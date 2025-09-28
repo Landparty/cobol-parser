@@ -1,0 +1,20 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HELLO-WORLD.
+       AUTHOR. COBOL PARSER.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-MESSAGE    PIC X(20) VALUE "Hello, World!".
+       01  WS-COUNTER    PIC 9(5) COMP-3.
+       01  WS-TOTAL      PIC 9(7)V99 VALUE ZERO.
+       
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE 100 TO WS-COUNTER.
+           PERFORM CALC-PARA UNTIL WS-COUNTER = 0.
+           DISPLAY WS-MESSAGE.
+           STOP RUN.
+           
+       CALC-PARA.
+           ADD 1.5 TO WS-TOTAL.
+           SUBTRACT 1 FROM WS-COUNTER.
