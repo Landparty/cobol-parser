@@ -47,6 +47,8 @@ class ExecSQLStatement(CobolStatement):
         first_word = sql_text.strip().split()[0].upper() if sql_text.strip() else ""
         if first_word in ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER"]:
             self.sql_type = first_word
+        else:
+            self.sql_type = "UNKNOWN"
             
     def add_host_variable(self, variable: str) -> None:
         """Add a host variable used in the SQL statement."""
@@ -116,7 +118,7 @@ class IBMDataItem(CobolDataItem):
         if self.ibm_usage == IBMDataType.COMP_3:
             # COMP-3: Packed decimal - (digits + 1) / 2
             return (self.picture_clause.total_digits + 1) // 2
-        elif self.ibm_usage == IBMDataType.COMP:
+        elif self.ibm_usage == IBMDataType.COMP or self.ibm_usage == IBMDataType.COMP_4:
             # COMP/COMP-4: Binary
             if self.picture_clause.total_digits <= 4:
                 return 2  # Halfword
@@ -130,7 +132,12 @@ class IBMDataItem(CobolDataItem):
             return 8  # Double precision float
         elif self.ibm_usage == IBMDataType.COMP_5:
             # Native binary - same as COMP but with different range
-            return self.calculate_storage_size()  # Delegate to COMP calculation
+            if self.picture_clause.total_digits <= 4:
+                return 2  # Halfword
+            elif self.picture_clause.total_digits <= 9:
+                return 4  # Fullword
+            else:
+                return 8  # Doubleword
         elif self.ibm_usage == IBMDataType.POINTER:
             return 4  # 32-bit pointer on z/OS
         else:

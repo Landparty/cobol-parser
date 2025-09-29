@@ -1,12 +1,12 @@
 # COBOL Parser for Python
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-211%20passing-green.svg)](#testing)
-[![Coverage](https://img.shields.io/badge/coverage-90%2B%25-green.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-618%20passing-green.svg)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-57%2B%25%20parser-yellow.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![IBM COBOL](https://img.shields.io/badge/IBM%20Enterprise%20COBOL-supported-blue.svg)](#ibm-enterprise-cobol-support)
 
-A comprehensive COBOL source code parser for Python 3.13+ with enhanced features including configurable memory management, JSON export, IBM Enterprise COBOL dialect support, and advanced error recovery. Built following Test-Driven Development (TDD) principles with 90%+ code coverage.
+A comprehensive COBOL source code parser for Python 3.13+ with enhanced features including configurable memory management, JSON export, IBM Enterprise COBOL dialect support, and advanced error recovery. Built following Test-Driven Development (TDD) principles with comprehensive test coverage (618 tests, 57%+ parser coverage).
 
 ## Table of Contents
 
@@ -32,8 +32,8 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - 🏢 **IBM Enterprise COBOL** - Priority support for COMP-3, EXEC SQL, EXEC CICS
 - 🧩 **Plugin Architecture** - Extensible design for custom dialects and features
 - 📊 **Statistics** - Detailed parsing metrics and performance monitoring
-- ✅ **TDD Compliant** - 211 comprehensive tests ensuring reliability
-- 🔍 **Lexical Analysis** - Complete tokenization with error reporting
+- ✅ **TDD Compliant** - 618 comprehensive tests ensuring reliability
+- 🔍 **Lexical Analysis** - Complete tokenization with comprehensive COBOL verb support (75+ verbs) and error reporting
 - 🏗️ **AST Generation** - Full Abstract Syntax Tree with source location tracking
 
 ## Installation
@@ -80,23 +80,22 @@ mypy cobolparser/
 from cobolparser import parse_cobol
 
 # Simple COBOL program
-cobol_code = """
-IDENTIFICATION DIVISION.
-PROGRAM-ID. HELLO-WORLD.
-
-PROCEDURE DIVISION.
-DISPLAY "Hello, World!".
-STOP RUN.
+cobol_code = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HELLO-WORLD.
+       
+       PROCEDURE DIVISION.
+           DISPLAY "Hello, World!".
+           STOP RUN.
 """
 
 # Parse the program
 result = parse_cobol(cobol_code, filename="hello.cob")
 
 if result.success:
-    print(f"✅ Successfully parsed: {result.ast.program_name}")
-    print(f"📁 Divisions: {len(result.ast.divisions)}")
+    print(f"Successfully parsed: {result.ast.program_name}")
+    print(f"Divisions: {len(result.ast.divisions)}")
 else:
-    print("❌ Parsing failed:")
+    print("Parsing failed:")
     for error in result.errors:
         print(f"  {error}")
 ```
@@ -146,8 +145,8 @@ parser = CobolParser(memory_config=memory_config)
 with open('large_program.cob', 'r') as f:
     result = parser.parse(f.read(), filename='large_program.cob')
 
-print(f"📊 Memory used: {result.statistics.memory_peak_mb:.1f}MB")
-print(f"⏱️  Parse time: {result.statistics.total_time_ms:.2f}ms")
+print(f"Memory used: {result.statistics.memory_peak_mb:.1f}MB")
+print(f"Parse time: {result.statistics.total_time_ms:.2f}ms")
 ```
 
 ### Error Recovery Modes
@@ -162,14 +161,13 @@ strict_parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
 lenient_parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
 # Parse program with errors
-buggy_cobol = """
-IDENTIFICATION DIVISION.
-PROGRAM-ID. BUGGY.
+buggy_cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BUGGY.
 
-PROCEDURE DIVISION.
-DISPLAY "This is fine".
-MISSPELLED STATEMENT.  # Error here
-DISPLAY "This won't be reached in strict mode".
+       PROCEDURE DIVISION.
+           DISPLAY "This is fine".
+           MISSPELLED STATEMENT.
+           DISPLAY "This won't be reached in strict mode".
 """
 
 # Strict parsing stops at first error
@@ -192,33 +190,32 @@ from cobolparser.plugins.core import DialectType
 ibm_parser = CobolParser(dialect=DialectType.IBM_ENTERPRISE)
 
 # COBOL program with IBM-specific features
-ibm_cobol = """
-IDENTIFICATION DIVISION.
-PROGRAM-ID. EMPLOYEE-DB.
+ibm_cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EMPLOYEE-DB.
 
-DATA DIVISION.
-WORKING-STORAGE SECTION.
-01  WS-EMPLOYEE-REC.
-    05  WS-EMP-ID        PIC 9(6) COMP-3.
-    05  WS-EMP-NAME      PIC X(30).
-    05  WS-EMP-SALARY    PIC 9(7)V99 COMP-3.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-EMPLOYEE-REC.
+           05  WS-EMP-ID        PIC 9(6) COMP-3.
+           05  WS-EMP-NAME      PIC X(30).
+           05  WS-EMP-SALARY    PIC 9(7)V99 COMP-3.
 
-PROCEDURE DIVISION.
-MAIN-PROCESS.
-    EXEC SQL
-        SELECT EMP_ID, EMP_NAME, SALARY
-        INTO :WS-EMP-ID, :WS-EMP-NAME, :WS-EMP-SALARY
-        FROM EMPLOYEE
-        WHERE EMP_ID = 123456
-    END-EXEC.
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           EXEC SQL
+               SELECT EMP_ID, EMP_NAME, SALARY
+               INTO :WS-EMP-ID, :WS-EMP-NAME, :WS-EMP-SALARY
+               FROM EMPLOYEE
+               WHERE EMP_ID = 123456
+           END-EXEC.
 
-    IF SQLCODE = 0
-        DISPLAY 'Employee found: ' WS-EMP-NAME
-    ELSE
-        DISPLAY 'Employee not found'
-    END-IF.
+           IF SQLCODE = 0
+               DISPLAY 'Employee found: ' WS-EMP-NAME
+           ELSE
+               DISPLAY 'Employee not found'
+           END-IF.
 
-    STOP RUN.
+           STOP RUN.
 """
 
 result = ibm_parser.parse(ibm_cobol, filename="employee.cob")
@@ -230,7 +227,7 @@ if result.ast:
 
     for item in ws_section.children:
         if hasattr(item, 'usage') and item.usage == 'COMP-3':
-            print(f"💰 COMP-3 field: {item.name} (size: {item.calculate_storage_size()} bytes)")
+            print(f"COMP-3 field: {item.name} (size: {item.calculate_storage_size()} bytes)")
 ```
 
 ### JSON Export and Serialization
@@ -258,11 +255,11 @@ if result.ast:
     with open('program_ast.json', 'w', encoding='utf-8') as f:
         json.dump(ast_json, f, indent=2, ensure_ascii=False)
 
-    print("📤 AST exported to JSON:")
-    print(f"  📁 Program: {ast_json['program_name']}")
-    print(f"  📊 Divisions: {ast_json['division_count']}")
-    print(f"  📏 Lines: {ast_json['source_lines']}")
-    print(f"  🏷️  Metadata: {bool(ast_json.get('metadata'))}")
+    print("AST exported to JSON:")
+    print(f"  Program: {ast_json['program_name']}")
+    print(f"  Divisions: {ast_json['division_count']}")
+    print(f"  Lines: {ast_json['source_lines']}")
+    print(f"  Metadata: {bool(ast_json.get('metadata'))}")
 ```
 
 ### Lexical Analysis
@@ -276,9 +273,9 @@ lexer = CobolLexer(cobol_code, filename="example.cob")
 # Tokenize source
 tokens = lexer.tokenize()
 
-print(f"🔍 Lexical Analysis:")
-print(f"  📊 Total tokens: {len(tokens)}")
-print(f"  ❌ Lexer errors: {len(lexer.get_errors())}")
+print(f"Lexical Analysis:")
+print(f"  Total tokens: {len(tokens)}")
+print(f"  Lexer errors: {len(lexer.get_errors())}")
 
 # Analyze token distribution
 token_counts = {}
@@ -286,12 +283,12 @@ for token in tokens:
     token_type = token.type.name
     token_counts[token_type] = token_counts.get(token_type, 0) + 1
 
-print("🏷️  Token Distribution:")
+print("Token Distribution:")
 for token_type, count in sorted(token_counts.items(), key=lambda x: x[1], reverse=True):
     print(f"  {token_type}: {count}")
 
 # Show sample tokens
-print("📝 Sample Tokens:")
+print("Sample Tokens:")
 for i, token in enumerate(tokens[:10]):
     print(f"  {i+1:2d}. {token.type.name:15s} '{token.value}' @ {token.location.line}:{token.location.column}")
 ```
@@ -302,25 +299,24 @@ for i, token in enumerate(tokens[:10]):
 from cobolparser import parse_cobol
 
 # COBOL program with various data types
-data_cobol = """
-IDENTIFICATION DIVISION.
-PROGRAM-ID. DATA-TYPES.
+data_cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DATA-TYPES.
 
-DATA DIVISION.
-WORKING-STORAGE SECTION.
-01  WS-NUMERIC-DATA.
-    05  WS-INTEGER       PIC 9(5).
-    05  WS-DECIMAL       PIC 9(7)V99.
-    05  WS-PACKED        PIC 9(5) COMP-3.
-    05  WS-BINARY        PIC 9(8) COMP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-NUMERIC-DATA.
+           05  WS-INTEGER       PIC 9(5).
+           05  WS-DECIMAL       PIC 9(7)V99.
+           05  WS-PACKED        PIC 9(5) COMP-3.
+           05  WS-BINARY        PIC 9(8) COMP.
 
-01  WS-STRING-DATA.
-    05  WS-NAME          PIC X(30).
-    05  WS-ADDRESS       PIC X(50).
+       01  WS-STRING-DATA.
+           05  WS-NAME          PIC X(30).
+           05  WS-ADDRESS       PIC X(50).
 
-01  WS-ARRAYS.
-    05  WS-MONTHS        PIC X(3) OCCURS 12 TIMES.
-    05  WS-SALES         PIC 9(7)V99 OCCURS 12 TIMES.
+       01  WS-ARRAYS.
+           05  WS-MONTHS        PIC X(3) OCCURS 12 TIMES.
+           05  WS-SALES         PIC 9(7)V99 OCCURS 12 TIMES.
 """
 
 result = parse_cobol(data_cobol)
@@ -337,10 +333,10 @@ if result.ast:
                 usage = getattr(item, 'usage', 'DISPLAY')
                 picture = item.picture_clause.pattern if item.picture_clause else 'N/A'
 
-                print(f"{prefix}📁 {item.level:02d} {item.name}")
-                print(f"{prefix}   📏 Picture: {picture}")
-                print(f"{prefix}   💾 Usage: {usage}")
-                print(f"{prefix}   📐 Size: {size} bytes")
+                print(f"{prefix}{item.level:02d} {item.name}")
+                print(f"{prefix}   Picture: {picture}")
+                print(f"{prefix}   Usage: {usage}")
+                print(f"{prefix}   Size: {size} bytes")
 
                 if hasattr(item, 'children') and item.children:
                     analyze_data_items(item.children, indent + 1)
@@ -369,8 +365,8 @@ Abstract Syntax Tree (AST)
 ```
 cobolparser/
 ├── __init__.py           # Main package interface and exports
-├── lexer.py             # COBOL tokenization (680+ lines)
-├── parser.py            # AST generation and parsing logic (712+ lines)
+├── lexer.py             # COBOL tokenization with 75+ verb support (416 statements)
+├── parser.py            # AST generation and parsing logic (1176 lines, 636 statements)
 ├── models/              # AST node hierarchy
 │   ├── ast_base.py     # Base AST classes and SourceLocation
 │   ├── program.py      # Program/Division/Section structure
@@ -541,12 +537,12 @@ tokens = tokenize_cobol(source_code, filename="program.cob")
 
 ## Testing
 
-The parser includes a comprehensive test suite with 211 tests organized by category:
+The parser includes a comprehensive test suite with 618 tests organized by category:
 
 ### Test Categories
 
-- **Unit Tests (145)**: Component-specific functionality testing
-- **Integration Tests (28)**: End-to-end workflow validation
+- **Unit Tests (500+)**: Component-specific functionality testing including comprehensive parser coverage
+- **Integration Tests (75+)**: End-to-end workflow validation
 - **Contract Tests (38)**: API contract compliance and stability
 
 ### Running Tests
@@ -569,15 +565,15 @@ python -m pytest -n auto tests/
 
 ### Test Coverage
 
-The project maintains 90%+ code coverage with comprehensive test cases covering:
+The project includes comprehensive test coverage with detailed test cases covering:
 
-- Lexer tokenization accuracy
-- Parser AST generation correctness
-- Memory management under various conditions
-- Error recovery behavior
-- IBM Enterprise COBOL dialect features
-- JSON serialization/deserialization
-- Performance characteristics
+- **Lexer**: Comprehensive COBOL verb recognition (75+ verbs including all IBM Enterprise verbs)
+- **Parser**: 57%+ statement coverage with detailed AST generation testing (417/636 statements covered)
+- **Memory management** under various conditions and large program scenarios
+- **Error recovery** behavior in both fail-fast and collect-all modes
+- **IBM Enterprise COBOL** dialect features including COMP-3, EXEC SQL, EXEC CICS
+- **JSON serialization/deserialization** with metadata and source location tracking
+- **Performance characteristics** and edge case handling
 
 ### Integration Test
 
@@ -664,7 +660,7 @@ We welcome contributions! Please follow these guidelines:
 - **Python 3.13+** features only
 - **Type hints** required for all public APIs
 - **Docstrings** for all public functions/classes
-- **90%+ test coverage** maintained
+- **Comprehensive test coverage** maintained (618 tests, 57%+ parser coverage)
 - **Black formatting** enforced
 - **Ruff linting** passes
 
@@ -692,10 +688,11 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Acknowledgments
 
 - Built following Test-Driven Development (TDD) principles
-- Designed for IBM Enterprise COBOL compatibility
+- Designed for IBM Enterprise COBOL compatibility with comprehensive verb support
 - Supports modern Python 3.13+ features
-- Comprehensive test coverage with 211 test cases
+- Comprehensive test coverage with 618 test cases across all components
 - Memory-efficient parsing for large legacy codebases
+- Enhanced lexer supporting 75+ COBOL verbs including all major IBM Enterprise verbs
 
 ## Support
 
