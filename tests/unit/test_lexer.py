@@ -501,39 +501,493 @@ class TestCobolLexerPerformance:
         assert len(division_tokens) >= 150  # Should have many divisions from repetition
 
 
-def test_lexer_tdd_constitutional_compliance():
-    """
-    CONSTITUTIONAL REQUIREMENT: Lexer unit tests must be comprehensive.
+class TestCobolLexerTokenClass:
+    """Unit tests for Token class methods and properties."""
     
-    This test verifies that lexer test coverage meets TDD requirements
-    and guides implementation effectively.
-    """
-    # Verify all test classes are defined
-    assert TestCobolLexerBasicTokens is not None
-    assert TestCobolLexerPictureClause is not None
-    assert TestCobolLexerIBMSpecific is not None
-    assert TestCobolLexerComments is not None
-    assert TestCobolLexerErrorHandling is not None
-    assert TestCobolLexerPerformance is not None
+    def test_token_str_method(self):
+        """Test Token.__str__ method returns correct format."""
+        from cobolparser.lexer import Token, TokenType
+        from cobolparser.models.ast_base import SourceLocation
+        
+        location = SourceLocation(1, 1)
+        token = Token(TokenType.IDENTIFIER, "TEST-VAR", location)
+        
+        # Test __str__ method
+        str_result = str(token)
+        assert str_result == "IDENTIFIER(TEST-VAR)"
     
-    # Verify TokenType enum covers essential tokens
-    required_tokens = {
-        TokenType.IDENTIFIER,
-        TokenType.NUMERIC_LITERAL,
-        TokenType.STRING_LITERAL,
-        TokenType.DIVISION,
-        TokenType.PIC,
-        TokenType.COMP_3,
-        TokenType.EXEC_SQL
-    }
+    def test_token_repr_method(self):
+        """Test Token.__repr__ method returns correct format."""
+        from cobolparser.lexer import Token, TokenType
+        from cobolparser.models.ast_base import SourceLocation
+        
+        location = SourceLocation(5, 10)
+        token = Token(TokenType.NUMERIC_LITERAL, "123", location)
+        
+        # Test __repr__ method
+        repr_result = repr(token)
+        assert repr_result == "Token(NUMERIC_LITERAL, '123', Line 5, Column 10)"
     
-    available_tokens = set(TokenType)
-    assert required_tokens.issubset(available_tokens)
+    def test_token_with_raw_value(self):
+        """Test Token with raw_value attribute."""
+        from cobolparser.lexer import Token, TokenType
+        from cobolparser.models.ast_base import SourceLocation
+        
+        location = SourceLocation(1, 1)
+        token = Token(TokenType.IDENTIFIER, "test", location, raw_value="TEST")
+        
+        assert token.value == "test"
+        assert token.raw_value == "TEST"
+        assert str(token) == "IDENTIFIER(test)"
+
+
+class TestCobolLexerStringLiterals:
+    """Unit tests for string literal tokenization."""
     
-    print("✅ Lexer unit test framework complete")
-    print("✅ Token type definitions comprehensive")
-    print("✅ Basic tokenization tests defined")
-    print("✅ IBM Enterprise COBOL token tests defined")
-    print("✅ Error handling tests defined")
-    print("✅ Performance test framework ready")
-    print("✅ Lexer TDD compliance achieved")
+    def test_unterminated_string_literal_error(self):
+        """Test error handling for unterminated string literals."""
+        from cobolparser.lexer import CobolLexer, LexerError
+        
+        # Test unterminated double-quoted string
+        cobol_source = '       DISPLAY "Unterminated string'
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should have recorded an error
+        assert len(lexer.errors) == 1
+        error = lexer.errors[0]
+        assert isinstance(error, LexerError)
+        assert "Unterminated string literal" in error.message
+        assert error.location.line == 1
+        assert error.location.column == 16  # Position after DISPLAY
+    
+    def test_unterminated_single_quote_string_error(self):
+        """Test error handling for unterminated single-quoted strings."""
+        from cobolparser.lexer import CobolLexer, LexerError
+        
+        # Test unterminated single-quoted string
+        cobol_source = "       MOVE 'Unterminated"
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should have recorded an error
+        assert len(lexer.errors) == 1
+        error = lexer.errors[0]
+        assert isinstance(error, LexerError)
+        assert "Unterminated string literal" in error.message
+    
+    def test_doubled_quotes_in_strings(self):
+        """Test handling of doubled quotes for escaping."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # Test doubled quotes in string literals
+        cobol_source = '       DISPLAY "He said ""Hello"" to me".'
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find string literal token
+        string_tokens = [t for t in tokens if t.type == TokenType.STRING_LITERAL]
+        assert len(string_tokens) >= 1
+        
+        # Should contain the properly unescaped content
+        string_token = string_tokens[0]
+        assert string_token.value == 'He said "Hello" to me'
+
+
+class TestCobolLexerNumericLiterals:
+    """Unit tests for numeric literal tokenization."""
+    
+    def test_scientific_notation_positive_exponent(self):
+        """Test scientific notation with positive exponent."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       COMPUTE RESULT = 1.23E+10."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find numeric literal token
+        numeric_tokens = [t for t in tokens if t.type == TokenType.NUMERIC_LITERAL]
+        assert len(numeric_tokens) >= 1
+        
+        # Should recognize scientific notation
+        sci_token = next((t for t in numeric_tokens if 'E' in t.value.upper()), None)
+        assert sci_token is not None
+        assert '1.23E+10' in sci_token.value or '1.23E10' in sci_token.value
+    
+    def test_scientific_notation_negative_exponent(self):
+        """Test scientific notation with negative exponent."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       MOVE 4.56e-7 TO WS-SMALL-NUM."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find numeric literal token
+        numeric_tokens = [t for t in tokens if t.type == TokenType.NUMERIC_LITERAL]
+        assert len(numeric_tokens) >= 1
+        
+        # Should recognize scientific notation
+        sci_token = next((t for t in numeric_tokens if 'e' in t.value.lower()), None)
+        assert sci_token is not None
+        assert '4.56e-7' in sci_token.value or '4.56E-7' in sci_token.value
+
+
+class TestCobolLexerFigurativeConstants:
+    """Unit tests for figurative constant recognition."""
+    
+    def test_zero_figurative_constants(self):
+        """Test ZERO, ZEROS, ZEROES figurative constants."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       MOVE ZERO TO WS-COUNT.\n       MOVE ZEROS TO WS-AMOUNT.\n       MOVE ZEROES TO WS-TOTAL."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find figurative constant tokens
+        fig_tokens = [t for t in tokens if t.type == TokenType.FIGURATIVE_CONSTANT]
+        assert len(fig_tokens) >= 3
+        
+        # Check values
+        fig_values = [t.value.upper() for t in fig_tokens]
+        assert "ZERO" in fig_values
+        assert "ZEROS" in fig_values
+        assert "ZEROES" in fig_values
+    
+    def test_space_figurative_constants(self):
+        """Test SPACE, SPACES figurative constants."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       MOVE SPACE TO WS-CHAR.\n       MOVE SPACES TO WS-STRING."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find figurative constant tokens
+        fig_tokens = [t for t in tokens if t.type == TokenType.FIGURATIVE_CONSTANT]
+        assert len(fig_tokens) >= 2
+        
+        # Check values
+        fig_values = [t.value.upper() for t in fig_tokens]
+        assert "SPACE" in fig_values
+        assert "SPACES" in fig_values
+    
+    def test_high_low_value_constants(self):
+        """Test HIGH-VALUE, HIGH-VALUES, LOW-VALUE, LOW-VALUES."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       MOVE HIGH-VALUE TO WS-MAX.\n       MOVE LOW-VALUES TO WS-MIN."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find figurative constant tokens
+        fig_tokens = [t for t in tokens if t.type == TokenType.FIGURATIVE_CONSTANT]
+        assert len(fig_tokens) >= 2
+        
+        # Check values
+        fig_values = [t.value.upper() for t in fig_tokens]
+        assert "HIGH-VALUE" in fig_values
+        assert "LOW-VALUES" in fig_values
+    
+    def test_quote_and_all_constants(self):
+        """Test QUOTE, QUOTES, and ALL figurative constants."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       MOVE QUOTE TO WS-QUOTE.\n       MOVE ALL 'X' TO WS-FILLER."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find figurative constant tokens
+        fig_tokens = [t for t in tokens if t.type == TokenType.FIGURATIVE_CONSTANT]
+        assert len(fig_tokens) >= 1
+        
+        # Check values
+        fig_values = [t.value.upper() for t in fig_tokens]
+        assert "QUOTE" in fig_values
+        assert "ALL" in fig_values
+
+
+class TestCobolLexerComments:
+    """Unit tests for comment tokenization."""
+    
+    def test_read_comment_method(self):
+        """Test the read_comment method directly."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # Create lexer and manually test read_comment
+        cobol_source = "       * This is a comment line"
+        lexer = CobolLexer(cobol_source)
+        
+        # Position at the comment start
+        lexer.current_pos = 7  # After the 7 spaces
+        
+        # Call read_comment directly
+        comment_token = lexer.read_comment()
+        
+        assert comment_token.type == TokenType.COMMENT
+        assert "* This is a comment line" in comment_token.value
+    
+    def test_inline_comments(self):
+        """Test comments that appear inline (not just column 7)."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # This would require inline comment syntax, but COBOL doesn't have it
+        # So this test verifies that comments are only recognized in column 7
+        cobol_source = "       MOVE * This is not a comment TO WS-VAR."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should not find any comment tokens
+        comment_tokens = [t for t in tokens if t.type == TokenType.COMMENT]
+        assert len(comment_tokens) == 0
+
+
+class TestCobolLexerLineFormat:
+    """Unit tests for COBOL line format handling."""
+    
+    def test_short_lines_less_than_7_chars(self):
+        """Test handling of lines shorter than 7 characters."""
+        from cobolparser.lexer import CobolLexer
+        
+        # Test very short line
+        cobol_source = "ID"  # Only 2 characters
+        lexer = CobolLexer(cobol_source)
+        
+        # Test handle_cobol_line_format directly
+        tokens = lexer.handle_cobol_line_format("ID", 0)
+        
+        # Should return empty list for lines < 7 chars
+        assert tokens == []
+    
+    def test_page_break_indicator(self):
+        """Test page break indicator (/) in column 7."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # Test page break line
+        cobol_source = "      / This is a page break"
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should find comment token for page break
+        comment_tokens = [t for t in tokens if t.type == TokenType.COMMENT]
+        assert len(comment_tokens) >= 1
+        
+        # Should contain page break text
+        page_break_found = any("/ PAGE BREAK" in t.value for t in comment_tokens)
+        assert page_break_found
+    
+    def test_continuation_line_indicator(self):
+        """Test continuation line indicator (-) in column 7."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # Test continuation line
+        cobol_source = "      -     WS-NAME PIC X(30)."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should find continuation token
+        cont_tokens = [t for t in tokens if t.type == TokenType.CONTINUATION]
+        assert len(cont_tokens) >= 1
+        
+        assert cont_tokens[0].value == "-"
+
+
+class TestCobolLexerProgramText:
+    """Unit tests for program text tokenization."""
+    
+    def test_tokenize_program_text_whitespace_skipping(self):
+        """Test whitespace skipping in tokenize_program_text."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        lexer = CobolLexer("")
+        
+        # Test tokenize_program_text with whitespace
+        text = "  MOVE   WS-A   TO   WS-B  .  "
+        tokens = lexer.tokenize_program_text(text, 0, 8)
+        
+        # Should skip whitespace and find tokens
+        assert len(tokens) >= 3  # MOVE, WS-A, TO, WS-B, PERIOD
+    
+    def test_invalid_character_error(self):
+        """Test error handling for invalid characters."""
+        from cobolparser.lexer import CobolLexer, LexerError
+        
+        lexer = CobolLexer("")
+        
+        # Test with invalid character
+        text = "MOVE @ WS-VAR."  # @ is invalid
+        tokens = lexer.tokenize_program_text(text, 0, 8)
+        
+        # Should have recorded an error
+        assert len(lexer.errors) >= 1
+        error = lexer.errors[0]
+        assert isinstance(error, LexerError)
+        assert "Invalid character" in error.message
+        assert "@" in error.message
+
+
+class TestCobolLexerTokenizeMethod:
+    """Unit tests for the main tokenize method."""
+    
+    def test_newline_token_insertion(self):
+        """Test that newline tokens are inserted between lines."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # Multi-line program
+        cobol_source = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. TEST."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should find newline tokens
+        newline_tokens = [t for t in tokens if t.type == TokenType.NEWLINE]
+        assert len(newline_tokens) >= 1
+        
+        # Newline should have correct value
+        assert newline_tokens[0].value == "\\n"
+    
+    def test_eof_token_always_added(self):
+        """Test that EOF token is always added at the end."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        # Empty source
+        lexer = CobolLexer("")
+        tokens = lexer.tokenize()
+        
+        # Should still have EOF token
+        eof_tokens = [t for t in tokens if t.type == TokenType.EOF]
+        assert len(eof_tokens) == 1
+        
+        assert eof_tokens[0].value == ""
+
+
+class TestCobolLexerConvenienceFunction:
+    """Unit tests for the tokenize_cobol convenience function."""
+    
+    def test_tokenize_cobol_success(self):
+        """Test tokenize_cobol function with valid input."""
+        from cobolparser.lexer import tokenize_cobol, TokenType
+        
+        source = "       IDENTIFICATION DIVISION."
+        tokens = tokenize_cobol(source, "test.cob")
+        
+        # Should return tokens without errors
+        assert len(tokens) > 0
+        assert tokens[-1].type == TokenType.EOF
+    
+    def test_tokenize_cobol_with_errors(self):
+        """Test tokenize_cobol function raises error on invalid input."""
+        from cobolparser.lexer import tokenize_cobol, LexerError
+        
+        # Invalid source that should cause errors
+        source = '       DISPLAY "Unterminated string'
+        
+        # Should raise LexerError
+        with pytest.raises(LexerError) as exc_info:
+            tokenize_cobol(source, "test.cob")
+        
+        assert "Unterminated string literal" in str(exc_info.value)
+
+
+class TestCobolLexerLevelNumbers:
+    """Unit tests for level number recognition."""
+    
+    def test_level_number_recognition(self):
+        """Test that 01-99 are recognized as level numbers."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       01 WS-RECORD.\n       77 WS-ITEM.\n       88 WS-CONDITION."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Find level number tokens
+        level_tokens = [t for t in tokens if t.type == TokenType.LEVEL_NUMBER]
+        assert len(level_tokens) >= 3
+        
+        # Check values
+        level_values = [t.value for t in level_tokens]
+        assert "01" in level_values
+        assert "77" in level_values
+        assert "88" in level_values
+    
+    def test_level_number_not_recognized_as_numeric(self):
+        """Test that level numbers are not treated as numeric literals."""
+        from cobolparser.lexer import CobolLexer, TokenType
+        
+        cobol_source = "       01 WS-RECORD."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+        
+        # Should be LEVEL_NUMBER, not NUMERIC_LITERAL
+        level_tokens = [t for t in tokens if t.type == TokenType.LEVEL_NUMBER]
+        numeric_tokens = [t for t in tokens if t.type == TokenType.NUMERIC_LITERAL]
+        
+        assert len(level_tokens) >= 1
+        assert len(numeric_tokens) == 0 or all(t.value not in ["01", "1"] for t in numeric_tokens)
+
+
+class TestCobolLexerMethods:
+    """Unit tests for lexer utility methods."""
+    
+    def test_get_tokens_caches_result(self):
+        """Test that get_tokens caches the tokenization result."""
+        from cobolparser.lexer import CobolLexer
+        
+        lexer = CobolLexer("       IDENTIFICATION DIVISION.")
+        
+        # First call should tokenize
+        tokens1 = lexer.get_tokens()
+        assert len(tokens1) > 0
+        
+        # Second call should return cached result
+        tokens2 = lexer.get_tokens()
+        assert tokens1 is tokens2  # Same object
+    
+    def test_has_errors_method(self):
+        """Test has_errors method."""
+        from cobolparser.lexer import CobolLexer
+        
+        # No errors
+        lexer1 = CobolLexer("       IDENTIFICATION DIVISION.")
+        lexer1.tokenize()
+        assert not lexer1.has_errors()
+        
+        # With errors
+        lexer2 = CobolLexer('       DISPLAY "Unterminated')
+        lexer2.tokenize()
+        assert lexer2.has_errors()
+    
+    def test_get_current_location(self):
+        """Test get_current_location method."""
+        from cobolparser.lexer import CobolLexer
+        from cobolparser.models.ast_base import SourceLocation
+        
+        lexer = CobolLexer("       IDENTIFICATION DIVISION.")
+        
+        # At start
+        location = lexer.get_current_location()
+        assert location.line == 1
+        assert location.column == 1
+        
+        # After advancing
+        lexer.advance_char()
+        location = lexer.get_current_location()
+        assert location.line == 1
+        assert location.column == 2
+    
+    def test_peek_char_and_advance(self):
+        """Test peek_char and advance_char methods."""
+        from cobolparser.lexer import CobolLexer
+        
+        lexer = CobolLexer("AB")
+        
+        # Peek at first char
+        assert lexer.peek_char() == "A"
+        assert lexer.peek_char(1) == "B"
+        
+        # Advance
+        char = lexer.advance_char()
+        assert char == "A"
+        assert lexer.peek_char() == "B"
+        
+        # Advance to end
+        char = lexer.advance_char()
+        assert char == "B"
+        assert lexer.peek_char() is None

@@ -313,12 +313,14 @@ class CobolDataItem(ASTNode):
         self.redefines = redefines_item
     
     def is_group_item(self) -> bool:
-        """Check if this is a group item (has children, no PICTURE)."""
-        return len(self.children) > 0 and self.picture_clause is None
+        """Check if this is a group item (has CobolDataItem children, no PICTURE)."""
+        cobol_data_children = [child for child in self.children if isinstance(child, CobolDataItem)]
+        return len(cobol_data_children) > 0 and self.picture_clause is None
     
     def is_elementary_item(self) -> bool:
-        """Check if this is an elementary item (has PICTURE, no children)."""
-        return self.picture_clause is not None and len(self.children) == 0
+        """Check if this is an elementary item (has PICTURE, no CobolDataItem children)."""
+        cobol_data_children = [child for child in self.children if isinstance(child, CobolDataItem)]
+        return self.picture_clause is not None and len(cobol_data_children) == 0
     
     def get_elementary_items(self) -> List['CobolDataItem']:
         """Get all elementary items under this data item."""

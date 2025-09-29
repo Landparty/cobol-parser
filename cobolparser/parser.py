@@ -158,6 +158,23 @@ class CobolParser:
             self.add_error(self.create_error(f"Parser error: {str(e)}"))
             return self._create_result(None)
     
+    def parse_file(self, filepath: str) -> ParseResult:
+        """Parse COBOL source code from a file.
+        
+        Args:
+            filepath: Path to COBOL source file
+            
+        Returns:
+            ParseResult with AST and metadata
+        """
+        try:
+            with open(filepath, 'r', encoding='utf-8') as file:
+                source = file.read()
+            return self.parse(source, filepath)
+        except IOError as e:
+            self.add_error(self.create_error(f"File error: {str(e)}"))
+            return self._create_result(None)
+    
     def _create_result(self, ast: Optional[CobolProgram]) -> ParseResult:
         """Create parse result with current state."""
         return ParseResult(

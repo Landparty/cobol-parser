@@ -200,10 +200,12 @@ class ASTValidator:
         """Validate a single node (override in subclasses)."""
         # Default validation - check for basic node structure
         if not hasattr(node, 'node_type') or not node.node_type:
-            result.add_error(f"Node missing node_type: {node}")
+            node_id = f"{type(node).__name__}@{id(node)}"
+            result.add_error(f"Node missing node_type: {node_id}")
         
         if not hasattr(node, 'location'):
-            result.add_error(f"Node missing location: {node}")
+            node_id = f"{type(node).__name__}@{id(node)}"
+            result.add_error(f"Node missing location: {node_id}")
         
         # Validate children recursively
         for child in node.children:

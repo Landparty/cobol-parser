@@ -73,8 +73,12 @@ class ParseError(Exception):
         self.column = column
     
     def __str__(self) -> str:
-        if self.line > 0:
-            return f"Line {self.line}, Column {self.column}: {self.message}"
+        try:
+            line = int(self.line) if self.line is not None else 0
+            if line > 0:
+                return f"Line {line}, Column {self.column}: {self.message}"
+        except (ValueError, TypeError):
+            pass
         return self.message
 
 

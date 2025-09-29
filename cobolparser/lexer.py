@@ -92,6 +92,54 @@ class TokenType(Enum):
     EXIT = auto()
     CONTINUE = auto()
     
+    # Additional COBOL Verbs
+    ALTER = auto()
+    CANCEL = auto()
+    CHAIN = auto()
+    COMMIT = auto()
+    DELETE = auto()
+    DISABLE = auto()
+    DISPLAY_1 = auto()
+    ENABLE = auto()
+    END_INVOKE = auto()
+    END_PERFORM = auto()
+    END_SET = auto()
+    ENTER = auto()
+    ENTRY = auto()
+    EXAMINE = auto()
+    EXECUTE = auto()
+    EXHIBIT = auto()
+    GENERATE = auto()
+    GOBACK = auto()
+    INITIALIZE = auto()
+    INITIATE = auto()
+    INSPECT = auto()
+    INVOKE = auto()
+    MERGE = auto()
+    NEXT = auto()
+    NOTE = auto()
+    ON = auto()
+    OTHERWISE = auto()
+    READY = auto()
+    RECEIVE = auto()
+    RECOVER = auto()
+    RELEASE = auto()
+    RESET = auto()
+    REWRITE = auto()
+    ROLLBACK = auto()
+    SEARCH = auto()
+    SEND = auto()
+    SERVICE = auto()
+    SET = auto()
+    SORT = auto()
+    START = auto()
+    STRING = auto()
+    SUPPRESS = auto()
+    TERMINATE = auto()
+    TRANSFORM = auto()
+    UNLOCK = auto()
+    UNSTRING = auto()
+    
     # Keywords - I/O
     SELECT = auto()
     READ = auto()
@@ -180,7 +228,8 @@ class LexerError(ParseError):
     """Error during lexical analysis."""
     
     def __init__(self, message: str, location: SourceLocation, token_value: str = ""):
-        super().__init__(message, location)
+        super().__init__(message, location.line, location.column)
+        self.location = location
         self.token_value = token_value
 
 
@@ -258,6 +307,54 @@ class CobolLexer:
         'EXIT': TokenType.EXIT,
         'CONTINUE': TokenType.CONTINUE,
         
+        # Additional COBOL Verbs
+        'ALTER': TokenType.ALTER,
+        'CANCEL': TokenType.CANCEL,
+        'CHAIN': TokenType.CHAIN,
+        'COMMIT': TokenType.COMMIT,
+        'DELETE': TokenType.DELETE,
+        'DISABLE': TokenType.DISABLE,
+        'DISPLAY-1': TokenType.DISPLAY_1,
+        'ENABLE': TokenType.ENABLE,
+        'END-INVOKE': TokenType.END_INVOKE,
+        'END-PERFORM': TokenType.END_PERFORM,
+        'END-SET': TokenType.END_SET,
+        'ENTER': TokenType.ENTER,
+        'ENTRY': TokenType.ENTRY,
+        'EXAMINE': TokenType.EXAMINE,
+        'EXECUTE': TokenType.EXECUTE,
+        'EXHIBIT': TokenType.EXHIBIT,
+        'GENERATE': TokenType.GENERATE,
+        'GOBACK': TokenType.GOBACK,
+        'INITIALIZE': TokenType.INITIALIZE,
+        'INITIATE': TokenType.INITIATE,
+        'INSPECT': TokenType.INSPECT,
+        'INVOKE': TokenType.INVOKE,
+        'MERGE': TokenType.MERGE,
+        'NEXT': TokenType.NEXT,
+        'NOTE': TokenType.NOTE,
+        'ON': TokenType.ON,
+        'OTHERWISE': TokenType.OTHERWISE,
+        'READY': TokenType.READY,
+        'RECEIVE': TokenType.RECEIVE,
+        'RECOVER': TokenType.RECOVER,
+        'RELEASE': TokenType.RELEASE,
+        'RESET': TokenType.RESET,
+        'REWRITE': TokenType.REWRITE,
+        'ROLLBACK': TokenType.ROLLBACK,
+        'SEARCH': TokenType.SEARCH,
+        'SEND': TokenType.SEND,
+        'SERVICE': TokenType.SERVICE,
+        'SET': TokenType.SET,
+        'SORT': TokenType.SORT,
+        'START': TokenType.START,
+        'STRING': TokenType.STRING,
+        'SUPPRESS': TokenType.SUPPRESS,
+        'TERMINATE': TokenType.TERMINATE,
+        'TRANSFORM': TokenType.TRANSFORM,
+        'UNLOCK': TokenType.UNLOCK,
+        'UNSTRING': TokenType.UNSTRING,
+        
         # I/O
         'SELECT': TokenType.SELECT,
         'READ': TokenType.READ,
@@ -324,7 +421,7 @@ class CobolLexer:
         
     def get_current_location(self) -> SourceLocation:
         """Get current source location."""
-        return SourceLocation(self.filename, self.current_line + 1, self.current_column + 1)
+        return SourceLocation(self.current_line + 1, self.current_column + 1, 1)
     
     def peek_char(self, offset: int = 0) -> Optional[str]:
         """Peek at character at current position + offset."""
@@ -389,6 +486,7 @@ class CobolLexer:
         start_location = self.get_current_location()
         value = ""
         has_decimal = False
+        has_exponent = False
         
         while True:
             char = self.peek_char()
@@ -398,12 +496,13 @@ class CobolLexer:
             if char.isdigit():
                 value += char
                 self.advance_char()
-            elif char == '.' and not has_decimal:
+            elif char == '.' and not has_decimal and not has_exponent:
                 has_decimal = True
                 value += char
                 self.advance_char()
-            elif char in 'Ee' and value and not has_decimal:
+            elif char in 'Ee' and value and not has_exponent:
                 # Scientific notation
+                has_exponent = True
                 value += char
                 self.advance_char()
                 if self.peek_char() in '+-':
@@ -475,26 +574,29 @@ class CobolLexer:
         if indicator == '*':
             # Comment line
             comment_text = line[6:72].rstrip() if len(line) > 6 else ""
-            location = SourceLocation(self.filename, line_num + 1, 7)
+            location = SourceLocation(line_num + 1, 7, 1)
             line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
             return line_tokens
         
         if indicator == '/':
             # Page break - treat as comment
-            location = SourceLocation(self.filename, line_num + 1, 7)
+            location = SourceLocation(line_num + 1, 7, 1)
             line_tokens.append(Token(TokenType.COMMENT, "/ PAGE BREAK", location))
             return line_tokens
         
         if indicator == '-':
             # Continuation line
-            location = SourceLocation(self.filename, line_num + 1, 7)
+            location = SourceLocation(line_num + 1, 7, 1)
             line_tokens.append(Token(TokenType.CONTINUATION, "-", location))
         
         # Extract program text (columns 8-72)
         program_text = line[7:72] if len(line) > 7 else ""
         
-        # Tokenize the program text
-        return self.tokenize_program_text(program_text, line_num, 8)
+        # Tokenize the program text and add to existing line_tokens
+        program_tokens = self.tokenize_program_text(program_text, line_num, 8)
+        line_tokens.extend(program_tokens)
+        
+        return line_tokens
     
     def tokenize_program_text(self, text: str, line_num: int, start_col: int) -> List[Token]:
         """Tokenize COBOL program text from a line."""
@@ -503,7 +605,7 @@ class CobolLexer:
         
         while pos < len(text):
             char = text[pos]
-            location = SourceLocation(self.filename, line_num + 1, start_col + pos)
+            location = SourceLocation(line_num + 1, start_col + pos, 1)
             
             # Skip whitespace
             if char in ' \t':
@@ -560,7 +662,7 @@ class CobolLexer:
     def read_string_from_text(self, text: str, start_pos: int, line_num: int, start_col: int) -> tuple[Token, int]:
         """Read string literal from text starting at position."""
         quote_char = text[start_pos]
-        location = SourceLocation(self.filename, line_num + 1, start_col + start_pos)
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
         value = ""
         pos = start_pos + 1
         
@@ -578,29 +680,47 @@ class CobolLexer:
                 value += char
                 pos += 1
         
+        # Check if string was unterminated
+        if pos >= len(text) and (pos == start_pos + 1 or text[pos - 1] != quote_char):
+            self.errors.append(LexerError(
+                "Unterminated string literal",
+                location,
+                quote_char + value
+            ))
+        
         return Token(TokenType.STRING_LITERAL, value, location), pos
     
     def read_number_from_text(self, text: str, start_pos: int, line_num: int, start_col: int) -> tuple[Token, int]:
         """Read numeric literal from text starting at position."""
-        location = SourceLocation(self.filename, line_num + 1, start_col + start_pos)
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
         value = ""
         pos = start_pos
         has_decimal = False
+        has_exponent = False
         
         while pos < len(text):
             char = text[pos]
             if char.isdigit():
                 value += char
                 pos += 1
-            elif char == '.' and not has_decimal:
+            elif char == '.' and not has_decimal and not has_exponent:
                 has_decimal = True
                 value += char
                 pos += 1
+            elif char in 'Ee' and value and not has_exponent:
+                # Scientific notation
+                has_exponent = True
+                value += char
+                pos += 1
+                # Check for optional sign after E/e
+                if pos < len(text) and text[pos] in '+-':
+                    value += text[pos]
+                    pos += 1
             else:
                 break
         
-        # Check if this should be a level number (01-99 without decimal)
-        if (not has_decimal and re.match(r'^\d{1,2}$', value) and 
+        # Check if this should be a level number (01-99 without decimal or exponent)
+        if (not has_decimal and not has_exponent and re.match(r'^\d{1,2}$', value) and 
             1 <= int(value) <= 99):
             # Only treat as level number if it's a valid COBOL level number
             return Token(TokenType.LEVEL_NUMBER, value, location), pos
@@ -609,7 +729,7 @@ class CobolLexer:
     
     def read_word_from_text(self, text: str, start_pos: int, line_num: int, start_col: int) -> tuple[Token, int]:
         """Read word (identifier/keyword) from text starting at position."""
-        location = SourceLocation(self.filename, line_num + 1, start_col + start_pos)
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
         value = ""
         pos = start_pos
         
@@ -646,11 +766,11 @@ class CobolLexer:
             
             # Add newline token if not a comment-only line
             if line_tokens and line_tokens[0].type != TokenType.COMMENT:
-                location = SourceLocation(self.filename, line_num + 1, len(line) + 1)
+                location = SourceLocation(line_num + 1, len(line) + 1, 1)
                 self.tokens.append(Token(TokenType.NEWLINE, "\\n", location))
         
         # Add EOF token
-        final_location = SourceLocation(self.filename, len(self.lines) + 1, 1)
+        final_location = SourceLocation(len(self.lines) + 1, 1, 1)
         self.tokens.append(Token(TokenType.EOF, "", final_location))
         
         return self.tokens

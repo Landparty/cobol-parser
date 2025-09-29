@@ -6,7 +6,8 @@ including program nodes, division nodes, and section nodes with full
 JSON serialization support.
 """
 
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+import json
+from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
 from .ast_base import ASTNode, SourceLocation, ValidationResult
 from ..plugins import SerializationConfig
 
@@ -82,6 +83,38 @@ class CobolDivision(ASTNode):
         """Add a paragraph directly to this division (procedure division)."""
         self.add_child(paragraph)
         self.paragraphs.append(paragraph)
+    
+    def add_data_item(self, data_item: 'CobolDataItem') -> None:
+        """Add a data item to this division (creates a working storage section if needed)."""
+        # For DATA divisions, add to working storage section
+        if not self.has_section("WORKING-STORAGE"):
+            ws_section = CobolSection("WORKING-STORAGE", SourceLocation(1, 1))
+            self.add_section(ws_section)
+        
+        ws_section = self.get_section_by_name("WORKING-STORAGE")
+        if ws_section:
+            ws_section.add_data_item(data_item)
+    
+    def add_statement(self, statement: 'CobolStatement') -> None:
+        """Add a statement to this division (procedure division)."""
+        # For PROCEDURE divisions, add to default paragraph if none exists
+        if not self.paragraphs:
+            default_paragraph = CobolParagraph("MAIN", SourceLocation(1, 1))
+            self.add_paragraph(default_paragraph)
+        
+        # Add to the last paragraph
+        if self.paragraphs:
+            self.paragraphs[-1].add_statement(statement)
+    
+    def add_procedure(self, procedure: Union['CobolParagraph', 'CobolSection']) -> None:
+        """Add a procedure (paragraph or section) to this division."""
+        if isinstance(procedure, CobolParagraph):
+            self.add_paragraph(procedure)
+        elif isinstance(procedure, CobolSection):
+            self.add_section(procedure)
+        else:
+            # Generic add as child
+            self.add_child(procedure)
     
     def get_section_by_name(self, name: str) -> Optional[CobolSection]:
         """Get a section by name."""
@@ -167,6 +200,92 @@ class CobolProgram(ASTNode):
                     data_items.extend(item.get_all_children())
         
         return data_items
+    
+    def find_data_items(self, name_pattern: Optional[str] = None, level: Optional[int] = None) -> List['CobolDataItem']:
+        """Find data items by name pattern and/or level number."""
+        import fnmatch
+        all_items = self.get_data_items()
+        results = []
+        
+        for item in all_items:
+            # Apply name pattern filter
+            if name_pattern is not None:
+                if not fnmatch.fnmatch(item.name, name_pattern):
+                    continue
+            
+            # Apply level filter
+            if level is not None:
+                if item.level != level:
+                    continue
+            
+            results.append(item)
+        
+        return results
+    
+    def find_procedures(self, proc_type: Optional[str] = None, name_pattern: Optional[str] = None) -> List['CobolProcedure']:
+        """Find procedures by type (PARAGRAPH/SECTION) and/or name pattern."""
+        import fnmatch
+        all_procedures = self.get_procedures()
+        results = []
+        
+        for proc in all_procedures:
+            # Apply type filter
+            if proc_type is not None:
+                if proc_type == "PARAGRAPH" and not isinstance(proc, CobolParagraph):
+                    continue
+                elif proc_type == "SECTION" and not isinstance(proc, CobolSection):
+                    continue
+            
+            # Apply name pattern filter
+            if name_pattern is not None:
+                proc_name = getattr(proc, 'paragraph_name', None) or getattr(proc, 'section_name', None)
+                if proc_name and not fnmatch.fnmatch(proc_name, name_pattern):
+                    continue
+            
+            results.append(proc)
+        
+        return results
+    
+    def get_all_statements(self) -> List['CobolStatement']:
+        """Get all statements in the program (typically in PROCEDURE division)."""
+        statements = []
+        
+        # Look in PROCEDURE division
+        proc_division = self.get_division("PROCEDURE")
+        if proc_division:
+            # Get statements from paragraphs
+            for paragraph in proc_division.paragraphs:
+                statements.extend(paragraph.statements)
+            
+            # Get statements from sections
+            for section in proc_division.sections.values():
+                for paragraph in section.paragraphs:
+                    statements.extend(paragraph.statements)
+        
+        return statements
+    
+    def find_statements(self, stmt_type: Optional[str] = None) -> List['CobolStatement']:
+        """Find statements by type."""
+        all_statements = self.get_all_statements()
+        
+        if stmt_type is None:
+            return all_statements
+        
+        return [stmt for stmt in all_statements if stmt.statement_type == stmt_type]
+    
+    def find_statements_using_variable(self, variable_name: str) -> List['CobolStatement']:
+        """Find statements that use a specific variable."""
+        all_statements = self.get_all_statements()
+        using_variable = []
+        
+        for stmt in all_statements:
+            # Check operands for variable usage
+            for operand in stmt.operands:
+                if variable_name in operand:
+                    using_variable.append(stmt)
+                    break
+        
+        return using_variable
     
     def get_procedures(self) -> List['CobolProcedure']:
         """Get all procedure paragraphs/sections in the program."""
@@ -290,12 +409,18 @@ class CobolProgram(ASTNode):
             result["location"] = self.location.to_dict()
         
         if config.include_metadata:
-            result["metadata"] = {
+            metadata = {
                 "statistics": self.get_statistics(),
                 "parser_version": "1.0.0",
                 "created_at": "2024-01-01T00:00:00Z",  # Would be actual timestamp
                 **self._metadata
             }
+            
+            # Add source_locations if requested
+            if config.include_source_locations:
+                metadata["source_locations"] = True
+            
+            result["metadata"] = metadata
         
         return result
     
@@ -307,9 +432,42 @@ class CobolProgram(ASTNode):
         data = self.to_dict(config)
         
         if config.compact_format:
-            return super().to_json(indent=None)
+            return json.dumps(data, indent=None)
         else:
-            return super().to_json(indent=2)
+            return json.dumps(data, indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'CobolProgram':
+        """Create a CobolProgram instance from JSON representation."""
+        import json
+        data = json.loads(json_str)
+        
+        # Extract basic program information
+        program_name = data.get("program_name", "")
+        
+        # Reconstruct location
+        location_data = data.get("location", {"line": 1, "column": 1})
+        location = SourceLocation(location_data["line"], location_data["column"])
+        
+        # Create program instance
+        program = cls(program_name, location)
+        
+        # Reconstruct divisions
+        divisions_data = data.get("divisions", {})
+        for div_name, div_data in divisions_data.items():
+            div_location_data = div_data.get("location", {"line": 1, "column": 1})
+            div_location = SourceLocation(div_location_data["line"], div_location_data["column"])
+            division = CobolDivision(div_name, div_location)
+            program.add_division(division)
+        
+        # Set metadata if present
+        if "metadata" in data:
+            metadata = data["metadata"]
+            for key, value in metadata.items():
+                if key not in ["statistics", "parser_version", "created_at", "source_locations"]:
+                    program.set_metadata(key, value)
+        
+        return program
 
 
 class CobolFileDescription(ASTNode):
