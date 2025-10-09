@@ -703,3 +703,16 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 **COBOL Parser Team** - Modernizing legacy code, one parse at a time.
+
+## Recent Enhancements
+
+### FILE-CONTROL SELECT Parsing
+The parser now correctly handles multi-line `SELECT` statements in the `FILE-CONTROL` paragraph where the `ASSIGN [TO]` target appears on the following line, e.g.:
+
+```
+FILE-CONTROL.
+    SELECT PRINT-FILE ASSIGN TO
+        PRINTER01.
+```
+
+It also supports optional `ORGANIZATION [IS] <type>` and `ACCESS [MODE] [IS] <mode>` clause variants on the same or subsequent lines.

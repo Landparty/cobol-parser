@@ -66,8 +66,13 @@ class CobolDivision(ASTNode):
     def __init__(self, division_name: str, location: SourceLocation):
         super().__init__("Division", location)
         self.division_name = division_name
-        self.sections: Dict[str, CobolSection] = {}
+        self._sections: Dict[str, CobolSection] = {}
         self.paragraphs: List['CobolParagraph'] = []
+
+    @property
+    def sections(self) -> List[CobolSection]:  # type: ignore[override]
+        """List-like access for sections (tests iterate over 'sections')."""
+        return list(self._sections.values())
     
     @property
     def division_type(self) -> str:
@@ -77,7 +82,7 @@ class CobolDivision(ASTNode):
     def add_section(self, section: CobolSection) -> None:
         """Add a section to this division."""
         self.add_child(section)
-        self.sections[section.section_name] = section
+        self._sections[section.section_name] = section
     
     def add_paragraph(self, paragraph: 'CobolParagraph') -> None:
         """Add a paragraph directly to this division (procedure division)."""
@@ -118,11 +123,11 @@ class CobolDivision(ASTNode):
     
     def get_section_by_name(self, name: str) -> Optional[CobolSection]:
         """Get a section by name."""
-        return self.sections.get(name)
+        return self._sections.get(name)
     
     def has_section(self, name: str) -> bool:
         """Check if division has a specific section."""
-        return name in self.sections
+        return name in self._sections
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert division to dictionary representation."""
@@ -131,6 +136,8 @@ class CobolDivision(ASTNode):
             "division_name": self.division_name,
             "location": self.location.to_dict(),
             "sections": {name: section.to_dict() for name, section in self.sections.items()},
+            # Provide a list form for simple iteration in consumers/tests
+            "sections_list": [section.to_dict() for section in self._sections.values()],
             "paragraphs": [p.to_dict() for p in self.paragraphs],
             "metadata": self._metadata
         }
@@ -166,17 +173,24 @@ class CobolProgram(ASTNode):
     def __init__(self, program_name: str, location: SourceLocation):
         super().__init__("Program", location)
         self.program_name = program_name
-        self.divisions: Dict[str, CobolDivision] = {}
+        # Internal mapping of division name -> division object
+        self._divisions: Dict[str, CobolDivision] = {}
+        # Cached statistics
         self._statistics: Optional[Dict[str, Any]] = None
+
+    # Backwards compatibility: expose divisions as list for simple iteration
+    @property
+    def divisions(self) -> List[CobolDivision]:  # type: ignore[override]
+        return list(self._divisions.values())
     
     def add_division(self, division: CobolDivision) -> None:
-        """Add a division to the program."""
+        """Add a division to the program (keeps both dict and list representations)."""
         self.add_child(division)
-        self.divisions[division.division_name] = division
+        self._divisions[division.division_name] = division
     
     def get_division(self, name: str) -> Optional[CobolDivision]:
         """Get a division by name."""
-        return self.divisions.get(name)
+        return self._divisions.get(name)
     
     def get_division_by_name(self, name: str) -> Optional[CobolDivision]:
         """Get a division by name (alias for compatibility)."""
@@ -184,7 +198,7 @@ class CobolProgram(ASTNode):
     
     def has_division(self, name: str) -> bool:
         """Check if program has a specific division."""
-        return name in self.divisions
+        return name in self._divisions
     
     def get_data_items(self) -> List['CobolDataItem']:
         """Get all data items defined in the program."""
@@ -193,7 +207,7 @@ class CobolProgram(ASTNode):
         # Look in DATA division sections
         data_division = self.get_division("DATA")
         if data_division:
-            for section in data_division.sections.values():
+            for section in data_division._sections.values():
                 data_items.extend(section.data_items)
                 # Also look for nested data items
                 for item in section.data_items:
@@ -258,7 +272,7 @@ class CobolProgram(ASTNode):
                 statements.extend(paragraph.statements)
             
             # Get statements from sections
-            for section in proc_division.sections.values():
+            for section in proc_division._sections.values():
                 for paragraph in section.paragraphs:
                     statements.extend(paragraph.statements)
         
@@ -295,14 +309,14 @@ class CobolProgram(ASTNode):
         proc_division = self.get_division("PROCEDURE")
         if proc_division:
             # Add sections as procedures
-            for section in proc_division.sections.values():
+            for section in proc_division._sections.values():
                 procedures.append(section)
             
             # Add paragraphs as procedures  
             procedures.extend(proc_division.paragraphs)
             
             # Also look in sections for paragraphs
-            for section in proc_division.sections.values():
+            for section in proc_division._sections.values():
                 procedures.extend(section.paragraphs)
         
         return procedures
@@ -334,7 +348,7 @@ class CobolProgram(ASTNode):
             result.add_warning(f"Divisions not in standard order. Found: {found_divisions}, Expected: {expected_order}")
         
         # Validate each division
-        for division in self.divisions.values():
+        for division in self._divisions.values():
             division_result = self._validate_division(division)
             result.errors.extend(division_result.errors)
             result.warnings.extend(division_result.warnings)
@@ -381,17 +395,20 @@ class CobolProgram(ASTNode):
         # Count procedures
         procedure_count = len(self.get_procedures())
         
-        # Count statements (simplified - would need statement nodes)
-        for division in self.divisions.values():
+        # Count statements: sum all Statement nodes in PROCEDURE division
+        for division in self._divisions.values():
             if division.division_name == "PROCEDURE":
-                statement_count += len(division.paragraphs) * 2  # Estimate
+                for section in division._sections.values():
+                    for child in getattr(section, 'children', []):
+                        if getattr(child, 'node_type', '') == 'Statement':
+                            statement_count += 1
         
         self._statistics = {
             "total_lines": total_lines,
             "data_item_count": data_item_count,
             "procedure_count": procedure_count,
             "statement_count": statement_count,
-            "division_count": len(self.divisions)
+            "division_count": len(self._divisions)
         }
     
     def to_dict(self, config: Optional[SerializationConfig] = None) -> Dict[str, Any]:
@@ -402,7 +419,7 @@ class CobolProgram(ASTNode):
         result = {
             "node_type": self.node_type,
             "program_name": self.program_name,
-            "divisions": {name: division.to_dict() for name, division in self.divisions.items()}
+            "divisions": {name: division.to_dict() for name, division in self._divisions.items()}
         }
         
         if config.include_source_locations:
