@@ -1396,8 +1396,25 @@ class CobolParser:
             else:
                 debug_info += " (no more tokens)"
             
+            # Special handling for tokens that suggest we're not actually in a MOVE statement context
+            problematic_tokens = {
+                TokenType.LEVEL_NUMBER,  # Data definitions (04, 05, etc.)
+                TokenType.PERIOD,        # Statement terminators
+                TokenType.MULTIPLY_OP,   # Arithmetic operators (*) 
+                TokenType.ASSIGN,        # Assignment operators (=)
+                TokenType.PLUS,          # Addition operators (+) - might be legitimate but often suggests wrong context
+                TokenType.MINUS          # Subtraction operators (-) - might be legitimate but often suggests wrong context
+            }
+            
+            if i < len(tokens) and tokens[i].type in problematic_tokens:
+                # These tokens suggest we mistakenly started parsing a MOVE statement
+                # when we should be parsing something else (data definitions, arithmetic, etc.)
+                # Don't create an error - this is likely a false positive
+                # Instead, skip back and let the normal parsing continue
+                return i - 1  # Return to the position before advancing past the presumed source operand
+            
             # Heuristic: if next token is plausible target (identifier, literal), treat as MOVE
-            if i < len(tokens) and tokens[i].type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL):
+            elif i < len(tokens) and tokens[i].type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL):
                 target = tokens[i].value
                 i += 1
                 self.add_warning(f"MOVE statement missing TO; treated '{target}' as target at {start.location}")
@@ -1738,7 +1755,7 @@ class CobolParser:
         while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
             self.advance_token()
         
-        # Parse source operand with enhanced logic
+        # Parse source operand with enhanced logic for COBOL continuation lines
         if not self.current_token:
             # Check if this is the issue - no source token, expecting TO immediately
             if (self.current_token_index + 1 < len(self.tokens) and 
@@ -1759,10 +1776,33 @@ class CobolParser:
                 source = self.current_token.value + self.peek_token().value
                 self.advance_token()  # Skip sign
                 self.advance_token()  # Skip number
-            # Handle LEVEL_NUMBER as numeric literal (e.g., MOVE 1 TO ...)
+            # Handle LEVEL_NUMBER as numeric literal (e.g., MOVE 1 TO ...) or part of continuation
             elif self.current_token.type == TokenType.LEVEL_NUMBER:
                 source = self.current_token.value
                 self.advance_token()
+                
+                # Check if this is followed by continuation lines (COBOL multi-line numeric literals)
+                # Pattern: LEVEL_NUMBER, NEWLINE, CONTINUATION, LEVEL_NUMBER, ...
+                while (self.current_token and self.current_token.type == TokenType.NEWLINE):
+                    # Look ahead to see if next token is CONTINUATION
+                    next_idx = self.current_token_index + 1
+                    if (next_idx < len(self.tokens) and 
+                        self.tokens[next_idx].type == TokenType.CONTINUATION):
+                        # Skip NEWLINE and CONTINUATION
+                        self.advance_token()  # Skip NEWLINE
+                        self.advance_token()  # Skip CONTINUATION
+                        
+                        # Now get the next part of the numeric literal
+                        if (self.current_token and 
+                            self.current_token.type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL)):
+                            source += self.current_token.value
+                            self.advance_token()
+                        else:
+                            # End of continuation, break out
+                            break
+                    else:
+                        # No continuation, break out
+                        break
             # Check if we're seeing TO immediately (missing source value)
             elif (self.current_token.value.upper() == "TO" or 
                   self.current_token.type == TokenType.TO):
