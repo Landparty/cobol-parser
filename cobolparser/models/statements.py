@@ -264,6 +264,51 @@ class SelectStatement(CobolStatement):
         return result
 
 
+class CopyStatement(CobolStatement):
+    """AST node for COPY statements."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("COPY", location)
+        self.copybook_name: Optional[str] = None
+        self.library_name: Optional[str] = None
+        self.suppressions: List[str] = []
+        self.replacements: List[Dict[str, str]] = []
+    
+    def set_copybook_name(self, name: str) -> None:
+        """Set the copybook name."""
+        self.copybook_name = name
+        if name not in self.operands:
+            self.operands.insert(0, name)
+    
+    def set_library_name(self, library: str) -> None:
+        """Set the IN/OF library name."""
+        self.library_name = library
+        if library not in self.operands:
+            self.operands.append(library)
+    
+    def add_suppression(self, suppression: str) -> None:
+        """Add a SUPPRESS phrase."""
+        self.suppressions.append(suppression)
+    
+    def add_replacement(self, old_text: str, new_text: str) -> None:
+        """Add a REPLACING phrase."""
+        self.replacements.append({
+            "old_text": old_text,
+            "new_text": new_text
+        })
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert COPY statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "copybook_name": self.copybook_name,
+            "library_name": self.library_name,
+            "suppressions": self.suppressions,
+            "replacements": self.replacements
+        })
+        return result
+
+
 class CobolExpression(ASTNode):
     """Base class for COBOL expression AST nodes."""
     
@@ -442,6 +487,8 @@ __all__ = [
     "PerformStatement",
     "CallStatement",
     "ComputeStatement",
+    "CopyStatement",
+    "SelectStatement",
     "CobolExpression",
     "ArithmeticExpression",
     "ConditionalExpression",

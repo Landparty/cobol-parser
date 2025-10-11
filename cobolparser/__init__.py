@@ -103,6 +103,7 @@ from .parser import (
     ParseState,
     parse_cobol,
 )
+from .preprocess import normalize_fixed_format
 
 from .dialects import (
     IBMEnterpriseCobol,
@@ -167,6 +168,7 @@ __all__ = [
     
     # Dialect support
     "IBMEnterpriseCobol",
+    "normalize_fixed_format",
     
     # Will be added when implemented:
     # "ANSICobol", 

@@ -16,6 +16,7 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - [Advanced Usage](#advanced-usage)
 - [Architecture](#architecture)
 - [IBM Enterprise COBOL Support](#ibm-enterprise-cobol-support)
+- [Extracting Specific Statements](#extracting-specific-statements)
 - [Configuration Options](#configuration-options)
 - [API Reference](#api-reference)
 - [Testing](#testing)
@@ -433,6 +434,497 @@ result = parse_cobol(exec_sql)
 # Host variables are automatically detected and tracked
 ```
 
+## Extracting Specific Statements
+
+The parser provides comprehensive support for extracting and analyzing specific COBOL constructs from parsed programs. Here are practical examples showing how to find SQL statements, PERFORM statements, CALL statements, and COPYBOOK references.
+
+### Extracting SQL Instructions
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.dialects.ibm_enterprise import ExecSQLStatement
+
+def extract_sql_statements(cobol_source: str):
+    """Extract all EXEC SQL statements from COBOL source."""
+    result = parse_cobol(cobol_source)
+    
+    if not result.success:
+        print("Parsing failed:", result.errors)
+        return []
+    
+    sql_statements = []
+    
+    def find_sql_statements(node):
+        """Recursively find SQL statements in AST."""
+        if isinstance(node, ExecSQLStatement):
+            sql_statements.append({
+                'sql_text': node.sql_text,
+                'sql_type': node.sql_type,  # SELECT, INSERT, UPDATE, etc.
+                'host_variables': node.host_variables,
+                'location': f"{node.location.line}:{node.location.column}"
+            })
+        
+        # Recursively check children
+        if hasattr(node, 'children'):
+            for child in node.children:
+                find_sql_statements(child)
+    
+    # Start search from program root
+    find_sql_statements(result.ast)
+    
+    return sql_statements
+
+# Example usage
+cobol_with_sql = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SQL-EXAMPLE.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-EMPLOYEE.
+           05  WS-EMP-ID      PIC 9(6) COMP-3.
+           05  WS-EMP-NAME    PIC X(30).
+           05  WS-SALARY      PIC 9(7)V99 COMP-3.
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           EXEC SQL
+               SELECT EMP_ID, EMP_NAME, SALARY
+               INTO :WS-EMP-ID, :WS-EMP-NAME, :WS-SALARY
+               FROM EMPLOYEE
+               WHERE EMP_ID = 123456
+           END-EXEC.
+           
+           EXEC SQL
+               UPDATE EMPLOYEE
+               SET SALARY = :WS-SALARY
+               WHERE EMP_ID = :WS-EMP-ID
+           END-EXEC.
+           
+           EXEC SQL COMMIT END-EXEC.
+           
+           STOP RUN.
+"""
+
+sql_statements = extract_sql_statements(cobol_with_sql)
+
+print("Found SQL Statements:")
+for i, sql in enumerate(sql_statements, 1):
+    print(f"{i}. {sql['sql_type']} at {sql['location']}")
+    print(f"   SQL: {sql['sql_text'][:50]}...")
+    print(f"   Host Variables: {sql['host_variables']}")
+    print()
+```
+
+### Extracting PERFORM Statements
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.models.statements import PerformStatement
+
+def extract_perform_statements(cobol_source: str):
+    """Extract all PERFORM statements from COBOL source."""
+    result = parse_cobol(cobol_source)
+    
+    if not result.success:
+        print("Parsing failed:", result.errors)
+        return []
+    
+    perform_statements = []
+    
+    def find_perform_statements(node):
+        """Recursively find PERFORM statements in AST."""
+        if isinstance(node, PerformStatement):
+            perform_info = {
+                'target_paragraph': node.target_paragraph,
+                'perform_type': node.perform_type,  # SIMPLE, TIMES, UNTIL, VARYING
+                'location': f"{node.location.line}:{node.location.column}"
+            }
+            
+            # Add specific details based on perform type
+            if node.perform_type == "TIMES":
+                perform_info['times_count'] = node.times_count
+            elif node.perform_type == "UNTIL":
+                perform_info['until_condition'] = str(node.until_condition)
+            elif node.perform_type == "VARYING":
+                perform_info['varying_clause'] = node.varying_clause
+            
+            perform_statements.append(perform_info)
+        
+        # Recursively check children
+        if hasattr(node, 'children'):
+            for child in node.children:
+                find_perform_statements(child)
+    
+    find_perform_statements(result.ast)
+    return perform_statements
+
+# Example usage
+cobol_with_performs = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PERFORM-EXAMPLE.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-COUNTER    PIC 9(3) VALUE 0.
+       01  WS-TOTAL      PIC 9(5) VALUE 0.
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           PERFORM INITIALIZATION.
+           PERFORM PROCESS-RECORDS 10 TIMES.
+           PERFORM CALCULATE-TOTAL UNTIL WS-COUNTER > 100.
+           PERFORM VARYING WS-COUNTER FROM 1 BY 1 
+                   UNTIL WS-COUNTER > 50
+               COMPUTE WS-TOTAL = WS-TOTAL + WS-COUNTER
+           END-PERFORM.
+           PERFORM CLEANUP.
+           STOP RUN.
+           
+       INITIALIZATION.
+           MOVE 0 TO WS-COUNTER.
+           MOVE 0 TO WS-TOTAL.
+           
+       PROCESS-RECORDS.
+           ADD 1 TO WS-COUNTER.
+           
+       CALCULATE-TOTAL.
+           ADD WS-COUNTER TO WS-TOTAL.
+           ADD 1 TO WS-COUNTER.
+           
+       CLEANUP.
+           DISPLAY "Processing complete".
+"""
+
+perform_statements = extract_perform_statements(cobol_with_performs)
+
+print("Found PERFORM Statements:")
+for i, perform in enumerate(perform_statements, 1):
+    print(f"{i}. {perform['perform_type']} PERFORM at {perform['location']}")
+    print(f"   Target: {perform['target_paragraph']}")
+    if 'times_count' in perform:
+        print(f"   Times: {perform['times_count']}")
+    if 'until_condition' in perform:
+        print(f"   Until: {perform['until_condition']}")
+    if 'varying_clause' in perform:
+        print(f"   Varying: {perform['varying_clause']}")
+    print()
+```
+
+### Extracting CALL Statements
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.models.statements import CallStatement
+
+def extract_call_statements(cobol_source: str):
+    """Extract all CALL statements from COBOL source."""
+    result = parse_cobol(cobol_source)
+    
+    if not result.success:
+        print("Parsing failed:", result.errors)
+        return []
+    
+    call_statements = []
+    
+    def find_call_statements(node):
+        """Recursively find CALL statements in AST."""
+        if isinstance(node, CallStatement):
+            call_info = {
+                'called_program': node.called_program,
+                'using_parameters': node.using_parameters,
+                'giving_parameter': node.giving_parameter,
+                'location': f"{node.location.line}:{node.location.column}"
+            }
+            call_statements.append(call_info)
+        
+        # Recursively check children
+        if hasattr(node, 'children'):
+            for child in node.children:
+                find_call_statements(child)
+    
+    find_call_statements(result.ast)
+    return call_statements
+
+# Example usage
+cobol_with_calls = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALL-EXAMPLE.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-RESULT      PIC 9(5).
+       01  WS-PARAM1      PIC X(10).
+       01  WS-PARAM2      PIC 9(3).
+       01  WS-ERROR-CODE  PIC 99.
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           MOVE "TEST" TO WS-PARAM1.
+           MOVE 123 TO WS-PARAM2.
+           
+           CALL "SUBPROG1" USING WS-PARAM1 WS-PARAM2.
+           
+           CALL "CALCULATOR" USING WS-PARAM1 WS-PARAM2
+                             GIVING WS-RESULT.
+           
+           CALL "VALIDATE" USING WS-PARAM1
+                          ON EXCEPTION
+                             MOVE 99 TO WS-ERROR-CODE
+                          NOT ON EXCEPTION
+                             MOVE 0 TO WS-ERROR-CODE.
+           
+           STOP RUN.
+"""
+
+call_statements = extract_call_statements(cobol_with_calls)
+
+print("Found CALL Statements:")
+for i, call in enumerate(call_statements, 1):
+    print(f"{i}. CALL at {call['location']}")
+    print(f"   Program: {call['called_program']}")
+    if call['using_parameters']:
+        print(f"   Using: {', '.join(call['using_parameters'])}")
+    if call['giving_parameter']:
+        print(f"   Giving: {call['giving_parameter']}")
+    print()
+```
+
+### Extracting COPYBOOK References
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.models.statements import CopyStatement
+
+def extract_copy_statements(cobol_source: str):
+    """Extract all COPY statements (copybook references) from COBOL source."""
+    result = parse_cobol(cobol_source)
+    
+    if not result.success:
+        print("Parsing failed:", result.errors)
+        return []
+    
+    copy_statements = []
+    
+    def find_copy_statements(node):
+        """Recursively find COPY statements in AST."""
+        if isinstance(node, CopyStatement):
+            copy_info = {
+                'copybook_name': node.copybook_name,
+                'library_name': node.library_name,
+                'suppressions': node.suppressions,
+                'replacements': node.replacements,
+                'location': f"{node.location.line}:{node.location.column}"
+            }
+            copy_statements.append(copy_info)
+        
+        # Recursively check children
+        if hasattr(node, 'children'):
+            for child in node.children:
+                find_copy_statements(child)
+    
+    find_copy_statements(result.ast)
+    return copy_statements
+
+# Example usage
+cobol_with_copybooks = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. COPYBOOK-EXAMPLE.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           COPY EMPLOYEE-RECORD.
+           COPY CONSTANTS IN LIBRARY1.
+           
+       01  LOCAL-DATA.
+           05  LOCAL-FIELD    PIC X(25).
+           COPY STANDARD-FIELDS REPLACING
+               ==:PREFIX:== BY ==LOCAL==
+               ==:SUFFIX:== BY ==DATA==.
+               
+       FILE SECTION.
+           COPY FILE-LAYOUTS SUPPRESS.
+           
+       PROCEDURE DIVISION.
+           COPY STANDARD-PROCEDURES.
+           COPY ERROR-HANDLING IN ERRORLIB
+               REPLACING ==PROGRAM-NAME== BY ==COPYBOOK-EXAMPLE==.
+           STOP RUN.
+"""
+
+copy_statements = extract_copy_statements(cobol_with_copybooks)
+
+print("Found COPY Statements (Copybooks):")
+for i, copy in enumerate(copy_statements, 1):
+    print(f"{i}. COPY at {copy['location']}")
+    print(f"   Copybook: {copy['copybook_name']}")
+    if copy['library_name']:
+        print(f"   Library: {copy['library_name']}")
+    if copy['suppressions']:
+        print(f"   Suppressions: {copy['suppressions']}")
+    if copy['replacements']:
+        print(f"   Replacements:")
+        for repl in copy['replacements']:
+            print(f"     '{repl['old_text']}' -> '{repl['new_text']}'")
+    print()
+```
+
+### Comprehensive Statement Analysis
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.models.statements import *
+from cobolparser.dialects.ibm_enterprise import ExecSQLStatement
+
+def analyze_cobol_program(cobol_source: str):
+    """Comprehensive analysis of a COBOL program showing all statement types."""
+    result = parse_cobol(cobol_source)
+    
+    if not result.success:
+        print("Parsing failed:", result.errors)
+        return
+    
+    # Counters for different statement types
+    statement_counts = {
+        'SQL': 0, 'PERFORM': 0, 'CALL': 0, 'COPY': 0,
+        'MOVE': 0, 'DISPLAY': 0, 'COMPUTE': 0, 'OTHER': 0
+    }
+    
+    statements_by_type = {
+        'SQL': [], 'PERFORM': [], 'CALL': [], 'COPY': [],
+        'MOVE': [], 'DISPLAY': [], 'COMPUTE': [], 'OTHER': []
+    }
+    
+    def analyze_node(node):
+        """Analyze each node in the AST."""
+        statement_type = 'OTHER'
+        statement_info = {'location': f"{node.location.line}:{node.location.column}"}
+        
+        if isinstance(node, ExecSQLStatement):
+            statement_type = 'SQL'
+            statement_info.update({
+                'sql_type': node.sql_type,
+                'host_variables': len(node.host_variables)
+            })
+        elif isinstance(node, PerformStatement):
+            statement_type = 'PERFORM'
+            statement_info.update({
+                'target': node.target_paragraph,
+                'type': node.perform_type
+            })
+        elif isinstance(node, CallStatement):
+            statement_type = 'CALL'
+            statement_info.update({
+                'program': node.called_program,
+                'parameters': len(node.using_parameters)
+            })
+        elif isinstance(node, CopyStatement):
+            statement_type = 'COPY'
+            statement_info.update({
+                'copybook': node.copybook_name,
+                'replacements': len(node.replacements)
+            })
+        elif isinstance(node, MoveStatement):
+            statement_type = 'MOVE'
+            statement_info.update({
+                'source': node.source,
+                'targets': len(node.targets)
+            })
+        elif isinstance(node, DisplayStatement):
+            statement_type = 'DISPLAY'
+            statement_info.update({
+                'items': len(node.display_items)
+            })
+        elif isinstance(node, ComputeStatement):
+            statement_type = 'COMPUTE'
+            statement_info.update({
+                'targets': len(node.targets)
+            })
+        
+        if hasattr(node, 'statement_type'):  # It's a statement
+            statement_counts[statement_type] += 1
+            statements_by_type[statement_type].append(statement_info)
+        
+        # Recursively analyze children
+        if hasattr(node, 'children'):
+            for child in node.children:
+                analyze_node(child)
+    
+    analyze_node(result.ast)
+    
+    # Print summary
+    print("COBOL Program Analysis Summary")
+    print("=" * 40)
+    print(f"Program: {result.ast.program_name}")
+    print(f"Total Divisions: {len(result.ast.divisions)}")
+    print()
+    
+    print("Statement Counts:")
+    for stmt_type, count in statement_counts.items():
+        if count > 0:
+            print(f"  {stmt_type}: {count}")
+    
+    print("\nDetailed Breakdown:")
+    for stmt_type, statements in statements_by_type.items():
+        if statements:
+            print(f"\n{stmt_type} Statements:")
+            for stmt in statements[:5]:  # Show first 5 of each type
+                print(f"  - Line {stmt['location']}: {stmt}")
+            if len(statements) > 5:
+                print(f"  ... and {len(statements) - 5} more")
+
+# Example usage with comprehensive COBOL program
+comprehensive_cobol = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. COMPREHENSIVE-EXAMPLE.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           COPY EMPLOYEE-RECORD.
+       01  WS-VARIABLES.
+           05  WS-COUNTER     PIC 9(3).
+           05  WS-TOTAL       PIC 9(7)V99.
+           05  WS-EMPLOYEE.
+               10  WS-EMP-ID    PIC 9(6) COMP-3.
+               10  WS-EMP-NAME  PIC X(30).
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           PERFORM INITIALIZATION.
+           
+           EXEC SQL
+               SELECT COUNT(*) INTO :WS-COUNTER
+               FROM EMPLOYEE
+           END-EXEC.
+           
+           PERFORM PROCESS-EMPLOYEES WS-COUNTER TIMES.
+           
+           CALL "CALCULATE-TOTALS" USING WS-VARIABLES.
+           
+           MOVE WS-TOTAL TO WS-EMPLOYEE.
+           DISPLAY "Processing complete: " WS-TOTAL.
+           
+           COPY CLEANUP-PROCEDURES.
+           
+           STOP RUN.
+           
+       INITIALIZATION.
+           MOVE ZERO TO WS-COUNTER WS-TOTAL.
+           
+       PROCESS-EMPLOYEES.
+           EXEC SQL
+               UPDATE EMPLOYEE SET STATUS = 'PROCESSED'
+               WHERE EMP_ID = :WS-EMP-ID
+           END-EXEC.
+           
+           COMPUTE WS-TOTAL = WS-TOTAL + 1.
+"""
+
+analyze_cobol_program(comprehensive_cobol)
+```
+
+These examples demonstrate how to traverse the parsed AST to extract specific COBOL constructs. The parser automatically creates appropriate AST nodes for each statement type, making it easy to analyze program structure, find dependencies, and understand program flow.
+
 ## Configuration Options
 
 ### Memory Configuration
@@ -703,3 +1195,16 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 **COBOL Parser Team** - Modernizing legacy code, one parse at a time.
+
+## Recent Enhancements
+
+### FILE-CONTROL SELECT Parsing
+The parser now correctly handles multi-line `SELECT` statements in the `FILE-CONTROL` paragraph where the `ASSIGN [TO]` target appears on the following line, e.g.:
+
+```
+FILE-CONTROL.
+    SELECT PRINT-FILE ASSIGN TO
+        PRINTER01.
+```
+
+It also supports optional `ORGANIZATION [IS] <type>` and `ACCESS [MODE] [IS] <mode>` clause variants on the same or subsequent lines.
