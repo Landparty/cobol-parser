@@ -155,6 +155,7 @@ class TokenType(Enum):
     UNTIL = auto()
     VARYING = auto()
     FROM = auto()
+    TO = auto()
     BY = auto()
     AFTER = auto()
     BEFORE = auto()
@@ -372,6 +373,7 @@ class CobolLexer:
         'UNTIL': TokenType.UNTIL,
         'VARYING': TokenType.VARYING,
         'FROM': TokenType.FROM,
+        'TO': TokenType.TO,
         'BY': TokenType.BY,
         'AFTER': TokenType.AFTER,
         'BEFORE': TokenType.BEFORE,
