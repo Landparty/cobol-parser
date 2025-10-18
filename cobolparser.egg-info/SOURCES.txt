@@ -4,6 +4,7 @@ cobolparser/__init__.py
 cobolparser/lexer.py
 cobolparser/lexer_simple.py
 cobolparser/parser.py
+cobolparser/preprocess.py
 cobolparser.egg-info/PKG-INFO
 cobolparser.egg-info/SOURCES.txt
 cobolparser.egg-info/dependency_links.txt

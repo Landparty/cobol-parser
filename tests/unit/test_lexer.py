@@ -841,7 +841,7 @@ class TestCobolLexerTokenizeMethod:
         assert len(newline_tokens) >= 1
         
         # Newline should have correct value
-        assert newline_tokens[0].value == "\\n"
+        assert newline_tokens[0].value == "\n"
     
     def test_eof_token_always_added(self):
         """Test that EOF token is always added at the end."""

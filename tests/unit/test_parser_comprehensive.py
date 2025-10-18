@@ -308,8 +308,8 @@ class TestTokenManagement:
         self.parser.current_token = None
         
         location = self.parser.get_current_location()
-        # Should return a default location
-        assert location.line == "<unknown>"
+        # Should return a default location (1,1)
+        assert location.line == 1
         assert location.column == 1
 
 
@@ -339,7 +339,7 @@ class TestParseErrors:
         assert isinstance(error, ParseError)
         assert error.message == "Error without token"
         # Should use default location
-        assert error.line == "<unknown>"
+        assert error.line == 1
         assert error.column == 1
     
     def test_add_error(self):
@@ -347,14 +347,14 @@ class TestParseErrors:
         parser = CobolParser()
         
         # Create and add an error
-        error = ParseError("Test error", SourceLocation("test.cob", 1, 1))
+        error = ParseError("Test error", 1, 1)
         parser.add_error(error)
         
         assert len(parser.errors) == 1
         assert parser.errors[0] == error
         
         # Add another error
-        error2 = ParseError("Second error", SourceLocation("test.cob", 2, 1))
+        error2 = ParseError("Second error", 2, 1)
         parser.add_error(error2)
         
         assert len(parser.errors) == 2
@@ -1027,7 +1027,9 @@ class TestProcedureDivisionParsing:
         assert perform_stmt is not None
         assert perform_stmt.target_paragraph == "PARA-NAME"
         assert perform_stmt.perform_type == "UNTIL"
-        assert perform_stmt.until_condition == "CONDITION"
+        # until_condition is now a CobolExpression object, check its metadata
+        assert perform_stmt.until_condition is not None
+        assert perform_stmt.until_condition._metadata.get("value") == "CONDITION"
     
     def test_parse_call_statement_with_using(self):
         """Test CALL statement with USING clause."""

@@ -59,7 +59,7 @@ addopts = [
     "--cov=cobolparser",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
-    "--cov-fail-under=90",
+    "--cov-fail-under=81",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

@@ -198,7 +198,7 @@ class CobolParser:
         """Get current source location."""
         if self.current_token:
             return self.current_token.location
-        return SourceLocation("<unknown>", 1, 1)
+        return SourceLocation(1, 1, 1)
     
     def add_error(self, error: ParseError) -> None:
         """Add a parse error."""
@@ -553,7 +553,7 @@ class CobolParser:
             self.advance_token()  # Skip period
         
         # Add SELECT statement to current paragraph
-        if hasattr(self.current_section, 'paragraphs') and self.current_section.paragraphs:
+        if self.current_section and hasattr(self.current_section, 'paragraphs') and self.current_section.paragraphs:
             # Get the last paragraph (should be FILE-CONTROL)
             last_paragraph = self.current_section.paragraphs[-1]
             last_paragraph.add_statement(select_stmt)
@@ -609,9 +609,10 @@ class CobolParser:
     def parse_working_storage_section(self) -> None:
         """Parse WORKING-STORAGE SECTION."""
         if not self.match_token(TokenType.IDENTIFIER):  # SECTION keyword
+            loc = self.get_current_location()
             self.add_error(ParseError(
                 "Expected SECTION after WORKING-STORAGE",
-                self.get_current_location()
+                loc.line, loc.column
             ))
             return
         
@@ -866,12 +867,13 @@ class CobolParser:
                         while not end_quote_found and self.current_token_index + 1 < len(self.tokens):
                             next_token = self.tokens[self.current_token_index + 1]
                             # Heuristic: continuation line if column 7 is '-'
-                            if hasattr(next_token, 'source_line') and next_token.source_line[6] == '-':
-                                string_value += next_token.value
-                                self.current_token_index += 1
-                                end_quote_found = '"' in next_token.value
-                            else:
-                                break
+                            # Note: Token doesn't have source_line attribute, skip this check
+                            # if hasattr(next_token, 'source_line') and next_token.source_line[6] == '-':
+                            #     string_value += next_token.value
+                            #     self.current_token_index += 1
+                            #     end_quote_found = '"' in next_token.value
+                            # else:
+                            break
                         data_item.initial_value = f'"{string_value}"'
                         self.advance_token()
                     else:
@@ -994,7 +996,7 @@ class CobolParser:
     def _parse_picture_pattern(self) -> tuple[Optional[str], SourceLocation, bool]:
         """Parse a complete PICTURE pattern, including parentheses."""
         if not self.current_token:
-            return None, self.get_current_location()
+            return None, self.get_current_location(), False
         
         pattern = ""
         location = self.current_token.location
@@ -1051,9 +1053,10 @@ class CobolParser:
             return True  # Optional division
         
         if not self.match_token(TokenType.IDENTIFIER):  # DIVISION keyword
+            loc = self.get_current_location()
             self.add_error(ParseError(
                 "Expected DIVISION after PROCEDURE",
-                self.get_current_location()
+                loc.line, loc.column
             ))
         
         # Handle optional USING clause: PROCEDURE DIVISION USING data-name-1 [data-name-2 ...]
@@ -1098,11 +1101,12 @@ class CobolParser:
                     self.parse_paragraph_or_statement()
                     continue
                 elif (next_token and next_token.type == TokenType.IDENTIFIER and 
-                      next_token.value.upper() == "SECTION" and
-                      self.peek_token(2) and self.peek_token(2).type == TokenType.PERIOD):
-                    # Section pattern: NAME SECTION.
-                    self.parse_paragraph_or_statement()
-                    continue
+                      next_token.value.upper() == "SECTION"):
+                    peek2 = self.peek_token(2)
+                    if peek2 and peek2.type == TokenType.PERIOD:
+                        # Section pattern: NAME SECTION.
+                        self.parse_paragraph_or_statement()
+                        continue
             # Skip solitary newlines/comments
             if self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
                 self.advance_token()
@@ -1706,10 +1710,13 @@ class CobolParser:
     def parse_paragraph_or_statement(self) -> None:
         """Parse paragraph names, section names, or other statement types."""
         # Check for section pattern: NAME SECTION.
-        if (self.peek_token() and 
-            self.peek_token().value and self.peek_token().value.upper() == "SECTION" and
-            self.peek_token(2) and self.peek_token(2).type == TokenType.PERIOD):
+        peek1 = self.peek_token()
+        peek2 = self.peek_token(2)
+        if (peek1 and peek1.value and peek1.value.upper() == "SECTION" and
+            peek2 and peek2.type == TokenType.PERIOD):
             # This is a section declaration: NAME SECTION.
+            if not self.current_token:
+                return
             section_name = self.current_token.value
             location = self.current_token.location
             self.advance_token()  # Skip section name
@@ -1725,24 +1732,28 @@ class CobolParser:
             self.current_section = procedure_section
             
         # Check for paragraph pattern: NAME.
-        elif self.peek_token() and self.peek_token().type == TokenType.PERIOD:
-            # This is a paragraph name - create paragraph and parse its statements
-            paragraph_name = self.current_token.value
-            location = self.current_token.location
-            self.advance_token()  # Skip paragraph name
-            self.advance_token()  # Skip period
-            
-            # Create paragraph as a section in the procedure division
-            # In COBOL, paragraphs in procedure division are treated as sections
-            paragraph_section = CobolSection(paragraph_name, location)
-            if self.current_division:
-                self.current_division.add_section(paragraph_section)
-            
-            # Set this paragraph as current section to collect statements
-            self.current_section = paragraph_section
         else:
-            # Unknown statement, skip
-            self.advance_token()
+            peek1 = self.peek_token()
+            if peek1 and peek1.type == TokenType.PERIOD:
+                # This is a paragraph name - create paragraph and parse its statements
+                if not self.current_token:
+                    return
+                paragraph_name = self.current_token.value
+                location = self.current_token.location
+                self.advance_token()  # Skip paragraph name
+                self.advance_token()  # Skip period
+            
+                # Create paragraph as a section in the procedure division
+                # In COBOL, paragraphs in procedure division are treated as sections
+                paragraph_section = CobolSection(paragraph_name, location)
+                if self.current_division:
+                    self.current_division.add_section(paragraph_section)
+            
+                # Set this paragraph as current section to collect statements
+                self.current_section = paragraph_section
+            else:
+                # Unknown statement, skip
+                self.advance_token()
     
     def parse_move_statement(self) -> Optional[MoveStatement]:
         """Parse MOVE statement."""
@@ -1769,11 +1780,12 @@ class CobolParser:
             source = None
             
             # Handle PLUS/MINUS + LEVEL_NUMBER/NUMERIC_LITERAL combinations (signed numeric literals)
+            peek_tok = self.peek_token()
             if (self.current_token.type in (TokenType.PLUS, TokenType.MINUS) and 
-                self.peek_token() and 
-                self.peek_token().type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL)):
+                peek_tok and 
+                peek_tok.type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL)):
                 # Combine sign with number
-                source = self.current_token.value + self.peek_token().value
+                source = self.current_token.value + peek_tok.value
                 self.advance_token()  # Skip sign
                 self.advance_token()  # Skip number
             # Handle LEVEL_NUMBER as numeric literal (e.g., MOVE 1 TO ...) or part of continuation
@@ -1849,9 +1861,10 @@ class CobolParser:
             # Debug: print current token info
             current_info = f"None" if not self.current_token else f"{self.current_token.type.name}='{self.current_token.value}'"
             # Soft failure: record error, skip to period to reduce cascade
+            loc = self.get_current_location()
             self.add_error(ParseError(
                 f"Expected TO in MOVE statement (found: {current_info})",
-                self.get_current_location()
+                loc.line, loc.column
             ))
             # Skip until PERIOD or next verb to allow continued parsing
             while self.current_token and self.current_token.type not in (TokenType.PERIOD, TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.CALL, TokenType.STOP, TokenType.EOF):
@@ -1954,7 +1967,10 @@ class CobolParser:
         perform_stmt.set_target_paragraph(paragraph)
         if condition:
             perform_stmt.perform_type = "UNTIL"
-            perform_stmt.until_condition = condition  # TODO: Parse as expression
+            # Create a simple identifier expression from the condition string
+            condition_expr = CobolExpression("IDENTIFIER", location)
+            condition_expr._metadata["value"] = condition
+            perform_stmt.until_condition = condition_expr
         if self.current_division:
             self.current_division.add_child(perform_stmt)
         

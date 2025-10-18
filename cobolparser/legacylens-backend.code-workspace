@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../legacylens-backend"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../jcl-parser"
+		}
+	],
+	"settings": {}
+}
