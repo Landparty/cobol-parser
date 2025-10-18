@@ -132,7 +132,7 @@ class TestASTNode:
         location = SourceLocation(1, 1)
         
         with pytest.raises(TypeError):
-            ASTNode("TestNode", location)
+            ASTNode("TestNode", location)  # type: ignore[abstract]
     
     def test_add_child_basic(self):
         """Test adding child nodes."""
@@ -510,9 +510,9 @@ class TestASTNode:
         """Test equals method with non-ASTNode object."""
         node = ConcreteASTNode("TestType", SourceLocation(1, 1))
         
-        assert not node.equals("not an ast node")
-        assert not node.equals(42)
-        assert not node.equals(None)
+        assert not node.equals("not an ast node")  # type: ignore[arg-type]
+        assert not node.equals(42)  # type: ignore[arg-type]
+        assert not node.equals(None)  # type: ignore[arg-type]
     
     def test_str_representation(self):
         """Test string representation of node."""

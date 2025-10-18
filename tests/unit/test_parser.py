@@ -305,9 +305,9 @@ class TestCobolParserDataDefinition:
         assert len(emp_record.children) >= 3  # EMP-ID, EMP-NAME, FILLER
         
         # Find specific child items
-        emp_id = next((child for child in emp_record.children if hasattr(child, 'name') and child.name == "EMP-ID"), None)
-        emp_name = next((child for child in emp_record.children if hasattr(child, 'name') and child.name == "EMP-NAME"), None)
-        filler = next((child for child in emp_record.children if hasattr(child, 'name') and child.name == "FILLER"), None)
+        emp_id = next((child for child in emp_record.children if isinstance(child, CobolDataItem) and child.name == "EMP-ID"), None)
+        emp_name = next((child for child in emp_record.children if isinstance(child, CobolDataItem) and child.name == "EMP-NAME"), None)
+        filler = next((child for child in emp_record.children if isinstance(child, CobolDataItem) and child.name == "FILLER"), None)
         
         assert emp_id is not None
         assert isinstance(emp_id, CobolDataItem)
@@ -407,12 +407,12 @@ class TestCobolParserDataDefinition:
         
         # Test usage clauses on child items
         display_num = next((child for child in numeric_fields.children 
-                           if hasattr(child, 'name') and child.name == "DISPLAY-NUM"), None)
+                           if isinstance(child, CobolDataItem) and child.name == "DISPLAY-NUM"), None)
         assert display_num is not None
         # Default usage should be DISPLAY or None
         
         comp3_num = next((child for child in numeric_fields.children 
-                         if hasattr(child, 'name') and child.name == "COMP3-NUM"), None)
+                         if isinstance(child, CobolDataItem) and child.name == "COMP3-NUM"), None)
         assert comp3_num is not None
         assert isinstance(comp3_num, CobolDataItem)
         assert comp3_num.usage == "COMP-3"

@@ -154,7 +154,7 @@ class TestDeclarativesAndUseStatements:
             assert len(sections) > 0
             
             # Verify main program flow can be identified
-            section_names = [s.name for s in sections if hasattr(s, 'name')]
+            section_names = [s.section_name for s in sections if hasattr(s, 'section_name')]
             expected_sections = ["MAIN-PROGRAM", "DEBUG-HANDLER"] 
             # Should contain at least one main section
 
