@@ -14,12 +14,9 @@ from ..plugins import SerializationConfig
 if TYPE_CHECKING:
     from .data_items import CobolDataItem
     from .statements import CobolStatement
-    
-    class CobolParagraph:
-        pass
-    
-    class CobolProcedure:
-        pass
+
+# Type alias for procedures (Paragraph or Section)
+CobolProcedure = Union['CobolParagraph', 'CobolSection']
 
 
 class CobolSection(ASTNode):
@@ -135,7 +132,7 @@ class CobolDivision(ASTNode):
             "node_type": self.node_type,
             "division_name": self.division_name,
             "location": self.location.to_dict(),
-            "sections": {name: section.to_dict() for name, section in self.sections.items()},
+            "sections": {name: section.to_dict() for name, section in self._sections.items()},
             # Provide a list form for simple iteration in consumers/tests
             "sections_list": [section.to_dict() for section in self._sections.values()],
             "paragraphs": [p.to_dict() for p in self.paragraphs],
@@ -375,6 +372,8 @@ class CobolProgram(ASTNode):
         """Calculate and return program statistics.""" 
         if self._statistics is None:
             self._calculate_statistics()
+        # Type assertion: _calculate_statistics ensures _statistics is not None
+        assert self._statistics is not None
         return self._statistics
     
     def _calculate_statistics(self) -> None:

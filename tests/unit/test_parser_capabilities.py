@@ -33,10 +33,10 @@ class TestCurrentParserCapabilities:
             assert result.ast is not None
             assert result.ast.program_name == "BASIC-TEST"
             
-            # Check if divisions are accessible
-            if hasattr(result.ast, 'divisions'):
-                divisions = result.ast.divisions
-                assert "IDENTIFICATION" in divisions or "DATA" in divisions or "PROCEDURE" in divisions
+            # Check if divisions are accessible using has_division method
+            assert (result.ast.has_division("IDENTIFICATION") or 
+                   result.ast.has_division("DATA") or 
+                   result.ast.has_division("PROCEDURE"))
         else:
             pytest.fail(f"Basic program structure should parse successfully. Errors: {result.errors}")
 

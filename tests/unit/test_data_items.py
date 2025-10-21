@@ -986,9 +986,11 @@ def test_picture_clause_missing_coverage():
     
     # Test patterns that hit fallback parsing (lines 176-183)
     pic_fallback1 = PictureClause("999X999", location)  # Mix of 9s and Xs
+    assert pic_fallback1.size is not None
     assert pic_fallback1.size > 0  # Should calculate based on 9s and Xs
     
     pic_fallback2 = PictureClause("9V999X", location)  # V with X after decimal
+    assert pic_fallback2.size is not None
     assert pic_fallback2.size > 0  # Should fallback and parse with findall
     
     # Test fallback with no 9s or Xs (lines 194-198)
@@ -1046,6 +1048,7 @@ def test_picture_clause_final_coverage():
     
     # Test complex fallback patterns (lines 176-183, 194-198)
     pic_mixed_chars = PictureClause("A9B9C", location)  # Mix with some 9s
+    assert pic_mixed_chars.size is not None
     assert pic_mixed_chars.size >= 2  # Should count the 9s
     
     pic_no_nines_xs = PictureClause("ABCD", location)  # No 9s or Xs at all
@@ -1062,7 +1065,7 @@ def test_occurs_clause_final_edge_case():
     
     # Test OccursClause with only min_times set (no max_times)
     occurs = OccursClause(location)
-    occurs.set_variable_occurs(5, None, None)  # Only min, no max or depending
+    occurs.set_variable_occurs(5, None, None)  # type: ignore[arg-type]  # Only min, no max or depending
     
     # The times property should handle this case - it returns None when no max_times
     times_value = occurs.times

@@ -428,6 +428,7 @@ class TestPerformStatement:
         perform_stmt.set_varying_clause("I", "1", "1", condition)
         
         assert perform_stmt.perform_type == "VARYING"
+        assert perform_stmt.varying_clause is not None
         assert perform_stmt.varying_clause["variable"] == "I"
         assert perform_stmt.varying_clause["from_value"] == "1"
         assert perform_stmt.varying_clause["by_value"] == "1"

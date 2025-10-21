@@ -60,7 +60,7 @@ class TestExecSQLStatement:
     
     def test_exec_sql_statement_creation(self):
         """Test basic creation of ExecSQLStatement."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         assert stmt.node_type == "Statement"
@@ -72,7 +72,7 @@ class TestExecSQLStatement:
     
     def test_set_sql_text_basic(self):
         """Test setting basic SQL text."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         stmt.set_sql_text("SELECT * FROM EMPLOYEE")
@@ -82,7 +82,7 @@ class TestExecSQLStatement:
     
     def test_set_sql_text_with_whitespace(self):
         """Test setting SQL text with leading/trailing whitespace."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         stmt.set_sql_text("   INSERT INTO EMPLOYEE VALUES (1, 'John')   ")
@@ -92,7 +92,7 @@ class TestExecSQLStatement:
     
     def test_set_sql_text_all_types(self):
         """Test SQL type detection for all supported types."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         test_cases = [
@@ -113,7 +113,7 @@ class TestExecSQLStatement:
     
     def test_add_host_variable(self):
         """Test adding host variables."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         stmt.add_host_variable("WS-EMP-ID")
@@ -125,7 +125,7 @@ class TestExecSQLStatement:
     
     def test_add_host_variable_duplicate(self):
         """Test adding duplicate host variables."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         stmt.add_host_variable("WS-EMP-ID")
@@ -136,7 +136,7 @@ class TestExecSQLStatement:
     
     def test_exec_sql_to_dict(self):
         """Test converting ExecSQLStatement to dictionary."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         stmt.set_sql_text("SELECT * FROM EMPLOYEE WHERE ID = :WS-EMP-ID")
         stmt.add_host_variable("WS-EMP-ID")
@@ -151,7 +151,7 @@ class TestExecSQLStatement:
     
     def test_exec_sql_inheritance(self):
         """Test that ExecSQLStatement properly inherits from CobolStatement."""
-        location = SourceLocation("test.cob", 10, 5)
+        location = SourceLocation(10, 5)
         stmt = ExecSQLStatement(location)
         
         # Test inherited properties
@@ -165,7 +165,7 @@ class TestExecCICSStatement:
     
     def test_exec_cics_statement_creation(self):
         """Test basic creation of ExecCICSStatement."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         
         assert stmt.node_type == "Statement"
@@ -176,7 +176,7 @@ class TestExecCICSStatement:
     
     def test_set_command(self):
         """Test setting CICS command."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         
         stmt.set_command("receive")
@@ -187,7 +187,7 @@ class TestExecCICSStatement:
     
     def test_add_option_without_value(self):
         """Test adding CICS option without value."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         
         stmt.add_option("NOHANDLE")
@@ -197,7 +197,7 @@ class TestExecCICSStatement:
     
     def test_add_option_with_value(self):
         """Test adding CICS option with value."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         
         stmt.add_option("INTO", "WS-DATA")
@@ -208,7 +208,7 @@ class TestExecCICSStatement:
     
     def test_add_multiple_options(self):
         """Test adding multiple CICS options."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         
         stmt.add_option("INTO", "WS-BUFFER")
@@ -222,7 +222,7 @@ class TestExecCICSStatement:
     
     def test_exec_cics_to_dict(self):
         """Test converting ExecCICSStatement to dictionary."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         stmt.set_command("RECEIVE")
         stmt.add_option("INTO", "WS-COMMAREA")
@@ -238,7 +238,7 @@ class TestExecCICSStatement:
     
     def test_exec_cics_inheritance(self):
         """Test that ExecCICSStatement properly inherits from CobolStatement."""
-        location = SourceLocation("test.cob", 15, 8)
+        location = SourceLocation(15, 8)
         stmt = ExecCICSStatement(location)
         
         # Test inherited properties
@@ -252,7 +252,7 @@ class TestIBMDataItem:
     
     def test_ibm_data_item_creation(self):
         """Test basic creation of IBMDataItem."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-AMOUNT", 5, location)
         
         assert item.name == "WS-AMOUNT"
@@ -266,7 +266,7 @@ class TestIBMDataItem:
     
     def test_set_ibm_usage(self):
         """Test setting IBM-specific USAGE clause."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-AMOUNT", 5, location)
         
         item.set_ibm_usage(IBMDataType.COMP_3)
@@ -276,7 +276,7 @@ class TestIBMDataItem:
     
     def test_set_all_ibm_usage_types(self):
         """Test setting all IBM usage types."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         
         for usage_type in IBMDataType:
             item = IBMDataItem(f"WS-{usage_type.name}", 5, location)
@@ -287,7 +287,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_no_picture(self):
         """Test storage size calculation without picture clause."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-AMOUNT", 5, location)
         
         size = item.calculate_storage_size()
@@ -295,7 +295,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_comp3(self):
         """Test COMP-3 storage size calculation."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-AMOUNT", 5, location)
         item.picture_clause = PictureClause("9(5)V99", location)
         item.set_ibm_usage(IBMDataType.COMP_3)
@@ -306,7 +306,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_comp3_odd_digits(self):
         """Test COMP-3 storage size with odd number of digits."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-COUNT", 5, location)
         item.picture_clause = PictureClause("9(5)", location)
         item.set_ibm_usage(IBMDataType.COMP_3)
@@ -317,7 +317,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_comp_binary(self):
         """Test COMP/COMP-4 binary storage size calculation."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         
         # Test cases for binary storage sizes
         test_cases = [
@@ -338,7 +338,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_comp1_comp2(self):
         """Test COMP-1 and COMP-2 floating point storage sizes."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         
         # COMP-1: single precision (4 bytes)
         item1 = IBMDataItem("WS-FLOAT", 5, location)
@@ -354,7 +354,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_comp5(self):
         """Test COMP-5 native binary storage size."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         
         # Test different digit ranges for COMP-5
         test_cases = [
@@ -373,7 +373,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_pointer(self):
         """Test POINTER storage size."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-PTR", 5, location)
         item.picture_clause = PictureClause("X(10)", location)  # Picture doesn't matter for pointer
         item.set_ibm_usage(IBMDataType.POINTER)
@@ -383,7 +383,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_display(self):
         """Test DISPLAY storage size (uses base picture size)."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-NAME", 5, location)
         item.picture_clause = PictureClause("X(30)", location)
         item.set_ibm_usage(IBMDataType.DISPLAY)
@@ -393,7 +393,7 @@ class TestIBMDataItem:
     
     def test_calculate_storage_size_non_ibm_usage(self):
         """Test storage size for non-IBM usage types (covers else clause)."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-TEST", 5, location)
         item.picture_clause = PictureClause("X(25)", location)
         
@@ -406,7 +406,7 @@ class TestIBMDataItem:
     
     def test_ibm_data_item_properties(self):
         """Test setting IBM-specific properties."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-TEST", 5, location)
         
         # Test modifying properties
@@ -422,7 +422,7 @@ class TestIBMDataItem:
     
     def test_ibm_data_item_to_dict(self):
         """Test converting IBMDataItem to dictionary."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-AMOUNT", 5, location)
         item.picture_clause = PictureClause("9(7)V99", location)
         item.set_ibm_usage(IBMDataType.COMP_3)
@@ -443,7 +443,7 @@ class TestIBMDataItem:
     
     def test_ibm_data_item_to_dict_no_usage(self):
         """Test converting IBMDataItem to dictionary without IBM usage."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-NAME", 5, location)
         
         result = item.to_dict()
@@ -453,7 +453,7 @@ class TestIBMDataItem:
     
     def test_ibm_data_item_inheritance(self):
         """Test that IBMDataItem properly inherits from CobolDataItem."""
-        location = SourceLocation("test.cob", 20, 12)
+        location = SourceLocation(20, 12)
         item = IBMDataItem("WS-TEST", 5, location)
         item.picture_clause = PictureClause("X(10)", location)  # Make it elementary
         
@@ -532,7 +532,7 @@ class TestIBMEnterpriseCobol:
     def test_validate_data_item_comp3_valid(self):
         """Test validation of valid COMP-3 data item."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 25, 10)
+        location = SourceLocation(25, 10)
         
         # Create valid COMP-3 item
         item = IBMDataItem("WS-AMOUNT", 5, location)
@@ -545,7 +545,7 @@ class TestIBMEnterpriseCobol:
     def test_validate_data_item_comp3_no_picture(self):
         """Test validation of COMP-3 data item without picture clause."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 25, 10)
+        location = SourceLocation(25, 10)
         
         # Create COMP-3 item without picture
         item = IBMDataItem("WS-AMOUNT", 5, location)
@@ -557,7 +557,7 @@ class TestIBMEnterpriseCobol:
     def test_validate_data_item_comp3_non_numeric_picture(self):
         """Test validation of COMP-3 data item with non-numeric picture."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 25, 10)
+        location = SourceLocation(25, 10)
         
         # Create COMP-3 item with alphanumeric picture
         item = IBMDataItem("WS-NAME", 5, location)
@@ -570,7 +570,7 @@ class TestIBMEnterpriseCobol:
     def test_validate_data_item_level_77_with_parent(self):
         """Test validation of level 77 item with parent (invalid)."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 25, 10)
+        location = SourceLocation(25, 10)
         
         # Create level 77 item with parent
         parent = IBMDataItem("WS-GROUP", 1, location)
@@ -583,7 +583,7 @@ class TestIBMEnterpriseCobol:
     def test_validate_data_item_level_77_without_parent(self):
         """Test validation of level 77 item without parent (valid)."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 25, 10)
+        location = SourceLocation(25, 10)
         
         # Create valid level 77 item
         item = IBMDataItem("WS-INDEPENDENT", 77, location)
@@ -596,7 +596,7 @@ class TestIBMEnterpriseCobol:
     def test_create_comp3_data_item(self):
         """Test creating COMP-3 data item."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 30, 5)
+        location = SourceLocation(30, 5)
         
         item = dialect.create_comp3_data_item("WS-AMOUNT", "9(7)V99", location)
         
@@ -605,13 +605,14 @@ class TestIBMEnterpriseCobol:
         assert item.location == location
         assert item.ibm_usage == IBMDataType.COMP_3
         assert item.usage == "COMP-3"
+        assert item.picture_clause is not None
         assert item.picture_clause.pattern == "9(7)V99"
         assert item.calculate_storage_size() == 5  # (9 + 1) / 2
     
     def test_parse_exec_sql_basic(self):
         """Test parsing basic EXEC SQL statement."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 35, 8)
+        location = SourceLocation(35, 8)
         
         sql_text = "SELECT * FROM EMPLOYEE WHERE ID = 123"
         stmt = dialect.parse_exec_sql(sql_text, location)
@@ -625,7 +626,7 @@ class TestIBMEnterpriseCobol:
     def test_parse_exec_sql_with_host_variables(self):
         """Test parsing EXEC SQL with host variables."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 35, 8)
+        location = SourceLocation(35, 8)
         
         sql_text = "SELECT EMP_ID, EMP_NAME INTO :WS-EMP-ID, :WS-EMP-NAME FROM EMPLOYEE WHERE DEPT = :WS-DEPT"
         stmt = dialect.parse_exec_sql(sql_text, location)
@@ -639,7 +640,7 @@ class TestIBMEnterpriseCobol:
     def test_parse_exec_sql_host_variables_with_hyphens(self):
         """Test parsing host variables with hyphens."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 35, 8)
+        location = SourceLocation(35, 8)
         
         sql_text = "INSERT INTO EMPLOYEE VALUES (:WS-EMPLOYEE-ID, :WS-LAST-NAME)"
         stmt = dialect.parse_exec_sql(sql_text, location)
@@ -651,7 +652,7 @@ class TestIBMEnterpriseCobol:
     def test_parse_exec_cics_basic(self):
         """Test parsing basic EXEC CICS statement."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 40, 8)
+        location = SourceLocation(40, 8)
         
         cics_text = "RECEIVE INTO(WS-COMMAREA) LENGTH(100)"
         stmt = dialect.parse_exec_cics(cics_text, location)
@@ -665,7 +666,7 @@ class TestIBMEnterpriseCobol:
     def test_parse_exec_cics_no_options(self):
         """Test parsing EXEC CICS with command only."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 40, 8)
+        location = SourceLocation(40, 8)
         
         cics_text = "RETURN"
         stmt = dialect.parse_exec_cics(cics_text, location)
@@ -676,7 +677,7 @@ class TestIBMEnterpriseCobol:
     def test_parse_exec_cics_options_without_values(self):
         """Test parsing EXEC CICS with options without values."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 40, 8)
+        location = SourceLocation(40, 8)
         
         cics_text = "READ DATASET NOHANDLE"
         stmt = dialect.parse_exec_cics(cics_text, location)
@@ -688,7 +689,7 @@ class TestIBMEnterpriseCobol:
     def test_parse_exec_cics_empty_text(self):
         """Test parsing empty EXEC CICS text."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 40, 8)
+        location = SourceLocation(40, 8)
         
         cics_text = ""
         stmt = dialect.parse_exec_cics(cics_text, location)
@@ -906,7 +907,7 @@ class TestIBMEnterpriseIntegration:
     def test_comp3_full_workflow(self):
         """Test complete COMP-3 workflow from creation to validation."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 50, 5)
+        location = SourceLocation(50, 5)
         
         # Create COMP-3 item
         item = dialect.create_comp3_data_item("WS-TOTAL", "9(9)V99", location)
@@ -926,7 +927,7 @@ class TestIBMEnterpriseIntegration:
     def test_exec_sql_full_workflow(self):
         """Test complete EXEC SQL workflow."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 60, 8)
+        location = SourceLocation(60, 8)
         
         sql_text = "UPDATE EMPLOYEE SET SALARY = :WS-NEW-SALARY WHERE ID = :WS-EMP-ID"
         stmt = dialect.parse_exec_sql(sql_text, location)
@@ -943,7 +944,7 @@ class TestIBMEnterpriseIntegration:
     def test_exec_cics_full_workflow(self):
         """Test complete EXEC CICS workflow."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 70, 8)
+        location = SourceLocation(70, 8)
         
         cics_text = "READ DATASET(EMPFILE) INTO(WS-EMPLOYEE-REC) RIDFLD(WS-EMP-ID)"
         stmt = dialect.parse_exec_cics(cics_text, location)
@@ -960,7 +961,7 @@ class TestIBMEnterpriseIntegration:
     def test_all_usage_types_storage_calculation(self):
         """Test storage calculation for all IBM usage types."""
         dialect = IBMEnterpriseCobol()
-        location = SourceLocation("test.cob", 80, 5)
+        location = SourceLocation(80, 5)
         
         # Test all usage types with consistent picture
         picture = "9(5)"
@@ -996,7 +997,7 @@ def test_ibm_enterprise_comprehensive_coverage():
     assert IBMDataType is not None
     
     # Test all classes exist and can be instantiated
-    location = SourceLocation("test.cob", 1, 1)
+    location = SourceLocation(1, 1)
     
     sql_stmt = ExecSQLStatement(location)
     assert sql_stmt is not None

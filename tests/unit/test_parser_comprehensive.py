@@ -96,17 +96,20 @@ class TestTokenManagement:
         """Test advance_token with normal progression."""
         # Initially at token 0
         assert self.parser.current_token_index == 0
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.IDENTIFICATION_DIVISION
         
         # Advance to token 1
         self.parser.advance_token()
         assert self.parser.current_token_index == 1
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.IDENTIFIER
         assert self.parser.current_token.value == "DIVISION"
         
         # Advance to token 2
         self.parser.advance_token()
         assert self.parser.current_token_index == 2
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.PERIOD
     
     def test_advance_token_at_end(self):
@@ -148,11 +151,13 @@ class TestTokenManagement:
         
         # Current token should not change
         assert self.parser.current_token_index == 0
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.IDENTIFICATION_DIVISION
         
         # Move to position 1 and peek
         self.parser.advance_token()
         next_token = self.parser.peek_token()
+        assert next_token is not None
         assert next_token.type == TokenType.PERIOD
     
     def test_peek_token_at_end(self):
@@ -191,6 +196,7 @@ class TestTokenManagement:
         
         # Should have advanced to next token
         assert self.parser.current_token_index == 1
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.IDENTIFIER
     
     def test_expect_token_failure(self):
@@ -207,6 +213,7 @@ class TestTokenManagement:
         
         # Should not have advanced token
         assert self.parser.current_token_index == 0
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.IDENTIFICATION_DIVISION
     
     def test_expect_token_at_eof(self):
@@ -235,6 +242,7 @@ class TestTokenManagement:
         
         # Should have advanced to next token
         assert self.parser.current_token_index == 1
+        assert self.parser.current_token is not None
         assert self.parser.current_token.type == TokenType.IDENTIFIER
         
         # Try to match wrong type - should fail
@@ -308,8 +316,8 @@ class TestTokenManagement:
         self.parser.current_token = None
         
         location = self.parser.get_current_location()
-        # Should return a default location
-        assert location.line == "<unknown>"
+        # Should return a default location (1,1)
+        assert location.line == 1
         assert location.column == 1
 
 
@@ -339,7 +347,7 @@ class TestParseErrors:
         assert isinstance(error, ParseError)
         assert error.message == "Error without token"
         # Should use default location
-        assert error.line == "<unknown>"
+        assert error.line == 1
         assert error.column == 1
     
     def test_add_error(self):
@@ -347,14 +355,14 @@ class TestParseErrors:
         parser = CobolParser()
         
         # Create and add an error
-        error = ParseError("Test error", SourceLocation("test.cob", 1, 1))
+        error = ParseError("Test error", 1, 1)
         parser.add_error(error)
         
         assert len(parser.errors) == 1
         assert parser.errors[0] == error
         
         # Add another error
-        error2 = ParseError("Second error", SourceLocation("test.cob", 2, 1))
+        error2 = ParseError("Second error", 2, 1)
         parser.add_error(error2)
         
         assert len(parser.errors) == 2
@@ -556,6 +564,7 @@ class TestIdentificationDivisionParsing:
         result = parser.parse(source)
         
         assert result.success is True
+        assert result.ast is not None
         assert result.ast.program_name == "BASIC-PROG"
         
         # Check division structure
@@ -569,9 +578,9 @@ class TestIdentificationDivisionParsing:
         
         # Mock tokens to simulate missing DIVISION keyword
         parser.tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 15)),  # Missing DIVISION
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 15)),  # Missing DIVISION
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -589,10 +598,10 @@ class TestIdentificationDivisionParsing:
         
         # Mock tokens without period after DIVISION
         parser.tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation("test", 1, 15)),
-            Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation("test", 2, 1)),  # Missing period
-            Token(TokenType.EOF, "", SourceLocation("test", 3, 1))
+            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 15)),
+            Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),  # Missing period
+            Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -609,10 +618,10 @@ class TestIdentificationDivisionParsing:
         
         # Mock tokens without PROGRAM-ID
         parser.tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation("test", 1, 15)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 23)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))  # No PROGRAM-ID
+            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 15)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 23)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))  # No PROGRAM-ID
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -630,13 +639,13 @@ class TestIdentificationDivisionParsing:
         
         # Mock tokens with missing program name
         parser.tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation("test", 1, 15)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 23)),
-            Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation("test", 2, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 2, 11)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 2, 13)),  # Period instead of identifier
-            Token(TokenType.EOF, "", SourceLocation("test", 3, 1))
+            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 15)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 23)),
+            Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(2, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(2, 13)),  # Period instead of identifier
+            Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -653,13 +662,13 @@ class TestIdentificationDivisionParsing:
         
         # Mock tokens with extra content to skip
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "AUTHOR", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 7)),
-            Token(TokenType.IDENTIFIER, "COBOL", SourceLocation("test", 1, 9)),
-            Token(TokenType.IDENTIFIER, "TEAM", SourceLocation("test", 1, 15)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 19)),
-            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation("test", 2, 1)),
-            Token(TokenType.EOF, "", SourceLocation("test", 3, 1))
+            Token(TokenType.IDENTIFIER, "AUTHOR", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 7)),
+            Token(TokenType.IDENTIFIER, "COBOL", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "TEAM", SourceLocation(1, 15)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 19)),
+            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation(2, 1)),
+            Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -687,7 +696,7 @@ class TestEnvironmentDivisionParsing:
         
         result = parser.parse(source)
         
-        if result.success:
+        if result.success and result.ast is not None:
             # Check environment division exists
             env_division = result.ast.get_division("ENVIRONMENT")
             assert env_division is not None
@@ -699,14 +708,14 @@ class TestEnvironmentDivisionParsing:
         
         # Setup tokens without ENVIRONMENT DIVISION
         parser.tokens = [
-            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation("test", 1, 5)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 13)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 5)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 13)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
-        parser.current_program = CobolProgram("TEST", SourceLocation("test", 1, 1))
+        parser.current_program = CobolProgram("TEST", SourceLocation(1, 1))
         
         result = parser.parse_environment_division()
         
@@ -721,18 +730,18 @@ class TestEnvironmentDivisionParsing:
         
         # Mock tokens for CONFIGURATION SECTION
         parser.tokens = [
-            Token(TokenType.CONFIGURATION_SECTION, "CONFIGURATION", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "SECTION", SourceLocation("test", 1, 15)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 22)),
-            Token(TokenType.IDENTIFIER, "SOURCE-COMPUTER", SourceLocation("test", 2, 1)),
-            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation("test", 3, 1)),
-            Token(TokenType.EOF, "", SourceLocation("test", 4, 1))
+            Token(TokenType.CONFIGURATION_SECTION, "CONFIGURATION", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "SECTION", SourceLocation(1, 15)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 22)),
+            Token(TokenType.IDENTIFIER, "SOURCE-COMPUTER", SourceLocation(2, 1)),
+            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation(3, 1)),
+            Token(TokenType.EOF, "", SourceLocation(4, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
         
         # Create environment division
-        env_division = CobolDivision("ENVIRONMENT", SourceLocation("test", 1, 1))
+        env_division = CobolDivision("ENVIRONMENT", SourceLocation(1, 1))
         parser.current_division = env_division
         
         parser.parse_configuration_section()
@@ -756,8 +765,9 @@ class TestEnvironmentDivisionParsing:
         
         result = parser.parse(source)
         
-        if result.success and result.ast.get_division("ENVIRONMENT"):
+        if result.success and result.ast is not None and result.ast.get_division("ENVIRONMENT"):
             env_division = result.ast.get_division("ENVIRONMENT")
+            assert env_division is not None
             io_section = env_division.get_section_by_name("INPUT-OUTPUT")
             if io_section:
                 assert io_section.section_name == "INPUT-OUTPUT"
@@ -772,12 +782,12 @@ class TestDataDivisionParsing:
         
         # Setup tokens without DATA DIVISION
         parser.tokens = [
-            Token(TokenType.PROCEDURE_DIVISION, "PROCEDURE", SourceLocation("test", 1, 1)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.PROCEDURE_DIVISION, "PROCEDURE", SourceLocation(1, 1)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
-        parser.current_program = CobolProgram("TEST", SourceLocation("test", 1, 1))
+        parser.current_program = CobolProgram("TEST", SourceLocation(1, 1))
         
         result = parser.parse_data_division()
         
@@ -792,15 +802,15 @@ class TestDataDivisionParsing:
         
         # Mock tokens missing SECTION keyword
         parser.tokens = [
-            Token(TokenType.WORKING_STORAGE_SECTION, "WORKING-STORAGE", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 17)),  # Missing SECTION
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.WORKING_STORAGE_SECTION, "WORKING-STORAGE", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 17)),  # Missing SECTION
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
         
         # Create data division
-        data_division = CobolDivision("DATA", SourceLocation("test", 1, 1))
+        data_division = CobolDivision("DATA", SourceLocation(1, 1))
         parser.current_division = data_division
         
         parser.parse_working_storage_section()
@@ -816,9 +826,9 @@ class TestDataDivisionParsing:
         
         # Mock tokens with level number but no data name
         parser.tokens = [
-            Token(TokenType.LEVEL_NUMBER, "01", SourceLocation("test", 1, 1)),
-            Token(TokenType.PIC, "PIC", SourceLocation("test", 1, 4)),  # Missing identifier
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.LEVEL_NUMBER, "01", SourceLocation(1, 1)),
+            Token(TokenType.PIC, "PIC", SourceLocation(1, 4)),  # Missing identifier
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -836,9 +846,9 @@ class TestDataDivisionParsing:
         
         # Mock tokens: USAGE IS COMPUTATIONAL
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "IS", SourceLocation("test", 1, 1)),
-            Token(TokenType.COMPUTATIONAL, "COMPUTATIONAL", SourceLocation("test", 1, 4)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.IDENTIFIER, "IS", SourceLocation(1, 1)),
+            Token(TokenType.COMPUTATIONAL, "COMPUTATIONAL", SourceLocation(1, 4)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -854,8 +864,8 @@ class TestDataDivisionParsing:
         
         # Mock tokens with invalid usage
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "INVALID-USAGE", SourceLocation("test", 1, 1)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.IDENTIFIER, "INVALID-USAGE", SourceLocation(1, 1)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -871,12 +881,12 @@ class TestDataDivisionParsing:
         
         # Mock tokens: OCCURS 10 TIMES DEPENDING ON COUNTER
         parser.tokens = [
-            Token(TokenType.NUMERIC_LITERAL, "10", SourceLocation("test", 1, 1)),
-            Token(TokenType.TIMES, "TIMES", SourceLocation("test", 1, 4)),
-            Token(TokenType.IDENTIFIER, "DEPENDING", SourceLocation("test", 1, 10)),
-            Token(TokenType.IDENTIFIER, "ON", SourceLocation("test", 1, 20)),
-            Token(TokenType.IDENTIFIER, "COUNTER", SourceLocation("test", 1, 23)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.NUMERIC_LITERAL, "10", SourceLocation(1, 1)),
+            Token(TokenType.TIMES, "TIMES", SourceLocation(1, 4)),
+            Token(TokenType.IDENTIFIER, "DEPENDING", SourceLocation(1, 10)),
+            Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 20)),
+            Token(TokenType.IDENTIFIER, "COUNTER", SourceLocation(1, 23)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -893,14 +903,14 @@ class TestDataDivisionParsing:
         
         # Mock tokens for pattern with decimal: 9(5).99
         parser.tokens = [
-            Token(TokenType.LEVEL_NUMBER, "9", SourceLocation("test", 1, 1)),
-            Token(TokenType.LEFT_PAREN, "(", SourceLocation("test", 1, 2)),
-            Token(TokenType.NUMERIC_LITERAL, "5", SourceLocation("test", 1, 3)),
-            Token(TokenType.RIGHT_PAREN, ")", SourceLocation("test", 1, 4)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 5)),
-            Token(TokenType.LEVEL_NUMBER, "99", SourceLocation("test", 1, 6)),
-            Token(TokenType.VALUE, "VALUE", SourceLocation("test", 1, 9)),  # Next clause
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.LEVEL_NUMBER, "9", SourceLocation(1, 1)),
+            Token(TokenType.LEFT_PAREN, "(", SourceLocation(1, 2)),
+            Token(TokenType.NUMERIC_LITERAL, "5", SourceLocation(1, 3)),
+            Token(TokenType.RIGHT_PAREN, ")", SourceLocation(1, 4)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 5)),
+            Token(TokenType.LEVEL_NUMBER, "99", SourceLocation(1, 6)),
+            Token(TokenType.VALUE, "VALUE", SourceLocation(1, 9)),  # Next clause
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -922,11 +932,11 @@ class TestProcedureDivisionParsing:
         
         # Setup tokens without PROCEDURE DIVISION
         parser.tokens = [
-            Token(TokenType.EOF, "", SourceLocation("test", 1, 1))
+            Token(TokenType.EOF, "", SourceLocation(1, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
-        parser.current_program = CobolProgram("TEST", SourceLocation("test", 1, 1))
+        parser.current_program = CobolProgram("TEST", SourceLocation(1, 1))
         
         result = parser.parse_procedure_division()
         
@@ -939,16 +949,16 @@ class TestProcedureDivisionParsing:
         
         # Mock tokens for paragraph: MAIN-PARA.
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "MAIN-PARA", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 10)),
-            Token(TokenType.DISPLAY, "DISPLAY", SourceLocation("test", 2, 1)),
-            Token(TokenType.EOF, "", SourceLocation("test", 3, 1))
+            Token(TokenType.IDENTIFIER, "MAIN-PARA", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 10)),
+            Token(TokenType.DISPLAY, "DISPLAY", SourceLocation(2, 1)),
+            Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
         
         # Create procedure division
-        proc_division = CobolDivision("PROCEDURE", SourceLocation("test", 1, 1))
+        proc_division = CobolDivision("PROCEDURE", SourceLocation(1, 1))
         parser.current_division = proc_division
         
         parser.parse_paragraph_or_statement()
@@ -967,11 +977,11 @@ class TestProcedureDivisionParsing:
         
         # Mock tokens: MOVE SOURCE TARGET. (missing TO)
         parser.tokens = [
-            Token(TokenType.MOVE, "MOVE", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "SOURCE", SourceLocation("test", 1, 6)),
-            Token(TokenType.IDENTIFIER, "TARGET", SourceLocation("test", 1, 13)),  # Missing TO
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 19)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.MOVE, "MOVE", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "SOURCE", SourceLocation(1, 6)),
+            Token(TokenType.IDENTIFIER, "TARGET", SourceLocation(1, 13)),  # Missing TO
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 19)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -990,9 +1000,9 @@ class TestProcedureDivisionParsing:
         
         # Mock tokens: DISPLAY . (missing item)
         parser.tokens = [
-            Token(TokenType.DISPLAY, "DISPLAY", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 8)),  # Missing item
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.DISPLAY, "DISPLAY", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 8)),  # Missing item
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -1008,18 +1018,18 @@ class TestProcedureDivisionParsing:
         
         # Mock tokens: PERFORM PARA-NAME UNTIL CONDITION.
         parser.tokens = [
-            Token(TokenType.PERFORM, "PERFORM", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "PARA-NAME", SourceLocation("test", 1, 9)),
-            Token(TokenType.UNTIL, "UNTIL", SourceLocation("test", 1, 19)),
-            Token(TokenType.IDENTIFIER, "CONDITION", SourceLocation("test", 1, 25)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 34)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "PARA-NAME", SourceLocation(1, 9)),
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 19)),
+            Token(TokenType.IDENTIFIER, "CONDITION", SourceLocation(1, 25)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 34)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
         
         # Create procedure division to add statement to
-        proc_division = CobolDivision("PROCEDURE", SourceLocation("test", 1, 1))
+        proc_division = CobolDivision("PROCEDURE", SourceLocation(1, 1))
         parser.current_division = proc_division
         
         perform_stmt = parser.parse_perform_statement()
@@ -1027,7 +1037,9 @@ class TestProcedureDivisionParsing:
         assert perform_stmt is not None
         assert perform_stmt.target_paragraph == "PARA-NAME"
         assert perform_stmt.perform_type == "UNTIL"
-        assert perform_stmt.until_condition == "CONDITION"
+        # until_condition is now a CobolExpression object, check its metadata
+        assert perform_stmt.until_condition is not None
+        assert perform_stmt.until_condition._metadata.get("value") == "CONDITION"
     
     def test_parse_call_statement_with_using(self):
         """Test CALL statement with USING clause."""
@@ -1035,19 +1047,19 @@ class TestProcedureDivisionParsing:
         
         # Mock tokens: CALL "SUBPROG" USING PARAM1 PARAM2.
         parser.tokens = [
-            Token(TokenType.CALL, "CALL", SourceLocation("test", 1, 1)),
-            Token(TokenType.STRING_LITERAL, "SUBPROG", SourceLocation("test", 1, 6)),
-            Token(TokenType.IDENTIFIER, "USING", SourceLocation("test", 1, 15)),
-            Token(TokenType.IDENTIFIER, "PARAM1", SourceLocation("test", 1, 21)),
-            Token(TokenType.IDENTIFIER, "PARAM2", SourceLocation("test", 1, 28)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 34)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
+            Token(TokenType.STRING_LITERAL, "SUBPROG", SourceLocation(1, 6)),
+            Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 15)),
+            Token(TokenType.IDENTIFIER, "PARAM1", SourceLocation(1, 21)),
+            Token(TokenType.IDENTIFIER, "PARAM2", SourceLocation(1, 28)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 34)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
         
         # Create procedure division to add statement to
-        proc_division = CobolDivision("PROCEDURE", SourceLocation("test", 1, 1))
+        proc_division = CobolDivision("PROCEDURE", SourceLocation(1, 1))
         parser.current_division = proc_division
         
         call_stmt = parser.parse_call_statement()
@@ -1067,10 +1079,10 @@ class TestProcedureDivisionParsing:
         
         # Mock tokens: STOP RUN.
         parser.tokens = [
-            Token(TokenType.STOP, "STOP", SourceLocation("test", 1, 1)),
-            Token(TokenType.IDENTIFIER, "RUN", SourceLocation("test", 1, 6)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 9)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.STOP, "STOP", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "RUN", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 9)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -1090,12 +1102,12 @@ class TestSkipMethods:
         
         # Mock tokens to skip through
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "AUTHOR", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 7)),
-            Token(TokenType.IDENTIFIER, "TEAM", SourceLocation("test", 1, 9)),
-            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation("test", 2, 1)),
-            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation("test", 2, 6)),
-            Token(TokenType.EOF, "", SourceLocation("test", 3, 1))
+            Token(TokenType.IDENTIFIER, "AUTHOR", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 7)),
+            Token(TokenType.IDENTIFIER, "TEAM", SourceLocation(1, 9)),
+            Token(TokenType.DATA_DIVISION, "DATA", SourceLocation(2, 1)),
+            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(2, 6)),
+            Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -1112,9 +1124,9 @@ class TestSkipMethods:
         
         # Mock tokens without target
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "AUTHOR", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 7)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.IDENTIFIER, "AUTHOR", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 7)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -1132,11 +1144,11 @@ class TestSkipMethods:
         
         # Mock tokens to skip to next section
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, "SOURCE-COMPUTER", SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 16)),
-            Token(TokenType.IDENTIFIER, "IBM-Z15", SourceLocation("test", 1, 18)),
-            Token(TokenType.WORKING_STORAGE_SECTION, "WORKING-STORAGE", SourceLocation("test", 2, 1)),
-            Token(TokenType.EOF, "", SourceLocation("test", 3, 1))
+            Token(TokenType.IDENTIFIER, "SOURCE-COMPUTER", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 16)),
+            Token(TokenType.IDENTIFIER, "IBM-Z15", SourceLocation(1, 18)),
+            Token(TokenType.WORKING_STORAGE_SECTION, "WORKING-STORAGE", SourceLocation(2, 1)),
+            Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]
@@ -1153,7 +1165,7 @@ class TestParseResultConstruction:
     def test_parse_result_success(self):
         """Test ParseResult for successful parse."""
         parser = CobolParser()
-        ast = CobolProgram("TEST", SourceLocation("test.cob", 1, 1))
+        ast = CobolProgram("TEST", SourceLocation(1, 1))
         
         result = ParseResult(
             ast=ast,
@@ -1172,8 +1184,8 @@ class TestParseResultConstruction:
         """Test ParseResult with errors."""
         parser = CobolParser()
         errors = [
-            ParseError("Error 1", SourceLocation("test.cob", 1, 1)),
-            ParseError("Error 2", SourceLocation("test.cob", 2, 1))
+            ParseError("Error 1", 1, 1),
+            ParseError("Error 2", 2, 1)
         ]
         
         result = ParseResult(
@@ -1194,7 +1206,7 @@ class TestParseResultConstruction:
         warnings = ["Warning 1", "Warning 2"]
         
         result = ParseResult(
-            ast=CobolProgram("TEST", SourceLocation("test.cob", 1, 1)),
+            ast=CobolProgram("TEST", SourceLocation(1, 1)),
             errors=[],
             warnings=warnings,
             statistics=parser.statistics
@@ -1294,7 +1306,7 @@ class TestEdgeCases:
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         result = parser.parse(source)
         
-        if result.success:
+        if result.success and result.ast is not None:
             assert result.ast.program_name == long_name
     
     def test_malformed_tokens(self):
@@ -1303,9 +1315,9 @@ class TestEdgeCases:
         
         # Mock malformed tokens - tokens with None values
         parser.tokens = [
-            Token(TokenType.IDENTIFIER, None, SourceLocation("test", 1, 1)),
-            Token(TokenType.PERIOD, ".", SourceLocation("test", 1, 2)),
-            Token(TokenType.EOF, "", SourceLocation("test", 2, 1))
+            Token(TokenType.IDENTIFIER, "", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 2)),
+            Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
         parser.current_token_index = 0
         parser.current_token = parser.tokens[0]

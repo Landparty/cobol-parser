@@ -21,6 +21,7 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - [API Reference](#api-reference)
 - [Testing](#testing)
 - [Performance](#performance)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -1105,6 +1106,26 @@ print(f"Peak memory: {stats.memory_peak_mb}MB")
 print(f"Lines/second: {stats.lines_parsed / (stats.total_time_ms / 1000):.0f}")
 print(f"Tokens/second: {stats.tokens_processed / (stats.total_time_ms / 1000):.0f}")
 ```
+
+## Documentation
+
+The `docs/` folder contains comprehensive examples of parsed COBOL constructs showing the complete AST output for various statement types and language features.
+
+### Available Examples
+
+- **[CALL Statements](docs/call-statements.md)** - Function/procedure calls with parameters and exception handling
+- **[PERFORM Statements](docs/perform-statements.md)** - Loop and subroutine execution constructs (SIMPLE, TIMES, UNTIL, VARYING)
+- **[SQL Statements](docs/sql-statements.md)** - Embedded SQL (EXEC SQL) parsing with host variables
+- **[COPY Statements](docs/copy-statements.md)** - Copybook inclusion and text replacement
+- **[Data Items](docs/data-items.md)** - Variable declarations, COMP-3, arrays, and group structures
+- **[Complete Program](docs/complete-program.md)** - Full COBOL program parsing example with comprehensive AST output
+- **[IBM Enterprise Features](docs/ibm-enterprise.md)** - COMP-3, EXEC CICS, EXEC SQL, and other IBM-specific constructs
+
+Each documentation file includes:
+- COBOL source code examples
+- Complete JSON AST output
+- Key property explanations
+- Usage examples for code analysis
 
 ## Contributing
 

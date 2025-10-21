@@ -17,6 +17,8 @@ import pytest
 from typing import List, Dict, Any, Optional
 from abc import ABC, abstractmethod
 
+from cobolparser.models.data_items import CobolDataItem
+
 
 class ASTNode(ABC):
     """Base class for AST nodes."""
@@ -121,8 +123,9 @@ class TestCobolParserProgram:
         assert id_division.division_name == "IDENTIFICATION"
         
         # Verify division structure
-        assert isinstance(result.ast.divisions, dict)
-        assert "IDENTIFICATION" in result.ast.divisions
+        assert isinstance(result.ast.divisions, list)
+        assert len(result.ast.divisions) > 0
+        assert result.ast.has_division("IDENTIFICATION")
     
     def test_environment_division_parsing(self):
         """Test parsing of ENVIRONMENT DIVISION."""
@@ -169,7 +172,7 @@ class TestCobolParserProgram:
         assert config_section is not None or io_section is not None
         
         # Verify division is properly added to program
-        assert "ENVIRONMENT" in result.ast.divisions
+        assert result.ast.has_division("ENVIRONMENT")
     
     def test_data_division_parsing(self):
         """Test parsing of DATA DIVISION."""
@@ -248,7 +251,7 @@ class TestCobolParserProgram:
         assert main_paragraph.section_name == "MAIN-PARAGRAPH"
         
         # Verify division structure
-        assert "PROCEDURE" in result.ast.divisions
+        assert result.ast.has_division("PROCEDURE")
 
 
 class TestCobolParserDataDefinition:
@@ -302,18 +305,21 @@ class TestCobolParserDataDefinition:
         assert len(emp_record.children) >= 3  # EMP-ID, EMP-NAME, FILLER
         
         # Find specific child items
-        emp_id = next((child for child in emp_record.children if hasattr(child, 'name') and child.name == "EMP-ID"), None)
-        emp_name = next((child for child in emp_record.children if hasattr(child, 'name') and child.name == "EMP-NAME"), None)
-        filler = next((child for child in emp_record.children if hasattr(child, 'name') and child.name == "FILLER"), None)
+        emp_id = next((child for child in emp_record.children if isinstance(child, CobolDataItem) and child.name == "EMP-ID"), None)
+        emp_name = next((child for child in emp_record.children if isinstance(child, CobolDataItem) and child.name == "EMP-NAME"), None)
+        filler = next((child for child in emp_record.children if isinstance(child, CobolDataItem) and child.name == "FILLER"), None)
         
         assert emp_id is not None
+        assert isinstance(emp_id, CobolDataItem)
         assert emp_id.level == 5
         
         assert emp_name is not None
+        assert isinstance(emp_name, CobolDataItem)
         assert emp_name.level == 5
         assert emp_name.initial_value == "SPACES"
         
         assert filler is not None
+        assert isinstance(filler, CobolDataItem)
         assert filler.level == 5
     
     def test_picture_clause_parsing(self):
@@ -401,18 +407,20 @@ class TestCobolParserDataDefinition:
         
         # Test usage clauses on child items
         display_num = next((child for child in numeric_fields.children 
-                           if hasattr(child, 'name') and child.name == "DISPLAY-NUM"), None)
+                           if isinstance(child, CobolDataItem) and child.name == "DISPLAY-NUM"), None)
         assert display_num is not None
         # Default usage should be DISPLAY or None
         
         comp3_num = next((child for child in numeric_fields.children 
-                         if hasattr(child, 'name') and child.name == "COMP3-NUM"), None)
+                         if isinstance(child, CobolDataItem) and child.name == "COMP3-NUM"), None)
         assert comp3_num is not None
+        assert isinstance(comp3_num, CobolDataItem)
         assert comp3_num.usage == "COMP-3"
         
         binary_num = next((child for child in numeric_fields.children 
-                          if hasattr(child, 'name') and child.name == "BINARY-NUM"), None)
+                          if isinstance(child, CobolDataItem) and child.name == "BINARY-NUM"), None)
         assert binary_num is not None
+        assert isinstance(binary_num, CobolDataItem)
         assert binary_num.usage in ["COMP", "COMPUTATIONAL"]
     
     def test_occurs_clauses_parsing(self):
@@ -467,11 +475,11 @@ class TestCobolParserDataDefinition:
         # Look for any child with OCCURS clause (parser may handle this differently)
         occurs_items = []
         for item in ws_section.data_items:
-            if hasattr(item, 'occurs_clause') and item.occurs_clause:
+            if isinstance(item, CobolDataItem) and hasattr(item, 'occurs_clause') and item.occurs_clause:
                 occurs_items.append(item)
             # Also check children
             for child in item.children:
-                if hasattr(child, 'occurs_clause') and child.occurs_clause:
+                if isinstance(child, CobolDataItem) and hasattr(child, 'occurs_clause') and child.occurs_clause:
                     occurs_items.append(child)
         
         # Test that OCCURS parsing works at some level (even if hierarchy isn't perfect)
@@ -531,6 +539,7 @@ class TestCobolParserStatements:
             """
             simple_result = simple_parser.parse(simple_source)
             assert simple_result.success
+            assert simple_result.ast is not None
             proc_division = simple_result.ast.get_division("PROCEDURE")
             
         assert proc_division is not None
@@ -600,6 +609,7 @@ class TestCobolParserStatements:
             """
             simple_result = simple_parser.parse(simple_source)
             if simple_result.success:
+                assert simple_result.ast is not None
                 proc_division = simple_result.ast.get_division("PROCEDURE")
             else:
                 # MOVE statements might not be fully implemented yet
@@ -702,6 +712,7 @@ class TestCobolParserStatements:
             """
             simple_result = simple_parser.parse(simple_source)
             if simple_result.success:
+                assert simple_result.ast is not None
                 proc_division = simple_result.ast.get_division("PROCEDURE")
             else:
                 # PERFORM statements might not be fully implemented
@@ -1017,20 +1028,20 @@ class TestCobolParserIBMSpecific:
         # Note: The parser may have limitations with complex PICTURE clauses (especially signed ones)
         
         comp3_items = [child for child in packed_fields.children 
-                      if hasattr(child, 'usage') and child.usage == "COMP-3"]
+                      if isinstance(child, CobolDataItem) and hasattr(child, 'usage') and child.usage == "COMP-3"]
         
         # Should have at least some COMP-3 items parsed
         assert len(comp3_items) >= 1, f"Expected at least 1 COMP-3 item, got {len(comp3_items)}"
         
         # Test specific items that we know are parsed correctly
         salary = next((child for child in packed_fields.children
-                      if hasattr(child, 'name') and child.name == "SALARY"), None)
+                      if isinstance(child, CobolDataItem) and child.name == "SALARY"), None)
         if salary:
             assert salary.usage == "COMP-3"
             assert salary.picture_clause is not None
 
         employee_id = next((child for child in packed_fields.children
-                           if hasattr(child, 'name') and child.name == "EMPLOYEE-ID"), None)
+                           if isinstance(child, CobolDataItem) and child.name == "EMPLOYEE-ID"), None)
         if employee_id:
             assert employee_id.usage == "COMP-3"
             assert employee_id.initial_value == "0" or employee_id.initial_value == "0."

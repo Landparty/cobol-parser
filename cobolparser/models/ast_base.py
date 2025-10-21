@@ -79,11 +79,11 @@ class ASTNode(ABC):
     
     def traverse_breadth_first(self) -> Iterator['ASTNode']:
         """Traverse the AST in breadth-first order starting from this node.""" 
-        queue = [self]
+        queue: List[ASTNode] = [self]
         while queue:
             node = queue.pop(0)
             yield node
-            queue.extend(node.children)
+            queue.extend(node.children)  # type: ignore[arg-type]
     
     def find_first_by_type(self, node_type: str) -> Optional['ASTNode']:
         """Find the first node of a specific type in the subtree."""
