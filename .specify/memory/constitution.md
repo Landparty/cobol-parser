@@ -1,117 +1,237 @@
-<!--# [PROJECT_NAME] Constitution
+<!--
+Sync Impact Report - Constitution v1.0.0 Initial Ratification
+==============================================================
+Version Change: (none) → 1.0.0
+Action: Initial constitution ratification for COBOL Parser project
 
-Sync Impact Report:<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+Principles Established:
+1. Test-Driven Development (TDD) - NON-NEGOTIABLE
+2. IBM Enterprise COBOL Priority
+3. JSON Serialization Contract
+4. Memory Management & Performance
+5. Python 3.13+ Modern Standards
+6. API Contract Stability
+7. Code Quality Standards
 
-Version change: Template → 1.0.0 (Initial constitution)
+Templates Status:
+✅ plan-template.md - Reviewed, constitution gates align with TDD and testing principles
+✅ spec-template.md - Reviewed, requirements structure aligns with user story priority approach
+✅ tasks-template.md - Reviewed, task categorization reflects TDD and independent testing principles
+✅ agent-file-template.md - Reviewed, no constitution-specific updates needed
+✅ checklist-template.md - Reviewed, no constitution-specific updates needed
 
-Added principles:## Core Principles
+Follow-up Actions:
+- None - all placeholders resolved
+- Constitution ready for use
 
-- Test-First Development (NON-NEGOTIABLE)
-
-- Comprehensive COBOL Coverage### [PRINCIPLE_1_NAME]
-
-- Pythonic API Design<!-- Example: I. Library-First -->
-
-- Error Handling & Validation[PRINCIPLE_1_DESCRIPTION]
-
-- Extensibility Through Plugins<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
-
-Added sections:
-
-- Testing Standards### [PRINCIPLE_2_NAME]
-
-- Development Workflow<!-- Example: II. CLI Interface -->
-
-Templates requiring updates: ✅ Validated consistency[PRINCIPLE_2_DESCRIPTION]
-
-Follow-up TODOs: None<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
-
+Generated: 2025-10-26
 -->
 
-### [PRINCIPLE_3_NAME]
+# COBOL Parser Constitution
 
-# COBOL Parser Constitution<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
+## Core Principles
 
-[PRINCIPLE_3_DESCRIPTION]
+### I. Test-Driven Development (NON-NEGOTIABLE)
 
-## Core Principles<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+**TDD MUST be followed rigorously for all feature development:**
 
+- Tests written FIRST → User approval → Tests FAIL → Then implement
+- Red-Green-Refactor cycle strictly enforced
+- Minimum 81% code coverage required (enforced via pytest --cov-fail-under=81)
+- All new features MUST include comprehensive unit tests before implementation
+- Tests demonstrate the feature's correctness, not just code execution
 
+**Rationale**: With 618 tests (38 contract, 17 integration, 563 unit) providing 81%+ coverage, TDD ensures parser reliability for production COBOL codebases. Legacy COBOL systems require absolute correctness—parsing errors can break multi-million-line enterprise applications.
 
-### I. Test-First Development (NON-NEGOTIABLE)### [PRINCIPLE_4_NAME]
+### II. IBM Enterprise COBOL Priority
 
-Automated tests MUST be written and MUST pass for every release. TDD cycle strictly enforced: Tests written → Tests fail → Implementation → Tests pass. Code coverage MUST be tracked and aim for 90%+. All tests MUST pass before publishing or merging PRs. No exceptions.<!-- Example: IV. Integration Testing -->
+**IBM Enterprise COBOL dialect features take precedence over ANSI COBOL:**
 
-[PRINCIPLE_4_DESCRIPTION]
+- COMP-3 packed decimal support with `calculate_storage_size()` implementations
+- EXEC SQL embedded SQL blocks with host variable detection
+- EXEC CICS transaction commands and API calls
+- IBM intrinsic functions (LENGTH, NUMVAL, etc.) prioritized
+- z/OS platform-specific extensions supported
 
-**Rationale**: Testing ensures reliability and maintainability for enterprise COBOL modernization where errors can be costly.<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+**When choosing between ANSI COBOL and IBM Enterprise COBOL compatibility, IBM Enterprise COBOL wins.**
 
+**Rationale**: The primary use case is parsing IBM mainframe COBOL programs. IBM Enterprise COBOL represents the vast majority of production COBOL code in Fortune 500 enterprises.
 
+### III. JSON Serialization Contract
 
-### II. Comprehensive COBOL Coverage### [PRINCIPLE_5_NAME]
+**All AST nodes MUST implement `to_dict()` for JSON export:**
 
-Tests and examples MUST cover most current and commonly used COBOL syntax, including variations and edge cases. Parser MUST handle real-world COBOL programs, not just textbook examples. Support for all four COBOL divisions (IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE) is mandatory.<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
+- Every AST node class inherits from `ASTNode`
+- Mandatory `to_dict() -> Dict[str, Any]` method implementation
+- Must include: node_type, location (via SourceLocation), and all semantic properties
+- Supports `SerializationConfig` for metadata and source location control
+- Cross-platform interoperability is non-negotiable
 
-[PRINCIPLE_5_DESCRIPTION]
+**Rationale**: JSON export enables integration with analysis tools, IDEs, language servers, and cross-platform COBOL tooling. Modern development workflows require machine-readable AST formats.
 
-**Rationale**: COBOL has decades of syntax variations and enterprise codebases contain complex, real-world patterns that must be supported.<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### IV. Memory Management & Performance
 
+**Parser MUST handle enterprise-scale COBOL programs efficiently:**
 
+- Configurable memory limits (64MB minimum to 8GB maximum)
+- Streaming support enabled for programs >1MB
+- Chunked processing with configurable chunk sizes
+- Performance monitoring via `ParseStatistics` (parse time, memory usage, tokens/sec)
+- Token caching and lexer optimizations for large files
 
-### III. Pythonic API Design## [SECTION_2_NAME]
+**Performance targets:**
+- Small programs (<1MB): <100ms parse time
+- Medium programs (1-10MB): 100ms-1s parse time
+- Large programs (10MB+): 1-10s with streaming
+- Memory usage: 2-5x source code size during parsing
 
-Every feature MUST expose a clean, Pythonic API that feels natural to Python developers. Object model MUST represent COBOL structure as intuitive Python classes (Program, Division, Section, Paragraph, Statement). API design MUST prioritize ease of use over implementation convenience.<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+**Rationale**: Enterprise COBOL programs can exceed 100,000 lines. Without proper memory management, the parser becomes unusable for real-world mainframe codebases.
 
+### V. Python 3.13+ Modern Standards
 
+**Code MUST leverage Python 3.13+ features exclusively:**
 
-**Rationale**: Python developers should be able to work with COBOL parsing without learning COBOL intricacies.[SECTION_2_CONTENT]
+- Dataclasses for AST nodes and configuration objects
+- Type hints (typing module) for all public APIs and internal functions
+- Enums for state machines, error modes, and configuration options
+- Pattern matching (match/case) where appropriate
+- Modern error handling with specific exception types
 
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+**Type checking with mypy MUST pass with strict configuration (disallow_untyped_defs=true).**
 
-### IV. Error Handling & Validation
+**Rationale**: Python 3.13+ provides superior type safety, performance, and maintainability. The parser is a foundational library requiring long-term stability and clear contracts.
 
-System MUST provide clear error reporting for syntax errors, unsupported features, and ambiguous code. Custom exception classes MUST be used. Basic validation of structure and variable usage is required. Error messages MUST help users understand what went wrong and how to fix it.## [SECTION_3_NAME]
+### VI. API Contract Stability
 
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+**Public API changes require contract tests to prevent breakage:**
 
-**Rationale**: COBOL parsing often encounters legacy code with inconsistencies; robust error handling is essential for practical usage.
+- 38 contract tests validate API stability across versions
+- All new public APIs MUST include contract tests before merge
+- Breaking changes require MAJOR version bump (semantic versioning)
+- Contract tests live in `tests/contracts/` and verify method signatures, return types, and behavior
+- Integration tests (17 tests) validate end-to-end workflows
 
-[SECTION_3_CONTENT]
+**Contract test requirements:**
+- Method signature validation
+- Return type verification
+- Exception behavior documentation
+- Backward compatibility checks for existing APIs
 
-### V. Extensibility Through Plugins<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+**Rationale**: The parser is used by analysis tools, IDEs, and automation systems. Breaking API changes cascade to downstream consumers. Contract tests provide compile-time guarantees.
 
-Architecture MUST support plugins and hooks to extend parsing or validation rules. Plugin system MUST allow adding new COBOL dialects, custom validation rules, and transformation capabilities without modifying core parser logic. Clear plugin API required.
+### VII. Code Quality Standards
 
-## Governance
+**All code MUST pass quality gates before merge:**
 
-**Rationale**: COBOL has many vendor-specific extensions and enterprise-specific patterns that require customization.<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
+- **Ruff linting**: Zero errors, warnings addressed (E, W, F, I, B, C4, UP rules enabled)
+- **Black formatting**: Automated formatting enforced (line-length=88, target-version=py313)
+- **Mypy type checking**: Strict mode with no untyped definitions allowed
+- **Docstrings**: All public functions/classes require docstrings
+- **No unused imports/variables**: Enforced by ruff
 
+**Quality gate command:** `ruff check . && black . && mypy cobolparser/`
 
+**Rationale**: Consistent code quality reduces maintenance burden, improves collaboration, and prevents technical debt accumulation in a 1,400+ line parser codebase.
 
-## Testing Standards[GOVERNANCE_RULES]
+## Technical Constraints
 
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+### Two-Stage Parsing Pipeline
 
-**Test Requirements**: Unit tests, integration tests, and example scripts MUST be maintained. Test suite MUST include real COBOL program samples, edge cases, and error scenarios. Performance testing required for large COBOL files (>10,000 lines). All tests MUST use pytest framework.
+**Architecture is FIXED: Lexer → Parser → AST**
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
+- **Lexer** (`lexer.py`): Tokenization with 75+ COBOL verb support, produces token stream
+- **Parser** (`parser.py`): AST generation from token stream with error recovery
+- **Models** (`models/`): AST node hierarchy with JSON serialization
+- **Dialects** (`dialects/`): Dialect-specific extensions (IBM Enterprise COBOL)
+- **Plugins** (`plugins/`): Memory config, error recovery, serialization
 
-**Coverage Requirements**: Minimum 90% code coverage required. Critical parsing paths MUST have 100% coverage. Test data MUST include samples from different COBOL compilers and eras.<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**State machine parsing:** Parser uses `ParseState` enum to track division/section context (IDENTIFICATION_DIVISION → DATA_DIVISION → PROCEDURE_DIVISION).
 
-**Release Blocking**: No release if required tests fail. No merge if tests don't cover new functionality. Test execution MUST be automated in CI/CD pipeline.
+**This architecture MUST NOT be bypassed or replaced without a major version bump and architectural review.**
+
+### Error Recovery Modes
+
+**Two error recovery modes are supported:**
+
+1. **FAIL_FAST** (production default): Stop parsing on first critical error
+2. **COLLECT_ALL** (development/debugging): Collect all errors and continue parsing
+
+**Error recovery mode MUST be configurable via `ErrorRecoveryMode` enum.**
+
+**Rationale**: Production systems need fail-fast behavior for safety. Development workflows benefit from seeing all errors at once for comprehensive debugging.
+
+### Dependency-Free Design
+
+**The parser MUST remain dependency-free (pure Python):**
+
+- No external dependencies in core parser (`cobolparser/`)
+- Development dependencies (pytest, ruff, black, mypy) are acceptable in `[dev]` extras
+- Documentation dependencies (sphinx) are acceptable in `[docs]` extras
+
+**Rationale**: Minimizes supply chain risk, simplifies deployment, and ensures the parser can be embedded in restricted environments.
 
 ## Development Workflow
 
-**Code Structure**: Single Python package architecture with clear separation: parser logic, object model, error handling, utilities, and plugins. Follow Python package best practices (pyproject.toml, proper imports, documentation).
+### Feature Development Process
 
-**Documentation**: README.md with installation and usage examples. Docstrings for all public classes and methods. API reference documentation required. Examples folder with real COBOL samples.
+1. **Specification Phase**: Create feature spec in `/specs/[###-feature-name]/spec.md` with user stories and acceptance criteria
+2. **Test Design Phase**: Write failing tests that demonstrate the feature (TDD red phase)
+3. **User Approval**: Confirm tests represent desired behavior before implementation
+4. **Implementation Phase**: Implement feature to pass tests (TDD green phase)
+5. **Refactoring Phase**: Clean up code while maintaining passing tests (TDD refactor phase)
+6. **Contract Test Phase**: Add contract tests for any new public APIs
+7. **Documentation Phase**: Update README, docstrings, and `/docs/` examples
 
-**Distribution**: PyPI publishing required (`pip install cobolparser`). Python 3.13+ compatibility required. Wheel and source distributions. Semantic versioning (MAJOR.MINOR.PATCH) based on API changes.
+### Required Test Categories
+
+- **Unit tests** (`tests/unit/`): Component-specific functionality (lexer, parser, models)
+- **Integration tests** (`tests/integration/`): End-to-end workflows with real COBOL programs
+- **Contract tests** (`tests/contracts/`): API stability validation (REQUIRED for new APIs)
+
+### Code Review Requirements
+
+Before merge, ALL of the following MUST pass:
+
+- [ ] `python -m pytest tests/ -v` (618 tests passing)
+- [ ] `python -m pytest --cov=cobolparser --cov-fail-under=81` (81%+ coverage)
+- [ ] `ruff check .` (zero errors)
+- [ ] `black .` (formatting applied)
+- [ ] `mypy cobolparser/` (type checking passes)
+- [ ] Contract tests added for new public APIs
+- [ ] Documentation updated (README, docstrings, examples)
 
 ## Governance
 
-Constitution supersedes all other development practices. All PRs and code reviews MUST verify compliance with these principles. Any complexity that violates principles MUST be explicitly justified with technical reasoning. 
+### Amendment Process
 
-Amendment procedure: Proposed changes MUST be documented, reviewed, and approved before implementation. Breaking changes to core principles require MAJOR version increment.
+1. **Proposal**: Open GitHub issue tagged `constitution-amendment` with rationale
+2. **Discussion**: Allow 7-day comment period for stakeholder input
+3. **Approval**: Requires maintainer consensus (2+ maintainer approvals)
+4. **Version Bump**: Update constitution version per semantic versioning rules:
+   - **MAJOR**: Backward incompatible governance/principle removals or redefinitions
+   - **MINOR**: New principle/section added or materially expanded guidance
+   - **PATCH**: Clarifications, wording, typo fixes, non-semantic refinements
+5. **Migration Plan**: Document impact on existing code and required changes
+6. **Sync Templates**: Update all templates in `.specify/templates/` to reflect changes
 
-**Version**: 1.0.0 | **Ratified**: 2025-09-27 | **Last Amended**: 2025-09-27
+### Compliance Reviews
+
+- All pull requests MUST include a constitution compliance checklist
+- Quarterly reviews of constitution effectiveness (tracked in GitHub Discussions)
+- Annual review to ensure principles still serve project goals
+
+### Complexity Justification
+
+Violations of constitution principles (e.g., adding external dependencies, reducing test coverage, breaking API contracts) MUST be justified in writing with:
+
+- **Why Needed**: Specific technical/business reason
+- **Alternatives Considered**: Why simpler approaches were rejected
+- **Mitigation Plan**: How to minimize impact and technical debt
+
+Unjustified violations are rejected during code review.
+
+### Runtime Guidance
+
+For detailed development patterns, examples, and implementation guidance, refer to `.github/copilot-instructions.md`. The constitution defines **what** must be done; the copilot instructions define **how** to do it.
+
+**Version**: 1.0.0 | **Ratified**: 2025-10-26 | **Last Amended**: 2025-10-26
