@@ -103,10 +103,45 @@ from .parser import (
     ParseState,
     parse_cobol,
 )
-from .preprocess import normalize_fixed_format
+
+# Import normalize_fixed_format from the legacy preprocess.py module
+# Note: There's both a preprocess.py file AND preprocess/ package directory
+# We need to access the .py file's function
+import sys
+import importlib.util
+from pathlib import Path
+_preprocess_py_path = Path(__file__).parent / "preprocess.py"
+_spec = importlib.util.spec_from_file_location("cobolparser._preprocess_legacy", _preprocess_py_path)
+if _spec and _spec.loader:
+    _preprocess_legacy = importlib.util.module_from_spec(_spec)
+    sys.modules["cobolparser._preprocess_legacy"] = _preprocess_legacy
+    _spec.loader.exec_module(_preprocess_legacy)
+    normalize_fixed_format = _preprocess_legacy.normalize_fixed_format
+else:
+    def normalize_fixed_format(*args, **kwargs):  # type: ignore
+        raise ImportError("Could not load normalize_fixed_format from preprocess.py")
 
 from .dialects import (
     IBMEnterpriseCobol,
+)
+
+# Copybook expansion (preprocessing)
+from .preprocess.copybook_expander import (
+    expand_copybooks,
+    parse_cobol_with_expansion,
+)
+from .preprocess.models import (
+    CopybookExpansion,
+    CopyStatement,
+    CopybookSearchPath,
+    ExpansionStatistics,
+)
+from .preprocess import (
+    CircularReferenceError,
+    CopybookNotFoundError,
+    PathTraversalError,
+    EncodingError,
+    NestingDepthError,
 )
 
 # Other dialects will be added when implemented
@@ -154,6 +189,9 @@ __all__ = [
     "ParseState",
     "parse_cobol",
     
+    # Preprocessing utilities
+    "normalize_fixed_format",
+    
     # Enhanced features
     "MemoryConfiguration",
     "SerializationConfig",
@@ -168,7 +206,19 @@ __all__ = [
     
     # Dialect support
     "IBMEnterpriseCobol",
-    "normalize_fixed_format",
+    
+    # Copybook expansion
+    "expand_copybooks",
+    "parse_cobol_with_expansion",
+    "CopybookExpansion",
+    "CopyStatement",
+    "CopybookSearchPath",
+    "ExpansionStatistics",
+    "CircularReferenceError",
+    "CopybookNotFoundError",
+    "PathTraversalError",
+    "EncodingError",
+    "NestingDepthError",
     
     # Will be added when implemented:
     # "ANSICobol", 
