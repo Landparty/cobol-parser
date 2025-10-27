@@ -155,6 +155,7 @@ class TokenType(Enum):
     UNTIL = auto()
     VARYING = auto()
     FROM = auto()
+    TO = auto()
     BY = auto()
     AFTER = auto()
     BEFORE = auto()
@@ -372,6 +373,7 @@ class CobolLexer:
         'UNTIL': TokenType.UNTIL,
         'VARYING': TokenType.VARYING,
         'FROM': TokenType.FROM,
+        'TO': TokenType.TO,
         'BY': TokenType.BY,
         'AFTER': TokenType.AFTER,
         'BEFORE': TokenType.BEFORE,
@@ -457,7 +459,10 @@ class CobolLexer:
     
     def skip_whitespace(self) -> None:
         """Skip whitespace characters except newlines."""
-        while self.peek_char() and self.peek_char() in ' \t\r':
+        while True:
+            char = self.peek_char()
+            if char is None or char not in ' \t\r':
+                break
             self.advance_char()
     
     def read_string_literal(self, quote_char: str) -> Token:
@@ -469,16 +474,8 @@ class CobolLexer:
         while True:
             char = self.peek_char()
             if char is None:
-                # Check if we can continue on next line for COBOL continuation
-                if not self.free_form and self.current_line + 1 < len(self.lines):
-                    next_line = self.lines[self.current_line + 1]
-                    if len(next_line) > 6 and next_line[6] == '-':
-                        # Continue to next line
-                        self.advance_char()  # Move past end of current line
-                        continue
-                
-                # No continuation possible - emit error but don't break parsing
-                # Instead, return what we have so far
+                # Unterminated string - add error
+                self.errors.append(LexerError("Unterminated string literal", start_location, quote_char + value))
                 break
             
             if char == quote_char:
@@ -519,8 +516,9 @@ class CobolLexer:
                 has_exponent = True
                 value += char
                 self.advance_char()
-                if self.peek_char() in '+-':
-                    value += self.peek_char()
+                next_char = self.peek_char()
+                if next_char and next_char in '+-':
+                    value += next_char
                     self.advance_char()
             else:
                 break
@@ -562,8 +560,11 @@ class CobolLexer:
         value = ""
         
         # Read until end of line
-        while self.peek_char() and self.peek_char() != '\n':
-            value += self.peek_char()
+        while True:
+            char = self.peek_char()
+            if char is None or char == '\n':
+                break
+            value += char
             self.advance_char()
         
         return Token(TokenType.COMMENT, value, start_location)
@@ -773,62 +774,13 @@ class CobolLexer:
                         # Stop tokenizing remaining of this line (all considered part of literal)
                         return tokens
                     else:
-                        # Check if this might be a valid COBOL multi-line string pattern
-                        # Look for closing quote in nearby lines or current line context
-                        found_closing_quote = False
-                        if not self.free_form:
-                            # Check next few lines for continuation with closing quote
-                            for check_line_idx in range(line_num + 1, min(line_num + 5, len(self.lines))):
-                                check_line = self.lines[check_line_idx]
-                                if len(check_line) > 6 and check_line[6] == '-' and char in check_line:
-                                    found_closing_quote = True
-                                    break
-                            
-                            # Also check if this line itself looks like it should be part of a VALUE clause
-                            current_line = self.lines[line_num] if line_num < len(self.lines) else ''
-                            prev_line = self.lines[line_num - 1] if line_num > 0 else ''
-                            
-                            # Check if previous line ends with VALUE (without quotes) - common COBOL pattern
-                            if (prev_line.strip().upper().endswith('VALUE') or 
-                                'VALUE' in current_line.upper() or 
-                                (line_num > 0 and 'VALUE' in prev_line.upper())):
-                                found_closing_quote = True
-                        
-                        # Always create a token for COBOL compatibility, but only emit error if it's clearly not a COBOL pattern
+                        # This is clearly an unterminated string that should be an error
+                        # For test cases like 'DISPLAY "Unterminated string', there are no continuation markers
+                        # and no COBOL multi-line context, so this should be an error
                         partial_value = text[pos+1:new_pos] if new_pos > pos + 1 else ""
                         err_location = SourceLocation(line_num + 1, start_col + pos, 1)
-                        
-                        if found_closing_quote:
-                            # This looks like a valid COBOL multi-line string - don't emit error
-                            tokens.append(Token(TokenType.STRING_LITERAL, partial_value, err_location))
-                        else:
-                            # Check one more heuristic - if the unterminated string is short and we're in a DATA section
-                            current_line = self.lines[line_num] if line_num < len(self.lines) else ''
-                            context_suggests_cobol = (
-                                len(partial_value) < 100 and  # Reasonable length
-                                ('FILLER' in current_line.upper() or 'PIC' in current_line.upper() or 'VALUE' in current_line.upper())
-                            )
-                            
-                            # Additional check for the specific pattern in lines 171-172
-                            if (line_num + 1 < len(self.lines) and 
-                                len(self.lines[line_num + 1]) > 6 and 
-                                self.lines[line_num + 1][6] == '-' and
-                                '"' in self.lines[line_num + 1]):
-                                context_suggests_cobol = True
-                            
-                            # Also check if this line itself has a continuation marker (line 172 case)
-                            if (len(current_line) > 6 and current_line[6] == '-' and 
-                                line_num > 0 and '"' in self.lines[line_num - 1]):
-                                context_suggests_cobol = True
-                            
-                            if context_suggests_cobol or len(partial_value) > 2:
-                                # Likely a COBOL multi-line string or substantial content - emit token without error for robustness
-                                tokens.append(Token(TokenType.STRING_LITERAL, partial_value, err_location))
-                            else:
-                                # Emit error only for very short strings (likely truly malformed)
-                                self.errors.append(LexerError("Unterminated string literal", err_location, char))
-                                tokens.append(Token(TokenType.STRING_LITERAL, partial_value, err_location))
-                        
+                        self.errors.append(LexerError("Unterminated string literal", err_location, char + partial_value))
+                        tokens.append(Token(TokenType.STRING_LITERAL, partial_value, err_location))
                         pos = new_pos
                         continue
                 else:
@@ -1140,7 +1092,7 @@ class CobolLexer:
         
         return Token(TokenType.NUMERIC_LITERAL, value, location), pos
     
-    def check_division_header(self, text: str, start_pos: int) -> tuple[TokenType, int]:
+    def check_division_header(self, text: str, start_pos: int) -> tuple[TokenType | None, int]:
         """Check if text at position starts a division header and return appropriate token type."""
         remaining = text[start_pos:].strip().upper()
         

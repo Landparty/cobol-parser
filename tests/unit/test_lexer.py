@@ -420,12 +420,9 @@ class TestCobolLexerErrorHandling:
         
         # If tokens have position information, verify it's reasonable
         for token in tokens:
-            if hasattr(token, 'line'):
-                assert token.line >= 1, f"Token {token.value} has invalid line number {token.line}"
-            if hasattr(token, 'column'):
-                assert token.column >= 1, f"Token {token.value} has invalid column number {token.column}"
-            if hasattr(token, 'position'):
-                assert token.position >= 0, f"Token {token.value} has invalid position {token.position}"
+            if hasattr(token, 'location') and token.location:
+                assert token.location.line >= 1, f"Token {token.value} has invalid line number {token.location.line}"
+                assert token.location.column >= 1, f"Token {token.value} has invalid column number {token.location.column}"
 
 
 class TestCobolLexerPerformance:
@@ -705,8 +702,8 @@ class TestCobolLexerFigurativeConstants:
         assert "ALL" in fig_values
 
 
-class TestCobolLexerComments:
-    """Unit tests for comment tokenization."""
+class TestCobolLexerCommentMethods:
+    """Unit tests for comment tokenization methods."""
     
     def test_read_comment_method(self):
         """Test the read_comment method directly."""
@@ -841,7 +838,7 @@ class TestCobolLexerTokenizeMethod:
         assert len(newline_tokens) >= 1
         
         # Newline should have correct value
-        assert newline_tokens[0].value == "\\n"
+        assert newline_tokens[0].value == "\n"
     
     def test_eof_token_always_added(self):
         """Test that EOF token is always added at the end."""

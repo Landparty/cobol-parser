@@ -17,20 +17,7 @@ import pytest
 import json
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-
-
-@dataclass
-class SourceLocation:
-    """Source code location information."""
-    line: int
-    column: int
-    length: Optional[int] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        result = {"line": self.line, "column": self.column}
-        if self.length is not None:
-            result["length"] = self.length
-        return result
+from cobolparser.models.ast_base import SourceLocation
 
 
 class TestASTNodeBase:
@@ -160,8 +147,8 @@ class TestProgramNode:
         id_division = CobolDivision("IDENTIFICATION", SourceLocation(2, 1))
         program.add_division(id_division)
         
-        assert "IDENTIFICATION" in program.divisions
-        assert program.divisions["IDENTIFICATION"] == id_division
+        assert program.has_division("IDENTIFICATION")
+        assert program.get_division("IDENTIFICATION") == id_division
     
     def test_program_validation(self):
         """Test COBOL program structure validation."""
