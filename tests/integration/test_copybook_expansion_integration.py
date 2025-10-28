@@ -175,6 +175,117 @@ class TestSourceLocationIntegration:
         pytest.skip("Implementation pending - Phase 6")
 
 
+class TestProcedureDivisionCopybooks:
+    """Integration tests for COPY statements in PROCEDURE DIVISION."""
+    
+    def test_procedure_copybook_expansion_and_parsing(self):
+        """Test COPY in PROCEDURE DIVISION expands and statements appear in AST."""
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+        
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROC-COPY-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC X(20).
+       01 WS-COUNTER PIC 9(4) VALUE ZERO.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY "Before copybook".
+           COPY STANDARD-PROCEDURES.
+           DISPLAY "After copybook".
+           STOP RUN."""
+        
+        # Parse with expansion
+        result = parse_cobol_with_expansion(source, "proc_test.cbl", [str(samples_dir)])
+        
+        # Verify parsing succeeded
+        assert result is not None
+        assert result.success, f"Parsing failed: {result.errors}"
+        assert result.ast is not None
+        
+        # Verify PROCEDURE DIVISION exists in AST
+        proc_div = result.ast.get_division("PROCEDURE")
+        assert proc_div is not None, "PROCEDURE DIVISION not found in AST"
+        
+        # Get all statements from procedure division using the AST method
+        all_statements = result.ast.get_all_statements()
+        
+        # Verify we have statements
+        assert len(all_statements) > 0, "No statements found in PROCEDURE DIVISION"
+        
+        # Check for statement types from copybook (MOVE, DISPLAY, PERFORM)
+        statement_types = [stmt.statement_type for stmt in all_statements if hasattr(stmt, 'statement_type')]
+        
+        # At minimum, we should have DISPLAY statements (before, from copybook, after)
+        display_count = statement_types.count("DISPLAY")
+        assert display_count >= 2, f"Expected at least 2 DISPLAY statements, found {display_count}"
+        
+        # Verify MOVE statement from copybook appears
+        has_move = "MOVE" in statement_types
+        assert has_move, f"Expected MOVE statement from copybook. Found types: {statement_types}"
+    
+    def test_multiple_procedure_copybooks(self):
+        """Test multiple COPY statements in PROCEDURE DIVISION."""
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+        
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MULTI-PROC-COPY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC X(20).
+       01 WS-COUNTER PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           COPY STANDARD-PROCEDURES.
+           COPY HELPER-ROUTINES.
+           STOP RUN."""
+        
+        result = parse_cobol_with_expansion(source, "multi_proc.cbl", [str(samples_dir)])
+        
+        # Verify parsing succeeded
+        assert result is not None
+        assert result.success, f"Parsing failed: {result.errors}"
+        assert result.ast is not None
+        
+        # Verify AST has statements from both copybooks
+        all_statements = result.ast.get_all_statements()
+        statement_types = [stmt.statement_type for stmt in all_statements if hasattr(stmt, 'statement_type')]
+        
+        # Should have MOVE statements from both copybooks
+        move_count = statement_types.count("MOVE")
+        assert move_count >= 2, f"Expected at least 2 MOVE statements from copybooks, found {move_count}"
+    
+    def test_procedure_copybook_with_data_copybook(self):
+        """Test COPY in both DATA and PROCEDURE divisions."""
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+        
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MIXED-COPY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY EMPLOYEE.
+       01 WS-STATUS PIC X(20).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           COPY STANDARD-PROCEDURES.
+           STOP RUN."""
+        
+        result = parse_cobol_with_expansion(source, "mixed.cbl", [str(samples_dir)])
+        
+        # Verify parsing succeeded
+        assert result is not None
+        assert result.success, f"Parsing failed: {result.errors}"
+        assert result.ast is not None
+        
+        # Verify DATA DIVISION has data items from EMPLOYEE copybook
+        data_div = result.ast.get_division("DATA")
+        assert data_div is not None
+        
+        # Verify PROCEDURE DIVISION exists
+        proc_div = result.ast.get_division("PROCEDURE")
+        assert proc_div is not None
+
+
 class TestCopyReplacingIntegration:
     """Integration tests for COPY REPLACING (Phase 7)."""
     

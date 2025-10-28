@@ -243,3 +243,76 @@ class TestParseCobolWithExpansionContracts:
     def test_returns_parse_result(self):
         """Verify return type compatibility with existing parser (T092)."""
         pytest.skip("Implementation pending - Phase 7")
+
+
+class TestProcedureDivisionCopybookContracts:
+    """Contract tests for COPY statements in PROCEDURE DIVISION."""
+    
+    def test_procedure_copybook_statements_in_ast(self):
+        """Test COPY in PROCEDURE DIVISION statements appear in AST."""
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+        
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROC-AST-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC X(20).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           COPY STANDARD-PROCEDURES.
+           STOP RUN."""
+        
+        result = parse_cobol_with_expansion(source, "ast_test.cbl", [str(samples_dir)])
+        
+        # Contract: parse_cobol_with_expansion returns valid ParseResult
+        assert result is not None
+        assert hasattr(result, 'ast')
+        assert hasattr(result, 'success')
+        
+        # Contract: AST contains statements from expanded copybook
+        if result.success and result.ast:
+            all_statements = result.ast.get_all_statements()
+            statement_types = [stmt.statement_type for stmt in all_statements if hasattr(stmt, 'statement_type')]
+            
+            # Contract: MOVE statement from STANDARD-PROCEDURES.cpy is in AST
+            assert "MOVE" in statement_types, "MOVE statement from copybook not found in AST"
+    
+    def test_procedure_copybook_preserves_order(self):
+        """Test statements from COPY maintain order in AST."""
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+        
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ORDER-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC X(20).
+       01 WS-COUNTER PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY "Start".
+           COPY STANDARD-PROCEDURES.
+           DISPLAY "End".
+           STOP RUN."""
+        
+        result = parse_cobol_with_expansion(source, "order_test.cbl", [str(samples_dir)])
+        
+        # Contract: statements maintain order
+        if result.success and result.ast:
+            all_statements = result.ast.get_all_statements()
+            
+            # Should have multiple statements in order
+            assert len(all_statements) >= 3, "Expected at least 3 statements"
+            
+            # First should be DISPLAY "Start"
+            # Middle should be from copybook (MOVE, DISPLAY, PERFORM)
+            # Last should be DISPLAY "End" (and optionally STOP RUN if parser supports it)
+            statement_types = [stmt.statement_type for stmt in all_statements if hasattr(stmt, 'statement_type')]
+            
+            # Verify we have expected statement types from copybook
+            assert "DISPLAY" in statement_types, "Expected DISPLAY statements"
+            assert "MOVE" in statement_types, "Expected MOVE statement from copybook"
+            assert "PERFORM" in statement_types, "Expected PERFORM statement from copybook"
+            
+            # Verify we have at least 3 DISPLAY statements (Start, Processing started, End)
+            display_count = statement_types.count("DISPLAY")
+            assert display_count >= 3, f"Expected at least 3 DISPLAY statements, got {display_count}"

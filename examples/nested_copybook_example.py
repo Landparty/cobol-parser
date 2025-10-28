@@ -206,5 +206,26 @@ if __name__ == "__main__":
         
         # Analyze EMPLOYEE copybook
         analyze_specific_copybook("EMPLOYEE", copybook_paths)
+        
+        # Show PROCEDURE DIVISION copybook usage
+        print(f"\n{'=' * 70}")
+        print("BONUS: COPY Statement in PROCEDURE DIVISION")
+        print("=" * 70)
+        print("\nCopybook expansion works in ANY division, including PROCEDURE!")
+        print("\nExample:")
+        print("""
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           DISPLAY "Starting".
+           COPY STANDARD-PROCEDURES.
+           STOP RUN.
+           
+Where STANDARD-PROCEDURES.cpy contains:
+       MOVE "ACTIVE" TO WS-STATUS.
+       PERFORM INITIALIZE-ROUTINE.
+       PERFORM PROCESS-DATA.
+       
+This allows you to reuse common procedure code across programs!
+""")
     
     sys.exit(exit_code)

@@ -270,8 +270,16 @@ class CobolProgram(ASTNode):
             
             # Get statements from sections
             for section in proc_division._sections.values():
+                # Get statements from paragraphs within sections
                 for paragraph in section.paragraphs:
                     statements.extend(paragraph.statements)
+                
+                # Get statements that are direct children of sections
+                # (happens when parser adds statements to section without creating paragraph)
+                from .statements import CobolStatement
+                for child in section.children:
+                    if isinstance(child, CobolStatement):
+                        statements.append(child)
         
         return statements
     

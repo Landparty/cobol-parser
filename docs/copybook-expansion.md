@@ -340,6 +340,61 @@ result = expand_copybooks(
 )
 ```
 
+### COPY Statements in PROCEDURE DIVISION
+
+Copybook expansion works in **any** division, including PROCEDURE DIVISION for reusable procedure code:
+
+```python
+from cobolparser import expand_copybooks
+
+# Program with COPY in PROCEDURE DIVISION
+program = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROC-COPY-EXAMPLE.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS          PIC X(20) VALUE SPACES.
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCESS.
+           DISPLAY "Starting main process".
+           COPY STANDARD-PROCEDURES.
+           PERFORM ADDITIONAL-PROCESSING.
+           STOP RUN.
+           
+       ADDITIONAL-PROCESSING.
+           DISPLAY "Additional processing".
+           COPY SUBROUTINES.
+           DISPLAY "Done".
+"""
+
+# STANDARD-PROCEDURES.cpy contains procedure statements:
+# MOVE "STARTING" TO WS-STATUS.
+# PERFORM INITIALIZE-ROUTINE.
+# PERFORM PROCESS-DATA.
+
+# SUBROUTINES.cpy can even include nested COPYs:
+# COPY HELPER-ROUTINES.
+# PERFORM ERROR-HANDLING.
+
+result = expand_copybooks(program, copybook_paths=["/path/to/copybooks"])
+
+# Results show nested expansion in procedure code
+print(f"Copybooks expanded: {result.included_copybooks}")
+# ['SUBROUTINES.cpy', 'HELPER-ROUTINES.cpy', 'STANDARD-PROCEDURES.cpy']
+
+print(f"Max nesting depth: {result.max_depth_reached}")
+# 2 (SUBROUTINES includes HELPER-ROUTINES)
+```
+
+**Use Cases for Procedure Copybooks**:
+- Reusable procedure templates
+- Standard error handling routines  
+- Common validation logic
+- Database transaction patterns
+- Nested procedure expansion supported
+
 ### Analyzing Copybook Content Before Expansion
 
 ```python
