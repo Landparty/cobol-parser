@@ -17,6 +17,21 @@ class CobolStatement(ASTNode):
         self.statement_type = statement_type
         self.operands: List[str] = []
     
+    @property
+    def sql_type(self) -> Optional[str]:
+        """Return SQL type if this is an SQL statement, None otherwise."""
+        return None
+    
+    @property
+    def cics_command(self) -> Optional[str]:
+        """Return CICS command if this is a CICS statement, None otherwise."""
+        return None
+    
+    @property
+    def ims_command(self) -> Optional[str]:
+        """Return IMS command if this is an IMS statement, None otherwise."""
+        return None
+    
     def add_operand(self, operand: str) -> None:
         """Add an operand to the statement."""
         self.operands.append(operand)

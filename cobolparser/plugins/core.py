@@ -6,8 +6,11 @@ memory management, error recovery modes, and serialization options.
 """
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from cobolparser.models.ast_base import SourceLocation
 
 
 class ErrorRecoveryMode(Enum):
@@ -66,18 +69,70 @@ class SerializationConfig:
 class ParseError(Exception):
     """Base exception for COBOL parsing errors."""
     
-    def __init__(self, message: str, line: int = 0, column: int = 0):
+    def __init__(self, message: str, line: Union[int, str] = 0, column: Union[int, str] = 0, location: Optional['SourceLocation'] = None):
         super().__init__(message)
         self.message = message
-        self.line = line
-        self.column = column
+        self._line = 0
+        self._column = 0
+        
+        # Support both direct line/column parameters and SourceLocation object
+        if location is not None:
+            self._set_line(location.line) if hasattr(location, 'line') else None
+            self._set_column(location.column) if hasattr(location, 'column') else None
+        else:
+            self._set_line(line)
+            self._set_column(column)
+    
+    def _set_line(self, value: Union[int, str, None]) -> None:
+        """Set line attribute with type conversion."""
+        if value is not None:
+            try:
+                self._line = int(value)
+            except (ValueError, TypeError):
+                self._line = 0
+        else:
+            self._line = 0
+    
+    def _set_column(self, value: Union[int, str, None]) -> None:
+        """Set column attribute with type conversion."""
+        if value is not None:
+            try:
+                self._column = int(value)
+            except (ValueError, TypeError):
+                self._column = 0
+        else:
+            self._column = 0
+    
+    @property
+    def line(self) -> int:
+        """Get line number."""
+        return self._line
+    
+    @line.setter
+    def line(self, value) -> None:
+        """Set line number with type conversion."""
+        self._set_line(value)
+    
+    @property
+    def column(self) -> int:
+        """Get column number."""
+        return self._column
+    
+    @column.setter
+    def column(self, value: Union[int, str, None]) -> None:
+        """Set column number with type conversion."""
+        self._set_column(value)
     
     def __str__(self) -> str:
         try:
+            # Ensure line and column are integers
             line = int(self.line) if self.line is not None else 0
+            column = int(self.column) if self.column is not None else 0
+            
             if line > 0:
-                return f"Line {line}, Column {self.column}: {self.message}"
+                return f"Line {line}, Column {column}: {self.message}"
         except (ValueError, TypeError):
+            # If conversion fails, just return the message
             pass
         return self.message
 

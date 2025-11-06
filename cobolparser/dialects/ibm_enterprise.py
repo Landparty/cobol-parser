@@ -36,8 +36,13 @@ class ExecSQLStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("EXEC-SQL", location)
         self.sql_text: str = ""
-        self.sql_type: str = "UNKNOWN"  # SELECT, INSERT, UPDATE, DELETE, etc.
+        self._sql_type: str = "UNKNOWN"  # SELECT, INSERT, UPDATE, DELETE, etc.
         self.host_variables: List[str] = []
+    
+    @property
+    def sql_type(self) -> str:
+        """Return SQL type (SELECT, INSERT, UPDATE, DELETE, etc.)."""
+        return self._sql_type
         
     def set_sql_text(self, sql_text: str) -> None:
         """Set the SQL statement text."""
@@ -46,9 +51,9 @@ class ExecSQLStatement(CobolStatement):
         # Determine SQL type
         first_word = sql_text.strip().split()[0].upper() if sql_text.strip() else ""
         if first_word in ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER"]:
-            self.sql_type = first_word
+            self._sql_type = first_word
         else:
-            self.sql_type = "UNKNOWN"
+            self._sql_type = "UNKNOWN"
             
     def add_host_variable(self, variable: str) -> None:
         """Add a host variable used in the SQL statement."""
@@ -71,12 +76,17 @@ class ExecCICSStatement(CobolStatement):
     
     def __init__(self, location: SourceLocation):
         super().__init__("EXEC-CICS", location)
-        self.cics_command: str = ""
+        self._cics_command: str = ""
         self.cics_options: Dict[str, str] = {}
+    
+    @property
+    def cics_command(self) -> str:
+        """Return the CICS command."""
+        return self._cics_command
         
     def set_command(self, command: str) -> None:
         """Set the CICS command."""
-        self.cics_command = command.upper()
+        self._cics_command = command.upper()
         
     def add_option(self, option: str, value: str = "") -> None:
         """Add a CICS command option."""
@@ -88,6 +98,42 @@ class ExecCICSStatement(CobolStatement):
         result.update({
             "cics_command": self.cics_command,
             "cics_options": self.cics_options
+        })
+        return result
+
+
+class ExecIMSStatement(CobolStatement):
+    """AST node for EXEC IMS statements."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("EXEC-IMS", location)
+        self._ims_command: str = ""
+        self.ims_options: Dict[str, str] = {}
+        self.ims_call_type: str = "UNKNOWN"  # GU, GN, GNP, ISRT, REPL, DLET, etc.
+    
+    @property
+    def ims_command(self) -> str:
+        """Return the IMS command."""
+        return self._ims_command
+        
+    def set_command(self, command: str) -> None:
+        """Set the IMS command."""
+        self._ims_command = command.upper()
+        # Determine IMS call type
+        if self._ims_command in ["GU", "GN", "GNP", "ISRT", "REPL", "DLET"]:
+            self.ims_call_type = self._ims_command
+        
+    def add_option(self, option: str, value: str = "") -> None:
+        """Add an IMS command option."""
+        self.ims_options[option.upper()] = value
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "ims_command": self.ims_command,
+            "ims_call_type": self.ims_call_type,
+            "ims_options": self.ims_options
         })
         return result
 
@@ -112,9 +158,17 @@ class IBMDataItem(CobolDataItem):
         """Calculate storage size in bytes using IBM rules."""
         if not self.picture_clause:
             return 0
-            
-        base_size = self.picture_clause.size
-        
+
+        base_size = self.picture_clause.size or 0
+
+        # POINTER doesn't depend on picture digits
+        if self.ibm_usage == IBMDataType.POINTER:
+            return 4  # 32-bit pointer on z/OS
+
+        # For other types, we need total_digits
+        if self.picture_clause.total_digits is None:
+            return base_size  # DISPLAY and other character types
+
         if self.ibm_usage == IBMDataType.COMP_3:
             # COMP-3: Packed decimal - (digits + 1) / 2
             return (self.picture_clause.total_digits + 1) // 2
@@ -138,8 +192,6 @@ class IBMDataItem(CobolDataItem):
                 return 4  # Fullword
             else:
                 return 8  # Doubleword
-        elif self.ibm_usage == IBMDataType.POINTER:
-            return 4  # 32-bit pointer on z/OS
         else:
             # DISPLAY and other character types
             return base_size
@@ -205,13 +257,23 @@ class IBMEnterpriseCobol:
         "ENTER", "HANDLE", "IGNORE", "NOHANDLE"
     }
     
+    # IMS commands (DL/I call types)
+    IMS_COMMANDS = {
+        "GU", "GN", "GNP",  # Get Unique, Get Next, Get Next in Parent
+        "ISRT", "REPL", "DLET",  # Insert, Replace, Delete
+        "CHKP", "ROLLB", "TERM",  # Checkpoint, Rollback, Terminate
+        "ENQUEUE", "DEQUEUE", "PURG",  # Queue operations
+        "XRST", "XDLT", "XRPL"  # Extended operations
+    }
+    
     def __init__(self):
         """Initialize IBM Enterprise COBOL dialect."""
         self.dialect_type = DialectType.IBM_ENTERPRISE
         self.supported_features = {
             "comp_3_packed_decimal",
             "exec_sql",
-            "exec_cics", 
+            "exec_cics",
+            "exec_ims",
             "ibm_intrinsic_functions",
             "pointer_data_types",
             "object_oriented_cobol",
@@ -261,6 +323,26 @@ class IBMEnterpriseCobol:
         
         # Simple parsing - extract command and options
         parts = cics_text.strip().split()
+        if parts:
+            stmt.set_command(parts[0])
+            
+            # Parse options (simplified)
+            for part in parts[1:]:
+                if '(' in part:
+                    option, value = part.split('(', 1)
+                    value = value.rstrip(')')
+                    stmt.add_option(option, value)
+                else:
+                    stmt.add_option(part)
+                    
+        return stmt
+    
+    def parse_exec_ims(self, ims_text: str, location: SourceLocation) -> ExecIMSStatement:
+        """Parse EXEC IMS statement."""
+        stmt = ExecIMSStatement(location)
+        
+        # Simple parsing - extract command and options
+        parts = ims_text.strip().split()
         if parts:
             stmt.set_command(parts[0])
             
@@ -338,6 +420,10 @@ class IBMEnterpriseCobol:
         """Check if command is a valid CICS command."""
         return command.upper() in self.CICS_COMMANDS
     
+    def is_ims_command(self, command: str) -> bool:
+        """Check if command is a valid IMS command."""
+        return command.upper() in self.IMS_COMMANDS
+    
     def get_dialect_info(self) -> Dict[str, Any]:
         """Get dialect information."""
         return {
@@ -347,5 +433,6 @@ class IBMEnterpriseCobol:
             "features": list(self.supported_features),
             "reserved_words": len(self.IBM_RESERVED_WORDS),
             "intrinsic_functions": len(self.IBM_INTRINSIC_FUNCTIONS),
-            "cics_commands": len(self.CICS_COMMANDS)
+            "cics_commands": len(self.CICS_COMMANDS),
+            "ims_commands": len(self.IMS_COMMANDS)
         }

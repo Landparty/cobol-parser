@@ -306,6 +306,73 @@ class CobolProgram(ASTNode):
         
         return using_variable
     
+    def has_sql(self) -> bool:
+        """Check if program uses EXEC SQL statements."""
+        all_statements = self.get_all_statements()
+        for stmt in all_statements:
+            if stmt.statement_type == "EXEC-SQL":
+                return True
+        return False
+    
+    def has_cics(self) -> bool:
+        """Check if program uses EXEC CICS statements."""
+        all_statements = self.get_all_statements()
+        for stmt in all_statements:
+            if stmt.statement_type == "EXEC-CICS":
+                return True
+        return False
+    
+    def has_ims(self) -> bool:
+        """Check if program uses EXEC IMS statements."""
+        all_statements = self.get_all_statements()
+        for stmt in all_statements:
+            if stmt.statement_type == "EXEC-IMS":
+                return True
+        return False
+    
+    def get_sql_statements(self) -> List['CobolStatement']:
+        """Get all EXEC SQL statements in the program."""
+        all_statements = self.get_all_statements()
+        return [stmt for stmt in all_statements if stmt.statement_type == "EXEC-SQL"]
+    
+    def get_cics_statements(self) -> List['CobolStatement']:
+        """Get all EXEC CICS statements in the program."""
+        all_statements = self.get_all_statements()
+        return [stmt for stmt in all_statements if stmt.statement_type == "EXEC-CICS"]
+    
+    def get_ims_statements(self) -> List['CobolStatement']:
+        """Get all EXEC IMS statements in the program."""
+        all_statements = self.get_all_statements()
+        return [stmt for stmt in all_statements if stmt.statement_type == "EXEC-IMS"]
+    
+    def uses_ims_interface(self) -> bool:
+        """Check if program uses IMS language interface (CBLTDLI, AIBTDLI, CEETDLI)."""
+        all_statements = self.get_all_statements()
+        ims_interfaces = {"CBLTDLI", "AIBTDLI", "CEETDLI"}
+        
+        for stmt in all_statements:
+            if stmt.statement_type == "CALL":
+                # Check if any operand contains an IMS interface call
+                for operand in stmt.operands:
+                    if any(interface in operand.upper() for interface in ims_interfaces):
+                        return True
+        return False
+    
+    def get_ims_interface_calls(self) -> List['CobolStatement']:
+        """Get all CALL statements to IMS language interfaces."""
+        all_statements = self.get_all_statements()
+        ims_interfaces = {"CBLTDLI", "AIBTDLI", "CEETDLI"}
+        ims_calls = []
+        
+        for stmt in all_statements:
+            if stmt.statement_type == "CALL":
+                for operand in stmt.operands:
+                    if any(interface in operand.upper() for interface in ims_interfaces):
+                        ims_calls.append(stmt)
+                        break
+        
+        return ims_calls
+    
     def get_procedures(self) -> List['CobolProcedure']:
         """Get all procedure paragraphs/sections in the program."""
         procedures = []

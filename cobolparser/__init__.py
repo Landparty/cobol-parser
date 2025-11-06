@@ -104,22 +104,8 @@ from .parser import (
     parse_cobol,
 )
 
-# Import normalize_fixed_format from the legacy preprocess.py module
-# Note: There's both a preprocess.py file AND preprocess/ package directory
-# We need to access the .py file's function
-import sys
-import importlib.util
-from pathlib import Path
-_preprocess_py_path = Path(__file__).parent / "preprocess.py"
-_spec = importlib.util.spec_from_file_location("cobolparser._preprocess_legacy", _preprocess_py_path)
-if _spec and _spec.loader:
-    _preprocess_legacy = importlib.util.module_from_spec(_spec)
-    sys.modules["cobolparser._preprocess_legacy"] = _preprocess_legacy
-    _spec.loader.exec_module(_preprocess_legacy)
-    normalize_fixed_format = _preprocess_legacy.normalize_fixed_format
-else:
-    def normalize_fixed_format(*args, **kwargs):  # type: ignore
-        raise ImportError("Could not load normalize_fixed_format from preprocess.py")
+# Import normalize_fixed_format from the preprocess package
+from .preprocess import normalize_fixed_format
 
 from .dialects import (
     IBMEnterpriseCobol,

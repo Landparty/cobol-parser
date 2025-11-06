@@ -20,6 +20,7 @@ from .plugins.core import (
     ParseError, ParseStatistics, ErrorRecoveryMode, DialectType,
     MemoryConfiguration, SerializationConfig, PluginManager
 )
+from .preprocess import normalize_fixed_format
 
 
 class ParseState(Enum):
@@ -1240,7 +1241,7 @@ class CobolParser:
         
         if i >= len(tokens):
             # MOVE at end of token stream - add error and return
-            self.add_error(ParseError("Expected source operand in MOVE statement (no more tokens)", start.location))
+            self.add_error(ParseError("Expected source operand in MOVE statement (no more tokens)", location=start.location))
             return i
         
         # Skip optional separators before source (multi-line MOVE support)
@@ -1249,7 +1250,7 @@ class CobolParser:
             
         if i >= len(tokens):
             # Still no tokens after skipping separators - add error and return
-            self.add_error(ParseError("Expected source operand in MOVE statement (no more tokens)", start.location))
+            self.add_error(ParseError("Expected source operand in MOVE statement (no more tokens)", location=start.location))
             return i
         
         # Parse source operand
@@ -1266,7 +1267,7 @@ class CobolParser:
             
             # Check what follows the sign (after any continuations)
             if i >= len(tokens):
-                self.add_error(ParseError(f"Expected number after {sign_token.value} in MOVE statement (no more tokens)", start.location))
+                self.add_error(ParseError(f"Expected number after {sign_token.value} in MOVE statement (no more tokens)", location=start.location))
                 return i
             elif tokens[i].type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL):
                 # Direct number: +123, -456
@@ -1290,7 +1291,7 @@ class CobolParser:
                 source_operand = sign_token.value + tokens[i].value + tokens[i + 1].value
                 i += 2
             else:
-                self.add_error(ParseError(f"Expected number after {sign_token.value} in MOVE statement (found {tokens[i].type.name})", start.location))
+                self.add_error(ParseError(f"Expected number after {sign_token.value} in MOVE statement (found {tokens[i].type.name})", location=start.location))
                 return i
         # Handle PERIOD + NUMBER (decimal literals like .82, .999)
         elif (i < len(tokens) and tokens[i].type == TokenType.PERIOD and
@@ -1335,7 +1336,7 @@ class CobolParser:
             source_operand = tokens[i].value
             i += 1
         else:
-            self.add_error(ParseError("Expected source operand in MOVE statement (no more tokens)", start.location))
+            self.add_error(ParseError("Expected source operand in MOVE statement (no more tokens)", location=start.location))
             return i
         
         # Handle comma-separated numeric literals (COBOL allows commas in large numbers)
@@ -1423,7 +1424,7 @@ class CobolParser:
                 i += 1
                 self.add_warning(f"MOVE statement missing TO; treated '{target}' as target at {start.location}")
             else:
-                self.add_error(ParseError(debug_info, start.location))
+                self.add_error(ParseError(debug_info, location=start.location))
                 # Advance index to avoid infinite loop in sentence parsing
                 if i < len(tokens):
                     i += 1
@@ -1864,7 +1865,7 @@ class CobolParser:
             loc = self.get_current_location()
             self.add_error(ParseError(
                 f"Expected TO in MOVE statement (found: {current_info})",
-                loc.line, loc.column
+                location=loc
             ))
             # Skip until PERIOD or next verb to allow continued parsing
             while self.current_token and self.current_token.type not in (TokenType.PERIOD, TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.CALL, TokenType.STOP, TokenType.EOF):
@@ -2085,11 +2086,7 @@ def parse_cobol(
         ParseResult with AST and metadata
     """
     if preprocess_fixed:
-        try:
-            from .preprocess import normalize_fixed_format
-            source = normalize_fixed_format(source.splitlines())
-            free_form = True  # normalize produces free-form text
-        except Exception:
-            pass  # fallback silently
+        source = normalize_fixed_format(source.splitlines())
+        free_form = True  # normalize produces free-form text
     parser = CobolParser(dialect=dialect, error_recovery=error_recovery, free_form=free_form)
     return parser.parse(source, filename)
