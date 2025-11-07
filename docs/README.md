@@ -8,6 +8,7 @@ This directory contains examples of parsed COBOL constructs showing the Abstract
 - **[CALL Statements](call-statements.md)** - Function/procedure calls with parameters
 - **[PERFORM Statements](perform-statements.md)** - Loop and subroutine execution constructs
 - **[SQL Statements](sql-statements.md)** - Embedded SQL (EXEC SQL) parsing
+- **[CICS and IMS Statements](cics-ims-statements.md)** - EXEC CICS and IMS interface calls
 - **[COPY Statements](copy-statements.md)** - Copybook inclusion and text replacement
 
 ### Data Constructs
