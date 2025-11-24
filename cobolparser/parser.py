@@ -1988,15 +1988,25 @@ class CobolParser:
         if not self.current_token:
             return None
         
-        # Preserve quotes for string literals
+        # Detect if this is a dynamic or static CALL
+        is_dynamic = False
         if self.current_token.type == TokenType.STRING_LITERAL:
+            # Static call with literal string
             program_name = f'"{self.current_token.value}"'
-        else:
+            is_dynamic = False
+        elif self.current_token.type == TokenType.IDENTIFIER:
+            # Dynamic call with variable
             program_name = self.current_token.value
+            is_dynamic = True
+        else:
+            # Fallback for other token types
+            program_name = self.current_token.value
+            is_dynamic = False
+        
         self.advance_token()
         
         call_stmt = CallStatement(location)
-        call_stmt.set_called_program(program_name)
+        call_stmt.set_called_program(program_name, is_dynamic=is_dynamic)
         
         # Check for USING clause
         if (self.current_token and 

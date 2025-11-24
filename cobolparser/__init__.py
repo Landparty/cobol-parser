@@ -130,6 +130,11 @@ from .preprocess import (
     NestingDepthError,
 )
 
+# Analysis utilities
+from .analysis import (
+    DynamicCallAnalyzer,
+)
+
 # Other dialects will be added when implemented
 # from .dialects import (
 #     ANSICobol,
@@ -205,6 +210,9 @@ __all__ = [
     "PathTraversalError",
     "EncodingError",
     "NestingDepthError",
+    
+    # Analysis utilities
+    "DynamicCallAnalyzer",
     
     # Will be added when implemented:
     # "ANSICobol", 

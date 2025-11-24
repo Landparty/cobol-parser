@@ -192,7 +192,12 @@ class ComputeStatement(CobolStatement):
 
 
 class CallStatement(CobolStatement):
-    """AST node for CALL statements."""
+    """AST node for CALL statements.
+    
+    Supports both static CALL statements (with literal program names) and
+    dynamic CALL statements (using variables). For dynamic calls, the parser
+    can track possible values through data flow analysis.
+    """
     
     def __init__(self, location: SourceLocation):
         super().__init__("CALL", location)
@@ -201,12 +206,52 @@ class CallStatement(CobolStatement):
         self.giving_parameter: Optional[str] = None
         self.on_overflow: Optional[List['CobolStatement']] = None
         self.on_exception: Optional[List['CobolStatement']] = None
+        self._is_dynamic: bool = False
+        self._possible_values: List[str] = []
     
-    def set_called_program(self, program: str) -> None:
-        """Set the program name being called."""
+    @property
+    def is_dynamic(self) -> bool:
+        """Check if this is a dynamic CALL (using a variable instead of literal)."""
+        return self._is_dynamic
+    
+    @property
+    def possible_values(self) -> List[str]:
+        """Get list of possible values for dynamic CALL target.
+        
+        Returns empty list for static calls. For dynamic calls, returns all
+        values that could be assigned to the variable through MOVE statements
+        or initial VALUE clauses.
+        """
+        return self._possible_values.copy()
+    
+    def set_called_program(self, program: str, is_dynamic: bool = False) -> None:
+        """Set the program name being called.
+        
+        Args:
+            program: Program name (literal) or variable name
+            is_dynamic: True if program is a variable, False if literal
+        """
         self.called_program = program
+        self._is_dynamic = is_dynamic
         if program not in self.operands:
             self.operands.insert(0, program)
+    
+    def add_possible_value(self, value: str) -> None:
+        """Add a possible value for a dynamic CALL target.
+        
+        Args:
+            value: A literal value that could be assigned to the CALL variable
+        """
+        if value not in self._possible_values:
+            self._possible_values.append(value)
+    
+    def set_possible_values(self, values: List[str]) -> None:
+        """Set all possible values for a dynamic CALL target.
+        
+        Args:
+            values: List of literal values that could be assigned
+        """
+        self._possible_values = values.copy()
     
     def add_using_parameter(self, parameter: str) -> None:
         """Add a parameter to the USING clause."""
@@ -225,6 +270,8 @@ class CallStatement(CobolStatement):
         result = super().to_dict()
         result.update({
             "called_program": self.called_program,
+            "is_dynamic": self._is_dynamic,
+            "possible_values": self._possible_values.copy(),
             "using_parameters": self.using_parameters,
             "giving_parameter": self.giving_parameter
         })

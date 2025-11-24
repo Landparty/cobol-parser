@@ -766,6 +766,113 @@ class TestCallStatement:
         assert result["called_program"] == "UTILITY"
         assert result["using_parameters"] == []
         assert result["giving_parameter"] is None
+    
+    def test_set_called_program_static(self):
+        """Test setting a static called program (literal)."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('"SUBPROG"', is_dynamic=False)
+        
+        assert call_stmt.called_program == '"SUBPROG"'
+        assert call_stmt.is_dynamic == False
+        assert call_stmt.possible_values == []
+    
+    def test_set_called_program_dynamic(self):
+        """Test setting a dynamic called program (variable)."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('WS-PROGRAM-NAME', is_dynamic=True)
+        
+        assert call_stmt.called_program == 'WS-PROGRAM-NAME'
+        assert call_stmt.is_dynamic == True
+        assert call_stmt.possible_values == []  # Empty until analyzed
+    
+    def test_add_possible_value(self):
+        """Test adding a possible value to a dynamic CALL."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('WS-PROG', is_dynamic=True)
+        call_stmt.add_possible_value("PROG1")
+        call_stmt.add_possible_value("PROG2")
+        
+        assert len(call_stmt.possible_values) == 2
+        assert "PROG1" in call_stmt.possible_values
+        assert "PROG2" in call_stmt.possible_values
+    
+    def test_add_possible_value_no_duplicates(self):
+        """Test that adding duplicate values doesn't create duplicates."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('WS-PROG', is_dynamic=True)
+        call_stmt.add_possible_value("PROG1")
+        call_stmt.add_possible_value("PROG1")  # Duplicate
+        call_stmt.add_possible_value("PROG2")
+        
+        assert len(call_stmt.possible_values) == 2
+        assert call_stmt.possible_values.count("PROG1") == 1
+    
+    def test_set_possible_values(self):
+        """Test setting all possible values at once."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('WS-PROG', is_dynamic=True)
+        call_stmt.set_possible_values(["PROG-A", "PROG-B", "PROG-C"])
+        
+        assert len(call_stmt.possible_values) == 3
+        assert "PROG-A" in call_stmt.possible_values
+        assert "PROG-B" in call_stmt.possible_values
+        assert "PROG-C" in call_stmt.possible_values
+    
+    def test_possible_values_returns_copy(self):
+        """Test that possible_values property returns a copy."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('WS-PROG', is_dynamic=True)
+        call_stmt.add_possible_value("PROG1")
+        
+        # Get values and modify
+        values = call_stmt.possible_values
+        values.append("MODIFIED")
+        
+        # Verify original is not affected
+        assert "MODIFIED" not in call_stmt.possible_values
+        assert len(call_stmt.possible_values) == 1
+    
+    def test_to_dict_includes_dynamic_fields(self):
+        """Test that to_dict includes is_dynamic and possible_values."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('WS-PROG', is_dynamic=True)
+        call_stmt.add_possible_value("PROG1")
+        call_stmt.add_possible_value("PROG2")
+        
+        result = call_stmt.to_dict()
+        
+        assert "is_dynamic" in result
+        assert "possible_values" in result
+        assert result["is_dynamic"] == True
+        assert len(result["possible_values"]) == 2
+        assert "PROG1" in result["possible_values"]
+        assert "PROG2" in result["possible_values"]
+    
+    def test_to_dict_static_call(self):
+        """Test to_dict for static CALL statement."""
+        location = SourceLocation(1, 1)
+        call_stmt = CallStatement(location)
+        
+        call_stmt.set_called_program('"STATIC-PROG"', is_dynamic=False)
+        
+        result = call_stmt.to_dict()
+        
+        assert result["is_dynamic"] == False
+        assert result["possible_values"] == []
 
 
 class TestSelectStatement:
