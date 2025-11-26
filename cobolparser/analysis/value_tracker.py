@@ -89,25 +89,28 @@ class DynamicCallAnalyzer:
             targets = node.targets
             
             if source and targets:
-                # Extract literal value from source (handle strings, numbers)
-                source_value = self._extract_literal_value(source)
+                source_upper = source.upper()
                 
-                # If source is a literal, add it to all targets
-                if source_value:
-                    for target in targets:
-                        target_name = target.upper()
-                        if target_name not in self._variable_values:
-                            self._variable_values[target_name] = set()
-                        self._variable_values[target_name].add(source_value)
-                
-                # If source is a variable, propagate its possible values
-                elif source.upper() in self._variable_values:
-                    source_values = self._variable_values[source.upper()]
+                # Check if source is a known variable (propagate its values)
+                if source_upper in self._variable_values:
+                    source_values = self._variable_values[source_upper]
                     for target in targets:
                         target_name = target.upper()
                         if target_name not in self._variable_values:
                             self._variable_values[target_name] = set()
                         self._variable_values[target_name].update(source_values)
+                else:
+                    # Source is not a known variable, treat as a literal value
+                    # The parser strips quotes from STRING_LITERAL tokens, so
+                    # "PROGRAM-A" becomes PROGRAM-A
+                    source_value = self._extract_literal_value(source)
+                    
+                    if source_value:
+                        for target in targets:
+                            target_name = target.upper()
+                            if target_name not in self._variable_values:
+                                self._variable_values[target_name] = set()
+                            self._variable_values[target_name].add(source_value)
         
         # Recursively process children
         if hasattr(node, 'children'):
@@ -163,6 +166,15 @@ class DynamicCallAnalyzer:
             return '\x00'
         if upper_source in ('HIGH-VALUE', 'HIGH-VALUES'):
             return '\xff'
+        
+        # If the source contains a hyphen and doesn't match a known figurative constant,
+        # it's likely an unquoted string literal (parser strips quotes from STRING_LITERAL tokens)
+        # Examples: PROGRAM-A, SUB-PROG, MY-VALUE
+        # We treat any alphanumeric string with hyphens as a potential literal value
+        if '-' in source or source.replace('-', '').isalnum():
+            # Only treat it as a literal if it's not already tracked as a variable
+            # (this check happens in the caller)
+            return source
         
         # Not a literal
         return None

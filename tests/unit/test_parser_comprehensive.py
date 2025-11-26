@@ -1067,8 +1067,8 @@ class TestProcedureDivisionParsing:
         assert call_stmt is not None
         assert call_stmt.called_program == '"SUBPROG"'
         assert len(call_stmt.using_parameters) == 2
-        # Parameters might be strings or identifiers
-        param_values = [p if isinstance(p, str) else p.value if hasattr(p, 'value') else str(p) 
+        # Parameters might be strings or CallParameter objects
+        param_values = [p if isinstance(p, str) else p.name if hasattr(p, 'name') else str(p) 
                        for p in call_stmt.using_parameters]
         assert "PARAM1" in param_values
         assert "PARAM2" in param_values

@@ -3,10 +3,11 @@ Core copybook expansion engine.
 
 This module implements the main copybook expansion logic, including
 recursive resolution of nested copybooks, encoding detection,
-and source location tracking.
+source location tracking, content validation, and caching.
 """
 
 import time
+import os
 from typing import Optional
 from pathlib import Path
 from .models import (
@@ -14,13 +15,24 @@ from .models import (
     CopybookSearchPath,
     ExpansionContext,
     ExpansionStatistics,
+    MAX_COPYBOOK_SIZE_BYTES,
+    MAX_TOTAL_EXPANSION_BYTES,
 )
-from .copy_statement_parser import extract_copy_statements, parse_replacing_clause
+from .copy_statement_parser import (
+    extract_copy_statements, 
+    apply_replacing_clauses,
+    normalize_continuation_lines,
+)
 from .path_resolver import PathResolver
 from . import (
     CircularReferenceError,
     NestingDepthError,
     EncodingError,
+    CopybookSizeExceededError,
+    TotalExpansionSizeExceededError,
+    validate_copybook_content,
+    validate_level_numbers,
+    preprocess_conditional_compilation,
 )
 
 
@@ -146,19 +158,31 @@ def expand_copybooks(
     copybook_paths: list[str],
     max_nesting_depth: int = 100,
     preserve_source_locations: bool = False,
+    validate_content: bool = True,
+    validate_levels: bool = False,
+    process_conditionals: bool = False,
+    defined_symbols: Optional[dict[str, str]] = None,
+    max_file_size: int = MAX_COPYBOOK_SIZE_BYTES,
+    max_total_size: int = MAX_TOTAL_EXPANSION_BYTES,
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
     
     This is the main entry point for copybook expansion. It recursively resolves
-    nested COPY statements, detects circular references, and optionally preserves
-    source location metadata for error tracing.
+    nested COPY statements, detects circular references, validates content,
+    and optionally preserves source location metadata for error tracing.
     
     Args:
         source_code: COBOL source code containing COPY statements
         copybook_paths: List of directory paths to search for copybooks
         max_nesting_depth: Maximum allowed nesting depth (default: 100)
         preserve_source_locations: Whether to track source locations (default: False)
+        validate_content: Whether to validate copybook content (default: True)
+        validate_levels: Whether to validate level number alignment (default: False)
+        process_conditionals: Whether to process >>IF/>>DEFINE directives (default: False)
+        defined_symbols: Pre-defined symbols for conditional compilation
+        max_file_size: Maximum size per copybook file in bytes
+        max_total_size: Maximum total expanded content size in bytes
         
     Returns:
         CopybookExpansion object containing expanded source and metadata
@@ -169,6 +193,9 @@ def expand_copybooks(
         PathTraversalError: If path validation fails
         NestingDepthError: If nesting depth exceeds maximum
         EncodingError: If file encoding cannot be detected or converted
+        CopybookSizeExceededError: If a copybook exceeds the size limit
+        TotalExpansionSizeExceededError: If total expanded size exceeds limit
+        CopybookSyntaxError: If copybook content validation fails
         
     Example:
         >>> result = expand_copybooks(
@@ -181,10 +208,19 @@ def expand_copybooks(
     """
     start_time = time.time()
     
+    # Pre-process conditional compilation if requested
+    if process_conditionals:
+        source_code = preprocess_conditional_compilation(
+            source_code, 
+            defined_symbols or {}
+        )
+    
     # Create search configuration
     search_config = CopybookSearchPath(
         directories=copybook_paths,
-        max_nesting_depth=max_nesting_depth
+        max_nesting_depth=max_nesting_depth,
+        max_file_size=max_file_size,
+        max_total_size=max_total_size,
     )
     
     # Create path resolver
@@ -194,12 +230,14 @@ def expand_copybooks(
     context = ExpansionContext(
         current_file="<main>",
         expansion_stack=[],
-        current_depth=0
+        current_depth=0,
+        defined_symbols=dict(defined_symbols) if defined_symbols else {},
     )
     
     # Initialize statistics
     stats = ExpansionStatistics()
     stats.file_count = 1  # Count main program
+    stats.total_bytes_processed = len(source_code.encode('utf-8'))
     
     # Track included copybooks
     included_copybooks: list[str] = []
@@ -211,7 +249,11 @@ def expand_copybooks(
         path_resolver,
         context,
         preserve_source_locations,
-        included_copybooks
+        included_copybooks,
+        validate_content,
+        validate_levels,
+        process_conditionals,
+        stats,
     )
     
     # Calculate statistics
@@ -236,6 +278,10 @@ def _expand_source_recursive(
     context: ExpansionContext,
     preserve_locations: bool,
     included_copybooks: list[str],
+    validate_content: bool = True,
+    validate_levels: bool = False,
+    process_conditionals: bool = False,
+    stats: Optional[ExpansionStatistics] = None,
 ) -> tuple[str, int]:
     """
     Recursively expand COPY statements in source code.
@@ -247,6 +293,10 @@ def _expand_source_recursive(
         context: Expansion context for tracking state
         preserve_locations: Whether to preserve source locations
         included_copybooks: Accumulated list of included copybook paths
+        validate_content: Whether to validate copybook content
+        validate_levels: Whether to validate level number alignment
+        process_conditionals: Whether to process conditional directives
+        stats: Statistics object to update
         
     Returns:
         Tuple of (expanded_source, max_depth_reached)
@@ -254,6 +304,7 @@ def _expand_source_recursive(
     Raises:
         CircularReferenceError: If circular dependency detected
         NestingDepthError: If max nesting depth exceeded
+        TotalExpansionSizeExceededError: If total size exceeds limit
     """
     # Check nesting depth
     if context.current_depth > path_resolver.search_config.max_nesting_depth:
@@ -268,7 +319,7 @@ def _expand_source_recursive(
         chain = context.expansion_stack + [source_file]
         raise CircularReferenceError(chain)
     
-    # Extract COPY statements
+    # Extract COPY statements (continuation lines are normalized internally)
     copy_statements = extract_copy_statements(source_code, source_file)
     
     # If no COPY statements, return source unchanged
@@ -282,40 +333,107 @@ def _expand_source_recursive(
     # Process COPY statements in reverse order to maintain positions
     expanded_source = source_code
     for statement in reversed(copy_statements):
+        # Check cache first (for diamond dependency optimization)
+        cache_key = context.get_cache_key(
+            statement.member_name, 
+            statement.replacing_clauses
+        )
+        
         # Find copybook file
         copybook_path = path_resolver.resolve(
             statement.member_name,
             statement.library_qualifier
         )
         
-        # Read copybook content with encoding detection
-        copybook_content = read_file_with_encoding(copybook_path)
+        # Check if we have a cached expansion (without nested COPY processing)
+        # Note: We can only use cache for the same file + same replacements
+        full_cache_key = context.get_cache_key(copybook_path, statement.replacing_clauses)
         
-        # Track this copybook
-        if copybook_path not in included_copybooks:
-            included_copybooks.append(copybook_path)
-        
-        # Apply REPLACING clause if present
-        if statement.replacing_clauses:
-            for find_text, replace_text in statement.replacing_clauses:
-                copybook_content = copybook_content.replace(find_text, replace_text)
-        
-        # Recursively expand nested COPY statements
-        context.current_depth += 1
-        context.current_file = copybook_path
-        
-        expanded_copybook, nested_depth = _expand_source_recursive(
-            copybook_content,
-            copybook_path,
-            path_resolver,
-            context,
-            preserve_locations,
-            included_copybooks
-        )
+        if full_cache_key in context.content_cache:
+            expanded_copybook = context.content_cache[full_cache_key]
+            nested_depth = context.current_depth + 1
+        else:
+            # Read copybook content with encoding detection
+            copybook_content = read_file_with_encoding(copybook_path)
+            
+            # Update total bytes and check limit
+            content_size = len(copybook_content.encode('utf-8'))
+            context.total_bytes += content_size
+            if stats:
+                stats.total_bytes_processed = context.total_bytes
+            
+            if context.total_bytes > path_resolver.search_config.max_total_size:
+                raise TotalExpansionSizeExceededError(
+                    context.total_bytes,
+                    path_resolver.search_config.max_total_size
+                )
+            
+            # Validate copybook content if requested
+            if validate_content:
+                warnings = validate_copybook_content(copybook_content, copybook_path)
+                if stats and warnings:
+                    stats.warnings.extend(warnings)
+            
+            # Validate level number alignment if requested
+            if validate_levels:
+                # Get context before the COPY statement
+                statement_start = expanded_source.find(statement.original_text)
+                if statement_start != -1:
+                    pre_context = expanded_source[:statement_start]
+                    level_warnings = validate_level_numbers(
+                        pre_context, 
+                        copybook_content,
+                        copybook_path
+                    )
+                    if stats and level_warnings:
+                        stats.warnings.extend(level_warnings)
+            
+            # Process conditional compilation directives if requested
+            if process_conditionals:
+                copybook_content = preprocess_conditional_compilation(
+                    copybook_content,
+                    context.defined_symbols
+                )
+            
+            # Track this copybook
+            if copybook_path not in included_copybooks:
+                included_copybooks.append(copybook_path)
+            
+            # Apply REPLACING clause if present (using enhanced function)
+            if statement.replacing_clauses:
+                copybook_content = apply_replacing_clauses(
+                    copybook_content, 
+                    statement.replacing_clauses
+                )
+            
+            # Handle SUPPRESS clause (for listing control - we still include the content)
+            # SUPPRESS is mainly for compiler listing output, not actual code inclusion
+            # We note it in metadata but don't change the expansion behavior
+            
+            # Recursively expand nested COPY statements
+            context.current_depth += 1
+            context.current_file = copybook_path
+            
+            expanded_copybook, nested_depth = _expand_source_recursive(
+                copybook_content,
+                copybook_path,
+                path_resolver,
+                context,
+                preserve_locations,
+                included_copybooks,
+                validate_content,
+                validate_levels,
+                process_conditionals,
+                stats,
+            )
+            
+            context.current_depth -= 1
+            context.current_file = source_file
+            
+            # Cache the fully expanded result
+            context.content_cache[full_cache_key] = expanded_copybook
         
         max_depth = max(max_depth, nested_depth)
-        context.current_depth -= 1
-        context.current_file = source_file
         
         # Replace COPY statement with expanded content
         # Find statement in source

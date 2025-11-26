@@ -51,6 +51,65 @@ class TokenType(Enum):
     
     # File Description
     FD = auto()
+    SD = auto()  # Sort Description
+    
+    # FILE CONTROL keywords
+    ASSIGN_TO = auto()  # ASSIGN keyword in FILE-CONTROL
+    ORGANIZATION = auto()
+    ACCESS = auto()
+    MODE = auto()
+    RECORD = auto()
+    KEY = auto()
+    ALTERNATE = auto()
+    DUPLICATES = auto()
+    FILE_STATUS = auto()
+    RESERVE = auto()
+    AREA = auto()
+    AREAS = auto()
+    PADDING = auto()
+    CHARACTER = auto()
+    RECORD_DELIMITER = auto()
+    STANDARD_1 = auto()
+    PASSWORD = auto()
+    LOCK = auto()
+    SHARING = auto()
+    WITH = auto()
+    ALL = auto()
+    OTHER = auto()
+    NO = auto()
+    READ_ONLY = auto()
+    SEQUENTIAL = auto()
+    INDEXED = auto()
+    RELATIVE = auto()
+    LINE = auto()
+    RANDOM = auto()
+    DYNAMIC = auto()
+    OPTIONAL = auto()
+    
+    # FD/SD clause keywords
+    BLOCK = auto()
+    CONTAINS = auto()
+    RECORDS = auto()
+    CHARACTERS = auto()
+    LABEL = auto()
+    STANDARD = auto()
+    OMITTED = auto()
+    DATA = auto()
+    LINAGE = auto()
+    LINES = auto()
+    FOOTING = auto()
+    AT = auto()
+    TOP = auto()
+    BOTTOM = auto()
+    CODE_SET = auto()
+    RECORDING = auto()
+    EXTERNAL = auto()
+    GLOBAL = auto()
+    IS = auto()
+    ARE = auto()
+    IN = auto()
+    OF = auto()
+    DEPENDING = auto()
     
     # Keywords - Data Definition
     PIC = auto()
@@ -270,6 +329,64 @@ class CobolLexer:
         
         # File Description
         'FD': TokenType.FD,
+        'SD': TokenType.SD,
+        
+        # FILE CONTROL keywords
+        'ASSIGN': TokenType.ASSIGN_TO,
+        'ORGANIZATION': TokenType.ORGANIZATION,
+        'ACCESS': TokenType.ACCESS,
+        'MODE': TokenType.MODE,
+        'RECORD': TokenType.RECORD,
+        'KEY': TokenType.KEY,
+        'ALTERNATE': TokenType.ALTERNATE,
+        'DUPLICATES': TokenType.DUPLICATES,
+        'FILE-STATUS': TokenType.FILE_STATUS,
+        'RESERVE': TokenType.RESERVE,
+        'AREA': TokenType.AREA,
+        'AREAS': TokenType.AREAS,
+        'PADDING': TokenType.PADDING,
+        'CHARACTER': TokenType.CHARACTER,
+        'RECORD-DELIMITER': TokenType.RECORD_DELIMITER,
+        'STANDARD-1': TokenType.STANDARD_1,
+        'PASSWORD': TokenType.PASSWORD,
+        'LOCK': TokenType.LOCK,
+        'SHARING': TokenType.SHARING,
+        'WITH': TokenType.WITH,
+        'OTHER': TokenType.OTHER,
+        'NO': TokenType.NO,
+        'READ-ONLY': TokenType.READ_ONLY,
+        'SEQUENTIAL': TokenType.SEQUENTIAL,
+        'INDEXED': TokenType.INDEXED,
+        'RELATIVE': TokenType.RELATIVE,
+        'LINE': TokenType.LINE,
+        'RANDOM': TokenType.RANDOM,
+        'DYNAMIC': TokenType.DYNAMIC,
+        'OPTIONAL': TokenType.OPTIONAL,
+        
+        # FD/SD clause keywords
+        'BLOCK': TokenType.BLOCK,
+        'CONTAINS': TokenType.CONTAINS,
+        'RECORDS': TokenType.RECORDS,
+        'CHARACTERS': TokenType.CHARACTERS,
+        'LABEL': TokenType.LABEL,
+        'STANDARD': TokenType.STANDARD,
+        'OMITTED': TokenType.OMITTED,
+        'DATA': TokenType.DATA,
+        'LINAGE': TokenType.LINAGE,
+        'LINES': TokenType.LINES,
+        'FOOTING': TokenType.FOOTING,
+        'AT': TokenType.AT,
+        'TOP': TokenType.TOP,
+        'BOTTOM': TokenType.BOTTOM,
+        'CODE-SET': TokenType.CODE_SET,
+        'RECORDING': TokenType.RECORDING,
+        'EXTERNAL': TokenType.EXTERNAL,
+        'GLOBAL': TokenType.GLOBAL,
+        'IS': TokenType.IS,
+        'ARE': TokenType.ARE,
+        'IN': TokenType.IN,
+        'OF': TokenType.OF,
+        'DEPENDING': TokenType.DEPENDING,
         
         # Data definition
         'PIC': TokenType.PIC,

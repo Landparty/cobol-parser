@@ -2,16 +2,18 @@
 Path resolution and validation for copybook files.
 
 This module handles locating copybook files in search directories,
-normalizing paths for cross-platform compatibility, and validating
-paths to prevent security vulnerabilities like path traversal attacks.
+normalizing paths for cross-platform compatibility, validating
+paths to prevent security vulnerabilities like path traversal attacks,
+and providing fuzzy matching suggestions for misspelled copybook names.
 """
 
 import os
 import sys
 from pathlib import Path
 from typing import Optional
+from difflib import get_close_matches
 from .models import CopybookSearchPath
-from . import PathTraversalError, CopybookNotFoundError
+from . import PathTraversalError, CopybookNotFoundError, CopybookSizeExceededError
 
 
 def normalize_path(path: str) -> str:
@@ -81,6 +83,80 @@ def validate_path_within_directory(file_path: str, base_directory: str) -> bool:
         raise PathTraversalError(file_path, f"Path validation failed: {str(e)}")
 
 
+def get_available_copybooks(search_config: CopybookSearchPath) -> list[str]:
+    """
+    Get list of all available copybook names in search directories.
+    
+    Args:
+        search_config: Search configuration with directories and extensions
+        
+    Returns:
+        List of copybook member names (without extensions)
+        
+    Example:
+        >>> config = CopybookSearchPath(directories=["/copybooks"])
+        >>> get_available_copybooks(config)
+        ['EMPLOYEE', 'CUSTOMER', 'ADDRESS']
+    """
+    available = set()
+    
+    for search_dir in search_config.directories:
+        if not os.path.isdir(search_dir):
+            continue
+        
+        for ext in search_config.extensions:
+            if ext:
+                pattern = f"*{ext}"
+                for path in Path(search_dir).glob(pattern):
+                    if path.is_file():
+                        available.add(path.stem.upper())
+            else:
+                # No extension - add all files
+                for path in Path(search_dir).iterdir():
+                    if path.is_file():
+                        available.add(path.stem.upper())
+    
+    return sorted(available)
+
+
+def suggest_similar_copybooks(
+    member_name: str, 
+    search_config: CopybookSearchPath,
+    max_suggestions: int = 3,
+    cutoff: float = 0.6
+) -> list[str]:
+    """
+    Find similarly-named copybooks for typo detection.
+    
+    Uses fuzzy string matching to suggest alternatives when a
+    copybook is not found.
+    
+    Args:
+        member_name: The copybook name that was not found
+        search_config: Search configuration
+        max_suggestions: Maximum number of suggestions to return
+        cutoff: Minimum similarity ratio (0.0 to 1.0)
+        
+    Returns:
+        List of similar copybook names
+        
+    Example:
+        >>> suggest_similar_copybooks("EMPLOYE", config)
+        ['EMPLOYEE']
+    """
+    available = get_available_copybooks(search_config)
+    
+    # Normalize to uppercase for comparison
+    member_upper = member_name.upper()
+    
+    return get_close_matches(
+        member_upper, 
+        available, 
+        n=max_suggestions, 
+        cutoff=cutoff
+    )
+
+
 def find_copybook_file(
     member_name: str,
     search_config: CopybookSearchPath,
@@ -104,6 +180,7 @@ def find_copybook_file(
     Raises:
         CopybookNotFoundError: If copybook cannot be found in any search path
         PathTraversalError: If path validation fails
+        CopybookSizeExceededError: If file exceeds size limit
         
     Example:
         >>> config = CopybookSearchPath(directories=["/copybooks"])
@@ -116,17 +193,36 @@ def find_copybook_file(
     # Build list of possible filenames
     possible_names = [member_name]  # Try exact name first
     for ext in extensions:
-        possible_names.append(f"{member_name}{ext}")
+        if ext:  # Skip empty extension (already added as exact name)
+            possible_names.append(f"{member_name}{ext}")
+    
+    # If not case-sensitive, also try case variations
+    if not search_config.case_sensitive:
+        case_variants = [
+            member_name.upper(),
+            member_name.lower(),
+            member_name.capitalize()
+        ]
+        for variant in case_variants:
+            if variant not in possible_names:
+                possible_names.append(variant)
+            for ext in extensions:
+                if ext:
+                    name_with_ext = f"{variant}{ext}"
+                    if name_with_ext not in possible_names:
+                        possible_names.append(name_with_ext)
     
     # Search in each directory
     for search_dir in search_dirs:
+        actual_search_dir = search_dir
+        
         # If library qualifier provided, add it as a subdirectory
         if library_qualifier:
-            search_dir = os.path.join(search_dir, library_qualifier)
+            actual_search_dir = os.path.join(search_dir, library_qualifier)
         
         # Try each possible filename
         for filename in possible_names:
-            file_path = os.path.join(search_dir, filename)
+            file_path = os.path.join(actual_search_dir, filename)
             
             # Normalize path
             file_path = normalize_path(file_path)
@@ -135,10 +231,21 @@ def find_copybook_file(
             if os.path.isfile(file_path):
                 # Validate path is within search directory
                 validate_path_within_directory(file_path, search_dir)
+                
+                # Check file size
+                file_size = os.path.getsize(file_path)
+                if file_size > search_config.max_file_size:
+                    raise CopybookSizeExceededError(
+                        file_path,
+                        file_size,
+                        search_config.max_file_size
+                    )
+                
                 return os.path.abspath(file_path)
     
-    # Copybook not found in any search path
-    raise CopybookNotFoundError(member_name, search_dirs)
+    # Copybook not found - get suggestions
+    suggestions = suggest_similar_copybooks(member_name, search_config)
+    raise CopybookNotFoundError(member_name, search_dirs, suggestions)
 
 
 class PathResolver:
@@ -146,7 +253,7 @@ class PathResolver:
     Wrapper class for path resolution functionality.
     
     Provides a unified interface for resolving copybook file paths
-    with integrated validation and search configuration.
+    with integrated validation, size checking, and fuzzy matching.
     
     Attributes:
         search_config: Configuration for copybook search paths and extensions
@@ -173,8 +280,9 @@ class PathResolver:
             Absolute path to copybook file
             
         Raises:
-            CopybookNotFoundError: If copybook not found
+            CopybookNotFoundError: If copybook not found (with suggestions)
             PathTraversalError: If path validation fails
+            CopybookSizeExceededError: If file exceeds size limit
         """
         return find_copybook_file(member_name, self.search_config, library_qualifier)
     
@@ -205,11 +313,34 @@ class PathResolver:
             PathTraversalError: If validation fails
         """
         return validate_path_within_directory(file_path, base_directory)
+    
+    def get_suggestions(self, member_name: str) -> list[str]:
+        """
+        Get suggestions for a possibly misspelled copybook name.
+        
+        Args:
+            member_name: The copybook name to find suggestions for
+            
+        Returns:
+            List of similar copybook names
+        """
+        return suggest_similar_copybooks(member_name, self.search_config)
+    
+    def list_available(self) -> list[str]:
+        """
+        List all available copybook names.
+        
+        Returns:
+            List of copybook member names
+        """
+        return get_available_copybooks(self.search_config)
 
 
 __all__ = [
     'normalize_path',
     'validate_path_within_directory',
     'find_copybook_file',
+    'get_available_copybooks',
+    'suggest_similar_copybooks',
     'PathResolver',
 ]

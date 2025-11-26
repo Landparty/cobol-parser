@@ -2,6 +2,112 @@
 
 This document shows examples of how FILE-CONTROL SELECT statements and file definitions are parsed into AST nodes.
 
+## Supported SELECT Clause Variations
+
+The parser supports comprehensive SELECT statement parsing for FILE-CONTROL:
+
+### SELECT Clauses
+
+| Clause | Status | Notes |
+|--------|--------|-------|
+| SELECT file-name | ✅ Full | Basic file selection |
+| SELECT OPTIONAL file-name | ✅ Full | Optional file handling |
+| ASSIGN TO identifier | ✅ Full | Simple assignment |
+| ASSIGN TO string-literal | ✅ Full | e.g., "MYFILE.DAT" |
+| ASSIGN TO device-type | ✅ Full | DISK, TAPE, PRINTER, etc. |
+| ASSIGN TO device-type identifier | ✅ Full | e.g., DISK MYFILE |
+| ORGANIZATION IS SEQUENTIAL | ✅ Full | Sequential file organization |
+| ORGANIZATION IS INDEXED | ✅ Full | Indexed file organization |
+| ORGANIZATION IS RELATIVE | ✅ Full | Relative file organization |
+| ORGANIZATION IS LINE SEQUENTIAL | ✅ Full | Text file organization |
+| ACCESS MODE IS SEQUENTIAL | ✅ Full | Sequential access |
+| ACCESS MODE IS RANDOM | ✅ Full | Random access |
+| ACCESS MODE IS DYNAMIC | ✅ Full | Dynamic access |
+| RECORD KEY IS data-name | ✅ Full | Primary record key |
+| RECORD KEY ... SOURCE IS | ✅ Full | Key source specification |
+| ALTERNATE RECORD KEY | ✅ Full | Alternate keys |
+| ALTERNATE KEY ... WITH DUPLICATES | ✅ Full | Duplicate handling |
+| RELATIVE KEY IS data-name | ✅ Full | Relative file key |
+| FILE STATUS IS data-name | ✅ Full | Single status variable |
+| FILE STATUS IS data-name, data-name | ✅ Full | VSAM return code |
+| RESERVE integer AREAS | ✅ Full | Buffer areas |
+| PADDING CHARACTER IS | ✅ Full | Padding specification |
+| RECORD DELIMITER IS | ✅ Full | Delimiter specification |
+| PASSWORD IS data-name | ✅ Full | File password |
+| LOCK MODE IS MANUAL | ✅ Full | Manual locking |
+| LOCK MODE IS AUTOMATIC | ✅ Full | Automatic locking |
+| LOCK MODE IS EXCLUSIVE | ✅ Full | Exclusive locking |
+| LOCK MODE ... WITH LOCK ON RECORD | ✅ Full | Record locking |
+| LOCK MODE ... WITH ROLLBACK | ✅ Full | Rollback support |
+| SHARING WITH ALL OTHER | ✅ Full | Multi-user sharing |
+| SHARING WITH NO OTHER | ✅ Full | Exclusive access |
+| SHARING WITH READ ONLY | ✅ Full | Read-only sharing |
+
+### FD/SD Clauses
+
+| Clause | Status | Notes |
+|--------|--------|-------|
+| FD file-name | ✅ Full | File description entry |
+| SD file-name | ✅ Full | Sort description entry |
+| BLOCK CONTAINS integer RECORDS | ✅ Full | Fixed block size |
+| BLOCK CONTAINS integer CHARACTERS | ✅ Full | Character-based block |
+| BLOCK CONTAINS min TO max | ✅ Full | Variable block size |
+| RECORD CONTAINS integer | ✅ Full | Fixed record size |
+| RECORD CONTAINS min TO max | ✅ Full | Variable record size |
+| RECORD IS VARYING ... DEPENDING ON | ✅ Full | Variable length records |
+| LABEL RECORDS ARE STANDARD | ✅ Full | Standard labels |
+| LABEL RECORDS ARE OMITTED | ✅ Full | Omitted labels |
+| VALUE OF system-name | ✅ Full | File information |
+| DATA RECORDS ARE | ✅ Full | Record names |
+| LINAGE IS integer LINES | ✅ Full | Page lines |
+| LINAGE ... FOOTING AT | ⚠️ Partial | May need error recovery |
+| LINAGE ... LINES AT TOP | ⚠️ Partial | May need error recovery |
+| LINAGE ... LINES AT BOTTOM | ⚠️ Partial | May need error recovery |
+| CODE-SET IS alphabet-name | ✅ Full | Character encoding |
+| RECORDING MODE IS F/V/U/S | ✅ Full | IBM recording modes |
+| IS EXTERNAL | ✅ Full | External file |
+| IS GLOBAL | ✅ Full | Global file |
+| REPORT IS | ✅ Full | Report file |
+
+## Device Types Supported
+
+The ASSIGN clause recognizes these device types:
+- `DISK` - Disk files
+- `TAPE` - Magnetic tape
+- `PRINTER` - Print output
+- `READER` - Card reader
+- `PUNCH` - Card punch
+- `KEYBOARD` - Keyboard input
+- `DISPLAY` - Display output
+- `CONSOLE` - Console device
+- `DA` - Direct access
+- `UT` - Utility
+- `UR` - Unit record
+- `EXTERNAL` - External assignment
+- `DYNAMIC` - Dynamic assignment
+
+## Dialect-Specific Variations
+
+The parser supports dialect-specific syntax variations:
+
+### IBM Enterprise COBOL
+- RECORDING MODE clause (F, V, U, S)
+- EXEC SQL file handling
+- VSAM file status codes
+
+### Micro Focus COBOL
+- LINE SEQUENTIAL organization
+- SHARING clause variations
+- LOCK MODE extensions
+
+### GnuCOBOL
+- Extended device types
+- Relaxed syntax requirements
+
+### ACUCOBOL
+- Additional file status codes
+- Extended sharing modes
+
 ## Basic SELECT Statement
 
 ### COBOL Source

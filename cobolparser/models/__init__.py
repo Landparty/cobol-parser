@@ -28,10 +28,21 @@ from .statements import (
     MoveStatement,
     DisplayStatement, 
     PerformStatement,
+    StopStatement,
     CallStatement,
     ComputeStatement,
     ArithmeticExpression,
     ConditionalExpression,
+)
+from .sql_statements import (
+    SQLStatementInfo,
+    SQLStatementType,
+    ExecSQLStatement,
+    DeclareCursorStatement,
+    FetchStatement,
+    DynamicSQLStatement,
+    TransactionControlStatement,
+    parse_exec_sql,
 )
 
 # All model exports
@@ -51,9 +62,19 @@ __all__ = [
     "CobolExpression",
     "MoveStatement",
     "DisplayStatement",
-    "PerformStatement", 
+    "PerformStatement",
+    "StopStatement",
     "CallStatement",
     "ComputeStatement",
     "ArithmeticExpression",
     "ConditionalExpression",
+    # SQL statement exports
+    "SQLStatementInfo",
+    "SQLStatementType",
+    "ExecSQLStatement",
+    "DeclareCursorStatement",
+    "FetchStatement",
+    "DynamicSQLStatement",
+    "TransactionControlStatement",
+    "parse_exec_sql",
 ]

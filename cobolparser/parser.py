@@ -13,9 +13,10 @@ from .models.ast_base import SourceLocation, ASTNode
 from .models.program import CobolProgram, CobolDivision, CobolSection, CobolParagraph, CobolFileDescription
 from .models.statements import (
     CobolStatement, CobolExpression, MoveStatement, DisplayStatement, 
-    PerformStatement, CallStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
+    PerformStatement, StopStatement, CallStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
 )
 from .models.data_items import CobolDataItem, PictureClause, OccursClause
+from .models.sql_statements import parse_exec_sql, ExecSQLStatement
 from .plugins.core import (
     ParseError, ParseStatistics, ErrorRecoveryMode, DialectType,
     MemoryConfiguration, SerializationConfig, PluginManager
@@ -481,7 +482,24 @@ class CobolParser:
                     self.advance_token()
     
     def parse_select_statement(self) -> None:
-        """Parse SELECT statement in FILE-CONTROL."""
+        """Parse SELECT statement in FILE-CONTROL with comprehensive clause support.
+        
+        Supports all SELECT clause variations:
+        - SELECT [OPTIONAL] file-name
+        - ASSIGN TO assignment-name/device-name/literal
+        - ORGANIZATION IS SEQUENTIAL/INDEXED/RELATIVE/LINE SEQUENTIAL
+        - ACCESS MODE IS SEQUENTIAL/RANDOM/DYNAMIC
+        - RECORD KEY IS data-name [SOURCE IS data-name]
+        - ALTERNATE RECORD KEY IS data-name [WITH DUPLICATES] [PASSWORD IS data-name]
+        - RELATIVE KEY IS data-name
+        - FILE STATUS IS data-name [, data-name]
+        - RESERVE integer AREA(S)
+        - PADDING CHARACTER IS data-name/literal
+        - RECORD DELIMITER IS STANDARD-1/data-name
+        - PASSWORD IS data-name
+        - LOCK MODE IS {MANUAL/AUTOMATIC/EXCLUSIVE} [WITH LOCK ON {RECORD/MULTIPLE RECORDS}] [WITH ROLLBACK]
+        - SHARING WITH {ALL/NO OTHER/READ ONLY}
+        """
         if (not self.current_token or 
             self.current_token.value.upper() != "SELECT"):
             return
@@ -489,8 +507,22 @@ class CobolParser:
         location = self.current_token.location
         self.advance_token()  # Skip SELECT
         
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Check for OPTIONAL keyword
+        is_optional = False
+        if self.current_token and self.current_token.value.upper() == "OPTIONAL":
+            is_optional = True
+            self.advance_token()
+            # Skip newlines
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+        
         # Get file name
         if not self.current_token or self.current_token.type != TokenType.IDENTIFIER:
+            self.add_error(self.create_error("Expected file name after SELECT"))
             return
         
         file_name = self.current_token.value
@@ -498,66 +530,516 @@ class CobolParser:
         
         # Create SELECT statement
         select_stmt = SelectStatement(location)
-        select_stmt.set_file_name(file_name)
+        select_stmt.set_file_name(file_name, is_optional)
         
-        # Parse ASSIGN (TO) clause. In many codebases ASSIGN and TO can be
-        # split across lines, and the target device/filename may appear on
-        # the following line (as in the CCVS85 test suite). We therefore:
-        # 1. Treat ASSIGN as a keyword even if tokenized as IDENTIFIER.
-        # 2. Allow optional TO.
-        # 3. Skip intervening NEWLINE tokens before capturing the target.
-        if self.current_token and self.current_token.value.upper() == "ASSIGN":
-            self.advance_token()  # consume ASSIGN
-            # Optional TO keyword
-            if self.current_token and self.current_token.value.upper() == "TO":
-                self.advance_token()
-            # Skip blank lines
+        # Parse clauses until period
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip newlines between clauses
             while self.current_token and self.current_token.type == TokenType.NEWLINE:
                 self.advance_token()
-            # Capture target (identifier or string literal)
-            if self.current_token and self.current_token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
-                if self.current_token.type == TokenType.STRING_LITERAL:
-                    assign_to = f'"{self.current_token.value}"'
-                else:
-                    assign_to = self.current_token.value
-                select_stmt.set_assign_to(assign_to)
-                self.advance_token()
-        
-        # Parse optional clauses (ORGANIZATION, ACCESS MODE, etc.)
-        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
             current_val = self.current_token.value.upper() if self.current_token.value else ""
-            if current_val == "ORGANIZATION":
-                self.advance_token()  # ORGANIZATION
-                if self.current_token and self.current_token.value.upper() == "IS":
-                    self.advance_token()
-                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
-                    select_stmt.set_organization(self.current_token.value)
-                    self.advance_token()
+            
+            # ASSIGN clause
+            if current_val == "ASSIGN":
+                self._parse_select_assign_clause(select_stmt)
+            
+            # ORGANIZATION clause
+            elif current_val == "ORGANIZATION":
+                self._parse_select_organization_clause(select_stmt)
+            
+            # ACCESS MODE clause
             elif current_val == "ACCESS":
-                # ACCESS [MODE] [IS] <type>
-                self.advance_token()  # ACCESS
-                if self.current_token and self.current_token.value.upper() == "MODE":
-                    self.advance_token()
+                self._parse_select_access_mode_clause(select_stmt)
+            
+            # RECORD KEY clause
+            elif current_val == "RECORD":
+                self._parse_select_record_key_clause(select_stmt)
+            
+            # ALTERNATE RECORD KEY clause
+            elif current_val == "ALTERNATE":
+                self._parse_select_alternate_key_clause(select_stmt)
+            
+            # RELATIVE KEY clause  
+            elif current_val == "RELATIVE":
+                self._parse_select_relative_key_clause(select_stmt)
+            
+            # FILE STATUS clause
+            elif current_val == "FILE" or current_val == "FILE-STATUS":
+                self._parse_select_file_status_clause(select_stmt)
+            
+            # RESERVE clause
+            elif current_val == "RESERVE":
+                self._parse_select_reserve_clause(select_stmt)
+            
+            # PADDING CHARACTER clause
+            elif current_val == "PADDING":
+                self._parse_select_padding_clause(select_stmt)
+            
+            # RECORD DELIMITER clause (already handled RECORD above, check for DELIMITER)
+            elif current_val == "DELIMITER":
+                # This could be part of RECORD DELIMITER - skip if standalone
+                self.advance_token()
+            
+            # PASSWORD clause
+            elif current_val == "PASSWORD":
+                self._parse_select_password_clause(select_stmt)
+            
+            # LOCK MODE clause
+            elif current_val == "LOCK":
+                self._parse_select_lock_mode_clause(select_stmt)
+            
+            # SHARING clause
+            elif current_val == "SHARING":
+                self._parse_select_sharing_clause(select_stmt)
+            
+            # STATUS (alternative form of FILE STATUS)
+            elif current_val == "STATUS":
+                # Skip to IS and get the status variable
+                self.advance_token()
                 if self.current_token and self.current_token.value.upper() == "IS":
                     self.advance_token()
                 if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
-                    select_stmt.set_access_mode(self.current_token.value)
+                    select_stmt.set_file_status(self.current_token.value)
                     self.advance_token()
+            
+            # Break on start of another SELECT or division/section keywords
+            elif current_val in ("SELECT", "DATA", "PROCEDURE", "INPUT-OUTPUT", "CONFIGURATION", "I-O-CONTROL"):
+                break
+            
+            # Skip noise words and unknown tokens
             else:
-                # Break on start of another SELECT (defensive) or division/section keywords
-                if current_val in ("SELECT", "DATA", "PROCEDURE", "INPUT-OUTPUT", "CONFIGURATION"):
-                    break
                 self.advance_token()
         
         # Consume period
         if self.current_token and self.current_token.type == TokenType.PERIOD:
-            self.advance_token()  # Skip period
+            self.advance_token()
         
         # Add SELECT statement to current paragraph
         if self.current_section and hasattr(self.current_section, 'paragraphs') and self.current_section.paragraphs:
-            # Get the last paragraph (should be FILE-CONTROL)
             last_paragraph = self.current_section.paragraphs[-1]
             last_paragraph.add_statement(select_stmt)
+    
+    def _parse_select_assign_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse ASSIGN TO clause with device type support."""
+        self.advance_token()  # Skip ASSIGN
+        
+        # Optional TO keyword
+        if self.current_token and self.current_token.value.upper() == "TO":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Check for device type (DISK, TAPE, PRINTER, etc.)
+        # Device types can be followed by an actual file name, or can BE the assignment target
+        device_type = None
+        device_keywords = {"DISK", "TAPE", "PRINTER", "READER", "PUNCH", "KEYBOARD", 
+                          "DISPLAY", "CONSOLE", "DA", "UT", "UR", "EXTERNAL", "DYNAMIC"}
+        
+        if self.current_token and self.current_token.value.upper() in device_keywords:
+            potential_device = self.current_token.value.upper()
+            # Peek ahead to see if there's an actual target after the device keyword
+            saved_index = self.current_token_index
+            self.advance_token()
+            
+            # Skip newlines to check what's next
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+            
+            # If next token is an identifier or string literal, then the keyword was a device type
+            # If next token is period or a new clause keyword, then the keyword IS the assignment target
+            if (self.current_token and 
+                self.current_token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL)):
+                # Device keyword followed by actual target
+                device_type = potential_device
+                if self.current_token.type == TokenType.STRING_LITERAL:
+                    assign_to = f'"{self.current_token.value}"'
+                else:
+                    assign_to = self.current_token.value
+                select_stmt.set_assign_to(assign_to, device_type)
+                self.advance_token()
+            else:
+                # Device keyword IS the assignment target (e.g., "ASSIGN TO PRINTER.")
+                select_stmt.set_assign_to(potential_device, None)
+            return
+        
+        # Get assignment target (identifier or string literal) - not a device keyword
+        if self.current_token and self.current_token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
+            if self.current_token.type == TokenType.STRING_LITERAL:
+                assign_to = f'"{self.current_token.value}"'
+            else:
+                assign_to = self.current_token.value
+            select_stmt.set_assign_to(assign_to, device_type)
+            self.advance_token()
+    
+    def _parse_select_organization_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse ORGANIZATION IS clause."""
+        self.advance_token()  # Skip ORGANIZATION
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get organization type
+        if self.current_token:
+            org_val = self.current_token.value.upper()
+            
+            # Handle LINE SEQUENTIAL
+            if org_val == "LINE":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "SEQUENTIAL":
+                    select_stmt.set_organization("LINE SEQUENTIAL")
+                    self.advance_token()
+                else:
+                    select_stmt.set_organization("LINE")
+            elif org_val in ("SEQUENTIAL", "INDEXED", "RELATIVE"):
+                select_stmt.set_organization(org_val)
+                self.advance_token()
+            else:
+                select_stmt.set_organization(org_val)
+                self.advance_token()
+    
+    def _parse_select_access_mode_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse ACCESS MODE IS clause."""
+        self.advance_token()  # Skip ACCESS
+        
+        # Optional MODE keyword
+        if self.current_token and self.current_token.value.upper() == "MODE":
+            self.advance_token()
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get access mode (SEQUENTIAL, RANDOM, DYNAMIC)
+        # Note: these may be tokenized as keywords rather than identifiers
+        if self.current_token:
+            access_val = self.current_token.value.upper() if self.current_token.value else ""
+            if access_val in ("SEQUENTIAL", "RANDOM", "DYNAMIC"):
+                select_stmt.set_access_mode(access_val)
+                self.advance_token()
+    
+    def _parse_select_record_key_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse RECORD KEY IS clause or RECORD DELIMITER clause."""
+        self.advance_token()  # Skip RECORD
+        
+        if not self.current_token:
+            return
+        
+        next_val = self.current_token.value.upper() if self.current_token.value else ""
+        
+        # RECORD DELIMITER clause
+        if next_val == "DELIMITER":
+            self.advance_token()  # Skip DELIMITER
+            if self.current_token and self.current_token.value.upper() == "IS":
+                self.advance_token()
+            if self.current_token:
+                if self.current_token.value.upper() == "STANDARD-1":
+                    select_stmt.set_record_delimiter("STANDARD-1")
+                else:
+                    select_stmt.set_record_delimiter(self.current_token.value)
+                self.advance_token()
+            return
+        
+        # RECORD KEY clause
+        if next_val == "KEY":
+            self.advance_token()  # Skip KEY
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get key data name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            key_name = self.current_token.value
+            self.advance_token()
+            
+            # Check for SOURCE IS clause (IBM extension)
+            source = None
+            if self.current_token and self.current_token.value.upper() == "SOURCE":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "IS":
+                    self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    source = self.current_token.value
+                    self.advance_token()
+            
+            select_stmt.set_record_key(key_name, source)
+    
+    def _parse_select_alternate_key_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse ALTERNATE RECORD KEY IS clause."""
+        self.advance_token()  # Skip ALTERNATE
+        
+        # RECORD keyword
+        if self.current_token and self.current_token.value.upper() == "RECORD":
+            self.advance_token()
+        
+        # KEY keyword
+        if self.current_token and self.current_token.value.upper() == "KEY":
+            self.advance_token()
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get key data name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            key_name = self.current_token.value
+            self.advance_token()
+            
+            # Check for WITH DUPLICATES
+            duplicates_allowed = False
+            password = None
+            
+            while self.current_token:
+                word = self.current_token.value.upper() if self.current_token.value else ""
+                
+                if word == "WITH":
+                    self.advance_token()
+                    continue
+                elif word == "DUPLICATES":
+                    duplicates_allowed = True
+                    self.advance_token()
+                    continue
+                elif word == "PASSWORD":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "IS":
+                        self.advance_token()
+                    if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                        password = self.current_token.value
+                        self.advance_token()
+                    continue
+                else:
+                    break
+            
+            select_stmt.add_alternate_key(key_name, duplicates_allowed, password)
+    
+    def _parse_select_relative_key_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse RELATIVE KEY IS clause."""
+        self.advance_token()  # Skip RELATIVE
+        
+        # KEY keyword
+        if self.current_token and self.current_token.value.upper() == "KEY":
+            self.advance_token()
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get key data name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            select_stmt.set_relative_key(self.current_token.value)
+            self.advance_token()
+    
+    def _parse_select_file_status_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse FILE STATUS IS clause."""
+        current_val = self.current_token.value.upper() if self.current_token.value else ""
+        
+        if current_val == "FILE":
+            self.advance_token()  # Skip FILE
+            if self.current_token and self.current_token.value.upper() == "STATUS":
+                self.advance_token()
+        elif current_val == "FILE-STATUS":
+            self.advance_token()  # Skip FILE-STATUS
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get primary status variable
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            primary_status = self.current_token.value
+            self.advance_token()
+            
+            # Check for second status variable (VSAM)
+            vsam_status = None
+            if self.current_token and self.current_token.type == TokenType.COMMA:
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    vsam_status = self.current_token.value
+                    self.advance_token()
+            
+            select_stmt.set_file_status(primary_status, vsam_status)
+    
+    def _parse_select_reserve_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse RESERVE clause."""
+        self.advance_token()  # Skip RESERVE
+        
+        # Get number of areas
+        if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+            areas = int(self.current_token.value)
+            select_stmt.set_reserve_areas(areas)
+            self.advance_token()
+            
+            # Optional AREA(S) keyword
+            if self.current_token and self.current_token.value.upper() in ("AREA", "AREAS"):
+                self.advance_token()
+    
+    def _parse_select_padding_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse PADDING CHARACTER IS clause."""
+        self.advance_token()  # Skip PADDING
+        
+        # CHARACTER keyword
+        if self.current_token and self.current_token.value.upper() == "CHARACTER":
+            self.advance_token()
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get padding character (identifier or literal)
+        if self.current_token:
+            if self.current_token.type == TokenType.STRING_LITERAL:
+                select_stmt.set_padding_character(f'"{self.current_token.value}"')
+            else:
+                select_stmt.set_padding_character(self.current_token.value)
+            self.advance_token()
+    
+    def _parse_select_password_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse PASSWORD IS clause."""
+        self.advance_token()  # Skip PASSWORD
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get password data name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            select_stmt.set_password(self.current_token.value)
+            self.advance_token()
+    
+    def _parse_select_lock_mode_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse LOCK MODE IS clause."""
+        self.advance_token()  # Skip LOCK
+        
+        # MODE keyword
+        if self.current_token and self.current_token.value.upper() == "MODE":
+            self.advance_token()
+        
+        # Optional IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get lock mode (MANUAL, AUTOMATIC, EXCLUSIVE)
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            lock_mode = self.current_token.value.upper()
+            self.advance_token()
+            
+            lock_on = None
+            with_rollback = False
+            
+            # Check for WITH LOCK ON clause
+            while self.current_token:
+                word = self.current_token.value.upper() if self.current_token.value else ""
+                
+                if word == "WITH":
+                    self.advance_token()
+                    if self.current_token:
+                        next_word = self.current_token.value.upper()
+                        if next_word == "LOCK":
+                            self.advance_token()
+                            if self.current_token and self.current_token.value.upper() == "ON":
+                                self.advance_token()
+                                # Get lock target (RECORD or MULTIPLE RECORDS)
+                                if self.current_token and self.current_token.value.upper() == "MULTIPLE":
+                                    self.advance_token()
+                                    if self.current_token and self.current_token.value.upper() == "RECORDS":
+                                        lock_on = "MULTIPLE RECORDS"
+                                        self.advance_token()
+                                elif self.current_token and self.current_token.value.upper() == "RECORD":
+                                    lock_on = "RECORD"
+                                    self.advance_token()
+                        elif next_word == "ROLLBACK":
+                            with_rollback = True
+                            self.advance_token()
+                        else:
+                            break
+                else:
+                    break
+            
+            select_stmt.set_lock_mode(lock_mode, lock_on, with_rollback)
+    
+    def _parse_select_sharing_clause(self, select_stmt: SelectStatement) -> None:
+        """Parse SHARING WITH clause."""
+        self.advance_token()  # Skip SHARING
+        
+        # Optional WITH keyword
+        if self.current_token and self.current_token.value.upper() == "WITH":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get sharing mode
+        if self.current_token:
+            sharing_val = self.current_token.value.upper()
+            
+            if sharing_val == "ALL":
+                self.advance_token()
+                # Optional OTHER
+                if self.current_token and self.current_token.value.upper() == "OTHER":
+                    self.advance_token()
+                select_stmt.set_sharing_mode("ALL OTHER")
+            elif sharing_val == "NO":
+                self.advance_token()
+                # OTHER
+                if self.current_token and self.current_token.value.upper() == "OTHER":
+                    self.advance_token()
+                select_stmt.set_sharing_mode("NO OTHER")
+            elif sharing_val == "READ":
+                self.advance_token()
+                # ONLY
+                if self.current_token and self.current_token.value.upper() == "ONLY":
+                    self.advance_token()
+                select_stmt.set_sharing_mode("READ ONLY")
+            elif sharing_val == "READ-ONLY":
+                select_stmt.set_sharing_mode("READ ONLY")
+                self.advance_token()
+            else:
+                select_stmt.set_sharing_mode(sharing_val)
+                self.advance_token()
     
     def parse_data_division(self) -> bool:
         """Parse DATA DIVISION (optional)."""
@@ -664,7 +1146,7 @@ class CobolParser:
         self.parse_data_items()
     
     def parse_file_section(self) -> None:
-        """Parse FILE SECTION with FD records."""
+        """Parse FILE SECTION with FD and SD records."""
         if not self.match_token(TokenType.IDENTIFIER):  # SECTION keyword
             return
         
@@ -677,52 +1159,576 @@ class CobolParser:
             self.current_division.add_section(file_section)
         self.current_section = file_section
         
-        # Parse FD records and data items
+        # Parse FD/SD records and data items
         while self.current_token and self.current_token.type not in [
             TokenType.PROCEDURE_DIVISION, TokenType.WORKING_STORAGE_SECTION,
             TokenType.LOCAL_STORAGE_SECTION, TokenType.LINKAGE_SECTION, TokenType.EOF
         ]:
-            if (self.current_token and 
-                self.current_token.value.upper() == "FD"):
-                self.parse_fd_record()
-            elif self.current_token.type == TokenType.LEVEL_NUMBER:
-                self.parse_data_item()
+            if self.current_token and self.current_token.value:
+                record_type = self.current_token.value.upper()
+                if record_type == "FD":
+                    self.parse_fd_record("FD")
+                elif record_type == "SD":
+                    self.parse_fd_record("SD")
+                elif self.current_token.type == TokenType.LEVEL_NUMBER:
+                    self.parse_data_item()
+                else:
+                    # Skip newlines and other tokens
+                    if not self.match_token(TokenType.NEWLINE):
+                        self.advance_token()
             else:
-                # Skip newlines and other tokens
-                if not self.match_token(TokenType.NEWLINE):
-                    self.advance_token()
+                self.advance_token()
     
-    def parse_fd_record(self) -> None:
-        """Parse FD (File Description) record."""
-        if (not self.current_token or 
-            self.current_token.value.upper() != "FD"):
+    def parse_fd_record(self, record_type: str = "FD") -> None:
+        """Parse FD (File Description) or SD (Sort Description) record.
+        
+        Supports comprehensive FD/SD clause variations:
+        - EXTERNAL/GLOBAL attributes
+        - BLOCK CONTAINS clause
+        - RECORD CONTAINS clause (fixed and variable)
+        - LABEL RECORDS clause
+        - VALUE OF clause
+        - DATA RECORD(S) clause
+        - LINAGE clause with FOOTING and TOP/BOTTOM
+        - CODE-SET clause
+        - RECORDING MODE clause
+        - REPORT IS clause (Report Writer)
+        """
+        if not self.current_token or self.current_token.value.upper() not in ("FD", "SD"):
             return
         
         location = self.current_token.location
-        self.advance_token()  # Skip FD
+        actual_type = self.current_token.value.upper()
+        self.advance_token()  # Skip FD/SD
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
         
         # Get file name
         if not self.current_token or self.current_token.type != TokenType.IDENTIFIER:
+            self.add_error(self.create_error(f"Expected file name after {actual_type}"))
             return
         
         file_name = self.current_token.value
         self.advance_token()
         
-        # Create FD record
-        fd_record = CobolFileDescription(file_name, location)
+        # Create FD/SD record
+        fd_record = CobolFileDescription(file_name, location, actual_type)
         
-        # Parse optional clauses until period
-        while (self.current_token and 
-               self.current_token.type != TokenType.PERIOD):
-            # Could parse RECORD CONTAINS, BLOCK CONTAINS, LABEL RECORDS here
+        # Parse clauses until period
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip newlines between clauses
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            current_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # EXTERNAL attribute
+            if current_val == "EXTERNAL":
+                fd_record.set_external(True)
+                self.advance_token()
+            
+            # GLOBAL attribute
+            elif current_val == "GLOBAL":
+                fd_record.set_global(True)
+                self.advance_token()
+            
+            # IS keyword (noise word)
+            elif current_val == "IS":
+                self.advance_token()
+            
+            # BLOCK CONTAINS clause
+            elif current_val == "BLOCK":
+                self._parse_fd_block_contains(fd_record)
+            
+            # RECORD clause (CONTAINS or IS VARYING)
+            elif current_val == "RECORD":
+                self._parse_fd_record_contains(fd_record)
+            
+            # LABEL RECORDS clause
+            elif current_val == "LABEL":
+                self._parse_fd_label_records(fd_record)
+            
+            # VALUE OF clause
+            elif current_val == "VALUE":
+                self._parse_fd_value_of(fd_record)
+            
+            # DATA RECORD(S) clause
+            elif current_val == "DATA":
+                self._parse_fd_data_records(fd_record)
+            
+            # LINAGE clause
+            elif current_val == "LINAGE":
+                self._parse_fd_linage(fd_record)
+            
+            # CODE-SET clause
+            elif current_val == "CODE-SET":
+                self._parse_fd_code_set(fd_record)
+            
+            # RECORDING MODE clause
+            elif current_val == "RECORDING":
+                self._parse_fd_recording_mode(fd_record)
+            
+            # REPORT IS clause
+            elif current_val == "REPORT":
+                self._parse_fd_report(fd_record)
+            
+            # Skip unknown clauses/tokens
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
             self.advance_token()
         
-        if self.current_token and self.current_token.type == TokenType.PERIOD:
-            self.advance_token()  # Skip period
-        
-        # Add FD to current section
+        # Add FD/SD to current section
         if self.current_section:
             self.current_section.add_child(fd_record)
+    
+    def _parse_fd_block_contains(self, fd_record: CobolFileDescription) -> None:
+        """Parse BLOCK CONTAINS clause."""
+        self.advance_token()  # Skip BLOCK
+        
+        # CONTAINS keyword
+        if self.current_token and self.current_token.value.upper() == "CONTAINS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get first number
+        if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+            first_num = int(self.current_token.value)
+            self.advance_token()
+            
+            # Check for TO (range)
+            if self.current_token and self.current_token.value.upper() == "TO":
+                self.advance_token()
+                if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                    second_num = int(self.current_token.value)
+                    self.advance_token()
+                    
+                    # Get unit (RECORDS or CHARACTERS)
+                    unit = None
+                    if self.current_token and self.current_token.value.upper() in ("RECORDS", "CHARACTERS"):
+                        unit = self.current_token.value.upper()
+                        self.advance_token()
+                    
+                    fd_record.set_block_contains(min_count=first_num, max_count=second_num, unit=unit)
+                else:
+                    fd_record.set_block_contains(count=first_num)
+            else:
+                # Get unit (RECORDS or CHARACTERS)
+                unit = None
+                if self.current_token and self.current_token.value.upper() in ("RECORDS", "CHARACTERS"):
+                    unit = self.current_token.value.upper()
+                    self.advance_token()
+                
+                fd_record.set_block_contains(count=first_num, unit=unit)
+    
+    def _parse_fd_record_contains(self, fd_record: CobolFileDescription) -> None:
+        """Parse RECORD CONTAINS or RECORD IS VARYING clause."""
+        self.advance_token()  # Skip RECORD
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        if not self.current_token:
+            return
+        
+        current_val = self.current_token.value.upper() if self.current_token.value else ""
+        
+        # RECORD CONTAINS clause
+        if current_val == "CONTAINS":
+            self.advance_token()
+            
+            # Skip newlines
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+            
+            # Get first number
+            if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                first_num = int(self.current_token.value)
+                self.advance_token()
+                
+                # Check for TO (variable length)
+                if self.current_token and self.current_token.value.upper() == "TO":
+                    self.advance_token()
+                    if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        second_num = int(self.current_token.value)
+                        self.advance_token()
+                        
+                        # Skip CHARACTERS keyword
+                        if self.current_token and self.current_token.value.upper() == "CHARACTERS":
+                            self.advance_token()
+                        
+                        # Check for DEPENDING ON
+                        depending_on = None
+                        if self.current_token and self.current_token.value.upper() == "DEPENDING":
+                            self.advance_token()
+                            if self.current_token and self.current_token.value.upper() == "ON":
+                                self.advance_token()
+                            if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                                depending_on = self.current_token.value
+                                self.advance_token()
+                        
+                        fd_record.set_record_contains(min_count=first_num, max_count=second_num, depending_on=depending_on)
+                else:
+                    # Skip CHARACTERS keyword
+                    if self.current_token and self.current_token.value.upper() == "CHARACTERS":
+                        self.advance_token()
+                    
+                    fd_record.set_record_contains(count=first_num)
+        
+        # RECORD IS VARYING clause
+        elif current_val == "IS":
+            self.advance_token()  # Skip IS
+            
+            if self.current_token and self.current_token.value.upper() == "VARYING":
+                self.advance_token()
+                
+                # IN SIZE (optional)
+                if self.current_token and self.current_token.value.upper() == "IN":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "SIZE":
+                        self.advance_token()
+                
+                # FROM min TO max
+                min_size = None
+                max_size = None
+                depending_on = None
+                
+                if self.current_token and self.current_token.value.upper() == "FROM":
+                    self.advance_token()
+                    if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        min_size = int(self.current_token.value)
+                        self.advance_token()
+                
+                if self.current_token and self.current_token.value.upper() == "TO":
+                    self.advance_token()
+                    if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        max_size = int(self.current_token.value)
+                        self.advance_token()
+                
+                # Skip CHARACTERS keyword
+                if self.current_token and self.current_token.value.upper() == "CHARACTERS":
+                    self.advance_token()
+                
+                # DEPENDING ON
+                if self.current_token and self.current_token.value.upper() == "DEPENDING":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "ON":
+                        self.advance_token()
+                    if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                        depending_on = self.current_token.value
+                        self.advance_token()
+                
+                if min_size is not None and max_size is not None:
+                    fd_record.set_record_contains(min_count=min_size, max_count=max_size, depending_on=depending_on)
+    
+    def _parse_fd_label_records(self, fd_record: CobolFileDescription) -> None:
+        """Parse LABEL RECORDS clause."""
+        self.advance_token()  # Skip LABEL
+        
+        # RECORD or RECORDS keyword
+        if self.current_token and self.current_token.value.upper() in ("RECORD", "RECORDS"):
+            self.advance_token()
+        
+        # IS or ARE keyword
+        if self.current_token and self.current_token.value.upper() in ("IS", "ARE"):
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get label records value (STANDARD, OMITTED, or data-name)
+        if self.current_token:
+            label_val = self.current_token.value.upper()
+            if label_val in ("STANDARD", "OMITTED"):
+                fd_record.set_label_records(label_val)
+            else:
+                fd_record.set_label_records(self.current_token.value)
+            self.advance_token()
+    
+    def _parse_fd_value_of(self, fd_record: CobolFileDescription) -> None:
+        """Parse VALUE OF clause."""
+        self.advance_token()  # Skip VALUE
+        
+        # OF keyword
+        if self.current_token and self.current_token.value.upper() == "OF":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Parse system-name IS data-name/literal pairs
+        while self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            system_name = self.current_token.value
+            self.advance_token()
+            
+            # IS keyword
+            if self.current_token and self.current_token.value.upper() == "IS":
+                self.advance_token()
+            
+            # Get value (data-name or literal)
+            if self.current_token:
+                if self.current_token.type == TokenType.STRING_LITERAL:
+                    value = f'"{self.current_token.value}"'
+                else:
+                    value = self.current_token.value
+                fd_record.add_value_of(system_name, value)
+                self.advance_token()
+            
+            # Skip comma if present
+            if self.current_token and self.current_token.type == TokenType.COMMA:
+                self.advance_token()
+            
+            # Skip newlines
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+            
+            # Check if next token starts a new clause
+            if self.current_token and self.current_token.value:
+                next_val = self.current_token.value.upper()
+                if next_val in ("DATA", "LABEL", "RECORD", "BLOCK", "LINAGE", "CODE-SET", "RECORDING", "REPORT", "EXTERNAL", "GLOBAL"):
+                    break
+    
+    def _parse_fd_data_records(self, fd_record: CobolFileDescription) -> None:
+        """Parse DATA RECORD(S) clause."""
+        self.advance_token()  # Skip DATA
+        
+        # RECORD or RECORDS keyword
+        if self.current_token and self.current_token.value.upper() in ("RECORD", "RECORDS"):
+            self.advance_token()
+        
+        # IS or ARE keyword
+        if self.current_token and self.current_token.value.upper() in ("IS", "ARE"):
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get record names
+        while self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            # Check if this is a clause keyword
+            name_val = self.current_token.value.upper()
+            if name_val in ("LABEL", "VALUE", "BLOCK", "RECORD", "LINAGE", "CODE-SET", "RECORDING", "REPORT", "EXTERNAL", "GLOBAL"):
+                break
+            
+            fd_record.add_data_record_name(self.current_token.value)
+            self.advance_token()
+            
+            # Skip comma if present
+            if self.current_token and self.current_token.type == TokenType.COMMA:
+                self.advance_token()
+            
+            # Skip newlines
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+    
+    def _parse_fd_linage(self, fd_record: CobolFileDescription) -> None:
+        """Parse LINAGE clause with FOOTING and TOP/BOTTOM."""
+        self.advance_token()  # Skip LINAGE
+        
+        # IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get linage value (number or data-name)
+        linage_value = None
+        if self.current_token:
+            if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                linage_value = int(self.current_token.value)
+            else:
+                linage_value = self.current_token.value
+            self.advance_token()
+        
+        # LINES keyword (optional)
+        if self.current_token and self.current_token.value.upper() == "LINES":
+            self.advance_token()
+        
+        # Parse optional clauses
+        footing = None
+        top = None
+        bottom = None
+        
+        while self.current_token:
+            # Skip newlines
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            current_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # WITH FOOTING AT
+            if current_val == "WITH":
+                self.advance_token()
+                continue
+            elif current_val == "FOOTING":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "AT":
+                    self.advance_token()
+                if self.current_token:
+                    if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        footing = int(self.current_token.value)
+                    else:
+                        footing = self.current_token.value
+                    self.advance_token()
+            
+            # LINES AT TOP
+            elif current_val == "LINES":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "AT":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "TOP":
+                        self.advance_token()
+                        if self.current_token:
+                            if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                                top = int(self.current_token.value)
+                            else:
+                                top = self.current_token.value
+                            self.advance_token()
+                    elif self.current_token and self.current_token.value.upper() == "BOTTOM":
+                        self.advance_token()
+                        if self.current_token:
+                            if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                                bottom = int(self.current_token.value)
+                            else:
+                                bottom = self.current_token.value
+                            self.advance_token()
+            
+            # AT TOP / AT BOTTOM
+            elif current_val == "AT":
+                self.advance_token()
+                continue
+            elif current_val == "TOP":
+                self.advance_token()
+                if self.current_token:
+                    if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        top = int(self.current_token.value)
+                    else:
+                        top = self.current_token.value
+                    self.advance_token()
+            elif current_val == "BOTTOM":
+                self.advance_token()
+                if self.current_token:
+                    if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        bottom = int(self.current_token.value)
+                    else:
+                        bottom = self.current_token.value
+                    self.advance_token()
+            
+            # Check for next clause
+            elif current_val in ("DATA", "LABEL", "VALUE", "BLOCK", "RECORD", "CODE-SET", "RECORDING", "REPORT", "EXTERNAL", "GLOBAL"):
+                break
+            else:
+                break
+        
+        fd_record.set_linage(linage_value, footing, top, bottom)
+    
+    def _parse_fd_code_set(self, fd_record: CobolFileDescription) -> None:
+        """Parse CODE-SET clause."""
+        self.advance_token()  # Skip CODE-SET
+        
+        # IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get code set name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            code_set = self.current_token.value
+            self.advance_token()
+            
+            # Check for FOR clause (IBM extension)
+            for_alphanumeric = None
+            for_national = None
+            
+            while self.current_token and self.current_token.value.upper() == "FOR":
+                self.advance_token()
+                if self.current_token:
+                    for_type = self.current_token.value.upper()
+                    if for_type == "ALPHANUMERIC":
+                        self.advance_token()
+                        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                            for_alphanumeric = self.current_token.value
+                            self.advance_token()
+                    elif for_type == "NATIONAL":
+                        self.advance_token()
+                        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                            for_national = self.current_token.value
+                            self.advance_token()
+            
+            fd_record.set_code_set(code_set, for_alphanumeric, for_national)
+    
+    def _parse_fd_recording_mode(self, fd_record: CobolFileDescription) -> None:
+        """Parse RECORDING MODE clause."""
+        self.advance_token()  # Skip RECORDING
+        
+        # MODE keyword
+        if self.current_token and self.current_token.value.upper() == "MODE":
+            self.advance_token()
+        
+        # IS keyword
+        if self.current_token and self.current_token.value.upper() == "IS":
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get recording mode (F, V, U, S)
+        if self.current_token:
+            fd_record.set_recording_mode(self.current_token.value)
+            self.advance_token()
+    
+    def _parse_fd_report(self, fd_record: CobolFileDescription) -> None:
+        """Parse REPORT IS clause."""
+        self.advance_token()  # Skip REPORT
+        
+        # IS or ARE keyword
+        if self.current_token and self.current_token.value.upper() in ("IS", "ARE"):
+            self.advance_token()
+        
+        # Skip newlines
+        while self.current_token and self.current_token.type == TokenType.NEWLINE:
+            self.advance_token()
+        
+        # Get report names
+        while self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            # Check if this is a clause keyword
+            name_val = self.current_token.value.upper()
+            if name_val in ("LABEL", "VALUE", "DATA", "BLOCK", "RECORD", "LINAGE", "CODE-SET", "RECORDING", "EXTERNAL", "GLOBAL"):
+                break
+            
+            fd_record.add_report_name(self.current_token.value)
+            self.advance_token()
+            
+            # Skip comma if present
+            if self.current_token and self.current_token.type == TokenType.COMMA:
+                self.advance_token()
+            
+            # Skip newlines
+            while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                self.advance_token()
     
     def parse_data_items(self) -> None:
         """Parse data item definitions with hierarchical structure support."""
@@ -854,6 +1860,9 @@ class CobolParser:
                     picture_clause = PictureClause(picture_pattern, picture_location)
                     data_item.picture_clause = picture_clause
                     period_consumed_by_picture = consumed_period
+                    # If the period was consumed by PICTURE parsing, exit the clause loop
+                    if period_consumed_by_picture:
+                        break
             
             # VALUE clause
             elif self.match_token(TokenType.VALUE):
@@ -1084,6 +2093,8 @@ class CobolParser:
         if self.current_program:
             self.current_program.add_division(proc_division)
         self.current_division = proc_division
+        # Reset current_section so procedure statements go to the right place
+        self.current_section = None
         
         # Parse statements
         self.parse_statements()
@@ -1202,6 +2213,9 @@ class CobolParser:
             if ttype == TokenType.DISPLAY or upper_val == 'DISPLAY':
                 i = self._parse_display_inline(tokens, i)
                 continue
+            if ttype == TokenType.CALL or upper_val == 'CALL':
+                i = self._parse_call_inline(tokens, i)
+                continue
             if ttype == TokenType.WRITE or upper_val == 'WRITE':
                 i = self._parse_write_inline(tokens, i)
                 continue
@@ -1224,13 +2238,204 @@ class CobolParser:
             if ttype == TokenType.SORT or upper_val == 'SORT':
                 i = self._parse_sort_inline(tokens, i)
                 continue
+            # Handle EXEC SQL blocks
+            if ttype == TokenType.EXEC or upper_val == 'EXEC':
+                i = self._parse_exec_inline(tokens, i)
+                continue
             # Unrecognized inside sentence: skip token
             i += 1
 
     def _skip_to_next_verb(self, tokens, start):
-        verbs = {TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.WRITE, TokenType.GO, TokenType.GOTO, TokenType.IF}
+        verbs = {TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.CALL, TokenType.WRITE, TokenType.GO, TokenType.GOTO, TokenType.IF, TokenType.EXEC}
         i = start
         while i < len(tokens) and tokens[i].type not in verbs:
+            i += 1
+        return i
+
+    def _parse_exec_inline(self, tokens, i):
+        """Parse EXEC SQL, EXEC CICS, or EXEC IMS block inline."""
+        start = tokens[i]
+        i += 1  # Move past EXEC token
+        
+        if i >= len(tokens):
+            return i
+        
+        # Skip any newlines/comments
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        if i >= len(tokens):
+            return i
+        
+        # Determine EXEC type (SQL, CICS, IMS)
+        exec_type = tokens[i].value.upper() if tokens[i].value else ""
+        
+        if exec_type == "SQL":
+            i += 1  # Move past SQL token
+            return self._parse_exec_sql_inline(tokens, i, start)
+        elif exec_type == "CICS":
+            i += 1  # Move past CICS token
+            return self._parse_exec_cics_inline(tokens, i, start)
+        elif exec_type == "IMS":
+            i += 1  # Move past IMS token
+            return self._parse_exec_ims_inline(tokens, i, start)
+        else:
+            # Unknown EXEC type - skip to END-EXEC
+            return self._skip_to_end_exec(tokens, i)
+    
+    def _parse_exec_sql_inline(self, tokens, i, start_token):
+        """Parse EXEC SQL block content and create ExecSQLStatement."""
+        sql_tokens = []
+        
+        # Skip any leading newlines/comments
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Collect all tokens until END-EXEC
+        while i < len(tokens):
+            tok = tokens[i]
+            
+            # Check for END-EXEC (can be one token or two)
+            if tok.type == TokenType.END_EXEC or tok.value.upper() == "END-EXEC":
+                i += 1  # Move past END-EXEC
+                break
+            # Handle END EXEC as two separate tokens
+            if tok.value.upper() == "END":
+                if i + 1 < len(tokens) and tokens[i + 1].value.upper() == "EXEC":
+                    i += 2  # Move past END EXEC
+                    break
+            
+            # Skip NEWLINE but preserve for multi-line SQL formatting
+            if tok.type == TokenType.NEWLINE:
+                sql_tokens.append(" ")  # Replace newline with space for SQL
+            elif tok.type == TokenType.COMMENT:
+                # Skip inline comments within SQL
+                pass
+            else:
+                sql_tokens.append(tok.value if tok.value else "")
+            
+            i += 1
+        
+        # Build SQL text
+        sql_text = " ".join(str(t) for t in sql_tokens if t)
+        sql_text = " ".join(sql_text.split())  # Normalize whitespace
+        
+        # Create SQL statement node
+        sql_stmt = parse_exec_sql(sql_text, start_token.location)
+        
+        # Add to current section
+        if self.current_section:
+            self.current_section.add_child(sql_stmt)
+        
+        return i
+    
+    def _parse_exec_cics_inline(self, tokens, i, start_token):
+        """Parse EXEC CICS block content."""
+        from .dialects.ibm_enterprise import ExecCICSStatement
+        
+        cics_tokens = []
+        
+        # Skip any leading newlines/comments
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Collect all tokens until END-EXEC
+        while i < len(tokens):
+            tok = tokens[i]
+            
+            if tok.type == TokenType.END_EXEC or tok.value.upper() == "END-EXEC":
+                i += 1
+                break
+            if tok.value.upper() == "END":
+                if i + 1 < len(tokens) and tokens[i + 1].value.upper() == "EXEC":
+                    i += 2
+                    break
+            
+            if tok.type not in (TokenType.NEWLINE, TokenType.COMMENT):
+                cics_tokens.append(tok.value if tok.value else "")
+            
+            i += 1
+        
+        # Build CICS text and parse
+        cics_text = " ".join(cics_tokens)
+        
+        cics_stmt = ExecCICSStatement(start_token.location)
+        if cics_tokens:
+            cics_stmt.set_command(cics_tokens[0])
+            # Parse options
+            j = 1
+            while j < len(cics_tokens):
+                option = cics_tokens[j]
+                if '(' in option:
+                    opt_name, opt_value = option.split('(', 1)
+                    opt_value = opt_value.rstrip(')')
+                    cics_stmt.add_option(opt_name, opt_value)
+                else:
+                    cics_stmt.add_option(option)
+                j += 1
+        
+        if self.current_section:
+            self.current_section.add_child(cics_stmt)
+        
+        return i
+    
+    def _parse_exec_ims_inline(self, tokens, i, start_token):
+        """Parse EXEC IMS block content."""
+        from .dialects.ibm_enterprise import ExecIMSStatement
+        
+        ims_tokens = []
+        
+        # Skip any leading newlines/comments
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Collect all tokens until END-EXEC
+        while i < len(tokens):
+            tok = tokens[i]
+            
+            if tok.type == TokenType.END_EXEC or tok.value.upper() == "END-EXEC":
+                i += 1
+                break
+            if tok.value.upper() == "END":
+                if i + 1 < len(tokens) and tokens[i + 1].value.upper() == "EXEC":
+                    i += 2
+                    break
+            
+            if tok.type not in (TokenType.NEWLINE, TokenType.COMMENT):
+                ims_tokens.append(tok.value if tok.value else "")
+            
+            i += 1
+        
+        # Build IMS text and parse
+        ims_stmt = ExecIMSStatement(start_token.location)
+        if ims_tokens:
+            ims_stmt.set_command(ims_tokens[0])
+            # Parse options
+            j = 1
+            while j < len(ims_tokens):
+                option = ims_tokens[j]
+                if '(' in option:
+                    opt_name, opt_value = option.split('(', 1)
+                    opt_value = opt_value.rstrip(')')
+                    ims_stmt.add_option(opt_name, opt_value)
+                else:
+                    ims_stmt.add_option(option)
+                j += 1
+        
+        if self.current_section:
+            self.current_section.add_child(ims_stmt)
+        
+        return i
+    
+    def _skip_to_end_exec(self, tokens, i):
+        """Skip to END-EXEC token."""
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok.type == TokenType.END_EXEC or tok.value.upper() == "END-EXEC":
+                return i + 1
+            if tok.value.upper() == "END":
+                if i + 1 < len(tokens) and tokens[i + 1].value.upper() == "EXEC":
+                    return i + 2
             i += 1
         return i
 
@@ -1445,6 +2650,152 @@ class CobolParser:
             i += 1
             if self.current_section:
                 self.current_section.add_child(disp)
+        return i
+
+    def _parse_call_inline(self, tokens, i):
+        """Parse CALL statement from inline tokens."""
+        start = tokens[i]
+        i += 1  # Move past CALL token
+        
+        if i >= len(tokens):
+            return i
+        
+        call_stmt = CallStatement(start.location)
+        
+        # Skip optional whitespace/newlines
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        if i >= len(tokens):
+            return i
+        
+        # Get program name (literal or identifier)
+        program_name = tokens[i].value
+        is_dynamic = tokens[i].type == TokenType.IDENTIFIER
+        
+        # For string literals, keep the quotes
+        if tokens[i].type == TokenType.STRING_LITERAL:
+            program_name = f'"{program_name}"'
+        
+        call_stmt.set_called_program(program_name, is_dynamic)
+        i += 1
+        
+        # Skip optional whitespace/newlines
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Parse optional USING clause
+        if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER and \
+           tokens[i].value.upper() == "USING":
+            i += 1
+            i = self._parse_call_using_parameters_inline(tokens, i, call_stmt)
+        
+        # Skip optional whitespace/newlines
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Parse optional RETURNING clause
+        if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER and \
+           tokens[i].value.upper() == "RETURNING":
+            i += 1
+            
+            # Skip optional whitespace/newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
+                call_stmt.set_returning_parameter(tokens[i].value)
+                i += 1
+        
+        # Skip optional whitespace/newlines
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Parse optional ON EXCEPTION/OVERFLOW clauses
+        if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER and \
+           tokens[i].value.upper() == "ON":
+            i += 1
+            
+            # Skip optional whitespace/newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
+                exception_type = tokens[i].value.upper()
+                
+                if exception_type in ("EXCEPTION", "OVERFLOW"):
+                    i += 1
+                    
+                    # Skip statements until END-CALL
+                    exception_statements = []
+                    while i < len(tokens):
+                        # Check for END-CALL
+                        if tokens[i].type == TokenType.IDENTIFIER and \
+                           tokens[i].value.upper() == "END-CALL":
+                            i += 1
+                            break
+                        
+                        # Skip tokens in the exception handler
+                        i += 1
+                    
+                    # Store which type of exception handler we found
+                    if exception_type == "EXCEPTION":
+                        call_stmt.on_exception = exception_statements
+                    else:
+                        call_stmt.on_overflow = exception_statements
+        
+        if self.current_section:
+            self.current_section.add_child(call_stmt)
+        
+        return i
+    
+    def _parse_call_using_parameters_inline(self, tokens, i, call_stmt):
+        """Parse USING clause parameters for inline CALL statement."""
+        current_mode = "REFERENCE"  # Default mode
+        
+        while i < len(tokens):
+            # Skip whitespace/newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            if i >= len(tokens):
+                break
+            
+            # Check for RETURNING, ON (exception/overflow) - end of USING clause
+            if tokens[i].type == TokenType.IDENTIFIER:
+                upper_val = tokens[i].value.upper()
+                
+                if upper_val in ("RETURNING", "ON"):
+                    break
+                
+                # Check for BY keyword (parameter passing mode)
+                if upper_val == "BY":
+                    i += 1
+                    
+                    # Skip whitespace/newlines
+                    while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                        i += 1
+                    
+                    if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
+                        mode = tokens[i].value.upper()
+                        if mode in ("REFERENCE", "CONTENT", "VALUE"):
+                            current_mode = mode
+                            i += 1
+                            
+                            # Skip whitespace/newlines
+                            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                                i += 1
+                            
+                            continue
+                
+                # This must be a parameter name
+                param_name = tokens[i].value
+                call_stmt.add_using_parameter(param_name, current_mode)
+                i += 1
+            else:
+                # End of USING clause
+                break
+        
         return i
 
     def _parse_perform_inline(self, tokens, i):
@@ -1972,76 +3323,18 @@ class CobolParser:
             condition_expr = CobolExpression("IDENTIFIER", location)
             condition_expr._metadata["value"] = condition
             perform_stmt.until_condition = condition_expr
+        
         if self.current_division:
             self.current_division.add_child(perform_stmt)
         
         return perform_stmt
     
-    def parse_call_statement(self) -> Optional[CallStatement]:
-        """Parse CALL statement."""
-        if not self.match_token(TokenType.CALL):
+    def parse_stop_statement(self) -> Optional[StopStatement]:
+        """Parse STOP RUN statement."""
+        if not self.match_token(TokenType.STOP):
             return None
         
         location = self.get_current_location()
-        
-        # Get program name
-        if not self.current_token:
-            return None
-        
-        # Detect if this is a dynamic or static CALL
-        is_dynamic = False
-        if self.current_token.type == TokenType.STRING_LITERAL:
-            # Static call with literal string
-            program_name = f'"{self.current_token.value}"'
-            is_dynamic = False
-        elif self.current_token.type == TokenType.IDENTIFIER:
-            # Dynamic call with variable
-            program_name = self.current_token.value
-            is_dynamic = True
-        else:
-            # Fallback for other token types
-            program_name = self.current_token.value
-            is_dynamic = False
-        
-        self.advance_token()
-        
-        call_stmt = CallStatement(location)
-        call_stmt.set_called_program(program_name, is_dynamic=is_dynamic)
-        
-        # Check for USING clause
-        if (self.current_token and 
-            self.current_token.value.upper() == "USING"):
-            self.advance_token()
-            
-            # Parse USING parameters
-            while (self.current_token and 
-                   self.current_token.type == TokenType.IDENTIFIER and
-                   self.current_token.type != TokenType.PERIOD):
-                param_name = self.current_token.value
-                call_stmt.add_using_parameter(param_name)
-                self.advance_token()
-                
-                # Break if we hit period or other statement terminators
-                if (self.current_token and 
-                    self.current_token.type in [TokenType.PERIOD, TokenType.IF, TokenType.MOVE]):
-                    break
-        
-        # Skip other optional clauses for now (GIVING, ON EXCEPTION, etc.)
-        
-        # Expect period (may already be consumed by paragraph parsing)
-        if self.current_token and self.current_token.type == TokenType.PERIOD:
-            self.advance_token()
-        
-        # Add to current division
-        if self.current_division:
-            self.current_division.add_child(call_stmt)
-        
-        return call_stmt
-    
-    def parse_stop_statement(self) -> None:
-        """Parse STOP RUN statement."""
-        if not self.match_token(TokenType.STOP):
-            return
         
         # Expect RUN
         if self.current_token and self.current_token.value.upper() == "RUN":
@@ -2049,6 +3342,180 @@ class CobolParser:
         
         # Expect period
         self.expect_token(TokenType.PERIOD)
+        
+        stop_stmt = StopStatement(location)
+        
+        if self.current_division:
+            self.current_division.add_child(stop_stmt)
+        
+        return stop_stmt
+    
+    def parse_call_statement(self) -> Optional[CallStatement]:
+        """Parse CALL statement.
+        
+        Supports:
+        - CALL "literal" or CALL identifier (dynamic)
+        - USING clause with BY REFERENCE/CONTENT/VALUE parameters
+        - RETURNING clause
+        - ON EXCEPTION/OVERFLOW clauses with END-CALL terminator
+        """
+        if not self.match_token(TokenType.CALL):
+            return None
+        
+        location = self.get_current_location()
+        call_stmt = CallStatement(location)
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Get program name (literal or identifier)
+        if not self.current_token:
+            self.add_error(ParseError("Expected program name after CALL", location=location))
+            return None
+        
+        program_name = self.current_token.value
+        is_dynamic = self.current_token.type == TokenType.IDENTIFIER
+        
+        # For string literals, keep the quotes
+        if self.current_token.type == TokenType.STRING_LITERAL:
+            program_name = f'"{program_name}"'
+        
+        call_stmt.set_called_program(program_name, is_dynamic)
+        self.advance_token()
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse optional USING clause
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER and \
+           self.current_token.value.upper() == "USING":
+            self.advance_token()
+            self._parse_call_using_parameters(call_stmt)
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse optional RETURNING clause
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER and \
+           self.current_token.value.upper() == "RETURNING":
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                call_stmt.set_returning_parameter(self.current_token.value)
+                self.advance_token()
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse optional ON EXCEPTION/OVERFLOW clauses
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER and \
+           self.current_token.value.upper() == "ON":
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                exception_type = self.current_token.value.upper()
+                
+                if exception_type in ("EXCEPTION", "OVERFLOW"):
+                    self.advance_token()
+                    
+                    # Parse statements until END-CALL or period
+                    exception_statements = []
+                    while self.current_token and self.current_token.type != TokenType.EOF:
+                        # Check for END-CALL
+                        if self.current_token.type == TokenType.IDENTIFIER and \
+                           self.current_token.value.upper() == "END-CALL":
+                            self.advance_token()
+                            break
+                        
+                        # Check for period (alternative terminator)
+                        if self.current_token.type == TokenType.PERIOD:
+                            break
+                        
+                        # For now, skip tokens in the exception handler
+                        # Full implementation would parse nested statements
+                        self.advance_token()
+                    
+                    # Store which type of exception handler we found
+                    if exception_type == "EXCEPTION":
+                        call_stmt.on_exception = exception_statements
+                    else:
+                        call_stmt.on_overflow = exception_statements
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Expect period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        if self.current_division:
+            self.current_division.add_child(call_stmt)
+        
+        return call_stmt
+    
+    def _parse_call_using_parameters(self, call_stmt: CallStatement) -> None:
+        """Parse USING clause parameters for CALL statement."""
+        current_mode = "REFERENCE"  # Default mode
+        
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            # Skip whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token:
+                break
+            
+            # Check for end of USING clause
+            if self.current_token.type == TokenType.PERIOD:
+                break
+            
+            # Check for RETURNING, ON (exception/overflow)
+            if self.current_token.type == TokenType.IDENTIFIER:
+                upper_val = self.current_token.value.upper()
+                
+                if upper_val in ("RETURNING", "ON"):
+                    break
+                
+                # Check for BY keyword (parameter passing mode)
+                if upper_val == "BY":
+                    self.advance_token()
+                    
+                    # Skip whitespace/newlines
+                    while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                        self.advance_token()
+                    
+                    if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                        mode = self.current_token.value.upper()
+                        if mode in ("REFERENCE", "CONTENT", "VALUE"):
+                            current_mode = mode
+                            self.advance_token()
+                            
+                            # Skip whitespace/newlines
+                            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                                self.advance_token()
+                            
+                            continue
+                
+                # This must be a parameter name
+                param_name = self.current_token.value
+                call_stmt.add_using_parameter(param_name, current_mode)
+                self.advance_token()
+            else:
+                # Unexpected token, break to avoid infinite loop
+                break
     
     def skip_to_next_division(self) -> None:
         """Skip tokens until next division is found."""

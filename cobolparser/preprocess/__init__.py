@@ -12,11 +12,18 @@ Key Features:
 - Path traversal prevention for security
 - Cross-platform path normalization
 - Automatic encoding detection and UTF-8 conversion
+- SUPPRESS clause support for listing control
+- REPLACING clause with LEADING/TRAILING modifiers
+- Conditional compilation directive processing (>>IF/>>DEFINE)
+- Copybook content validation and size limits
+- Fuzzy matching for misspelled copybook names
 
 Main Functions:
     expand_copybooks: Expand all COPY statements in COBOL source code
     parse_cobol_with_expansion: Convenience function combining expansion + parsing
     normalize_fixed_format: Normalize fixed-format COBOL lines into pseudo free-form
+    preprocess_conditional_compilation: Process >>IF/>>DEFINE directives
+    validate_copybook_content: Validate copybook content before expansion
 
 Exception Types:
     CircularReferenceError: Circular copybook dependency detected
@@ -24,6 +31,8 @@ Exception Types:
     PathTraversalError: Attempted path traversal outside search directories
     EncodingError: Failed to detect or convert file encoding
     NestingDepthError: Exceeded maximum nesting depth limit
+    CopybookSizeExceededError: Copybook exceeds configured size limits
+    CopybookSyntaxError: Copybook contains invalid or malformed content
 
 Usage Example:
     from cobolparser.preprocess import expand_copybooks, normalize_fixed_format
@@ -37,6 +46,7 @@ Usage Example:
 """
 
 from typing import Optional, Iterable, List
+import re
 
 
 class CircularReferenceError(Exception):
@@ -63,15 +73,25 @@ class CopybookNotFoundError(Exception):
     Attributes:
         copybook_name: Name of the copybook that was not found
         search_paths: List of directories that were searched
+        suggestions: List of similar copybook names (for typo detection)
         message: Human-readable error message
     """
     
-    def __init__(self, copybook_name: str, search_paths: list[str], message: Optional[str] = None):
+    def __init__(
+        self, 
+        copybook_name: str, 
+        search_paths: list[str], 
+        suggestions: Optional[list[str]] = None,
+        message: Optional[str] = None
+    ):
         self.copybook_name = copybook_name
         self.search_paths = search_paths
+        self.suggestions = suggestions or []
         if message is None:
-            paths_str = ", ".join(search_paths)
+            paths_str = ", ".join(search_paths) if search_paths else "(no paths configured)"
             message = f"Copybook '{copybook_name}' not found in search paths: {paths_str}"
+            if self.suggestions:
+                message += f". Did you mean: {', '.join(self.suggestions)}?"
         super().__init__(message)
 
 
@@ -126,6 +146,95 @@ class NestingDepthError(Exception):
         self.max_depth = max_depth
         if message is None:
             message = f"Nesting depth exceeded: reached {current_depth} levels (max: {max_depth})"
+        super().__init__(message)
+
+
+class CopybookSizeExceededError(Exception):
+    """
+    Raised when a copybook file exceeds the configured size limit.
+    
+    Attributes:
+        copybook_path: Path to the oversized copybook
+        size: Actual size in bytes
+        limit: Configured size limit in bytes
+        message: Human-readable error message
+    """
+    
+    def __init__(
+        self, 
+        copybook_path: str, 
+        size: int, 
+        limit: int, 
+        message: Optional[str] = None
+    ):
+        self.copybook_path = copybook_path
+        self.size = size
+        self.limit = limit
+        if message is None:
+            message = (
+                f"Copybook '{copybook_path}' size ({size:,} bytes) "
+                f"exceeds limit ({limit:,} bytes)"
+            )
+        super().__init__(message)
+
+
+class CopybookSyntaxError(Exception):
+    """
+    Raised when copybook contains invalid or malformed content.
+    
+    Attributes:
+        copybook_path: Path to the copybook with syntax issues
+        line: Line number where issue was detected (if applicable)
+        details: Description of the syntax problem
+        message: Human-readable error message
+    """
+    
+    def __init__(
+        self, 
+        copybook_path: str, 
+        details: str,
+        line: Optional[int] = None,
+        message: Optional[str] = None
+    ):
+        self.copybook_path = copybook_path
+        self.line = line
+        self.details = details
+        if message is None:
+            if line:
+                message = f"Syntax error in '{copybook_path}' at line {line}: {details}"
+            else:
+                message = f"Syntax error in '{copybook_path}': {details}"
+        super().__init__(message)
+
+
+class LevelNumberMismatchWarning(UserWarning):
+    """
+    Warning issued when level numbers may not align correctly after expansion.
+    
+    This is a warning rather than an error because some level mismatches
+    may be intentional (e.g., copybook designed for specific contexts).
+    """
+    pass
+
+
+class TotalExpansionSizeExceededError(Exception):
+    """
+    Raised when total expanded content exceeds the configured limit.
+    
+    Attributes:
+        total_size: Total size reached in bytes
+        limit: Configured limit in bytes
+        message: Human-readable error message
+    """
+    
+    def __init__(self, total_size: int, limit: int, message: Optional[str] = None):
+        self.total_size = total_size
+        self.limit = limit
+        if message is None:
+            message = (
+                f"Total expansion size ({total_size:,} bytes) "
+                f"exceeds limit ({limit:,} bytes)"
+            )
         super().__init__(message)
 
 
@@ -210,13 +319,234 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
     return '\n'.join(result) + '\n'
 
 
+def preprocess_conditional_compilation(
+    source: str, 
+    defined_symbols: Optional[dict[str, str]] = None
+) -> str:
+    """
+    Process IBM >>IF/>>DEFINE conditional compilation directives.
+    
+    Supports:
+    - >>DEFINE symbol [AS value]
+    - >>IF symbol IS DEFINED / IS NOT DEFINED
+    - >>ELSE
+    - >>END-IF
+    - >>EVALUATE (basic support)
+    
+    Args:
+        source: COBOL source code containing directives
+        defined_symbols: Pre-defined symbols (optional)
+        
+    Returns:
+        Source code with conditional sections processed
+        
+    Example:
+        >>> source = '''
+        ... >>DEFINE DEBUG
+        ... >>IF DEBUG IS DEFINED
+        ...        DISPLAY "Debug mode".
+        ... >>END-IF
+        ... '''
+        >>> preprocess_conditional_compilation(source)
+        '       DISPLAY "Debug mode".\\n'
+    """
+    defined = dict(defined_symbols) if defined_symbols else {}
+    result_lines = []
+    skip_stack = [False]  # Stack of skip states (False = include lines)
+    
+    for line in source.splitlines():
+        stripped = line.strip().upper()
+        
+        # >>DEFINE symbol [AS value]
+        if stripped.startswith('>>DEFINE'):
+            match = re.match(r'>>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?', stripped)
+            if match:
+                symbol = match.group(1)
+                value = match.group(2).strip() if match.group(2) else 'TRUE'
+                defined[symbol] = value
+            continue
+        
+        # >>IF condition
+        elif stripped.startswith('>>IF'):
+            condition_text = stripped[4:].strip()
+            
+            # Parse condition
+            is_defined_match = re.match(r'(\w+)\s+IS\s+(NOT\s+)?DEFINED', condition_text)
+            if is_defined_match:
+                symbol = is_defined_match.group(1)
+                is_not = is_defined_match.group(2) is not None
+                
+                symbol_exists = symbol in defined
+                condition_met = (not symbol_exists) if is_not else symbol_exists
+                
+                # If currently skipping, continue skipping
+                if any(skip_stack):
+                    skip_stack.append(True)
+                else:
+                    skip_stack.append(not condition_met)
+            else:
+                # Unknown condition - default to skipping
+                skip_stack.append(True)
+            continue
+        
+        # >>ELSE
+        elif stripped.startswith('>>ELSE'):
+            if len(skip_stack) > 1:
+                # Only toggle if parent is not skipping
+                parent_skip = any(skip_stack[:-1])
+                if not parent_skip:
+                    skip_stack[-1] = not skip_stack[-1]
+            continue
+        
+        # >>END-IF
+        elif stripped.startswith('>>END-IF'):
+            if len(skip_stack) > 1:
+                skip_stack.pop()
+            continue
+        
+        # Regular line - include if not skipping
+        if not any(skip_stack):
+            result_lines.append(line)
+    
+    return '\n'.join(result_lines)
+
+
+def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
+    """
+    Validate copybook content before expansion.
+    
+    Checks for:
+    - Empty content
+    - Binary/corrupted content
+    - Unbalanced quotes
+    - Missing terminating periods
+    - Other potential issues
+    
+    Args:
+        content: Copybook content to validate
+        copybook_path: Path to copybook (for error messages)
+        
+    Returns:
+        List of warning messages (empty if no issues)
+        
+    Raises:
+        CopybookSyntaxError: For fatal syntax issues like binary content
+    """
+    warnings = []
+    
+    # Check for empty content
+    stripped = content.strip()
+    if not stripped:
+        warnings.append(f"Copybook '{copybook_path}' is empty")
+        return warnings
+    
+    # Check for comment-only content
+    lines = [l for l in stripped.splitlines() if l.strip() and not l.strip().startswith('*')]
+    if not lines:
+        warnings.append(f"Copybook '{copybook_path}' contains only comments")
+    
+    # Check for binary content indicators
+    if '\x00' in content:
+        raise CopybookSyntaxError(
+            copybook_path, 
+            "Binary content detected (null bytes found)"
+        )
+    
+    # Check for unbalanced quotes (simple check)
+    single_quotes = content.count("'")
+    double_quotes = content.count('"')
+    
+    # Account for escaped quotes (doubled quotes)
+    single_escaped = content.count("''")
+    double_escaped = content.count('""')
+    
+    effective_singles = single_quotes - (single_escaped * 2)
+    effective_doubles = double_quotes - (double_escaped * 2)
+    
+    if effective_singles % 2 != 0:
+        warnings.append(f"Possible unbalanced single quotes in '{copybook_path}'")
+    if effective_doubles % 2 != 0:
+        warnings.append(f"Possible unbalanced double quotes in '{copybook_path}'")
+    
+    # Check for potential missing terminating period on data definitions
+    # Look for lines that appear to be data definitions without periods
+    data_def_pattern = re.compile(
+        r'^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$',
+        re.MULTILINE
+    )
+    for match in data_def_pattern.finditer(content):
+        line_num = content[:match.start()].count('\n') + 1
+        warnings.append(
+            f"Line {line_num} in '{copybook_path}' may be missing terminating period"
+        )
+    
+    return warnings
+
+
+def validate_level_numbers(
+    pre_context: str, 
+    copybook_content: str,
+    copybook_path: str
+) -> list[str]:
+    """
+    Validate level number continuity between main program and copybook.
+    
+    Args:
+        pre_context: Source code before the COPY statement
+        copybook_content: Content of the copybook being included
+        copybook_path: Path to copybook (for messages)
+        
+    Returns:
+        List of warning messages about potential level mismatches
+    """
+    import warnings as warn_module
+    
+    warnings = []
+    
+    # Extract last level number before COPY statement
+    level_pattern = re.compile(r'^\s*(\d{2})\s+[A-Za-z]', re.MULTILINE)
+    
+    pre_levels = list(level_pattern.finditer(pre_context))
+    if not pre_levels:
+        return warnings  # No prior data definitions
+    
+    last_level = int(pre_levels[-1].group(1))
+    
+    # Extract first level number in copybook
+    copy_levels = list(level_pattern.finditer(copybook_content))
+    if not copy_levels:
+        return warnings  # No data definitions in copybook
+    
+    first_copy_level = int(copy_levels[0].group(1))
+    
+    # Check for potential issues
+    if first_copy_level not in (1, 77, 88):  # 01, 77, 88 can start anywhere
+        if first_copy_level <= last_level:
+            msg = (
+                f"Level number mismatch: copybook '{copybook_path}' starts with "
+                f"level {first_copy_level:02d} after level {last_level:02d} in main program. "
+                f"This may cause data hierarchy issues."
+            )
+            warnings.append(msg)
+            warn_module.warn(msg, LevelNumberMismatchWarning)
+    
+    return warnings
+
+
 __all__ = [
     'CircularReferenceError',
     'CopybookNotFoundError',
     'PathTraversalError',
     'EncodingError',
     'NestingDepthError',
+    'CopybookSizeExceededError',
+    'CopybookSyntaxError',
+    'LevelNumberMismatchWarning',
+    'TotalExpansionSizeExceededError',
     'normalize_fixed_format',
+    'preprocess_conditional_compilation',
+    'validate_copybook_content',
+    'validate_level_numbers',
     'expand_copybooks',
     'parse_cobol_with_expansion',
 ]

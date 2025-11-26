@@ -9,6 +9,85 @@ and internal expansion state.
 from dataclasses import dataclass, field
 from typing import Optional, Any
 from pathlib import Path
+import sys
+
+
+def get_default_case_sensitivity() -> bool:
+    """Determine case sensitivity based on platform.
+    
+    Returns:
+        True for case-sensitive filesystems (Linux/Unix),
+        False for case-insensitive filesystems (Windows, macOS)
+    """
+    if sys.platform == 'win32':
+        return False  # Windows is case-insensitive
+    elif sys.platform == 'darwin':
+        return False  # macOS is case-insensitive by default
+    else:
+        return True   # Linux/Unix is case-sensitive
+
+
+# Size limits for copybook processing
+MAX_COPYBOOK_SIZE_BYTES = 10 * 1024 * 1024  # 10MB per copybook
+MAX_TOTAL_EXPANSION_BYTES = 100 * 1024 * 1024  # 100MB total expansion
+
+
+@dataclass
+class ReplacingClause:
+    """
+    Represents a single REPLACING clause entry.
+    
+    Attributes:
+        find_text: Text pattern to find
+        replace_text: Text to replace with
+        mode: Replacement mode - 'ALL' (default), 'LEADING', or 'TRAILING'
+    """
+    find_text: str
+    replace_text: str
+    mode: str = "ALL"  # ALL, LEADING, TRAILING
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "find": self.find_text,
+            "replace": self.replace_text,
+            "mode": self.mode,
+        }
+
+
+@dataclass
+class SuppressClause:
+    """
+    Represents a SUPPRESS clause in a COPY statement.
+    
+    Attributes:
+        suppress_all: If True, suppress entire copybook listing
+        line_ranges: List of (start, end) tuples for specific line suppression
+        single_lines: List of individual lines to suppress
+    """
+    suppress_all: bool = False
+    line_ranges: list[tuple[int, int]] = field(default_factory=list)
+    single_lines: list[int] = field(default_factory=list)
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        if self.suppress_all:
+            return {"type": "ALL"}
+        result: dict[str, Any] = {}
+        if self.line_ranges:
+            result["ranges"] = [{"start": s, "end": e} for s, e in self.line_ranges]
+        if self.single_lines:
+            result["lines"] = self.single_lines
+        return result
+    
+    def get_suppressed_lines(self) -> set[int]:
+        """Get all suppressed line numbers."""
+        if self.suppress_all:
+            return set()  # Handled separately
+        lines = set(self.single_lines)
+        for start, end in self.line_ranges:
+            lines.update(range(start, end + 1))
+        return lines
 
 
 @dataclass
@@ -21,20 +100,28 @@ class ExpansionStatistics:
         file_count: Number of copybooks processed (including main program)
         total_lines: Total lines in the expanded output
         peak_memory_bytes: Peak memory usage during expansion
+        warnings: List of non-fatal warnings encountered during expansion
+        total_bytes_processed: Total bytes processed across all copybooks
     """
     parse_time_ms: float = 0.0
     file_count: int = 0
     total_lines: int = 0
     peak_memory_bytes: int = 0
+    warnings: list[str] = field(default_factory=list)
+    total_bytes_processed: int = 0
     
     def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary for JSON serialization."""
-        return {
+        result = {
             "parse_time_ms": self.parse_time_ms,
             "file_count": self.file_count,
             "total_lines": self.total_lines,
             "peak_memory_bytes": self.peak_memory_bytes,
+            "total_bytes_processed": self.total_bytes_processed,
         }
+        if self.warnings:
+            result["warnings"] = self.warnings
+        return result
 
 
 @dataclass
@@ -80,15 +167,27 @@ class CopyStatement:
     Attributes:
         member_name: Name of the copybook member to be included
         library_qualifier: Optional library name (from IN/OF clause)
-        replacing_clauses: Optional list of (find, replace) text substitution pairs
+        replacing_clauses: Optional list of ReplacingClause objects for text substitution
+        suppress_clause: Optional SuppressClause for listing suppression
         source_location: Location in source where COPY statement appears (file, line, column)
         original_text: The original COPY statement text from source
     """
     member_name: str
     library_qualifier: Optional[str] = None
-    replacing_clauses: Optional[list[tuple[str, str]]] = None
+    replacing_clauses: Optional[list[ReplacingClause]] = None
+    suppress_clause: Optional[SuppressClause] = None
     source_location: Optional[tuple[str, int, int]] = None
     original_text: str = ""
+    
+    @property
+    def is_suppressed(self) -> bool:
+        """Check if this COPY statement has SUPPRESS clause."""
+        return self.suppress_clause is not None
+    
+    @property
+    def has_replacements(self) -> bool:
+        """Check if this COPY statement has REPLACING clauses."""
+        return bool(self.replacing_clauses)
     
     def to_dict(self) -> dict[str, Any]:
         """Convert COPY statement to dictionary for JSON serialization."""
@@ -99,10 +198,9 @@ class CopyStatement:
         if self.library_qualifier:
             result["library_qualifier"] = self.library_qualifier
         if self.replacing_clauses:
-            result["replacing_clauses"] = [
-                {"find": find, "replace": replace}
-                for find, replace in self.replacing_clauses
-            ]
+            result["replacing_clauses"] = [rc.to_dict() for rc in self.replacing_clauses]
+        if self.suppress_clause:
+            result["suppress_clause"] = self.suppress_clause.to_dict()
         if self.source_location:
             file, line, col = self.source_location
             result["source_location"] = {"file": file, "line": line, "column": col}
@@ -117,13 +215,17 @@ class CopybookSearchPath:
     Attributes:
         directories: Ordered list of directory paths to search for copybooks
         extensions: File extensions to try when resolving copybook names
-        case_sensitive: Whether file matching should be case-sensitive (platform-dependent)
+        case_sensitive: Whether file matching should be case-sensitive (auto-detected by default)
         max_nesting_depth: Maximum allowed nesting depth for copybooks
+        max_file_size: Maximum size in bytes for a single copybook file
+        max_total_size: Maximum total size in bytes for all expanded content
     """
     directories: list[str] = field(default_factory=list)
-    extensions: list[str] = field(default_factory=lambda: [".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB"])
-    case_sensitive: bool = True  # Default to True, will be auto-detected per platform
+    extensions: list[str] = field(default_factory=lambda: [".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB", ""])
+    case_sensitive: bool = field(default_factory=get_default_case_sensitivity)
     max_nesting_depth: int = 100
+    max_file_size: int = MAX_COPYBOOK_SIZE_BYTES
+    max_total_size: int = MAX_TOTAL_EXPANSION_BYTES
     
     def to_dict(self) -> dict[str, Any]:
         """Convert search configuration to dictionary for JSON serialization."""
@@ -132,6 +234,8 @@ class CopybookSearchPath:
             "extensions": self.extensions,
             "case_sensitive": self.case_sensitive,
             "max_nesting_depth": self.max_nesting_depth,
+            "max_file_size": self.max_file_size,
+            "max_total_size": self.max_total_size,
         }
 
 
@@ -145,11 +249,25 @@ class ExpansionContext:
         expansion_stack: Stack of files being expanded (for circular reference detection)
         source_maps: Accumulated source location mappings (line_number -> (file, original_line))
         current_depth: Current nesting depth in the expansion recursion
+        content_cache: Cache of already-expanded copybook content (for diamond dependencies)
+        total_bytes: Running total of bytes processed
+        defined_symbols: Symbols defined via >>DEFINE for conditional compilation
     """
     current_file: str = ""
     expansion_stack: list[str] = field(default_factory=list)
     source_maps: dict[int, tuple[str, int]] = field(default_factory=dict)
     current_depth: int = 0
+    content_cache: dict[str, str] = field(default_factory=dict)
+    total_bytes: int = 0
+    defined_symbols: dict[str, str] = field(default_factory=dict)
+    
+    def get_cache_key(self, copybook_path: str, replacing_clauses: Optional[list] = None) -> str:
+        """Generate cache key for a copybook with specific replacements."""
+        if replacing_clauses:
+            replace_str = str(sorted((rc.find_text, rc.replace_text, rc.mode) 
+                                     for rc in replacing_clauses))
+            return f"{copybook_path}::{replace_str}"
+        return copybook_path
     
     def to_dict(self) -> dict[str, Any]:
         """Convert expansion context to dictionary for debugging/serialization."""
@@ -158,6 +276,9 @@ class ExpansionContext:
             "expansion_stack": self.expansion_stack,
             "current_depth": self.current_depth,
             "source_maps_count": len(self.source_maps),
+            "cache_size": len(self.content_cache),
+            "total_bytes": self.total_bytes,
+            "defined_symbols": self.defined_symbols,
         }
 
 
@@ -171,5 +292,10 @@ __all__ = [
     'CopybookSearchPath',
     'ExpansionContext',
     'ExpansionStatistics',
+    'ReplacingClause',
+    'SuppressClause',
     'SourceLocationMap',
+    'get_default_case_sensitivity',
+    'MAX_COPYBOOK_SIZE_BYTES',
+    'MAX_TOTAL_EXPANSION_BYTES',
 ]

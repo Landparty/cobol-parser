@@ -6,6 +6,7 @@ and control flow constructs with full functionality.
 """
 
 from typing import Dict, Any, List, Optional, Union
+from dataclasses import dataclass
 from .ast_base import ASTNode, SourceLocation
 
 
@@ -162,6 +163,22 @@ class PerformStatement(CobolStatement):
         return result
 
 
+class StopStatement(CobolStatement):
+    """AST node for STOP RUN statements."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("STOP", location)
+        self.stop_type: str = "RUN"  # RUN or literal
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert STOP statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "stop_type": self.stop_type
+        })
+        return result
+
+
 class ComputeStatement(CobolStatement):
     """AST node for COMPUTE statements."""
     
@@ -191,6 +208,13 @@ class ComputeStatement(CobolStatement):
         return result
 
 
+@dataclass
+class CallParameter:
+    """Parameter passed to a CALL statement."""
+    name: str
+    passing_mode: str = "REFERENCE"  # REFERENCE, CONTENT, or VALUE
+
+
 class CallStatement(CobolStatement):
     """AST node for CALL statements.
     
@@ -202,126 +226,247 @@ class CallStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("CALL", location)
         self.called_program: Optional[str] = None
-        self.using_parameters: List[str] = []
+        self.using_parameters: List[CallParameter] = []
+        self.returning_parameter: Optional[str] = None
         self.giving_parameter: Optional[str] = None
         self.on_overflow: Optional[List['CobolStatement']] = None
         self.on_exception: Optional[List['CobolStatement']] = None
         self._is_dynamic: bool = False
         self._possible_values: List[str] = []
-    
+        
+    def set_called_program(self, program_name: str, is_dynamic: bool = False):
+        """Set the called program name and type."""
+        self.called_program = program_name
+        self._is_dynamic = is_dynamic
+        if program_name not in self.operands:
+            self.add_operand(program_name)
+        
+    def add_using_parameter(self, param_name: str, passing_mode: str = "REFERENCE"):
+        """Add a parameter to the USING clause."""
+        param = CallParameter(param_name, passing_mode)
+        self.using_parameters.append(param)
+        if param_name not in self.operands:
+            self.add_operand(param_name)
+        
+    def set_giving_parameter(self, param_name: str):
+        """Set the GIVING parameter."""
+        self.giving_parameter = param_name
+        if param_name not in self.operands:
+            self.add_operand(param_name)
+
+    def set_returning_parameter(self, param_name: str):
+        """Set the RETURNING parameter."""
+        self.returning_parameter = param_name
+        if param_name not in self.operands:
+            self.add_operand(param_name)
+        
     @property
     def is_dynamic(self) -> bool:
-        """Check if this is a dynamic CALL (using a variable instead of literal)."""
+        """Check if this is a dynamic CALL."""
         return self._is_dynamic
-    
+        
     @property
     def possible_values(self) -> List[str]:
-        """Get list of possible values for dynamic CALL target.
+        """Get possible values for dynamic call target."""
+        return list(self._possible_values)
         
-        Returns empty list for static calls. For dynamic calls, returns all
-        values that could be assigned to the variable through MOVE statements
-        or initial VALUE clauses.
-        """
-        return self._possible_values.copy()
-    
-    def set_called_program(self, program: str, is_dynamic: bool = False) -> None:
-        """Set the program name being called.
-        
-        Args:
-            program: Program name (literal) or variable name
-            is_dynamic: True if program is a variable, False if literal
-        """
-        self.called_program = program
-        self._is_dynamic = is_dynamic
-        if program not in self.operands:
-            self.operands.insert(0, program)
-    
-    def add_possible_value(self, value: str) -> None:
-        """Add a possible value for a dynamic CALL target.
-        
-        Args:
-            value: A literal value that could be assigned to the CALL variable
-        """
+    def add_possible_value(self, value: str):
+        """Add a possible value for dynamic call."""
         if value not in self._possible_values:
             self._possible_values.append(value)
-    
-    def set_possible_values(self, values: List[str]) -> None:
-        """Set all possible values for a dynamic CALL target.
+            
+    def set_possible_values(self, values: List[str]):
+        """Set all possible values."""
+        self._possible_values = list(set(values))  # Deduplicate
         
-        Args:
-            values: List of literal values that could be assigned
-        """
-        self._possible_values = values.copy()
-    
-    def add_using_parameter(self, parameter: str) -> None:
-        """Add a parameter to the USING clause."""
-        self.using_parameters.append(parameter)
-        if parameter not in self.operands:
-            self.operands.append(parameter)
-    
-    def set_giving_parameter(self, parameter: str) -> None:
-        """Set the GIVING parameter."""
-        self.giving_parameter = parameter
-        if parameter not in self.operands:
-            self.operands.append(parameter)
-    
     def to_dict(self) -> Dict[str, Any]:
-        """Convert CALL statement to dictionary representation."""
-        result = super().to_dict()
-        result.update({
+        """Convert to dictionary."""
+        base = super().to_dict()
+        base.update({
             "called_program": self.called_program,
-            "is_dynamic": self._is_dynamic,
-            "possible_values": self._possible_values.copy(),
-            "using_parameters": self.using_parameters,
-            "giving_parameter": self.giving_parameter
+            "using_parameters": [
+                {"name": p.name, "mode": p.passing_mode} 
+                for p in self.using_parameters
+            ],
+            "giving_parameter": self.giving_parameter,
+            "returning_parameter": self.returning_parameter,
+            "is_dynamic": self.is_dynamic,
+            "possible_values": self.possible_values
         })
-        return result
+        # Add exception handlers if present
+        if self.on_overflow:
+            base["on_overflow"] = [s.to_dict() for s in self.on_overflow]
+        if self.on_exception:
+            base["on_exception"] = [s.to_dict() for s in self.on_exception]
+            
+        return base
 
 
 class SelectStatement(CobolStatement):
-    """AST node for SELECT statements in FILE-CONTROL paragraph."""
+    """AST node for SELECT statements in FILE-CONTROL paragraph.
+    
+    Supports comprehensive SELECT clause variations:
+    - ASSIGN TO with device types and assignment specifications
+    - ORGANIZATION: SEQUENTIAL, INDEXED, RELATIVE, LINE SEQUENTIAL
+    - ACCESS MODE: SEQUENTIAL, RANDOM, DYNAMIC
+    - RECORD KEY and ALTERNATE RECORD KEY with duplicate handling
+    - FILE STATUS variable assignments
+    - RESERVE clause area allocations
+    - PADDING CHARACTER and RECORD DELIMITER specifications
+    - PASSWORD and LOCK MODE clauses for security and concurrency
+    - SHARING clauses for multi-user access
+    - OPTIONAL clause for file existence handling
+    """
     
     def __init__(self, location: SourceLocation):
         super().__init__("SELECT", location)
         self.file_name: Optional[str] = None
+        self.is_optional: bool = False
+        
+        # ASSIGN clause
         self.assign_to: Optional[str] = None
-        self.organization: Optional[str] = None
-        self.access_mode: Optional[str] = None
+        self.assign_device_type: Optional[str] = None  # DISK, TAPE, PRINTER, etc.
+        self.assign_external_name: Optional[str] = None
+        
+        # ORGANIZATION clause
+        self.organization: Optional[str] = None  # SEQUENTIAL, INDEXED, RELATIVE, LINE SEQUENTIAL
+        
+        # ACCESS MODE clause
+        self.access_mode: Optional[str] = None  # SEQUENTIAL, RANDOM, DYNAMIC
+        
+        # RECORD KEY clause
+        self.record_key: Optional[str] = None
+        self.record_key_source: Optional[str] = None  # SOURCE IS data-name (IBM extension)
+        
+        # ALTERNATE RECORD KEY clause(s)
+        self.alternate_keys: List[Dict[str, Any]] = []  # [{key, duplicates_allowed, password}]
+        
+        # FILE STATUS clause
         self.file_status: Optional[str] = None
-    
-    def set_file_name(self, name: str) -> None:
+        self.file_status_vsam: Optional[str] = None  # Second status variable for VSAM
+        
+        # RELATIVE KEY clause
+        self.relative_key: Optional[str] = None
+        
+        # RESERVE clause
+        self.reserve_areas: Optional[int] = None
+        
+        # PADDING CHARACTER clause
+        self.padding_character: Optional[str] = None
+        
+        # RECORD DELIMITER clause
+        self.record_delimiter: Optional[str] = None  # STANDARD-1 or identifier
+        
+        # PASSWORD clause
+        self.password: Optional[str] = None
+        
+        # LOCK MODE clause
+        self.lock_mode: Optional[str] = None  # MANUAL, AUTOMATIC, EXCLUSIVE
+        self.lock_on: Optional[str] = None  # RECORD, MULTIPLE RECORDS
+        self.lock_with_rollback: bool = False
+        
+        # SHARING clause
+        self.sharing_mode: Optional[str] = None  # ALL, NO OTHER, READ ONLY
+        
+    def set_file_name(self, name: str, is_optional: bool = False) -> None:
         """Set the file name being selected."""
         self.file_name = name
+        self.is_optional = is_optional
         if name not in self.operands:
             self.operands.insert(0, name)
     
-    def set_assign_to(self, assign_value: str) -> None:
-        """Set the ASSIGN TO clause value."""
+    def set_assign_to(self, assign_value: str, device_type: Optional[str] = None,
+                      external_name: Optional[str] = None) -> None:
+        """Set the ASSIGN TO clause value with optional device type."""
         self.assign_to = assign_value
+        self.assign_device_type = device_type
+        self.assign_external_name = external_name
         if assign_value not in self.operands:
             self.operands.append(assign_value)
     
     def set_organization(self, org: str) -> None:
         """Set the ORGANIZATION clause."""
-        self.organization = org
+        self.organization = org.upper()
     
     def set_access_mode(self, mode: str) -> None:
         """Set the ACCESS MODE clause."""
-        self.access_mode = mode
+        self.access_mode = mode.upper()
     
-    def set_file_status(self, status: str) -> None:
+    def set_record_key(self, key: str, source: Optional[str] = None) -> None:
+        """Set the RECORD KEY clause."""
+        self.record_key = key
+        self.record_key_source = source
+    
+    def add_alternate_key(self, key: str, duplicates_allowed: bool = False,
+                          password: Optional[str] = None) -> None:
+        """Add an ALTERNATE RECORD KEY clause."""
+        self.alternate_keys.append({
+            'key': key,
+            'duplicates_allowed': duplicates_allowed,
+            'password': password
+        })
+    
+    def set_file_status(self, status: str, vsam_status: Optional[str] = None) -> None:
         """Set the FILE STATUS clause."""
         self.file_status = status
+        self.file_status_vsam = vsam_status
+    
+    def set_relative_key(self, key: str) -> None:
+        """Set the RELATIVE KEY clause."""
+        self.relative_key = key
+    
+    def set_reserve_areas(self, areas: int) -> None:
+        """Set the RESERVE clause."""
+        self.reserve_areas = areas
+    
+    def set_padding_character(self, character: str) -> None:
+        """Set the PADDING CHARACTER clause."""
+        self.padding_character = character
+    
+    def set_record_delimiter(self, delimiter: str) -> None:
+        """Set the RECORD DELIMITER clause."""
+        self.record_delimiter = delimiter
+    
+    def set_password(self, password: str) -> None:
+        """Set the PASSWORD clause."""
+        self.password = password
+    
+    def set_lock_mode(self, mode: str, lock_on: Optional[str] = None,
+                      with_rollback: bool = False) -> None:
+        """Set the LOCK MODE clause."""
+        self.lock_mode = mode.upper()
+        self.lock_on = lock_on
+        self.lock_with_rollback = with_rollback
+    
+    def set_sharing_mode(self, mode: str) -> None:
+        """Set the SHARING clause."""
+        self.sharing_mode = mode.upper()
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert SELECT statement to dictionary representation."""
         result = super().to_dict()
         result.update({
             "file_name": self.file_name,
+            "is_optional": self.is_optional,
             "assign_to": self.assign_to,
+            "assign_device_type": self.assign_device_type,
+            "assign_external_name": self.assign_external_name,
             "organization": self.organization,
             "access_mode": self.access_mode,
-            "file_status": self.file_status
+            "record_key": self.record_key,
+            "record_key_source": self.record_key_source,
+            "alternate_keys": self.alternate_keys,
+            "file_status": self.file_status,
+            "file_status_vsam": self.file_status_vsam,
+            "relative_key": self.relative_key,
+            "reserve_areas": self.reserve_areas,
+            "padding_character": self.padding_character,
+            "record_delimiter": self.record_delimiter,
+            "password": self.password,
+            "lock_mode": self.lock_mode,
+            "lock_on": self.lock_on,
+            "lock_with_rollback": self.lock_with_rollback,
+            "sharing_mode": self.sharing_mode
         })
         return result
 

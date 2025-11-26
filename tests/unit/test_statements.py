@@ -673,7 +673,9 @@ class TestCallStatement:
         
         call_stmt.add_using_parameter("WS-INPUT-DATA")
         
-        assert call_stmt.using_parameters == ["WS-INPUT-DATA"]
+        assert len(call_stmt.using_parameters) == 1
+        assert call_stmt.using_parameters[0].name == "WS-INPUT-DATA"
+        assert call_stmt.using_parameters[0].passing_mode == "REFERENCE"
         assert "WS-INPUT-DATA" in call_stmt.operands
     
     def test_add_using_parameter_multiple(self):
@@ -686,7 +688,10 @@ class TestCallStatement:
         call_stmt.add_using_parameter("WS-PARAM3")
         
         expected_params = ["WS-PARAM1", "WS-PARAM2", "WS-PARAM3"]
-        assert call_stmt.using_parameters == expected_params
+        assert len(call_stmt.using_parameters) == 3
+        for i, param_name in enumerate(expected_params):
+            assert call_stmt.using_parameters[i].name == param_name
+            assert call_stmt.using_parameters[i].passing_mode == "REFERENCE"
         
         # All should be in operands
         for param in expected_params:
@@ -703,7 +708,8 @@ class TestCallStatement:
         # Then add as using parameter
         call_stmt.add_using_parameter("WS-SHARED-PARAM")
         
-        assert "WS-SHARED-PARAM" in call_stmt.using_parameters
+        assert len(call_stmt.using_parameters) == 1
+        assert call_stmt.using_parameters[0].name == "WS-SHARED-PARAM"
         # Should not duplicate in operands
         assert call_stmt.operands.count("WS-SHARED-PARAM") == 1
     
@@ -752,7 +758,11 @@ class TestCallStatement:
         
         # Check CALL-specific properties
         assert result["called_program"] == "CALCULATETAX"
-        assert result["using_parameters"] == ["WS-SALARY", "WS-DEDUCTIONS"]
+        assert len(result["using_parameters"]) == 2
+        assert result["using_parameters"][0]["name"] == "WS-SALARY"
+        assert result["using_parameters"][0]["mode"] == "REFERENCE"
+        assert result["using_parameters"][1]["name"] == "WS-DEDUCTIONS"
+        assert result["using_parameters"][1]["mode"] == "REFERENCE"
         assert result["giving_parameter"] == "WS-TAX-AMOUNT"
     
     def test_call_statement_minimal(self):
