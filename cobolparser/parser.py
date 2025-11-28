@@ -341,9 +341,7 @@ class CobolParser:
                     self.advance_token()
                     
                     # Handle optional PROGRAM-ID clauses (IS INITIAL, IS COMMON, etc.)
-                    while (self.current_token and 
-                           self.current_token.type == TokenType.IDENTIFIER and 
-                           self.current_token.value.upper() == 'IS'):
+                    while self.current_token and self.current_token.type == TokenType.IS:
                         self.advance_token()  # Skip 'IS'
                         # Skip the clause value (INITIAL, COMMON, etc.)
                         if (self.current_token and 
@@ -1551,7 +1549,9 @@ class CobolParser:
         linage_value = None
         if self.current_token:
             if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
-                linage_value = int(self.current_token.value)
+                # Strip trailing period if present (lexer may include it)
+                val_str = self.current_token.value.rstrip('.')
+                linage_value = int(val_str) if val_str else 0
             else:
                 linage_value = self.current_token.value
             self.advance_token()
@@ -1585,7 +1585,8 @@ class CobolParser:
                     self.advance_token()
                 if self.current_token:
                     if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
-                        footing = int(self.current_token.value)
+                        val_str = self.current_token.value.rstrip('.')
+                        footing = int(val_str) if val_str else 0
                     else:
                         footing = self.current_token.value
                     self.advance_token()
@@ -1599,7 +1600,8 @@ class CobolParser:
                         self.advance_token()
                         if self.current_token:
                             if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
-                                top = int(self.current_token.value)
+                                val_str = self.current_token.value.rstrip('.')
+                                top = int(val_str) if val_str else 0
                             else:
                                 top = self.current_token.value
                             self.advance_token()
@@ -1607,7 +1609,8 @@ class CobolParser:
                         self.advance_token()
                         if self.current_token:
                             if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
-                                bottom = int(self.current_token.value)
+                                val_str = self.current_token.value.rstrip('.')
+                                bottom = int(val_str) if val_str else 0
                             else:
                                 bottom = self.current_token.value
                             self.advance_token()
@@ -1620,7 +1623,8 @@ class CobolParser:
                 self.advance_token()
                 if self.current_token:
                     if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
-                        top = int(self.current_token.value)
+                        val_str = self.current_token.value.rstrip('.')
+                        top = int(val_str) if val_str else 0
                     else:
                         top = self.current_token.value
                     self.advance_token()
@@ -1628,7 +1632,8 @@ class CobolParser:
                 self.advance_token()
                 if self.current_token:
                     if self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
-                        bottom = int(self.current_token.value)
+                        val_str = self.current_token.value.rstrip('.')
+                        bottom = int(val_str) if val_str else 0
                     else:
                         bottom = self.current_token.value
                     self.advance_token()
