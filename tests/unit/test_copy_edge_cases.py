@@ -41,8 +41,218 @@ from cobolparser.preprocess.copy_statement_parser import (
     parse_replacing_clause,
     parse_suppress_clause,
     apply_replacing_clauses,
+    is_comment_line,
+    is_within_string_literal,
+    remove_comment_lines,
 )
 from cobolparser.preprocess.path_resolver import suggest_similar_copybooks
+
+
+class TestCommentLineDetection:
+    """Test detection of comment lines in fixed-format COBOL."""
+    
+    def test_asterisk_in_column_7_is_comment(self):
+        """Test that asterisk in column 7 marks a comment line."""
+        # Column 7 is index 6
+        line = "      * This is a comment line"
+        assert is_comment_line(line) is True
+        
+    def test_slash_in_column_7_is_comment(self):
+        """Test that slash in column 7 marks a page break comment."""
+        line = "      / This is a page break comment"
+        assert is_comment_line(line) is True
+        
+    def test_debug_line_d_is_comment(self):
+        """Test that 'D' in column 7 marks a debug line (treated as comment)."""
+        line = "      D DISPLAY 'DEBUG INFO'."
+        assert is_comment_line(line) is True
+        
+    def test_debug_line_lowercase_d_is_comment(self):
+        """Test that lowercase 'd' in column 7 marks a debug line."""
+        line = "      d DISPLAY 'DEBUG INFO'."
+        assert is_comment_line(line) is True
+        
+    def test_normal_code_line_not_comment(self):
+        """Test that normal code line is not detected as comment."""
+        line = "       MOVE A TO B."
+        assert is_comment_line(line) is False
+        
+    def test_short_line_not_comment(self):
+        """Test that lines shorter than 7 characters are not comments."""
+        line = "123"
+        assert is_comment_line(line) is False
+        
+    def test_continuation_line_not_comment(self):
+        """Test that continuation lines (hyphen in column 7) are not comments."""
+        line = "      -    CONTINUATION TEXT"
+        assert is_comment_line(line) is False
+
+
+class TestStringLiteralDetection:
+    """Test detection of content within string literals."""
+    
+    def test_copy_within_double_quoted_string(self):
+        """Test COPY keyword inside double-quoted string is detected."""
+        source = '       DISPLAY "COPY EMPLOYEE TO FILE".'
+        # Position of "COPY" is around index 17
+        copy_pos = source.find("COPY")
+        assert is_within_string_literal(source, copy_pos, copy_pos + 4) is True
+        
+    def test_copy_within_single_quoted_string(self):
+        """Test COPY keyword inside single-quoted string is detected."""
+        source = "       DISPLAY 'COPY EMPLOYEE TO FILE'."
+        copy_pos = source.find("COPY")
+        assert is_within_string_literal(source, copy_pos, copy_pos + 4) is True
+        
+    def test_copy_outside_string(self):
+        """Test COPY keyword outside string is not falsely detected."""
+        source = "       COPY EMPLOYEE."
+        copy_pos = source.find("COPY")
+        assert is_within_string_literal(source, copy_pos, copy_pos + 4) is False
+        
+    def test_copy_after_string(self):
+        """Test COPY after a complete string is correctly identified."""
+        source = '       DISPLAY "HEADER". COPY EMPLOYEE.'
+        copy_pos = source.rfind("COPY")  # Second COPY
+        assert is_within_string_literal(source, copy_pos, copy_pos + 4) is False
+        
+    def test_escaped_quotes_handled(self):
+        """Test that doubled quotes (COBOL escape) are handled correctly."""
+        source = '       DISPLAY "SAY ""HELLO""". COPY EMPLOYEE.'
+        copy_pos = source.rfind("COPY")
+        assert is_within_string_literal(source, copy_pos, copy_pos + 4) is False
+
+
+class TestRemoveCommentLines:
+    """Test removal of comment lines from source."""
+    
+    def test_comment_lines_blanked(self):
+        """Test that comment lines are blanked out."""
+        source = """\
+      * This is a comment
+       COPY EMPLOYEE."""
+        result = remove_comment_lines(source)
+        lines = result.split('\n')
+        # First line should be blanked (indicator preserved)
+        assert "This is a comment" not in lines[0]
+        # Second line preserved
+        assert "COPY EMPLOYEE" in lines[1]
+        
+    def test_line_count_preserved(self):
+        """Test that line count is preserved after removing comments."""
+        source = """\
+       LINE 1.
+      * COMMENT LINE
+       LINE 3."""
+        result = remove_comment_lines(source)
+        assert result.count('\n') == source.count('\n')
+
+
+class TestCopyStatementExtractionWithComments:
+    """Test that COPY statements in comments are properly ignored."""
+    
+    def test_copy_in_comment_ignored(self):
+        """Test that COPY statement in comment line is not extracted."""
+        source = """\
+      * COPY COMMENTED-OUT.
+       COPY VALID-COPYBOOK."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "VALID-COPYBOOK"
+        
+    def test_multiple_commented_copies_ignored(self):
+        """Test multiple commented COPY statements are all ignored."""
+        source = """\
+      * COPY FIRST-COMMENT.
+      * COPY SECOND-COMMENT.
+       COPY REAL-COPYBOOK."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "REAL-COPYBOOK"
+        
+    def test_mix_of_valid_and_commented_copies(self):
+        """Test mix of valid and commented COPY statements."""
+        source = """\
+       COPY FIRST-VALID.
+      * COPY COMMENTED-OUT.
+       COPY SECOND-VALID."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 2
+        assert statements[0].member_name == "FIRST-VALID"
+        assert statements[1].member_name == "SECOND-VALID"
+        
+    def test_page_break_comment_copy_ignored(self):
+        """Test COPY in page break comment (/) is ignored."""
+        source = """\
+      / COPY IN-PAGE-BREAK.
+       COPY VALID."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "VALID"
+
+
+class TestCopyStatementExtractionWithStrings:
+    """Test that COPY keywords in strings are properly ignored."""
+    
+    def test_copy_in_display_string_ignored(self):
+        """Test COPY in DISPLAY string is not extracted."""
+        source = '       DISPLAY "USE COPY COMMAND".\n       COPY ACTUAL-COPYBOOK.'
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "ACTUAL-COPYBOOK"
+        
+    def test_copy_in_move_string_ignored(self):
+        """Test COPY in MOVE string literal is not extracted."""
+        source = """\
+       MOVE "COPY THIS TEXT" TO WS-FIELD.
+       COPY REAL-DATA."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "REAL-DATA"
+        
+    def test_single_quoted_copy_ignored(self):
+        """Test COPY in single-quoted string is not extracted."""
+        source = """\
+       DISPLAY 'COPY STATEMENT EXAMPLE'.
+       COPY VALID-COPY."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "VALID-COPY"
+        
+    def test_continuation_in_string_with_copy(self):
+        """Test COPY in multi-line string continuation is ignored."""
+        source = """\
+       MOVE "THE COPY STATEMENT
+      -"IS USED FOR COPYBOOKS." TO WS-MSG.
+       COPY REAL-COPYBOOK."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "REAL-COPYBOOK"
+
+
+class TestK6SCACopybook:
+    """Test cases based on the K6SCA.CPY file example from the user."""
+    
+    def test_k6sca_style_continuation_with_message(self):
+        """Test K6SCA-style continuation line with COPY in message text."""
+        source = """\
+027900     MOVE  " REGARDLESS OF WHAT APPEARS ABOVE OR BELOW, THIS IS THK6SCA4.2
+028000-          "E REPORT FOR SM106A" TO PRINT-REC.                    K6SCA4.2
+028300     MOVE     " THE PRESENCE OF THIS MESSAGE INDICATES THAT TEXT FK6SCA4.2
+028400-    "OR ALL 3 DIVISIONS CAN BE GENERATED BY ONE COPY STATEMENT." K6SCA4.2
+028500              TO PRINT-REC.                                       K6SCA4.2"""
+        # This should NOT extract any COPY statements because "COPY" is in a string
+        statements = extract_copy_statements(source)
+        assert len(statements) == 0
+        
+    def test_valid_copy_after_string_with_copy_text(self):
+        """Test valid COPY after a string containing 'COPY' text."""
+        source = """\
+       DISPLAY "USING COPY FOR EXPANSION".
+       COPY EMPLOYEE."""
+        statements = extract_copy_statements(source)
+        assert len(statements) == 1
+        assert statements[0].member_name == "EMPLOYEE"
 
 
 class TestMultiLineContinuation:

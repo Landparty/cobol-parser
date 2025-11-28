@@ -4,12 +4,21 @@ COPY statement parser for COBOL copybook expansion.
 This module handles parsing of COBOL COPY statements from source code,
 supporting various syntax variants including library qualifiers,
 REPLACING clauses with LEADING/TRAILING modifiers, and SUPPRESS options.
+
+Properly handles:
+- Comment lines (asterisk in column 7 of fixed-format COBOL)
+- COPY keywords within string literals
+- Continuation lines (hyphen in column 7)
 """
 
 import re
 from typing import Optional
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
+
+# Regex to identify comment lines in fixed-format COBOL
+# Column 7 (index 6) contains '*' for full-line comments or '/' for page break comments
+COMMENT_LINE_PATTERN = re.compile(r'^.{6}[*\/]', re.MULTILINE)
 
 # COPY statement regex patterns supporting IBM Enterprise COBOL syntax
 # Matches: COPY member, COPY "member", COPY member IN/OF library, COPY member SUPPRESS, COPY member REPLACING
@@ -40,6 +49,9 @@ def normalize_continuation_lines(source: str) -> str:
     - Columns 8-72: Program text area
     
     This function merges continuation lines to enable proper COPY statement parsing.
+    Handles string literal continuation where:
+    - The continued line ends mid-literal (no closing quote)
+    - The continuation line starts with a quote to continue the literal
     
     Args:
         source: COBOL source code (may contain continuation lines)
@@ -62,9 +74,30 @@ def normalize_continuation_lines(source: str) -> str:
             if result:
                 # Get the continuation text (columns 8 onwards)
                 continuation_text = line[7:] if len(line) > 7 else ""
-                # Append to previous line (trimming trailing spaces from previous, 
-                # but preserving leading spaces of continuation for string literals)
-                result[-1] = result[-1].rstrip() + continuation_text
+                
+                # Get the previous line (the one we're continuing)
+                prev_line = result[-1].rstrip()
+                
+                # Check if we're continuing a string literal
+                # Count unmatched quotes in previous line to determine if we're in a string
+                in_double_string = _count_unmatched_quotes(prev_line, '"') % 2 == 1
+                in_single_string = _count_unmatched_quotes(prev_line, "'") % 2 == 1
+                
+                if in_double_string or in_single_string:
+                    # We're continuing a string literal
+                    # COBOL continuation: the continuation line starts with the quote char
+                    # which should be skipped as it's just indicating literal continuation
+                    cont_stripped = continuation_text.lstrip()
+                    if cont_stripped:
+                        if in_double_string and cont_stripped.startswith('"'):
+                            # Skip the continuation quote
+                            continuation_text = cont_stripped[1:]
+                        elif in_single_string and cont_stripped.startswith("'"):
+                            # Skip the continuation quote
+                            continuation_text = cont_stripped[1:]
+                
+                # Append to previous line
+                result[-1] = prev_line + continuation_text
             else:
                 # Orphan continuation line - just add the text part
                 result.append(line[7:] if len(line) > 7 else "")
@@ -74,9 +107,151 @@ def normalize_continuation_lines(source: str) -> str:
     return '\n'.join(result)
 
 
+def _count_unmatched_quotes(text: str, quote_char: str) -> int:
+    """
+    Count the number of unescaped quote characters in text.
+    
+    In COBOL, quotes are escaped by doubling them ("" or '').
+    
+    Args:
+        text: Text to analyze
+        quote_char: The quote character (" or ')
+        
+    Returns:
+        Count of unescaped quote characters
+    """
+    count = 0
+    i = 0
+    while i < len(text):
+        if text[i] == quote_char:
+            # Check if this is an escaped quote (doubled)
+            if i + 1 < len(text) and text[i + 1] == quote_char:
+                # Skip the escaped pair
+                i += 2
+                continue
+            count += 1
+        i += 1
+    return count
+
+
+def is_comment_line(line: str) -> bool:
+    """
+    Check if a line is a COBOL comment line.
+    
+    In fixed-format COBOL:
+    - Column 7 (index 6) contains '*' for full-line comments
+    - Column 7 contains '/' for page break comments (also treated as comments)
+    - Column 7 contains 'D' or 'd' for debugging lines (typically treated as comments)
+    
+    Args:
+        line: A single line of COBOL source code
+        
+    Returns:
+        True if the line is a comment, False otherwise
+        
+    Example:
+        >>> is_comment_line("      * This is a comment")
+        True
+        >>> is_comment_line("       MOVE A TO B.")
+        False
+    """
+    if len(line) < 7:
+        return False
+    indicator = line[6]
+    return indicator in ('*', '/', 'D', 'd')
+
+
+def is_within_string_literal(source: str, match_start: int, match_end: int) -> bool:
+    """
+    Check if a regex match position falls within a COBOL string literal.
+    
+    COBOL strings are delimited by either single quotes (') or double quotes (").
+    This function checks if the match position is inside an unclosed string.
+    
+    Args:
+        source: The full source code string
+        match_start: Start position of the match in the source
+        match_end: End position of the match in the source
+        
+    Returns:
+        True if the match is within a string literal, False otherwise
+        
+    Example:
+        >>> source = '       DISPLAY "COPY EMPLOYEE.".'
+        >>> is_within_string_literal(source, 16, 20)  # Position of "COPY"
+        True
+    """
+    # Get the text before the match on the same line
+    line_start = source.rfind('\n', 0, match_start) + 1
+    text_before_match = source[line_start:match_start]
+    
+    # Count unescaped quotes before the match
+    double_quote_count = 0
+    single_quote_count = 0
+    
+    i = 0
+    while i < len(text_before_match):
+        char = text_before_match[i]
+        if char == '"':
+            # Check for escaped quote (doubled quote in COBOL)
+            if i + 1 < len(text_before_match) and text_before_match[i + 1] == '"':
+                i += 2  # Skip both quotes (escaped)
+                continue
+            double_quote_count += 1
+        elif char == "'":
+            # Check for escaped quote (doubled quote in COBOL)
+            if i + 1 < len(text_before_match) and text_before_match[i + 1] == "'":
+                i += 2  # Skip both quotes (escaped)
+                continue
+            single_quote_count += 1
+        i += 1
+    
+    # If we have an odd number of quotes, we're inside a string
+    # COBOL typically uses one type consistently, so check both
+    in_double_quote_string = double_quote_count % 2 == 1
+    in_single_quote_string = single_quote_count % 2 == 1
+    
+    return in_double_quote_string or in_single_quote_string
+
+
+def remove_comment_lines(source: str) -> str:
+    """
+    Remove comment lines from COBOL source code.
+    
+    This preserves line numbers by replacing comment content with spaces
+    while keeping the line structure intact.
+    
+    Args:
+        source: COBOL source code
+        
+    Returns:
+        Source with comment lines replaced (preserving line structure)
+    """
+    lines = source.split('\n')
+    result = []
+    
+    for line in lines:
+        if is_comment_line(line):
+            # Replace comment with spaces to preserve line numbers
+            # Keep first 7 columns (sequence + indicator) and blank the rest
+            if len(line) >= 7:
+                result.append(line[:7] + ' ' * max(0, len(line) - 7))
+            else:
+                result.append(line)
+        else:
+            result.append(line)
+    
+    return '\n'.join(result)
+
+
 def extract_copy_statements(source_code: str, source_file: str = "<main>") -> list[CopyStatement]:
     """
     Extract all COPY statements from COBOL source code.
+    
+    This function properly handles:
+    - Comment lines (asterisk/slash in column 7) - ignored
+    - COPY keywords within string literals - ignored
+    - Continuation lines (hyphen in column 7) - merged before parsing
     
     Args:
         source_code: COBOL source code to parse
@@ -94,12 +269,19 @@ def extract_copy_statements(source_code: str, source_file: str = "<main>") -> li
         >>> print(statements[0].is_suppressed)
         True
     """
-    # Normalize continuation lines before parsing
-    normalized_source = normalize_continuation_lines(source_code)
+    # Step 1: Remove comment lines (replace with spaces to preserve positions)
+    source_without_comments = remove_comment_lines(source_code)
+    
+    # Step 2: Normalize continuation lines before parsing
+    normalized_source = normalize_continuation_lines(source_without_comments)
     
     statements = []
     
     for match in COPY_PATTERN.finditer(normalized_source):
+        # Skip if the COPY keyword is within a string literal
+        if is_within_string_literal(normalized_source, match.start(), match.end()):
+            continue
+        
         # Extract member name (try all three capture groups)
         member_name = match.group(1) or match.group(2) or match.group(3)
         library_qualifier = match.group(4)
@@ -325,5 +507,8 @@ __all__ = [
     'apply_replacing_clauses',
     'normalize_continuation_lines',
     'track_source_location',
+    'is_comment_line',
+    'is_within_string_literal',
+    'remove_comment_lines',
     'COPY_PATTERN',
 ]
