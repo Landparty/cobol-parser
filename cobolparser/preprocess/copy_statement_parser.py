@@ -9,6 +9,7 @@ Properly handles:
 - Comment lines (asterisk in column 7 of fixed-format COBOL)
 - COPY keywords within string literals
 - Continuation lines (hyphen in column 7)
+- Sequence/identification area (columns 73-80) in fixed-format COBOL
 """
 
 import re
@@ -16,12 +17,53 @@ from typing import Optional
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
 
+# Fixed-format COBOL column boundaries
+# Columns 1-6: Sequence number area
+# Column 7: Indicator area
+# Columns 8-72: Program text area (Area A + Area B)
+# Columns 73-80: Identification/sequence area (ignored for parsing)
+FIXED_FORMAT_CODE_END_COLUMN = 72
+
 # Regex to identify comment lines in fixed-format COBOL
 # Column 7 (index 6) contains '*' for full-line comments or '/' for page break comments
 COMMENT_LINE_PATTERN = re.compile(r'^.{6}[*\/]', re.MULTILINE)
 
 # COPY statement regex patterns supporting IBM Enterprise COBOL syntax
 # Matches: COPY member, COPY "member", COPY member IN/OF library, COPY member SUPPRESS, COPY member REPLACING
+#
+# The REPLACING clause pattern handles:
+# - Pseudo-text blocks (==...==) which may contain periods
+# - Plain identifiers and literals after BY
+# A period inside ==...== should NOT terminate the COPY statement.
+# The statement ends with a period that follows the complete REPLACING clause.
+#
+# Pattern structure:
+#   COPY <member> [IN/OF <library>] [SUPPRESS [PRINTING]] [REPLACING <clauses>] .
+#
+# REPLACING operands can be:
+# - Pseudo-text: ==...== or :...:  
+# - Identifiers: WORD-NAME, FIELD-01, etc.
+# - Literals: "string" or 'string'
+# - Numeric literals with optional sign: +2, -3, 00001
+# - Figurative constants: SPACE, ZERO, etc.
+
+# Helper pattern for REPLACING operands (pseudo-text, identifier, literal, or numeric)
+_REPLACING_OPERAND = (
+    r'(?:'
+        r'==(?:[^=]|=[^=])*=='  # Pseudo-text ==...==
+        r'|'
+        r':(?:[^:])*:'  # Alternate pseudo-text :...:
+        r'|'
+        r'"[^"]*"'  # Double-quoted literal
+        r'|'
+        r"'[^']*'"  # Single-quoted literal
+        r'|'
+        r'[+-]?[0-9]+(?:\.[0-9]+)?'  # Numeric literal with optional sign and decimal
+        r'|'
+        r'[A-Za-z0-9][-A-Za-z0-9]*(?:\s+(?:IN|OF)\s+[A-Za-z0-9][-A-Za-z0-9]*)*(?:\s*\([^)]+\))?'  # Qualified identifier with optional subscript
+    r')'
+)
+
 COPY_PATTERN = re.compile(
     r'\bCOPY\s+'  # COPY keyword
     r'(?:'  # Member name (quoted or unquoted)
@@ -33,13 +75,23 @@ COPY_PATTERN = re.compile(
     r')'
     r'(?:\s+(?:IN|OF)\s+([A-Za-z0-9_-]+))?'  # Optional library qualifier (group 4)
     r'(?:\s+(SUPPRESS)(?:\s+(PRINTING))?)?'  # Optional SUPPRESS [PRINTING] clause (groups 5, 6)
-    r'(?:\s+REPLACING\s+(.+?))?'  # Optional REPLACING clause (group 7)
-    r'\s*\.',  # Terminating period
+    r'(?:\s+REPLACING\s+'  # Optional REPLACING clause start
+        r'('  # Capture the entire REPLACING content (group 7)
+            r'(?:'
+                r'(?:LEADING\s+|TRAILING\s+)?'  # Optional LEADING/TRAILING modifier
+                + _REPLACING_OPERAND +  # Find operand
+                r'\s+BY\s+'
+                + _REPLACING_OPERAND +  # Replace operand
+                r'\s*'
+            r')+'
+        r')'
+    r')?'
+    r'\s*\.',  # Terminating period (NOT inside pseudo-text)
     re.IGNORECASE | re.DOTALL
 )
 
 
-def normalize_continuation_lines(source: str) -> str:
+def normalize_continuation_lines(source: str, indicator_position: int = 6) -> str:
     """
     Normalize COBOL fixed-format continuation lines for COPY statement detection.
     
@@ -55,6 +107,8 @@ def normalize_continuation_lines(source: str) -> str:
     
     Args:
         source: COBOL source code (may contain continuation lines)
+        indicator_position: Position of the indicator column (default 6 for original,
+                           0 for source that has had columns 1-6 stripped)
         
     Returns:
         Source with continuation lines merged
@@ -67,13 +121,16 @@ def normalize_continuation_lines(source: str) -> str:
     lines = source.split('\n')
     result = []
     
+    # Text starts after the indicator column
+    text_start = indicator_position + 1
+    
     for i, line in enumerate(lines):
-        # Check if this is a continuation line (column 7 is '-')
-        if len(line) >= 7 and line[6] == '-':
+        # Check if this is a continuation line (indicator is '-')
+        if len(line) > indicator_position and line[indicator_position] == '-':
             # This is a continuation line
             if result:
-                # Get the continuation text (columns 8 onwards)
-                continuation_text = line[7:] if len(line) > 7 else ""
+                # Get the continuation text (after the indicator)
+                continuation_text = line[text_start:] if len(line) > text_start else ""
                 
                 # Get the previous line (the one we're continuing)
                 prev_line = result[-1].rstrip()
@@ -95,12 +152,18 @@ def normalize_continuation_lines(source: str) -> str:
                         elif in_single_string and cont_stripped.startswith("'"):
                             # Skip the continuation quote
                             continuation_text = cont_stripped[1:]
+                else:
+                    # Non-literal continuation: strip leading spaces
+                    # In COBOL, when continuing a non-literal (like an identifier),
+                    # the continuation text is concatenated directly to the previous text.
+                    # Example: "O005" continued with "F-001" becomes "O005F-001"
+                    continuation_text = continuation_text.lstrip()
                 
                 # Append to previous line
                 result[-1] = prev_line + continuation_text
             else:
                 # Orphan continuation line - just add the text part
-                result.append(line[7:] if len(line) > 7 else "")
+                result.append(line[text_start:] if len(line) > text_start else "")
         else:
             result.append(line)
     
@@ -132,6 +195,58 @@ def _count_unmatched_quotes(text: str, quote_char: str) -> int:
             count += 1
         i += 1
     return count
+
+
+def strip_sequence_area(source: str) -> str:
+    """
+    Strip the sequence areas from fixed-format COBOL for regex-based extraction.
+    
+    In fixed-format COBOL:
+    - Columns 1-6: Sequence number area (stripped for pattern matching)
+    - Column 7: Indicator area (kept for comment/continuation detection)
+    - Columns 8-72: Program text area (the actual code)
+    - Columns 73-80: Identification/sequence area (stripped to prevent false matches)
+    
+    Stripping both areas is critical for COPY statement extraction where:
+    1. The copybook name may appear at the end of the code area (column 72) and
+       could incorrectly concatenate with content from the identification area.
+    2. Multi-line statements need to match across line breaks without sequence
+       numbers interfering with the regex patterns.
+    
+    Args:
+        source: COBOL source code (may be fixed-format with sequence areas)
+        
+    Returns:
+        Source with columns 1-6 and 73+ stripped from each line
+        
+    Example:
+        >>> line = "033800     COPY                                                    KP001SM2064.2"
+        >>> strip_sequence_area(line)
+        "     COPY                                                    KP001"
+    """
+    lines = source.split('\n')
+    result = []
+    
+    # Define column boundaries (0-indexed)
+    SEQUENCE_NUMBER_END = 6  # Columns 1-6 (indices 0-5)
+    
+    for line in lines:
+        if len(line) < 7:
+            # Short line - might be free-format or empty, keep as-is
+            result.append(line)
+        else:
+            # Extract columns 7-72 (indicator + program text)
+            # Column 7 (index 6) is indicator area - keep it
+            # Columns 8-72 (indices 7-71) are program text area
+            # Columns 73+ (index 72+) are identification area - strip
+            
+            # Keep indicator (index 6) and program text (indices 7 to 71)
+            start_idx = SEQUENCE_NUMBER_END  # Start at column 7 (index 6)
+            end_idx = min(len(line), FIXED_FORMAT_CODE_END_COLUMN)
+            
+            result.append(line[start_idx:end_idx])
+    
+    return '\n'.join(result)
 
 
 def is_comment_line(line: str) -> bool:
@@ -252,6 +367,7 @@ def extract_copy_statements(source_code: str, source_file: str = "<main>") -> li
     - Comment lines (asterisk/slash in column 7) - ignored
     - COPY keywords within string literals - ignored
     - Continuation lines (hyphen in column 7) - merged before parsing
+    - Sequence/identification areas (columns 1-6 and 73-80) - stripped before pattern matching
     
     Args:
         source_code: COBOL source code to parse
@@ -269,11 +385,19 @@ def extract_copy_statements(source_code: str, source_file: str = "<main>") -> li
         >>> print(statements[0].is_suppressed)
         True
     """
-    # Step 1: Remove comment lines (replace with spaces to preserve positions)
+    # Step 1: Remove comment lines FIRST (while column 7 indicator is still at index 6)
+    # This replaces comment content with spaces to preserve line structure
     source_without_comments = remove_comment_lines(source_code)
     
-    # Step 2: Normalize continuation lines before parsing
-    normalized_source = normalize_continuation_lines(source_without_comments)
+    # Step 2: Strip sequence areas (columns 1-6 and 73-80) from fixed-format COBOL
+    # This prevents false matches where:
+    # - Identifiers at column 72 concatenate with sequence numbers (e.g., "KP006SM2064")
+    # - Sequence numbers at start of lines interfere with multi-line pattern matching
+    source_stripped = strip_sequence_area(source_without_comments)
+    
+    # Step 3: Normalize continuation lines before parsing
+    # After stripping columns 1-6, the indicator column is now at position 0
+    normalized_source = normalize_continuation_lines(source_stripped, indicator_position=0)
     
     statements = []
     
@@ -506,9 +630,11 @@ __all__ = [
     'parse_suppress_clause',
     'apply_replacing_clauses',
     'normalize_continuation_lines',
+    'strip_sequence_area',
     'track_source_location',
     'is_comment_line',
     'is_within_string_literal',
     'remove_comment_lines',
     'COPY_PATTERN',
+    'FIXED_FORMAT_CODE_END_COLUMN',
 ]
