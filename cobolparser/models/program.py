@@ -258,28 +258,63 @@ class CobolProgram(ASTNode):
         return results
     
     def get_all_statements(self) -> List['CobolStatement']:
-        """Get all statements in the program (typically in PROCEDURE division)."""
+        """Get all statements in the program (typically in PROCEDURE division).
+        
+        Recursively traverses nested structures like PERFORM inline blocks
+        and IF/ELSE branches to extract ALL statements including nested ones.
+        """
         statements = []
+        
+        def collect_nested_statements(stmt: 'CobolStatement') -> List['CobolStatement']:
+            """Recursively collect statements from nested structures."""
+            result = [stmt]
+            
+            # Check for nested structures in PERFORM statements
+            if hasattr(stmt, 'inline_statements'):
+                for nested_stmt in stmt.inline_statements:
+                    result.extend(collect_nested_statements(nested_stmt))
+            
+            # Check for nested structures in IF statements
+            if hasattr(stmt, 'then_statements'):
+                for nested_stmt in stmt.then_statements:
+                    result.extend(collect_nested_statements(nested_stmt))
+            
+            if hasattr(stmt, 'else_statements'):
+                for nested_stmt in stmt.else_statements:
+                    result.extend(collect_nested_statements(nested_stmt))
+            
+            # Check for exception handler statements in CALL
+            if hasattr(stmt, 'on_exception') and stmt.on_exception:
+                for nested_stmt in stmt.on_exception:
+                    result.extend(collect_nested_statements(nested_stmt))
+            
+            if hasattr(stmt, 'on_overflow') and stmt.on_overflow:
+                for nested_stmt in stmt.on_overflow:
+                    result.extend(collect_nested_statements(nested_stmt))
+            
+            return result
         
         # Look in PROCEDURE division
         proc_division = self.get_division("PROCEDURE")
         if proc_division:
             # Get statements from paragraphs
             for paragraph in proc_division.paragraphs:
-                statements.extend(paragraph.statements)
+                for stmt in paragraph.statements:
+                    statements.extend(collect_nested_statements(stmt))
             
             # Get statements from sections
             for section in proc_division._sections.values():
                 # Get statements from paragraphs within sections
                 for paragraph in section.paragraphs:
-                    statements.extend(paragraph.statements)
+                    for stmt in paragraph.statements:
+                        statements.extend(collect_nested_statements(stmt))
                 
                 # Get statements that are direct children of sections
                 # (happens when parser adds statements to section without creating paragraph)
                 from .statements import CobolStatement
                 for child in section.children:
                     if isinstance(child, CobolStatement):
-                        statements.append(child)
+                        statements.extend(collect_nested_statements(child))
         
         return statements
     

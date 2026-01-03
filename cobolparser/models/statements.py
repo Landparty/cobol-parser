@@ -121,6 +121,7 @@ class PerformStatement(CobolStatement):
         self.times_count: Optional[int] = None
         self.until_condition: Optional['CobolExpression'] = None
         self.varying_clause: Optional[Dict[str, Any]] = None
+        self.inline_statements: List['CobolStatement'] = []
     
     def set_target_paragraph(self, paragraph: str) -> None:
         """Set the target paragraph to perform."""
@@ -150,6 +151,11 @@ class PerformStatement(CobolStatement):
         self.until_condition = until_condition
         self.add_child(until_condition)
     
+    def add_inline_statement(self, statement: 'CobolStatement') -> None:
+        """Add a statement to the inline block of this PERFORM."""
+        self.inline_statements.append(statement)
+        self.add_child(statement)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert PERFORM statement to dictionary representation."""
         result = super().to_dict()
@@ -158,7 +164,43 @@ class PerformStatement(CobolStatement):
             "perform_type": self.perform_type,
             "times_count": self.times_count,
             "until_condition": self.until_condition.to_dict() if self.until_condition else None,
-            "varying_clause": self.varying_clause
+            "varying_clause": self.varying_clause,
+            "inline_statements": [stmt.to_dict() for stmt in self.inline_statements]
+        })
+        return result
+
+
+class IfStatement(CobolStatement):
+    """AST node for IF statements with conditional branches."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("IF", location)
+        self.condition: Optional['CobolExpression'] = None
+        self.then_statements: List['CobolStatement'] = []
+        self.else_statements: List['CobolStatement'] = []
+    
+    def set_condition(self, condition: 'CobolExpression') -> None:
+        """Set the IF condition."""
+        self.condition = condition
+        self.add_child(condition)
+    
+    def add_then_statement(self, statement: 'CobolStatement') -> None:
+        """Add a statement to the THEN branch."""
+        self.then_statements.append(statement)
+        self.add_child(statement)
+    
+    def add_else_statement(self, statement: 'CobolStatement') -> None:
+        """Add a statement to the ELSE branch."""
+        self.else_statements.append(statement)
+        self.add_child(statement)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert IF statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "condition": self.condition.to_dict() if self.condition else None,
+            "then_statements": [stmt.to_dict() for stmt in self.then_statements],
+            "else_statements": [stmt.to_dict() for stmt in self.else_statements]
         })
         return result
 
@@ -692,6 +734,7 @@ __all__ = [
     "MoveStatement", 
     "DisplayStatement",
     "PerformStatement",
+    "IfStatement",
     "CallStatement",
     "ComputeStatement",
     "CopyStatement",

@@ -13,7 +13,7 @@ from .models.ast_base import SourceLocation, ASTNode
 from .models.program import CobolProgram, CobolDivision, CobolSection, CobolParagraph, CobolFileDescription
 from .models.statements import (
     CobolStatement, CobolExpression, MoveStatement, DisplayStatement, 
-    PerformStatement, StopStatement, CallStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
+    PerformStatement, IfStatement, StopStatement, CallStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
 )
 from .models.data_items import CobolDataItem, PictureClause, OccursClause
 from .models.sql_statements import parse_exec_sql, ExecSQLStatement
@@ -126,6 +126,7 @@ class CobolParser:
         self.current_program: Optional[CobolProgram] = None
         self.current_division: Optional[CobolDivision] = None
         self.current_section: Optional[CobolSection] = None
+        self.parsing_nested_statement = False  # Track nested statement parsing
         
     def parse(self, source: str, filename: str = "<string>") -> ParseResult:
         """Parse COBOL source code into AST.
@@ -2804,14 +2805,284 @@ class CobolParser:
         return i
 
     def _parse_perform_inline(self, tokens, i):
+        """Parse PERFORM statement inline (sentence-level parsing).
+        
+        Handles:
+        - PERFORM paragraph-name
+        - PERFORM VARYING variable FROM value BY value UNTIL condition ... END-PERFORM
+        """
         start = tokens[i]
         i += 1
-        if i < len(tokens):
+        
+        if i >= len(tokens):
+            return i
+        
+        # Check if this is PERFORM VARYING
+        if tokens[i].value and tokens[i].value.upper() == 'VARYING':
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"_parse_perform_inline: Found PERFORM VARYING at token {i}")
+            
+            pf = PerformStatement(start.location)
+            i += 1  # Skip VARYING
+            
+            logger.debug(f"After VARYING, token {i}: {tokens[i].type if i < len(tokens) else 'EOF'}")
+            
+            # Get variable name
+            if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
+                variable_name = tokens[i].value
+                i += 1
+                logger.debug(f"Variable name: {variable_name}, next token {i}: {tokens[i].type if i < len(tokens) else 'EOF'}")
+                
+                # Expect FROM
+                if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'FROM':
+                    logger.debug(f"Found FROM at token {i}")
+                    i += 1  # Skip FROM
+                    
+                    # Get FROM value
+                    if i < len(tokens):
+                        from_value = tokens[i].value
+                        i += 1
+                        
+                        # Expect BY
+                        if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'BY':
+                            i += 1  # Skip BY
+                            
+                            # Get BY value
+                            if i < len(tokens):
+                                by_value = tokens[i].value
+                                i += 1
+                                
+                                # Skip newlines before UNTIL
+                                while i < len(tokens) and tokens[i].type == TokenType.NEWLINE:
+                                    i += 1
+                                
+                                # Expect UNTIL
+                                if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'UNTIL':
+                                    logger.debug(f"Found UNTIL at token {i}")
+                                    i += 1  # Skip UNTIL
+                                    
+                                    # Parse condition until newline or statement keyword
+                                    cond_tokens = []
+                                    while i < len(tokens) and tokens[i].type != TokenType.NEWLINE:
+                                        cond_tokens.append(tokens[i].value)
+                                        i += 1
+                                    
+                                    condition_text = " ".join(cond_tokens).strip()
+                                    condition_expr = CobolExpression("IDENTIFIER", start.location)
+                                    condition_expr._metadata["value"] = condition_text
+                                    
+                                    # Set VARYING clause
+                                    pf.set_varying_clause(variable_name, from_value, by_value, condition_expr)
+                                    logger.debug(f"Set VARYING clause: {variable_name} FROM {from_value} BY {by_value} UNTIL {condition_text}")
+                                    
+                                    # Skip newlines before inline statements
+                                    while i < len(tokens) and tokens[i].type == TokenType.NEWLINE:
+                                        i += 1
+                                    
+                                    # Parse inline statements until END-PERFORM
+                                    logger.debug(f"Starting inline statement parse loop at token {i}, tokens remaining: {len(tokens) - i}")
+                                    while i < len(tokens):
+                                        # Check for END-PERFORM
+                                        if (tokens[i].type == TokenType.IDENTIFIER and 
+                                            tokens[i].value and tokens[i].value.upper() == 'END-PERFORM'):
+                                            i += 1
+                                            break
+                                        
+                                        # Check for nested statements
+                                        token_type = tokens[i].type
+                                        token_val = tokens[i].value.upper() if tokens[i].value else ""
+                                        
+                                        # Debug logging
+                                        import logging
+                                        logger = logging.getLogger(__name__)
+                                        logger.debug(f"PERFORM inline: token {i}: {token_type} / {token_val}")
+                                        
+                                        # Parse nested CALL statements
+                                        if token_type == TokenType.CALL or token_val == 'CALL':
+                                            logger.debug(f"Found CALL at token {i}, calling _parse_inline_call_into_perform")
+                                            i = self._parse_inline_call_into_perform(tokens, i, pf)
+                                            continue
+                                        
+                                        # Parse nested IF statements
+                                        if token_type == TokenType.IF or token_val == 'IF':
+                                            i = self._parse_inline_if_into_perform(tokens, i, pf)
+                                            continue
+                                        
+                                        # Skip other tokens (newlines, comments, etc.)
+                                        i += 1
+            
+            if self.current_section:
+                self.current_section.add_child(pf)
+            return i
+        
+        # Simple PERFORM paragraph-name
+        else:
             pf = PerformStatement(start.location)
             pf.set_target_paragraph(tokens[i].value)
             i += 1
             if self.current_section:
                 self.current_section.add_child(pf)
+            return i
+    
+    def _parse_inline_call_into_perform(self, tokens, i, perform_stmt):
+        """Parse a CALL statement within a PERFORM block and add it to inline_statements."""
+        if i >= len(tokens):
+            return i
+        
+        start = tokens[i]
+        i += 1  # Skip CALL
+        
+        if i < len(tokens):
+            call_stmt = CallStatement(start.location)
+            
+            # Get program name
+            program_name = tokens[i].value
+            is_dynamic = tokens[i].type == TokenType.IDENTIFIER
+            
+            # For string literals, keep quotes
+            if tokens[i].type == TokenType.STRING_LITERAL:
+                program_name = f'"{program_name}"'
+            
+            call_stmt.set_called_program(program_name, is_dynamic)
+            i += 1
+            
+            # Check for USING clause
+            if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'USING':
+                i += 1  # Skip USING
+                
+                # Parse parameters until newline or END-PERFORM
+                while i < len(tokens):
+                    token_val = tokens[i].value.upper() if tokens[i].value else ""
+                    
+                    # Stop at END-PERFORM or newline
+                    if token_val == 'END-PERFORM' or tokens[i].type == TokenType.NEWLINE:
+                        break
+                    
+                    # Add parameter
+                    if tokens[i].type == TokenType.IDENTIFIER:
+                        call_stmt.add_using_parameter(tokens[i].value)
+                    
+                    i += 1
+            
+            # Add to PERFORM's inline statements
+            perform_stmt.add_inline_statement(call_stmt)
+        
+        return i
+    
+    def _parse_inline_if_into_perform(self, tokens, i, perform_stmt):
+        """Parse an IF statement within a PERFORM block and add it to inline_statements."""
+        if i >= len(tokens):
+            return i
+        
+        start = tokens[i]
+        i += 1  # Skip IF
+        
+        if_stmt = IfStatement(start.location)
+        
+        # Parse condition until THEN or newline
+        cond_tokens = []
+        while i < len(tokens) and tokens[i].type != TokenType.NEWLINE:
+            token_val = tokens[i].value.upper() if tokens[i].value else ""
+            if token_val in ('THEN', 'END-PERFORM'):
+                break
+            cond_tokens.append(tokens[i].value)
+            i += 1
+        
+        condition_text = " ".join(cond_tokens).strip()
+        condition_expr = CobolExpression("COMPARISON", start.location)
+        condition_expr._metadata["value"] = condition_text
+        if_stmt.set_condition(condition_expr)
+        
+        # Skip THEN if present
+        if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'THEN':
+            i += 1
+        
+        # Parse THEN branch until ELSE or END-IF or END-PERFORM
+        while i < len(tokens):
+            token_val = tokens[i].value.upper() if tokens[i].value else ""
+            if token_val in ('ELSE', 'END-IF', 'END-PERFORM'):
+                break
+            
+            # Parse nested CALL in IF
+            if tokens[i].type == TokenType.CALL or token_val == 'CALL':
+                i = self._parse_inline_call_into_if(tokens, i, if_stmt, True)
+                continue
+            
+            i += 1
+        
+        # Check for ELSE
+        if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'ELSE':
+            i += 1  # Skip ELSE
+            
+            # Parse ELSE branch until END-IF or END-PERFORM
+            while i < len(tokens):
+                token_val = tokens[i].value.upper() if tokens[i].value else ""
+                if token_val in ('END-IF', 'END-PERFORM'):
+                    break
+                
+                # Parse nested CALL in ELSE
+                if tokens[i].type == TokenType.CALL or token_val == 'CALL':
+                    i = self._parse_inline_call_into_if(tokens, i, if_stmt, False)
+                    continue
+                
+                i += 1
+        
+        # Skip END-IF if present
+        if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'END-IF':
+            i += 1
+        
+        # Add IF statement to PERFORM's inline statements
+        perform_stmt.add_inline_statement(if_stmt)
+        
+        return i
+    
+    def _parse_inline_call_into_if(self, tokens, i, if_stmt, is_then_branch):
+        """Parse a CALL statement within an IF block."""
+        if i >= len(tokens):
+            return i
+        
+        start = tokens[i]
+        i += 1  # Skip CALL
+        
+        if i < len(tokens):
+            call_stmt = CallStatement(start.location)
+            
+            # Get program name
+            program_name = tokens[i].value
+            is_dynamic = tokens[i].type == TokenType.IDENTIFIER
+            
+            # For string literals, keep quotes
+            if tokens[i].type == TokenType.STRING_LITERAL:
+                program_name = f'"{program_name}"'
+            
+            call_stmt.set_called_program(program_name, is_dynamic)
+            i += 1
+            
+            # Check for USING clause
+            if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'USING':
+                i += 1  # Skip USING
+                
+                # Parse parameters until newline, ELSE, or END-IF
+                while i < len(tokens):
+                    token_val = tokens[i].value.upper() if tokens[i].value else ""
+                    
+                    # Stop at control keywords or newline
+                    if token_val in ('ELSE', 'END-IF', 'END-PERFORM') or tokens[i].type == TokenType.NEWLINE:
+                        break
+                    
+                    # Add parameter
+                    if tokens[i].type == TokenType.IDENTIFIER:
+                        call_stmt.add_using_parameter(tokens[i].value)
+                    
+                    i += 1
+            
+            # Add to appropriate branch
+            if is_then_branch:
+                if_stmt.add_then_statement(call_stmt)
+            else:
+                if_stmt.add_else_statement(call_stmt)
+        
         return i
 
     def _parse_write_inline(self, tokens, i):
@@ -3252,7 +3523,7 @@ class CobolParser:
         move_stmt = MoveStatement(location)
         move_stmt.set_source(source)
         move_stmt.add_target(target)
-        if self.current_division:
+        if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(move_stmt)
         return move_stmt
     
@@ -3276,60 +3547,174 @@ class CobolParser:
         
         display_stmt = DisplayStatement(location)
         display_stmt.add_display_item(item)
-        if self.current_division:
+        if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(display_stmt)
         
         return display_stmt
     
     def parse_perform_statement(self) -> Optional[PerformStatement]:
-        """Parse PERFORM statement."""
+        """Parse PERFORM statement.
+        
+        Supports:
+        - PERFORM paragraph-name
+        - PERFORM UNTIL condition
+        - PERFORM VARYING variable FROM value BY value UNTIL condition ... END-PERFORM
+        - Inline PERFORM blocks with nested statements
+        """
         if not self.match_token(TokenType.PERFORM):
             return None
         
         location = self.get_current_location()
-        
-        # Get paragraph name
-        if not self.current_token:
-            return None
-        
-        paragraph = self.current_token.value
-        self.advance_token()
-        
-        # Check for UNTIL clause
-        condition = None
-        if self.match_token(TokenType.UNTIL):
-            # Start building a textual condition until we hit a terminating period.
-            cond_tokens = []
-            # Gather at least one token (identifier, numeric, etc.)
-            while self.current_token and self.current_token.type not in (TokenType.PERIOD, TokenType.NEWLINE):
-                # Stop early if we encounter another statement keyword (defensive)
-                if self.current_token.type in (TokenType.PERFORM, TokenType.MOVE, TokenType.DISPLAY, TokenType.CALL, TokenType.STOP):
-                    break
-                cond_tokens.append(self.current_token.value)
-                # If we see '=', treat it as part of expression even though token type is ASSIGN
-                self.advance_token()
-            condition = " ".join(cond_tokens).strip() if cond_tokens else None
-            # After condition, allow optional NEWLINE(s)
-            while self.current_token and self.current_token.type == TokenType.NEWLINE:
-                self.advance_token()
-        
-        # Expect terminal period (may follow immediately or after condition).
-        # Some numeric literals in test inputs include trailing '.' inside the token
-        # (e.g., '0.') so we treat a condition ending with such a token as sentence-terminated.
-        if not (condition and condition.endswith('.')):
-            if not self.expect_token(TokenType.PERIOD):
-                return None
-        
         perform_stmt = PerformStatement(location)
-        perform_stmt.set_target_paragraph(paragraph)
-        if condition:
-            perform_stmt.perform_type = "UNTIL"
-            # Create a simple identifier expression from the condition string
-            condition_expr = CobolExpression("IDENTIFIER", location)
-            condition_expr._metadata["value"] = condition
-            perform_stmt.until_condition = condition_expr
         
-        if self.current_division:
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Check for VARYING clause
+        if self.current_token and self.current_token.value and self.current_token.value.upper() == "VARYING":
+            self.advance_token()  # Skip VARYING
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Get variable name
+            if not self.current_token or self.current_token.type != TokenType.IDENTIFIER:
+                self.add_error(ParseError("Expected variable name after VARYING", location=location))
+                return None
+            
+            variable_name = self.current_token.value
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Expect FROM
+            if not self.current_token or not self.current_token.value or self.current_token.value.upper() != "FROM":
+                self.add_error(ParseError("Expected FROM after variable in VARYING clause", location=location))
+                return None
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Get FROM value
+            if not self.current_token:
+                self.add_error(ParseError("Expected value after FROM", location=location))
+                return None
+            from_value = self.current_token.value
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Expect BY
+            if not self.current_token or not self.current_token.value or self.current_token.value.upper() != "BY":
+                self.add_error(ParseError("Expected BY in VARYING clause", location=location))
+                return None
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Get BY value
+            if not self.current_token:
+                self.add_error(ParseError("Expected value after BY", location=location))
+                return None
+            by_value = self.current_token.value
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Expect UNTIL
+            if not self.current_token or not self.current_token.value or self.current_token.value.upper() != "UNTIL":
+                self.add_error(ParseError("Expected UNTIL in VARYING clause", location=location))
+                return None
+            self.advance_token()
+            
+            # Parse condition until newline or statement
+            cond_tokens = []
+            while self.current_token and self.current_token.type not in (TokenType.NEWLINE, TokenType.COMMENT):
+                cond_tokens.append(self.current_token.value)
+                self.advance_token()
+            
+            condition_text = " ".join(cond_tokens).strip()
+            condition_expr = CobolExpression("IDENTIFIER", location)
+            condition_expr._metadata["value"] = condition_text
+            
+            # Set VARYING clause
+            perform_stmt.set_varying_clause(variable_name, from_value, by_value, condition_expr)
+            
+            # Skip newlines after condition
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Parse inline statements until END-PERFORM
+            while self.current_token and self.current_token.type != TokenType.EOF:
+                # Check for END-PERFORM
+                if self.current_token.type == TokenType.IDENTIFIER and \
+                   self.current_token.value and self.current_token.value.upper() == "END-PERFORM":
+                    self.advance_token()
+                    
+                    # Skip optional period
+                    if self.current_token and self.current_token.type == TokenType.PERIOD:
+                        self.advance_token()
+                    break
+                
+                # Parse nested statement with flag set
+                self.parsing_nested_statement = True
+                nested_stmt = self.parse_statement()
+                self.parsing_nested_statement = False
+                
+                if nested_stmt:
+                    perform_stmt.add_inline_statement(nested_stmt)
+                else:
+                    # Skip unknown token
+                    self.advance_token()
+        
+        # Simple PERFORM paragraph-name
+        elif self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            paragraph = self.current_token.value
+            self.advance_token()
+            
+            # Check for UNTIL clause
+            condition = None
+            if self.match_token(TokenType.UNTIL):
+                # Start building a textual condition until we hit a terminating period.
+                cond_tokens = []
+                # Gather at least one token (identifier, numeric, etc.)
+                while self.current_token and self.current_token.type not in (TokenType.PERIOD, TokenType.NEWLINE):
+                    # Stop early if we encounter another statement keyword (defensive)
+                    if self.current_token.type in (TokenType.PERFORM, TokenType.MOVE, TokenType.DISPLAY, TokenType.CALL, TokenType.STOP):
+                        break
+                    cond_tokens.append(self.current_token.value)
+                    self.advance_token()
+                condition = " ".join(cond_tokens).strip() if cond_tokens else None
+                # After condition, allow optional NEWLINE(s)
+                while self.current_token and self.current_token.type == TokenType.NEWLINE:
+                    self.advance_token()
+            
+            # Expect terminal period (may follow immediately or after condition).
+            if not (condition and condition.endswith('.')):
+                if not self.expect_token(TokenType.PERIOD):
+                    return None
+            
+            perform_stmt.set_target_paragraph(paragraph)
+            if condition:
+                perform_stmt.perform_type = "UNTIL"
+                # Create a simple identifier expression from the condition string
+                condition_expr = CobolExpression("IDENTIFIER", location)
+                condition_expr._metadata["value"] = condition
+                perform_stmt.until_condition = condition_expr
+        
+        if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(perform_stmt)
         
         return perform_stmt
@@ -3350,10 +3735,177 @@ class CobolParser:
         
         stop_stmt = StopStatement(location)
         
-        if self.current_division:
+        if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(stop_stmt)
         
         return stop_stmt
+    
+    def parse_statement(self) -> Optional[CobolStatement]:
+        """Parse a single statement (dispatcher to specific statement parsers).
+        
+        This method acts as a dispatcher to call the appropriate statement parser
+        based on the current token type. It's used when parsing nested statements
+        within PERFORM blocks, IF branches, etc.
+        """
+        if not self.current_token:
+            return None
+        
+        # Skip whitespace and comments
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        if not self.current_token:
+            return None
+        
+        # Dispatch based on token type
+        if self.current_token.type == TokenType.MOVE or \
+           (self.current_token.value and self.current_token.value.upper() == "MOVE"):
+            return self.parse_move_statement()
+        elif self.current_token.type == TokenType.DISPLAY or \
+             (self.current_token.value and self.current_token.value.upper() == "DISPLAY"):
+            return self.parse_display_statement()
+        elif self.current_token.type == TokenType.PERFORM or \
+             (self.current_token.value and self.current_token.value.upper() == "PERFORM"):
+            return self.parse_perform_statement()
+        elif self.current_token.type == TokenType.CALL or \
+             (self.current_token.value and self.current_token.value.upper() == "CALL"):
+            return self.parse_call_statement()
+        elif self.current_token.type == TokenType.STOP or \
+             (self.current_token.value and self.current_token.value.upper() == "STOP"):
+            return self.parse_stop_statement()
+        elif self.current_token.type == TokenType.IF or \
+             (self.current_token.value and self.current_token.value.upper() == "IF"):
+            return self.parse_if_statement()
+        else:
+            # Unknown statement type - create generic statement
+            location = self.get_current_location()
+            stmt = CobolStatement(self.current_token.value.upper() if self.current_token.value else "UNKNOWN", location)
+            self.advance_token()
+            
+            # Skip to end of statement (period)
+            while self.current_token and self.current_token.type != TokenType.PERIOD:
+                if self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    self.advance_token()
+                    continue
+                stmt.add_operand(self.current_token.value)
+                self.advance_token()
+            
+            if self.current_token and self.current_token.type == TokenType.PERIOD:
+                self.advance_token()
+            
+            return stmt
+    
+    def parse_if_statement(self) -> Optional[IfStatement]:
+        """Parse IF statement with THEN/ELSE branches and END-IF terminator.
+        
+        Supports:
+        - IF condition THEN statements END-IF
+        - IF condition THEN statements ELSE statements END-IF  
+        - Nested statements in both branches
+        """
+        if not self.match_token(TokenType.IF):
+            return None
+        
+        location = self.get_current_location()
+        if_stmt = IfStatement(location)
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse condition until THEN or newline
+        cond_tokens = []
+        while self.current_token and \
+              self.current_token.type not in (TokenType.NEWLINE, TokenType.COMMENT) and \
+              not (self.current_token.value and self.current_token.value.upper() == "THEN"):
+            cond_tokens.append(self.current_token.value)
+            self.advance_token()
+        
+        condition_text = " ".join(cond_tokens).strip()
+        condition_expr = CobolExpression("COMPARISON", location)
+        condition_expr._metadata["value"] = condition_text
+        if_stmt.set_condition(condition_expr)
+        
+        # Skip THEN keyword if present
+        if self.current_token and self.current_token.value and self.current_token.value.upper() == "THEN":
+            self.advance_token()
+        
+        # Skip newlines after condition/THEN
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse THEN branch statements until ELSE or END-IF
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            # Check for ELSE
+            if self.current_token.type == TokenType.IDENTIFIER and \
+               self.current_token.value and self.current_token.value.upper() == "ELSE":
+                self.advance_token()
+                break
+            
+            # Check for END-IF
+            if self.current_token.type == TokenType.IDENTIFIER and \
+               self.current_token.value and self.current_token.value.upper() == "END-IF":
+                self.advance_token()
+                # Skip optional period
+                if self.current_token and self.current_token.type == TokenType.PERIOD:
+                    self.advance_token()
+                
+                if not self.parsing_nested_statement and self.current_division:
+                    self.current_division.add_child(if_stmt)
+                
+                return if_stmt
+            
+            # Skip newlines/comments
+            if self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+                continue
+            
+            # Parse nested statement with flag set
+            self.parsing_nested_statement = True
+            nested_stmt = self.parse_statement()
+            self.parsing_nested_statement = False
+            
+            if nested_stmt:
+                if_stmt.add_then_statement(nested_stmt)
+            else:
+                # Unable to parse statement, skip token
+                self.advance_token()
+        
+        # Skip newlines after ELSE
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse ELSE branch statements until END-IF
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            # Check for END-IF
+            if self.current_token.type == TokenType.IDENTIFIER and \
+               self.current_token.value and self.current_token.value.upper() == "END-IF":
+                self.advance_token()
+                # Skip optional period
+                if self.current_token and self.current_token.type == TokenType.PERIOD:
+                    self.advance_token()
+                break
+            
+            # Skip newlines/comments
+            if self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+                continue
+            
+            # Parse nested statement with flag set
+            self.parsing_nested_statement = True
+            nested_stmt = self.parse_statement()
+            self.parsing_nested_statement = False
+            
+            if nested_stmt:
+                if_stmt.add_else_statement(nested_stmt)
+            else:
+                # Unable to parse statement, skip token
+                self.advance_token()
+        
+        if not self.parsing_nested_statement and self.current_division:
+            self.current_division.add_child(if_stmt)
+        
+        return if_stmt
     
     def parse_call_statement(self) -> Optional[CallStatement]:
         """Parse CALL statement.
@@ -3466,7 +4018,8 @@ class CobolParser:
         if self.current_token and self.current_token.type == TokenType.PERIOD:
             self.advance_token()
         
-        if self.current_division:
+        # Only add to division if not parsing nested statement
+        if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(call_stmt)
         
         return call_stmt
