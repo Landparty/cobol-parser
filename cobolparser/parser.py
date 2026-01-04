@@ -276,6 +276,12 @@ class CobolParser:
                 break
         return self.current_token is not None and self.current_token.type in token_types
     
+    def _set_node_context(self, node: ASTNode) -> None:
+        """Set division and section context on a newly created node."""
+        division_name = self.current_division.division_name if self.current_division else None
+        section_name = self.current_section.section_name if self.current_section else None
+        node.set_division_context(division_name, section_name)
+    
     def parse_program(self) -> Optional[CobolProgram]:
         """Parse a complete COBOL program."""
         program_name = None
@@ -411,6 +417,7 @@ class CobolParser:
         
         # Create configuration section
         config_section = CobolSection("CONFIGURATION", self.get_current_location())
+        self._set_node_context(config_section)
         if self.current_division:
             self.current_division.add_section(config_section)
         self.current_section = config_section
@@ -428,6 +435,7 @@ class CobolParser:
         
         # Create input-output section
         io_section = CobolSection("INPUT-OUTPUT", self.get_current_location())
+        self._set_node_context(io_section)
         if self.current_division:
             self.current_division.add_section(io_section)
         self.current_section = io_section
@@ -460,6 +468,7 @@ class CobolParser:
         
         # Create FILE-CONTROL paragraph
         file_control_paragraph = CobolParagraph("FILE-CONTROL", location)
+        self._set_node_context(file_control_paragraph)
         if self.current_section:
             self.current_section.add_paragraph(file_control_paragraph)
         
@@ -529,6 +538,7 @@ class CobolParser:
         
         # Create SELECT statement
         select_stmt = SelectStatement(location)
+        self._set_node_context(select_stmt)
         select_stmt.set_file_name(file_name, is_optional)
         
         # Parse clauses until period
@@ -914,13 +924,7 @@ class CobolParser:
         # Optional IS keyword
         if self.current_token and self.current_token.value.upper() == "IS":
             self.advance_token()
-        
-        # Skip newlines
-        while self.current_token and self.current_token.type == TokenType.NEWLINE:
-            self.advance_token()
-        
-        # Get padding character (identifier or literal)
-        if self.current_token:
+
             if self.current_token.type == TokenType.STRING_LITERAL:
                 select_stmt.set_padding_character(f'"{self.current_token.value}"')
             else:
@@ -1103,6 +1107,7 @@ class CobolParser:
         
         # Create working storage section
         ws_section = CobolSection("WORKING-STORAGE", self.get_current_location())
+        self._set_node_context(ws_section)
         if self.current_division:
             self.current_division.add_section(ws_section)
         self.current_section = ws_section
@@ -1120,6 +1125,7 @@ class CobolParser:
         
         # Create local storage section
         ls_section = CobolSection("LOCAL-STORAGE", self.get_current_location())
+        self._set_node_context(ls_section)
         if self.current_division:
             self.current_division.add_section(ls_section)
         self.current_section = ls_section
@@ -1137,6 +1143,7 @@ class CobolParser:
         
         # Create linkage section
         linkage_section = CobolSection("LINKAGE", self.get_current_location())
+        self._set_node_context(linkage_section)
         if self.current_division:
             self.current_division.add_section(linkage_section)
         self.current_section = linkage_section
@@ -1154,6 +1161,7 @@ class CobolParser:
         
         # Create file section
         file_section = CobolSection("FILE", self.get_current_location())
+        self._set_node_context(file_section)
         if self.current_division:
             self.current_division.add_section(file_section)
         self.current_section = file_section
@@ -1854,6 +1862,7 @@ class CobolParser:
         
         # Create data item
         data_item = CobolDataItem(name, level, location)
+        self._set_node_context(data_item)
         
         # Parse clauses in any order until period or semicolon (some dialects)
         period_consumed_by_picture = False
@@ -2196,6 +2205,7 @@ class CobolParser:
         # straight-line code at top of PROCEDURE DIVISION before any paragraph labels.
         if self.current_division and (self.current_division.division_name == "PROCEDURE") and self.current_section is None:
             implicit = CobolSection("IMPLICIT-SECTION", location)
+            self._set_node_context(implicit)
             self.current_division.add_section(implicit)
             self.current_section = implicit
         i = 0
@@ -2916,11 +2926,42 @@ class CobolParser:
                 self.current_section.add_child(pf)
             return i
         
-        # Simple PERFORM paragraph-name
+        # Simple PERFORM paragraph-name [THRU paragraph-name] [n TIMES]
         else:
             pf = PerformStatement(start.location)
             pf.set_target_paragraph(tokens[i].value)
             i += 1
+            
+            # Check for THRU clause
+            if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == "THRU":
+                i += 1  # Skip THRU
+                
+                # Skip optional whitespace/newlines
+                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    i += 1
+                
+                # Get ending paragraph name
+                if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
+                    pf.set_thru_paragraph(tokens[i].value)
+                    i += 1
+            
+            # Check for TIMES clause
+            if i < len(tokens) and tokens[i].type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                try:
+                    times_count = int(tokens[i].value)
+                    i += 1
+                    
+                    # Skip optional whitespace/newlines
+                    while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                        i += 1
+                    
+                    # Expect TIMES keyword
+                    if i < len(tokens) and tokens[i].value and tokens[i].value.upper() in ("TIMES", "TIME"):
+                        i += 1
+                        pf.set_times_clause(times_count)
+                except ValueError:
+                    pass
+            
             if self.current_section:
                 self.current_section.add_child(pf)
             return i
@@ -3148,103 +3189,142 @@ class CobolParser:
         return i
 
     def _parse_if_inline(self, tokens, i):
+        """Parse IF statement inline within a sentence (backward compatibility mode).
+        
+        This handles period-terminated IF statements like:
+        - IF A > B MOVE C TO D.
+        - IF A > B MOVE C TO D ELSE MOVE E TO F.
+        
+        Creates proper IfStatement objects with then_statements and else_statements
+        populated for backward compatibility and consistent AST structure.
+        """
         start = tokens[i]
         i += 1
         cond_parts = []
         # Parse condition up to THEN or first verb/ELSE
         while i < len(tokens) and tokens[i].type not in (TokenType.THEN, TokenType.ELSE, TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.WRITE, TokenType.GO, TokenType.GOTO, TokenType.IF):
-            cond_parts.append(tokens[i].value)
+            if tokens[i].value:
+                cond_parts.append(tokens[i].value)
             i += 1
         condition = ' '.join(cond_parts).strip()
-        if_stmt = CobolStatement("IF", start.location)
-        if_stmt.add_operand(condition)
+        
+        # Create proper IfStatement instead of generic CobolStatement
+        if_stmt = IfStatement(start.location)
+        self._set_node_context(if_stmt)
+        
+        # Set condition
+        condition_expr = CobolExpression("COMPARISON", start.location)
+        condition_expr._metadata["value"] = condition
+        if_stmt.set_condition(condition_expr)
+        
         # Parse THEN block (if THEN present, else treat next verb as THEN)
-        then_stmts = []
         if i < len(tokens) and tokens[i].type == TokenType.THEN:
             i += 1
+        
+        # Skip newlines after THEN
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
         # Parse statements until ELSE or next IF or end
         while i < len(tokens) and tokens[i].type not in (TokenType.ELSE, TokenType.IF):
             verb_tok = tokens[i]
             verb_type = verb_tok.type
-            verb_val = verb_tok.value.upper()
+            verb_val = verb_tok.value.upper() if verb_tok.value else ""
+            
             # Only parse known verbs
             if verb_type == TokenType.MOVE or verb_val == 'MOVE':
                 j = self._parse_move_inline(tokens, i)
-                # Find last statement added to section
+                # Find last statement added to section and add to IF then_statements
                 if self.current_section and self.current_section.children:
-                    then_stmts.append(self.current_section.children[-1])
+                    then_stmt = self.current_section.children[-1]
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.PERFORM or verb_val == 'PERFORM':
                 j = self._parse_perform_inline(tokens, i)
                 if self.current_section and self.current_section.children:
-                    then_stmts.append(self.current_section.children[-1])
+                    then_stmt = self.current_section.children[-1]
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.DISPLAY or verb_val == 'DISPLAY':
                 j = self._parse_display_inline(tokens, i)
                 if self.current_section and self.current_section.children:
-                    then_stmts.append(self.current_section.children[-1])
+                    then_stmt = self.current_section.children[-1]
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.WRITE or verb_val == 'WRITE':
                 j = self._parse_write_inline(tokens, i)
                 if self.current_section and self.current_section.children:
-                    then_stmts.append(self.current_section.children[-1])
+                    then_stmt = self.current_section.children[-1]
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type in (TokenType.GO, TokenType.GOTO) or verb_val in ('GO', 'GOTO'):
                 j = self._parse_goto_inline(tokens, i)
                 if self.current_section and self.current_section.children:
-                    then_stmts.append(self.current_section.children[-1])
+                    then_stmt = self.current_section.children[-1]
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             # Unknown or non-verb: skip
             i += 1
-        # Attach THEN statements to IF node
-        if_stmt._metadata['then'] = then_stmts
+        
         # Parse ELSE block if present
-        else_stmts = []
         if i < len(tokens) and tokens[i].type == TokenType.ELSE:
             i += 1
+            
+            # Skip newlines after ELSE
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
             while i < len(tokens) and tokens[i].type not in (TokenType.IF,):
                 verb_tok = tokens[i]
                 verb_type = verb_tok.type
-                verb_val = verb_tok.value.upper()
+                verb_val = verb_tok.value.upper() if verb_tok.value else ""
+                
                 if verb_type == TokenType.MOVE or verb_val == 'MOVE':
                     j = self._parse_move_inline(tokens, i)
                     if self.current_section and self.current_section.children:
-                        else_stmts.append(self.current_section.children[-1])
+                        else_stmt = self.current_section.children[-1]
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.PERFORM or verb_val == 'PERFORM':
                     j = self._parse_perform_inline(tokens, i)
                     if self.current_section and self.current_section.children:
-                        else_stmts.append(self.current_section.children[-1])
+                        else_stmt = self.current_section.children[-1]
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.DISPLAY or verb_val == 'DISPLAY':
                     j = self._parse_display_inline(tokens, i)
                     if self.current_section and self.current_section.children:
-                        else_stmts.append(self.current_section.children[-1])
+                        else_stmt = self.current_section.children[-1]
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.WRITE or verb_val == 'WRITE':
                     j = self._parse_write_inline(tokens, i)
                     if self.current_section and self.current_section.children:
-                        else_stmts.append(self.current_section.children[-1])
+                        else_stmt = self.current_section.children[-1]
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type in (TokenType.GO, TokenType.GOTO) or verb_val in ('GO', 'GOTO'):
                     j = self._parse_goto_inline(tokens, i)
                     if self.current_section and self.current_section.children:
-                        else_stmts.append(self.current_section.children[-1])
+                        else_stmt = self.current_section.children[-1]
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 i += 1
-        if_stmt._metadata['else'] = else_stmts
+        
+        # Add IF statement to current section
         if self.current_section:
             self.current_section.add_child(if_stmt)
+        
         return i
     
     def _parse_sort_inline(self, tokens, i):
@@ -3353,6 +3433,7 @@ class CobolParser:
             
             # Create section in the procedure division
             procedure_section = CobolSection(section_name, location)
+            self._set_node_context(procedure_section)
             if self.current_division:
                 self.current_division.add_section(procedure_section)
             
@@ -3374,6 +3455,7 @@ class CobolParser:
                 # Create paragraph as a section in the procedure division
                 # In COBOL, paragraphs in procedure division are treated as sections
                 paragraph_section = CobolSection(paragraph_name, location)
+                self._set_node_context(paragraph_section)
                 if self.current_division:
                     self.current_division.add_section(paragraph_section)
             
@@ -3521,6 +3603,7 @@ class CobolParser:
             return None
 
         move_stmt = MoveStatement(location)
+        self._set_node_context(move_stmt)
         move_stmt.set_source(source)
         move_stmt.add_target(target)
         if not self.parsing_nested_statement and self.current_division:
@@ -3546,6 +3629,7 @@ class CobolParser:
             return None
         
         display_stmt = DisplayStatement(location)
+        self._set_node_context(display_stmt)
         display_stmt.add_display_item(item)
         if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(display_stmt)
@@ -3566,6 +3650,7 @@ class CobolParser:
         
         location = self.get_current_location()
         perform_stmt = PerformStatement(location)
+        self._set_node_context(perform_stmt)
         
         # Skip optional whitespace/newlines
         while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
@@ -3684,9 +3769,48 @@ class CobolParser:
             paragraph = self.current_token.value
             self.advance_token()
             
+            # Check for THRU clause
+            thru_paragraph = None
+            if self.current_token and self.current_token.value and self.current_token.value.upper() == "THRU":
+                self.advance_token()  # Skip THRU keyword
+                
+                # Skip optional whitespace/newlines
+                while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    self.advance_token()
+                
+                # Get ending paragraph name
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    thru_paragraph = self.current_token.value
+                    self.advance_token()
+                else:
+                    self.add_error(ParseError("Expected paragraph name after THRU", location=location))
+                    return None
+            
+            # Check for TIMES clause (can follow THRU or paragraph name)
+            times_count = None
+            if self.current_token and self.current_token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                # Number before TIMES keyword
+                try:
+                    times_count = int(self.current_token.value)
+                    self.advance_token()
+                    
+                    # Skip optional whitespace/newlines
+                    while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                        self.advance_token()
+                    
+                    # Expect TIMES keyword
+                    if self.current_token and self.current_token.value and self.current_token.value.upper() in ("TIMES", "TIME"):
+                        self.advance_token()
+                    else:
+                        # Number without TIMES - might be an error, but continue
+                        pass
+                except ValueError:
+                    pass
+            
             # Check for UNTIL clause
             condition = None
             if self.match_token(TokenType.UNTIL):
+
                 # Start building a textual condition until we hit a terminating period.
                 cond_tokens = []
                 # Gather at least one token (identifier, numeric, etc.)
@@ -3706,7 +3830,18 @@ class CobolParser:
                 if not self.expect_token(TokenType.PERIOD):
                     return None
             
+            # Set the target paragraph
             perform_stmt.set_target_paragraph(paragraph)
+            
+            # Set the THRU paragraph if present
+            if thru_paragraph:
+                perform_stmt.set_thru_paragraph(thru_paragraph)
+            
+            # Set TIMES count if present
+            if times_count:
+                perform_stmt.set_times_clause(times_count)
+            
+            # Set UNTIL condition if present
             if condition:
                 perform_stmt.perform_type = "UNTIL"
                 # Create a simple identifier expression from the condition string
@@ -3734,6 +3869,7 @@ class CobolParser:
         self.expect_token(TokenType.PERIOD)
         
         stop_stmt = StopStatement(location)
+        self._set_node_context(stop_stmt)
         
         if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(stop_stmt)
@@ -3808,6 +3944,7 @@ class CobolParser:
         
         location = self.get_current_location()
         if_stmt = IfStatement(location)
+        self._set_node_context(if_stmt)
         
         # Skip optional whitespace/newlines
         while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
@@ -3921,6 +4058,7 @@ class CobolParser:
         
         location = self.get_current_location()
         call_stmt = CallStatement(location)
+        self._set_node_context(call_stmt)
         
         # Skip optional whitespace/newlines
         while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):

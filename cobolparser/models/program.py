@@ -24,7 +24,7 @@ class CobolSection(ASTNode):
     
     def __init__(self, section_name: str, location: SourceLocation):
         super().__init__("Section", location)
-        self.section_name = section_name
+        self._own_section_name = section_name  # Use _own_ prefix to avoid property conflict
         self.paragraphs: List['CobolParagraph'] = []
         self.data_items: List['CobolDataItem'] = []
     
@@ -49,7 +49,7 @@ class CobolSection(ASTNode):
         """Convert section to dictionary representation."""
         return {
             "node_type": self.node_type,
-            "section_name": self.section_name,
+            "section_name": self.section_name,  # Use property
             "location": self.location.to_dict(),
             "paragraphs": [p.to_dict() for p in self.paragraphs],
             "data_items": [d.to_dict() for d in self.data_items],
@@ -62,9 +62,11 @@ class CobolDivision(ASTNode):
     
     def __init__(self, division_name: str, location: SourceLocation):
         super().__init__("Division", location)
-        self.division_name = division_name
+        self._own_division_name = division_name  # Use _own_ prefix to avoid property conflict
         self._sections: Dict[str, CobolSection] = {}
         self.paragraphs: List['CobolParagraph'] = []
+        # Set own division context
+        self.set_division_context(division_name, None)
 
     @property
     def sections(self) -> List[CobolSection]:  # type: ignore[override]
@@ -74,7 +76,7 @@ class CobolDivision(ASTNode):
     @property
     def division_type(self) -> str:
         """Returns the type of division."""
-        return self.division_name
+        return self._own_division_name
     
     def add_section(self, section: CobolSection) -> None:
         """Add a section to this division."""
@@ -427,6 +429,39 @@ class CobolProgram(ASTNode):
                 procedures.extend(section.paragraphs)
         
         return procedures
+    
+    def get_nodes_in_division(self, division_name: str, node_type: Optional[str] = None) -> List[ASTNode]:
+        """Get all nodes belonging to a specific division.
+        
+        Args:
+            division_name: Name of the division (e.g., 'PROCEDURE', 'DATA')
+            node_type: Optional filter by node type (e.g., 'Statement')
+        
+        Returns:
+            List of nodes in the specified division
+        """
+        results = []
+        for node in self.traverse_depth_first():
+            if node.division_name == division_name:
+                if node_type is None or node.node_type == node_type:
+                    results.append(node)
+        return results
+    
+    def get_statements_in_division(self, division_name: str) -> List['CobolStatement']:
+        """Get all statements in a specific division.
+        
+        Args:
+            division_name: Name of the division (e.g., 'PROCEDURE')
+        
+        Returns:
+            List of statements in the specified division
+        """
+        from .statements import CobolStatement
+        results = []
+        for node in self.traverse_depth_first():
+            if isinstance(node, CobolStatement) and node.division_name == division_name:
+                results.append(node)
+        return results
     
     def validate(self) -> ValidationResult:
         """Validate the COBOL program structure."""

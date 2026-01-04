@@ -117,6 +117,7 @@ class PerformStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("PERFORM", location)
         self.target_paragraph: Optional[str] = None
+        self.thru_paragraph: Optional[str] = None  # Ending paragraph for PERFORM THRU
         self.perform_type: str = "SIMPLE"  # SIMPLE, TIMES, UNTIL, VARYING
         self.times_count: Optional[int] = None
         self.until_condition: Optional['CobolExpression'] = None
@@ -128,6 +129,12 @@ class PerformStatement(CobolStatement):
         self.target_paragraph = paragraph
         if paragraph not in self.operands:
             self.operands.insert(0, paragraph)
+    
+    def set_thru_paragraph(self, paragraph: str) -> None:
+        """Set the ending paragraph for PERFORM THRU."""
+        self.thru_paragraph = paragraph
+        if paragraph not in self.operands:
+            self.operands.append(paragraph)
     
     def set_times_clause(self, count: int) -> None:
         """Set TIMES clause for the PERFORM."""
@@ -161,6 +168,7 @@ class PerformStatement(CobolStatement):
         result = super().to_dict()
         result.update({
             "target_paragraph": self.target_paragraph,
+            "thru_paragraph": self.thru_paragraph,
             "perform_type": self.perform_type,
             "times_count": self.times_count,
             "until_condition": self.until_condition.to_dict() if self.until_condition else None,

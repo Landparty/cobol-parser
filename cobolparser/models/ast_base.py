@@ -44,6 +44,57 @@ class ASTNode(ABC):
         self.parent: Optional['ASTNode'] = None
         self.children: List['ASTNode'] = []
         self._metadata: Dict[str, Any] = {}
+        self._division_name: Optional[str] = None  # Track division context
+        self._section_name: Optional[str] = None   # Track section context
+    
+    def set_division_context(self, division_name: Optional[str], section_name: Optional[str] = None) -> None:
+        """Set the division and section context for this node."""
+        self._division_name = division_name
+        self._section_name = section_name
+    
+    @property
+    def division_name(self) -> Optional[str]:
+        """Get the division this node belongs to.
+        
+        Returns the division name if set directly, otherwise traverses
+        up the parent chain to find it.
+        """
+        # Check if this node has its own division_name attribute (like CobolDivision)
+        if hasattr(self, '_own_division_name'):
+            return getattr(self, '_own_division_name')
+        
+        if self._division_name:
+            return self._division_name
+        # Fallback: traverse up to find division
+        if self.parent:
+            return self.parent.division_name
+        return None
+    
+    @property
+    def section_name(self) -> Optional[str]:
+        """Get the section this node belongs to.
+        
+        Returns the section name if set directly, otherwise traverses
+        up the parent chain to find it.
+        """
+        # Check if this node has its own section_name attribute (like CobolSection)
+        if hasattr(self, '_own_section_name'):
+            return getattr(self, '_own_section_name')
+        
+        if self._section_name:
+            return self._section_name
+        # Fallback: traverse up to find section
+        if self.parent:
+            return self.parent.section_name
+        return None
+    
+    def get_division_context(self) -> Dict[str, Optional[str]]:
+        """Get both division and section context."""
+        return {
+            'division': self.division_name,
+            'section': self.section_name
+        }
+
     
     def add_child(self, child: 'ASTNode') -> None:
         """Add a child node and set its parent reference."""
