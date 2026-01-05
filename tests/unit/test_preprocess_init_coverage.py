@@ -308,6 +308,19 @@ class TestNormalizeFixedFormat:
         result = normalize_fixed_format(lines)
         assert "This is a comment" in result
     
+    def test_page_eject_comment_lines(self):
+        """Test handling of page eject comment lines (indicator /)."""
+        lines = [
+            "      /+---------------------------------------------------------------+",
+            "      *|                                                               |",
+            "       IDENTIFICATION DIVISION."
+        ]
+        result = normalize_fixed_format(lines)
+        # Both / and * lines should be treated as comments
+        assert "+---------------------------------------------------------------+" in result
+        assert "|                                                               |" in result
+        assert "IDENTIFICATION DIVISION." in result
+    
     def test_regular_lines(self):
         """Test handling of regular program lines."""
         lines = [

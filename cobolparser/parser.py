@@ -13,7 +13,7 @@ from .models.ast_base import SourceLocation, ASTNode
 from .models.program import CobolProgram, CobolDivision, CobolSection, CobolParagraph, CobolFileDescription
 from .models.statements import (
     CobolStatement, CobolExpression, MoveStatement, DisplayStatement, 
-    PerformStatement, IfStatement, StopStatement, CallStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
+    PerformStatement, IfStatement, StopStatement, CallStatement, EntryStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
 )
 from .models.data_items import CobolDataItem, PictureClause, OccursClause
 from .models.sql_statements import parse_exec_sql, ExecSQLStatement
@@ -2232,6 +2232,9 @@ class CobolParser:
             if ttype == TokenType.CALL or upper_val == 'CALL':
                 i = self._parse_call_inline(tokens, i)
                 continue
+            if ttype == TokenType.ENTRY or upper_val == 'ENTRY':
+                i = self._parse_entry_inline(tokens, i)
+                continue
             if ttype == TokenType.WRITE or upper_val == 'WRITE':
                 i = self._parse_write_inline(tokens, i)
                 continue
@@ -2731,6 +2734,79 @@ class CobolParser:
         
         if self.current_section:
             self.current_section.add_child(call_stmt)
+        
+        return i
+    
+    def _parse_entry_inline(self, tokens, i):
+        """Parse ENTRY statement inline.
+        
+        Syntax: ENTRY literal-name [USING parameter-list]
+        Example: ENTRY 'DLITCBL' USING LKPCB-IO LKPCB-ALT
+        """
+        start = tokens[i]
+        i += 1  # Move past ENTRY token
+        
+        if i >= len(tokens):
+            return i
+        
+        entry_stmt = EntryStatement(start.location)
+        self._set_node_context(entry_stmt)
+        
+        # Skip optional whitespace/newlines
+        i = self._skip_whitespace_and_comments(tokens, i)
+        
+        if i >= len(tokens):
+            return i
+        
+        # Get entry name (must be a string literal)
+        if tokens[i].type == TokenType.STRING_LITERAL:
+            entry_name = tokens[i].value
+            entry_stmt.set_entry_name(entry_name)
+            i += 1
+        elif tokens[i].type == TokenType.IDENTIFIER:
+            # Some dialects might allow identifiers
+            entry_name = tokens[i].value
+            entry_stmt.set_entry_name(entry_name)
+            i += 1
+        
+        # Skip optional whitespace/newlines
+        i = self._skip_whitespace_and_comments(tokens, i)
+        
+        # Parse optional USING clause
+        if i < len(tokens) and self._is_keyword(tokens[i], "USING"):
+            i += 1
+            
+            # Parse parameter list
+            while i < len(tokens):
+                # Skip whitespace/newlines/commas
+                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.COMMA):
+                    i += 1
+                
+                # Check if we've reached the end or a statement terminator
+                if i >= len(tokens):
+                    break
+                
+                # Check for period (end of statement)
+                if tokens[i].type == TokenType.PERIOD:
+                    break
+                
+                # Check if this looks like the start of a new statement
+                if tokens[i].type in (TokenType.MOVE, TokenType.DISPLAY, TokenType.PERFORM, 
+                                     TokenType.CALL, TokenType.IF, TokenType.STOP):
+                    break
+                
+                # Get parameter name
+                if tokens[i].type == TokenType.IDENTIFIER:
+                    param_name = tokens[i].value
+                    entry_stmt.add_using_parameter(param_name)
+                    i += 1
+                else:
+                    # Unknown token, skip it
+                    i += 1
+        
+        # Add to current section
+        if self.current_section:
+            self.current_section.add_child(entry_stmt)
         
         return i
     

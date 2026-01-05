@@ -245,6 +245,135 @@ TEXT_START_COL = 8       # program text begins (1-based)
 TEXT_END_COL = 72        # program text end (inclusive, 1-based)
 
 
+def strip_compiler_directives(
+    source: str,
+    *,
+    preserve_line_numbers: bool = True
+) -> str:
+    """Remove PROCESS and CBL compiler directives from fixed-format COBOL source.
+    
+    This function processes raw fixed-format COBOL lines and removes any
+    PROCESS or CBL compiler directives that appear before the IDENTIFICATION
+    DIVISION. It handles continuation lines and preserves line numbers for
+    accurate error reporting.
+    
+    Compiler directives are identified by:
+    - Lines starting with "PROCESS" or "CBL" in columns 8-72 (or at start if no sequence area)
+    - Continuation lines (indicator '-' in column 7)
+    - Must appear before IDENTIFICATION DIVISION
+    
+    Args:
+        source: Fixed-format COBOL source code (may or may not have sequence area)
+        preserve_line_numbers: Replace removed lines with blank lines (default: True)
+        
+    Returns:
+        Cleaned source code with PROCESS/CBL directives removed
+        
+    Note:
+        This should be called BEFORE normalize_fixed_format().
+        
+    Example:
+        >>> source = '''PROCESS APOST
+        ...        IDENTIFICATION DIVISION.'''
+        >>> result = strip_compiler_directives(source)
+        >>> 'PROCESS' in result
+        False
+        >>> 'IDENTIFICATION' in result
+        True
+    """
+    lines = source.splitlines(keepends=True)
+    result_lines = []
+    in_directive_section = True  # We start in the directive section
+    in_continuation = False
+    
+    for line in lines:
+        # Preserve the original line ending
+        line_content = line.rstrip('\r\n')
+        line_ending = line[len(line_content):]
+        
+        # Determine where program text starts
+        # Check if line has sequence area (columns 1-7 are typically spaces or sequence numbers)
+        # If line starts with non-space in first 7 positions, it's likely without sequence area
+        has_sequence_area = False
+        if len(line_content) >= TEXT_START_COL:
+            # Check if first 7 chars look like sequence area (spaces or digits)
+            first_seven = line_content[:TEXT_START_COL-1]
+            # If first 7 chars are all spaces or digits, it's likely a sequence area
+            if first_seven.strip() == '' or first_seven.replace(' ', '').isdigit():
+                has_sequence_area = True
+        
+        if has_sequence_area:
+            text_start = TEXT_START_COL - 1
+            indicator_pos = INDICATOR_COL - 1
+        else:
+            # No sequence area - text starts at beginning
+            text_start = 0
+            indicator_pos = 6 if len(line_content) > 6 else 0
+        
+        # Extract program text area
+        text_area = line_content[text_start:].strip() if len(line_content) > text_start else ""
+        
+        # Check if we've reached IDENTIFICATION DIVISION
+        # This marks the end of the directive section
+        if in_directive_section and text_area:
+            text_upper = text_area.upper()
+            if text_upper.startswith('IDENTIFICATION') or text_upper.startswith('ID '):
+                in_directive_section = False
+                in_continuation = False
+                result_lines.append(line)
+                continue
+        
+        # If we're past the directive section, keep all lines
+        if not in_directive_section:
+            result_lines.append(line)
+            continue
+        
+        # We're in the directive section - check for PROCESS/CBL
+        # Get the indicator column (column 7, or position 6 for short lines)
+        indicator = line_content[indicator_pos] if len(line_content) > indicator_pos else ' '
+        
+        # Check for continuation line
+        if indicator == '-':
+            if in_continuation:
+                # This is a continuation of a PROCESS/CBL directive
+                if preserve_line_numbers:
+                    result_lines.append(line_ending)  # Blank line
+                # else: skip entirely
+                continue
+            else:
+                # Continuation of something else (shouldn't happen before IDENTIFICATION)
+                result_lines.append(line)
+                continue
+        
+        # Not a continuation line - check if it's a PROCESS/CBL directive
+        if text_area:
+            text_upper = text_area.upper()
+            
+            # Check if line starts with PROCESS or CBL
+            # Handle various formats: "PROCESS ", "PROCESS\t", "PROCESS", "CBL ", etc.
+            is_directive = False
+            if text_upper == 'PROCESS' or text_upper == 'CBL':
+                is_directive = True
+            elif text_upper.startswith('PROCESS ') or text_upper.startswith('PROCESS\t'):
+                is_directive = True
+            elif text_upper.startswith('CBL ') or text_upper.startswith('CBL\t'):
+                is_directive = True
+            
+            if is_directive:
+                # This is a PROCESS/CBL directive
+                in_continuation = True
+                if preserve_line_numbers:
+                    result_lines.append(line_ending)  # Blank line
+                # else: skip entirely
+                continue
+        
+        # Not a directive - keep the line
+        in_continuation = False
+        result_lines.append(line)
+    
+    return ''.join(result_lines)
+
+
 def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bool = True) -> str:
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
@@ -276,7 +405,7 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
             continue
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
-        if indicator == '*':  # comment
+        if indicator in ('*', '/'):  # comment (including page eject)
             flush_buffer()
             result.append(text_slice.rstrip())
             continue
@@ -543,6 +672,7 @@ __all__ = [
     'CopybookSyntaxError',
     'LevelNumberMismatchWarning',
     'TotalExpansionSizeExceededError',
+    'strip_compiler_directives',
     'normalize_fixed_format',
     'preprocess_conditional_compilation',
     'validate_copybook_content',

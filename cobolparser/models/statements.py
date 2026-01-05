@@ -353,6 +353,44 @@ class CallStatement(CobolStatement):
         return base
 
 
+class EntryStatement(CobolStatement):
+    """AST node for ENTRY statements.
+    
+    ENTRY statements define alternate entry points into a program, commonly
+    used in IMS programs. The syntax is:
+        ENTRY literal-name [USING parameter-list]
+    
+    Example:
+        ENTRY 'DLITCBL' USING LKPCB-IO LKPCB-ALT LKPCB-BPP100MA
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("ENTRY", location)
+        self.entry_name: Optional[str] = None
+        self.using_parameters: List[str] = []
+    
+    def set_entry_name(self, name: str) -> None:
+        """Set the entry point name (literal)."""
+        self.entry_name = name
+        if name not in self.operands:
+            self.add_operand(name)
+    
+    def add_using_parameter(self, param_name: str) -> None:
+        """Add a parameter to the USING clause."""
+        self.using_parameters.append(param_name)
+        if param_name not in self.operands:
+            self.add_operand(param_name)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        base = super().to_dict()
+        base.update({
+            "entry_name": self.entry_name,
+            "using_parameters": self.using_parameters
+        })
+        return base
+
+
 class SelectStatement(CobolStatement):
     """AST node for SELECT statements in FILE-CONTROL paragraph.
     
@@ -745,6 +783,7 @@ __all__ = [
     "PerformStatement",
     "IfStatement",
     "CallStatement",
+    "EntryStatement",
     "ComputeStatement",
     "CopyStatement",
     "SelectStatement",
