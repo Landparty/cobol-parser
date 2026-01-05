@@ -4317,6 +4317,7 @@ class CobolParser:
         - USING clause with BY REFERENCE/CONTENT/VALUE parameters
         - RETURNING clause
         - ON EXCEPTION/OVERFLOW clauses with END-CALL terminator
+        - Comments and continuations between all clauses
         """
         if not self.match_token(TokenType.CALL):
             return None
@@ -4325,8 +4326,8 @@ class CobolParser:
         call_stmt = CallStatement(location)
         self._set_node_context(call_stmt)
         
-        # Skip optional whitespace/newlines
-        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+        # Skip optional whitespace/newlines/comments/continuations
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
             self.advance_token()
         
         # Get program name (literal or identifier)
@@ -4344,8 +4345,8 @@ class CobolParser:
         call_stmt.set_called_program(program_name, is_dynamic)
         self.advance_token()
         
-        # Skip optional whitespace/newlines
-        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+        # Skip optional whitespace/newlines/comments/continuations
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
             self.advance_token()
         
         # Parse optional USING clause
@@ -4354,8 +4355,8 @@ class CobolParser:
             self.advance_token()
             self._parse_call_using_parameters(call_stmt)
         
-        # Skip optional whitespace/newlines
-        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+        # Skip optional whitespace/newlines/comments/continuations
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
             self.advance_token()
         
         # Parse optional RETURNING clause
@@ -4363,16 +4364,16 @@ class CobolParser:
            self.current_token.value.upper() == "RETURNING":
             self.advance_token()
             
-            # Skip optional whitespace/newlines
-            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            # Skip optional whitespace/newlines/comments/continuations
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
                 self.advance_token()
             
             if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
                 call_stmt.set_returning_parameter(self.current_token.value)
                 self.advance_token()
         
-        # Skip optional whitespace/newlines
-        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+        # Skip optional whitespace/newlines/comments/continuations
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
             self.advance_token()
         
         # Parse optional ON EXCEPTION/OVERFLOW clauses
@@ -4380,8 +4381,8 @@ class CobolParser:
            self.current_token.value.upper() == "ON":
             self.advance_token()
             
-            # Skip optional whitespace/newlines
-            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            # Skip optional whitespace/newlines/comments/continuations
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
                 self.advance_token()
             
             if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
@@ -4393,6 +4394,13 @@ class CobolParser:
                     # Parse statements until END-CALL or period
                     exception_statements = []
                     while self.current_token and self.current_token.type != TokenType.EOF:
+                        # Skip whitespace/comments/continuations
+                        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
+                            self.advance_token()
+                        
+                        if not self.current_token:
+                            break
+                        
                         # Check for END-CALL
                         if self.current_token.type == TokenType.IDENTIFIER and \
                            self.current_token.value.upper() == "END-CALL":
@@ -4403,9 +4411,67 @@ class CobolParser:
                         if self.current_token.type == TokenType.PERIOD:
                             break
                         
-                        # For now, skip tokens in the exception handler
-                        # Full implementation would parse nested statements
-                        self.advance_token()
+                        # Check for NOT ON EXCEPTION
+                        if self.current_token.type == TokenType.IDENTIFIER and \
+                           self.current_token.value.upper() == "NOT":
+                            # Look ahead for ON EXCEPTION
+                            saved_pos = self.current_token_index
+                            self.advance_token()
+                            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
+                                self.advance_token()
+                            
+                            if self.current_token and self.current_token.value.upper() == "ON":
+                                self.advance_token()
+                                while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
+                                    self.advance_token()
+                                
+                                if self.current_token and self.current_token.value.upper() == "EXCEPTION":
+                                    # Found NOT ON EXCEPTION - store current exception statements and parse NOT ON EXCEPTION
+                                    if exception_type == "EXCEPTION":
+                                        call_stmt.on_exception = exception_statements
+                                    else:
+                                        call_stmt.on_overflow = exception_statements
+                                    
+                                    self.advance_token()
+                                    not_exception_statements = []
+                                    
+                                    # Parse NOT ON EXCEPTION statements
+                                    while self.current_token and self.current_token.type != TokenType.EOF:
+                                        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
+                                            self.advance_token()
+                                        
+                                        if not self.current_token:
+                                            break
+                                        
+                                        if self.current_token.type == TokenType.IDENTIFIER and \
+                                           self.current_token.value.upper() == "END-CALL":
+                                            self.advance_token()
+                                            call_stmt.not_on_exception = not_exception_statements
+                                            break
+                                        
+                                        if self.current_token.type == TokenType.PERIOD:
+                                            call_stmt.not_on_exception = not_exception_statements
+                                            break
+                                        
+                                        # Parse statement in NOT ON EXCEPTION block
+                                        stmt = self.parse_statement()
+                                        if stmt:
+                                            not_exception_statements.append(stmt)
+                                        else:
+                                            self.advance_token()
+                                    break
+                            
+                            # Not NOT ON EXCEPTION, restore position
+                            self.current_token_index = saved_pos
+                            self.current_token = self.tokens[saved_pos] if saved_pos < len(self.tokens) else None
+                        
+                        # Parse statement in exception handler
+                        stmt = self.parse_statement()
+                        if stmt:
+                            exception_statements.append(stmt)
+                        else:
+                            # Couldn't parse statement, skip token to avoid infinite loop
+                            self.advance_token()
                     
                     # Store which type of exception handler we found
                     if exception_type == "EXCEPTION":
@@ -4413,8 +4479,8 @@ class CobolParser:
                     else:
                         call_stmt.on_overflow = exception_statements
         
-        # Skip optional whitespace/newlines
-        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+        # Skip optional whitespace/newlines/comments/continuations
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
             self.advance_token()
         
         # Expect period
@@ -4432,8 +4498,8 @@ class CobolParser:
         current_mode = "REFERENCE"  # Default mode
         
         while self.current_token and self.current_token.type != TokenType.EOF:
-            # Skip whitespace/newlines
-            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            # Skip whitespace/newlines/comments/continuations
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
                 self.advance_token()
             
             if not self.current_token:
@@ -4454,8 +4520,8 @@ class CobolParser:
                 if upper_val == "BY":
                     self.advance_token()
                     
-                    # Skip whitespace/newlines
-                    while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    # Skip whitespace/newlines/comments/continuations
+                    while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
                         self.advance_token()
                     
                     if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
@@ -4464,8 +4530,8 @@ class CobolParser:
                             current_mode = mode
                             self.advance_token()
                             
-                            # Skip whitespace/newlines
-                            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                            # Skip whitespace/newlines/comments/continuations
+                            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
                                 self.advance_token()
                             
                             continue
@@ -4479,16 +4545,16 @@ class CobolParser:
                 break
     
     def _skip_whitespace_and_comments(self, tokens: list, i: int) -> int:
-        """Skip whitespace and comment tokens.
+        """Skip whitespace, comment, and continuation tokens.
         
         Args:
             tokens: Token list
             i: Current position
             
         Returns:
-            New position after whitespace/comments
+            New position after whitespace/comments/continuations
         """
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
             i += 1
         return i
     
