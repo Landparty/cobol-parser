@@ -294,6 +294,11 @@ class CobolProgram(ASTNode):
                 for nested_stmt in stmt.on_overflow:
                     result.extend(collect_nested_statements(nested_stmt))
             
+            # Check for NOT ON EXCEPTION handler statements in CALL
+            if hasattr(stmt, 'not_on_exception') and stmt.not_on_exception:
+                for nested_stmt in stmt.not_on_exception:
+                    result.extend(collect_nested_statements(nested_stmt))
+            
             return result
         
         # Look in PROCEDURE division

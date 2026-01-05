@@ -2669,7 +2669,15 @@ class CobolParser:
         return i
 
     def _parse_call_inline(self, tokens, i):
-        """Parse CALL statement from inline tokens."""
+        """Parse CALL statement from inline tokens.
+        
+        Enhanced to handle:
+        - Multi-line parameters
+        - Exception handlers (ON EXCEPTION/NOT ON EXCEPTION)
+        - CALL inside control flow (IF/PERFORM)
+        - BY VALUE/BY REFERENCE parameter modifiers
+        - RETURNING clause variations
+        """
         start = tokens[i]
         i += 1  # Move past CALL token
         
@@ -2679,8 +2687,7 @@ class CobolParser:
         call_stmt = CallStatement(start.location)
         
         # Skip optional whitespace/newlines
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-            i += 1
+        i = self._skip_whitespace_and_comments(tokens, i)
         
         if i >= len(tokens):
             return i
@@ -2697,119 +2704,363 @@ class CobolParser:
         i += 1
         
         # Skip optional whitespace/newlines
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-            i += 1
+        i = self._skip_whitespace_and_comments(tokens, i)
         
         # Parse optional USING clause
-        if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER and \
-           tokens[i].value.upper() == "USING":
+        if i < len(tokens) and self._is_keyword(tokens[i], "USING"):
             i += 1
             i = self._parse_call_using_parameters_inline(tokens, i, call_stmt)
         
         # Skip optional whitespace/newlines
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-            i += 1
+        i = self._skip_whitespace_and_comments(tokens, i)
         
         # Parse optional RETURNING clause
-        if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER and \
-           tokens[i].value.upper() == "RETURNING":
+        if i < len(tokens) and self._is_keyword(tokens[i], "RETURNING"):
             i += 1
-            
-            # Skip optional whitespace/newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
+            i = self._skip_whitespace_and_comments(tokens, i)
             
             if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
                 call_stmt.set_returning_parameter(tokens[i].value)
                 i += 1
         
         # Skip optional whitespace/newlines
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-            i += 1
+        i = self._skip_whitespace_and_comments(tokens, i)
         
-        # Parse optional ON EXCEPTION/OVERFLOW clauses
-        if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER and \
-           tokens[i].value.upper() == "ON":
-            i += 1
-            
-            # Skip optional whitespace/newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
-            
-            if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
-                exception_type = tokens[i].value.upper()
-                
-                if exception_type in ("EXCEPTION", "OVERFLOW"):
-                    i += 1
-                    
-                    # Skip statements until END-CALL
-                    exception_statements = []
-                    while i < len(tokens):
-                        # Check for END-CALL
-                        if tokens[i].type == TokenType.IDENTIFIER and \
-                           tokens[i].value.upper() == "END-CALL":
-                            i += 1
-                            break
-                        
-                        # Skip tokens in the exception handler
-                        i += 1
-                    
-                    # Store which type of exception handler we found
-                    if exception_type == "EXCEPTION":
-                        call_stmt.on_exception = exception_statements
-                    else:
-                        call_stmt.on_overflow = exception_statements
+        # Parse optional ON EXCEPTION/OVERFLOW/NOT ON EXCEPTION clauses
+        i = self._parse_call_exception_handlers(tokens, i, call_stmt)
         
         if self.current_section:
             self.current_section.add_child(call_stmt)
         
         return i
     
-    def _parse_call_using_parameters_inline(self, tokens, i, call_stmt):
-        """Parse USING clause parameters for inline CALL statement."""
-        current_mode = "REFERENCE"  # Default mode
+    def _parse_call_exception_handlers(self, tokens, i, call_stmt):
+        """Parse ON EXCEPTION/NOT ON EXCEPTION clauses in CALL statement.
         
+        Handles:
+        - ON EXCEPTION ... statements ... [NOT ON EXCEPTION ...]
+        - NOT ON EXCEPTION ... statements ...
+        - END-CALL marker
+        """
         while i < len(tokens):
-            # Skip whitespace/newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
+            # Skip whitespace
+            i = self._skip_whitespace_and_comments(tokens, i)
             
             if i >= len(tokens):
                 break
             
-            # Check for RETURNING, ON (exception/overflow) - end of USING clause
+            # Check for ON keyword
+            if self._is_keyword(tokens[i], "ON"):
+                i += 1
+                i = self._skip_whitespace_and_comments(tokens, i)
+                
+                if i >= len(tokens):
+                    break
+                
+                if self._is_keyword(tokens[i], "EXCEPTION"):
+                    i += 1
+                    # Parse exception handler statements until END-CALL or NOT ON EXCEPTION
+                    exception_stmts = []
+                    while i < len(tokens):
+                        i = self._skip_whitespace_and_comments(tokens, i)
+                        
+                        # Check for END-CALL
+                        if self._is_keyword(tokens[i], "END-CALL"):
+                            i += 1
+                            call_stmt.on_exception = exception_stmts
+                            return i
+                        
+                        # Check for NOT ON EXCEPTION (end of ON EXCEPTION block)
+                        if self._is_keyword(tokens[i], "NOT"):
+                            # Look ahead for ON EXCEPTION
+                            if i + 2 < len(tokens) and \
+                               self._is_keyword(tokens[i+1], "ON") and \
+                               self._is_keyword(tokens[i+2], "EXCEPTION"):
+                                call_stmt.on_exception = exception_stmts
+                                i += 3
+                                i = self._skip_whitespace_and_comments(tokens, i)
+                                # Now parse NOT ON EXCEPTION statements
+                                not_exception_stmts = []
+                                while i < len(tokens):
+                                    i = self._skip_whitespace_and_comments(tokens, i)
+                                    
+                                    if self._is_keyword(tokens[i], "END-CALL"):
+                                        i += 1
+                                        call_stmt.not_on_exception = not_exception_stmts
+                                        return i
+                                    
+                                    # Parse statements in NOT ON EXCEPTION block
+                                    upper_val = tokens[i].value.upper() if hasattr(tokens[i], 'value') else ''
+                                    if upper_val in ('DISPLAY', 'MOVE', 'PERFORM', 'CALL', 'CONTINUE'):
+                                        stmt_count_before = len(self.current_section.children) if self.current_section else 0
+                                        
+                                        if upper_val == 'DISPLAY':
+                                            old_i = i
+                                            i = self._parse_display_inline(tokens, i)
+                                            if i > old_i and self.current_section:
+                                                stmt_count_after = len(self.current_section.children)
+                                                if stmt_count_after > stmt_count_before:
+                                                    not_exception_stmts.append(self.current_section.children[-1])
+                                            continue
+                                        elif upper_val == 'MOVE':
+                                            old_i = i
+                                            i = self._parse_move_inline(tokens, i)
+                                            if i > old_i and self.current_section:
+                                                stmt_count_after = len(self.current_section.children)
+                                                if stmt_count_after > stmt_count_before:
+                                                    not_exception_stmts.append(self.current_section.children[-1])
+                                            continue
+                                        elif upper_val == 'PERFORM':
+                                            old_i = i
+                                            i = self._parse_perform_inline(tokens, i)
+                                            if i > old_i and self.current_section:
+                                                stmt_count_after = len(self.current_section.children)
+                                                if stmt_count_after > stmt_count_before:
+                                                    not_exception_stmts.append(self.current_section.children[-1])
+                                            continue
+                                        elif upper_val == 'CALL':
+                                            old_i = i
+                                            i = self._parse_call_inline(tokens, i)
+                                            if i > old_i and self.current_section:
+                                                stmt_count_after = len(self.current_section.children)
+                                                if stmt_count_after > stmt_count_before:
+                                                    not_exception_stmts.append(self.current_section.children[-1])
+                                            continue
+                                        elif upper_val == 'CONTINUE':
+                                            i += 1
+                                            continue
+                                    
+                                    i += 1
+                                
+                                return i
+                        
+                        # Parse statement in exception handler
+                        upper_val = tokens[i].value.upper() if hasattr(tokens[i], 'value') else ''
+                        
+                        # Check for statement verbs
+                        if upper_val in ('DISPLAY', 'MOVE', 'PERFORM', 'CALL', 'CONTINUE'):
+                            stmt_count_before = len(self.current_section.children) if self.current_section else 0
+                            
+                            if upper_val == 'DISPLAY':
+                                old_i = i
+                                i = self._parse_display_inline(tokens, i)
+                                if i > old_i and self.current_section:
+                                    stmt_count_after = len(self.current_section.children)
+                                    if stmt_count_after > stmt_count_before:
+                                        exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                            elif upper_val == 'MOVE':
+                                old_i = i
+                                i = self._parse_move_inline(tokens, i)
+                                if i > old_i and self.current_section:
+                                    stmt_count_after = len(self.current_section.children)
+                                    if stmt_count_after > stmt_count_before:
+                                        exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                            elif upper_val == 'PERFORM':
+                                old_i = i
+                                i = self._parse_perform_inline(tokens, i)
+                                if i > old_i and self.current_section:
+                                    stmt_count_after = len(self.current_section.children)
+                                    if stmt_count_after > stmt_count_before:
+                                        exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                            elif upper_val == 'CALL':
+                                old_i = i
+                                i = self._parse_call_inline(tokens, i)
+                                if i > old_i and self.current_section:
+                                    stmt_count_after = len(self.current_section.children)
+                                    if stmt_count_after > stmt_count_before:
+                                        exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                            elif upper_val == 'CONTINUE':
+                                i += 1
+                                continue
+                        
+                        # Skip token if not recognized
+                        i += 1
+                
+                elif self._is_keyword(tokens[i], "OVERFLOW"):
+                    i += 1
+                    # Parse overflow handler statements
+                    overflow_stmts = []
+                    while i < len(tokens):
+                        i = self._skip_whitespace_and_comments(tokens, i)
+                        
+                        if self._is_keyword(tokens[i], "END-CALL"):
+                            i += 1
+                            call_stmt.on_overflow = overflow_stmts
+                            return i
+                        
+                        if self._is_keyword(tokens[i], "NOT"):
+                            if i + 2 < len(tokens) and \
+                               self._is_keyword(tokens[i+1], "ON") and \
+                               self._is_keyword(tokens[i+2], "EXCEPTION"):
+                                call_stmt.on_overflow = overflow_stmts
+                                i += 3
+                                continue
+                        
+                        i += 1
+            
+            # Check for NOT ON EXCEPTION (without preceding ON EXCEPTION)
+            elif self._is_keyword(tokens[i], "NOT"):
+                i += 1
+                i = self._skip_whitespace_and_comments(tokens, i)
+                
+                if i < len(tokens) and self._is_keyword(tokens[i], "ON"):
+                    i += 1
+                    i = self._skip_whitespace_and_comments(tokens, i)
+                    
+                    if i < len(tokens) and self._is_keyword(tokens[i], "EXCEPTION"):
+                        i += 1
+                        # Parse NOT ON EXCEPTION statements
+                        not_exception_stmts = []
+                        while i < len(tokens):
+                            i = self._skip_whitespace_and_comments(tokens, i)
+                            
+                            if self._is_keyword(tokens[i], "END-CALL"):
+                                i += 1
+                                # Store in on_exception since that's the success case
+                                if call_stmt.on_exception is None:
+                                    call_stmt.on_exception = not_exception_stmts
+                                return i
+                            
+                            # Parse statements in NOT ON EXCEPTION block
+                            upper_val = tokens[i].value.upper() if hasattr(tokens[i], 'value') else ''
+                            if upper_val in ('DISPLAY', 'MOVE', 'PERFORM', 'CALL', 'CONTINUE'):
+                                stmt_count_before = len(self.current_section.children) if self.current_section else 0
+                                
+                                if upper_val == 'DISPLAY':
+                                    old_i = i
+                                    i = self._parse_display_inline(tokens, i)
+                                    if i > old_i and self.current_section:
+                                        stmt_count_after = len(self.current_section.children)
+                                        if stmt_count_after > stmt_count_before:
+                                            not_exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                                elif upper_val == 'MOVE':
+                                    old_i = i
+                                    i = self._parse_move_inline(tokens, i)
+                                    if i > old_i and self.current_section:
+                                        stmt_count_after = len(self.current_section.children)
+                                        if stmt_count_after > stmt_count_before:
+                                            not_exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                                elif upper_val == 'PERFORM':
+                                    old_i = i
+                                    i = self._parse_perform_inline(tokens, i)
+                                    if i > old_i and self.current_section:
+                                        stmt_count_after = len(self.current_section.children)
+                                        if stmt_count_after > stmt_count_before:
+                                            not_exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                                elif upper_val == 'CALL':
+                                    old_i = i
+                                    i = self._parse_call_inline(tokens, i)
+                                    if i > old_i and self.current_section:
+                                        stmt_count_after = len(self.current_section.children)
+                                        if stmt_count_after > stmt_count_before:
+                                            not_exception_stmts.append(self.current_section.children[-1])
+                                    continue
+                                elif upper_val == 'CONTINUE':
+                                    i += 1
+                                    continue
+                            
+                            i += 1
+                        
+                        return i
+            
+            # Check for END-CALL without exception handlers
+            elif self._is_keyword(tokens[i], "END-CALL"):
+                i += 1
+                return i
+            
+            # Check for statement keywords that end the CALL
+            elif tokens[i].type == TokenType.IDENTIFIER:
+                upper_val = tokens[i].value.upper()
+                if upper_val in ('IF', 'PERFORM', 'MOVE', 'DISPLAY', 'WRITE', 'STOP', 'EVALUATE', 'CALL'):
+                    # Next statement starting - end CALL processing
+                    return i
+                i += 1
+            # Check for CALL token type
+            elif tokens[i].type == TokenType.CALL:
+                # Next CALL statement starting - end current CALL processing
+                return i
+            else:
+                # Skip unrecognized token
+                i += 1
+        
+        return i
+    
+    def _parse_call_using_parameters_inline(self, tokens, i, call_stmt):
+        """Parse USING clause parameters for inline CALL statement.
+        
+        Enhanced to handle:
+        - Multi-line parameters
+        - BY VALUE / BY REFERENCE / BY CONTENT modifiers
+        - Parameter sequences across multiple lines
+        """
+        current_mode = "REFERENCE"  # Default mode
+        
+        while i < len(tokens):
+            # Skip whitespace/newlines - critical for multi-line support
+            i = self._skip_whitespace_and_comments(tokens, i)
+            
+            if i >= len(tokens):
+                break
+            
+            # Check for BY keyword (parameter passing mode modifier) - must be before IDENTIFIER check
+            if tokens[i].type == TokenType.BY or (tokens[i].type == TokenType.IDENTIFIER and tokens[i].value.upper() == "BY"):
+                i += 1
+                i = self._skip_whitespace_and_comments(tokens, i)
+                
+                if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
+                    mode = tokens[i].value.upper()
+                    
+                    # Support multiple passing mode variations
+                    if mode in ("REFERENCE", "CONTENT", "VALUE"):
+                        current_mode = mode
+                        i += 1
+                        i = self._skip_whitespace_and_comments(tokens, i)
+                        
+                        # After setting mode, continue to next parameter
+                        # Don't break, as next iteration will get the parameter
+                        continue
+                    elif mode in ("AREA", "DESCRIPTOR"):
+                        # IBM extensions
+                        current_mode = mode
+                        i += 1
+                        i = self._skip_whitespace_and_comments(tokens, i)
+                        continue
+                continue
+            
+            # Check for keywords that end USING clause
             if tokens[i].type == TokenType.IDENTIFIER:
                 upper_val = tokens[i].value.upper()
                 
-                if upper_val in ("RETURNING", "ON"):
+                # Check for RETURNING, ON, NOT ON (exception handlers) - end of USING clause
+                if upper_val in ("RETURNING", "ON", "NOT"):
                     break
                 
-                # Check for BY keyword (parameter passing mode)
-                if upper_val == "BY":
-                    i += 1
-                    
-                    # Skip whitespace/newlines
-                    while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                        i += 1
-                    
-                    if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
-                        mode = tokens[i].value.upper()
-                        if mode in ("REFERENCE", "CONTENT", "VALUE"):
-                            current_mode = mode
-                            i += 1
-                            
-                            # Skip whitespace/newlines
-                            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                                i += 1
-                            
-                            continue
+                # Check for statement verbs that start new statement
+                if upper_val in ("IF", "PERFORM", "MOVE", "DISPLAY", "WRITE", "STOP", "EVALUATE"):
+                    break
                 
-                # This must be a parameter name
+                # This is a parameter name
                 param_name = tokens[i].value
                 call_stmt.add_using_parameter(param_name, current_mode)
                 i += 1
+                
+                # Don't reset mode - it applies to subsequent parameters until changed
+                # unless it's explicitly reset with another BY clause
+                
+            elif tokens[i].type == TokenType.STRING_LITERAL:
+                # Support literal values as parameters
+                param_name = f'"{tokens[i].value}"'
+                call_stmt.add_using_parameter(param_name, current_mode)
+                i += 1
             else:
-                # End of USING clause
+                # Unrecognized token type - end USING clause
                 break
         
         return i
@@ -3202,7 +3453,7 @@ class CobolParser:
         i += 1
         cond_parts = []
         # Parse condition up to THEN or first verb/ELSE
-        while i < len(tokens) and tokens[i].type not in (TokenType.THEN, TokenType.ELSE, TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.WRITE, TokenType.GO, TokenType.GOTO, TokenType.IF):
+        while i < len(tokens) and tokens[i].type not in (TokenType.THEN, TokenType.ELSE, TokenType.MOVE, TokenType.PERFORM, TokenType.DISPLAY, TokenType.WRITE, TokenType.GO, TokenType.GOTO, TokenType.IF, TokenType.CALL):
             if tokens[i].value:
                 cond_parts.append(tokens[i].value)
             i += 1
@@ -3254,6 +3505,13 @@ class CobolParser:
                     if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
+            if verb_type == TokenType.CALL or verb_val == 'CALL':
+                j = self._parse_call_inline(tokens, i)
+                if self.current_section and self.current_section.children:
+                    then_stmt = self.current_section.children[-1]
+                    if_stmt.add_then_statement(then_stmt)
+                i = j
+                continue
             if verb_type == TokenType.WRITE or verb_val == 'WRITE':
                 j = self._parse_write_inline(tokens, i)
                 if self.current_section and self.current_section.children:
@@ -3300,6 +3558,13 @@ class CobolParser:
                     continue
                 if verb_type == TokenType.DISPLAY or verb_val == 'DISPLAY':
                     j = self._parse_display_inline(tokens, i)
+                    if self.current_section and self.current_section.children:
+                        else_stmt = self.current_section.children[-1]
+                        if_stmt.add_else_statement(else_stmt)
+                    i = j
+                    continue
+                if verb_type == TokenType.CALL or verb_val == 'CALL':
+                    j = self._parse_call_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
                         if_stmt.add_else_statement(else_stmt)
@@ -4212,6 +4477,34 @@ class CobolParser:
             else:
                 # Unexpected token, break to avoid infinite loop
                 break
+    
+    def _skip_whitespace_and_comments(self, tokens: list, i: int) -> int:
+        """Skip whitespace and comment tokens.
+        
+        Args:
+            tokens: Token list
+            i: Current position
+            
+        Returns:
+            New position after whitespace/comments
+        """
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        return i
+    
+    def _is_keyword(self, token, keyword: str) -> bool:
+        """Check if a token matches a keyword.
+        
+        Args:
+            token: Token to check
+            keyword: Keyword to match (case-insensitive)
+            
+        Returns:
+            True if token is the keyword
+        """
+        if not hasattr(token, 'value'):
+            return False
+        return token.value.upper() == keyword.upper() if token.value else False
     
     def skip_to_next_division(self) -> None:
         """Skip tokens until next division is found."""

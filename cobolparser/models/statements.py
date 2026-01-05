@@ -281,6 +281,7 @@ class CallStatement(CobolStatement):
         self.giving_parameter: Optional[str] = None
         self.on_overflow: Optional[List['CobolStatement']] = None
         self.on_exception: Optional[List['CobolStatement']] = None
+        self.not_on_exception: Optional[List['CobolStatement']] = None
         self._is_dynamic: bool = False
         self._possible_values: List[str] = []
         
