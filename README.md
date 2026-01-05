@@ -58,6 +58,12 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - **Storage**: 50MB free space
 - **OS**: Windows 10+, macOS 10.15+, Linux (any modern distribution)
 
+### Verification
+To verify compatibility on your specific environment (especially macOS), you can run the provided verification script:
+```bash
+python verify_mac.py
+```
+
 ### Recommended Requirements
 - **Python**: 3.13.1 or higher
 - **Memory**: 1GB RAM (for medium programs)

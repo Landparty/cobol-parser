@@ -4,6 +4,7 @@ This module provides the core parsing functionality that converts tokenized COBO
 source code into Abstract Syntax Trees (AST) representing the program structure.
 """
 
+import re
 from typing import List, Optional, Dict, Any, Union, Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -128,6 +129,38 @@ class CobolParser:
         self.current_section: Optional[CobolSection] = None
         self.parsing_nested_statement = False  # Track nested statement parsing
         
+    @staticmethod
+    def _skip_to_identification_division(content: str) -> str:
+        """Skip all lines before IDENTIFICATION DIVISION, preserving line numbers.
+        
+        This handles PROCESS directives, CBL directives, and any other preamble
+        content that appears before the actual COBOL program begins.
+        
+        Args:
+            content: Raw COBOL source code
+            
+        Returns:
+            Content starting from IDENTIFICATION DIVISION with blank lines
+            preserving original line numbers
+        """
+        lines = content.splitlines(keepends=True)
+        
+        # Search for IDENTIFICATION DIVISION or ID DIVISION (case-insensitive)
+        id_div_pattern = re.compile(
+            r'^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)',
+            re.IGNORECASE
+        )
+        
+        for i, line in enumerate(lines):
+            if id_div_pattern.search(line):
+                # Replace all lines before IDENTIFICATION DIVISION with blank lines
+                blank_lines = ['\n'] * i
+                return ''.join(blank_lines + lines[i:])
+        
+        # If no IDENTIFICATION DIVISION found, return original content
+        # The parser will handle this error appropriately
+        return content
+        
     def parse(self, source: str, filename: str = "<string>") -> ParseResult:
         """Parse COBOL source code into AST.
         
@@ -142,8 +175,11 @@ class CobolParser:
         self.statistics.start_timing()
         
         try:
+            # Skip lines before IDENTIFICATION DIVISION (e.g., PROCESS directives)
+            cleaned_source = self._skip_to_identification_division(source)
+            
             # Tokenize source
-            lexer = CobolLexer(source, filename, self.dialect, free_form=self.free_form)
+            lexer = CobolLexer(cleaned_source, filename, self.dialect, free_form=self.free_form)
             self.tokens = lexer.tokenize()
             
             if lexer.has_errors():
