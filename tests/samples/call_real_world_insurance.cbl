@@ -92,7 +92,7 @@
                RETURNING WS-POLICY-VALID
                ON EXCEPTION
                    MOVE 'N' TO WS-POLICY-VALID
-                   CALL 'LOG-VALIDATION-ERROR' USING 'POLICY-CHECK-FAILED'
+                   CALL 'LOG-VALIDATION-ERROR' USING 'POLICY-CHECK-FAIL'
                                                      WS-CLAIM-NUMBER
                END-CALL.
            

@@ -16,10 +16,10 @@ class TestFigurativeConstants:
     
     def test_all_figurative_constant_tokenization(self):
         """Test that ALL is tokenized as FIGURATIVE_CONSTANT."""
-        lexer = CobolLexer()
         source = "MOVE ALL 'X' TO WS-FIELD."
+        lexer = CobolLexer(source, free_form=True)
         
-        tokens = list(lexer.tokenize(source))
+        tokens = list(lexer.tokenize())
         
         # Find ALL token
         all_token = next((t for t in tokens if t.value == 'ALL'), None)
@@ -28,11 +28,10 @@ class TestFigurativeConstants:
         
     def test_zero_figurative_constant(self):
         """Test ZERO/ZEROS/ZEROES tokenization."""
-        lexer = CobolLexer()
-        
         for variant in ['ZERO', 'ZEROS', 'ZEROES']:
             source = f"MOVE {variant} TO WS-FIELD."
-            tokens = list(lexer.tokenize(source))
+            lexer = CobolLexer(source, free_form=True)
+            tokens = list(lexer.tokenize())
             
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
@@ -40,11 +39,10 @@ class TestFigurativeConstants:
             
     def test_space_figurative_constant(self):
         """Test SPACE/SPACES tokenization."""
-        lexer = CobolLexer()
-        
         for variant in ['SPACE', 'SPACES']:
             source = f"MOVE {variant} TO WS-FIELD."
-            tokens = list(lexer.tokenize(source))
+            lexer = CobolLexer(source, free_form=True)
+            tokens = list(lexer.tokenize())
             
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
@@ -52,11 +50,10 @@ class TestFigurativeConstants:
             
     def test_quote_figurative_constant(self):
         """Test QUOTE/QUOTES tokenization."""
-        lexer = CobolLexer()
-        
         for variant in ['QUOTE', 'QUOTES']:
             source = f"MOVE {variant} TO WS-FIELD."
-            tokens = list(lexer.tokenize(source))
+            lexer = CobolLexer(source, free_form=True)
+            tokens = list(lexer.tokenize())
             
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
@@ -64,11 +61,10 @@ class TestFigurativeConstants:
             
     def test_high_low_value_constants(self):
         """Test HIGH-VALUE and LOW-VALUE tokenization."""
-        lexer = CobolLexer()
-        
         for variant in ['HIGH-VALUE', 'HIGH-VALUES', 'LOW-VALUE', 'LOW-VALUES']:
             source = f"MOVE {variant} TO WS-FIELD."
-            tokens = list(lexer.tokenize(source))
+            lexer = CobolLexer(source, free_form=True)
+            tokens = list(lexer.tokenize())
             
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None

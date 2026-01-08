@@ -1125,7 +1125,9 @@ class CobolParser:
             elif self.match_token(TokenType.FILE_SECTION):
                 self.parse_file_section()
             else:
-                # Skip unknown tokens
+                # Skip unknown tokens, but check if we've reached a division marker
+                if self.current_token.type in [TokenType.PROCEDURE_DIVISION, TokenType.EOF]:
+                    break
                 self.advance_token()
     
     def parse_working_storage_section(self) -> None:
@@ -1937,6 +1939,17 @@ class CobolParser:
                             break
                         data_item.initial_value = f'"{string_value}"'
                         self.advance_token()
+                    elif self.current_token.type == TokenType.NUMERIC_LITERAL:
+                        # Handle numeric literals that may include trailing period
+                        # (e.g., lexer tokenizes "VALUE 0." as NUMERIC_LITERAL "0.")
+                        numeric_value = self.current_token.value
+                        if numeric_value.endswith('.'):
+                            # Strip the period and mark it as consumed
+                            data_item.initial_value = numeric_value[:-1]
+                            period_consumed_by_picture = True
+                        else:
+                            data_item.initial_value = numeric_value
+                        self.advance_token()
                     else:
                         data_item.initial_value = self.current_token.value
                         self.advance_token()
@@ -1979,7 +1992,14 @@ class CobolParser:
                 self.advance_token()  # Skip usage type
             
             else:
-                # Skip unknown tokens or advance on unrecognized clause
+                # Check if we've reached end of data item definition
+                if self.current_token.type in [TokenType.NEWLINE, TokenType.LEVEL_NUMBER, 
+                                               TokenType.PROCEDURE_DIVISION, TokenType.WORKING_STORAGE_SECTION,
+                                               TokenType.LOCAL_STORAGE_SECTION, TokenType.LINKAGE_SECTION,
+                                               TokenType.FILE_SECTION, TokenType.EOF]:
+                    # Don't advance - let the period check or loop exit handle these
+                    break
+                # Skip other unknown tokens
                 self.advance_token()
         
         # Expect period or semicolon (unless it was already consumed by PICTURE parsing)

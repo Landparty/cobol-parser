@@ -331,7 +331,14 @@ class TestBackwardCompatibility:
         parser = CobolParser()
         
         # Contract: parse(source_code: str) should work
-        result = parser.parse("IDENTIFICATION DIVISION. PROGRAM-ID. TEST.")
+        # Use a more complete minimal program to ensure successful parsing
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            STOP RUN.
+        """
+        result = parser.parse(source)
         
         assert result is not None
         assert result.ast is not None
