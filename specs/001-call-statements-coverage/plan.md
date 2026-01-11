@@ -1,0 +1,149 @@
+# Implementation Plan: [FEATURE]
+
+**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+
+## Summary
+
+**Primary Requirement**: Ensure all variations of CALL statements are covered and tested by the parser for COBOL fixed format.
+
+**Scope**: Comprehensive test coverage for 6 CALL statement variation categories:
+1. **P1 - Basic CALL Parsing**: Static and dynamic program calls (CALL "PROG" vs CALL VAR)
+2. **P1 - Parameter Passing Modes**: BY REFERENCE/CONTENT/VALUE parameter modifiers
+3. **P2 - RETURNING/GIVING Clauses**: Return value capture (mutually exclusive validation)
+4. **P2 - Exception Handling**: ON EXCEPTION, NOT ON EXCEPTION, ON OVERFLOW clauses
+5. **P1 - Fixed Format Compliance**: Multi-line statements with continuation markers (column 7 hyphen)
+6. **P3 - Dynamic Call Tracking**: Track MOVE statements to variables used in CALL (MVP scope)
+
+**Technical Approach**: Enhance existing CallStatement model and parse_call_statement() method to:
+- Add mutual exclusivity validation for RETURNING/GIVING
+- Improve exception handler parsing for nested statements
+- Expand inline CALL parsing for use within PERFORM/IF blocks
+- Create 6 test suites (one per variation category) with minimum 90%+ coverage
+- Document fixed format continuation line handling
+
+**Existing Baseline**: CallStatement already implements core features; enhancements focus on validation, test coverage, and edge cases.
+
+---
+
+## Technical Context
+
+**Language/Version**: Python 3.13+  
+**Primary Dependencies**: ZERO external runtime dependencies (self-contained parser)  
+**Storage**: File-based COBOL source processing (lexer → tokens → AST)  
+**Testing**: pytest with pytest-cov, pytest-xdist (multi-tier: unit, integration, contracts, acceptance, performance)  
+**Target Platform**: Cross-platform (Linux/Windows/macOS mainframe code analysis)  
+**Project Type**: Single Python package (cobolparser) with modular architecture  
+**Performance Goals**: Parse 10,000 LOC in <100ms; handle 1M+ LOC programs with streaming support  
+**Constraints**: 256MB default memory limit (configurable); 81%+ test coverage requirement; backward compatibility mandatory  
+**Scale/Scope**: IBM Enterprise COBOL parser covering 15+ statement types; CallStatement is highest-priority statement type
+
+## Constitution Check
+
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+
+**Five Core Principles (all MUST pass)**:
+
+1. ✅ **Test-First Development (TDD)**: Specification includes 6 user stories with acceptance scenarios; tests will be written BEFORE implementation (red-green-refactor cycle documented in tasks.md)
+2. ✅ **Code Quality Standards**: Design targets 90%+ coverage (currently 14% baseline for unit tests only); AST nodes use dataclasses, type hints in all signatures; to_dict() serialization implemented
+3. ✅ **Performance Requirements**: Parser targets <100ms for 10K LOC; 256MB memory default; streaming for >1MB files; CallStatement tracking adds minimal overhead
+4. ✅ **User Experience Consistency**: Uses Python conventions; CallStatement follows CobolStatement base class pattern; error messages include line/column; API uses sensible defaults (BY REFERENCE for parameters)
+5. ✅ **IBM Enterprise COBOL Priority**: Specification prioritizes CALL statement variations found in IBM mainframe COBOL; RETURNING/GIVING are IBM-standard clauses; MOVE tracking targets IBM patterns
+
+**Quality Gates**:
+- [x] TDD workflow documented (red-green-refactor cycle in acceptance scenarios)
+- [x] Test organization follows `tests/{contract,integration,unit}/` structure (6 test suites planned)
+- [x] Performance benchmarks identified: <100ms for 10K LOC, continue for 1M LOC
+- [x] Error messages include line/column information (SourceLocation in every AST node)
+- [x] JSON serialization includes AST `to_dict()` implementation (CallStatement @ line 315)
+
+**Justification for Any Failed Checks**: ALL CHECKS PASS - No constitutional violations. Feature aligns with all five core principles and passes all quality gates.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/001-call-statements-coverage/
+├── spec.md                  # Feature specification (completed)
+├── plan.md                  # This file (implementation planning)
+├── framework-baseline.md    # Framework analysis (completed)
+├── research.md              # Phase 0 output (to be generated)
+├── data-model.md            # Phase 1 output (to be generated)
+├── quickstart.md            # Phase 1 output (to be generated)
+├── contracts/               # Phase 1 output (to be generated)
+│   ├── call-statement-contract.md
+│   ├── exception-handlers-contract.md
+│   └── parameter-modes-contract.md
+└── tasks.md                 # Phase 2 output (to be generated by speckit.tasks)
+```
+
+### Source Code (existing repository)
+
+```text
+cobolparser/
+├── models/
+│   ├── statements.py        # CallStatement class (line 268-350) [TO ENHANCE]
+│   ├── ast_base.py          # ASTNode base class [REFERENCE]
+│   └── program.py           # Program/Division/Section structure [REFERENCE]
+├── parser.py                # parse_call_statement() @ line 4444 [TO ENHANCE]
+├── dialects/
+│   └── ibm_enterprise.py    # IBM COBOL extensions [REFERENCE]
+└── plugins/
+    └── core.py              # Error recovery, serialization [REFERENCE]
+
+tests/
+├── unit/
+│   ├── test_call_statement_parsing.py       # 4 baseline tests (TO EXPAND to 6 categories)
+│   └── test_call_[category]_*.py            # 6 new test files (one per variation category)
+├── integration/
+│   └── test_call_comprehensive.py           # Existing integration tests [TO VERIFY]
+├── contracts/
+│   └── test_call_statement_contract.py      # Serialization contracts [TO EXPAND]
+└── acceptance/
+    └── test_call_real_world_patterns.py    # Real COBOL patterns [TO CREATE]
+```
+
+**Structure Decision**: Single project model with modular test organization. Enhancements focus on:
+1. **Minimal Changes to callStatement** (statements.py:268-350): Add mutual exclusivity validation
+2. **Inline Parser Enhancement** (parser.py:4444+): Improve exception handler parsing
+3. **Test Expansion** (tests/): 6 test suites for 6 variation categories
+4. **No New Files**: Leverage existing framework patterns and directories
+
+## Implementation Approach
+
+### Phase 0: Research & Technology Decisions (1-2 hours)
+**Deliverable**: `research.md`
+
+Key research tasks:
+1. **Continuation Line Handling**: Verify column 7 hyphen continuation is already implemented in lexer
+2. **Exception Handler Limits**: Confirm recursion depth limits are appropriate for nested handlers
+3. **Parameter Mode Defaults**: Document BY REFERENCE default behavior
+4. **MOVE Tracking Scope**: Define which MOVE patterns to track for dynamic calls
+5. **Mutual Exclusivity Check**: Identify best location for RETURNING/GIVING validation
+
+### Phase 1: Design & Contracts (3-4 hours)
+**Deliverables**: `data-model.md`, `contracts/`, `quickstart.md`
+
+Entity definitions:
+- **CallStatement**: Already exists; document expected behavior
+- **CallParameter**: Already exists; clarify passing_mode values
+- **Exception Handler List**: Document on_exception, not_on_exception, on_overflow structure
+
+API Contracts (OpenAPI format):
+- `contracts/call-statement-contract.md`: Core CALL structure
+- `contracts/exception-handlers-contract.md`: Exception handler clauses
+- `contracts/parameter-modes-contract.md`: Parameter passing modes
+
+### Phase 2: Implementation & Testing (8-12 hours)
+**Deliverable**: `tasks.md` (generated by speckit.tasks)
+
+Implementation sequence:
+1. **Add validation**: Mutual exclusivity check in CallStatement
+2. **Enhance parsing**: Improve exception handler statement parsing
+3. **Expand tests**: 6 test suites for 6 variation categories
+4. **Run baseline**: Verify existing tests still pass (regression check)
+5. **Measure coverage**: Achieve 90%+ for CallStatement and parse_call_statement
+6. **Documentation**: Update docs/call-statements.md with new patterns
