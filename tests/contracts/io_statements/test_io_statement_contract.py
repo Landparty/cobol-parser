@@ -8,6 +8,7 @@ import json
 import pytest
 from cobolparser import parse_cobol
 from cobolparser.models.statements import (
+    IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement, IOAcceptStatement,
     ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
 )
 from cobolparser.models.ast_base import SourceLocation

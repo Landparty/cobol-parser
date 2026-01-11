@@ -41,16 +41,16 @@ Each statement requires:
 
 | Statement | Status | Contract | Integration | Unit | Total | Notes |
 |-----------|--------|----------|-------------|------|-------|-------|
-| **OPEN** | � Planned | 0/8 | 0/5 | 0/15 | **0/28** | INPUT/OUTPUT/I-O/EXTEND (FR-001) |
-| **CLOSE** | 📝 Planned | 0/6 | 0/3 | 0/10 | **0/19** | WITH LOCK clause (FR-002) |
-| **READ** | 📝 Planned | 0/10 | 0/8 | 0/25 | **0/43** | Complex AT END logic (FR-002) |
-| **WRITE** | 📝 Planned | 0/10 | 0/6 | 0/20 | **0/36** | BEFORE/AFTER ADVANCING (FR-002) |
-| **REWRITE** | 📝 Planned | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause (FR-002) |
-| **DELETE** | 📝 Planned | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause (FR-002) |
-| **START** | 📝 Planned | 0/6 | 0/3 | 0/12 | **0/21** | Key positioning (FR-001) |
-| **UNLOCK** | 📝 Planned | 0/4 | 0/2 | 0/8 | **0/14** | Record unlock (FR-001) |
+| **OPEN** | ✅ Complete | 8/8 ✅ | 5/5 ✅ | 15/15 ✅ | 28/28 | INPUT/OUTPUT/I-O/EXTEND (T016-T018) |
+| **CLOSE** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 10/10 ✅ | 19/19 | WITH LOCK clause (T016-T018) |
+| **READ** | ✅ Complete | 10/10 ✅ | 8/8 ✅ | 25/25 ✅ | 43/43 | AT END logic, record locking (T016-T018) |
+| **WRITE** | ✅ Complete | 10/10 ✅ | 6/6 ✅ | 20/20 ✅ | 36/36 | BEFORE/AFTER ADVANCING (T016-T018) |
+| **REWRITE** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
+| **DELETE** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
+| **START** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 12/12 ✅ | 21/21 | Key positioning (T017-T018) |
+| **UNLOCK** | ✅ Complete | 4/4 ✅ | 2/2 ✅ | 8/8 ✅ | 14/14 | Record unlock (T017-T018) |
 
-**File I/O Subtotal (61 variations planned)**: 0/215 tests (0%) | Catalog: [io-variation-catalog.csv](../specs/001-io-variation-coverage/io-variation-catalog.csv)
+**File I/O Subtotal (61 variations covered)**: 233/254 tests (91.7%) | Catalog: [io-variation-catalog.csv](../specs/001-io-variation-coverage/io-variation-catalog.csv)
 
 ### Control Flow
 

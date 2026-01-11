@@ -5,8 +5,9 @@ and ACCEPT statements with full clause variations.
 """
 
 import pytest
-from cobolparser import parse_cobol
+from cobolparser import parse_cobol, ErrorRecoveryMode
 from cobolparser.models.statements import (
+    IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement, IOAcceptStatement,
     ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
 )
 
@@ -331,7 +332,7 @@ class TestIOStatementErrorHandling:
             READ MYFILE
             STOP RUN.
         """
-        result = parse_cobol(code, error_recovery="COLLECT_ALL")
+        result = parse_cobol(code, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         # Should have errors or warnings
         assert result.ast is not None
     

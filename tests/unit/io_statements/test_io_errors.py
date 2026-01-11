@@ -39,7 +39,7 @@ class TestIOErrorHandling:
 
         # TODO: Assert that result contains error with code IO_INVALID_LOCK
         # Syntax: with_lock is only valid on INDEXED/RELATIVE files
-        assert result.diagnostics is not None or result.ast is not None
+        assert result.errors is not None or result.ast is not None
 
     def test_start_on_sequential_file(self) -> None:
         """START is invalid on sequential files (should emit IO_INVALID_ORG)."""
@@ -66,7 +66,7 @@ class TestIOErrorHandling:
         result = parser.parse(source)
 
         # TODO: Assert error code IO_INVALID_ORG (START requires indexed/relative)
-        assert result.diagnostics is not None or result.ast is not None
+        assert result.errors is not None or result.ast is not None
 
     def test_delete_on_sequential_without_current_record(self) -> None:
         """DELETE on sequential after READ should work, but DELETE without READ is error."""

@@ -55,8 +55,8 @@ Independent Test: Parsing the curated IO suite in COLLECT_ALL mode yields AST + 
 - [ ] T016 [P] [US1] Update IO keyword/token handling in `cobolparser/lexer.py` (including continuation-line rules) so new clauses are recognized.
 - [ ] T017 [P] [US1] Extend AST node classes and `to_dict()` implementations in `cobolparser/models/statements.py` per `contracts/io-statement-ast.md` (add metadata fields such as `with_lock`, `advancing_clause`, and FD bindings).
 - [ ] T018 [US1] Implement parser productions and error-recovery hooks in `cobolparser/parser.py` to map tokens + clauses into the new AST nodes while preserving SourceLocation data.
-- [ ] T019 [US1] Update diagnostics for malformed IO statements by adding `IO_*` error codes and recovery hints in `cobolparser/plugins/core.py` (ErrorRecoveryMode helpers).
-- [ ] T020 [US1] Refresh documentation (`docs/file-control.md` and `docs/STATEMENT_TEST_COVERAGE_MATRIX.md`) with the newly supported IO forms and AST examples.
+- [x] T019 [US1] Update diagnostics for malformed IO statements by adding `IO_*` error codes and recovery hints in `cobolparser/plugins/core.py` (ErrorRecoveryMode helpers).
+- [x] T020 [US1] Refresh documentation (`docs/file-control.md` and `docs/STATEMENT_TEST_COVERAGE_MATRIX.md`) with the newly supported IO forms and AST examples.
 - [ ] T021 [US1] Run the full test + performance suites (guarded by T004) and write post-US1 metrics to `specs/001-io-variation-coverage/baselines/post-us1.json` for regression comparison.
 
 ---

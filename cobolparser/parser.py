@@ -15,7 +15,11 @@ from .models.program import CobolProgram, CobolDivision, CobolSection, CobolPara
 from .models.statements import (
     CobolStatement, CobolExpression, MoveStatement, DisplayStatement, 
     PerformStatement, IfStatement, StopStatement, CallStatement, EntryStatement, SelectStatement, ArithmeticExpression, ConditionalExpression,
-    ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
+    # IO Statement Classes (with backward compatibility aliases)
+    ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement,
+    # New IO Statement Classes
+    IORewriteStatement, RewriteStatement, IODeleteStatement, DeleteStatement,
+    IOStartStatement, StartStatement, IOUnlockStatement, UnlockStatement
 )
 from .models.data_items import CobolDataItem, PictureClause, OccursClause
 from .models.sql_statements import parse_exec_sql, ExecSQLStatement
@@ -4440,6 +4444,15 @@ class CobolParser:
         elif self.current_token.type == TokenType.ACCEPT or \
              (self.current_token.value and self.current_token.value.upper() == "ACCEPT"):
             return self.parse_accept_statement()
+        # New IO statements (REWRITE, DELETE, START, UNLOCK)
+        elif self.current_token.value and self.current_token.value.upper() == "REWRITE":
+            return self.parse_rewrite_statement()
+        elif self.current_token.value and self.current_token.value.upper() == "DELETE":
+            return self.parse_delete_statement()
+        elif self.current_token.value and self.current_token.value.upper() == "START":
+            return self.parse_start_statement()
+        elif self.current_token.value and self.current_token.value.upper() == "UNLOCK":
+            return self.parse_unlock_statement()
         else:
             # Unknown statement type - create generic statement
             location = self.get_current_location()
@@ -5238,6 +5251,318 @@ class CobolParser:
                 if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
                     stmt.set_color(self.current_token.value)
                     self.advance_token()
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+
+    def parse_rewrite_statement(self) -> Optional[IORewriteStatement]:
+        """Parse REWRITE statement for indexed and relative files.
+        
+        Syntax:
+            REWRITE record-name [WITH LOCK] [INVALID KEY statement]
+                              [NOT INVALID KEY statement]
+        """
+        if not self.current_token or (self.current_token.value and self.current_token.value.upper() != "REWRITE"):
+            return None
+        
+        location = self.get_current_location()
+        stmt = IORewriteStatement(location)
+        self.advance_token()  # consume REWRITE
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Record name is required
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            record_name = self.current_token.value
+            stmt.set_record_name(record_name)
+            self.advance_token()
+        
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # WITH LOCK
+            if upper_val == "WITH":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "LOCK":
+                    stmt.set_lock(with_lock=True)
+                    self.advance_token()
+            # INVALID KEY
+            elif upper_val == "INVALID":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "KEY":
+                    self.advance_token()
+                    # Parse nested statements
+                    invalid_key_stmts = []
+                    while self.current_token and self.current_token.type != TokenType.PERIOD:
+                        upper_check = self.current_token.value.upper() if self.current_token.value else ""
+                        if upper_check in ("NOT", "INVALID"):
+                            break
+                        nested_stmt = self.parse_statement()
+                        if nested_stmt:
+                            invalid_key_stmts.append(nested_stmt)
+                        else:
+                            break
+                    if invalid_key_stmts:
+                        stmt.set_invalid_key_clause(invalid_key_stmts)
+            # NOT INVALID KEY
+            elif upper_val == "NOT":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "INVALID":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "KEY":
+                        self.advance_token()
+                        # Parse nested statements
+                        not_invalid_key_stmts = []
+                        while self.current_token and self.current_token.type != TokenType.PERIOD:
+                            nested_stmt = self.parse_statement()
+                            if nested_stmt:
+                                not_invalid_key_stmts.append(nested_stmt)
+                            else:
+                                break
+                        if not_invalid_key_stmts:
+                            stmt.set_not_invalid_key_clause(not_invalid_key_stmts)
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+
+    def parse_delete_statement(self) -> Optional[IODeleteStatement]:
+        """Parse DELETE statement for indexed and relative files.
+        
+        Syntax:
+            DELETE file-name [RECORD] [WITH LOCK] [INVALID KEY statement]
+                                                   [NOT INVALID KEY statement]
+        """
+        if not self.current_token or (self.current_token.value and self.current_token.value.upper() != "DELETE"):
+            return None
+        
+        location = self.get_current_location()
+        stmt = IODeleteStatement(location)
+        self.advance_token()  # consume DELETE
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # File name is required
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            file_name = self.current_token.value
+            stmt.set_file_name(file_name)
+            self.advance_token()
+        
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # RECORD (optional keyword)
+            if upper_val == "RECORD":
+                self.advance_token()
+            # WITH LOCK
+            elif upper_val == "WITH":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "LOCK":
+                    stmt.set_lock(with_lock=True)
+                    self.advance_token()
+            # INVALID KEY
+            elif upper_val == "INVALID":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "KEY":
+                    self.advance_token()
+                    # Parse nested statements
+                    invalid_key_stmts = []
+                    while self.current_token and self.current_token.type != TokenType.PERIOD:
+                        upper_check = self.current_token.value.upper() if self.current_token.value else ""
+                        if upper_check in ("NOT", "INVALID"):
+                            break
+                        nested_stmt = self.parse_statement()
+                        if nested_stmt:
+                            invalid_key_stmts.append(nested_stmt)
+                        else:
+                            break
+                    if invalid_key_stmts:
+                        stmt.set_invalid_key_clause(invalid_key_stmts)
+            # NOT INVALID KEY
+            elif upper_val == "NOT":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "INVALID":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "KEY":
+                        self.advance_token()
+                        # Parse nested statements
+                        not_invalid_key_stmts = []
+                        while self.current_token and self.current_token.type != TokenType.PERIOD:
+                            nested_stmt = self.parse_statement()
+                            if nested_stmt:
+                                not_invalid_key_stmts.append(nested_stmt)
+                            else:
+                                break
+                        if not_invalid_key_stmts:
+                            stmt.set_not_invalid_key_clause(not_invalid_key_stmts)
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+
+    def parse_start_statement(self) -> Optional[IOStartStatement]:
+        """Parse START statement for indexed files.
+        
+        Syntax:
+            START file-name [KEY condition record-key] [INVALID KEY statement]
+                                                       [NOT INVALID KEY statement]
+        """
+        if not self.current_token or (self.current_token.value and self.current_token.value.upper() != "START"):
+            return None
+        
+        location = self.get_current_location()
+        stmt = IOStartStatement(location)
+        self.advance_token()  # consume START
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # File name is required
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            file_name = self.current_token.value
+            stmt.set_file_name(file_name)
+            self.advance_token()
+        
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # KEY condition
+            if upper_val == "KEY":
+                self.advance_token()
+                if self.current_token:
+                    # Get the condition (EQUAL, GREATER, LESS, GREATER THAN, etc.)
+                    condition = self.current_token.value.upper() if self.current_token.value else ""
+                    if condition in ("EQUAL", "GREATER", "LESS", "GREATER", "LESS"):
+                        stmt.set_key_condition(condition)
+                        self.advance_token()
+                        # Handle "THAN" for "GREATER THAN" or "LESS THAN"
+                        if self.current_token and self.current_token.value.upper() == "THAN":
+                            stmt.set_key_condition(condition + " THAN")
+                            self.advance_token()
+            # INVALID KEY
+            elif upper_val == "INVALID":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "KEY":
+                    self.advance_token()
+                    # Parse nested statements
+                    invalid_key_stmts = []
+                    while self.current_token and self.current_token.type != TokenType.PERIOD:
+                        upper_check = self.current_token.value.upper() if self.current_token.value else ""
+                        if upper_check in ("NOT", "INVALID"):
+                            break
+                        nested_stmt = self.parse_statement()
+                        if nested_stmt:
+                            invalid_key_stmts.append(nested_stmt)
+                        else:
+                            break
+                    if invalid_key_stmts:
+                        stmt.set_invalid_key_clause(invalid_key_stmts)
+            # NOT INVALID KEY
+            elif upper_val == "NOT":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "INVALID":
+                    self.advance_token()
+                    if self.current_token and self.current_token.value.upper() == "KEY":
+                        self.advance_token()
+                        # Parse nested statements
+                        not_invalid_key_stmts = []
+                        while self.current_token and self.current_token.type != TokenType.PERIOD:
+                            nested_stmt = self.parse_statement()
+                            if nested_stmt:
+                                not_invalid_key_stmts.append(nested_stmt)
+                            else:
+                                break
+                        if not_invalid_key_stmts:
+                            stmt.set_not_invalid_key_clause(not_invalid_key_stmts)
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+
+    def parse_unlock_statement(self) -> Optional[IOUnlockStatement]:
+        """Parse UNLOCK statement for releasing file locks.
+        
+        Syntax:
+            UNLOCK file-name [RECORD]
+        """
+        if not self.current_token or (self.current_token.value and self.current_token.value.upper() != "UNLOCK"):
+            return None
+        
+        location = self.get_current_location()
+        stmt = IOUnlockStatement(location)
+        self.advance_token()  # consume UNLOCK
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # File name is required
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            file_name = self.current_token.value
+            stmt.set_file_name(file_name)
+            self.advance_token()
+        
+        # Parse optional RECORD keyword
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # RECORD keyword (optional)
+            if upper_val == "RECORD":
+                stmt.set_record_scope("RECORD")
+                self.advance_token()
             else:
                 self.advance_token()
         
