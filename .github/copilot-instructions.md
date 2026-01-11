@@ -2,6 +2,8 @@
 
 A comprehensive Python 3.13+ COBOL parser with IBM Enterprise COBOL focus, enhanced memory management, JSON export, and TDD architecture.
 
+**Constitutional Governance**: This project follows principles defined in `.specify/memory/constitution.md`. All development decisions must align with the five core principles: Test-First Development (TDD), Code Quality Standards, Performance Requirements, User Experience Consistency, and IBM Enterprise COBOL Priority.
+
 ## Architecture Overview
 
 This is a **two-stage parsing pipeline**: Lexer → Parser → AST with sophisticated memory management and error recovery.
