@@ -222,7 +222,7 @@
 
 ### Implementation Task I1: Add Mutual Exclusivity Validation
 
-- [ ] T014 [P] [US3] Implement RETURNING/GIVING mutual exclusivity check in parser
+- [x] T014 [P] [US3] Implement RETURNING/GIVING mutual exclusivity check in parser
 
 **Details**:
 - **Spec**: FR-006a (Mutual Exclusivity validation)
@@ -241,7 +241,7 @@
 
 ### Implementation Task I2: Basic CALL Test Suite
 
-- [ ] T015 [P] [US1] Create test suite for basic CALL statement parsing
+- [x] T015 [P] [US1] Create test suite for basic CALL statement parsing
 
 **Details**:
 - **Spec**: FR-001, FR-002 (Basic CALL with literal/variable program names)
@@ -260,7 +260,7 @@
 
 ### Implementation Task I3: Parameter Modes Test Suite
 
-- [ ] T016 [P] [US2] Create test suite for parameter passing modes
+- [x] T016 [P] [US2] Create test suite for parameter passing modes
 
 **Details**:
 - **Spec**: FR-003, FR-004 (BY REFERENCE, BY CONTENT, BY VALUE modes)
@@ -303,7 +303,7 @@
 
 ### Implementation Task I5: Exception Handling Test Suite
 
-- [ ] T018 [P] [US4] Create test suite for exception handling clauses
+- [x] T018 [P] [US4] Create test suite for exception handling clauses
 
 **Details**:
 - **Spec**: FR-007, FR-008, FR-009, FR-010 (ON EXCEPTION, NOT ON EXCEPTION, ON OVERFLOW, END-CALL)
@@ -324,7 +324,7 @@
 
 ### Implementation Task I6: Fixed Format Compliance Test Suite
 
-- [ ] T019 [P] [US5] Create test suite for COBOL fixed format compliance
+- [x] T019 [P] [US5] Create test suite for COBOL fixed format compliance
 
 **Details**:
 - **Spec**: FR-011, FR-012 (Multi-line CALL with continuation, columns 7-72)
@@ -345,7 +345,7 @@
 
 ### Implementation Task I7: Dynamic Call Tracking Test Suite
 
-- [ ] T020 [P] [US6] Create test suite for dynamic CALL analysis
+- [x] T020 [P] [US6] Create test suite for dynamic CALL analysis
 
 **Details**:
 - **Spec**: FR-015, FR-016 (Dynamic CALL value tracking from MOVE statements)
@@ -366,7 +366,7 @@
 
 ### Implementation Task I8: Contract Tests
 
-- [ ] T021 [P] Expand contract test suite for CallStatement serialization
+- [x] T021 [P] Expand contract test suite for CallStatement serialization
 
 **Details**:
 - **Spec**: FR-014, FR-022 (Serialization contracts, test coverage)
@@ -385,7 +385,7 @@
 
 ### Implementation Task I9: Regression Tests
 
-- [ ] T022 Run regression test suite to verify baseline functionality
+- [x] T022 Run regression test suite to verify baseline functionality
 
 **Details**:
 - **Spec**: FR-017 through FR-022 (Test Coverage commitment)
@@ -405,7 +405,7 @@
 
 ### Implementation Task I10: Coverage Measurement
 
-- [ ] T023 Measure code coverage and validate ≥90% targets
+- [x] T023 Measure code coverage and validate ≥90% targets
 
 **Details**:
 - **Spec**: SC-002 (95%+ coverage requirement)
