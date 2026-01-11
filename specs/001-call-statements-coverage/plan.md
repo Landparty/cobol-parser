@@ -1,0 +1,341 @@
+# Implementation Plan: [FEATURE]
+
+**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+
+## Summary
+
+**Primary Requirement**: Ensure all variations of CALL statements are covered and tested by the parser for COBOL fixed format.
+
+**Scope**: Comprehensive test coverage for 6 CALL statement variation categories:
+1. **P1 - Basic CALL Parsing**: Static and dynamic program calls (CALL "PROG" vs CALL VAR)
+2. **P1 - Parameter Passing Modes**: BY REFERENCE/CONTENT/VALUE parameter modifiers
+3. **P2 - RETURNING/GIVING Clauses**: Return value capture (mutually exclusive validation)
+4. **P2 - Exception Handling**: ON EXCEPTION, NOT ON EXCEPTION, ON OVERFLOW clauses
+5. **P1 - Fixed Format Compliance**: Multi-line statements with continuation markers (column 7 hyphen)
+6. **P3 - Dynamic Call Tracking**: Track MOVE statements to variables used in CALL (MVP scope)
+
+**Technical Approach**: Enhance existing CallStatement model and parse_call_statement() method to:
+- Add mutual exclusivity validation for RETURNING/GIVING
+- Improve exception handler parsing for nested statements
+- Expand inline CALL parsing for use within PERFORM/IF blocks
+- Create 6 test suites (one per variation category) with minimum 90%+ coverage
+- Document fixed format continuation line handling
+
+**Existing Baseline**: CallStatement already implements core features; enhancements focus on validation, test coverage, and edge cases.
+
+---
+
+## Technical Context
+
+**Language/Version**: Python 3.13+  
+**Primary Dependencies**: ZERO external runtime dependencies (self-contained parser)  
+**Storage**: File-based COBOL source processing (lexer → tokens → AST)  
+**Testing**: pytest with pytest-cov, pytest-xdist (multi-tier: unit, integration, contracts, acceptance, performance)  
+**Target Platform**: Cross-platform (Linux/Windows/macOS mainframe code analysis)  
+**Project Type**: Single Python package (cobolparser) with modular architecture  
+**Performance Goals**: Parse 10,000 LOC in <100ms; handle 1M+ LOC programs with streaming support  
+**Constraints**: 256MB default memory limit (configurable); 81%+ test coverage requirement; backward compatibility mandatory  
+**Scale/Scope**: IBM Enterprise COBOL parser covering 15+ statement types; CallStatement is highest-priority statement type
+
+## Constitution Check
+
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+
+**Five Core Principles (all MUST pass)**:
+
+1. ✅ **Test-First Development (TDD)**: Specification includes 6 user stories with acceptance scenarios; tests will be written BEFORE implementation (red-green-refactor cycle documented in tasks.md)
+2. ✅ **Code Quality Standards**: Design targets 90%+ coverage (currently 14% baseline for unit tests only); AST nodes use dataclasses, type hints in all signatures; to_dict() serialization implemented
+3. ✅ **Performance Requirements**: Parser targets <100ms for 10K LOC; 256MB memory default; streaming for >1MB files; CallStatement tracking adds minimal overhead
+4. ✅ **User Experience Consistency**: Uses Python conventions; CallStatement follows CobolStatement base class pattern; error messages include line/column; API uses sensible defaults (BY REFERENCE for parameters)
+5. ✅ **IBM Enterprise COBOL Priority**: Specification prioritizes CALL statement variations found in IBM mainframe COBOL; RETURNING/GIVING are IBM-standard clauses; MOVE tracking targets IBM patterns
+
+**Quality Gates**:
+- [x] TDD workflow documented (red-green-refactor cycle in acceptance scenarios)
+- [x] Test organization follows `tests/{contract,integration,unit}/` structure (6 test suites planned)
+- [x] Performance benchmarks identified: <100ms for 10K LOC, continue for 1M LOC
+- [x] Error messages include line/column information (SourceLocation in every AST node)
+- [x] JSON serialization includes AST `to_dict()` implementation (CallStatement @ line 315)
+
+**Justification for Any Failed Checks**: ALL CHECKS PASS - No constitutional violations. Feature aligns with all five core principles and passes all quality gates.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/001-call-statements-coverage/
+├── spec.md                  # Feature specification (completed)
+├── plan.md                  # This file (implementation planning)
+├── framework-baseline.md    # Framework analysis (completed)
+├── research.md              # Phase 0 output (to be generated)
+├── data-model.md            # Phase 1 output (to be generated)
+├── quickstart.md            # Phase 1 output (to be generated)
+├── contracts/               # Phase 1 output (to be generated)
+│   ├── call-statement-contract.md
+│   ├── exception-handlers-contract.md
+│   └── parameter-modes-contract.md
+└── tasks.md                 # Phase 2 output (to be generated by speckit.tasks)
+```
+
+### Source Code (existing repository)
+
+```text
+cobolparser/
+├── models/
+│   ├── statements.py        # CallStatement class (line 268-350) [TO ENHANCE]
+│   ├── ast_base.py          # ASTNode base class [REFERENCE]
+│   └── program.py           # Program/Division/Section structure [REFERENCE]
+├── parser.py                # parse_call_statement() @ line 4444 [TO ENHANCE]
+├── dialects/
+│   └── ibm_enterprise.py    # IBM COBOL extensions [REFERENCE]
+└── plugins/
+    └── core.py              # Error recovery, serialization [REFERENCE]
+
+tests/
+├── unit/
+│   ├── test_call_statement_parsing.py       # 4 baseline tests (TO EXPAND to 6 categories)
+│   └── test_call_[category]_*.py            # 6 new test files (one per variation category)
+├── integration/
+│   └── test_call_comprehensive.py           # Existing integration tests [TO VERIFY]
+├── contracts/
+│   └── test_call_statement_contract.py      # Serialization contracts [TO EXPAND]
+└── acceptance/
+    └── test_call_real_world_patterns.py    # Real COBOL patterns [TO CREATE]
+```
+
+**Structure Decision**: Single project model with modular test organization. Enhancements focus on:
+1. **Minimal Changes to callStatement** (statements.py:268-350): Add mutual exclusivity validation
+2. **Inline Parser Enhancement** (parser.py:4444+): Improve exception handler parsing
+3. **Test Expansion** (tests/): 6 test suites for 6 variation categories
+4. **No New Files**: Leverage existing framework patterns and directories
+
+## Implementation Approach (DETAILED)
+
+**Cross-References**: See [AUDIT-IMPLEMENTATION-PLAN.md](AUDIT-IMPLEMENTATION-PLAN.md) for detailed mapping and validation guidance.
+
+### Phase 0: Research & Technology Decisions (2-3 hours)
+
+**Status**: Not started | **Deliverable**: `research.md` | **Input**: spec.md, framework-baseline.md
+
+#### Task R1: Verify Lexer Continuation Support (0.5 hours)
+- **Examine**: cobolparser/lexer.py for column 7 hyphen handling
+- **Cross-reference**: [framework-baseline.md Section 8](framework-baseline.md) (Fixed Format Support)
+- **Spec requirement**: [spec.md FR-011, FR-012](spec.md) (fixed format multi-line)
+- **Decision**: Is continuation already fully implemented?
+- **Output**: research.md section "Continuation Line Handling"
+
+#### Task R2: Confirm Recursion Depth Limits (0.5 hours)
+- **Examine**: parser.py for recursion tracking
+- **Cross-reference**: [framework-baseline.md Section 9](framework-baseline.md) (Error Handling)
+- **Spec clarification**: [spec.md Clarifications](spec.md) "nested statements depth"
+- **Decision**: Use existing limits or define new ones?
+- **Output**: research.md section "Exception Handler Recursion"
+
+#### Task R3: Document Parameter Mode Semantics (0.5 hours)
+- **Examine**: statements.py CallParameter class ([framework-baseline.md Section 2](framework-baseline.md), lines 286-298)
+- **Spec requirement**: [spec.md FR-003, FR-004](spec.md) (Parameter Passing Modes)
+- **Question**: What does "BY CONTENT" mean in this implementation?
+- **Output**: research.md section "Parameter Mode Definitions"
+
+#### Task R4: Define MOVE Tracking Scope (0.5 hours)
+- **Examine**: analysis/value_tracker.py (if exists)
+- **Spec requirement**: [spec.md FR-015, FR-016](spec.md) (Dynamic CALL Analysis)
+- **Spec clarification**: [spec.md Clarifications](spec.md) "MOVE statements only"
+- **Question**: Which MOVE statements should be tracked?
+- **Output**: research.md section "Dynamic Call Value Tracking"
+
+#### Task R5: Identify Validation Point for Mutual Exclusivity (0.5 hours)
+- **Examine**: parser.py parse_call_statement() ([framework-baseline.md Section 3](framework-baseline.md))
+- **Spec requirement**: [spec.md FR-006a](spec.md) (Mutual Exclusivity)
+- **Question**: Validate at parse time or model time?
+- **Output**: research.md section "RETURNING/GIVING Mutual Exclusivity"
+
+### Phase 1: Design & API Contracts (3-4 hours)
+
+**Status**: Not started | **Deliverable**: `data-model.md`, `contracts/`, `quickstart.md` | **Input**: spec.md, framework-baseline.md, research.md
+
+#### Task D1: Document CallStatement Data Model (1 hour)
+- **Reference**: [framework-baseline.md Section 2](framework-baseline.md) (CallStatement Implementation)
+- **Spec source**: [spec.md Key Entities](spec.md) (CallStatement definition)
+- **Update**: Add RETURNING/GIVING mutual exclusivity constraint ([spec.md FR-006a](spec.md))
+- **Output**: data-model.md section "Entity: CallStatement"
+
+#### Task D2: Document CallParameter Data Model (0.5 hours)
+- **Reference**: [framework-baseline.md Section 2](framework-baseline.md) CallParameter (lines 286-298)
+- **Spec source**: [spec.md Key Entities](spec.md) (CallParameter definition)
+- **Clarify**: Valid values for passing_mode (REFERENCE, CONTENT, VALUE)
+- **Output**: data-model.md section "Entity: CallParameter"
+
+#### Task D3: Create API Contracts (1.5 hours)
+Three contract files:
+- `contracts/call-statement-contract.md` - [6 CALL categories](spec.md) input, [to_dict() output](framework-baseline.md)
+- `contracts/exception-handlers-contract.md` - [US-4 Exception Handling](spec.md) input, handler structures
+- `contracts/parameter-modes-contract.md` - [US-2 Parameter Modes](spec.md) input, CallParameter output
+
+#### Task D4: Create Quickstart Guide (1 hour)
+Six examples covering:
+- [US-1](spec.md) Basic CALL | [US-2](spec.md) Parameters | [US-3](spec.md) RETURNING
+- [US-4](spec.md) Exception Handling | [US-5](spec.md) Multi-line | [US-6](spec.md) Dynamic Analysis
+
+### Phase 2: Implementation & Testing (8-12 hours)
+
+**Status**: Not started | **Input**: spec.md, framework-baseline.md, research.md, data-model.md
+
+#### Task I1: Add Mutual Exclusivity Validation (1 hour)
+- **Spec**: [FR-006a](spec.md) | **File**: parser.py line 4510-4530 | **Test**: test_call_returning_giving.py::test_mutually_exclusive
+- **Code pattern**: [AUDIT Part 3](AUDIT-IMPLEMENTATION-PLAN.md)
+- **Depends**: Task R5
+
+#### Task I2: Create Basic CALL Test Suite (1.5 hours)
+- **Spec**: [FR-001, FR-002](spec.md) | **File**: test_call_basic_parsing.py
+- **Test cases**: literal static call, variable dynamic call, no parameters
+- **Reference**: [framework-baseline.md Section 3](framework-baseline.md)
+
+#### Task I3: Expand Parameter Modes Test Suite (1.5 hours)
+- **Spec**: [FR-003, FR-004](spec.md) | **File**: test_call_parameter_modes.py
+- **Test cases**: BY REFERENCE, BY CONTENT, BY VALUE, default mode, mixed modes
+- **Reference**: [framework-baseline.md Section 3](framework-baseline.md)
+
+#### Task I4: Expand RETURNING/GIVING Test Suite (1.5 hours)
+- **Spec**: [FR-005, FR-006, FR-006a](spec.md) | **File**: test_call_returning_giving.py
+- **Test cases**: RETURNING only, GIVING only, both with USING, neither, mutually exclusive error
+- **Depends**: Task I1
+
+#### Task I5: Create Exception Handling Test Suite (2 hours)
+- **Spec**: [FR-007 through FR-010](spec.md) | **File**: test_call_exception_handling.py
+- **Test cases**: ON EXCEPTION, NOT ON EXCEPTION, ON OVERFLOW, both handlers, END-CALL
+- **Reference**: [framework-baseline.md Section 3](framework-baseline.md)
+
+#### Task I6: Create Fixed Format Compliance Test Suite (2 hours)
+- **Spec**: [FR-011, FR-012](spec.md) | **File**: test_call_fixed_format.py
+- **Test cases**: multi-line continuation, comments, columns 8-72, literals spanning lines
+- **Reference**: [framework-baseline.md Section 8](framework-baseline.md)
+
+#### Task I7: Create Dynamic Call Tracking Test Suite (1.5 hours)
+- **Spec**: [FR-015, FR-016](spec.md) | **File**: test_call_dynamic_analysis.py
+- **Test cases**: single MOVE, multiple MOVEs, conditional MOVEs, no values, non-MOVE statements
+- **Reference**: [framework-baseline.md Section 2](framework-baseline.md)
+
+#### Task I8: Expand Contract Tests (1 hour)
+- **Spec**: [FR-014, FR-022](spec.md) | **File**: test_call_statement_contract.py
+- **Verify**: to_dict() output, backward compatibility, exception structures
+- **Depends**: All Tasks I1-I7
+
+#### Task I9: Run Regression Tests (1 hour)
+- **Spec**: [FR-017 through FR-022](spec.md) (Test Coverage)
+- **Command**: `pytest tests/unit/test_call_*.py -v`
+- **Verify**: 4 baseline tests pass, no mypy/ruff errors
+- **Reference**: [framework-baseline.md Section 11](framework-baseline.md)
+
+#### Task I10: Measure Coverage & Validate (1 hour)
+- **Spec**: [SC-002](spec.md) (95%+ coverage)
+- **Target**: statements.py CallStatement ≥95%, parser.py functions ≥95%
+- **Reference**: [AUDIT Part 8](AUDIT-IMPLEMENTATION-PLAN.md)
+- **Depends**: Task I9
+
+### Task Dependency Map
+
+```
+R1-R5 ─────────────────┬─→ D1-D4 ─────────────────┬─→ I1 ─┐
+                       │                          │       ├─→ I4
+                       │                          ├─→ I2  │
+                       │                          ├─→ I3  │
+                       │                          ├─→ I5  ├─→ I8 ─→ I9 ─→ I10
+                       │                          ├─→ I6  │
+                       │                          ├─→ I7  │
+                       └──────────────────────────┴───────┴─→
+```
+
+### Timeline
+
+| Phase | Duration | Start | End |
+|-------|----------|-------|-----|
+| 0: Research (R1-R5) | 2-3 hrs | T+0h | T+2.5h |
+| 1: Design (D1-D4) | 3-4 hrs | T+2.5h | T+6h |
+| 2: Implementation (I1-I10) | 8-12 hrs | T+6h | T+18h |
+| **TOTAL** | **13-19 hours** | | |
+
+### Implementation Validation
+
+See [AUDIT-IMPLEMENTATION-PLAN.md Part 8](AUDIT-IMPLEMENTATION-PLAN.md) for complete checklist.
+
+**Quick Verification**:
+- [ ] All phase deliverables completed
+- [ ] All 10 implementation tasks in dependency order
+- [ ] 6 test files created (one per user story)
+- [ ] Coverage ≥95% for CallStatement and parse_call_statement
+- [ ] All 4 baseline tests passing (regression check)
+- [ ] All [SC-001 through SC-008](spec.md#success-criteria-mandatory) verified
+- [ ] All [FR-001 through FR-022](spec.md#requirements-mandatory) tested
+
+## Cross-Reference Matrix
+
+**Specifications → Implementation**:
+
+| Spec Item | Source | Coverage | Implementation Task | Test File |
+|-----------|--------|----------|-------------------|-----------|
+| US-1: Basic CALL | [spec.md](spec.md#us-1-static-basic-call) | FR-001, FR-002 | I2 | test_call_basic_parsing.py |
+| US-2: Parameters | [spec.md](spec.md#us-2-parameter-passing) | FR-003, FR-004 | I3 | test_call_parameter_modes.py |
+| US-3: RETURNING | [spec.md](spec.md#us-3-return-values) | FR-005, FR-006, FR-006a | I1, I4 | test_call_returning_giving.py |
+| US-4: Exceptions | [spec.md](spec.md#us-4-exception-handling) | FR-007 through FR-010 | I5 | test_call_exception_handling.py |
+| US-5: Multi-line | [spec.md](spec.md#us-5-fixed-format) | FR-011, FR-012 | I6 | test_call_fixed_format.py |
+| US-6: Dynamic | [spec.md](spec.md#us-6-dynamic-call-analysis) | FR-015, FR-016 | I7 | test_call_dynamic_analysis.py |
+
+**Code Locations → Specifications**:
+
+| Component | File | Lines | Related FR | Framework Ref |
+|-----------|------|-------|-----------|---------------|
+| CallStatement | statements.py | 268-350 | FR-001 through FR-022 | [framework-baseline.md Section 2](framework-baseline.md) |
+| CallParameter | statements.py | 286-298 | FR-003, FR-004 | [framework-baseline.md Section 2](framework-baseline.md) |
+| parse_call_statement | parser.py | 4444+ | FR-011, FR-012 | [framework-baseline.md Section 3](framework-baseline.md) |
+| Exception handlers | parser.py | 4540+ | FR-007 through FR-010 | [framework-baseline.md Section 5](framework-baseline.md) |
+| Fixed format | lexer.py | 680 | FR-011, FR-012 | [framework-baseline.md Section 8](framework-baseline.md) |
+
+## Validation Checklist
+
+**Before Implementation Begins**:
+- [ ] plan.md reviewed and approved (this document)
+- [ ] research.md completed (Phase 0 output)
+- [ ] data-model.md and contracts/ reviewed (Phase 1 output)
+- [ ] All 22 FRs mapped to test files
+- [ ] All task dependencies verified
+
+**During Implementation**:
+- [ ] Each task linked to FR(s)
+- [ ] Each test file linked to task(s) and US
+- [ ] Regression tests run after each task
+- [ ] Code style: ruff check, black, mypy clean
+- [ ] Merge conflicts resolved
+
+**Post-Implementation**:
+- [ ] All 8 success criteria verified ([spec.md](spec.md#success-criteria-mandatory))
+- [ ] 90%+ coverage on statements.py CallStatement
+- [ ] 90%+ coverage on parser.py parse_call_statement
+- [ ] 4 baseline tests still passing
+- [ ] Documentation updated: docs/call-statements.md
+- [ ] No new mypy/ruff warnings
+- [ ] Git history clean (meaningful commits)
+
+**Quick Command Verification**:
+```bash
+# Run all tests with coverage
+pytest tests/unit/test_call_*.py -v --cov=cobolparser --cov-fail-under=90
+
+# Verify code quality
+ruff check . && black . --check && mypy cobolparser/
+
+# Check specific files
+# - statements.py CallStatement (lines 268-350)
+# - parser.py parse_call_statement (line 4444+)
+# - tests/unit/test_call_*.py (all test files)
+```
+
+## References
+
+- Framework baseline documentation: [framework-baseline.md](framework-baseline.md) (758 lines, 15 sections with code locations)
+- Feature specification: [spec.md](spec.md) (6 User Stories, 22 FRs, 8 Success Criteria)
+- Audit findings & detailed task mapping: [AUDIT-IMPLEMENTATION-PLAN.md](AUDIT-IMPLEMENTATION-PLAN.md) (700 lines, 11 parts)
+- Project constitution: [.specify/memory/constitution.md](.specify/memory/constitution.md) (5 core principles)

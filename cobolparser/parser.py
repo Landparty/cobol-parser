@@ -4492,8 +4492,10 @@ class CobolParser:
             self.advance_token()
         
         # Parse optional RETURNING clause
+        returning_location = None
         if self.current_token and self.current_token.type == TokenType.IDENTIFIER and \
            self.current_token.value.upper() == "RETURNING":
+            returning_location = self.get_current_location()
             self.advance_token()
             
             # Skip optional whitespace/newlines/comments/continuations
@@ -4503,6 +4505,33 @@ class CobolParser:
             if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
                 call_stmt.set_returning_parameter(self.current_token.value)
                 self.advance_token()
+        
+        # Skip optional whitespace/newlines/comments/continuations
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
+            self.advance_token()
+        
+        # Parse optional GIVING clause (IBM Enterprise COBOL extension)
+        giving_location = None
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER and \
+           self.current_token.value.upper() == "GIVING":
+            giving_location = self.get_current_location()
+            self.advance_token()
+            
+            # Skip optional whitespace/newlines/comments/continuations
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
+                self.advance_token()
+            
+            if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                call_stmt.set_giving_parameter(self.current_token.value)
+                self.advance_token()
+        
+        # Validate mutual exclusivity of RETURNING and GIVING (FR-006a)
+        if call_stmt.returning_parameter is not None and call_stmt.giving_parameter is not None:
+            error_location = giving_location if giving_location else returning_location
+            self.add_error(ParseError(
+                "RETURNING and GIVING clauses are mutually exclusive in CALL statements",
+                location=error_location
+            ))
         
         # Skip optional whitespace/newlines/comments/continuations
         while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT, TokenType.CONTINUATION):
@@ -4641,11 +4670,11 @@ class CobolParser:
             if self.current_token.type == TokenType.PERIOD:
                 break
             
-            # Check for RETURNING, ON (exception/overflow)
+            # Check for RETURNING, GIVING, ON (exception/overflow)
             if self.current_token.type == TokenType.IDENTIFIER:
                 upper_val = self.current_token.value.upper()
                 
-                if upper_val in ("RETURNING", "ON"):
+                if upper_val in ("RETURNING", "GIVING", "ON"):
                     break
                 
                 # Check for BY keyword (parameter passing mode)

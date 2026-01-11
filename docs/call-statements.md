@@ -1,6 +1,6 @@
 # CALL Statement Parsing Examples
 
-This document shows examples of how CALL statements are parsed into AST nodes, including support for dynamic CALL statements that use variables instead of literal program names.
+This document shows examples of how CALL statements are parsed into AST nodes, including support for dynamic CALL statements that use variables instead of literal program names, parameter passing modes, exception handling, and fixed-format COBOL support.
 
 ## Table of Contents
 - [Static CALL Statements](#static-call-statements)
@@ -8,6 +8,19 @@ This document shows examples of how CALL statements are parsed into AST nodes, i
   - [CALL with GIVING Clause](#call-with-giving-clause)
   - [CALL with Exception Handling](#call-with-exception-handling)
   - [CALL with Literal Program Name](#call-with-literal-program-name)
+- [CALL Statement in Fixed Format](#call-statement-in-fixed-format)
+  - [Multi-line CALL with Continuation](#multi-line-call-with-continuation)
+  - [Columns 8-72 Compliance](#columns-8-72-compliance)
+- [Parameter Passing Modes Explained](#parameter-passing-modes-explained)
+  - [BY REFERENCE Mode](#by-reference-mode)
+  - [BY CONTENT Mode](#by-content-mode)
+  - [BY VALUE Mode](#by-value-mode)
+  - [Mixed Modes in Single CALL](#mixed-modes-in-single-call)
+- [Exception Handling Best Practices](#exception-handling-best-practices)
+  - [ON EXCEPTION Handler](#on-exception-handler)
+  - [NOT ON EXCEPTION Handler](#not-on-exception-handler)
+  - [ON OVERFLOW Handler](#on-overflow-handler)
+  - [END-CALL Terminator](#end-call-terminator)
 - [Dynamic CALL Statements](#dynamic-call-statements)
   - [Basic Dynamic CALL](#basic-dynamic-call)
   - [Dynamic CALL with Value Tracking](#dynamic-call-with-value-tracking)
@@ -162,6 +175,207 @@ Static CALL statements use literal string values for the program name.
   "metadata": {}
 }
 ```
+
+## CALL Statement in Fixed Format
+
+Fixed-format COBOL has strict column requirements (7-72 for statements, with column 7 reserved for continuation indicators). CALL statements spanning multiple lines use the hyphen continuation character.
+
+### Multi-line CALL with Continuation
+
+### COBOL Source
+```cobol
+1234567890123456789012345678901234567890123456789012345678901234567890
+       CALL "CALCULATE-INVOICE"
+           USING BY REFERENCE WS-INVOICE-REC
+                             WS-RATE-TABLE
+                 BY VALUE WS-TOLERANCE
+           RETURNING WS-RESULT-CODE.
+```
+
+**Key Points**:
+- Line 1: Statement starts in column 11 (standard)
+- Line 2-4: Continuation lines must have hyphen in column 7
+- All parameters within columns 8-72
+- RETURNING clause on final line
+- Parser recognizes continuation markers and assembles complete statement
+
+### Parsed Structure
+The parser treats all continuation lines as a single logical CALL statement:
+```python
+call_stmt.called_program = "CALCULATE-INVOICE"
+call_stmt.using_parameters = [
+    CallParameter("WS-INVOICE-REC", "REFERENCE"),
+    CallParameter("WS-RATE-TABLE", "REFERENCE"),
+    CallParameter("WS-TOLERANCE", "VALUE")
+]
+call_stmt.returning_parameter = "WS-RESULT-CODE"
+```
+
+### Columns 8-72 Compliance
+
+Fixed-format COBOL requires statements to fit within columns 8-72 (positions 8-72). Anything in columns 1-7 is reserved for line numbering/continuation, and columns 73+ are ignored as comments.
+
+**Valid CALL within column limits**:
+```cobol
+       CALL "PGM" USING P1 P2 P3 P4 P5.
+1234567|        content must fit here        |72
+```
+
+**Invalid - exceeds column 72**:
+```cobol
+       CALL "PROGRAM-WITH-VERY-LONG-NAME" USING PARAMETER1 PARAMETER2.
+       ^ col 7         ^ col 8                                           ^ col 73+
+```
+
+## Parameter Passing Modes Explained
+
+COBOL supports three modes for passing parameters to CALL statements:
+
+### BY REFERENCE Mode
+
+**Default mode** - the called program receives access to the original variable and can modify it.
+
+```cobol
+       CALL "UPDATE-RECORD" USING BY REFERENCE WS-RECORD.
+```
+
+**Parser Output**:
+```python
+CallParameter("WS-RECORD", passing_mode="REFERENCE")
+```
+
+**Characteristics**:
+- Original variable is modified if called program changes it
+- Most memory efficient (no copy made)
+- Used when called program needs to update data
+- If mode not specified, defaults to REFERENCE
+
+### BY CONTENT Mode
+
+The called program receives a copy of the data and cannot modify the original.
+
+```cobol
+       CALL "VALIDATE-INPUT" USING BY CONTENT WS-INPUT.
+```
+
+**Parser Output**:
+```python
+CallParameter("WS-INPUT", passing_mode="CONTENT")
+```
+
+**Characteristics**:
+- Original variable is protected from modification
+- Copy made before calling program
+- Used for read-only operations
+- Slightly less efficient than REFERENCE
+
+### BY VALUE Mode
+
+The called program receives a copy that is also a new temporary variable (copy-in).
+
+```cobol
+       CALL "CALCULATE" USING BY VALUE WS-AMOUNT.
+```
+
+**Parser Output**:
+```python
+CallParameter("WS-AMOUNT", passing_mode="VALUE")
+```
+
+**Characteristics**:
+- Copies the value but not the variable itself
+- Original variable never modified
+- Most isolated execution
+- Used for pure functions and calculations
+
+### Mixed Modes in Single CALL
+
+A single CALL can use different modes for different parameters:
+
+```cobol
+       CALL "PROCESS"
+           USING BY REFERENCE WS-DATA
+                 BY CONTENT WS-CONFIG
+                 BY VALUE WS-AMOUNT.
+```
+
+**Parser Output**:
+```python
+call_stmt.using_parameters = [
+    CallParameter("WS-DATA", passing_mode="REFERENCE"),
+    CallParameter("WS-CONFIG", passing_mode="CONTENT"),
+    CallParameter("WS-AMOUNT", passing_mode="VALUE")
+]
+```
+
+## Exception Handling Best Practices
+
+CALL statements can include exception handlers to manage runtime errors and special conditions.
+
+### ON EXCEPTION Handler
+
+Executes when the called program terminates abnormally.
+
+```cobol
+       CALL "EXTERNAL-SERVICE"
+           USING WS-REQUEST
+           ON EXCEPTION
+               MOVE "SERVICE-FAILED" TO WS-STATUS
+               DISPLAY "Error calling external service".
+```
+
+**Parser Recognition**:
+```python
+call_stmt.on_exception = [MoveStatement(...), DisplayStatement(...)]
+```
+
+### NOT ON EXCEPTION Handler
+
+Executes when the called program terminates normally (the opposite of ON EXCEPTION).
+
+```cobol
+       CALL "EXTERNAL-SERVICE"
+           USING WS-REQUEST
+           NOT ON EXCEPTION
+               MOVE "SERVICE-OK" TO WS-STATUS.
+```
+
+**Mutual Exclusivity Note**: `RETURNING` and `GIVING` clauses are mutually exclusive - a single CALL statement cannot have both.
+
+### ON OVERFLOW Handler
+
+Handles special condition when called program stack overflows (rare but important for deep recursion or limited environments).
+
+```cobol
+       CALL "RECURSIVE-CALC"
+           USING WS-VALUE
+           ON OVERFLOW
+               MOVE -1 TO WS-RESULT
+               MOVE "STACK-OVERFLOW" TO WS-STATUS.
+```
+
+**Parser Recognition**:
+```python
+call_stmt.on_overflow = [MoveStatement(...), MoveStatement(...)]
+```
+
+### END-CALL Terminator
+
+Explicit terminator for CALL statements with exception handlers. Optional but recommended for complex multi-line CALL statements.
+
+```cobol
+       CALL "PROCESS-FILE"
+           USING WS-FILENAME
+           ON EXCEPTION
+               PERFORM ERROR-HANDLER
+           NOT ON EXCEPTION
+               PERFORM SUCCESS-HANDLER
+           END-CALL.
+       
+       NEXT-STATEMENT.
+```
+
+**Parser Recognition**: END-CALL marks the end of exception handler scope, preventing ambiguity in complex programs.
 
 ## Dynamic CALL Statements
 
@@ -432,3 +646,19 @@ def build_call_graph(cobol_source):
 #   ]
 # }
 ```
+
+## Summary
+
+The COBOL parser provides comprehensive support for:
+- **Static CALL statements** with literal program names (FR-001)
+- **Dynamic CALL statements** with variable program names (FR-002)  
+- **Parameter passing modes**: BY REFERENCE, BY CONTENT, BY VALUE (FR-003, FR-004)
+- **RETURNING clause** for capturing return values (FR-005)
+- **GIVING clause** for output capture (FR-005)
+- **Mutual exclusivity** validation between RETURNING and GIVING (FR-006a)
+- **Exception handlers**: ON EXCEPTION, NOT ON EXCEPTION, ON OVERFLOW (FR-007 through FR-010)
+- **Fixed-format COBOL** with multi-line support (FR-011, FR-012)
+- **Dynamic value tracking** via MOVE statement analysis (FR-015, FR-016)
+
+For more information, see the [CALL Statement Specification](../specs/001-call-statements-coverage/spec.md).
+````
