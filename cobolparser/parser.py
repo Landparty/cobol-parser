@@ -3197,6 +3197,86 @@ class CobolParser:
         
         return i
 
+    def _parse_test_timing_clause(self, tokens, i):
+        """
+        Parse WITH TEST BEFORE/AFTER clause.
+        
+        Returns: (test_timing, next_index) where test_timing is 'BEFORE', 'AFTER', or None
+        """
+        if i >= len(tokens) or tokens[i].type != TokenType.WITH:
+            return None, i
+        
+        # Save position in case we need to backtrack
+        start_i = i
+        i += 1  # consume WITH
+        
+        if i >= len(tokens) or tokens[i].type != TokenType.TEST:
+            # No TEST keyword, backtrack
+            return None, start_i
+        
+        i += 1  # consume TEST
+        
+        if i >= len(tokens):
+            # Default to BEFORE if no timing specified
+            return "BEFORE", i
+        
+        if tokens[i].type == TokenType.BEFORE:
+            i += 1
+            return "BEFORE", i
+        elif tokens[i].type == TokenType.AFTER:
+            i += 1
+            return "AFTER", i
+        else:
+            # No timing specified, default to BEFORE
+            return "BEFORE", i
+
+    def _parse_until_condition(self, tokens, i):
+        """
+        Parse UNTIL condition clause for PERFORM statements.
+        
+        Returns: (condition_node, next_index) or (None, i) if UNTIL not found
+        """
+        if i >= len(tokens) or tokens[i].type != TokenType.UNTIL:
+            return None, i
+        
+        i += 1  # consume UNTIL
+        
+        # Parse the condition expression using existing condition parsing
+        if i < len(tokens):
+            condition_text = []
+            start_i = i
+            # Collect tokens until we hit END-PERFORM, PERIOD, SEMICOLON, or another control keyword
+            while i < len(tokens):
+                if tokens[i].type in [TokenType.END_PERFORM, TokenType.PERIOD, 
+                                      TokenType.SEMICOLON, TokenType.END_PERFORM]:
+                    break
+                condition_text.append(tokens[i])
+                i += 1
+            
+            if condition_text:
+                # Create a simple condition expression from collected tokens
+                from .models.statements import ConditionalExpression
+                from .models.ast_base import SourceLocation as SrcLoc
+                # For now, return a simple ConditionalExpression that can be enhanced later
+                # This is a simplified version - full implementation would parse complex conditions
+                if len(condition_text) >= 3:
+                    # Handle simple binary operations: variable OPERATOR value
+                    left_var = condition_text[0].value
+                    operator = condition_text[1].value.upper()
+                    right_var = condition_text[2].value
+                    condition = ConditionalExpression(operator, SrcLoc(1, 1))
+                    condition.set_left_operand(left_var)
+                    condition.set_right_operand(right_var)
+                    return condition, i
+                else:
+                    # Single variable or literal condition
+                    left_var = condition_text[0].value
+                    condition = ConditionalExpression("IS-TRUE", SrcLoc(1, 1))
+                    condition.set_left_operand(left_var)
+                    return condition, i
+        
+        return None, i
+
     def _parse_perform_inline(self, tokens, i):
         """Parse PERFORM statement inline (sentence-level parsing).
         

@@ -1367,3 +1367,186 @@ def test_parser_comprehensive_coverage():
     print("✅ All parsing divisions tested")
     print("✅ Edge cases and boundary conditions tested")
     print("✅ Parser TDD compliance achieved - targeting 100% coverage")
+
+
+class TestParseHelperMethods:
+    """Test helper methods for parsing WITH TEST and UNTIL clauses."""
+    
+    def test_parse_test_timing_clause_with_before(self):
+        """Test parsing WITH TEST BEFORE clause."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH TEST BEFORE
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 6)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 17))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing == "BEFORE"
+        assert next_index == 3
+    
+    def test_parse_test_timing_clause_with_after(self):
+        """Test parsing WITH TEST AFTER clause."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH TEST AFTER
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 6)),
+            Token(TokenType.AFTER, "AFTER", SourceLocation(1, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 16))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing == "AFTER"
+        assert next_index == 3
+    
+    def test_parse_test_timing_clause_with_test_no_timing(self):
+        """Test parsing WITH TEST without timing (defaults to BEFORE)."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH TEST (no BEFORE/AFTER)
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 11))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing == "BEFORE"  # default
+        assert next_index == 2
+    
+    def test_parse_test_timing_clause_no_with(self):
+        """Test when there's no WITH keyword (should return None)."""
+        parser = CobolParser()
+        
+        # Mock tokens: TEST BEFORE (no WITH)
+        tokens = [
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 1)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 12))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing is None
+        assert next_index == 0  # no consumption
+    
+    def test_parse_test_timing_clause_with_without_test(self):
+        """Test WITH without TEST keyword (backtracking)."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH SOMETHING ELSE
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "SOMETHING", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 15))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing is None
+        assert next_index == 0  # backtracks
+    
+    def test_parse_test_timing_clause_at_end_of_tokens(self):
+        """Test parsing when at end of tokens."""
+        parser = CobolParser()
+        
+        # Mock tokens: empty
+        tokens = []
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing is None
+        assert next_index == 0
+    
+    def test_parse_until_condition_simple(self):
+        """Test parsing simple UNTIL condition."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL X = Y
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 7)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "Y", SourceLocation(1, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 12))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is not None
+        assert next_index == 4  # consumed UNTIL and condition tokens, stopped at PERIOD
+    
+    def test_parse_until_condition_no_until(self):
+        """Test when there's no UNTIL keyword."""
+        parser = CobolParser()
+        
+        # Mock tokens: X = Y (no UNTIL)
+        tokens = [
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 1)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 3)),
+            Token(TokenType.IDENTIFIER, "Y", SourceLocation(1, 5)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 6))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is None
+        assert next_index == 0
+    
+    def test_parse_until_condition_single_variable(self):
+        """Test parsing UNTIL with single variable."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL X
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 7)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 8))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is not None
+        assert next_index == 2  # consumed UNTIL and variable, stopped at PERIOD
+    
+    def test_parse_until_condition_stops_at_end_perform(self):
+        """Test that UNTIL parsing stops at END-PERFORM."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL X = Y END-PERFORM
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 7)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "Y", SourceLocation(1, 11)),
+            Token(TokenType.END_PERFORM, "END-PERFORM", SourceLocation(1, 13)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 24))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is not None
+        assert next_index == 4  # stopped before END-PERFORM
+    
+    def test_parse_until_condition_empty_after_until(self):
+        """Test UNTIL with no condition following."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL (nothing after)
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 6))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is None
+        assert next_index == 1  # consumed UNTIL but no condition
