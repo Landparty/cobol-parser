@@ -218,6 +218,7 @@ class TokenType(Enum):
     BY = auto()
     AFTER = auto()
     BEFORE = auto()
+    TEST = auto()
     
     # Keywords - Conditions
     EQUAL = auto()
@@ -494,6 +495,7 @@ class CobolLexer:
         'BY': TokenType.BY,
         'AFTER': TokenType.AFTER,
         'BEFORE': TokenType.BEFORE,
+        'TEST': TokenType.TEST,
         
         # Conditions
         'EQUAL': TokenType.EQUAL,

@@ -1367,3 +1367,410 @@ def test_parser_comprehensive_coverage():
     print("✅ All parsing divisions tested")
     print("✅ Edge cases and boundary conditions tested")
     print("✅ Parser TDD compliance achieved - targeting 100% coverage")
+
+
+class TestParseHelperMethods:
+    """Test helper methods for parsing WITH TEST and UNTIL clauses."""
+    
+    def test_parse_test_timing_clause_with_before(self):
+        """Test parsing WITH TEST BEFORE clause."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH TEST BEFORE
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 6)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 17))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing == "BEFORE"
+        assert next_index == 3
+    
+    def test_parse_test_timing_clause_with_after(self):
+        """Test parsing WITH TEST AFTER clause."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH TEST AFTER
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 6)),
+            Token(TokenType.AFTER, "AFTER", SourceLocation(1, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 16))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing == "AFTER"
+        assert next_index == 3
+    
+    def test_parse_test_timing_clause_with_test_no_timing(self):
+        """Test parsing WITH TEST without timing (defaults to BEFORE)."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH TEST (no BEFORE/AFTER)
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 11))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing == "BEFORE"  # default
+        assert next_index == 2
+    
+    def test_parse_test_timing_clause_no_with(self):
+        """Test when there's no WITH keyword (should return None)."""
+        parser = CobolParser()
+        
+        # Mock tokens: TEST BEFORE (no WITH)
+        tokens = [
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 1)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 12))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing is None
+        assert next_index == 0  # no consumption
+    
+    def test_parse_test_timing_clause_with_without_test(self):
+        """Test WITH without TEST keyword (backtracking)."""
+        parser = CobolParser()
+        
+        # Mock tokens: WITH SOMETHING ELSE
+        tokens = [
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "SOMETHING", SourceLocation(1, 6)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 15))
+        ]
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing is None
+        assert next_index == 0  # backtracks
+    
+    def test_parse_test_timing_clause_at_end_of_tokens(self):
+        """Test parsing when at end of tokens."""
+        parser = CobolParser()
+        
+        # Mock tokens: empty
+        tokens = []
+        
+        test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+        
+        assert test_timing is None
+        assert next_index == 0
+    
+    def test_parse_until_condition_simple(self):
+        """Test parsing simple UNTIL condition."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL X = Y
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 7)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "Y", SourceLocation(1, 11)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 12))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is not None
+        assert next_index == 4  # consumed UNTIL and condition tokens, stopped at PERIOD
+    
+    def test_parse_until_condition_no_until(self):
+        """Test when there's no UNTIL keyword."""
+        parser = CobolParser()
+        
+        # Mock tokens: X = Y (no UNTIL)
+        tokens = [
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 1)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 3)),
+            Token(TokenType.IDENTIFIER, "Y", SourceLocation(1, 5)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 6))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is None
+        assert next_index == 0
+    
+    def test_parse_until_condition_single_variable(self):
+        """Test parsing UNTIL with single variable."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL X
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 7)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 8))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is not None
+        assert next_index == 2  # consumed UNTIL and variable, stopped at PERIOD
+    
+    def test_parse_until_condition_stops_at_end_perform(self):
+        """Test that UNTIL parsing stops at END-PERFORM."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL X = Y END-PERFORM
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 7)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "Y", SourceLocation(1, 11)),
+            Token(TokenType.END_PERFORM, "END-PERFORM", SourceLocation(1, 13)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 24))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is not None
+        assert next_index == 4  # stopped before END-PERFORM
+    
+    def test_parse_until_condition_empty_after_until(self):
+        """Test UNTIL with no condition following."""
+        parser = CobolParser()
+        
+        # Mock tokens: UNTIL (nothing after)
+        tokens = [
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 6))
+        ]
+        
+        condition, next_index = parser._parse_until_condition(tokens, 0)
+        
+        assert condition is None
+        assert next_index == 1  # consumed UNTIL but no condition
+
+
+class TestPerformInlineEnhancements:
+    """Test enhanced _parse_perform_inline() with WITH TEST and UNTIL support."""
+    
+    def test_perform_simple_with_test_before(self):
+        """Test PERFORM PARA WITH TEST BEFORE."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA WITH TEST BEFORE .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "READ-RECORD", SourceLocation(1, 9)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 21)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 26)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 31)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 37))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        # Create procedure division context
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        # Parse the PERFORM statement
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        # Verify we consumed tokens up to period (not including period)
+        assert result_index == 5
+        
+        # Verify perform statement was created in section
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert isinstance(perform_stmt, PerformStatement)
+        assert perform_stmt.target_paragraph == "READ-RECORD"
+        assert perform_stmt.test_timing == "BEFORE"
+    
+    def test_perform_simple_with_test_after(self):
+        """Test PERFORM PARA WITH TEST AFTER."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA WITH TEST AFTER .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "PROCESS-DATA", SourceLocation(1, 9)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 22)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 27)),
+            Token(TokenType.AFTER, "AFTER", SourceLocation(1, 32)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 37))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 5
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.test_timing == "AFTER"
+    
+    def test_perform_simple_until(self):
+        """Test PERFORM PARA UNTIL condition."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA UNTIL WS-EOF = 'Y' .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "READ-LOOP", SourceLocation(1, 9)),
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 19)),
+            Token(TokenType.IDENTIFIER, "WS-EOF", SourceLocation(1, 25)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 32)),
+            Token(TokenType.STRING, "'Y'", SourceLocation(1, 34)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 37))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 6
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.perform_type == "UNTIL"
+        assert perform_stmt.until_condition is not None
+    
+    def test_perform_times_with_variable(self):
+        """Test PERFORM PARA n TIMES with variable (e.g., WS-COUNT TIMES)."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA WS-COUNT TIMES .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "PROCESS-ITEM", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "WS-COUNT", SourceLocation(1, 22)),
+            Token(TokenType.IDENTIFIER, "TIMES", SourceLocation(1, 31)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 36))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 4
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.times_count == "WS-COUNT"  # Should be a string (variable name)
+    
+    def test_perform_times_numeric(self):
+        """Test PERFORM PARA n TIMES with numeric literal."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA 5 TIMES .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "INIT-ARRAY", SourceLocation(1, 9)),
+            Token(TokenType.NUMERIC_LITERAL, "5", SourceLocation(1, 20)),
+            Token(TokenType.IDENTIFIER, "TIMES", SourceLocation(1, 22)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 27))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 4
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.times_count == 5  # Should be numeric
+    
+    def test_perform_thru_with_test(self):
+        """Test PERFORM PARA THRU PARA-END WITH TEST BEFORE."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA THRU PARA-END WITH TEST BEFORE .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "START-PARA", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "THRU", SourceLocation(1, 20)),
+            Token(TokenType.IDENTIFIER, "END-PARA", SourceLocation(1, 25)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 34)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 39)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 44)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 50))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 7
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.target_paragraph == "START-PARA"
+        assert perform_stmt.thru_paragraph == "END-PARA"
+        assert perform_stmt.test_timing == "BEFORE"
+    
+    def test_perform_complex_all_clauses(self):
+        """Test PERFORM with THRU, TIMES, WITH TEST, UNTIL all together."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA THRU PARA-END 3 TIMES WITH TEST AFTER UNTIL X = 5 .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "START", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "THRU", SourceLocation(1, 15)),
+            Token(TokenType.IDENTIFIER, "END", SourceLocation(1, 20)),
+            Token(TokenType.NUMERIC_LITERAL, "3", SourceLocation(1, 24)),
+            Token(TokenType.IDENTIFIER, "TIMES", SourceLocation(1, 26)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 32)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 37)),
+            Token(TokenType.AFTER, "AFTER", SourceLocation(1, 42)),
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 48)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 54)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 56)),
+            Token(TokenType.NUMERIC_LITERAL, "5", SourceLocation(1, 58)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 59))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 13
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.target_paragraph == "START"
+        assert perform_stmt.thru_paragraph == "END"
+        assert perform_stmt.times_count == 3
+        assert perform_stmt.test_timing == "AFTER"
+        assert perform_stmt.perform_type == "UNTIL"
+        assert perform_stmt.until_condition is not None

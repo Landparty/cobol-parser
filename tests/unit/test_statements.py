@@ -511,6 +511,226 @@ class TestPerformStatement:
         assert result["varying_clause"]["from_value"] == "1"
         assert result["varying_clause"]["by_value"] == "1"
         assert result["until_condition"] is not None
+    
+    # ============================================================================
+    # Phase 3.1: NEW TESTS - Model Extensions for test_timing and variable TIMES
+    # ============================================================================
+    
+    def test_perform_statement_test_timing_default(self):
+        """Test that test_timing defaults to 'BEFORE'."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        # Default should be BEFORE
+        assert perform_stmt.test_timing == "BEFORE"
+    
+    def test_perform_statement_test_timing_after(self):
+        """Test setting test_timing to AFTER."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_test_timing("AFTER")
+        
+        assert perform_stmt.test_timing == "AFTER"
+    
+    def test_perform_statement_test_timing_before(self):
+        """Test explicitly setting test_timing to BEFORE."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        # Change from default
+        perform_stmt.set_test_timing("AFTER")
+        assert perform_stmt.test_timing == "AFTER"
+        
+        # Change back
+        perform_stmt.set_test_timing("BEFORE")
+        assert perform_stmt.test_timing == "BEFORE"
+    
+    def test_perform_statement_test_timing_case_insensitive(self):
+        """Test that set_test_timing is case-insensitive."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        # Set with lowercase
+        perform_stmt.set_test_timing("before")
+        assert perform_stmt.test_timing == "BEFORE"
+        
+        # Set with mixed case
+        perform_stmt.set_test_timing("AfTeR")
+        assert perform_stmt.test_timing == "AFTER"
+    
+    def test_perform_statement_test_timing_invalid_value(self):
+        """Test that invalid test_timing values raise ValueError."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        with pytest.raises(ValueError, match="Invalid test timing"):
+            perform_stmt.set_test_timing("INVALID")
+        
+        with pytest.raises(ValueError, match="Invalid test timing"):
+            perform_stmt.set_test_timing("MIDDLE")
+    
+    def test_perform_statement_test_timing_chaining(self):
+        """Test that set_test_timing returns self for method chaining."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        result = perform_stmt.set_test_timing("AFTER")
+        
+        assert result is perform_stmt
+        assert perform_stmt.test_timing == "AFTER"
+    
+    def test_perform_statement_times_count_numeric(self):
+        """Test times_count with numeric literal."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_times_clause(10)
+        
+        assert perform_stmt.times_count == 10
+        assert isinstance(perform_stmt.times_count, int)
+    
+    def test_perform_statement_times_count_variable(self):
+        """Test times_count with variable name."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_times_clause("WS-COUNT")
+        
+        assert perform_stmt.times_count == "WS-COUNT"
+        assert isinstance(perform_stmt.times_count, str)
+        assert perform_stmt.perform_type == "TIMES"
+    
+    def test_perform_statement_times_count_zero(self):
+        """Test times_count with zero (valid edge case)."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_times_clause(0)
+        
+        assert perform_stmt.times_count == 0
+        assert perform_stmt.perform_type == "TIMES"
+    
+    def test_perform_statement_times_count_large_number(self):
+        """Test times_count with large number."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_times_clause(999999)
+        
+        assert perform_stmt.times_count == 999999
+        assert perform_stmt.perform_type == "TIMES"
+    
+    def test_perform_statement_times_count_variable_names(self):
+        """Test times_count with various valid variable names."""
+        location = SourceLocation(1, 1)
+        
+        variable_names = ["COUNT", "COUNTER", "WS-COUNT", "WS-LOOP-COUNT", "I"]
+        
+        for var_name in variable_names:
+            perform_stmt = PerformStatement(location)
+            perform_stmt.set_times_clause(var_name)
+            assert perform_stmt.times_count == var_name
+    
+    def test_perform_statement_to_dict_with_test_timing(self):
+        """Test to_dict includes test_timing."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_test_timing("AFTER")
+        
+        result = perform_stmt.to_dict()
+        
+        assert "test_timing" in result
+        assert result["test_timing"] == "AFTER"
+    
+    def test_perform_statement_to_dict_test_timing_default(self):
+        """Test to_dict includes default test_timing."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        result = perform_stmt.to_dict()
+        
+        assert "test_timing" in result
+        assert result["test_timing"] == "BEFORE"
+    
+    def test_perform_statement_to_dict_times_numeric(self):
+        """Test to_dict with numeric times_count."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_times_clause(5)
+        
+        result = perform_stmt.to_dict()
+        
+        assert result["times_count"] == 5
+        assert isinstance(result["times_count"], int)
+    
+    def test_perform_statement_to_dict_times_variable(self):
+        """Test to_dict with variable times_count."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_times_clause("WS-COUNT")
+        
+        result = perform_stmt.to_dict()
+        
+        assert result["times_count"] == "WS-COUNT"
+        assert isinstance(result["times_count"], str)
+    
+    def test_perform_statement_complex_with_test_timing_and_until(self):
+        """Test complex PERFORM with both test_timing and UNTIL."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        # Create condition
+        condition = ConditionalExpression("=", SourceLocation(1, 20))
+        condition.set_left_operand("WS-EOF")
+        condition.set_right_operand("'Y'")
+        
+        perform_stmt.set_target_paragraph("PROCESS")
+        perform_stmt.set_test_timing("AFTER")
+        perform_stmt.set_until_clause(condition)
+        
+        result = perform_stmt.to_dict()
+        
+        assert result["perform_type"] == "UNTIL"
+        assert result["test_timing"] == "AFTER"
+        assert result["until_condition"] is not None
+    
+    def test_perform_statement_complex_with_test_timing_and_times(self):
+        """Test complex PERFORM with both test_timing and TIMES."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        perform_stmt.set_target_paragraph("PROCESS")
+        perform_stmt.set_test_timing("BEFORE")
+        perform_stmt.set_times_clause("WS-COUNT")
+        
+        result = perform_stmt.to_dict()
+        
+        assert result["perform_type"] == "TIMES"
+        assert result["test_timing"] == "BEFORE"
+        assert result["times_count"] == "WS-COUNT"
+    
+    def test_perform_statement_complex_varying_with_test_timing(self):
+        """Test complex PERFORM VARYING with test_timing."""
+        location = SourceLocation(1, 1)
+        perform_stmt = PerformStatement(location)
+        
+        condition = ConditionalExpression(">", SourceLocation(1, 40))
+        condition.set_left_operand("IDX")
+        condition.set_right_operand("100")
+        
+        perform_stmt.set_target_paragraph("PROCESS-ARRAY")
+        perform_stmt.set_test_timing("AFTER")
+        perform_stmt.set_varying_clause("IDX", "1", "1", condition)
+        
+        result = perform_stmt.to_dict()
+        
+        assert result["perform_type"] == "VARYING"
+        assert result["test_timing"] == "AFTER"
+        assert result["varying_clause"]["variable"] == "IDX"
 
 
 class TestComputeStatement:

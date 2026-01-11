@@ -119,8 +119,9 @@ class PerformStatement(CobolStatement):
         self.target_paragraph: Optional[str] = None
         self.thru_paragraph: Optional[str] = None  # Ending paragraph for PERFORM THRU
         self.perform_type: str = "SIMPLE"  # SIMPLE, TIMES, UNTIL, VARYING
-        self.times_count: Optional[int] = None
+        self.times_count: Optional[Union[int, str]] = None  # Can be int literal or variable name
         self.until_condition: Optional['CobolExpression'] = None
+        self.test_timing: str = "BEFORE"  # BEFORE or AFTER for WITH TEST clause
         self.varying_clause: Optional[Dict[str, Any]] = None
         self.inline_statements: List['CobolStatement'] = []
     
@@ -136,7 +137,7 @@ class PerformStatement(CobolStatement):
         if paragraph not in self.operands:
             self.operands.append(paragraph)
     
-    def set_times_clause(self, count: int) -> None:
+    def set_times_clause(self, count: Union[int, str]) -> None:
         """Set TIMES clause for the PERFORM."""
         self.perform_type = "TIMES"
         self.times_count = count
@@ -158,6 +159,13 @@ class PerformStatement(CobolStatement):
         self.until_condition = until_condition
         self.add_child(until_condition)
     
+    def set_test_timing(self, test_timing: str) -> 'PerformStatement':
+        """Set the test timing clause (BEFORE or AFTER)."""
+        if test_timing.upper() not in ["BEFORE", "AFTER"]:
+            raise ValueError(f"Invalid test timing: {test_timing}")
+        self.test_timing = test_timing.upper()
+        return self
+    
     def add_inline_statement(self, statement: 'CobolStatement') -> None:
         """Add a statement to the inline block of this PERFORM."""
         self.inline_statements.append(statement)
@@ -172,6 +180,7 @@ class PerformStatement(CobolStatement):
             "perform_type": self.perform_type,
             "times_count": self.times_count,
             "until_condition": self.until_condition.to_dict() if self.until_condition else None,
+            "test_timing": self.test_timing,
             "varying_clause": self.varying_clause,
             "inline_statements": [stmt.to_dict() for stmt in self.inline_statements]
         })
