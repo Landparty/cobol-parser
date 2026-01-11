@@ -1,8 +1,5 @@
-# COBOL Parser CALL Statement Enhancement - Final Report
-
-## Executive Summary
-
-Successfully improved the COBOL parser's CALL statement parsing capability from **28.2%** (initial baseline) to **100%** coverage on all real-world test cases (70 actual CALL statements across 10 test files).
+(moved) This document has been archived to `archived_docs/CALL_ENHANCEMENT_REPORT.md` on 2026-01-11.
+Please open that file for the full enhancement report.
 
 ## Enhancements Implemented
 

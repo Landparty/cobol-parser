@@ -1,11 +1,5 @@
-# Exception Handler Parsing Fix Report
-
-**Date**: 2025-01-XX  
-**Status**: ✅ COMPLETED
-
-## Overview
-
-Fixed critical bug in CALL statement exception handler parsing where NOT ON EXCEPTION clauses were incorrectly merged with ON EXCEPTION clauses.
+(moved) This document has been archived to `archived_docs/EXCEPTION_HANDLER_FIX_REPORT.md` on 2026-01-11.
+Please open that file for the full fix report.
 
 ## Problem Description
 

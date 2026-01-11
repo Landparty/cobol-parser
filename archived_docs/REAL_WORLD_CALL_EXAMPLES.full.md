@@ -1,0 +1,1 @@
+(archived) See original REAL_WORLD_CALL_EXAMPLES.md in project root. Archived on 2026-01-11.

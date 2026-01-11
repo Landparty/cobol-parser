@@ -1,8 +1,5 @@
-# COBOL Parser CALL Statement Coverage Analysis
-
-## Summary
-
-Added **10 real-world COBOL program examples** totaling **177 CALL statements** to test parser robustness.
+(moved) This document has been archived to `archived_docs/CALL_COVERAGE_ANALYSIS.md` on 2026-01-11.
+Please open that file for the full analysis and details.
 
 ### Current Parser Coverage: **29.4%**
 - **Parsed Successfully**: 52 CALL statements
@@ -112,9 +109,7 @@ PERFORM VARYING WS-STATION-IDX FROM 1 BY 1
 END-PERFORM
 ```
 
-## Specific Pattern Failures
-
-### Pattern 1: Multi-Line Parameters
+<!-- Archived: full content moved to archived_docs/CALL_COVERAGE_ANALYSIS.md -->
 ```cobol
 CALL 'PROGRAM' USING WS-VAR1
                       WS-VAR2

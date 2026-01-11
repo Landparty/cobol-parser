@@ -5,15 +5,15 @@
 ### For Quick Start
 1. Start with **VISUAL_SUMMARY.md** for overview
 2. Run `python analyze_call_coverage.py` to see current status
-3. Check **EXAMPLES_SUMMARY.md** for detailed info
+3. Check **archived_docs/EXAMPLES_SUMMARY.md** for detailed info (archived)
 
 ### For Deep Dive
-1. Read **CALL_COVERAGE_ANALYSIS.md** for issues
-2. Review **REAL_WORLD_CALL_EXAMPLES.md** for patterns
+1. Read **archived_docs/CALL_COVERAGE_ANALYSIS.md** for issues (archived)
+2. Review **archived_docs/REAL_WORLD_CALL_EXAMPLES.md** for patterns (archived)
 3. Run `python debug_call_patterns.py` for details
 
 ### For Implementation
-1. Check **COMPLETION_REPORT.md** for roadmap
+1. Check **archived_docs/COMPLETION_REPORT.md** for roadmap (archived)
 2. Use test files in `tests/samples/call_*.cbl`
 3. Track progress with coverage scripts
 

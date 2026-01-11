@@ -1,7 +1,5 @@
-# Real-World COBOL Program Examples for CALL Statement Testing
-
-## Overview
-Added 8 comprehensive real-world COBOL program examples focusing on CALL statement variations and patterns found in production mainframe systems.
+(moved) This document has been archived to `archived_docs/REAL_WORLD_CALL_EXAMPLES.md` on 2026-01-11.
+Please open that file for the full examples list.
 
 ## Examples Created
 

@@ -1,8 +1,5 @@
-# COBOL Parser CALL Statement Enhancement - Completion Report
-
-## Summary
-
-Successfully added **10 comprehensive real-world COBOL program examples** to improve CALL statement parsing coverage. These examples represent actual production mainframe systems across multiple industries.
+(moved) This document has been archived to `archived_docs/COMPLETION_REPORT.md` on 2026-01-11.
+Please open that file for the full completion report.
 
 ## What Was Created
 

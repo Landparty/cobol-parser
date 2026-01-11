@@ -1,9 +1,5 @@
-# Real-World COBOL Examples Summary
-
-## What Was Added
-
-### 10 Real-World COBOL Program Examples
-Created comprehensive test programs based on actual production mainframe systems to test CALL statement parsing.
+(moved) This document has been archived to `archived_docs/EXAMPLES_SUMMARY.md` on 2026-01-11.
+Please open that file for the full examples summary.
 
 #### Sample Programs Created:
 
