@@ -777,6 +777,347 @@ class FunctionCall(CobolExpression):
         return result
 
 
+class ReadStatement(CobolStatement):
+    """AST node for READ statements with comprehensive IO variation support.
+    
+    Supports:
+    - Sequential, indexed, and relative READ operations
+    - Multiple record formats (next, first, last, previous, current)
+    - INTO clause for data transfer
+    - KEY clause for indexed and relative files
+    - AT END and NOT AT END clauses
+    - INVALID KEY handling
+    - Lock modes and file access controls
+    - RETRY clause for automatic retries
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("READ", location)
+        self.file_name: Optional[str] = None
+        self.record_name: Optional[str] = None
+        self.into_target: Optional[str] = None
+        self.key_value: Optional[str] = None  # KEY IS value
+        self.record_format: Optional[str] = None  # NEXT, FIRST, LAST, PREVIOUS, CURRENT
+        self.lock_mode: Optional[str] = None  # LOCK, NOWAIT
+        self.with_lock: bool = False
+        self.with_nowait: bool = False
+        self.at_end_clause: Optional[List['CobolStatement']] = None
+        self.not_at_end_clause: Optional[List['CobolStatement']] = None
+        self.invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.not_invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.retry_count: Optional[int] = None
+        
+    def set_file_name(self, name: str) -> None:
+        """Set the file name to read from."""
+        self.file_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_record_name(self, name: str) -> None:
+        """Set the record being read."""
+        self.record_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_into(self, target: str) -> None:
+        """Set the INTO clause target."""
+        self.into_target = target
+        if target not in self.operands:
+            self.operands.append(target)
+    
+    def set_key(self, value: str) -> None:
+        """Set the KEY IS clause value."""
+        self.key_value = value
+    
+    def set_record_format(self, fmt: str) -> None:
+        """Set the record format (NEXT, FIRST, LAST, PREVIOUS, CURRENT)."""
+        self.record_format = fmt.upper()
+    
+    def set_lock_mode(self, with_lock: bool = False, with_nowait: bool = False) -> None:
+        """Set the lock mode for the read."""
+        self.with_lock = with_lock
+        self.with_nowait = with_nowait
+    
+    def set_at_end_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the AT END clause."""
+        self.at_end_clause = statements
+    
+    def set_not_at_end_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT AT END clause."""
+        self.not_at_end_clause = statements
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def set_retry(self, count: int) -> None:
+        """Set the RETRY clause count."""
+        self.retry_count = count
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert READ statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "record_name": self.record_name,
+            "into_target": self.into_target,
+            "key_value": self.key_value,
+            "record_format": self.record_format,
+            "with_lock": self.with_lock,
+            "with_nowait": self.with_nowait,
+            "at_end_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.at_end_clause or [])],
+            "not_at_end_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_at_end_clause or [])],
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+            "retry_count": self.retry_count,
+        })
+        return result
+
+
+class WriteStatement(CobolStatement):
+    """AST node for WRITE statements with comprehensive IO variation support.
+    
+    Supports:
+    - FROM clause for data source
+    - BEFORE/AFTER ADVANCING for print files
+    - AT END-OF-PAGE clause
+    - INVALID KEY handling for indexed files
+    - Record deletion for VSAM files
+    - Multiple LINES specification
+    - Lock modes and file access controls
+    - RETRY clause for automatic retries
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("WRITE", location)
+        self.record_name: Optional[str] = None
+        self.from_source: Optional[str] = None
+        self.advancing_mode: Optional[str] = None  # BEFORE or AFTER
+        self.advancing_lines: Optional[int] = None
+        self.advancing_page: bool = False
+        self.delete_record: bool = False  # For VSAM DELETE
+        self.at_eop_clause: Optional[List['CobolStatement']] = None  # AT END-OF-PAGE
+        self.invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.not_invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.retry_count: Optional[int] = None
+        self.with_lock: bool = False
+        
+    def set_record_name(self, name: str) -> None:
+        """Set the record being written."""
+        self.record_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_from(self, source: str) -> None:
+        """Set the FROM clause source."""
+        self.from_source = source
+        if source not in self.operands:
+            self.operands.append(source)
+    
+    def set_advancing(self, mode: str, lines: Optional[int] = None, page: bool = False) -> None:
+        """Set the ADVANCING clause."""
+        self.advancing_mode = mode.upper()  # BEFORE or AFTER
+        self.advancing_lines = lines
+        self.advancing_page = page
+    
+    def set_delete(self, delete: bool = True) -> None:
+        """Set the VSAM DELETE flag."""
+        self.delete_record = delete
+    
+    def set_at_eop_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the AT END-OF-PAGE clause."""
+        self.at_eop_clause = statements
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def set_retry(self, count: int) -> None:
+        """Set the RETRY clause count."""
+        self.retry_count = count
+    
+    def set_lock(self, with_lock: bool = True) -> None:
+        """Set the LOCK flag."""
+        self.with_lock = with_lock
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert WRITE statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "record_name": self.record_name,
+            "from_source": self.from_source,
+            "advancing_mode": self.advancing_mode,
+            "advancing_lines": self.advancing_lines,
+            "advancing_page": self.advancing_page,
+            "delete_record": self.delete_record,
+            "at_eop_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.at_eop_clause or [])],
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+            "retry_count": self.retry_count,
+            "with_lock": self.with_lock,
+        })
+        return result
+
+
+class OpenStatement(CobolStatement):
+    """AST node for OPEN statements with comprehensive IO variation support.
+    
+    Supports:
+    - Multiple file opens in single statement
+    - OPEN INPUT, OUTPUT, I-O, EXTEND modes
+    - Error handling for file status issues
+    - REPOSITION for VSAM files
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("OPEN", location)
+        self.open_mode: Optional[str] = None  # INPUT, OUTPUT, I-O, EXTEND
+        self.file_names: List[str] = []
+        self.with_reposition: bool = False
+        
+    def set_open_mode(self, mode: str) -> None:
+        """Set the OPEN mode."""
+        self.open_mode = mode.upper()  # INPUT, OUTPUT, I-O, EXTEND
+    
+    def add_file(self, file_name: str) -> None:
+        """Add a file to open."""
+        if file_name not in self.file_names:
+            self.file_names.append(file_name)
+            self.operands.append(file_name)
+    
+    def set_reposition(self, reposition: bool = True) -> None:
+        """Set the REPOSITION flag for VSAM files."""
+        self.with_reposition = reposition
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert OPEN statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "open_mode": self.open_mode,
+            "file_names": self.file_names,
+            "with_reposition": self.with_reposition,
+        })
+        return result
+
+
+class CloseStatement(CobolStatement):
+    """AST node for CLOSE statements with comprehensive IO variation support.
+    
+    Supports:
+    - Multiple file closes in single statement
+    - REEL/UNIT for tape files
+    - WITH NO REWIND for tape operations
+    - WITH LOCK for exclusive close
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("CLOSE", location)
+        self.file_names: List[str] = []
+        self.close_options: Dict[str, Any] = {}  # reel, unit, no_rewind, with_lock
+        
+    def add_file(self, file_name: str, reel: bool = False, unit: bool = False,
+                 no_rewind: bool = False, with_lock: bool = False) -> None:
+        """Add a file to close with options."""
+        if file_name not in self.file_names:
+            self.file_names.append(file_name)
+            self.operands.append(file_name)
+            self.close_options[file_name] = {
+                'reel': reel,
+                'unit': unit,
+                'no_rewind': no_rewind,
+                'with_lock': with_lock
+            }
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert CLOSE statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "file_names": self.file_names,
+            "close_options": self.close_options,
+        })
+        return result
+
+
+class AcceptStatement(CobolStatement):
+    """AST node for ACCEPT statements with comprehensive IO variation support.
+    
+    Supports:
+    - FROM keyword variations (CONSOLE, DISPLAY, COMMAND-LINE, etc.)
+    - AT LINE/COLUMN positioning
+    - WITH CURSOR positioning
+    - COLOR specification
+    - BEEP for audible alert
+    - NO ECHO for password input
+    - RETURN-CODE and ENVIRONMENT-NAME
+    - DATE/TIME intrinsics
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("ACCEPT", location)
+        self.target: Optional[str] = None
+        self.from_source: Optional[str] = None  # CONSOLE, DISPLAY, COMMAND-LINE, DATE, TIME, etc.
+        self.at_line: Optional[int] = None
+        self.at_column: Optional[int] = None
+        self.with_cursor: bool = False
+        self.color_attribute: Optional[str] = None
+        self.with_beep: bool = False
+        self.with_no_echo: bool = False
+        
+    def set_target(self, name: str) -> None:
+        """Set the accept target variable."""
+        self.target = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_from(self, source: str) -> None:
+        """Set the FROM source."""
+        self.from_source = source.upper()
+    
+    def set_position(self, line: Optional[int] = None, column: Optional[int] = None) -> None:
+        """Set the position (AT LINE/COLUMN)."""
+        self.at_line = line
+        self.at_column = column
+    
+    def set_cursor(self, with_cursor: bool = True) -> None:
+        """Set the WITH CURSOR flag."""
+        self.with_cursor = with_cursor
+    
+    def set_color(self, attribute: str) -> None:
+        """Set the COLOR attribute."""
+        self.color_attribute = attribute
+    
+    def set_beep(self, with_beep: bool = True) -> None:
+        """Set the BEEP flag."""
+        self.with_beep = with_beep
+    
+    def set_no_echo(self, with_no_echo: bool = True) -> None:
+        """Set the NO ECHO flag."""
+        self.with_no_echo = with_no_echo
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert ACCEPT statement to dictionary representation."""
+        result = super().to_dict()
+        result.update({
+            "target": self.target,
+            "from_source": self.from_source,
+            "at_line": self.at_line,
+            "at_column": self.at_column,
+            "with_cursor": self.with_cursor,
+            "color_attribute": self.color_attribute,
+            "with_beep": self.with_beep,
+            "with_no_echo": self.with_no_echo,
+        })
+        return result
+
+
 # Import the base classes for procedure elements
 from .program import CobolParagraph, CobolSection
 
@@ -796,6 +1137,11 @@ __all__ = [
     "ComputeStatement",
     "CopyStatement",
     "SelectStatement",
+    "ReadStatement",
+    "WriteStatement",
+    "OpenStatement",
+    "CloseStatement",
+    "AcceptStatement",
     "CobolExpression",
     "ArithmeticExpression",
     "ConditionalExpression",

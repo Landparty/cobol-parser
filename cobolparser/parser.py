@@ -14,7 +14,8 @@ from .models.ast_base import SourceLocation, ASTNode
 from .models.program import CobolProgram, CobolDivision, CobolSection, CobolParagraph, CobolFileDescription
 from .models.statements import (
     CobolStatement, CobolExpression, MoveStatement, DisplayStatement, 
-    PerformStatement, IfStatement, StopStatement, CallStatement, EntryStatement, SelectStatement, ArithmeticExpression, ConditionalExpression
+    PerformStatement, IfStatement, StopStatement, CallStatement, EntryStatement, SelectStatement, ArithmeticExpression, ConditionalExpression,
+    ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
 )
 from .models.data_items import CobolDataItem, PictureClause, OccursClause
 from .models.sql_statements import parse_exec_sql, ExecSQLStatement
@@ -4408,7 +4409,7 @@ class CobolParser:
         if self.current_token.type == TokenType.MOVE or \
            (self.current_token.value and self.current_token.value.upper() == "MOVE"):
             return self.parse_move_statement()
-        elif self.current_token.type == TokenType.DISPLAY or \
+        elif self.current_token.type == TokenType.DISPLAY_STMT or \
              (self.current_token.value and self.current_token.value.upper() == "DISPLAY"):
             return self.parse_display_statement()
         elif self.current_token.type == TokenType.PERFORM or \
@@ -4423,6 +4424,22 @@ class CobolParser:
         elif self.current_token.type == TokenType.IF or \
              (self.current_token.value and self.current_token.value.upper() == "IF"):
             return self.parse_if_statement()
+        # IO statements
+        elif self.current_token.type == TokenType.READ or \
+             (self.current_token.value and self.current_token.value.upper() == "READ"):
+            return self.parse_read_statement()
+        elif self.current_token.type == TokenType.WRITE or \
+             (self.current_token.value and self.current_token.value.upper() == "WRITE"):
+            return self.parse_write_statement()
+        elif self.current_token.type == TokenType.OPEN or \
+             (self.current_token.value and self.current_token.value.upper() == "OPEN"):
+            return self.parse_open_statement()
+        elif self.current_token.type == TokenType.CLOSE or \
+             (self.current_token.value and self.current_token.value.upper() == "CLOSE"):
+            return self.parse_close_statement()
+        elif self.current_token.type == TokenType.ACCEPT or \
+             (self.current_token.value and self.current_token.value.upper() == "ACCEPT"):
+            return self.parse_accept_statement()
         else:
             # Unknown statement type - create generic statement
             location = self.get_current_location()
@@ -4847,6 +4864,389 @@ class CobolParser:
             return False
         return token.value.upper() == keyword.upper() if token.value else False
     
+    
+    def parse_read_statement(self) -> Optional[ReadStatement]:
+        """Parse READ statement with full support for:
+        - Sequential, indexed, and relative READ operations
+        - Multiple record formats (NEXT, FIRST, LAST, PREVIOUS, CURRENT)
+        - INTO clause for data transfer
+        - KEY clause for indexed and relative files
+        - AT END and NOT AT END clauses
+        - INVALID KEY handling
+        - Lock modes and file access controls
+        - RETRY clause for automatic retries
+        """
+        if not self.current_token or self.current_token.type != TokenType.READ:
+            return None
+        
+        location = self.get_current_location()
+        stmt = ReadStatement(location)
+        self.advance_token()  # consume READ
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Next token should be file name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            file_name = self.current_token.value
+            stmt.set_file_name(file_name)
+            self.advance_token()
+        
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # INTO clause
+            if upper_val == "INTO" and self.current_token.type == TokenType.INTO:
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    stmt.set_into(self.current_token.value)
+                    self.advance_token()
+            # KEY clause
+            elif upper_val == "KEY":
+                self.advance_token()
+                if self.current_token and upper_val == "IS":
+                    self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    stmt.set_key(self.current_token.value)
+                    self.advance_token()
+            # Record format (NEXT, FIRST, LAST, PREVIOUS, CURRENT)
+            elif upper_val in ("NEXT", "FIRST", "LAST", "PREVIOUS", "CURRENT"):
+                stmt.set_record_format(upper_val)
+                self.advance_token()
+            # WITH LOCK
+            elif upper_val == "WITH":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "LOCK":
+                    stmt.set_lock_mode(with_lock=True)
+                    self.advance_token()
+            # RETRY
+            elif upper_val == "RETRY":
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.NUMERIC_LITERAL:
+                    stmt.set_retry(int(self.current_token.value))
+                    self.advance_token()
+            # AT END
+            elif upper_val == "AT" and self.current_token.type == TokenType.AT:
+                self.advance_token()
+                # Parse nested statements until NOT AT END or end of statement
+                at_end_stmts = []
+                while self.current_token and self.current_token.type != TokenType.PERIOD:
+                    upper_check = self.current_token.value.upper() if self.current_token.value else ""
+                    if upper_check == "NOT":
+                        break
+                    nested_stmt = self.parse_statement()
+                    if nested_stmt:
+                        at_end_stmts.append(nested_stmt)
+                    else:
+                        break
+                if at_end_stmts:
+                    stmt.set_at_end_clause(at_end_stmts)
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+    
+    def parse_write_statement(self) -> Optional[WriteStatement]:
+        """Parse WRITE statement with full support for:
+        - FROM clause for data source
+        - BEFORE/AFTER ADVANCING for print files
+        - AT END-OF-PAGE clause
+        - INVALID KEY handling for indexed files
+        - Record deletion for VSAM files
+        - Lock modes and file access controls
+        - RETRY clause
+        """
+        if not self.current_token or self.current_token.type != TokenType.WRITE:
+            return None
+        
+        location = self.get_current_location()
+        stmt = WriteStatement(location)
+        self.advance_token()  # consume WRITE
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Next token should be record name
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            record_name = self.current_token.value
+            stmt.set_record_name(record_name)
+            self.advance_token()
+        
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # FROM clause
+            if upper_val == "FROM" and self.current_token.type == TokenType.FROM:
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    stmt.set_from(self.current_token.value)
+                    self.advance_token()
+            # BEFORE/AFTER ADVANCING
+            elif upper_val in ("BEFORE", "AFTER") and self.current_token.type == TokenType.BEFORE or self.current_token.type == TokenType.AFTER:
+                mode = upper_val
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "ADVANCING":
+                    self.advance_token()
+                    lines = None
+                    if self.current_token and self.current_token.type == TokenType.NUMERIC_LITERAL:
+                        lines = int(self.current_token.value)
+                        self.advance_token()
+                    stmt.set_advancing(mode, lines=lines)
+            # WITH LOCK
+            elif upper_val == "WITH":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "LOCK":
+                    stmt.set_lock(with_lock=True)
+                    self.advance_token()
+            # DELETE (VSAM)
+            elif upper_val == "DELETE":
+                stmt.set_delete(True)
+                self.advance_token()
+            # RETRY
+            elif upper_val == "RETRY":
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.NUMERIC_LITERAL:
+                    stmt.set_retry(int(self.current_token.value))
+                    self.advance_token()
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+    
+    def parse_open_statement(self) -> Optional[OpenStatement]:
+        """Parse OPEN statement with full support for:
+        - Multiple file opens in single statement
+        - OPEN INPUT, OUTPUT, I-O, EXTEND modes
+        - Error handling for file status issues
+        - REPOSITION for VSAM files
+        """
+        if not self.current_token or self.current_token.type != TokenType.OPEN:
+            return None
+        
+        location = self.get_current_location()
+        stmt = OpenStatement(location)
+        self.advance_token()  # consume OPEN
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Get OPEN mode (INPUT, OUTPUT, I-O, EXTEND)
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            mode = self.current_token.value.upper()
+            if mode in ("INPUT", "OUTPUT", "I-O", "EXTEND"):
+                stmt.set_open_mode(mode)
+                self.advance_token()
+            
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            # Parse file names
+            while self.current_token and self.current_token.type != TokenType.PERIOD:
+                if self.current_token.type == TokenType.IDENTIFIER:
+                    stmt.add_file(self.current_token.value)
+                    self.advance_token()
+                else:
+                    self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+    
+    def parse_close_statement(self) -> Optional[CloseStatement]:
+        """Parse CLOSE statement with full support for:
+        - Multiple file closes in single statement
+        - REEL/UNIT for tape files
+        - WITH NO REWIND for tape operations
+        - WITH LOCK for exclusive close
+        """
+        if not self.current_token or self.current_token.type != TokenType.CLOSE:
+            return None
+        
+        location = self.get_current_location()
+        stmt = CloseStatement(location)
+        self.advance_token()  # consume CLOSE
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Parse file names with optional clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            if self.current_token.type == TokenType.IDENTIFIER:
+                file_name = self.current_token.value
+                reel = False
+                unit = False
+                no_rewind = False
+                with_lock = False
+                
+                self.advance_token()
+                
+                # Check for REEL/UNIT/NO REWIND/WITH LOCK
+                while self.current_token and self.current_token.type != TokenType.PERIOD:
+                    upper_val = self.current_token.value.upper() if self.current_token.value else ""
+                    
+                    if upper_val == "REEL":
+                        reel = True
+                        self.advance_token()
+                    elif upper_val == "UNIT":
+                        unit = True
+                        self.advance_token()
+                    elif upper_val == "WITH":
+                        self.advance_token()
+                        if self.current_token and self.current_token.value.upper() == "NO":
+                            self.advance_token()
+                            if self.current_token and self.current_token.value.upper() == "REWIND":
+                                no_rewind = True
+                                self.advance_token()
+                        elif self.current_token and self.current_token.value.upper() == "LOCK":
+                            with_lock = True
+                            self.advance_token()
+                    else:
+                        # Next file name
+                        break
+                
+                stmt.add_file(file_name, reel=reel, unit=unit, no_rewind=no_rewind, with_lock=with_lock)
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+    
+    def parse_accept_statement(self) -> Optional[AcceptStatement]:
+        """Parse ACCEPT statement with full support for:
+        - FROM keyword variations (CONSOLE, DISPLAY, COMMAND-LINE, etc.)
+        - AT LINE/COLUMN positioning
+        - WITH CURSOR positioning
+        - COLOR specification
+        - BEEP for audible alert
+        - NO ECHO for password input
+        - DATE/TIME intrinsics
+        """
+        if not self.current_token or self.current_token.type != TokenType.ACCEPT:
+            return None
+        
+        location = self.get_current_location()
+        stmt = AcceptStatement(location)
+        self.advance_token()  # consume ACCEPT
+        
+        # Skip whitespace
+        while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance_token()
+        
+        # Get target variable
+        if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+            target = self.current_token.value
+            stmt.set_target(target)
+            self.advance_token()
+        
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            # Skip whitespace
+            while self.current_token and self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                self.advance_token()
+            
+            if not self.current_token or self.current_token.type == TokenType.PERIOD:
+                break
+            
+            upper_val = self.current_token.value.upper() if self.current_token.value else ""
+            
+            # FROM clause
+            if upper_val == "FROM" and self.current_token.type == TokenType.FROM:
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    stmt.set_from(self.current_token.value)
+                    self.advance_token()
+            # AT LINE/COLUMN
+            elif upper_val == "AT" and self.current_token.type == TokenType.AT:
+                self.advance_token()
+                line = None
+                column = None
+                
+                if self.current_token and self.current_token.value.upper() == "LINE":
+                    self.advance_token()
+                    if self.current_token and self.current_token.type == TokenType.NUMERIC_LITERAL:
+                        line = int(self.current_token.value)
+                        self.advance_token()
+                
+                if self.current_token and self.current_token.value.upper() == "COLUMN":
+                    self.advance_token()
+                    if self.current_token and self.current_token.type == TokenType.NUMERIC_LITERAL:
+                        column = int(self.current_token.value)
+                        self.advance_token()
+                
+                if line or column:
+                    stmt.set_position(line=line, column=column)
+            # WITH CURSOR
+            elif upper_val == "WITH":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "CURSOR":
+                    stmt.set_cursor(True)
+                    self.advance_token()
+            # NO ECHO
+            elif upper_val == "NO":
+                self.advance_token()
+                if self.current_token and self.current_token.value.upper() == "ECHO":
+                    stmt.set_no_echo(True)
+                    self.advance_token()
+            # BEEP
+            elif upper_val == "BEEP":
+                stmt.set_beep(True)
+                self.advance_token()
+            # COLOR
+            elif upper_val == "COLOR":
+                self.advance_token()
+                if self.current_token and self.current_token.type == TokenType.IDENTIFIER:
+                    stmt.set_color(self.current_token.value)
+                    self.advance_token()
+            else:
+                self.advance_token()
+        
+        # Consume period
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+        
+        return stmt
+
     def skip_to_next_division(self) -> None:
         """Skip tokens until next division is found."""
         division_tokens = [

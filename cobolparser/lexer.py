@@ -209,6 +209,19 @@ class TokenType(Enum):
     ACCEPT = auto()
     DISPLAY_STMT = auto()  # Different from USAGE DISPLAY
     
+    # Keywords - I/O Statement Clauses
+    # INTO, FROM, USING handled in Control Flow section
+    # AFTER, BEFORE, TEST handled in Control Flow section
+    AT_EOL = auto()  # AT END-OF-LINE
+    VARYING_REC = auto()  # VARYING (for READ)
+    NEXT_REC = auto()  # NEXT (for READ)
+    FIRST_REC = auto()  # FIRST (for READ)
+    LAST_REC = auto()  # LAST (for READ)
+    PREV_REC = auto()  # PREV (for READ)
+    CURRENT_REC = auto()  # CURRENT (for READ)
+    NULL_TERM = auto()  # NULL (for null termination)
+    RETRY = auto()
+    
     # Keywords - Control Flow
     TIMES = auto()
     UNTIL = auto()
@@ -219,6 +232,8 @@ class TokenType(Enum):
     AFTER = auto()
     BEFORE = auto()
     TEST = auto()
+    INTO = auto()
+    USING = auto()
     
     # Keywords - Conditions
     EQUAL = auto()
@@ -496,6 +511,8 @@ class CobolLexer:
         'AFTER': TokenType.AFTER,
         'BEFORE': TokenType.BEFORE,
         'TEST': TokenType.TEST,
+        'INTO': TokenType.INTO,
+        'USING': TokenType.USING,
         
         # Conditions
         'EQUAL': TokenType.EQUAL,

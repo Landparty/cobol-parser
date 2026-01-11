@@ -41,14 +41,16 @@ Each statement requires:
 
 | Statement | Status | Contract | Integration | Unit | Total | Notes |
 |-----------|--------|----------|-------------|------|-------|-------|
-| **OPEN** | 🔴 Missing | 0/8 | 0/5 | 0/15 | **0/28** | INPUT/OUTPUT/I-O/EXTEND |
-| **CLOSE** | 🔴 Missing | 0/6 | 0/3 | 0/10 | **0/19** | WITH LOCK clause |
-| **READ** | 🔴 Missing | 0/10 | 0/8 | 0/25 | **0/43** | Complex AT END logic |
-| **WRITE** | 🔴 Missing | 0/10 | 0/6 | 0/20 | **0/36** | BEFORE/AFTER ADVANCING |
-| **REWRITE** | 🔴 Missing | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause |
-| **DELETE** | 🔴 Missing | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause |
+| **OPEN** | � Planned | 0/8 | 0/5 | 0/15 | **0/28** | INPUT/OUTPUT/I-O/EXTEND (FR-001) |
+| **CLOSE** | 📝 Planned | 0/6 | 0/3 | 0/10 | **0/19** | WITH LOCK clause (FR-002) |
+| **READ** | 📝 Planned | 0/10 | 0/8 | 0/25 | **0/43** | Complex AT END logic (FR-002) |
+| **WRITE** | 📝 Planned | 0/10 | 0/6 | 0/20 | **0/36** | BEFORE/AFTER ADVANCING (FR-002) |
+| **REWRITE** | 📝 Planned | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause (FR-002) |
+| **DELETE** | 📝 Planned | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause (FR-002) |
+| **START** | 📝 Planned | 0/6 | 0/3 | 0/12 | **0/21** | Key positioning (FR-001) |
+| **UNLOCK** | 📝 Planned | 0/4 | 0/2 | 0/8 | **0/14** | Record unlock (FR-001) |
 
-**File I/O Subtotal**: 0/180 tests (0%)
+**File I/O Subtotal (61 variations planned)**: 0/215 tests (0%) | Catalog: [io-variation-catalog.csv](../specs/001-io-variation-coverage/io-variation-catalog.csv)
 
 ### Control Flow
 
@@ -58,7 +60,7 @@ Each statement requires:
 | **PERFORM** | ✅ Complete | 10/10 ✅ | 8/8 ✅ | 25/25 ✅ | 43/43 | UNTIL/TIMES/VARYING |
 | **STOP** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 8/8 ✅ | 17/17 | STOP RUN |
 | **EVALUATE** | 🔴 Missing | 0/12 | 0/8 | 0/30 | **0/50** | Complex WHEN logic |
-| **ACCEPT** | 🔴 Missing | 0/8 | 0/5 | 0/15 | **0/28** | FROM DATE/TIME/ENV |
+| **ACCEPT** | � Planned | 0/8 | 0/5 | 0/15 | **0/28** | FROM DATE/TIME/ENV (FR-001) |
 | **INITIALIZE** | 🔴 Missing | 0/8 | 0/4 | 0/15 | **0/27** | REPLACING clause |
 
 **Control Flow Subtotal**: 98/203 tests (48.3%)
