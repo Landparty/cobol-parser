@@ -3337,6 +3337,12 @@ class CobolParser:
                                     pf.set_test_timing(test_timing)
                                     logger.debug(f"Set test timing: {test_timing}")
                                 
+                                # Skip newlines after test timing clause
+                                while i < len(tokens) and tokens[i].type == TokenType.NEWLINE:
+                                    i += 1
+                                
+                                logger.debug(f"After skipping newlines, token {i}: {tokens[i].type if i < len(tokens) else 'EOF'} = {tokens[i].value if i < len(tokens) else 'EOF'}")
+                                
                                 # Expect UNTIL
                                 if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'UNTIL':
                                     logger.debug(f"Found UNTIL at token {i}")
@@ -3364,7 +3370,7 @@ class CobolParser:
                                     logger.debug(f"Starting inline statement parse loop at token {i}, tokens remaining: {len(tokens) - i}")
                                     while i < len(tokens):
                                         # Check for END-PERFORM
-                                        if (tokens[i].type == TokenType.IDENTIFIER and 
+                                        if (tokens[i].type in (TokenType.IDENTIFIER, TokenType.END_PERFORM) and 
                                             tokens[i].value and tokens[i].value.upper() == 'END-PERFORM'):
                                             i += 1
                                             break
