@@ -441,7 +441,7 @@
 
 ### Final Tasks
 
-- [ ] T024 Update documentation with CALL statement patterns and examples
+- [x] T024 Update documentation with CALL statement patterns and examples
 
 **Details**:
 - **File**: docs/call-statements.md
@@ -457,7 +457,7 @@
 
 ---
 
-- [ ] T025 Run full integration test suite
+- [x] T025 Run full integration test suite
 
 **Details**:
 - **Spec**: FR-017 through FR-022 (Full integration validation)
@@ -473,7 +473,7 @@
 
 ---
 
-- [ ] T026 Final validation: Verify all success criteria met
+- [x] T026 Final validation: Verify all success criteria met
 
 **Details**:
 - **Checklist** (all 8 must be ✓):
@@ -491,7 +491,7 @@
 
 ---
 
-- [ ] T027 Commit final changes to git with clean history
+- [x] T027 Commit final changes to git with clean history
 
 **Details**:
 - **Commit structure**:
