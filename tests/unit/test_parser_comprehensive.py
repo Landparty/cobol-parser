@@ -1550,3 +1550,227 @@ class TestParseHelperMethods:
         
         assert condition is None
         assert next_index == 1  # consumed UNTIL but no condition
+
+
+class TestPerformInlineEnhancements:
+    """Test enhanced _parse_perform_inline() with WITH TEST and UNTIL support."""
+    
+    def test_perform_simple_with_test_before(self):
+        """Test PERFORM PARA WITH TEST BEFORE."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA WITH TEST BEFORE .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "READ-RECORD", SourceLocation(1, 9)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 21)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 26)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 31)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 37))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        # Create procedure division context
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        # Parse the PERFORM statement
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        # Verify we consumed tokens up to period (not including period)
+        assert result_index == 5
+        
+        # Verify perform statement was created in section
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert isinstance(perform_stmt, PerformStatement)
+        assert perform_stmt.target_paragraph == "READ-RECORD"
+        assert perform_stmt.test_timing == "BEFORE"
+    
+    def test_perform_simple_with_test_after(self):
+        """Test PERFORM PARA WITH TEST AFTER."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA WITH TEST AFTER .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "PROCESS-DATA", SourceLocation(1, 9)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 22)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 27)),
+            Token(TokenType.AFTER, "AFTER", SourceLocation(1, 32)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 37))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 5
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.test_timing == "AFTER"
+    
+    def test_perform_simple_until(self):
+        """Test PERFORM PARA UNTIL condition."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA UNTIL WS-EOF = 'Y' .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "READ-LOOP", SourceLocation(1, 9)),
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 19)),
+            Token(TokenType.IDENTIFIER, "WS-EOF", SourceLocation(1, 25)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 32)),
+            Token(TokenType.STRING, "'Y'", SourceLocation(1, 34)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 37))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 6
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.perform_type == "UNTIL"
+        assert perform_stmt.until_condition is not None
+    
+    def test_perform_times_with_variable(self):
+        """Test PERFORM PARA n TIMES with variable (e.g., WS-COUNT TIMES)."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA WS-COUNT TIMES .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "PROCESS-ITEM", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "WS-COUNT", SourceLocation(1, 22)),
+            Token(TokenType.IDENTIFIER, "TIMES", SourceLocation(1, 31)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 36))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 4
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.times_count == "WS-COUNT"  # Should be a string (variable name)
+    
+    def test_perform_times_numeric(self):
+        """Test PERFORM PARA n TIMES with numeric literal."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA 5 TIMES .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "INIT-ARRAY", SourceLocation(1, 9)),
+            Token(TokenType.NUMERIC_LITERAL, "5", SourceLocation(1, 20)),
+            Token(TokenType.IDENTIFIER, "TIMES", SourceLocation(1, 22)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 27))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 4
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.times_count == 5  # Should be numeric
+    
+    def test_perform_thru_with_test(self):
+        """Test PERFORM PARA THRU PARA-END WITH TEST BEFORE."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA THRU PARA-END WITH TEST BEFORE .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "START-PARA", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "THRU", SourceLocation(1, 20)),
+            Token(TokenType.IDENTIFIER, "END-PARA", SourceLocation(1, 25)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 34)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 39)),
+            Token(TokenType.BEFORE, "BEFORE", SourceLocation(1, 44)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 50))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 7
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.target_paragraph == "START-PARA"
+        assert perform_stmt.thru_paragraph == "END-PARA"
+        assert perform_stmt.test_timing == "BEFORE"
+    
+    def test_perform_complex_all_clauses(self):
+        """Test PERFORM with THRU, TIMES, WITH TEST, UNTIL all together."""
+        parser = CobolParser()
+        
+        # Mock tokens: PERFORM PARA THRU PARA-END 3 TIMES WITH TEST AFTER UNTIL X = 5 .
+        tokens = [
+            Token(TokenType.PERFORM, "PERFORM", SourceLocation(1, 1)),
+            Token(TokenType.IDENTIFIER, "START", SourceLocation(1, 9)),
+            Token(TokenType.IDENTIFIER, "THRU", SourceLocation(1, 15)),
+            Token(TokenType.IDENTIFIER, "END", SourceLocation(1, 20)),
+            Token(TokenType.NUMERIC_LITERAL, "3", SourceLocation(1, 24)),
+            Token(TokenType.IDENTIFIER, "TIMES", SourceLocation(1, 26)),
+            Token(TokenType.WITH, "WITH", SourceLocation(1, 32)),
+            Token(TokenType.TEST, "TEST", SourceLocation(1, 37)),
+            Token(TokenType.AFTER, "AFTER", SourceLocation(1, 42)),
+            Token(TokenType.UNTIL, "UNTIL", SourceLocation(1, 48)),
+            Token(TokenType.IDENTIFIER, "X", SourceLocation(1, 54)),
+            Token(TokenType.EQUAL, "=", SourceLocation(1, 56)),
+            Token(TokenType.NUMERIC_LITERAL, "5", SourceLocation(1, 58)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 59))
+        ]
+        parser.tokens = tokens
+        parser.current_token_index = 0
+        parser.current_token = tokens[0]
+        
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        parser.current_division = proc_div
+        parser.current_section = CobolSection("MAIN", SourceLocation(1, 1))
+        
+        result_index = parser._parse_perform_inline(tokens, 0)
+        
+        assert result_index == 13
+        assert len(parser.current_section.children) > 0
+        perform_stmt = parser.current_section.children[0]
+        assert perform_stmt.target_paragraph == "START"
+        assert perform_stmt.thru_paragraph == "END"
+        assert perform_stmt.times_count == 3
+        assert perform_stmt.test_timing == "AFTER"
+        assert perform_stmt.perform_type == "UNTIL"
+        assert perform_stmt.until_condition is not None

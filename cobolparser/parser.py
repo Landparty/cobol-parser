@@ -3282,7 +3282,8 @@ class CobolParser:
         
         Handles:
         - PERFORM paragraph-name
-        - PERFORM VARYING variable FROM value BY value UNTIL condition ... END-PERFORM
+        - PERFORM paragraph-name [THRU paragraph-name] [n TIMES] [WITH TEST BEFORE/AFTER] [UNTIL condition]
+        - PERFORM VARYING variable FROM value BY value [WITH TEST BEFORE/AFTER] UNTIL condition ... END-PERFORM
         """
         start = tokens[i]
         i += 1
@@ -3326,9 +3327,15 @@ class CobolParser:
                                 by_value = tokens[i].value
                                 i += 1
                                 
-                                # Skip newlines before UNTIL
+                                # Skip newlines before WITH TEST or UNTIL
                                 while i < len(tokens) and tokens[i].type == TokenType.NEWLINE:
                                     i += 1
+                                
+                                # Check for WITH TEST clause in VARYING
+                                test_timing, i = self._parse_test_timing_clause(tokens, i)
+                                if test_timing:
+                                    pf.set_test_timing(test_timing)
+                                    logger.debug(f"Set test timing: {test_timing}")
                                 
                                 # Expect UNTIL
                                 if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == 'UNTIL':
@@ -3389,7 +3396,7 @@ class CobolParser:
                 self.current_section.add_child(pf)
             return i
         
-        # Simple PERFORM paragraph-name [THRU paragraph-name] [n TIMES]
+        # Simple PERFORM paragraph-name [THRU paragraph-name] [n TIMES] [WITH TEST] [UNTIL condition]
         else:
             pf = PerformStatement(start.location)
             pf.set_target_paragraph(tokens[i].value)
@@ -3408,10 +3415,16 @@ class CobolParser:
                     pf.set_thru_paragraph(tokens[i].value)
                     i += 1
             
-            # Check for TIMES clause
-            if i < len(tokens) and tokens[i].type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+            # Check for TIMES clause (can be numeric or variable)
+            if i < len(tokens) and tokens[i].type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER, TokenType.IDENTIFIER):
                 try:
-                    times_count = int(tokens[i].value)
+                    # Try to parse as numeric literal first
+                    if tokens[i].type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER):
+                        times_count = int(tokens[i].value)
+                    else:
+                        # It's an identifier (variable name)
+                        times_count = tokens[i].value
+                    
                     i += 1
                     
                     # Skip optional whitespace/newlines
@@ -3422,8 +3435,23 @@ class CobolParser:
                     if i < len(tokens) and tokens[i].value and tokens[i].value.upper() in ("TIMES", "TIME"):
                         i += 1
                         pf.set_times_clause(times_count)
-                except ValueError:
+                except (ValueError, AttributeError):
                     pass
+            
+            # Skip optional whitespace/newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            # Check for WITH TEST clause
+            test_timing, i = self._parse_test_timing_clause(tokens, i)
+            if test_timing:
+                pf.set_test_timing(test_timing)
+            
+            # Check for UNTIL clause
+            until_condition, i = self._parse_until_condition(tokens, i)
+            if until_condition:
+                pf.set_until_clause(until_condition)
+                pf.perform_type = "UNTIL"
             
             if self.current_section:
                 self.current_section.add_child(pf)
