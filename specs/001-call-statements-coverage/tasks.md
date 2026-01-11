@@ -20,7 +20,7 @@
 
 ### Setup Tasks
 
-- [ ] T001 Research: Verify lexer continuation support in cobolparser/lexer.py for column 7 hyphen handling
+- [x] T001 Research: Verify lexer continuation support in cobolparser/lexer.py for column 7 hyphen handling
 
 **Details**:
 - Examine cobolparser/lexer.py (680 lines total)
@@ -32,7 +32,7 @@
 
 ---
 
-- [ ] T002 Research: Confirm parser recursion depth limits for nested exception handlers
+- [x] T002 Research: Confirm parser recursion depth limits for nested exception handlers
 
 **Details**:
 - Examine parser.py for recursion tracking
@@ -45,7 +45,7 @@
 
 ---
 
-- [ ] T003 Research: Document parameter mode semantics (REFERENCE, CONTENT, VALUE)
+- [x] T003 Research: Document parameter mode semantics (REFERENCE, CONTENT, VALUE)
 
 **Details**:
 - Examine statements.py CallParameter class (lines 286-298)
@@ -58,7 +58,7 @@
 
 ---
 
-- [ ] T004 Research: Define MOVE tracking scope for dynamic CALL analysis
+- [x] T004 Research: Define MOVE tracking scope for dynamic CALL analysis
 
 **Details**:
 - Examine analysis/value_tracker.py (if exists)
@@ -72,7 +72,7 @@
 
 ---
 
-- [ ] T005 Research: Identify validation point for RETURNING/GIVING mutual exclusivity
+- [x] T005 Research: Identify validation point for RETURNING/GIVING mutual exclusivity
 
 **Details**:
 - Examine parser.py parse_call_statement() (line 4444+)
@@ -87,7 +87,7 @@
 
 ### Phase 0 Validation
 
-- [ ] T006 Consolidate: Create research.md with findings from T001-T005
+- [x] T006 Consolidate: Create research.md with findings from T001-T005
 
 **Details**:
 - File: specs/001-call-statements-coverage/research.md
@@ -110,7 +110,7 @@
 
 ### Design Tasks
 
-- [ ] T007 Design: Document CallStatement data model with constraints
+- [x] T007 Design: Document CallStatement data model with constraints
 
 **Details**:
 - File: specs/001-call-statements-coverage/data-model.md (new section "Entity: CallStatement")
@@ -123,7 +123,7 @@
 
 ---
 
-- [ ] T008 Design: Document CallParameter data model and passing modes
+- [x] T008 Design: Document CallParameter data model and passing modes
 
 **Details**:
 - File: specs/001-call-statements-coverage/data-model.md (new section "Entity: CallParameter")
@@ -136,7 +136,7 @@
 
 ---
 
-- [ ] T009 Contract: Create call-statement-contract.md for CALL statement structure
+- [x] T009 Contract: Create call-statement-contract.md for CALL statement structure
 
 **Details**:
 - File: specs/001-call-statements-coverage/contracts/call-statement-contract.md
@@ -149,7 +149,7 @@
 
 ---
 
-- [ ] T010 Contract: Create exception-handlers-contract.md for exception clause structures
+- [x] T010 Contract: Create exception-handlers-contract.md for exception clause structures
 
 **Details**:
 - File: specs/001-call-statements-coverage/contracts/exception-handlers-contract.md
@@ -162,7 +162,7 @@
 
 ---
 
-- [ ] T011 Contract: Create parameter-modes-contract.md for parameter passing variations
+- [x] T011 Contract: Create parameter-modes-contract.md for parameter passing variations
 
 **Details**:
 - File: specs/001-call-statements-coverage/contracts/parameter-modes-contract.md
@@ -175,7 +175,7 @@
 
 ---
 
-- [ ] T012 Guide: Create quickstart.md with 6 CALL examples
+- [x] T012 Guide: Create quickstart.md with 6 CALL examples
 
 **Details**:
 - File: specs/001-call-statements-coverage/quickstart.md
@@ -195,7 +195,7 @@
 
 ### Phase 1 Validation
 
-- [ ] T013 Consolidate: Verify all Phase 1 outputs exist and cross-reference correctly
+- [x] T013 Consolidate: Verify all Phase 1 outputs exist and cross-reference correctly
 
 **Details**:
 - Check files exist:
@@ -281,7 +281,7 @@
 
 ### Implementation Task I4: RETURNING/GIVING Test Suite
 
-- [ ] T017 [P] [US3] Create test suite for RETURNING/GIVING clauses
+- [x] T017 [P] [US3] Create test suite for RETURNING/GIVING clauses
 
 **Details**:
 - **Spec**: FR-005, FR-006, FR-006a (RETURNING/GIVING capture and mutual exclusivity)
