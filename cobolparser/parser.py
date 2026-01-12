@@ -4528,11 +4528,19 @@ class CobolParser:
         ):
             i += 1
 
-        # Parse statements until ELSE or next IF or end
-        while i < len(tokens) and tokens[i].type not in (TokenType.ELSE, TokenType.IF):
+        # Parse statements until ELSE or next IF or control structure terminators
+        while i < len(tokens):
             verb_tok = tokens[i]
             verb_type = verb_tok.type
             verb_val = verb_tok.value.upper() if verb_tok.value else ""
+
+            # Check for ELSE, IF, and control structure terminators
+            if verb_type == TokenType.ELSE or verb_val == "ELSE":
+                break
+            if verb_type == TokenType.IF or verb_val == "IF":
+                break
+            if verb_val in ("END-IF", "WHEN", "END-EVALUATE", "END-PERFORM"):
+                break
 
             # Only parse known verbs
             if verb_type == TokenType.MOVE or verb_val == "MOVE":
@@ -4595,10 +4603,16 @@ class CobolParser:
             ):
                 i += 1
 
-            while i < len(tokens) and tokens[i].type not in (TokenType.IF,):
+            while i < len(tokens):
                 verb_tok = tokens[i]
                 verb_type = verb_tok.type
                 verb_val = verb_tok.value.upper() if verb_tok.value else ""
+
+                # Check for IF and control structure terminators
+                if verb_type == TokenType.IF or verb_val == "IF":
+                    break
+                if verb_val in ("END-IF", "WHEN", "END-EVALUATE", "END-PERFORM"):
+                    break
 
                 if verb_type == TokenType.MOVE or verb_val == "MOVE":
                     j = self._parse_move_inline(tokens, i)
