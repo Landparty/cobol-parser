@@ -49,12 +49,34 @@ pytest tests/performance/ -m io
 
 ## 5. Coverage Artifact Generation
 
-1. After all tests pass, run the reporter (to be added in this feature) that gathers pytest results and emits `io-coverage.json` adhering to `contracts/io-coverage-schema.json`.
-2. Commit the artifact plus any updates to `docs/STATEMENT_TEST_COVERAGE_MATRIX.md` (human-readable summary).
-3. Verify JSON validation:
+1. After all tests pass, run the reporter to gather pytest results and emit `io-coverage.json`:
    ```bash
-   python -m jsonschema --instance io-coverage.json --schema specs/001-io-variation-coverage/contracts/io-coverage-schema.json
+   # Generate coverage artifact
+   python -m cobolparser.cli.coverage generate --pytest-results results.json --output io-coverage.json
+   
+   # Or use standalone tool
+   python tools/io_coverage/generate_artifact.py --pytest-results results.json --output io-coverage.json
    ```
+
+2. Validate artifact against schema:
+   ```bash
+   python -m cobolparser.cli.coverage validate --artifact io-coverage.json
+   python scripts/validate_io_coverage.py --artifact io-coverage.json
+   ```
+
+3. View coverage status:
+   ```bash
+   # Show all coverage
+   python -m cobolparser.cli.coverage status
+   
+   # Filter by verb
+   python -m cobolparser.cli.coverage status --verb READ
+   
+   # Filter by qualifier
+   python -m cobolparser.cli.coverage status --qualifier "INVALID KEY"
+   ```
+
+4. Commit the artifact plus any updates to `docs/STATEMENT_TEST_COVERAGE_MATRIX.md` (human-readable summary).
 
 ## 6. Regression & Performance Check
 

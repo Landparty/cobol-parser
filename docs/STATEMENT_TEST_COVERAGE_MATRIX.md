@@ -41,16 +41,16 @@ Each statement requires:
 
 | Statement | Status | Contract | Integration | Unit | Total | Notes |
 |-----------|--------|----------|-------------|------|-------|-------|
-| **OPEN** | ✅ Complete | 8/8 ✅ | 5/5 ✅ | 15/15 ✅ | 28/28 | INPUT/OUTPUT/I-O/EXTEND (T016-T018) |
-| **CLOSE** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 10/10 ✅ | 19/19 | WITH LOCK clause (T016-T018) |
-| **READ** | ✅ Complete | 10/10 ✅ | 8/8 ✅ | 25/25 ✅ | 43/43 | AT END logic, record locking (T016-T018) |
-| **WRITE** | ✅ Complete | 10/10 ✅ | 6/6 ✅ | 20/20 ✅ | 36/36 | BEFORE/AFTER ADVANCING (T016-T018) |
-| **REWRITE** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
-| **DELETE** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
-| **START** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 12/12 ✅ | 21/21 | Key positioning (T017-T018) |
-| **UNLOCK** | ✅ Complete | 4/4 ✅ | 2/2 ✅ | 8/8 ✅ | 14/14 | Record unlock (T017-T018) |
+| **[OPEN](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 8/8 ✅ | 5/5 ✅ | 15/15 ✅ | 28/28 | INPUT/OUTPUT/I-O/EXTEND (T016-T018) |
+| **[CLOSE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 10/10 ✅ | 19/19 | WITH LOCK clause (T016-T018) |
+| **[READ](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 10/10 ✅ | 8/8 ✅ | 25/25 ✅ | 43/43 | AT END logic, record locking (T016-T018) |
+| **[WRITE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 10/10 ✅ | 6/6 ✅ | 20/20 ✅ | 36/36 | BEFORE/AFTER ADVANCING (T016-T018) |
+| **[REWRITE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
+| **[DELETE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
+| **[START](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 12/12 ✅ | 21/21 | Key positioning (T017-T018) |
+| **[UNLOCK](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 4/4 ✅ | 2/2 ✅ | 8/8 ✅ | 14/14 | Record unlock (T017-T018) |
 
-**File I/O Subtotal (61 variations covered)**: 233/254 tests (91.7%) | Catalog: [io-variation-catalog.csv](../specs/001-io-variation-coverage/io-variation-catalog.csv)
+**File I/O Subtotal (61 variations covered)**: 233/254 tests (91.7%) | Catalog: [io-variation-catalog.csv](../specs/001-io-variation-coverage/io-variation-catalog.csv) | Coverage: [io-coverage.json](../specs/001-io-variation-coverage/baselines/post-us1.json) | Tests: [unit](../tests/unit/io_statements/) [integration](../tests/integration/io_statements/)
 
 ### Control Flow
 

@@ -52,12 +52,12 @@ Independent Test: Parsing the curated IO suite in COLLECT_ALL mode yields AST + 
 
 ### Implementation (after tests fail)
 
-- [ ] T016 [P] [US1] Update IO keyword/token handling in `cobolparser/lexer.py` (including continuation-line rules) so new clauses are recognized.
-- [ ] T017 [P] [US1] Extend AST node classes and `to_dict()` implementations in `cobolparser/models/statements.py` per `contracts/io-statement-ast.md` (add metadata fields such as `with_lock`, `advancing_clause`, and FD bindings).
-- [ ] T018 [US1] Implement parser productions and error-recovery hooks in `cobolparser/parser.py` to map tokens + clauses into the new AST nodes while preserving SourceLocation data.
+- [x] T016 [P] [US1] Update IO keyword/token handling in `cobolparser/lexer.py` (including continuation-line rules) so new clauses are recognized.
+- [x] T017 [P] [US1] Extend AST node classes and `to_dict()` implementations in `cobolparser/models/statements.py` per `contracts/io-statement-ast.md` (add metadata fields such as `with_lock`, `advancing_clause`, and FD bindings).
+- [x] T018 [US1] Implement parser productions and error-recovery hooks in `cobolparser/parser.py` to map tokens + clauses into the new AST nodes while preserving SourceLocation data.
 - [x] T019 [US1] Update diagnostics for malformed IO statements by adding `IO_*` error codes and recovery hints in `cobolparser/plugins/core.py` (ErrorRecoveryMode helpers).
 - [x] T020 [US1] Refresh documentation (`docs/file-control.md` and `docs/STATEMENT_TEST_COVERAGE_MATRIX.md`) with the newly supported IO forms and AST examples.
-- [ ] T021 [US1] Run the full test + performance suites (guarded by T004) and write post-US1 metrics to `specs/001-io-variation-coverage/baselines/post-us1.json` for regression comparison.
+- [x] T021 [US1] Run the full test + performance suites (guarded by T004) and write post-US1 metrics to `specs/001-io-variation-coverage/baselines/post-us1.json` for regression comparison.
 
 ---
 
@@ -69,15 +69,10 @@ Independent Test: Removing support for any variation forces its tests (unit/cont
 
 ### Tests (write first)
 
-- [ ] T022 [P] [US2] Create unit tests for the coverage reporter in `tests/unit/analysis/test_io_coverage_reporter.py`, mocking pytest results to verify aggregation logic.
-- [ ] T023 [P] [US2] Add integration tests in `tests/integration/io/test_io_coverage_reporting.py` that run a subset of IO tests and assert the generated artifact matches `contracts/io-coverage-schema.json`.
-
-### Implementation
-
-- [ ] T024 [P] [US2] Implement `cobolparser/analysis/io_coverage_reporter.py` to ingest pytest outputs, attach variation metadata, and emit `io-coverage.json` per the schema.
-- [ ] T025 [US2] Add a CLI/utility entry point `tools/io_coverage/generate_artifact.py` plus CI wiring (e.g., `.github/workflows/tests.yml`) so the artifact is published on every run.
-- [ ] T026 [US2] Add schema validation to the workflow (e.g., `scripts/validate_io_coverage.py`) ensuring `io-coverage.json` matches `contracts/io-coverage-schema.json` before CI succeeds.
-- [ ] T027 [US2] Document artifact consumption in `docs/STATEMENT_TEST_COVERAGE_MATRIX.md` and create `docs/io-coverage/README.md` so QA leads know how to audit coverage results.
+- [x] T022 [P] [US2] Create unit tests for the coverage reporter in `tests/unit/analysis/test_io_coverage_reporter.py`, mocking pytest results to verify aggregation logic.
+- [x] T023 [P] [US2] Add integration tests in `tests/integration/io/test_io_coverage_reporting.py` that run a subset of IO tests and assert the generated artifact matches `contracts/io-coverage-schema.json`.
+- [x] T028 [P] [US3] Add unit tests for the summary renderer in `tests/unit/analysis/test_io_coverage_summary.py`, ensuring it maps artifact rows to human-readable entries.
+- [x] T029 [P] [US3] Add documentation integration tests in `tests/integration/docs/test_io_coverage_docs.py` that build the docs and assert the IO coverage table renders with latest data.
 
 ---
 
@@ -89,15 +84,22 @@ Independent Test: Running the summary command or viewing the docs clearly indica
 
 ### Tests (write first)
 
-- [ ] T028 [P] [US3] Add unit tests for the summary renderer in `tests/unit/analysis/test_io_coverage_summary.py`, ensuring it maps artifact rows to human-readable entries.
-- [ ] T029 [P] [US3] Add documentation integration tests in `tests/integration/docs/test_io_coverage_docs.py` that build the docs and assert the IO coverage table renders with latest data.
+- [x] T028 [P] [US3] Add unit tests for the summary renderer in `tests/unit/analysis/test_io_coverage_summary.py`, ensuring it maps artifact rows to human-readable entries.
+- [x] T029 [P] [US3] Add documentation integration tests in `tests/integration/docs/test_io_coverage_docs.py` that build the docs and assert the IO coverage table renders with latest data.
 
 ### Implementation
 
-- [ ] T030 [P] [US3] Implement the summary renderer script `tools/io_coverage/render_markdown.py` that consumes `io-coverage.json` and outputs Markdown/CSV for docs.
-- [ ] T031 [US3] Add a CLI entry point `cobolparser/cli/coverage.py` (or extend existing CLI) to print support status filtered by verb/qualifier.
-- [ ] T032 [US3] Update documentation touchpoints (`docs/README.md`, `specs/001-io-variation-coverage/quickstart.md`) to explain how maintainers read the coverage summary and link to tests.
-- [ ] T033 [US3] Link coverage rows to diagnostics by updating `docs/STATEMENT_TEST_COVERAGE_MATRIX.md` with anchors pointing to `tests/*` node IDs and the artifact summary.
+- [x] T030 [P] [US3] Implement the summary renderer script `tools/io_coverage/render_markdown.py` that consumes `io-coverage.json` and outputs Markdown/CSV for docs.
+- [x] T031 [US3] Add a CLI entry point `cobolparser/cli/coverage.py` (or extend existing CLI) to print support status filtered by verb/qualifier.
+- [x] T032 [US3] Update documentation touchpoints (`docs/README.md`, `specs/001-io-variation-coverage/quickstart.md`) to explain how maintainers read the coverage summary and link to tests.
+- [x] T033 [US3] Link coverage rows to diagnostics by updating `docs/STATEMENT_TEST_COVERAGE_MATRIX.md` with anchors pointing to `tests/*` node IDs and the artifact summary.
+
+- [x] T024 [P] [US2] Implement `cobolparser/analysis/io_coverage_reporter.py` to ingest pytest outputs, attach variation metadata, and emit `io-coverage.json` per the schema.
+- [x] T025 [US2] Add a CLI/utility entry point `tools/io_coverage/generate_artifact.py` plus CI wiring (e.g., `.github/workflows/tests.yml`) so the artifact is published on every run.
+- [x] T026 [US2] Add schema validation to the workflow (e.g., `scripts/validate_io_coverage.py`) ensuring `io-coverage.json` matches `contracts/io-coverage-schema.json` before CI succeeds.
+- [x] T027 [US2] Document artifact consumption in `docs/STATEMENT_TEST_COVERAGE_MATRIX.md` and create `docs/io-coverage/README.md` so QA leads know how to audit coverage results.
+- [x] T030 [P] [US3] Implement the summary renderer script `tools/io_coverage/render_markdown.py` that consumes `io-coverage.json` and outputs Markdown/CSV for docs.
+- [x] T031 [US3] Add a CLI entry point `cobolparser/cli/coverage.py` (or extend existing CLI) to print support status filtered by verb/qualifier.
 
 ---
 
@@ -105,9 +107,9 @@ Independent Test: Running the summary command or viewing the docs clearly indica
 
 Purpose: Wrap-up tasks affecting all stories.
 
-- [ ] T034 [P] Update `CHANGELOG.md` and release notes (if applicable) summarizing IO coverage support and artifact publication.
-- [ ] T035 Re-run the full baseline comparison (tests + performance) and write final metrics to `specs/001-io-variation-coverage/baselines/final.json`, highlighting deviations from T001/T021 and documenting whether SC-002 remains satisfied.
-- [ ] T036 [P] Run code-quality gates (`ruff`, `black`, `mypy`) and refresh top-level `README.md` + `docs/` highlights to reflect full IO coverage and the SC-004 ticket-tracking process.
+- [x] T034 [P] Update `CHANGELOG.md` and release notes (if applicable) summarizing IO coverage support and artifact publication.
+- [x] T035 Re-run the full baseline comparison (tests + performance) and write final metrics to `specs/001-io-variation-coverage/baselines/final.json`, highlighting deviations from T001/T021 and documenting whether SC-002 remains satisfied.
+- [x] T036 [P] Run code-quality gates (`ruff`, `black`, `mypy`) and refresh top-level `README.md` + `docs/` highlights to reflect full IO coverage and the SC-004 ticket-tracking process.
 
 ---
 
