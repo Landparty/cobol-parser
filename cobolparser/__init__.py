@@ -13,25 +13,25 @@ Key Features:
 
 Basic Usage:
     >>> from cobolparser import CobolParser, MemoryConfiguration, ErrorRecoveryMode
-    >>> 
+    >>>
     >>> # Configure parser with memory limits and error handling
     >>> config = MemoryConfiguration(max_memory_mb=256)
     >>> parser = CobolParser(
     ...     memory_config=config,
     ...     error_recovery=ErrorRecoveryMode.COLLECT_ALL
     ... )
-    >>> 
+    >>>
     >>> # Parse COBOL source
     >>> with open('program.cbl', 'r') as f:
     ...     ast = parser.parse(f.read())
-    >>> 
+    >>>
     >>> # Export to JSON for interoperability
     >>> json_output = ast.to_json()
 
 Advanced Usage:
     >>> from cobolparser.dialects import IBMEnterpriseCobol
     >>> from cobolparser.plugins import SerializationConfig
-    >>> 
+    >>>
     >>> # Use IBM Enterprise COBOL dialect with custom serialization
     >>> dialect = IBMEnterpriseCobol()
     >>> serialization = SerializationConfig(include_metadata=True)
@@ -39,7 +39,7 @@ Advanced Usage:
 
 Memory Management:
     The parser includes sophisticated memory management to handle large COBOL programs:
-    
+
     >>> # Configure for large programs (up to 8GB)
     >>> heavy_config = MemoryConfiguration(
     ...     max_memory_mb=8192,
@@ -50,10 +50,10 @@ Memory Management:
 
 Error Recovery:
     Choose between fail-fast and collect-all error recovery modes:
-    
+
     >>> # Fail on first error (default)
     >>> strict_parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
-    >>> 
+    >>>
     >>> # Collect all errors for comprehensive reporting
     >>> lenient_parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 """
@@ -83,6 +83,8 @@ from .models.statements import (
     MoveStatement,
     DisplayStatement,
     PerformStatement,
+    EvaluateStatement,
+    WhenClause,
 )
 from .models.data_items import (
     CobolDataItem,
@@ -149,15 +151,16 @@ __license__ = "MIT"
 # Public API - controls what gets imported with "from cobolparser import *"
 __all__ = [
     # Core parsing errors and configuration
-    "ParseError", 
+    "ParseError",
     "ParseStatistics",
-    
     # AST model classes
     "CobolProgram",
     "CobolDivision",
     "CobolSection",
-    "CobolStatement", 
+    "CobolStatement",
     "CobolExpression",
+    "EvaluateStatement",
+    "WhenClause",
     "CobolDataItem",
     "SourceLocation",
     "ASTNode",
@@ -166,38 +169,31 @@ __all__ = [
     "PerformStatement",
     "PictureClause",
     "OccursClause",
-    
     # Lexer components
     "CobolLexer",
     "Token",
     "TokenType",
     "LexerError",
     "tokenize_cobol",
-    
     # Parser components
     "CobolParser",
-    "ParseResult", 
+    "ParseResult",
     "ParseState",
     "parse_cobol",
-    
     # Preprocessing utilities
     "normalize_fixed_format",
-    
     # Enhanced features
     "MemoryConfiguration",
     "SerializationConfig",
     "ErrorRecoveryMode",
     "DialectType",
     "PluginManager",
-    
     # Package metadata
     "__version__",
     "__author__",
     "__license__",
-    
     # Dialect support
     "IBMEnterpriseCobol",
-    
     # Copybook expansion
     "expand_copybooks",
     "parse_cobol_with_expansion",
@@ -210,16 +206,15 @@ __all__ = [
     "PathTraversalError",
     "EncodingError",
     "NestingDepthError",
-    
     # Analysis utilities
     "DynamicCallAnalyzer",
-    
     # Will be added when implemented:
-    # "ANSICobol", 
+    # "ANSICobol",
     # "MicroFocusCobol",
 ]
 
 # Configure default logging for the package
 import logging
+
 _logger = logging.getLogger(__name__)
 _logger.addHandler(logging.NullHandler())

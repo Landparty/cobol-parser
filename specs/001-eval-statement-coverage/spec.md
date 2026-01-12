@@ -5,6 +5,12 @@
 **Status**: Draft  
 **Input**: User description: "I would like to make sure that all the different variation evaluation statements are covered and tested by the parser for a cobol fix format."
 
+## Clarifications
+
+### Session 2026-01-11
+
+- Q: What scope of EVALUATE variants must be covered for fixed-format parsing? → A: Full IBM fixed-format catalog: single/multi subjects, ANY, THRU/THROUGH, ALSO combos, figurative constants, EVALUATE TRUE/condition with AND/OR, WHEN OTHER, nested EVALUATE.
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--
@@ -22,7 +28,7 @@
 
 ### User Story 1 - Validate all fixed-format EVALUATE variants (Priority: P1)
 
-Parser maintainers need to confirm every fixed-format EVALUATE variation (single subject, multiple subjects with ALSO, truth-value EVALUATE TRUE/FALSE, ANY, THRU/THROUGH ranges, nested EVALUATE) parses into a consistent AST and is backed by explicit coverage.
+Parser maintainers need to confirm every fixed-format EVALUATE variation (single subject, multiple subjects with ALSO, truth-value EVALUATE TRUE/FALSE with AND/OR conditions, ANY, THRU/THROUGH ranges, figurative constants, WHEN OTHER, nested EVALUATE) parses into a consistent AST and is backed by explicit coverage.
 
 **Why this priority**: Missing variant support blocks COBOL program ingestion and erodes parser trust for IBM-style fixed-format source.
 
@@ -30,7 +36,7 @@ Parser maintainers need to confirm every fixed-format EVALUATE variation (single
 
 **Acceptance Scenarios**:
 
-1. **Given** a catalog of fixed-format EVALUATE variants, **When** each sample is parsed, **Then** the parser produces a successful AST for every variant with the correct selectors and WHEN branches represented.
+1. **Given** a catalog of fixed-format EVALUATE variants, **When** each sample is parsed, **Then** the parser produces a successful AST for every variant with the correct selectors (including AND/OR conditions and figurative constants) and WHEN branches represented.
 2. **Given** an EVALUATE statement that combines subjects with ALSO and range conditions (THRU/THROUGH), **When** parsed in fixed-format layout, **Then** the AST reflects combined selectors without loss or reordering.
 
 ---
@@ -85,7 +91,7 @@ Parser owners want a living coverage matrix so future grammar or lexer changes c
 
 ### Functional Requirements
 
-- **FR-001**: Define and maintain a catalog of fixed-format EVALUATE variants (single subject, multiple subjects with ALSO, EVALUATE TRUE/FALSE, ANY, THRU/THROUGH ranges, nested cases) with clear descriptions and acceptance expectations.
+- **FR-001**: Define and maintain a catalog of fixed-format EVALUATE variants (single subject, multiple subjects with ALSO, EVALUATE TRUE/FALSE with AND/OR conditions, ANY, THRU/THROUGH ranges, figurative constants, WHEN OTHER, nested cases) with clear descriptions and acceptance expectations.
 - **FR-002**: The parser MUST successfully parse every cataloged variant in fixed-format layout and produce a consistent structural representation that preserves selectors, ranges, and WHEN clauses.
 - **FR-003**: The parser MUST validate fixed-format column rules for EVALUATE statements (indicator and area bounds, continuation handling) and surface deterministic diagnostics when violations occur.
 - **FR-004**: Provide positive test fixtures that cover each cataloged variant with expected serialized output to prove support.

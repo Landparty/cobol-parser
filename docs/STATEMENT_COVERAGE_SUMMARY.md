@@ -1,18 +1,18 @@
 # COBOL Statement Coverage - Quick Reference
 
 **Status**: 2026-01-11  
-**Coverage**: 11/41 statements (27%) | 316/1,153 tests (27.4%)
+**Coverage**: 12/41 statements (29%) | 367/1,169 tests (31.4%)
 
 ## 📊 At-a-Glance Status
 
 | Priority | Statements | Done | In Progress | To Do | Test Coverage |
 |----------|-----------|------|-------------|-------|---------------|
-| 🔴 HIGH | 24 | 11 | 0 | 13 | 43.1% (316/733) |
+| 🔴 HIGH | 24 | 12 | 0 | 12 | 47.2% (367/778) |
 | 🟡 MEDIUM | 12 | 0 | 0 | 12 | 0% (0/322) |
 | 🟢 LOW | 5 | 0 | 0 | 5 | 0% (0/98) |
-| **TOTAL** | **41** | **11** | **0** | **30** | **27.4%** (316/1,153) |
+| **TOTAL** | **41** | **12** | **0** | **29** | **31.4%** (367/1,169) |
 
-## ✅ Implemented (11 statements)
+## ✅ Implemented (12 statements)
 
 | Statement | Test Count | Usage Frequency |
 |-----------|-----------|-----------------|
@@ -27,6 +27,7 @@
 | EXEC SQL | 29 tests | 50% of programs (IBM) |
 | EXEC CICS | 23 tests | 40% of programs (IBM) |
 | EXEC IMS | 15 tests | 10% of programs (IBM) |
+| **EVALUATE** | **51 tests** | **60% of programs** |
 
 ## 🔴 HIGH Priority Gaps (13 statements)
 
@@ -50,12 +51,12 @@
 
 **Phase 2 Target**: Weeks 10-18, **180 tests total**
 
-### Control Flow (3 statements - Phase 3)
-- ❌ **EVALUATE** - 60% frequency, 50 tests needed (complex)
+### Control Flow (2 statements - Phase 3)
+- ✅ **EVALUATE** - 60% frequency, 51 tests COMPLETE (2026-01-11)
 - ❌ **ACCEPT** - 70% frequency, 28 tests needed
 - ❌ **INITIALIZE** - 65% frequency, 27 tests needed
 
-**Phase 3 Target**: Weeks 19-27, **105 tests total**
+**Phase 3 Target**: Weeks 19-27, **55 tests total**
 
 ## 🟡 MEDIUM Priority (12 statements - Phases 4-5)
 
@@ -106,8 +107,8 @@ All implementations MUST follow:
 
 | Metric | Current | Phase 1 Target | Final Target |
 |--------|---------|---------------|--------------|
-| Statement Coverage | 27% (11/41) | 37% (15/41) | 100% (41/41) |
-| Test Count | 618 tests | 750 tests | 1,455 tests |
+| Statement Coverage | 29% (12/41) | 37% (15/41) | 100% (41/41) |
+| Test Count | 667 tests | 750 tests | 1,455 tests |
 | Test Coverage % | 90%+ (current) | 90%+ (maintain) | 90%+ (maintain) |
 | Parsing Speed | 10K lines/sec | 9.5K lines/sec | 9K lines/sec |
 
