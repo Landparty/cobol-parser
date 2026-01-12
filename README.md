@@ -52,7 +52,15 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 
 ## Documentation
 
-Full consolidated documentation is available in `DOCUMENTATION.md` (root). It includes a focused summary of installation, quick-start examples, configuration options, and notes about CALL statement enhancements. For per-topic deep dives (CALL/SQL/PERFORM/etc.) keep using the files under the `docs/` directory.
+Full documentation index is available at [docs/README.md](docs/README.md). It contains a comprehensive index of all guides, including installation, quick-start, and per-topic deep dives.
+
+> [!TIP]
+> 🍳 **Check out the [Cookbook](docs/cookbook.md)!**
+> It features fresh, real-world recipes for:
+> - Extracting SQL statements
+> - Validating File Descriptors
+> - Generating Call Graphs
+> - Handling massive files with streaming
 
 Note: Several large, report-style markdown files (CALL examples, analysis, reports) were archived to `archived_docs/` to keep the root tidy. If you previously referenced `COMPLETION_REPORT.md`, `REAL_WORLD_CALL_EXAMPLES.md`, `CALL_COVERAGE_ANALYSIS.md`, or `EXAMPLES_SUMMARY.md`, you will find archived copies in `archived_docs/`.
 

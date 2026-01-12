@@ -5,6 +5,7 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 ## 📚 Quick Navigation
 
 ### 🎯 Project Planning & Coverage
+- **[Cookbook / Usage Examples](cookbook.md)** - 🍳 **Start Here!** Real-world recipes for SQL extraction, dependency mapping, and more.
 - **[Statement Coverage Summary](STATEMENT_COVERAGE_SUMMARY.md)** - Quick reference: What's implemented, what's missing (START HERE)
 - **[Gap Analysis](STATEMENT_COVERAGE_GAP_ANALYSIS.md)** - Comprehensive analysis of missing COBOL statements (42-week roadmap)
 - **[Test Coverage Matrix](STATEMENT_TEST_COVERAGE_MATRIX.md)** - Detailed test tracking for TDD workflow
