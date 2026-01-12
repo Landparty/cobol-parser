@@ -5,6 +5,8 @@ Auto-generated from all feature plans. Last updated: 2026-01-11
 **Constitution**: All development must follow principles in `.specify/memory/constitution.md` (TDD, Code Quality, Performance, UX Consistency, IBM COBOL Priority)
 
 ## Active Technologies
+- Python 3.13+ + Standard library, `pytest`, `pytest-cov`, `ruff`, `black`, `mypy`; internal AST/lexer/parser framework in `cobolparser/` (001-eval-statement-coverage)
+- N/A (in-memory parsing; optional JSON export) (001-eval-statement-coverage)
 
 - Python 3.13 (per `pyproject.toml`) with modern typing/dataclass features. + Internal modules `cobolparser/lexer.py`, `cobolparser/parser.py`, `cobolparser/models/{program,statements,data_items}.py`, dialect plug-ins in `cobolparser/dialects/ibm_enterprise.py`, plus dev tooling `pytest`, `pytest-cov`, `ruff`, `black`, `mypy`. (001-io-variation-coverage)
 
@@ -25,6 +27,7 @@ cd src; pytest; ruff check .
 Python 3.13 (per `pyproject.toml`) with modern typing/dataclass features.: Follow standard conventions
 
 ## Recent Changes
+- 001-eval-statement-coverage: Added Python 3.13+ + Standard library, `pytest`, `pytest-cov`, `ruff`, `black`, `mypy`; internal AST/lexer/parser framework in `cobolparser/`
 
 - 001-io-variation-coverage: Added Python 3.13 (per `pyproject.toml`) with modern typing/dataclass features. + Internal modules `cobolparser/lexer.py`, `cobolparser/parser.py`, `cobolparser/models/{program,statements,data_items}.py`, dialect plug-ins in `cobolparser/dialects/ibm_enterprise.py`, plus dev tooling `pytest`, `pytest-cov`, `ruff`, `black`, `mypy`.
 

@@ -31,6 +31,8 @@ from .models.statements import (
     SelectStatement,
     ArithmeticExpression,
     ConditionalExpression,
+    EvaluateStatement,
+    WhenClause,
     # IO Statement Classes (with backward compatibility aliases)
     ReadStatement,
     WriteStatement,
@@ -2736,6 +2738,9 @@ class CobolParser:
             if ttype == TokenType.SORT or upper_val == "SORT":
                 i = self._parse_sort_inline(tokens, i)
                 continue
+            if ttype == TokenType.EVALUATE or upper_val == "EVALUATE":
+                i = self._parse_evaluate_inline(tokens, i)
+                continue
             # Handle EXEC SQL blocks
             if ttype == TokenType.EXEC or upper_val == "EXEC":
                 i = self._parse_exec_inline(tokens, i)
@@ -4528,11 +4533,19 @@ class CobolParser:
         ):
             i += 1
 
-        # Parse statements until ELSE or next IF or end
-        while i < len(tokens) and tokens[i].type not in (TokenType.ELSE, TokenType.IF):
+        # Parse statements until ELSE or next IF or control structure terminators
+        while i < len(tokens):
             verb_tok = tokens[i]
             verb_type = verb_tok.type
             verb_val = verb_tok.value.upper() if verb_tok.value else ""
+
+            # Check for ELSE, IF, and control structure terminators
+            if verb_type == TokenType.ELSE or verb_val == "ELSE":
+                break
+            if verb_type == TokenType.IF or verb_val == "IF":
+                break
+            if verb_val in ("END-IF", "WHEN", "END-EVALUATE", "END-PERFORM"):
+                break
 
             # Only parse known verbs
             if verb_type == TokenType.MOVE or verb_val == "MOVE":
@@ -4595,10 +4608,16 @@ class CobolParser:
             ):
                 i += 1
 
-            while i < len(tokens) and tokens[i].type not in (TokenType.IF,):
+            while i < len(tokens):
                 verb_tok = tokens[i]
                 verb_type = verb_tok.type
                 verb_val = verb_tok.value.upper() if verb_tok.value else ""
+
+                # Check for IF and control structure terminators
+                if verb_type == TokenType.IF or verb_val == "IF":
+                    break
+                if verb_val in ("END-IF", "WHEN", "END-EVALUATE", "END-PERFORM"):
+                    break
 
                 if verb_type == TokenType.MOVE or verb_val == "MOVE":
                     j = self._parse_move_inline(tokens, i)
@@ -4759,6 +4778,348 @@ class CobolParser:
             self.current_section.add_child(sort_stmt)
 
         return i
+
+    def _parse_evaluate_inline(self, tokens: list, i: int) -> int:
+        """Parse EVALUATE statement inline.
+        
+        Syntax:
+            EVALUATE {subject [ALSO subject]...}
+                [WHEN {selector [ALSO selector]...}
+                    statement...]
+                [WHEN OTHER
+                    statement...]
+            [END-EVALUATE]
+        
+        Returns:
+            Next token index after EVALUATE statement
+        """
+        start_token = tokens[i]
+        eval_stmt = EvaluateStatement(start_token.location)
+        self._set_node_context(eval_stmt)
+        i += 1  # Skip EVALUATE
+        
+        # Skip newlines/comments after EVALUATE
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Parse subjects (one or more separated by ALSO)
+        while i < len(tokens):
+            # Skip newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            if i >= len(tokens):
+                break
+            
+            # Check for WHEN (end of subjects)
+            if tokens[i].value and tokens[i].value.upper() == "WHEN":
+                break
+            
+            # Parse subject expression - can be identifier, TRUE, FALSE, etc.
+            subject_val = tokens[i].value
+            eval_stmt.add_subject(subject_val)
+            i += 1
+            
+            # Skip newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            # Check for ALSO (more subjects)
+            if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == "ALSO":
+                i += 1  # Skip ALSO
+                continue
+            else:
+                break  # No more subjects
+        
+        # Parse WHEN clauses
+        found_when_other = False
+        found_end_evaluate = False
+        
+        while i < len(tokens):
+            # Skip newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            if i >= len(tokens):
+                break
+            
+            # Check for END-EVALUATE
+            if tokens[i].type == TokenType.END_EVALUATE or \
+               (tokens[i].value and tokens[i].value.upper() == "END-EVALUATE"):
+                i += 1  # Consume END-EVALUATE
+                found_end_evaluate = True
+                break
+            
+            # Check for WHEN
+            if not (tokens[i].value and tokens[i].value.upper() == "WHEN"):
+                break
+            
+            when_location = tokens[i].location
+            i += 1  # Skip WHEN
+            
+            # Skip newlines after WHEN
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            # Parse selectors
+            selectors = []
+            is_when_other = False
+            
+            # Check for empty WHEN (nothing after WHEN keyword)
+            if i < len(tokens) and tokens[i].value:
+                val = tokens[i].value.upper()
+                # If next token starts a statement, selector is empty
+                if val in ("WHEN", "END-EVALUATE", "DISPLAY", "MOVE", "PERFORM", "CALL", "IF"):
+                    # Empty selector - will be caught by validation
+                    pass
+            
+            while i < len(tokens):
+                # Skip newlines
+                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    i += 1
+                
+                if i >= len(tokens):
+                    break
+                
+                # Check for OTHER
+                if tokens[i].value and tokens[i].value.upper() == "OTHER":
+                    is_when_other = True
+                    i += 1
+                    break
+                
+                # Check for next statement/WHEN/END-EVALUATE
+                if tokens[i].value:
+                    val = tokens[i].value.upper()
+                    if val in ("WHEN", "END-EVALUATE"):
+                        break
+                    # Check for statement-starting verbs
+                    if tokens[i].type in (TokenType.MOVE, TokenType.DISPLAY, TokenType.PERFORM,
+                                         TokenType.CALL, TokenType.IF, TokenType.WRITE):
+                        break
+                    if val in ("DISPLAY", "MOVE", "PERFORM", "CALL", "IF", "WRITE", "STOP"):
+                        break
+                
+                # Parse selector
+                selector_dict = self._parse_evaluate_selector(tokens, i)
+                if selector_dict:
+                    selectors.append(selector_dict['selector'])
+                    i = selector_dict['next_i']
+                else:
+                    i += 1
+                
+                # Skip newlines
+                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    i += 1
+                
+                # Check for ALSO
+                if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == "ALSO":
+                    # Check for consecutive ALSO (diagnostic)
+                    next_idx = i + 1
+                    while next_idx < len(tokens) and tokens[next_idx].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                        next_idx += 1
+                    if next_idx < len(tokens) and tokens[next_idx].value and tokens[next_idx].value.upper() == "ALSO":
+                        self.add_error(self.create_error(
+                            "Consecutive ALSO keywords not allowed",
+                            tokens[i].location
+                        ))
+                    i += 1  # Skip ALSO
+                    continue
+                else:
+                    break
+            
+            # Create WhenClause
+            when_clause = WhenClause(selectors, when_location)
+            
+            # Parse statements in WHEN block (simplified - skip to next WHEN/END-EVALUATE)
+            # In a full implementation, would recursively parse statements
+            while i < len(tokens):
+                # Skip newlines
+                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    i += 1
+                
+                if i >= len(tokens):
+                    break
+                
+                # Check for next WHEN or END-EVALUATE
+                if tokens[i].value:
+                    val = tokens[i].value.upper()
+                    if val in ("WHEN", "END-EVALUATE"):
+                        break
+                    if tokens[i].type == TokenType.END_EVALUATE:
+                        break
+                
+                # Skip statement tokens (simplified parsing for now)
+                # A full implementation would call statement parsers here
+                i += 1
+            
+            # Add WHEN clause
+            if is_when_other:
+                # DIAGNOSTIC: WHEN OTHER must be last
+                if found_when_other:
+                    self.add_error(self.create_error(
+                        "Multiple WHEN OTHER clauses not allowed",
+                        when_location
+                    ))
+                found_when_other = True
+                eval_stmt.set_default_when(when_clause)
+            else:
+                # DIAGNOSTIC: Conditional WHEN after WHEN OTHER
+                if found_when_other:
+                    self.add_error(self.create_error(
+                        "Conditional WHEN after WHEN OTHER is not allowed",
+                        when_location
+                    ))
+                eval_stmt.add_when_clause(when_clause)
+        
+        # DIAGNOSTIC: Missing END-EVALUATE
+        if not found_end_evaluate:
+            self.add_error(self.create_error(
+                "EVALUATE statement requires END-EVALUATE terminator",
+                start_token.location
+            ))
+        
+        # Run diagnostics
+        self._validate_evaluate_statement(eval_stmt)
+        
+        # Add to AST
+        if self.current_section:
+            self.current_section.add_child(eval_stmt)
+        
+        return i
+    
+    def _parse_evaluate_selector(self, tokens: list, i: int) -> Optional[Dict]:
+        """Parse a single EVALUATE selector.
+        
+        Returns:
+            Dict with 'selector' and 'next_i', or None
+        """
+        if i >= len(tokens):
+            return None
+        
+        start_i = i
+        
+        # Check for ANY
+        if tokens[i].value and tokens[i].value.upper() == "ANY":
+            return {
+                'selector': {'type': 'Any'},
+                'next_i': i + 1
+            }
+        
+        # Get start value
+        if not tokens[i].value:
+            return None
+        
+        start_val = tokens[i].value
+        i += 1
+        
+        # Skip newlines
+        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+            i += 1
+        
+        # Check for THRU/THROUGH range
+        if i < len(tokens) and tokens[i].value and tokens[i].value.upper() in ("THRU", "THROUGH"):
+            thru_location = tokens[i].location
+            i += 1  # Skip THRU
+            
+            # Skip newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            # DIAGNOSTIC: Check for end value
+            if i >= len(tokens) or not tokens[i].value or \
+               tokens[i].value.upper() in ("ALSO", "WHEN", "END-EVALUATE", "DISPLAY", "MOVE"):
+                self.add_error(self.create_error(
+                    "THRU/THROUGH requires both start and end values",
+                    thru_location
+                ))
+                return {
+                    'selector': {'type': 'Range', 'start': start_val, 'end': None},
+                    'next_i': i
+                }
+            
+            end_val = tokens[i].value
+            i += 1
+            
+            return {
+                'selector': {'type': 'Range', 'start': start_val, 'end': end_val},
+                'next_i': i
+            }
+        
+        # Check for condition with AND/OR (for EVALUATE TRUE)
+        # Collect all tokens until WHEN, ALSO, or END-EVALUATE
+        condition_text = start_val
+        found_operator = None
+        original_i = i
+        
+        while i < len(tokens):
+            # Skip newlines
+            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
+                i += 1
+            
+            if i >= len(tokens):
+                break
+            
+            if not tokens[i].value:
+                break
+            
+            val = tokens[i].value.upper()
+            
+            # Check for terminators
+            if val in ("WHEN", "END-EVALUATE", "ALSO", "DISPLAY", "MOVE", "PERFORM", "CALL", "IF"):
+                break
+            
+            # Check for AND/OR operators
+            if val in ("AND", "OR"):
+                found_operator = val
+            
+            # Add to condition text
+            condition_text += " " + tokens[i].value
+            i += 1
+        
+        # If we found AND/OR, this is a Condition selector
+        if found_operator:
+            return {
+                'selector': {'type': 'Condition', 'operator': found_operator, 'text': condition_text},
+                'next_i': i
+            }
+        
+        # Simple literal/identifier - restore position to right after first value
+        return {
+            'selector': {'type': 'Literal', 'value': start_val},
+            'next_i': original_i
+        }
+    
+    def _validate_evaluate_statement(self, stmt: EvaluateStatement) -> None:
+        """Validate EVALUATE statement and report diagnostics."""
+        
+        # 1. Missing WHEN clause
+        if not stmt.when_clauses and not stmt.default_when:
+            self.add_error(self.create_error(
+                "EVALUATE statement requires at least one WHEN clause",
+                stmt.location
+            ))
+        
+        # 2. Selector/subject count mismatch
+        expected_count = len(stmt.subjects)
+        for clause in stmt.when_clauses:
+            actual_count = len(clause.selectors)
+            if actual_count != expected_count:
+                self.add_error(self.create_error(
+                    f"WHEN clause has {actual_count} selector(s) "
+                    f"but EVALUATE has {expected_count} subject(s)",
+                    clause.location
+                ))
+        
+        # 3. Empty WHEN selector
+        for clause in stmt.when_clauses:
+            if not clause.selectors or len(clause.selectors) == 0:
+                self.add_error(self.create_error(
+                    "WHEN clause cannot have empty selector",
+                    clause.location
+                ))
+        
+        # Note: THRU validation, WHEN OTHER placement, and consecutive ALSO
+        # are validated during parsing for better error locations
 
     def parse_paragraph_or_statement(self) -> None:
         """Parse paragraph names, section names, or other statement types."""
