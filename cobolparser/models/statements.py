@@ -777,6 +777,651 @@ class FunctionCall(CobolExpression):
         return result
 
 
+class IOReadStatement(CobolStatement):
+    """AST node for READ statements with comprehensive IBM Enterprise COBOL variation support.
+    
+    Contract: contracts/io-statement-ast.md
+    
+    Supports:
+    - Sequential, indexed, and relative READ operations
+    - Multiple access modes (NEXT, PREVIOUS, RANDOM, FIRST, LAST, CURRENT)
+    - INTO clause for data transfer
+    - KEY clause for indexed and relative files
+    - AT END and NOT AT END clauses
+    - INVALID KEY handling
+    - Lock modes and file access controls
+    - RETRY clause for automatic retries
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("READ", location)
+        self.file_name: Optional[str] = None
+        self.record_name: Optional[str] = None
+        self.into_target: Optional[str] = None
+        self.key_name: Optional[str] = None  # KEY IS value (contract field name)
+        self.key_value: Optional[str] = None  # Backward compat alias
+        self.access_mode: Optional[str] = None  # NEXT, FIRST, LAST, PREVIOUS, CURRENT (contract field)
+        self.record_format: Optional[str] = None  # Legacy name, kept for compat
+        self.lock_scope: Optional[str] = None  # record, file (contract field)
+        self.with_lock: bool = False
+        self.with_nowait: bool = False
+        self.at_end_clause: Optional[List['CobolStatement']] = None
+        self.not_at_end_clause: Optional[List['CobolStatement']] = None
+        self.invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.not_invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.retry_count: Optional[int] = None
+        # Metadata tracking
+        self._metadata['has_invalid_key'] = False
+        self._metadata['has_at_end'] = False
+        self._metadata['uses_lock'] = False
+        
+    def set_file_name(self, name: str) -> None:
+        """Set the file name to read from."""
+        self.file_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_record_name(self, name: str) -> None:
+        """Set the record being read."""
+        self.record_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_into(self, target: str) -> None:
+        """Set the INTO clause target."""
+        self.into_target = target
+        if target not in self.operands:
+            self.operands.append(target)
+    
+    def set_key(self, value: str) -> None:
+        """Set the KEY IS clause value."""
+        self.key_value = value
+        self.key_name = value  # Contract field
+    
+    def set_record_format(self, fmt: str) -> None:
+        """Set the access mode (NEXT, FIRST, LAST, PREVIOUS, CURRENT)."""
+        fmt_upper = fmt.upper()
+        self.record_format = fmt_upper  # Legacy compat
+        self.access_mode = fmt_upper  # Contract field
+    
+    def set_access_mode(self, mode: str) -> None:
+        """Set the access mode per contract."""
+        self.access_mode = mode.upper()
+        self.record_format = self.access_mode  # Backward compat
+    
+    def set_lock_mode(self, with_lock: bool = False, with_nowait: bool = False) -> None:
+        """Set the lock mode for the read."""
+        self.with_lock = with_lock
+        self.with_nowait = with_nowait
+        if with_lock:
+            self._metadata['uses_lock'] = True
+            self.lock_scope = 'record'
+    
+    def set_at_end_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the AT END clause."""
+        self.at_end_clause = statements
+        if statements:
+            self._metadata['has_at_end'] = True
+    
+    def set_not_at_end_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT AT END clause."""
+        self.not_at_end_clause = statements
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+        if statements:
+            self._metadata['has_invalid_key'] = True
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def set_retry(self, count: int) -> None:
+        """Set the RETRY clause count."""
+        self.retry_count = count
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert READ statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "record_name": self.record_name,
+            "into_target": self.into_target,
+            # Legacy field names (backward compatibility)
+            "record_format": self.record_format,
+            "key_value": self.key_value,
+            # Contract field names
+            "key_name": self.key_name,
+            "access_mode": self.access_mode,
+            "lock_scope": self.lock_scope,
+            # Status flags
+            "with_lock": self.with_lock,
+            "with_nowait": self.with_nowait,
+            # Clauses
+            "at_end_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.at_end_clause or [])],
+            "not_at_end_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_at_end_clause or [])],
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+            "retry_count": self.retry_count,
+        })
+        return result
+
+
+# Backward compatibility alias
+ReadStatement = IOReadStatement
+
+
+class IOWriteStatement(CobolStatement):
+    """AST node for WRITE statements with comprehensive IBM Enterprise COBOL variation support.
+    
+    Contract: contracts/io-statement-ast.md
+    
+    Supports:
+    - FROM clause for data source
+    - BEFORE/AFTER ADVANCING for print files
+    - AT END-OF-PAGE clause
+    - INVALID KEY handling for indexed files
+    - Record deletion for VSAM files
+    - Multiple LINES specification
+    - Lock modes and file access controls
+    - RETRY clause for automatic retries
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("WRITE", location)
+        self.file_name: Optional[str] = None  # Contract field (added)
+        self.record_name: Optional[str] = None
+        self.from_clause: Optional[str] = None  # Contract field name
+        self.from_source: Optional[str] = None  # Legacy compat
+        self.advancing_clause: Optional[Dict[str, Any]] = None  # Contract field: {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"}
+        self.advancing_mode: Optional[str] = None  # Legacy compat
+        self.advancing_lines: Optional[int] = None  # Legacy compat
+        self.advancing_page: bool = False  # Legacy compat
+        self.delete_record: bool = False  # For VSAM DELETE
+        self.at_eop_clause: Optional[List['CobolStatement']] = None  # AT END-OF-PAGE
+        self.invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.not_invalid_key_clause: Optional[List['CobolStatement']] = None
+        self.retry_count: Optional[int] = None
+        self.with_lock: bool = False
+        self.lock_scope: Optional[str] = None  # Contract field
+        # Metadata tracking
+        self._metadata['has_invalid_key'] = False
+        self._metadata['uses_advancing'] = False
+        self._metadata['uses_lock'] = False
+        
+    def set_record_name(self, name: str) -> None:
+        """Set the record being written."""
+        self.record_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_from(self, source: str) -> None:
+        """Set the FROM clause source."""
+        self.from_source = source
+        self.from_clause = source  # Contract field
+        if source not in self.operands:
+            self.operands.append(source)
+    
+    def set_advancing(self, mode: str, lines: Optional[int] = None, page: bool = False) -> None:
+        """Set the ADVANCING clause (legacy and contract)."""
+        mode_upper = mode.upper()
+        self.advancing_mode = mode_upper  # Legacy compat
+        self.advancing_lines = lines  # Legacy compat
+        self.advancing_page = page  # Legacy compat
+        
+        # Contract field: advancing_clause
+        self.advancing_clause = {
+            "type": mode_upper,  # BEFORE or AFTER
+            "value": lines if lines else ("PAGE" if page else None),
+            "unit": "CHANNEL" if page else ("LINES" if lines else None)
+        }
+        if self.advancing_clause:
+            self._metadata['uses_advancing'] = True
+    
+    def set_delete(self, delete: bool = True) -> None:
+        """Set the VSAM DELETE flag."""
+        self.delete_record = delete
+    
+    def set_at_eop_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the AT END-OF-PAGE clause."""
+        self.at_eop_clause = statements
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+        if statements:
+            self._metadata['has_invalid_key'] = True
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def set_retry(self, count: int) -> None:
+        """Set the RETRY clause count."""
+        self.retry_count = count
+    
+    def set_lock(self, with_lock: bool = True) -> None:
+        """Set the LOCK flag."""
+        self.with_lock = with_lock
+        if with_lock:
+            self._metadata['uses_lock'] = True
+            self.lock_scope = 'record'
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert WRITE statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "record_name": self.record_name,
+            # Legacy field names (backward compatibility)
+            "from_source": self.from_source,
+            "advancing_mode": self.advancing_mode,
+            "advancing_lines": self.advancing_lines,
+            "advancing_page": self.advancing_page,
+            # Contract field names
+            "from_clause": self.from_clause,
+            "advancing_clause": self.advancing_clause,
+            "lock_scope": self.lock_scope,
+            # Status flags
+            "delete_record": self.delete_record,
+            "with_lock": self.with_lock,
+            # Clauses
+            "at_eop_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.at_eop_clause or [])],
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+            "retry_count": self.retry_count,
+        })
+        return result
+
+
+# Backward compatibility alias
+WriteStatement = IOWriteStatement
+
+
+class IOOpenStatement(CobolStatement):
+    """AST node for OPEN statements with comprehensive IO variation support.
+    
+    Supports:
+    - Multiple file opens in single statement
+    - OPEN INPUT, OUTPUT, I-O, EXTEND modes
+    - Error handling for file status issues
+    - REPOSITION for VSAM files
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("OPEN", location)
+        self.open_mode: Optional[str] = None  # INPUT, OUTPUT, I-O, EXTEND
+        self.file_names: List[str] = []
+        self.with_reposition: bool = False
+        self.reel_unit_control: Optional[str] = None  # Contract field
+        self._metadata = {
+            'has_reel_unit': False,
+        }
+        
+    def set_open_mode(self, mode: str) -> None:
+        """Set the OPEN mode."""
+        self.open_mode = mode.upper()  # INPUT, OUTPUT, I-O, EXTEND
+    
+    def add_file(self, file_name: str) -> None:
+        """Add a file to open."""
+        if file_name not in self.file_names:
+            self.file_names.append(file_name)
+            self.operands.append(file_name)
+    
+    def set_reposition(self, reposition: bool = True) -> None:
+        """Set the REPOSITION flag for VSAM files."""
+        self.with_reposition = reposition
+    
+    def set_reel_unit_control(self, control: str) -> None:
+        """Set the REEL/UNIT control (contract field)."""
+        self.reel_unit_control = control.upper()
+        self._metadata['has_reel_unit'] = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert OPEN statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "open_mode": self.open_mode,
+            "file_names": self.file_names,
+            "with_reposition": self.with_reposition,
+            "reel_unit_control": self.reel_unit_control,  # Contract field
+        })
+        return result
+
+
+# Backward compatibility alias
+OpenStatement = IOOpenStatement
+
+
+class IOCloseStatement(CobolStatement):
+    """AST node for CLOSE statements with comprehensive IO variation support.
+    
+    Supports:
+    - Multiple file closes in single statement
+    - REEL/UNIT for tape files
+    - WITH NO REWIND for tape operations
+    - WITH LOCK for exclusive close
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("CLOSE", location)
+        self.file_names: List[str] = []
+        self.close_options: Dict[str, Any] = {}  # reel, unit, no_rewind, with_lock
+        self._metadata = {
+            'has_lock': False,
+            'has_reel_unit': False,
+        }
+        
+    def add_file(self, file_name: str, reel: bool = False, unit: bool = False,
+                 no_rewind: bool = False, with_lock: bool = False) -> None:
+        """Add a file to close with options."""
+        if file_name not in self.file_names:
+            self.file_names.append(file_name)
+            self.operands.append(file_name)
+            self.close_options[file_name] = {
+                'reel': reel,
+                'unit': unit,
+                'no_rewind': no_rewind,
+                'with_lock': with_lock
+            }
+            if with_lock:
+                self._metadata['has_lock'] = True
+            if reel or unit:
+                self._metadata['has_reel_unit'] = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert CLOSE statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_names": self.file_names,
+            "close_options": self.close_options,
+        })
+        return result
+
+
+# Backward compatibility alias
+CloseStatement = IOCloseStatement
+
+
+class IOAcceptStatement(CobolStatement):
+    """AST node for ACCEPT statements with comprehensive IO variation support.
+    
+    Supports:
+    - FROM keyword variations (CONSOLE, DISPLAY, COMMAND-LINE, etc.)
+    - AT LINE/COLUMN positioning
+    - WITH CURSOR positioning
+    - COLOR specification
+    - BEEP for audible alert
+    - NO ECHO for password input
+    - RETURN-CODE and ENVIRONMENT-NAME
+    - DATE/TIME intrinsics
+    """
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("ACCEPT", location)
+        self.target: Optional[str] = None
+        self.from_source: Optional[str] = None  # CONSOLE, DISPLAY, COMMAND-LINE, DATE, TIME, etc.
+        self.environment_name: Optional[str] = None  # Contract field
+        self.at_line: Optional[int] = None
+        self.at_column: Optional[int] = None
+        self.with_cursor: bool = False
+        self.color_attribute: Optional[str] = None
+        self.with_beep: bool = False
+        self.with_no_echo: bool = False
+        self._metadata = {
+            'has_environment_name': False,
+            'has_position': False,
+        }
+        
+    def set_target(self, name: str) -> None:
+        """Set the accept target variable."""
+        self.target = name
+        if name not in self.operands:
+            self.operands.append(name)
+    
+    def set_from(self, source: str) -> None:
+        """Set the FROM source."""
+        self.from_source = source.upper()
+    
+    def set_environment_name(self, name: str) -> None:
+        """Set the ENVIRONMENT-NAME for FROM ENVIRONMENT clause (contract field)."""
+        self.environment_name = name
+        self._metadata['has_environment_name'] = True
+    
+    def set_position(self, line: Optional[int] = None, column: Optional[int] = None) -> None:
+        """Set the position (AT LINE/COLUMN)."""
+        self.at_line = line
+        self.at_column = column
+        if line is not None or column is not None:
+            self._metadata['has_position'] = True
+    
+    def set_cursor(self, with_cursor: bool = True) -> None:
+        """Set the WITH CURSOR flag."""
+        self.with_cursor = with_cursor
+    
+    def set_color(self, attribute: str) -> None:
+        """Set the COLOR attribute."""
+        self.color_attribute = attribute
+    
+    def set_beep(self, with_beep: bool = True) -> None:
+        """Set the BEEP flag."""
+        self.with_beep = with_beep
+    
+    def set_no_echo(self, with_no_echo: bool = True) -> None:
+        """Set the NO ECHO flag."""
+        self.with_no_echo = with_no_echo
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert ACCEPT statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "target": self.target,
+            "from_source": self.from_source,
+            "environment_name": self.environment_name,  # Contract field
+            "at_line": self.at_line,
+            "at_column": self.at_column,
+            "with_cursor": self.with_cursor,
+            "color_attribute": self.color_attribute,
+            "with_beep": self.with_beep,
+            "with_no_echo": self.with_no_echo,
+        })
+        return result
+
+
+# Backward compatibility alias
+AcceptStatement = IOAcceptStatement
+
+
+class IORewriteStatement(CobolStatement):
+    """IBM Enterprise COBOL REWRITE statement AST node."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("REWRITE_STATEMENT", location)
+        self.file_name: Optional[str] = None
+        self.record_name: Optional[str] = None
+        self.invalid_key_clause: List['CobolStatement'] = []
+        self.not_invalid_key_clause: List['CobolStatement'] = []
+        self.with_lock: bool = False
+        self._metadata = {
+            'has_invalid_key': False,
+            'uses_lock': False,
+        }
+    
+    def set_file_name(self, file_name: str) -> None:
+        """Set the file name."""
+        self.file_name = file_name
+    
+    def set_record_name(self, record_name: str) -> None:
+        """Set the record name to rewrite."""
+        self.record_name = record_name
+        if record_name not in self.operands:
+            self.operands.append(record_name)
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+        if statements:
+            self._metadata['has_invalid_key'] = True
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def set_lock(self, with_lock: bool = True) -> None:
+        """Set the LOCK flag."""
+        self.with_lock = with_lock
+        if with_lock:
+            self._metadata['uses_lock'] = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert REWRITE statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "record_name": self.record_name,
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+            "with_lock": self.with_lock,
+        })
+        return result
+
+
+# Backward compatibility alias
+RewriteStatement = IORewriteStatement
+
+
+class IODeleteStatement(CobolStatement):
+    """IBM Enterprise COBOL DELETE statement AST node."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("DELETE_STATEMENT", location)
+        self.file_name: Optional[str] = None
+        self.invalid_key_clause: List['CobolStatement'] = []
+        self.not_invalid_key_clause: List['CobolStatement'] = []
+        self.with_lock: bool = False
+        self._metadata = {
+            'has_invalid_key': False,
+            'uses_lock': False,
+        }
+    
+    def set_file_name(self, file_name: str) -> None:
+        """Set the file name."""
+        self.file_name = file_name
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+        if statements:
+            self._metadata['has_invalid_key'] = True
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def set_lock(self, with_lock: bool = True) -> None:
+        """Set the LOCK flag."""
+        self.with_lock = with_lock
+        if with_lock:
+            self._metadata['uses_lock'] = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert DELETE statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+            "with_lock": self.with_lock,
+        })
+        return result
+
+
+# Backward compatibility alias
+DeleteStatement = IODeleteStatement
+
+
+class IOStartStatement(CobolStatement):
+    """IBM Enterprise COBOL START statement AST node."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("START_STATEMENT", location)
+        self.file_name: Optional[str] = None
+        self.key_condition: Optional[str] = None  # EQUAL, GREATER, LESS, GREATER THAN, etc.
+        self.invalid_key_clause: List['CobolStatement'] = []
+        self.not_invalid_key_clause: List['CobolStatement'] = []
+        self._metadata = {
+            'has_invalid_key': False,
+        }
+    
+    def set_file_name(self, file_name: str) -> None:
+        """Set the file name."""
+        self.file_name = file_name
+    
+    def set_key_condition(self, condition: str) -> None:
+        """Set the key condition (EQUAL, GREATER, LESS, etc.)."""
+        self.key_condition = condition.upper()
+    
+    def set_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+        if statements:
+            self._metadata['has_invalid_key'] = True
+    
+    def set_not_invalid_key_clause(self, statements: List['CobolStatement']) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert START statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "key_condition": self.key_condition,
+            "invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.invalid_key_clause or [])],
+            "not_invalid_key_clause": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (self.not_invalid_key_clause or [])],
+        })
+        return result
+
+
+# Backward compatibility alias
+StartStatement = IOStartStatement
+
+
+class IOUnlockStatement(CobolStatement):
+    """IBM Enterprise COBOL UNLOCK statement AST node."""
+    
+    def __init__(self, location: SourceLocation):
+        super().__init__("UNLOCK_STATEMENT", location)
+        self.file_name: Optional[str] = None
+        self.record_scope: Optional[str] = None  # 'record' or 'file'
+        self._metadata = {
+            'has_record_scope': False,
+        }
+    
+    def set_file_name(self, file_name: str) -> None:
+        """Set the file name."""
+        self.file_name = file_name
+    
+    def set_record_scope(self, scope: str) -> None:
+        """Set the record scope (RECORD or FILE)."""
+        self.record_scope = scope.upper()
+        self._metadata['has_record_scope'] = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert UNLOCK statement to dictionary representation per contract."""
+        result = super().to_dict()
+        result.update({
+            "file_name": self.file_name,
+            "record_scope": self.record_scope,
+        })
+        return result
+
+
+# Backward compatibility alias
+UnlockStatement = IOUnlockStatement
+
+
 # Import the base classes for procedure elements
 from .program import CobolParagraph, CobolSection
 
@@ -796,6 +1441,27 @@ __all__ = [
     "ComputeStatement",
     "CopyStatement",
     "SelectStatement",
+    # IO Statement Classes (Contract-based names)
+    "IOReadStatement",
+    "IOWriteStatement",
+    "IOOpenStatement",
+    "IOCloseStatement",
+    "IOAcceptStatement",
+    "IORewriteStatement",
+    "IODeleteStatement",
+    "IOStartStatement",
+    "IOUnlockStatement",
+    # Backward compatibility aliases
+    "ReadStatement",
+    "WriteStatement",
+    "OpenStatement",
+    "CloseStatement",
+    "AcceptStatement",
+    "RewriteStatement",
+    "DeleteStatement",
+    "StartStatement",
+    "UnlockStatement",
+    # Other exports
     "CobolExpression",
     "ArithmeticExpression",
     "ConditionalExpression",

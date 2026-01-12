@@ -20,6 +20,10 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 - **[Data Items](data-items.md)** - Variable declarations and data structures
 - **[File Control](file-control.md)** - File definitions and SELECT statements
 
+### 🎯 IO Coverage
+- **[IO Coverage Documentation](io-coverage/README.md)** - IO variation test coverage tracking and reporting
+- **[Test Coverage Matrix](STATEMENT_TEST_COVERAGE_MATRIX.md)** - Detailed test tracking for TDD workflow with IO variations
+
 ### 🏗️ Program Structure
 - **[Complete Program](complete-program.md)** - Full COBOL program parsing example
 - **[IBM Enterprise Features](ibm-enterprise.md)** - COMP-3, EXEC CICS, and other IBM-specific constructs
@@ -33,6 +37,33 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 - **27%** of COBOL statements fully implemented (11/41)
 - **43%** of HIGH priority statements complete (11/24)
 - **618 tests** with 90%+ coverage (target: 1,455 tests)
+
+### IO Coverage Status
+
+The parser now includes comprehensive IO statement coverage tracking:
+
+- **64 IO variations** cataloged in the IO variation catalog
+- **40+ tests** covering OPEN, CLOSE, READ, WRITE, ACCEPT, DISPLAY statements
+- **Machine-readable artifacts** generated for each test run
+- **CLI tools** available: `python -m cobolparser.cli.coverage`
+
+#### Quick IO Coverage Commands
+
+```bash
+# Show coverage status
+python -m cobolparser.cli.coverage status
+
+# Filter by verb (OPEN, READ, WRITE, etc.)
+python -m cobolparser.cli.coverage status --verb READ
+
+# Generate coverage artifact
+python -m cobolparser.cli.coverage generate --pytest-results results.json
+
+# Validate artifact against schema
+python -m cobolparser.cli.coverage validate --artifact io-coverage.json
+```
+
+See [IO Coverage Documentation](io-coverage/README.md) for detailed usage.
 
 ### Most Critical Gaps
 

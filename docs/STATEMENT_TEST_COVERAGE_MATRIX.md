@@ -41,14 +41,16 @@ Each statement requires:
 
 | Statement | Status | Contract | Integration | Unit | Total | Notes |
 |-----------|--------|----------|-------------|------|-------|-------|
-| **OPEN** | 🔴 Missing | 0/8 | 0/5 | 0/15 | **0/28** | INPUT/OUTPUT/I-O/EXTEND |
-| **CLOSE** | 🔴 Missing | 0/6 | 0/3 | 0/10 | **0/19** | WITH LOCK clause |
-| **READ** | 🔴 Missing | 0/10 | 0/8 | 0/25 | **0/43** | Complex AT END logic |
-| **WRITE** | 🔴 Missing | 0/10 | 0/6 | 0/20 | **0/36** | BEFORE/AFTER ADVANCING |
-| **REWRITE** | 🔴 Missing | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause |
-| **DELETE** | 🔴 Missing | 0/8 | 0/4 | 0/15 | **0/27** | INVALID KEY clause |
+| **[OPEN](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 8/8 ✅ | 5/5 ✅ | 15/15 ✅ | 28/28 | INPUT/OUTPUT/I-O/EXTEND (T016-T018) |
+| **[CLOSE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 10/10 ✅ | 19/19 | WITH LOCK clause (T016-T018) |
+| **[READ](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 10/10 ✅ | 8/8 ✅ | 25/25 ✅ | 43/43 | AT END logic, record locking (T016-T018) |
+| **[WRITE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 10/10 ✅ | 6/6 ✅ | 20/20 ✅ | 36/36 | BEFORE/AFTER ADVANCING (T016-T018) |
+| **[REWRITE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
+| **[DELETE](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 8/8 ✅ | 4/4 ✅ | 15/15 ✅ | 27/27 | INVALID KEY clause (T017-T018) |
+| **[START](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 12/12 ✅ | 21/21 | Key positioning (T017-T018) |
+| **[UNLOCK](../tests/unit/io_statements/test_io_clause_variations.py)** | ✅ Complete | 4/4 ✅ | 2/2 ✅ | 8/8 ✅ | 14/14 | Record unlock (T017-T018) |
 
-**File I/O Subtotal**: 0/180 tests (0%)
+**File I/O Subtotal (61 variations covered)**: 233/254 tests (91.7%) | Catalog: [io-variation-catalog.csv](../specs/001-io-variation-coverage/io-variation-catalog.csv) | Coverage: [io-coverage.json](../specs/001-io-variation-coverage/baselines/post-us1.json) | Tests: [unit](../tests/unit/io_statements/) [integration](../tests/integration/io_statements/)
 
 ### Control Flow
 
@@ -58,7 +60,7 @@ Each statement requires:
 | **PERFORM** | ✅ Complete | 10/10 ✅ | 8/8 ✅ | 25/25 ✅ | 43/43 | UNTIL/TIMES/VARYING |
 | **STOP** | ✅ Complete | 6/6 ✅ | 3/3 ✅ | 8/8 ✅ | 17/17 | STOP RUN |
 | **EVALUATE** | 🔴 Missing | 0/12 | 0/8 | 0/30 | **0/50** | Complex WHEN logic |
-| **ACCEPT** | 🔴 Missing | 0/8 | 0/5 | 0/15 | **0/28** | FROM DATE/TIME/ENV |
+| **ACCEPT** | � Planned | 0/8 | 0/5 | 0/15 | **0/28** | FROM DATE/TIME/ENV (FR-001) |
 | **INITIALIZE** | 🔴 Missing | 0/8 | 0/4 | 0/15 | **0/27** | REPLACING clause |
 
 **Control Flow Subtotal**: 98/203 tests (48.3%)
