@@ -600,6 +600,17 @@ class CobolLexer:
         self._open_string_value: List[str] = []
         self._open_string_location: Optional[SourceLocation] = None
 
+    def _is_figurative_constant(self, word: str) -> bool:
+        """Check if word is a COBOL figurative constant.
+        
+        Args:
+            word: The word to check (will be uppercased)
+            
+        Returns:
+            True if word is a figurative constant, False otherwise
+        """
+        return word.upper().strip() in self.FIGURATIVE_CONSTANTS
+
     def get_current_location(self) -> SourceLocation:
         """Get current source location."""
         return SourceLocation(self.current_line + 1, self.current_column + 1, 1)
@@ -794,7 +805,16 @@ class CobolLexer:
             value_pos = value_upper.find("VALUE")
             if value_pos != -1:
                 after_value = program_text[value_pos + 5 :].strip()
-                if after_value.startswith('"'):
+                # Skip "IS" if present
+                if after_value.upper().startswith("IS"):
+                    after_value = after_value[2:].strip()
+                
+                # Check if VALUE is followed by a figurative constant - if so, skip string mode
+                first_word = after_value.split()[0] if after_value.split() else ""
+                if self._is_figurative_constant(first_word):
+                    # VALUE with figurative constant, not a string literal - proceed normally
+                    pass
+                elif after_value.startswith('"'):
                     # Find if there's a closing quote
                     content_after_quote = after_value[1:]
                     if '"' not in content_after_quote:  # Unterminated string
@@ -861,8 +881,23 @@ class CobolLexer:
                         line_tokens.append(string_token)
                         return line_tokens
 
-        # If continuing a multi-line string, try to close it on this line first
+        # If continuing a multi-line string, check if this line is actually a comment
+        # If so, clear the string state and process as comment instead
         if self._open_string_quote is not None:
+            # Check if continuation line is a comment - if so, clear string state
+            if indicator == "*" or indicator == "/":
+                # This is a comment line interrupting the multi-line string
+                # Clear the string state
+                self._open_string_quote = None
+                self._open_string_value = []
+                self._open_string_location = None
+                # Process as normal comment line
+                comment_text = line[6:72].rstrip() if len(line) > 6 else ""
+                location = SourceLocation(line_num + 1, 7, 1)
+                line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
+                return line_tokens
+            
+            # Not a comment - continue with multi-line string processing
             closed, remainder_tokens = self._continue_multiline_string(
                 program_text, line_num
             )
@@ -1214,13 +1249,24 @@ class CobolLexer:
         # Skip leading whitespace on continuation lines but preserve the quote structure
         stripped_text = program_text.lstrip()
 
-        # Check for closing quote in the program text (columns 8-72)
-        idx = stripped_text.find(quote)
+        # For continuation lines starting with quotes, skip the opening quote first
+        # before looking for the closing quote
+        search_text = stripped_text
+        content_before_search = ""
+        if stripped_text.startswith(quote):
+            # This is a continuation line that starts with the same quote character
+            # Skip it and search for the closing quote in the rest of the line
+            search_text = stripped_text[1:]
+            content_before_search = ""
+        
+        # Check for closing quote in the remaining text
+        idx = search_text.find(quote)
         if idx != -1:
             # Found closing quote - include all text up to the quote
-            if idx > 0:
+            content_to_add = search_text[:idx]
+            if content_to_add:
                 compressed_content = self._compress_doubled_quotes(
-                    stripped_text[:idx], quote
+                    content_to_add, quote
                 )
                 self._open_string_value.append(compressed_content)
             token = Token(
@@ -1233,26 +1279,21 @@ class CobolLexer:
             self._open_string_location = None
             remainder_tokens.append(token)
             # Tokenize rest of line after quote
-            remainder_text = stripped_text[idx + 1 :]
+            remainder_text = search_text[idx + 1 :]
             if remainder_text:
                 # Calculate correct column position for remainder
                 whitespace_len = len(program_text) - len(stripped_text)
+                # Account for the skipped opening quote if present
+                quote_offset = 1 if stripped_text.startswith(quote) else 0
                 remainder_tokens.extend(
                     self.tokenize_program_text(
-                        remainder_text, line_num, 8 + whitespace_len + idx + 1
+                        remainder_text, line_num, 8 + whitespace_len + quote_offset + idx + 1
                     )
                 )
             return True, remainder_tokens
 
-        # No closing quote found - append entire program text as continuation
-        # For continuation lines starting with quotes, skip the opening quote
-        if stripped_text.startswith(quote):
-            # This is a continuation line that starts with the same quote character
-            content_to_add = stripped_text[
-                1:
-            ]  # Skip the opening quote on continuation line
-        else:
-            content_to_add = stripped_text
+        # No closing quote found - append entire content as continuation
+        content_to_add = search_text
 
         if content_to_add:
             compressed_content = self._compress_doubled_quotes(content_to_add, quote)

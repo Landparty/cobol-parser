@@ -143,3 +143,10 @@ dmypy.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# IA stuff
+.kilo*
+
+# tests
+baselines
+*.zip
