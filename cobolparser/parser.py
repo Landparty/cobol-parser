@@ -1036,7 +1036,9 @@ class CobolParser:
     def _parse_select_file_status_clause(self, select_stmt: SelectStatement) -> None:
         """Parse FILE STATUS IS clause."""
         current_val = (
-            self.current_token.value.upper() if self.current_token.value else ""
+            self.current_token.value.upper()
+            if self.current_token and self.current_token.value
+            else ""
         )
 
         if current_val == "FILE":
@@ -1526,8 +1528,10 @@ class CobolParser:
             TokenType.NUMERIC_LITERAL,
             TokenType.LEVEL_NUMBER,
         ):
-            first_num = int(self.current_token.value)
+            first_num = self._parse_integer_token(self.current_token)
             self.advance_token()
+            if first_num is None:
+                return
 
             # Check for TO (range)
             if self.current_token and self.current_token.value.upper() == "TO":
@@ -1536,8 +1540,11 @@ class CobolParser:
                     TokenType.NUMERIC_LITERAL,
                     TokenType.LEVEL_NUMBER,
                 ):
-                    second_num = int(self.current_token.value)
+                    second_num = self._parse_integer_token(self.current_token)
                     self.advance_token()
+                    if second_num is None:
+                        fd_record.set_block_contains(count=first_num)
+                        return
 
                     # Get unit (RECORDS or CHARACTERS)
                     unit = None
@@ -1580,6 +1587,22 @@ class CobolParser:
             self.current_token.value.upper() if self.current_token.value else ""
         )
 
+        # RECORD <n> clause (e.g., RECORD 240)
+        if self.current_token.type in (
+            TokenType.NUMERIC_LITERAL,
+            TokenType.LEVEL_NUMBER,
+        ):
+            record_count = self._parse_integer_token(self.current_token)
+            self.advance_token()
+            if record_count is not None:
+                if (
+                    self.current_token
+                    and self.current_token.value.upper() in ("CHARACTERS", "RECORDS")
+                ):
+                    self.advance_token()
+                fd_record.set_record_contains(count=record_count)
+            return
+
         # RECORD CONTAINS clause
         if current_val == "CONTAINS":
             self.advance_token()
@@ -1593,8 +1616,10 @@ class CobolParser:
                 TokenType.NUMERIC_LITERAL,
                 TokenType.LEVEL_NUMBER,
             ):
-                first_num = int(self.current_token.value)
+                first_num = self._parse_integer_token(self.current_token)
                 self.advance_token()
+                if first_num is None:
+                    return
 
                 # Check for TO (variable length)
                 if self.current_token and self.current_token.value.upper() == "TO":
@@ -1603,8 +1628,11 @@ class CobolParser:
                         TokenType.NUMERIC_LITERAL,
                         TokenType.LEVEL_NUMBER,
                     ):
-                        second_num = int(self.current_token.value)
+                        second_num = self._parse_integer_token(self.current_token)
                         self.advance_token()
+                        if second_num is None:
+                            fd_record.set_record_contains(count=first_num)
+                            return
 
                         # Skip CHARACTERS keyword
                         if (
@@ -1674,7 +1702,7 @@ class CobolParser:
                         TokenType.NUMERIC_LITERAL,
                         TokenType.LEVEL_NUMBER,
                     ):
-                        min_size = int(self.current_token.value)
+                        min_size = self._parse_integer_token(self.current_token)
                         self.advance_token()
 
                 if self.current_token and self.current_token.value.upper() == "TO":
@@ -1683,7 +1711,7 @@ class CobolParser:
                         TokenType.NUMERIC_LITERAL,
                         TokenType.LEVEL_NUMBER,
                     ):
-                        max_size = int(self.current_token.value)
+                        max_size = self._parse_integer_token(self.current_token)
                         self.advance_token()
 
                 # Skip CHARACTERS keyword
@@ -2135,8 +2163,8 @@ class CobolParser:
                     # Add current item to stack
                     data_item_stack.append(data_item)
             else:
-                # Skip newlines and other tokens
-                if not self.match_token(TokenType.NEWLINE):
+                # Skip newlines/continuations and other tokens
+                if not self.match_token(TokenType.NEWLINE, TokenType.CONTINUATION):
                     self.advance_token()
 
     def parse_data_item(self) -> Optional[CobolDataItem]:
@@ -2250,6 +2278,20 @@ class CobolParser:
             TokenType.PERIOD,
             TokenType.SEMICOLON,
         ]:
+            # Skip standalone continuation tokens
+            if self.current_token.type == TokenType.CONTINUATION:
+                self.advance_token()
+                continue
+
+            # NEWLINE ends the data item unless it is a continuation line
+            if self.current_token.type == TokenType.NEWLINE:
+                next_token = self.peek_token()
+                if next_token and next_token.type == TokenType.CONTINUATION:
+                    self.advance_token()  # NEWLINE
+                    self.advance_token()  # CONTINUATION
+                    continue
+                break
+
             # PICTURE clause
             if self.match_token(TokenType.PIC, TokenType.PICTURE):
                 picture_pattern, picture_location, consumed_period = (
@@ -2265,6 +2307,13 @@ class CobolParser:
 
             # VALUE clause
             elif self.match_token(TokenType.VALUE):
+                while self.current_token and self.current_token.type in (
+                    TokenType.NEWLINE,
+                    TokenType.CONTINUATION,
+                    TokenType.COMMENT,
+                ):
+                    self.advance_token()
+
                 if self.current_token and self.current_token.type in [
                     TokenType.STRING_LITERAL,
                     TokenType.NUMERIC_LITERAL,
@@ -2375,6 +2424,7 @@ class CobolParser:
                 # Check if we've reached end of data item definition
                 if self.current_token.type in [
                     TokenType.NEWLINE,
+                    TokenType.CONTINUATION,
                     TokenType.LEVEL_NUMBER,
                     TokenType.PROCEDURE_DIVISION,
                     TokenType.WORKING_STORAGE_SECTION,
@@ -2395,6 +2445,19 @@ class CobolParser:
                 TokenType.SEMICOLON,
             ]:
                 self.advance_token()  # Consume the terminator
+            elif self.current_token and self.current_token.type in [
+                TokenType.NEWLINE,
+                TokenType.CONTINUATION,
+                TokenType.LEVEL_NUMBER,
+                TokenType.PROCEDURE_DIVISION,
+                TokenType.WORKING_STORAGE_SECTION,
+                TokenType.LOCAL_STORAGE_SECTION,
+                TokenType.LINKAGE_SECTION,
+                TokenType.FILE_SECTION,
+                TokenType.EOF,
+            ]:
+                # Period is optional; allow implicit termination
+                return data_item
             else:
                 self.expect_token(TokenType.PERIOD)  # Still expect period by default
                 return data_item
@@ -2476,6 +2539,20 @@ class CobolParser:
                         self.advance_token()
 
             return occurs_clause
+
+        return None
+
+    def _parse_integer_token(self, token: Token) -> Optional[int]:
+        """Parse an integer value from a token, tolerating trailing periods."""
+        if not token or token.value is None:
+            return None
+
+        value = token.value
+        if isinstance(value, str) and value.endswith("."):
+            value = value[:-1]
+
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
 
         return None
 
@@ -4553,35 +4630,40 @@ class CobolParser:
                 # Find last statement added to section and add to IF then_statements
                 if self.current_section and self.current_section.children:
                     then_stmt = self.current_section.children[-1]
-                    if_stmt.add_then_statement(then_stmt)
+                    if isinstance(then_stmt, CobolStatement):
+                        if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.PERFORM or verb_val == "PERFORM":
                 j = self._parse_perform_inline(tokens, i)
                 if self.current_section and self.current_section.children:
                     then_stmt = self.current_section.children[-1]
-                    if_stmt.add_then_statement(then_stmt)
+                    if isinstance(then_stmt, CobolStatement):
+                        if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.DISPLAY or verb_val == "DISPLAY":
                 j = self._parse_display_inline(tokens, i)
                 if self.current_section and self.current_section.children:
                     then_stmt = self.current_section.children[-1]
-                    if_stmt.add_then_statement(then_stmt)
+                    if isinstance(then_stmt, CobolStatement):
+                        if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.CALL or verb_val == "CALL":
                 j = self._parse_call_inline(tokens, i)
                 if self.current_section and self.current_section.children:
                     then_stmt = self.current_section.children[-1]
-                    if_stmt.add_then_statement(then_stmt)
+                    if isinstance(then_stmt, CobolStatement):
+                        if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.WRITE or verb_val == "WRITE":
                 j = self._parse_write_inline(tokens, i)
                 if self.current_section and self.current_section.children:
                     then_stmt = self.current_section.children[-1]
-                    if_stmt.add_then_statement(then_stmt)
+                    if isinstance(then_stmt, CobolStatement):
+                        if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type in (TokenType.GO, TokenType.GOTO) or verb_val in (
@@ -4591,7 +4673,8 @@ class CobolParser:
                 j = self._parse_goto_inline(tokens, i)
                 if self.current_section and self.current_section.children:
                     then_stmt = self.current_section.children[-1]
-                    if_stmt.add_then_statement(then_stmt)
+                    if isinstance(then_stmt, CobolStatement):
+                        if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             # Unknown or non-verb: skip
@@ -4623,35 +4706,40 @@ class CobolParser:
                     j = self._parse_move_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
-                        if_stmt.add_else_statement(else_stmt)
+                        if isinstance(else_stmt, CobolStatement):
+                            if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.PERFORM or verb_val == "PERFORM":
                     j = self._parse_perform_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
-                        if_stmt.add_else_statement(else_stmt)
+                        if isinstance(else_stmt, CobolStatement):
+                            if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.DISPLAY or verb_val == "DISPLAY":
                     j = self._parse_display_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
-                        if_stmt.add_else_statement(else_stmt)
+                        if isinstance(else_stmt, CobolStatement):
+                            if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.CALL or verb_val == "CALL":
                     j = self._parse_call_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
-                        if_stmt.add_else_statement(else_stmt)
+                        if isinstance(else_stmt, CobolStatement):
+                            if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.WRITE or verb_val == "WRITE":
                     j = self._parse_write_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
-                        if_stmt.add_else_statement(else_stmt)
+                        if isinstance(else_stmt, CobolStatement):
+                            if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type in (TokenType.GO, TokenType.GOTO) or verb_val in (
@@ -4661,7 +4749,8 @@ class CobolParser:
                     j = self._parse_goto_inline(tokens, i)
                     if self.current_section and self.current_section.children:
                         else_stmt = self.current_section.children[-1]
-                        if_stmt.add_else_statement(else_stmt)
+                        if isinstance(else_stmt, CobolStatement):
+                            if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 i += 1
@@ -6435,7 +6524,7 @@ class CobolParser:
             # KEY clause (KEY IS identifier)
             elif self.current_token.type == TokenType.KEY_IS or (
                 self.current_token.type == TokenType.KEY
-                and self.peek_token()
+                and (self.peek_token() is not None)
                 and self.peek_token().type == TokenType.IDENTIFIER
             ):
                 if self.current_token.type == TokenType.KEY:

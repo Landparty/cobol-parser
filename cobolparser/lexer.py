@@ -1328,41 +1328,6 @@ class CobolLexer:
                         self.tokenize_program_text(program_text, line_num, 8)
                     )
                 return True, remainder_tokens
-        i = 0
-        at_line_start = True
-        while i < len(program_text):
-            ch = program_text[i]
-            # Skip indentation at start of continuation line
-            if at_line_start and ch == " ":
-                i += 1
-                continue
-            at_line_start = False
-            if ch == quote:
-                # Possible doubled quote
-                if i + 1 < len(program_text) and program_text[i + 1] == quote:
-                    self._open_string_value.append(quote)
-                    i += 2
-                    continue
-                # Close string
-                token = Token(
-                    TokenType.STRING_LITERAL,
-                    "".join(self._open_string_value),
-                    self._open_string_location or SourceLocation(line_num + 1, 8, 1),
-                )
-                remainder_text = program_text[i + 1 :]
-                # Reset state
-                self._open_string_quote = None
-                self._open_string_value = []
-                self._open_string_location = None
-                remainder_tokens.append(token)
-                if remainder_text:
-                    remainder_tokens.extend(
-                        self.tokenize_program_text(remainder_text, line_num, 8 + i + 1)
-                    )
-                return True, remainder_tokens
-            else:
-                self._open_string_value.append(ch)
-                i += 1
         # Not closed yet; whole line consumed
         return False, remainder_tokens
 
