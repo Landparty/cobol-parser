@@ -440,6 +440,8 @@ class ComputeStatement(CobolStatement):
         super().__init__("COMPUTE", location)
         self.targets: List[str] = []
         self.expression: Optional["CobolExpression"] = None
+        self.on_size_error: Optional[List["CobolStatement"]] = None
+        self.not_on_size_error: Optional[List["CobolStatement"]] = None
 
     def add_target(self, target: str) -> None:
         """Add a target variable for the computation."""
@@ -452,6 +454,16 @@ class ComputeStatement(CobolStatement):
         self.expression = expression
         self.add_child(expression)
 
+    def set_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+        self.on_size_error = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def set_not_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+        self.not_on_size_error = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert COMPUTE statement to dictionary representation."""
         result = super().to_dict()
@@ -461,6 +473,131 @@ class ComputeStatement(CobolStatement):
                 "expression": self.expression.to_dict() if self.expression else None,
             }
         )
+        if self.on_size_error:
+            result["on_size_error"] = [s.to_dict() for s in self.on_size_error]
+        if self.not_on_size_error:
+            result["not_on_size_error"] = [s.to_dict() for s in self.not_on_size_error]
+        return result
+
+
+class ArithmeticStatement(CobolStatement):
+    """Base AST node for arithmetic statements (ADD, SUBTRACT, MULTIPLY, DIVIDE)."""
+
+    def __init__(self, statement_type: str, location: SourceLocation):
+        super().__init__(statement_type, location)
+        self.on_size_error: Optional[List["CobolStatement"]] = None
+        self.not_on_size_error: Optional[List["CobolStatement"]] = None
+
+    def set_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+        self.on_size_error = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def set_not_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+        self.not_on_size_error = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = super().to_dict()
+        if self.on_size_error:
+            result["on_size_error"] = [s.to_dict() for s in self.on_size_error]
+        if self.not_on_size_error:
+            result["not_on_size_error"] = [s.to_dict() for s in self.not_on_size_error]
+        return result
+
+
+class AddStatement(ArithmeticStatement):
+    """AST node for ADD statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("ADD", location)
+
+
+class SubtractStatement(ArithmeticStatement):
+    """AST node for SUBTRACT statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("SUBTRACT", location)
+
+
+class MultiplyStatement(ArithmeticStatement):
+    """AST node for MULTIPLY statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("MULTIPLY", location)
+
+
+class DivideStatement(ArithmeticStatement):
+    """AST node for DIVIDE statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("DIVIDE", location)
+
+
+class SearchStatement(CobolStatement):
+    """AST node for SEARCH statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("SEARCH", location)
+        self.at_end_clause: Optional[List["CobolStatement"]] = None
+
+    def set_at_end_clause(self, statements: List["CobolStatement"]) -> None:
+        self.at_end_clause = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = super().to_dict()
+        if self.at_end_clause:
+            result["at_end_clause"] = [s.to_dict() for s in self.at_end_clause]
+        return result
+
+
+class StringStatement(CobolStatement):
+    """AST node for STRING statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("STRING", location)
+        self.on_overflow: Optional[List["CobolStatement"]] = None
+        self.not_on_overflow: Optional[List["CobolStatement"]] = None
+
+    def set_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+        self.on_overflow = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def set_not_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+        self.not_on_overflow = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = super().to_dict()
+        if self.on_overflow:
+            result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
+        if self.not_on_overflow:
+            result["not_on_overflow"] = [s.to_dict() for s in self.not_on_overflow]
+        return result
+
+
+class UnstringStatement(CobolStatement):
+    """AST node for UNSTRING statements."""
+    def __init__(self, location: SourceLocation):
+        super().__init__("UNSTRING", location)
+        self.on_overflow: Optional[List["CobolStatement"]] = None
+        self.not_on_overflow: Optional[List["CobolStatement"]] = None
+
+    def set_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+        self.on_overflow = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def set_not_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+        self.not_on_overflow = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = super().to_dict()
+        if self.on_overflow:
+            result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
+        if self.not_on_overflow:
+            result["not_on_overflow"] = [s.to_dict() for s in self.not_on_overflow]
         return result
 
 

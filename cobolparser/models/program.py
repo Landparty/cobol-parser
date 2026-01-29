@@ -182,6 +182,26 @@ class CobolProgram(ASTNode):
     def divisions(self) -> List[CobolDivision]:  # type: ignore[override]
         return list(self._divisions.values())
     
+    @property
+    def identification_division(self) -> Optional[CobolDivision]:
+        """Get the IDENTIFICATION DIVISION."""
+        return self.get_division("IDENTIFICATION")
+
+    @property
+    def environment_division(self) -> Optional[CobolDivision]:
+        """Get the ENVIRONMENT DIVISION."""
+        return self.get_division("ENVIRONMENT")
+
+    @property
+    def data_division(self) -> Optional[CobolDivision]:
+        """Get the DATA DIVISION."""
+        return self.get_division("DATA")
+
+    @property
+    def procedure_division(self) -> Optional[CobolDivision]:
+        """Get the PROCEDURE DIVISION."""
+        return self.get_division("PROCEDURE")
+    
     def add_division(self, division: CobolDivision) -> None:
         """Add a division to the program (keeps both dict and list representations)."""
         self.add_child(division)
@@ -262,67 +282,65 @@ class CobolProgram(ASTNode):
     def get_all_statements(self) -> List['CobolStatement']:
         """Get all statements in the program (typically in PROCEDURE division).
         
-        Recursively traverses nested structures like PERFORM inline blocks
-        and IF/ELSE branches to extract ALL statements including nested ones.
+        Recursively traverses nested structures to extract ALL statements.
+        Handles both AST children and specific statement attributes that
+        might hold nested statements (e.g. invalid_key_clause, on_exception).
         """
+        from .statements import CobolStatement
+
         statements = []
+        visited = set()
         
-        def collect_nested_statements(stmt: 'CobolStatement') -> List['CobolStatement']:
-            """Recursively collect statements from nested structures."""
-            result = [stmt]
+        def traverse(node: Any) -> None:
+            # Handle list of nodes
+            if isinstance(node, list):
+                for item in node:
+                    traverse(item)
+                return
+                
+            # Must be an ASTNode/valid object to continue (check for node_type)
+            if not hasattr(node, 'node_type'):
+                return
+                
+            # Cycle detection
+            if id(node) in visited:
+                return
+            visited.add(id(node))
             
-            # Check for nested structures in PERFORM statements
-            if hasattr(stmt, 'inline_statements'):
-                for nested_stmt in stmt.inline_statements:
-                    result.extend(collect_nested_statements(nested_stmt))
+            # Collect statement
+            if isinstance(node, CobolStatement):
+                statements.append(node)
             
-            # Check for nested structures in IF statements
-            if hasattr(stmt, 'then_statements'):
-                for nested_stmt in stmt.then_statements:
-                    result.extend(collect_nested_statements(nested_stmt))
+            # 1. Recurse children (primary mechanism)
+            if hasattr(node, 'children'):
+                for child in node.children:
+                    traverse(child)
             
-            if hasattr(stmt, 'else_statements'):
-                for nested_stmt in stmt.else_statements:
-                    result.extend(collect_nested_statements(nested_stmt))
+            # 2. Recurse known attribute lists (handle orphans/non-children)
+            # COBOL statements often have conditional blocks in attributes
+            orphan_attrs = [
+                'at_end_clause', 'not_at_end_clause',
+                'invalid_key_clause', 'not_invalid_key_clause',
+                'at_eop_clause',
+                'on_exception', 'not_on_exception',
+                'on_overflow', 'not_on_overflow',
+                'on_size_error', 'not_on_size_error',
+                'when_clauses', 'default_when',
+                'then_statements', 'else_statements',
+                'inline_statements',
+            ]
             
-            # Check for exception handler statements in CALL
-            if hasattr(stmt, 'on_exception') and stmt.on_exception:
-                for nested_stmt in stmt.on_exception:
-                    result.extend(collect_nested_statements(nested_stmt))
-            
-            if hasattr(stmt, 'on_overflow') and stmt.on_overflow:
-                for nested_stmt in stmt.on_overflow:
-                    result.extend(collect_nested_statements(nested_stmt))
-            
-            # Check for NOT ON EXCEPTION handler statements in CALL
-            if hasattr(stmt, 'not_on_exception') and stmt.not_on_exception:
-                for nested_stmt in stmt.not_on_exception:
-                    result.extend(collect_nested_statements(nested_stmt))
-            
-            return result
-        
-        # Look in PROCEDURE division
+            for attr in orphan_attrs:
+                if hasattr(node, attr):
+                    val = getattr(node, attr)
+                    if val:
+                        traverse(val)
+
+        # Start traversal from PROCEDURE division
         proc_division = self.get_division("PROCEDURE")
         if proc_division:
-            # Get statements from paragraphs
-            for paragraph in proc_division.paragraphs:
-                for stmt in paragraph.statements:
-                    statements.extend(collect_nested_statements(stmt))
+            traverse(proc_division)
             
-            # Get statements from sections
-            for section in proc_division._sections.values():
-                # Get statements from paragraphs within sections
-                for paragraph in section.paragraphs:
-                    for stmt in paragraph.statements:
-                        statements.extend(collect_nested_statements(stmt))
-                
-                # Get statements that are direct children of sections
-                # (happens when parser adds statements to section without creating paragraph)
-                from .statements import CobolStatement
-                for child in section.children:
-                    if isinstance(child, CobolStatement):
-                        statements.extend(collect_nested_statements(child))
-        
         return statements
     
     def find_statements(self, stmt_type: Optional[str] = None) -> List['CobolStatement']:

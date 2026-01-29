@@ -81,17 +81,16 @@ def validate_file_descriptors(cobol_code):
     if not file_section:
         return ["No File Section"]
         
-    for fd in file_section.file_descriptions:
+    # Access FD entries through the section's data_records
+    for fd in file_section.data_records:
         # Example Rule: Recording Mode must be 'F' (Fixed)
         if getattr(fd, 'recording_mode', '') != 'F':
-            issues.append(f"File {fd.file_name} has invalid recording mode: {fd.recording_mode}")
+            issues.append(f"File {fd.file_name} has invalid recording mode: {getattr(fd, 'recording_mode', 'N/A')}")
             
-        # Example Rule: Block contains must be multiple of 0
-        if fd.block_contains:
-             # Assuming block_contains returns a dict or object with 'count'
-             count = fd.block_contains.get('count', 0)
-             if count > 0 and count < 10:
-                 issues.append(f"File {fd.file_name} has small block size: {count}")
+        # Example Rule: Block contains must be reasonable
+        block_count = getattr(fd, 'block_contains', None)
+        if block_count and block_count < 10:
+            issues.append(f"File {fd.file_name} has small block size: {block_count}")
                  
     return issues
 

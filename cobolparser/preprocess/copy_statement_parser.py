@@ -391,6 +391,7 @@ class CopyStatementLexer:
             
     def _match_keyword(self, keyword: str) -> bool:
         """Check for a keyword and advance if matched, skipping leading separators."""
+        start_pos = self.pos
         self._skip_separators()
         if self.source[self.pos:self.pos+len(keyword)].upper() == keyword.upper():
             # Check for word boundary
@@ -398,6 +399,9 @@ class CopyStatementLexer:
             if not next_char or not (next_char.isalnum() or next_char in ('-', '_')):
                 self._advance(len(keyword))
                 return True
+        
+        # Restore position if no match
+        self.pos = start_pos
         return False
 
     def _read_operand(self) -> Optional[str]:
@@ -723,13 +727,15 @@ def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str
         # We use identifier-safe boundaries for modes to avoid partial word collisions
         # word boundaries \b in regex are good but COBOL identifiers can contain hyphens
         # So we define a custom boundary: not followed/preceded by [A-Za-z0-9-]
-        start_boundary = r'(?<![A-Za-z0-9-])'
-        end_boundary = r'(?![A-Za-z0-9-])'
+        # Determine boundaries based on whether the search text starts/ends with word chars
+        # If text starts/ends with special char (like :), don't enforce word boundary on that side
+        is_start_word = clause.find_text and (clause.find_text[0].isalnum() or clause.find_text[0] == '-')
+        is_end_word = clause.find_text and (clause.find_text[-1].isalnum() or clause.find_text[-1] == '-')
+        
+        start_boundary = r'(?<![A-Za-z0-9-])' if is_start_word else r''
+        end_boundary = r'(?![A-Za-z0-9-])' if is_end_word else r''
         
         if clause.mode == "ALL":
-            # Replace as a whole word/identifier unless it's pseudo-text (handled by caller or indicated by content)
-            # If the find_text contains marks that look like pseudo-text was intended (or it is pseudo-text)
-            # but here it's already stripped. We assume 'ALL' means "Whole identifier" by default for COBOL.
             pattern = re.compile(
                 start_boundary + re.escape(clause.find_text) + end_boundary,
                 re.IGNORECASE
@@ -738,14 +744,14 @@ def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str
         
         elif clause.mode == "LEADING":
             pattern = re.compile(
-                start_boundary + re.escape(clause.find_text) + r'(?=[A-Za-z0-9-])',
+                start_boundary + re.escape(clause.find_text) + (r'(?=[A-Za-z0-9-])' if is_end_word else r''),
                 re.IGNORECASE
             )
             result = pattern.sub(clause.replace_text, result)
         
         elif clause.mode == "TRAILING":
             pattern = re.compile(
-                r'(?<=[A-Za-z0-9-])' + re.escape(clause.find_text) + end_boundary,
+                (r'(?<=[A-Za-z0-9-])' if is_start_word else r'') + re.escape(clause.find_text) + end_boundary,
                 re.IGNORECASE
             )
             result = pattern.sub(clause.replace_text, result)

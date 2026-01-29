@@ -234,15 +234,21 @@ class TestValueClauseFigurativeConstantsContract:
         assert isinstance(ast_dict, dict)
         
         # Contract: Required fields in AST dict
-        required_fields = ["node_type", "program_name", "identification_division", 
-                          "data_division", "procedure_division"]
+        required_fields = ["node_type", "program_name", "divisions"]
         for field in required_fields:
             assert field in ast_dict, f"Missing required field: {field}"
+            
+        divisions = ast_dict["divisions"]
+        assert "IDENTIFICATION" in divisions
+        assert "DATA" in divisions
+        assert "PROCEDURE" in divisions
         
         # Contract: Data division must be structured
-        data_div = ast_dict["data_division"]
+        data_div = divisions["DATA"]
         assert data_div is not None
-        assert "working_storage" in data_div or "working_storage_section" in data_div
+        assert "sections" in data_div
+        sections = data_div["sections"]
+        assert "WORKING-STORAGE" in sections or "working_storage" in sections
 
     def test_api_contract_json_serialization_with_figurative_constants(self):
         """API Contract: VALUE clauses with figurative constants must be JSON-serializable."""

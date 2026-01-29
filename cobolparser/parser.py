@@ -33,6 +33,16 @@ from .models.statements import (
     ConditionalExpression,
     EvaluateStatement,
     WhenClause,
+    # Arithmetic Statements
+    ComputeStatement,
+    AddStatement,
+    SubtractStatement,
+    MultiplyStatement,
+    DivideStatement,
+    # String manipulation
+    SearchStatement,
+    StringStatement,
+    UnstringStatement,
     # IO Statement Classes (with backward compatibility aliases)
     ReadStatement,
     WriteStatement,
@@ -3849,6 +3859,18 @@ class CobolParser:
                     "STOP",
                     "EVALUATE",
                     "CALL",
+                    "END-EVALUATE",
+                    "WHEN",
+                    "END-PERFORM",
+                    "END-IF",
+                    "ELSE",
+                    "END-READ",
+                    "END-WRITE",
+                    "END-SEARCH",
+                    "END-STRING",
+                    "END-UNSTRING",
+                    "END-EXEC",
+                    "END-CALL",
                 ):
                     # Next statement starting - end CALL processing
                     return i
@@ -3856,6 +3878,15 @@ class CobolParser:
             # Check for CALL token type
             elif tokens[i].type == TokenType.CALL:
                 # Next CALL statement starting - end current CALL processing
+                return i
+            # Check for block terminators that should end the CALL statement
+            elif tokens[i].type in (
+                TokenType.END_EVALUATE,
+                TokenType.WHEN,
+                TokenType.END_PERFORM,
+                TokenType.END_IF,
+                TokenType.ELSE,
+            ):
                 return i
             else:
                 # Skip unrecognized token
@@ -5019,8 +5050,8 @@ class CobolParser:
             # Create WhenClause
             when_clause = WhenClause(selectors, when_location)
             
-            # Parse statements in WHEN block (simplified - skip to next WHEN/END-EVALUATE)
-            # In a full implementation, would recursively parse statements
+            # Parse statements in WHEN block
+            # Use inline parsing methods to handle statements
             while i < len(tokens):
                 # Skip newlines
                 while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
@@ -5037,9 +5068,50 @@ class CobolParser:
                     if tokens[i].type == TokenType.END_EVALUATE:
                         break
                 
-                # Skip statement tokens (simplified parsing for now)
-                # A full implementation would call statement parsers here
-                i += 1
+                # Parse the statement using inline parsers
+                ttype = tokens[i].type
+                upper_val = tokens[i].value.upper() if tokens[i].value else ""
+                
+                # Save current section and create temporary section to capture statements
+                saved_section = self.current_section
+                temp_section = CobolSection("TEMP", tokens[i].location)
+                self.current_section = temp_section
+                
+                # Dispatch to appropriate inline parser
+                if ttype == TokenType.CALL or upper_val == "CALL":
+                    i = self._parse_call_inline(tokens, i)
+                elif ttype == TokenType.DISPLAY or upper_val == "DISPLAY":
+                    i = self._parse_display_inline(tokens, i)
+                elif ttype == TokenType.MOVE or upper_val == "MOVE":
+                    i = self._parse_move_inline(tokens, i)
+                elif ttype == TokenType.PERFORM or upper_val == "PERFORM":
+                    i = self._parse_perform_inline(tokens, i)
+                elif ttype == TokenType.IF or upper_val == "IF":
+                    i = self._parse_if_inline(tokens, i)
+                elif ttype == TokenType.WRITE or upper_val == "WRITE":
+                    i = self._parse_write_inline(tokens, i)
+                elif ttype == TokenType.ENTRY or upper_val == "ENTRY":
+                    i = self._parse_entry_inline(tokens, i)
+                elif ttype == TokenType.SORT or upper_val == "SORT":
+                    i = self._parse_sort_inline(tokens, i)
+                elif ttype == TokenType.EXEC or upper_val == "EXEC":
+                    i = self._parse_exec_inline(tokens, i)
+                elif ttype == TokenType.EVALUATE or upper_val == "EVALUATE":
+                    i = self._parse_evaluate_inline(tokens, i)
+                elif ttype in (TokenType.GO, TokenType.GOTO) or upper_val in ("GO", "GOTO"):
+                    i = self._parse_goto_inline(tokens, i)
+                else:
+                    # Unknown statement type - skip token to avoid infinite loop
+                    self.current_section = saved_section
+                    i += 1
+                    continue
+                
+                # Extract statements from temporary section and add to when_clause
+                for stmt in temp_section.children:
+                    when_clause.add_statement(stmt)
+                
+                # Restore current section
+                self.current_section = saved_section
             
             # Add WHEN clause
             if is_when_other:
@@ -5889,6 +5961,26 @@ class CobolParser:
             return self.parse_start_statement()
         elif self.current_token.value and self.current_token.value.upper() == "UNLOCK":
             return self.parse_unlock_statement()
+        elif self.current_token.type == TokenType.EVALUATE or (
+            self.current_token.value and self.current_token.value.upper() == "EVALUATE"
+        ):
+            return self.parse_evaluate_statement()
+        elif self.current_token.type == TokenType.COMPUTE:
+            return self.parse_compute_statement()
+        elif self.current_token.type == TokenType.ADD:
+            return self.parse_add_statement()
+        elif self.current_token.type == TokenType.SUBTRACT:
+            return self.parse_subtract_statement()
+        elif self.current_token.type == TokenType.MULTIPLY:
+            return self.parse_multiply_statement()
+        elif self.current_token.type == TokenType.DIVIDE:
+            return self.parse_divide_statement()
+        elif self.current_token.type == TokenType.SEARCH:
+            return self.parse_search_statement()
+        elif self.current_token.type == TokenType.STRING:
+            return self.parse_string_statement()
+        elif self.current_token.type == TokenType.UNSTRING:
+            return self.parse_unstring_statement()
         else:
             # Unknown statement type - create generic statement
             location = self.get_current_location()
@@ -5912,6 +6004,621 @@ class CobolParser:
                 self.advance_token()
 
             return stmt
+
+    @staticmethod
+    def _is_statement_start(token_type: TokenType, token_val: str) -> bool:
+        """Helper to check if a token starts a statement."""
+        # List of common statement keywords/tokens
+        statement_types = {
+            TokenType.MOVE, TokenType.ADD, TokenType.SUBTRACT, TokenType.MULTIPLY,
+            TokenType.DIVIDE, TokenType.COMPUTE, TokenType.PERFORM, TokenType.IF,
+            TokenType.EVALUATE, TokenType.CALL, TokenType.STOP, TokenType.EXIT,
+            TokenType.GO, TokenType.GOTO, TokenType.DISPLAY_STMT, TokenType.READ,
+            TokenType.WRITE, TokenType.OPEN, TokenType.CLOSE, TokenType.ACCEPT,
+            TokenType.RETURN, TokenType.INITIALIZE, TokenType.INSPECT, TokenType.STRING,
+            TokenType.UNSTRING, TokenType.SET, TokenType.SEARCH, TokenType.CONTINUE,
+            TokenType.NEXT, # SENTENCE
+        }
+        
+        if token_type in statement_types:
+            return True
+            
+        keyword_set = {
+            "MOVE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE", "PERFORM",
+            "IF", "EVALUATE", "CALL", "STOP", "EXIT", "GO", "GOTO", "DISPLAY",
+            "READ", "WRITE", "OPEN", "CLOSE", "ACCEPT", "RETURN", "INITIALIZE",
+            "INSPECT", "STRING", "UNSTRING", "SET", "SEARCH", "CONTINUE", 
+            "NEXT", "DELETE", "REWRITE", "START", "UNLOCK"
+        }
+        return token_val in keyword_set
+
+    def parse_evaluate_statement(self) -> Optional[EvaluateStatement]:
+        """Parse EVALUATE statement.
+        
+        Supports:
+        - EVALUATE subject [ALSO subject]...
+        - WHEN selector [ALSO selector]... statement...
+        - WHEN OTHER statement...
+        - END-EVALUATE terminator
+        """
+        if not self.match_token(TokenType.EVALUATE):
+            return None
+            
+        location = self.get_current_location()
+        evaluate_stmt = EvaluateStatement(location)
+        self._set_node_context(evaluate_stmt)
+        
+        # Skip optional whitespace/newlines
+        while self.current_token and self.current_token.type in (
+            TokenType.NEWLINE, TokenType.COMMENT
+        ):
+            self.advance_token()
+            
+        # Parse Subjects
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            # Check for WHEN (start of clauses)
+            if self.current_token.type == TokenType.WHEN:
+                break
+                
+            # Parse subject expression
+            # For simplicity, we'll grab tokens until ALSO or WHEN
+            subject_tokens = []
+            while self.current_token and self.current_token.type not in (
+                TokenType.WHEN, TokenType.NEWLINE, TokenType.EOF
+            ):
+                if self.current_token.value.upper() == "ALSO":
+                    self.advance_token() # Skip ALSO
+                    break
+                subject_tokens.append(self.current_token.value)
+                self.advance_token()
+                
+            if subject_tokens:
+                evaluate_stmt.add_subject(" ".join(subject_tokens))
+                
+            # Skip newlines/comments
+            while self.current_token and self.current_token.type in (
+                TokenType.NEWLINE, TokenType.COMMENT
+            ):
+                self.advance_token()
+                
+        # Parse WHEN clauses
+        while self.current_token and self.current_token.type == TokenType.WHEN:
+            self.advance_token() # Skip WHEN
+            
+            clause_location = self.get_current_location()
+            selectors = []
+            is_other = False
+            
+            # Check for WHEN OTHER
+            if self.current_token and self.current_token.value.upper() == "OTHER":
+                is_other = True
+                self.advance_token()
+            else:
+                # Parse selectors
+                while self.current_token and self.current_token.type != TokenType.EOF:
+                    # Parse selector tokens
+                    selector_tokens = []
+                    while self.current_token:
+                        token_type = self.current_token.type
+                        token_val = self.current_token.value.upper()
+                        
+                        # Stop at ALSO, newlines (end of selectors), or statement keywords
+                        if self._is_statement_start(token_type, token_val) and token_val != "ALSO":
+                             break
+                        
+                        # Stop at newline if we have tokens (end of selector list)
+                        if token_type in (TokenType.NEWLINE, TokenType.COMMENT):
+                            break
+                            
+                        if token_val == "ALSO":
+                            self.advance_token()
+                            break
+                            
+                        selector_tokens.append(self.current_token.value)
+                        self.advance_token()
+                    
+                    if selector_tokens:
+                        selectors.append({"type": "Unknown", "value": " ".join(selector_tokens)})
+                        
+                    # Skip whitespace/newlines
+                    while self.current_token and self.current_token.type in (
+                        TokenType.NEWLINE, TokenType.COMMENT
+                    ):
+                        # Use a lookahead - if next token is ALSO, consume newline
+                        # If next token is statement start, stop consuming
+                        next_char = self.peek_char() # This is char lookahead, not token.
+                        # Simple logic: just skip
+                        self.advance_token()
+                        
+                    # Check if we should continue parsing selectors or start statements
+                    # If we hit a statement start keyword, or end of line without ALSO, break
+                    if self.current_token:
+                         if self._is_statement_start(self.current_token.type, self.current_token.value.upper()):
+                             break
+            
+            # Create clause
+            when_clause = WhenClause(selectors, clause_location)
+            
+            # DEBUG: Log statement parsing
+            import sys
+            print(f"[DEBUG] Starting statement parse loop, current_token: {self.current_token.type if self.current_token else 'None'}:{self.current_token.value if self.current_token else 'None'}", file=sys.stderr)
+            
+            # Parse statements for this clause
+            while self.current_token and self.current_token.type != TokenType.EOF:
+                # Stop at next WHEN, END-EVALUATE, or EOF
+                if self.current_token.type == TokenType.WHEN:
+                    break
+                if self.current_token.type == TokenType.END_EVALUATE:
+                    break
+                if (self.current_token.type == TokenType.IDENTIFIER and 
+                    self.current_token.value.upper() == "END-EVALUATE"):
+                    break
+                    
+                # Skip whitespace/newlines
+                if self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    self.advance_token()
+                    continue
+                    
+                # Parse statement
+                self.parsing_nested_statement = True
+                stmt = self.parse_statement()
+                self.parsing_nested_statement = False
+                
+                if stmt:
+                    when_clause.add_statement(stmt)
+                else:
+                    self.advance_token()
+
+            if is_other:
+                evaluate_stmt.set_default_when(when_clause)
+            else:
+                evaluate_stmt.add_when_clause(when_clause)
+
+        # Skip END-EVALUATE
+        if self.current_token:
+            if self.current_token.type == TokenType.END_EVALUATE:
+                self.advance_token()
+            elif (self.current_token.type == TokenType.IDENTIFIER and 
+                  self.current_token.value.upper() == "END-EVALUATE"):
+                self.advance_token()
+
+        # Consume period if present
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+            
+        if not self.parsing_nested_statement and self.current_division:
+            self.current_division.add_child(evaluate_stmt)
+            
+        return evaluate_stmt
+
+    def _parse_size_error_clauses(self, stmt: CobolStatement) -> bool:
+        """Parse ON SIZE ERROR and NOT ON SIZE ERROR clauses.
+        
+        Returns True if a clause was parsed, False otherwise.
+        """
+        if not self.current_token:
+            return False
+            
+        upper_val = self.current_token.value.upper() if self.current_token.value else ""
+        
+        # Check for ON SIZE ERROR
+        # Case 1: ON SIZE ERROR
+        # Case 2: SIZE ERROR (ON is optional)
+        is_on_size = False
+        is_not_on_size = False
+        
+        if upper_val == "ON":
+             t2 = self.peek_token(1)
+             t3 = self.peek_token(2)
+             if t2 and t2.value.upper() == "SIZE" and t3 and t3.value.upper() == "ERROR":
+                 is_on_size = True
+        elif upper_val == "SIZE":
+             t2 = self.peek_token(1)
+             if t2 and t2.value.upper() == "ERROR":
+                 is_on_size = True
+                 
+        # Check for NOT ON SIZE ERROR
+        if upper_val == "NOT":
+             t2 = self.peek_token(1)
+             # NOT ON SIZE ERROR
+             if t2 and t2.value.upper() == "ON":
+                  t3 = self.peek_token(2)
+                  t4 = self.peek_token(3)
+                  if t3 and t3.value.upper() == "SIZE" and t4 and t4.value.upper() == "ERROR":
+                      is_not_on_size = True
+             # NOT SIZE ERROR
+             elif t2 and t2.value.upper() == "SIZE":
+                  t3 = self.peek_token(2)
+                  if t3 and t3.value.upper() == "ERROR":
+                      is_not_on_size = True
+
+        if is_on_size:
+            # Consume tokens
+            if upper_val == "ON":
+                self.advance_token() # ON
+                self.advance_token() # SIZE
+                self.advance_token() # ERROR
+            else:
+                self.advance_token() # SIZE
+                self.advance_token() # ERROR
+                
+            # Parse statements
+            stmts = self._parse_nested_statements_until_end_terminator()
+            stmt.set_on_size_error_clause(stmts)
+            return True
+            
+        if is_not_on_size:
+            # Consume tokens
+            self.advance_token() # NOT
+            if self.current_token.value.upper() == "ON":
+                self.advance_token()
+            self.advance_token() # SIZE
+            self.advance_token() # ERROR
+            
+            # Parse statements
+            stmts = self._parse_nested_statements_until_end_terminator()
+            stmt.set_not_on_size_error_clause(stmts)
+            return True
+            
+        return False
+
+    def _parse_nested_statements_until_end_terminator(self) -> List[CobolStatement]:
+        """Parse statements until specific terminators (END-*, NOT, etc)."""
+        stmts = []
+        while self.current_token and self.current_token.type != TokenType.EOF:
+             # Stop words for nested blocks often include keywords of next clause
+             val = self.current_token.value.upper() if self.current_token.value else ""
+             type_ = self.current_token.type
+             
+             if type_ == TokenType.PERIOD:
+                 break
+             if val.startswith("END-"):
+                 break
+             if val in ("NOT", "ON", "ELSE", "WHEN", "ALSO"):
+                 # Check if it looks like start of next clause (NOT ON SIZE..., ON SIZE...)
+                 # Simple heuristic: if we see NOT/ON/ELSE, we stop current block?
+                 # NOT can be "NOT ON SIZE ERROR" or "NOT INVALID KEY"
+                 break
+                 
+             stmt = self.parse_statement()
+             if stmt:
+                 stmts.append(stmt)
+             else:
+                 self.advance_token()
+        return stmts
+
+    def parse_compute_statement(self) -> Optional[ComputeStatement]:
+        """Parse COMPUTE statement."""
+        if not self.match_token(TokenType.COMPUTE):
+            return None
+            
+        location = self.get_current_location()
+        stmt = ComputeStatement(location)
+        self._set_node_context(stmt)
+        
+        # Parse targets until "="
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            if self.current_token.value == "=" or self.current_token.value.upper() == "EQUAL":
+                self.advance_token()
+                break
+                
+            if self.current_token.type == TokenType.IDENTIFIER:
+                stmt.add_target(self.current_token.value)
+                self.advance_token()
+            else:
+                self.advance_token()
+                
+            # Skip ROUNDED
+            if self.current_token and self.current_token.value.upper() == "ROUNDED":
+                self.advance_token()
+                
+        # Parse Expression (Generic until end keywords)
+        expr_tokens = []
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            # Check for terminator or clause start
+            if self.current_token.type == TokenType.PERIOD:
+                break
+                
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val.startswith("END-"): # END-COMPUTE
+                break
+            
+            # Check for SIZE ERROR clauses
+            # (Lookahead logic duplicated? Or detect here and break loop?)
+            # If we see ON or SIZE or NOT, check if it's a clause
+            if val in ("ON", "SIZE", "NOT"):
+                 # Check if it is valid clause start
+                 is_clause = False
+                 # (Reuse simplified check or just break generic expression parsing on these keywords?)
+                 # For expression, stopping on ANY unexpected keyword is safer?
+                 # But variables can be named "ON" etc? No, reserved words.
+                 # So if we see ON/SIZE/NOT we can check if it starts a clause.
+                 
+                 # Look ahead
+                 if val == "ON":
+                      t = self.peek_token(1)
+                      if t and t.value.upper() == "SIZE": is_clause = True
+                 elif val == "SIZE":
+                      t = self.peek_token(1)
+                      if t and t.value.upper() == "ERROR": is_clause = True
+                 elif val == "NOT":
+                      t = self.peek_token(1)
+                      if t and (t.value.upper() == "ON" or t.value.upper() == "SIZE"): is_clause = True
+                      
+                 if is_clause:
+                      break
+            
+            expr_tokens.append(self.current_token.value)
+            self.advance_token()
+            
+        if expr_tokens:
+             expr = CobolExpression("ARITHMETIC", location)
+             expr._metadata["value"] = " ".join(expr_tokens)
+             stmt.set_expression(expr)
+             
+        # Parse clauses (ON SIZE ERROR, NOT ON SIZE ERROR)
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val == "END-COMPUTE":
+                break
+                
+            if self._parse_size_error_clauses(stmt):
+                continue
+                
+            # If unknown token, skip or break
+            self.advance_token()
+            
+        # Handle END-COMPUTE
+        if self.current_token and self.current_token.value.upper() == "END-COMPUTE":
+            self.advance_token()
+            
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+            
+        return stmt
+
+    def parse_add_statement(self) -> Optional[AddStatement]:
+        """Parse ADD statement."""
+        if not self.match_token(TokenType.ADD): return None
+        location = self.get_current_location()
+        stmt = AddStatement(location)
+        self._set_node_context(stmt)
+        return self._parse_generic_arithmetic_body(stmt, "END-ADD")
+
+    def parse_subtract_statement(self) -> Optional[SubtractStatement]:
+        """Parse SUBTRACT statement."""
+        if not self.match_token(TokenType.SUBTRACT): return None
+        location = self.get_current_location()
+        stmt = SubtractStatement(location)
+        self._set_node_context(stmt)
+        return self._parse_generic_arithmetic_body(stmt, "END-SUBTRACT")
+
+    def parse_multiply_statement(self) -> Optional[MultiplyStatement]:
+        """Parse MULTIPLY statement."""
+        if not self.match_token(TokenType.MULTIPLY): return None
+        location = self.get_current_location()
+        stmt = MultiplyStatement(location)
+        self._set_node_context(stmt)
+        return self._parse_generic_arithmetic_body(stmt, "END-MULTIPLY")
+
+    def parse_divide_statement(self) -> Optional[DivideStatement]:
+        """Parse DIVIDE statement."""
+        if not self.match_token(TokenType.DIVIDE): return None
+        location = self.get_current_location()
+        stmt = DivideStatement(location)
+        self._set_node_context(stmt)
+        return self._parse_generic_arithmetic_body(stmt, "END-DIVIDE")
+
+    def _parse_generic_arithmetic_body(self, stmt: ArithmeticStatement, end_marker: str) -> ArithmeticStatement:
+        """Generic body parser for ADD, SUBTRACT, MULTIPLY, DIVIDE."""
+        # Simple consuming of operands until clause start
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            if self.current_token.type == TokenType.PERIOD:
+                break
+                
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val == end_marker:
+                break
+                
+            # Check clause start
+            if val in ("ON", "SIZE", "NOT"):
+                 is_clause = False
+                 if val == "ON":
+                      t = self.peek_token(1)
+                      if t and t.value.upper() == "SIZE": is_clause = True
+                 elif val == "SIZE":
+                      t = self.peek_token(1)
+                      if t and t.value.upper() == "ERROR": is_clause = True
+                 elif val == "NOT":
+                      t = self.peek_token(1)
+                      if t and (t.value.upper() == "ON" or t.value.upper() == "SIZE"): is_clause = True
+                 
+                 if is_clause:
+                      break
+
+            stmt.add_operand(self.current_token.value)
+            self.advance_token()
+            
+        # Parse clauses
+        while self.current_token and self.current_token.type != TokenType.PERIOD:
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val == end_marker:
+                break
+                
+            if self._parse_size_error_clauses(stmt):
+                continue
+                
+            self.advance_token()
+            
+        # Handle END marker
+        if self.current_token and self.current_token.value.upper() == end_marker:
+            self.advance_token()
+            
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+            
+        return stmt
+
+    def parse_search_statement(self) -> Optional[SearchStatement]:
+        """Parse SEARCH statement."""
+        if not self.match_token(TokenType.SEARCH): return None
+        location = self.get_current_location()
+        stmt = SearchStatement(location)
+        self._set_node_context(stmt)
+        
+        # Parse body until AT END or period
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            if self.current_token.type == TokenType.PERIOD:
+                break
+                
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val == "END-SEARCH":
+                break
+                
+            # Check for AT END clause
+            if val == "AT":
+                t = self.peek_token(1)
+                if t and t.value.upper() == "END":
+                    self.advance_token()  # AT
+                    self.advance_token()  # END
+                    # Parse nested statements
+                    stmts = self._parse_nested_statements_until_end_terminator()
+                    stmt.set_at_end_clause(stmts)
+                    continue
+                    
+            stmt.add_operand(self.current_token.value)
+            self.advance_token()
+            
+        # Handle END-SEARCH
+        if self.current_token and self.current_token.value.upper() == "END-SEARCH":
+            self.advance_token()
+            
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+            
+        return stmt
+
+    def parse_string_statement(self) -> Optional[StringStatement]:
+        """Parse STRING statement."""
+        if not self.match_token(TokenType.STRING): return None
+        location = self.get_current_location()
+        stmt = StringStatement(location)
+        self._set_node_context(stmt)
+        
+        # Parse body until ON OVERFLOW or period
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            if self.current_token.type == TokenType.PERIOD:
+                break
+                
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val == "END-STRING":
+                break
+                
+            # Check for ON OVERFLOW clause
+            if self._parse_overflow_clauses(stmt):
+                continue
+                
+            stmt.add_operand(self.current_token.value)
+            self.advance_token()
+            
+        # Handle END-STRING
+        if self.current_token and self.current_token.value.upper() == "END-STRING":
+            self.advance_token()
+            
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+            
+        return stmt
+
+    def parse_unstring_statement(self) -> Optional[UnstringStatement]:
+        """Parse UNSTRING statement."""
+        if not self.match_token(TokenType.UNSTRING): return None
+        location = self.get_current_location()
+        stmt = UnstringStatement(location)
+        self._set_node_context(stmt)
+        
+        # Parse body until ON OVERFLOW or period
+        while self.current_token and self.current_token.type != TokenType.EOF:
+            if self.current_token.type == TokenType.PERIOD:
+                break
+                
+            val = self.current_token.value.upper() if self.current_token.value else ""
+            if val == "END-UNSTRING":
+                break
+                
+            # Check for ON OVERFLOW clause
+            if self._parse_overflow_clauses(stmt):
+                continue
+                
+            stmt.add_operand(self.current_token.value)
+            self.advance_token()
+            
+        # Handle END-UNSTRING
+        if self.current_token and self.current_token.value.upper() == "END-UNSTRING":
+            self.advance_token()
+            
+        if self.current_token and self.current_token.type == TokenType.PERIOD:
+            self.advance_token()
+            
+        return stmt
+
+    def _parse_overflow_clauses(self, stmt: CobolStatement) -> bool:
+        """Parse ON OVERFLOW and NOT ON OVERFLOW clauses.
+        
+        Returns True if a clause was parsed, False otherwise.
+        """
+        if not self.current_token:
+            return False
+            
+        upper_val = self.current_token.value.upper() if self.current_token.value else ""
+        
+        # Check for ON OVERFLOW
+        is_on_overflow = False
+        is_not_on_overflow = False
+        
+        if upper_val == "ON":
+             t2 = self.peek_token(1)
+             if t2 and t2.value.upper() == "OVERFLOW":
+                 is_on_overflow = True
+        elif upper_val == "OVERFLOW":
+             is_on_overflow = True
+                 
+        # Check for NOT ON OVERFLOW
+        if upper_val == "NOT":
+             t2 = self.peek_token(1)
+             if t2 and t2.value.upper() == "ON":
+                  t3 = self.peek_token(2)
+                  if t3 and t3.value.upper() == "OVERFLOW":
+                      is_not_on_overflow = True
+             elif t2 and t2.value.upper() == "OVERFLOW":
+                  is_not_on_overflow = True
+
+        if is_on_overflow:
+            # Consume tokens
+            if upper_val == "ON":
+                self.advance_token()  # ON
+                self.advance_token()  # OVERFLOW
+            else:
+                self.advance_token()  # OVERFLOW
+                
+            # Parse statements
+            stmts = self._parse_nested_statements_until_end_terminator()
+            stmt.set_on_overflow_clause(stmts)
+            return True
+            
+        if is_not_on_overflow:
+            # Consume tokens
+            self.advance_token()  # NOT
+            if self.current_token.value.upper() == "ON":
+                self.advance_token()
+            self.advance_token()  # OVERFLOW
+            
+            # Parse statements
+            stmts = self._parse_nested_statements_until_end_terminator()
+            stmt.set_not_on_overflow_clause(stmts)
+            return True
+            
+        return False
 
     def parse_if_statement(self) -> Optional[IfStatement]:
         """Parse IF statement with THEN/ELSE branches and END-IF terminator.
@@ -6524,8 +7231,8 @@ class CobolParser:
             # KEY clause (KEY IS identifier)
             elif self.current_token.type == TokenType.KEY_IS or (
                 self.current_token.type == TokenType.KEY
-                and (self.peek_token() is not None)
-                and self.peek_token().type == TokenType.IDENTIFIER
+                and (peeked := self.peek_token()) is not None
+                and peeked.type == TokenType.IDENTIFIER
             ):
                 if self.current_token.type == TokenType.KEY:
                     self.advance_token()  # consume KEY

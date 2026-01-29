@@ -59,10 +59,10 @@ def main():
         )
         
         # Display basic information
-        print(f"   ✓ Expansion successful!")
-        print(f"   • Total copybooks included: {len(result.included_copybooks)}")
-        print(f"   • Maximum nesting depth: {result.max_depth_reached}")
-        print(f"   • Processing time: {result.statistics.parse_time_ms:.2f}ms")
+        print(f"   [OK] Expansion successful!")
+        print(f"   - Total copybooks included: {len(result.included_copybooks)}")
+        print(f"   - Maximum nesting depth: {result.max_depth_reached}")
+        print(f"   - Processing time: {result.statistics.parse_time_ms:.2f}ms")
         
         # Show copybook hierarchy
         print("\n2. Copybook Hierarchy:")
@@ -70,7 +70,7 @@ def main():
             copybook_name = Path(copybook_path).name
             # Estimate indentation based on order (simplified)
             indent = "  " * (idx - 1) if idx <= 3 else "  " * 2
-            print(f"{indent}└─ {idx}. {copybook_name}")
+            print(f"{indent}+- {idx}. {copybook_name}")
         
         # Show source code growth
         original_lines = len(cobol_program.strip().splitlines())
@@ -78,11 +78,11 @@ def main():
         growth_percent = ((expanded_lines - original_lines) / original_lines * 100)
         
         print(f"\n3. Source Code Analysis:")
-        print(f"   • Original lines:  {original_lines}")
-        print(f"   • Expanded lines:  {expanded_lines}")
-        print(f"   • Growth:          +{growth_percent:.1f}%")
-        print(f"   • Files processed: {result.statistics.file_count}")
-        print(f"   • Total lines:     {result.statistics.total_lines}")
+        print(f"   - Original lines:  {original_lines}")
+        print(f"   - Expanded lines:  {expanded_lines}")
+        print(f"   - Growth:          +{growth_percent:.1f}%")
+        print(f"   - Files processed: {result.statistics.file_count}")
+        print(f"   - Total lines:     {result.statistics.total_lines}")
         
         # Show expanded source (first 20 lines)
         print(f"\n4. Expanded Source (first 20 lines):")
@@ -120,34 +120,34 @@ def main():
             filename="NESTED-EXAMPLE.cbl",
             copybook_paths=copybook_paths
         )
-        print(f"   ✓ Parsing successful!")
+        print(f"   [OK] Parsing successful!")
         if hasattr(parse_result, 'ast') and parse_result.ast:
-            print(f"   • AST generated successfully")
+            print(f"   - AST generated successfully")
         
         # Success summary
         print("\n" + "=" * 70)
-        print("✓ NESTED COPYBOOK EXPANSION COMPLETED SUCCESSFULLY")
+        print("SUCCESS: NESTED COPYBOOK EXPANSION COMPLETED SUCCESSFULLY")
         print("=" * 70)
         
     except CircularReferenceError as e:
-        print(f"\n✗ ERROR: Circular reference detected!")
-        print(f"   Dependency chain: {' → '.join(e.dependency_chain)}")
+        print(f"\n[ERROR] Circular reference detected!")
+        print(f"   Dependency chain: {' -> '.join(e.dependency_chain)}")
         return 1
         
     except CopybookNotFoundError as e:
-        print(f"\n✗ ERROR: Copybook not found!")
+        print(f"\n[ERROR] Copybook not found!")
         print(f"   Missing copybook: {e.copybook_name}")
         print(f"   Searched in: {', '.join(e.search_paths)}")
         return 1
         
     except NestingDepthError as e:
-        print(f"\n✗ ERROR: Nesting depth exceeded!")
+        print(f"\n[ERROR] Nesting depth exceeded!")
         print(f"   Current depth: {e.current_depth}")
         print(f"   Maximum depth: {e.max_depth}")
         return 1
         
     except Exception as e:
-        print(f"\n✗ ERROR: {type(e).__name__}: {e}")
+        print(f"\n[ERROR] {type(e).__name__}: {e}")
         return 1
     
     return 0
@@ -168,8 +168,8 @@ def analyze_specific_copybook(copybook_name: str, copybook_paths: list[str]):
         result = expand_copybooks(minimal_program, copybook_paths)
         
         print(f"\nCopybook Information:")
-        print(f"  • Nesting depth: {result.max_depth_reached}")
-        print(f"  • Nested copybooks: {len(result.included_copybooks)}")
+        print(f"  - Nesting depth: {result.max_depth_reached}")
+        print(f"  - Nested copybooks: {len(result.included_copybooks)}")
         
         if len(result.included_copybooks) > 1:
             print(f"\n  Nested copybooks included:")
@@ -188,7 +188,7 @@ def analyze_specific_copybook(copybook_name: str, copybook_paths: list[str]):
         print("  " + "-" * 66)
         
     except Exception as e:
-        print(f"  ✗ Error: {e}")
+        print(f"  [ERROR] {e}")
 
 
 if __name__ == "__main__":
