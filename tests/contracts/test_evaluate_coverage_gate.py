@@ -468,7 +468,7 @@ def run_coverage_gate() -> CoverageReport:
         "test_evaluate_invalid_also_chain": "tests/unit/test_evaluate_diagnostics.py",
         "test_evaluate_mixed_thru_through": "tests/unit/test_evaluate_diagnostics.py",
         "test_evaluate_any_with_also": "tests/unit/test_evaluate_diagnostics.py",
-        "test_evaluate_to_dict_structure": "tests/contract/test_evaluate_serialization.py",
+        "test_evaluate_to_dict_structure": "tests/contracts/test_evaluate_serialization.py",
         "test_evaluate_variants_sample_file": "tests/integration/test_evaluate_samples.py",
     }
 
@@ -523,7 +523,7 @@ class TestEvaluateCoverageGate:
 
     def test_coverage_gate_exists(self):
         """Coverage gate module should be importable."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             run_coverage_gate,
             CoverageReport,
             EVALUATE_VARIANT_CATALOG,
@@ -536,7 +536,7 @@ class TestEvaluateCoverageGate:
 
     def test_variant_catalog_is_populated(self):
         """Variant catalog should contain entries."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             EVALUATE_VARIANT_CATALOG,
             NEGATIVE_VARIANT_CATALOG,
         )
@@ -546,7 +546,7 @@ class TestEvaluateCoverageGate:
 
     def test_positive_catalog_has_required_variants(self):
         """Positive catalog should cover main variant types."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             EVALUATE_VARIANT_CATALOG,
             VariantCategory,
         )
@@ -567,7 +567,7 @@ class TestEvaluateCoverageGate:
 
     def test_negative_catalog_has_required_variants(self):
         """Negative catalog should cover main error types."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             NEGATIVE_VARIANT_CATALOG,
             VariantCategory,
         )
@@ -587,7 +587,7 @@ class TestEvaluateCoverageGate:
 
     def test_all_positive_variants_are_tested(self):
         """All positive catalog variants should have corresponding tests."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             run_coverage_gate,
         )
 
@@ -602,7 +602,7 @@ class TestEvaluateCoverageGate:
 
     def test_coverage_report_structure(self):
         """Coverage report should have expected structure."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             run_coverage_gate,
         )
 
@@ -617,7 +617,7 @@ class TestEvaluateCoverageGate:
 
     def test_variant_lookup_function(self):
         """Variant lookup by ID should work."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             get_variant_by_id,
             EVALUATE_VARIANT_CATALOG,
         )
@@ -629,14 +629,14 @@ class TestEvaluateCoverageGate:
 
     def test_nonexistent_variant_returns_none(self):
         """Lookup of non-existent variant should return None."""
-        from tests.contract.test_evaluate_coverage_gate import get_variant_by_id
+        from tests.contracts.test_evaluate_coverage_gate import get_variant_by_id
 
         found = get_variant_by_id("EV-NONEXISTENT-001")
         assert found is None
 
     def test_check_variant_coverage_helper(self):
         """check_variant_coverage helper should return tuple."""
-        from tests.contract.test_evaluate_coverage_gate import check_variant_coverage
+        from tests.contracts.test_evaluate_coverage_gate import check_variant_coverage
 
         is_complete, message = check_variant_coverage()
         assert isinstance(is_complete, bool)
@@ -645,7 +645,7 @@ class TestEvaluateCoverageGate:
 
     def test_variant_to_dict(self):
         """Variants should serialize to dict."""
-        from tests.contract.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
+        from tests.contracts.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
 
         variant = EVALUATE_VARIANT_CATALOG[0]
         variant_dict = variant.to_dict()
@@ -658,7 +658,7 @@ class TestEvaluateCoverageGate:
 
     def test_gate_fails_when_variants_missing(self):
         """Gate should report incomplete when variants untested."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             EVALUATE_VARIANT_CATALOG,
             NEGATIVE_VARIANT_CATALOG,
             CoverageReport,
@@ -677,7 +677,7 @@ class TestEvaluateVariantDocumentation:
 
     def test_catalog_has_descriptions(self):
         """All variants should have meaningful descriptions."""
-        from tests.contract.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
+        from tests.contracts.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
 
         for variant in EVALUATE_VARIANT_CATALOG:
             assert variant.description, (
@@ -689,7 +689,7 @@ class TestEvaluateVariantDocumentation:
 
     def test_catalog_has_features(self):
         """All variants should have feature tags."""
-        from tests.contract.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
+        from tests.contracts.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
 
         for variant in EVALUATE_VARIANT_CATALOG:
             assert variant.features, f"Variant {variant.variant_id} missing features"
@@ -699,7 +699,7 @@ class TestEvaluateVariantDocumentation:
 
     def test_variant_ids_are_unique(self):
         """All variant IDs should be unique."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             EVALUATE_VARIANT_CATALOG,
             NEGATIVE_VARIANT_CATALOG,
         )
@@ -713,7 +713,7 @@ class TestEvaluateVariantDocumentation:
 
     def test_variant_ids_follow_naming_convention(self):
         """Variant IDs should follow naming convention."""
-        from tests.contract.test_evaluate_coverage_gate import (
+        from tests.contracts.test_evaluate_coverage_gate import (
             EVALUATE_VARIANT_CATALOG,
             NEGATIVE_VARIANT_CATALOG,
         )

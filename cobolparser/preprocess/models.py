@@ -178,6 +178,8 @@ class CopyStatement:
     suppress_clause: Optional[SuppressClause] = None
     source_location: Optional[tuple[str, int, int]] = None
     original_text: str = ""
+    start_index: int = 0
+    end_index: int = 0
     
     @property
     def is_suppressed(self) -> bool:
@@ -226,6 +228,7 @@ class CopybookSearchPath:
     max_nesting_depth: int = 100
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES
+    max_cache_entries: int = 100
     
     def to_dict(self) -> dict[str, Any]:
         """Convert search configuration to dictionary for JSON serialization."""
@@ -236,6 +239,7 @@ class CopybookSearchPath:
             "max_nesting_depth": self.max_nesting_depth,
             "max_file_size": self.max_file_size,
             "max_total_size": self.max_total_size,
+            "max_cache_entries": self.max_cache_entries,
         }
 
 
@@ -261,6 +265,34 @@ class ExpansionContext:
     total_bytes: int = 0
     defined_symbols: dict[str, str] = field(default_factory=dict)
     
+    # LRU management
+    cache_order: list[str] = field(default_factory=list)
+    max_cache_size: int = 100
+    
+    def cache_get(self, key: str) -> Optional[str]:
+        """Get item from cache and update its position (LRU)."""
+        if key in self.content_cache:
+            # Move to front (most recent)
+            if key in self.cache_order:
+                self.cache_order.remove(key)
+            self.cache_order.append(key)
+            return self.content_cache[key]
+        return None
+        
+    def cache_put(self, key: str, value: str):
+        """Put item in cache with eviction if full."""
+        if key in self.content_cache:
+            self.cache_order.remove(key)
+        elif len(self.content_cache) >= self.max_cache_size:
+            # Evict oldest (at the beginning of the list)
+            if self.cache_order:
+                oldest_key = self.cache_order.pop(0)
+                if oldest_key in self.content_cache:
+                    del self.content_cache[oldest_key]
+        
+        self.content_cache[key] = value
+        self.cache_order.append(key)
+
     def get_cache_key(self, copybook_path: str, replacing_clauses: Optional[list] = None) -> str:
         """Generate cache key for a copybook with specific replacements."""
         if replacing_clauses:

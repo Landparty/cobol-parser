@@ -71,16 +71,12 @@ def validate_file_descriptors(cobol_code):
     if not result.success:
         return ["Parsing failed"]
         
-    data_div = result.ast.divisions.get('DATA DIVISION')
+    data_div = result.ast.get_division("DATA")
     if not data_div:
         return ["No Data Division"]
         
-    file_section = None
-    # Find FILE SECTION
-    for section in data_div.sections:
-        if section.section_name == 'FILE':
-            file_section = section
-            break
+    file_section = data_div.get_section_by_name("FILE")
+    if not file_section:
             
     if not file_section:
         return ["No File Section"]
@@ -122,15 +118,19 @@ def get_dependencies(cobol_code):
         
     def find_calls(node):
         if isinstance(node, CallStatement):
-            # 'program_name' might be a literal string or a variable
-            dependencies.add(str(node.program_name))
+            # 'called_program' is the attribute for the program name
+            if node.called_program:
+                dependencies.add(str(node.called_program))
+            # Also add any possible values for dynamic calls
+            for value in node.possible_values:
+                dependencies.add(str(value))
             
         if hasattr(node, 'children'):
             for child in node.children:
                 find_calls(child)
                 
     # Start the walk from Procedure Division
-    proc_div = result.ast.divisions.get('PROCEDURE DIVISION')
+    proc_div = result.ast.get_division("PROCEDURE")
     if proc_div:
         find_calls(proc_div)
         
@@ -141,10 +141,10 @@ def get_dependencies(cobol_code):
 
 **Problem**: You have a 50MB COBOL source file (yes, they exist) and it's crashing your parser with `MemoryError`.
 
-**Solution**: Enable Streaming Mode configuration.
+**Solution**: Use the `CobolParser` class directly with memory configuration.
 
 ```python
-from cobolparser import parse_cobol
+from cobolparser import CobolParser
 from cobolparser.plugins.core import MemoryConfiguration
 
 # 1. Configure for low memory footprint
@@ -154,9 +154,12 @@ mem_config = MemoryConfiguration(
     enable_streaming=True   # Turn on streaming tokenizer
 )
 
-# 2. Parse
+# 2. Create parser with memory configuration
+parser = CobolParser(memory_config=mem_config)
+
+# 3. Parse
 # Note: Streaming slightly increases parse time but drastically reduces peak RAM
-result = parse_cobol(huge_string_content, memory_config=mem_config)
+result = parser.parse(huge_string_content, filename="large_program.cbl")
 
 print(f"Parsed {result.statistics.lines_parsed} lines successfully.")
 ```

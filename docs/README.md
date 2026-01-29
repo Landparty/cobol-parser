@@ -4,11 +4,9 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 
 ## 📚 Quick Navigation
 
-### 🎯 Project Planning & Coverage
+### 🎯 Getting Started
 - **[Cookbook / Usage Examples](cookbook.md)** - 🍳 **Start Here!** Real-world recipes for SQL extraction, dependency mapping, and more.
-- **[Statement Coverage Summary](STATEMENT_COVERAGE_SUMMARY.md)** - Quick reference: What's implemented, what's missing (START HERE)
-- **[Gap Analysis](STATEMENT_COVERAGE_GAP_ANALYSIS.md)** - Comprehensive analysis of missing COBOL statements (42-week roadmap)
-- **[Test Coverage Matrix](STATEMENT_TEST_COVERAGE_MATRIX.md)** - Detailed test tracking for TDD workflow
+- **[Parser Invocation Guide](PARSER_INVOCATION_GUIDE.md)** - How to use the parser API
 
 ### 📖 Statement Parsing Examples
 - **[CALL Statements](call-statements.md)** - Function/procedure calls with parameters
@@ -21,15 +19,10 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 - **[Data Items](data-items.md)** - Variable declarations and data structures
 - **[File Control](file-control.md)** - File definitions and SELECT statements
 
-### 🎯 IO Coverage
-- **[IO Coverage Documentation](io-coverage/README.md)** - IO variation test coverage tracking and reporting
-- **[Test Coverage Matrix](STATEMENT_TEST_COVERAGE_MATRIX.md)** - Detailed test tracking for TDD workflow with IO variations
-
 ### 🏗️ Program Structure
 - **[Complete Program](complete-program.md)** - Full COBOL program parsing example
 - **[IBM Enterprise Features](ibm-enterprise.md)** - COMP-3, EXEC CICS, and other IBM-specific constructs
 - **[Copybook Expansion](copybook-expansion.md)** - COPY statement processing and text replacement
-- **[Parser Invocation Guide](PARSER_INVOCATION_GUIDE.md)** - How to use the parser API
 
 ## 🚀 Getting Started
 
@@ -64,7 +57,7 @@ python -m cobolparser.cli.coverage generate --pytest-results results.json
 python -m cobolparser.cli.coverage validate --artifact io-coverage.json
 ```
 
-See [IO Coverage Documentation](io-coverage/README.md) for detailed usage.
+See CLI help for detailed usage: `python -m cobolparser.cli.coverage --help`
 
 ### Most Critical Gaps
 
@@ -73,7 +66,7 @@ See [IO Coverage Documentation](io-coverage/README.md) for detailed usage.
 2. File I/O: OPEN, CLOSE, READ, WRITE, REWRITE, DELETE (60-85% frequency)
 3. Control Flow: EVALUATE, ACCEPT, INITIALIZE (60-70% frequency)
 
-**Next Steps**: See [Statement Coverage Summary](STATEMENT_COVERAGE_SUMMARY.md) for implementation roadmap.
+**Next Steps**: See project tracking system for current implementation roadmap.
 
 ## 📋 Output Format
 
@@ -109,8 +102,20 @@ All parser development follows principles defined in [`.specify/memory/constitut
 4. **User Experience Consistency** - Predictable APIs, clear error messages
 5. **IBM Enterprise COBOL Priority** - Dialect-specific features prioritized
 
+## 📦 Archived Documentation
+
+Historical documentation has been archived for compliance and reference. See:
+- **[Archive Index](../archived_docs/ARCHIVE_INDEX.md)** - Complete archive inventory with cross-references
+- **[Archive Manifest](../archived_docs/archive_manifest.json)** - Machine-readable metadata for all archived files
+
+Archived categories:
+- Coverage reports (EVALUATE, Statement Coverage matrices)
+- Metrics and baseline tracking documents
+- Completed feature documentation
+
 ## 🔗 Related Resources
 
 - **Main README**: [../README.md](../README.md) - Installation, quick start, API reference
 - **Constitution**: [../.specify/memory/constitution.md](../.specify/memory/constitution.md) - Project governance
-- **Test Suite**: `../tests/` - 618 comprehensive tests (unit, integration, contract)
+- **Test Suite**: `../tests/` - 618+ comprehensive tests (unit, integration, contract)
+- **Archived Docs**: `../archived_docs/` - Historical documentation and compliance records

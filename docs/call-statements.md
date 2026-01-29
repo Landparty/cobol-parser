@@ -46,12 +46,16 @@ Static CALL statements use literal string values for the program name.
 {
   "node_type": "CallStatement",
   "called_program": "SUBPROGRAM",
+  "using_parameters": [
+    {"name": "WS-PARAM1", "mode": "REFERENCE"},
+    {"name": "WS-PARAM2", "mode": "REFERENCE"}
+  ],
+  "giving_parameter": null,
+  "returning_parameter": null,
   "is_dynamic": false,
   "possible_values": [],
-  "using_parameters": ["WS-PARAM1", "WS-PARAM2"],
-  "giving_parameter": null,
+  "on_overflow": null,
   "on_exception": null,
-  "not_on_exception": null,
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -63,11 +67,12 @@ Static CALL statements use literal string values for the program name.
 
 ### Key Properties
 - `called_program`: The name of the program being called (string)
-- `is_dynamic`: False for static calls (literal program name)
-- `possible_values`: Empty array for static calls
-- `using_parameters`: Array of parameter names passed to the called program
-- `giving_parameter`: Optional parameter that receives the return value
-- `on_exception`/`not_on_exception`: Exception handling clauses
+- `using_parameters`: Array of parameter objects with `name` and `mode` (REFERENCE, CONTENT, or VALUE)
+- `giving_parameter`: Optional parameter that receives the return value (legacy)
+- `returning_parameter`: Optional parameter for RETURNING clause
+- `is_dynamic`: False for static calls (literal program name), True for variable-based calls
+- `possible_values`: Array of possible values for dynamic calls
+- `on_overflow`/`on_exception`/`not_on_exception`: Exception handling clauses
 
 ## CALL with GIVING Clause
 
@@ -84,10 +89,16 @@ Static CALL statements use literal string values for the program name.
 {
   "node_type": "CallStatement",
   "called_program": "CALCULATOR",
-  "using_parameters": ["WS-NUM1", "WS-NUM2"],
+  "using_parameters": [
+    {"name": "WS-NUM1", "mode": "REFERENCE"},
+    {"name": "WS-NUM2", "mode": "REFERENCE"}
+  ],
   "giving_parameter": "WS-RESULT",
+  "returning_parameter": null,
+  "is_dynamic": false,
+  "possible_values": [],
+  "on_overflow": null,
   "on_exception": null,
-  "not_on_exception": null,
   "location": {
     "file": "example.cob",
     "line": 3,

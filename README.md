@@ -62,7 +62,7 @@ Full documentation index is available at [docs/README.md](docs/README.md). It co
 > - Generating Call Graphs
 > - Handling massive files with streaming
 
-Note: Several large, report-style markdown files (CALL examples, analysis, reports) were archived to `archived_docs/` to keep the root tidy. If you previously referenced `COMPLETION_REPORT.md`, `REAL_WORLD_CALL_EXAMPLES.md`, `CALL_COVERAGE_ANALYSIS.md`, or `EXAMPLES_SUMMARY.md`, you will find archived copies in `archived_docs/`.
+**Archived Documentation**: Historical documentation including coverage reports, planning documents, and completed feature specifications have been archived to `archived_docs/` for compliance and reference. See [archived_docs/ARCHIVE_INDEX.md](archived_docs/ARCHIVE_INDEX.md) for the complete inventory.
 
 ## 📋 System Requirements
 
@@ -178,14 +178,14 @@ result = parse_cobol(cobol_code, filename="employee_processor.cob")
 
 if result.success:
     print(f"✅ Successfully parsed: {result.ast.program_name}")
-    print(f"   Author: {result.ast.author}")
     print(f"   Divisions: {len(result.ast.divisions)}")
     print(f"   Parse time: {result.statistics.total_time_ms}ms")
     
     # Access parsed data
-    if 'DATA DIVISION' in result.ast.divisions:
-        data_div = result.ast.divisions['DATA DIVISION']
-        print(f"   Data items: {len(data_div.data_items)}")
+    data_div = result.ast.get_division("DATA")
+    if data_div:
+        data_items = result.ast.get_data_items()
+        print(f"   Data items: {len(data_items)}")
 else:
     print("❌ Parsing failed:")
     for error in result.errors:
@@ -667,6 +667,7 @@ The `docs/` folder contains comprehensive examples of parsed COBOL constructs sh
 - **[Complete Program](docs/complete-program.md)** - Full COBOL program parsing example with comprehensive AST output
 - **[IBM Enterprise Features](docs/ibm-enterprise.md)** - COMP-3, EXEC CICS, EXEC SQL, and other IBM-specific constructs
 - **[File Control](docs/file-control.md)** - SELECT statements, file organizations, and access modes
+- **[Parser Invocation Guide](docs/PARSER_INVOCATION_GUIDE.md)** - Complete API reference and usage patterns
 
 Each documentation file includes:
 - COBOL source code examples

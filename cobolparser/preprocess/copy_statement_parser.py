@@ -359,15 +359,220 @@ def remove_comment_lines(source: str) -> str:
     return '\n'.join(result)
 
 
+class CopyStatementLexer:
+    """
+    A robust state-based lexer for extracting COPY statements from COBOL source.
+    """
+    
+    def __init__(self, source: str, source_file: str = "<main>"):
+        self.source = source
+        self.source_file = source_file
+        self.pos = 0
+        self.length = len(source)
+        
+    def _peek(self, offset: int = 0) -> str:
+        idx = self.pos + offset
+        return self.source[idx] if idx < self.length else ""
+        
+    def _advance(self, count: int = 1):
+        self.pos = min(self.pos + count, self.length)
+        
+    def _is_at_end(self) -> bool:
+        return self.pos >= self.length
+        
+    def _skip_separators(self):
+        """Skip whitespace and COBOL separators (comma, semicolon)."""
+        while not self._is_at_end():
+            c = self._peek()
+            if c.isspace() or c in (',', ';'):
+                self._advance()
+            else:
+                break
+            
+    def _match_keyword(self, keyword: str) -> bool:
+        """Check for a keyword and advance if matched, skipping leading separators."""
+        self._skip_separators()
+        if self.source[self.pos:self.pos+len(keyword)].upper() == keyword.upper():
+            # Check for word boundary
+            next_char = self._peek(len(keyword))
+            if not next_char or not (next_char.isalnum() or next_char in ('-', '_')):
+                self._advance(len(keyword))
+                return True
+        return False
+
+    def _read_operand(self) -> Optional[str]:
+        """Read a pseudo-text, literal, or identifier operand."""
+        self._skip_separators()
+        if self._is_at_end():
+            return None
+            
+        start_pos = self.pos
+        char = self._peek()
+        
+        # 1. Pseudo-text ==...==
+        if char == '=' and self._peek(1) == '=':
+            self._advance(2)
+            while not self._is_at_end():
+                if self._peek() == '=' and self._peek(1) == '=':
+                    text = self.source[start_pos+2:self.pos]
+                    self._advance(2)
+                    return text
+                self._advance()
+            return None 
+            
+        # 2. String literal "..." or '...'
+        if char in ('"', "'"):
+            quote = char
+            self._advance()
+            while not self._is_at_end():
+                if self._peek() == quote and self._peek(1) == quote:
+                    self._advance(2)
+                elif self._peek() == quote:
+                    self._advance()
+                    return self.source[start_pos+1:self.pos-1].replace(quote*2, quote)
+                else:
+                    self._advance()
+            return None 
+            
+        # 3. Identifier or qualified identifier
+        while not self._is_at_end():
+            c = self._peek()
+            if c.isspace() or c in ('.', ',', ';', '=', '(', ')'):
+                if c == '(' : # Handle MEMBER(QUAL)
+                   while not self._is_at_end() and self._peek() != ')':
+                       self._advance()
+                   if not self._is_at_end(): self._advance()
+                   continue
+                break
+            self._advance()
+            
+        return self.source[start_pos:self.pos] if self.pos > start_pos else None
+
+    def tokenize_copy_statements(self) -> list[CopyStatement]:
+        statements = []
+        while not self._is_at_end():
+            char = self._peek()
+            
+            # 1. Protection against COPY inside strings
+            if char in ('"', "'"):
+                self._read_operand()
+                continue
+                
+            # 2. Find next 'COPY'
+            if not self._match_keyword("COPY"):
+                self._advance()
+                continue
+                
+            match_start = self.pos - 4
+            self._skip_separators()
+            
+            # 3. Read Member Name
+            member_name = self._read_operand()
+            if not member_name: continue
+            
+            library_qualifier = None
+            suppress_clause = None
+            replacing_clauses = []
+            
+            # 4. Parse Clauses
+            while not self._is_at_end():
+                self._skip_separators()
+                
+                # End of statement
+                if self._peek() == '.' and not self._peek(1).isalnum():
+                    self._advance()
+                    text_so_far = self.source[:match_start]
+                    line_num = text_so_far.count('\n') + 1
+                    col_num = match_start - text_so_far.rfind('\n')
+                    
+                    statements.append(CopyStatement(
+                        member_name=member_name.strip(),
+                        library_qualifier=library_qualifier.strip() if library_qualifier else None,
+                        replacing_clauses=replacing_clauses if replacing_clauses else None,
+                        suppress_clause=suppress_clause,
+                        source_location=(self.source_file, line_num, col_num),
+                        original_text=self.source[match_start:self.pos],
+                        start_index=match_start,
+                        end_index=self.pos
+                    ))
+                    break
+                
+                # IN/OF
+                if self._match_keyword("IN") or self._match_keyword("OF"):
+                    library_qualifier = self._read_operand()
+                    continue
+                    
+                # SUPPRESS
+                if self._match_keyword("SUPPRESS"):
+                    self._match_keyword("PRINTING")
+                    suppress_clause = SuppressClause(suppress_all=True)
+                    continue
+                    
+                # REPLACING
+                if self._match_keyword("REPLACING"):
+                    while True:
+                        self._skip_separators()
+                        if self._is_at_end() or self._peek() == '.':
+                            break
+                        
+                        # Peek for next major clause
+                        curr_before_peek = self.pos
+                        if self._match_keyword("IN") or self._match_keyword("OF") or self._match_keyword("SUPPRESS"):
+                            self.pos = curr_before_peek
+                            break
+                        
+                        mode = "ALL"
+                        if self._match_keyword("LEADING"): 
+                            mode = "LEADING"
+                        elif self._match_keyword("TRAILING"): 
+                            mode = "TRAILING"
+                        
+                        search = self._read_operand()
+                        if not search: 
+                            # If no operand, break REPLACING loop
+                            break
+                        
+                        if not self._match_keyword("BY"):
+                            # This word was not part of a replacement pair, 
+                            # back up to before this search operand if possible or just break
+                            # In most cases, it means the REPLACING clause ended early or is malformed
+                            # We break and let the outer loop handle the next token
+                            break
+                            
+                        replace = self._read_operand()
+                        if replace is None: break
+                        
+                        replacing_clauses.append(ReplacingClause(
+                            find_text=search,
+                            replace_text=replace,
+                            mode=mode
+                        ))
+                    continue
+                
+                # Next COPY or unexpected token
+                curr = self.pos
+                if self._match_keyword("COPY") or self._peek().isalnum():
+                    self.pos = curr
+                    break
+                
+                self._advance()
+                
+        return statements
+
+    def extract_statements(self) -> list[CopyStatement]:
+        """Backward compatibility or entry point."""
+        return self.tokenize_copy_statements()
+
+
 def extract_copy_statements(source_code: str, source_file: str = "<main>") -> list[CopyStatement]:
     """
-    Extract all COPY statements from COBOL source code.
+    Extract all COPY statements from COBOL source code using a robust shallow lexer.
     
     This function properly handles:
     - Comment lines (asterisk/slash in column 7) - ignored
     - COPY keywords within string literals - ignored
     - Continuation lines (hyphen in column 7) - merged before parsing
-    - Sequence/identification areas (columns 1-6 and 73-80) - stripped before pattern matching
+    - Sequence/identification areas (columns 1-6 and 73-80) - stripped before parsing
     
     Args:
         source_code: COBOL source code to parse
@@ -375,69 +580,19 @@ def extract_copy_statements(source_code: str, source_file: str = "<main>") -> li
         
     Returns:
         List of CopyStatement objects representing each COPY statement found
-        
-    Example:
-        >>> statements = extract_copy_statements("COPY EMPLOYEE.")
-        >>> print(statements[0].member_name)
-        EMPLOYEE
-        
-        >>> statements = extract_copy_statements("COPY DATA SUPPRESS REPLACING ==X== BY ==Y==.")
-        >>> print(statements[0].is_suppressed)
-        True
     """
-    # Step 1: Remove comment lines FIRST (while column 7 indicator is still at index 6)
-    # This replaces comment content with spaces to preserve line structure
+    # Step 1: Remove comment lines FIRST
     source_without_comments = remove_comment_lines(source_code)
     
-    # Step 2: Strip sequence areas (columns 1-6 and 73-80) from fixed-format COBOL
-    # This prevents false matches where:
-    # - Identifiers at column 72 concatenate with sequence numbers (e.g., "KP006SM2064")
-    # - Sequence numbers at start of lines interfere with multi-line pattern matching
+    # Step 2: Strip sequence areas
     source_stripped = strip_sequence_area(source_without_comments)
     
-    # Step 3: Normalize continuation lines before parsing
-    # After stripping columns 1-6, the indicator column is now at position 0
+    # Step 3: Normalize continuation lines
     normalized_source = normalize_continuation_lines(source_stripped, indicator_position=0)
     
-    statements = []
-    
-    for match in COPY_PATTERN.finditer(normalized_source):
-        # Skip if the COPY keyword is within a string literal
-        if is_within_string_literal(normalized_source, match.start(), match.end()):
-            continue
-        
-        # Extract member name (try all three capture groups)
-        member_name = match.group(1) or match.group(2) or match.group(3)
-        library_qualifier = match.group(4)
-        suppress_keyword = match.group(5)
-        suppress_details = match.group(6)
-        replacing_text = match.group(7)
-        
-        # Calculate line and column from match position
-        line_num = normalized_source[:match.start()].count('\n') + 1
-        col_num = match.start() - normalized_source.rfind('\n', 0, match.start())
-        
-        # Parse SUPPRESS clause if present
-        suppress_clause = None
-        if suppress_keyword:
-            suppress_clause = parse_suppress_clause(suppress_details)
-        
-        # Parse REPLACING clause if present
-        replacing_clauses = None
-        if replacing_text:
-            replacing_clauses = parse_replacing_clause(replacing_text)
-        
-        statement = CopyStatement(
-            member_name=member_name.strip(),
-            library_qualifier=library_qualifier.strip() if library_qualifier else None,
-            replacing_clauses=replacing_clauses,
-            suppress_clause=suppress_clause,
-            source_location=(source_file, line_num, col_num),
-            original_text=match.group(0)
-        )
-        statements.append(statement)
-    
-    return statements
+    # Step 4: Use CopyStatementLexer for extraction
+    lexer = CopyStatementLexer(normalized_source, source_file)
+    return lexer.extract_statements()
 
 
 def parse_suppress_clause(suppress_text: Optional[str]) -> SuppressClause:
@@ -557,47 +712,40 @@ def parse_replacing_clause(replacing_text: str) -> list[ReplacingClause]:
 
 def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str:
     """
-    Apply REPLACING clauses to copybook content.
-    
-    Handles different replacement modes:
-    - ALL: Replace all occurrences
-    - LEADING: Replace only at the start of words/identifiers
-    - TRAILING: Replace only at the end of words/identifiers
-    
-    Args:
-        content: Copybook content to modify
-        clauses: List of ReplacingClause objects to apply
-        
-    Returns:
-        Modified content with replacements applied
-        
-    Example:
-        >>> content = "01 :PREFIX:-FIELD PIC X(10)."
-        >>> clauses = [ReplacingClause(":PREFIX:", "EMP", "ALL")]
-        >>> apply_replacing_clauses(content, clauses)
-        '01 EMP-FIELD PIC X(10).'
+    Apply REPLACING clauses to copybook content with identifier awareness.
     """
     result = content
     
-    for clause in clauses:
+    # Sort clauses by length descending to prioritize longer matches (e.g. 'ABC-1' before 'ABC')
+    sorted_clauses = sorted(clauses, key=lambda c: len(c.find_text), reverse=True)
+    
+    for clause in sorted_clauses:
+        # We use identifier-safe boundaries for modes to avoid partial word collisions
+        # word boundaries \b in regex are good but COBOL identifiers can contain hyphens
+        # So we define a custom boundary: not followed/preceded by [A-Za-z0-9-]
+        start_boundary = r'(?<![A-Za-z0-9-])'
+        end_boundary = r'(?![A-Za-z0-9-])'
+        
         if clause.mode == "ALL":
-            # Simple string replacement
-            result = result.replace(clause.find_text, clause.replace_text)
+            # Replace as a whole word/identifier unless it's pseudo-text (handled by caller or indicated by content)
+            # If the find_text contains marks that look like pseudo-text was intended (or it is pseudo-text)
+            # but here it's already stripped. We assume 'ALL' means "Whole identifier" by default for COBOL.
+            pattern = re.compile(
+                start_boundary + re.escape(clause.find_text) + end_boundary,
+                re.IGNORECASE
+            )
+            result = pattern.sub(clause.replace_text, result)
         
         elif clause.mode == "LEADING":
-            # Replace only at the start of words
-            # Word boundary before, but text must be followed by word characters or hyphen
             pattern = re.compile(
-                r'\b' + re.escape(clause.find_text) + r'(?=[-\w])',
+                start_boundary + re.escape(clause.find_text) + r'(?=[A-Za-z0-9-])',
                 re.IGNORECASE
             )
             result = pattern.sub(clause.replace_text, result)
         
         elif clause.mode == "TRAILING":
-            # Replace only at the end of words
-            # Text must be preceded by word characters or hyphen, word boundary after
             pattern = re.compile(
-                r'(?<=[-\w])' + re.escape(clause.find_text) + r'\b',
+                r'(?<=[A-Za-z0-9-])' + re.escape(clause.find_text) + end_boundary,
                 re.IGNORECASE
             )
             result = pattern.sub(clause.replace_text, result)
