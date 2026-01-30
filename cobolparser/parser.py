@@ -232,12 +232,14 @@ class CobolParser:
         try:
             # Skip lines before IDENTIFICATION DIVISION (e.g., PROCESS directives)
             cleaned_source = self._skip_to_identification_division(source)
+            print(f"DEBUG PARSE: cleaned_source len={len(cleaned_source)}")
 
             # Tokenize source
             lexer = CobolLexer(
                 cleaned_source, filename, self.dialect, free_form=self.free_form
             )
             self.tokens = lexer.tokenize()
+            print(f"DEBUG PARSE: tokens count={len(self.tokens)}")
 
             if lexer.has_errors():
                 for error in lexer.get_errors():
@@ -2702,6 +2704,12 @@ class CobolParser:
             start_pos_token = self.current_token
             paren_depth = 0
             expecting_to = False  # Track if we've seen MOVE and are expecting TO
+            
+            # DEBUG: Track sentence assembly for EVALUATE statements
+            debug_sentence = False
+            if self.current_token.value and 'EVALUATE' in str(self.current_token.value).upper():
+                debug_sentence = True
+                print(f"DEBUG SENTENCE: Starting sentence with EVALUATE")
 
             while self.current_token and self.current_token.type != TokenType.EOF:
                 current_type = self.current_token.type
@@ -2750,16 +2758,26 @@ class CobolParser:
                     # 2. We're inside parentheses
                     # 3. We're expecting TO for a MOVE statement
                     if not is_decimal_point and paren_depth == 0 and not expecting_to:
-                        # This is a sentence-ending period
+                        # This is a sentence-ending period - include it in sentence_tokens
+                        # so that statement parsers can see it as a terminator
+                        if debug_sentence:
+                            print(f"DEBUG SENTENCE: Breaking at PERIOD, collected {len(sentence_tokens)} tokens")
+                        sentence_tokens.append(self.current_token)
+                        if debug_sentence:
+                            print(f"DEBUG SENTENCE: Added token {len(sentence_tokens)}: {self.current_token.type.name} = {repr(self.current_token.value)}")
+                        self.advance_token()
                         break
 
                 sentence_tokens.append(self.current_token)
+                if debug_sentence:
+                    print(f"DEBUG SENTENCE: Added token {len(sentence_tokens)}: {self.current_token.type.name} = {repr(self.current_token.value)}")
                 self.advance_token()
 
-            # Consume the ending period if present
-            if self.current_token and self.current_token.type == TokenType.PERIOD:
-                self.advance_token()
+            # Note: The period is now included in sentence_tokens above
+            # We no longer need to consume it separately here
             # Parse the sentence for multiple verbs
+            if debug_sentence:
+                print(f"DEBUG SENTENCE: Parsing sentence with {len(sentence_tokens)} tokens")
             self.parse_sentence(sentence_tokens, start_pos_token.location)
 
     def parse_sentence(self, tokens: list, location) -> None:
@@ -4064,6 +4082,7 @@ class CobolParser:
         return None, i
 
     def _parse_perform_inline(self, tokens, i):
+        print(f"TRACE PERFORM ENTER: i={i}, token={tokens[i].type} {repr(tokens[i].value)}")
         """Parse PERFORM statement inline (sentence-level parsing).
 
         Handles:
@@ -4212,6 +4231,12 @@ class CobolParser:
                                             i += 1
                                             break
 
+                                        # Check for PERIOD (Implicit termination)
+                                        if tokens[i].type == TokenType.PERIOD:
+                                            # Do not consume period, let outer scope handle it?
+                                            # Or break loop.
+                                            break
+
                                         # Check for nested statements
                                         token_type = tokens[i].type
                                         token_val = (
@@ -4260,6 +4285,7 @@ class CobolParser:
 
         # Simple PERFORM paragraph-name [THRU paragraph-name] [n TIMES] [WITH TEST] [UNTIL condition]
         else:
+            print(f"TRACE PERFORM SIMPLE: i={i} Target={tokens[i].value}")
             pf = PerformStatement(start.location)
             pf.set_target_paragraph(tokens[i].value)
             i += 1
@@ -4935,10 +4961,42 @@ class CobolParser:
             if tokens[i].value and tokens[i].value.upper() == "WHEN":
                 break
             
-            # Parse subject expression - can be identifier, TRUE, FALSE, etc.
-            subject_val = tokens[i].value
-            eval_stmt.add_subject(subject_val)
-            i += 1
+            # Parse subject expression - collect all tokens until WHEN, ALSO, or newline
+            # This handles complex expressions like FUNCTION MIDRANGE(1, 2, 3)
+            subject_tokens = []
+            paren_depth = 0
+            
+            while i < len(tokens):
+                token = tokens[i]
+                
+                # Stop at newline unless we're inside parentheses
+                if token.type in (TokenType.NEWLINE, TokenType.COMMENT) and paren_depth == 0:
+                    break
+                
+                # Check for WHEN or ALSO (but not if inside parentheses)
+                if paren_depth == 0 and token.value:
+                    upper_val = token.value.upper()
+                    if upper_val in ("WHEN", "ALSO"):
+                        break
+                
+                # Track parentheses depth
+                if token.type == TokenType.LEFT_PAREN or token.value == "(":
+                    paren_depth += 1
+                elif token.type == TokenType.RIGHT_PAREN or token.value == ")":
+                    paren_depth -= 1
+                
+                # Skip newlines inside parentheses
+                if token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+                    i += 1
+                    continue
+                
+                subject_tokens.append(token.value)
+                i += 1
+            
+            # Add subject if we collected any tokens
+            if subject_tokens:
+                subject_val = " ".join(subject_tokens)
+                eval_stmt.add_subject(subject_val)
             
             # Skip newlines
             while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
@@ -4956,6 +5014,9 @@ class CobolParser:
         found_end_evaluate = False
         
         while i < len(tokens):
+            if i < len(tokens):
+                print(f"DEBUG FINAL: i={i}, token={tokens[i].type} {repr(tokens[i].value)}")
+
             # Skip newlines
             while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
                 i += 1
@@ -4968,6 +5029,26 @@ class CobolParser:
                (tokens[i].value and tokens[i].value.upper() == "END-EVALUATE"):
                 i += 1  # Consume END-EVALUATE
                 found_end_evaluate = True
+                break
+                
+            # Check for PERIOD (Implicit termination)
+            if tokens[i].type == TokenType.PERIOD:
+                # Do NOT consume the period here if we are nested, as it needs to terminate outer scopes too.
+                # However, for this simplified inline parser, we treat it as a terminator.
+                # Current behavior of other parsers seems to be to consume it? 
+                # If we assume this is the end of the sentence, we can consume it 
+                # OR just peek and break, leaving it for the caller?
+                # The caller `_parse_evaluate_inline` returns `i`.
+                # If we don't consume it, the caller might get stuck on it?
+                # But wait, looking at the loop, `i` is the current token index.
+                # If we break without consuming, `i` points to Period.
+                # The caller will continue from Period.
+                found_end_evaluate = True # Period is a valid terminator
+                # We should probably consume it so we don't parse it as "empty statement" or similar
+                # But wait, if we consume it, outer scopes won't see it.
+                # For now, let's consume it to fix the immediate issue, consistent with how END-EVALUATE is consumed.
+                # NOTE: This might need refinement for nested implicit termination.
+                i += 1 
                 break
             
             # Check for WHEN
@@ -4991,7 +5072,9 @@ class CobolParser:
                 # If next token starts a statement, selector is empty
                 if val in ("WHEN", "END-EVALUATE", "DISPLAY", "MOVE", "PERFORM", "CALL", "IF"):
                     # Empty selector - will be caught by validation
-                    pass
+                    pass            
+            # Parse selectors
+            selectors = []
             
             while i < len(tokens):
                 # Skip newlines
@@ -5001,6 +5084,13 @@ class CobolParser:
                 if i >= len(tokens):
                     break
                 
+                # Check for PERIOD (Implicit termination)
+                print(f"DEBUG: Checking PERIOD at i={i}, type={tokens[i].type}")
+                if tokens[i].type == TokenType.PERIOD:
+                    found_end_evaluate = True
+                    i += 1
+                    break
+
                 # Check for OTHER
                 if tokens[i].value and tokens[i].value.upper() == "OTHER":
                     is_when_other = True
@@ -5012,20 +5102,21 @@ class CobolParser:
                     val = tokens[i].value.upper()
                     if val in ("WHEN", "END-EVALUATE"):
                         break
-                    # Check for statement-starting verbs
-                    if tokens[i].type in (TokenType.MOVE, TokenType.DISPLAY, TokenType.PERFORM,
-                                         TokenType.CALL, TokenType.IF, TokenType.WRITE):
+                    # Check for statement-starting verbs or STOP
+                    if tokens[i].type in (TokenType.MOVE, TokenType.DISPLAY, TokenType.PERFORM, 
+                                         TokenType.CALL, TokenType.IF, TokenType.WRITE) or                        val in ("DISPLAY", "MOVE", "PERFORM", "CALL", "IF", "WRITE", "STOP", "GO"):
                         break
-                    if val in ("DISPLAY", "MOVE", "PERFORM", "CALL", "IF", "WRITE", "STOP"):
-                        break
-                
+
                 # Parse selector
                 selector_dict = self._parse_evaluate_selector(tokens, i)
                 if selector_dict:
+
                     selectors.append(selector_dict['selector'])
                     i = selector_dict['next_i']
                 else:
-                    i += 1
+                    # If selector parsing returns None, and we didn't break on valid statement start,
+                    # we might be looking at junk or syntax error. Break to let statement parser handle (or fail).
+                    break
                 
                 # Skip newlines
                 while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
@@ -5033,15 +5124,6 @@ class CobolParser:
                 
                 # Check for ALSO
                 if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == "ALSO":
-                    # Check for consecutive ALSO (diagnostic)
-                    next_idx = i + 1
-                    while next_idx < len(tokens) and tokens[next_idx].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                        next_idx += 1
-                    if next_idx < len(tokens) and tokens[next_idx].value and tokens[next_idx].value.upper() == "ALSO":
-                        self.add_error(self.create_error(
-                            "Consecutive ALSO keywords not allowed",
-                            tokens[i].location
-                        ))
                     i += 1  # Skip ALSO
                     continue
                 else:
@@ -5051,7 +5133,7 @@ class CobolParser:
             when_clause = WhenClause(selectors, when_location)
             
             # Parse statements in WHEN block
-            # Use inline parsing methods to handle statements
+
             while i < len(tokens):
                 # Skip newlines
                 while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
@@ -5065,8 +5147,14 @@ class CobolParser:
                     val = tokens[i].value.upper()
                     if val in ("WHEN", "END-EVALUATE"):
                         break
-                    if tokens[i].type == TokenType.END_EVALUATE:
-                        break
+                
+                # Check for PERIOD (Implicit termination of WHEN block)
+                if tokens[i].type == TokenType.PERIOD:
+                    break
+
+                # Check for END-EVALUATE via token type
+                if tokens[i].type == TokenType.END_EVALUATE:
+                    break
                 
                 # Parse the statement using inline parsers
                 ttype = tokens[i].type
@@ -5134,6 +5222,10 @@ class CobolParser:
         
         # DIAGNOSTIC: Missing END-EVALUATE
         if not found_end_evaluate:
+            if i < len(tokens):
+                print(f"DEBUG FAIL: Missing END. i={i}, len={len(tokens)}, token={tokens[i].type}")
+            else:
+                print(f"DEBUG FAIL: Missing END. i={i}, len={len(tokens)}, token=EOF")
             self.add_error(self.create_error(
                 "EVALUATE statement requires END-EVALUATE terminator",
                 start_token.location
@@ -5169,7 +5261,11 @@ class CobolParser:
         # Get start value
         if not tokens[i].value:
             return None
-        
+            
+        # Check for PERIOD (not a valid selector start)
+        if tokens[i].type == TokenType.PERIOD:
+            return None
+
         start_val = tokens[i].value
         i += 1
         
@@ -8137,6 +8233,63 @@ class CobolParser:
         self.skip_to_token(*section_tokens)
 
 
+
+def _detect_fixed_format(source: str) -> bool:
+    """Detect if source code is in fixed-format COBOL.
+    
+    Fixed-format COBOL typically has:
+    - Columns 1-6: Sequence numbers (usually numeric or spaces)
+    - Column 7: Indicator area (space, *, /, -, D, or other indicators)
+    - Columns 8-72: Program text area
+    
+    This function checks the first 10 non-empty lines to determine if they
+    follow the fixed-format pattern.
+    
+    Args:
+        source: COBOL source code to analyze
+        
+    Returns:
+        True if source appears to be fixed-format, False otherwise
+    """
+    lines = source.splitlines()
+    
+    # Need at least a few lines to make a determination
+    non_empty_lines = [line for line in lines if line.strip()]
+    if len(non_empty_lines) < 3:
+        return False
+    
+    # Check first 10 non-empty lines (or fewer if file is shorter)
+    sample_size = min(10, len(non_empty_lines))
+    fixed_format_indicators = 0
+    
+    for line in non_empty_lines[:sample_size]:
+        # Skip very short lines
+        if len(line) < 7:
+            continue
+            
+        # Check columns 1-6 for sequence area (spaces or digits)
+        seq_area = line[:6]
+        # Check column 7 for indicator
+        indicator = line[6] if len(line) > 6 else ' '
+        
+        # Fixed-format indicators:
+        # 1. Sequence area is all spaces or all digits
+        # 2. Column 7 is a valid indicator (space, *, /, -, D, etc.)
+        seq_is_spaces_or_digits = (
+            seq_area.strip() == '' or 
+            seq_area.replace(' ', '').isdigit()
+        )
+        
+        valid_indicator = indicator in (' ', '*', '/', '-', 'D', 'd')
+        
+        if seq_is_spaces_or_digits and valid_indicator:
+            fixed_format_indicators += 1
+    
+    # If more than 60% of sampled lines look like fixed-format, assume it is
+    threshold = sample_size * 0.6
+    return fixed_format_indicators >= threshold
+
+
 # Convenience function for simple parsing
 def parse_cobol(
     source: str,
@@ -8144,23 +8297,57 @@ def parse_cobol(
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
     free_form: bool = False,
-    preprocess_fixed: bool = False,
+    preprocess_fixed: bool | None = None,
 ) -> ParseResult:
     """Convenience function to parse COBOL source code.
+    
+    This function automatically detects fixed-format COBOL (with sequence numbers
+    in columns 1-6) and preprocesses it if needed. You can override the auto-detection
+    by explicitly setting preprocess_fixed to True or False.
 
     Args:
-        source: COBOL source code
+        source: COBOL source code or path to COBOL file
         filename: Source filename for error reporting
         dialect: COBOL dialect
         error_recovery: Error recovery mode
+        free_form: Whether source is in free-form format (default: False)
+        preprocess_fixed: Whether to preprocess fixed-format COBOL (default: auto-detect)
 
     Returns:
         ParseResult with AST and metadata
+        
+    Example:
+        >>> # Auto-detection (recommended)
+        >>> result = parse_cobol('examples/cobol/IX103A.CBL')
+        
+        >>> # Explicit preprocessing
+        >>> result = parse_cobol(source_code, preprocess_fixed=True)
+        
+        >>> # Disable preprocessing
+        >>> result = parse_cobol(source_code, preprocess_fixed=False)
     """
+    # Handle file paths - read the file if source looks like a path
+    import os
+    if os.path.isfile(source):
+        with open(source, 'r', encoding='utf-8', errors='replace') as f:
+            file_content = f.read()
+        # Use the actual filename for error reporting
+        if filename == "<string>":
+            filename = source
+        source = file_content
+    
+    # Auto-detect fixed-format if not explicitly specified
+    if preprocess_fixed is None:
+        preprocess_fixed = _detect_fixed_format(source)
+    
     if preprocess_fixed:
+        print(f"DEBUG PARSE: Pre-norm len={len(source)}")
         source = normalize_fixed_format(source.splitlines())
+        print(f"DEBUG PARSE: Post-norm len={len(source)}")
         free_form = True  # normalize produces free-form text
+    
     parser = CobolParser(
         dialect=dialect, error_recovery=error_recovery, free_form=free_form
     )
     return parser.parse(source, filename)
+

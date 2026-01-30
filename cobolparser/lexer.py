@@ -570,6 +570,20 @@ class CobolLexer:
         "QUOTES",
         "ALL",
     }
+    
+    # COBOL Fixed-Format Column Constants
+    SEQUENCE_AREA_START = 0
+    SEQUENCE_AREA_END = 6
+    INDICATOR_COLUMN = 6  # 0-indexed (column 7 in 1-indexed COBOL)
+    PROGRAM_TEXT_START = 7  # 0-indexed (column 8 in 1-indexed COBOL)
+    PROGRAM_TEXT_END = 72
+    IDENTIFICATION_START = 72
+    IDENTIFICATION_END = 80
+    
+    # Indicator characters
+    CONTINUATION_INDICATOR = '-'
+    COMMENT_INDICATORS = ('*', '/')
+    DEBUG_INDICATOR = 'D'
 
     def __init__(
         self,
@@ -1259,16 +1273,36 @@ class CobolLexer:
             search_text = stripped_text[1:]
             content_before_search = ""
         
-        # Check for closing quote in the remaining text
-        idx = search_text.find(quote)
-        if idx != -1:
-            # Found closing quote - include all text up to the quote
-            content_to_add = search_text[:idx]
-            if content_to_add:
-                compressed_content = self._compress_doubled_quotes(
-                    content_to_add, quote
-                )
-                self._open_string_value.append(compressed_content)
+        # Scan character by character to find the closing quote, handling doubled quotes
+        pos = 0
+        content_chars = []
+        found_closing_quote = False
+        
+        while pos < len(search_text):
+            char = search_text[pos]
+            
+            if char == quote:
+                # Check if this is a doubled quote (escape sequence)
+                if pos + 1 < len(search_text) and search_text[pos + 1] == quote:
+                    # Doubled quote - add single quote to content and skip both
+                    content_chars.append(quote)
+                    pos += 2
+                    continue
+                else:
+                    # Single quote - this is the closing quote
+                    found_closing_quote = True
+                    pos += 1  # Move past the closing quote
+                    break
+            else:
+                # Regular character
+                content_chars.append(char)
+                pos += 1
+        
+        if found_closing_quote:
+            # Found closing quote - add accumulated content
+            if content_chars:
+                self._open_string_value.append(''.join(content_chars))
+            
             token = Token(
                 TokenType.STRING_LITERAL,
                 "".join(self._open_string_value),
@@ -1279,7 +1313,7 @@ class CobolLexer:
             self._open_string_location = None
             remainder_tokens.append(token)
             # Tokenize rest of line after quote
-            remainder_text = search_text[idx + 1 :]
+            remainder_text = search_text[pos:]
             if remainder_text:
                 # Calculate correct column position for remainder
                 whitespace_len = len(program_text) - len(stripped_text)
@@ -1287,17 +1321,14 @@ class CobolLexer:
                 quote_offset = 1 if stripped_text.startswith(quote) else 0
                 remainder_tokens.extend(
                     self.tokenize_program_text(
-                        remainder_text, line_num, 8 + whitespace_len + quote_offset + idx + 1
+                        remainder_text, line_num, 8 + whitespace_len + quote_offset + pos
                     )
                 )
             return True, remainder_tokens
 
         # No closing quote found - append entire content as continuation
-        content_to_add = search_text
-
-        if content_to_add:
-            compressed_content = self._compress_doubled_quotes(content_to_add, quote)
-            self._open_string_value.append(compressed_content)
+        if content_chars:
+            self._open_string_value.append(''.join(content_chars))
 
         # Validate that this physical line is actually marked as a continuation ('-' in column 7)
         if not self.free_form:

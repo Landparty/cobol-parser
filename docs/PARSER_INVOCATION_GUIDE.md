@@ -82,7 +82,7 @@ def parse_cobol(
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
     free_form: bool = False,
-    preprocess_fixed: bool = False,
+    preprocess_fixed: bool | None = None,
 ) -> ParseResult
 ```
 
@@ -100,7 +100,7 @@ def parse_cobol(
 - `dialect` (DialectType): COBOL dialect (default: `IBM_ENTERPRISE`)
 - `error_recovery` (ErrorRecoveryMode): Recovery mode (default: `FAIL_FAST`)
 - `free_form` (bool): Treat source as free-form vs fixed-format (default: False)
-- `preprocess_fixed` (bool): Auto-normalize fixed-format (default: False)
+- `preprocess_fixed` (bool | None): Auto-normalize fixed-format. Default `None` enables **auto-detection** based on sequence numbers and indicator area.
 
 **Returns**: `ParseResult` object with AST and metadata
 
@@ -108,10 +108,10 @@ def parse_cobol(
 ```python
 from cobolparser import parse_cobol, ErrorRecoveryMode
 
-# Simple parse with error collection
+# Simple parse (automatically detects and handles fixed-format if needed)
 result = parse_cobol(my_cobol_code)
 
-# Auto-normalize fixed-format lines
+# Explicitly enable fixed-format preprocessing
 result = parse_cobol(my_fixed_format_code, preprocess_fixed=True)
 
 # Parse with lenient error handling
@@ -260,6 +260,8 @@ COBOL Source Code
 2. Recognize COBOL keywords, identifiers, literals, operators
 3. Generate `Token` objects with location information
 4. Track line/column numbers for error reporting
+5. Handle multi-line string literals with concatenation indicators (`-`) and doubled quotes as escape sequences.
+6. Support intelligent auto-detection of fixed-format source.
 
 **Key Methods**:
 - `CobolLexer.__init__(source, filename, dialect, free_form=False)`

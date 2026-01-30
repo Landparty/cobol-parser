@@ -47,7 +47,8 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - 🧩 **Plugin Architecture** - Extensible design for custom dialects and features
 - 📊 **Statistics** - Detailed parsing metrics and performance monitoring
 - ✅ **TDD Compliant** - 618 comprehensive tests ensuring reliability
-- 🔍 **Lexical Analysis** - Complete tokenization with comprehensive COBOL verb support (75+ verbs) and error reporting
+- 🔍 **Lexical Analysis** - Complete tokenization with comprehensive COBOL verb support (75+ verbs), multi-line string continuation, and robust error reporting
+- ⚡ **Auto-Detection** - Intelligent auto-detection of fixed-format COBOL with automatic preprocessing
 - 🏗️ **AST Generation** - Full Abstract Syntax Tree with source location tracking
 
 ## Documentation
@@ -399,12 +400,19 @@ class CobolProgram(ASTNode):
 ### Utility Functions
 
 #### parse_cobol()
-Convenience function for simple parsing.
+Convenience function for simple parsing. Now supports auto-detection of fixed-format COBOL.
 
 ```python
 from cobolparser import parse_cobol
 
+# Basic usage (defaults to auto-detection of fixed-format)
 result = parse_cobol(source_code, filename="program.cob")
+
+# Explicitly disable preprocessing if needed
+result = parse_cobol(source_code, preprocess_fixed=False)
+
+# File path usage
+result = parse_cobol("path/to/program.cbl")
 ```
 
 #### tokenize_cobol()

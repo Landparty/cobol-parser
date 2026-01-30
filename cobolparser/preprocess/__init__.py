@@ -406,25 +406,40 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
         if indicator in ('*', '/'):  # comment (including page eject)
-            flush_buffer()
-            result.append(text_slice.rstrip())
+            # Skip comments entirely in normalized output to prevent syntax errors
+            # and to allow correct merging of split literals checking
             continue
         is_cont = indicator == '-'
-
-        # Append to buffer if we are inside a literal continuation
-        if pending_literal and is_cont and merge_continued_literals:
-            # continuation: remove leading spaces in slice
-            chunk = text_slice.lstrip()
-            buffer += chunk
+        
+        # Handle continuation lines
+        if is_cont:
+            # This is a continuation line - merge with previous buffer
+            if pending_literal and merge_continued_literals:
+                # Special handling for string literal continuations:
+                # In COBOL fixed-format, continuation lines for string literals start with
+                # a quote character that is just a marker and should be removed.
+                # Example: Line 1: VALUE "PART1
+                #          Line 2: -    "PART2".
+                # The quote at the start of PART2 is a continuation marker, not part of the string.
+                chunk = text_slice.lstrip()
+                if chunk and chunk[0] == quote_char:
+                    # Remove the continuation quote marker
+                    chunk = chunk[1:]
+                buffer += chunk.rstrip()
+            else:
+                # Regular continuation (non-literal) - just append with a space
+                buffer += ' ' + text_slice.lstrip()
         else:
-            # Start new logical line
+            # Non-continuation line - start new logical line
             flush_buffer()
             buffer = text_slice.rstrip()
 
-        # Update literal tracking (simple heuristic)
         if merge_continued_literals:
             # Count quotes ignoring doubled ones
             i = 0
+            quote_char = None
+            pending_literal = False
+            
             while i < len(buffer):
                 ch = buffer[i]
                 if quote_char:
