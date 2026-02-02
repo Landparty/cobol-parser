@@ -16,16 +16,25 @@ def _parse(source: str) -> EvaluateStatement:
     assert result.ast is not None
     proc = result.ast.get_division("PROCEDURE")
     assert proc is not None
+    
+    # Check paragraphs first
     for paragraph in proc.paragraphs:
         for stmt in paragraph.statements:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
     
-    # Check sections if not in paragraphs
+    # Check sections
     for section in proc.sections:
+        # Check section statements directly
         for stmt in section.children:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
+        # Check section paragraphs
+        if hasattr(section, 'paragraphs'):
+            for paragraph in section.paragraphs:
+                for stmt in paragraph.statements:
+                    if isinstance(stmt, EvaluateStatement):
+                        return stmt
                 
     raise ValueError("EVALUATE statement not found in AST")
 

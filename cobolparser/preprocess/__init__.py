@@ -406,8 +406,9 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
         if indicator in ('*', '/'):  # comment (including page eject)
-            # Skip comments entirely in normalized output to prevent syntax errors
-            # and to allow correct merging of split literals checking
+            # Preserve comment text but don't treat as continuation source
+            flush_buffer()
+            result.append(text_slice.rstrip())
             continue
         is_cont = indicator == '-'
         

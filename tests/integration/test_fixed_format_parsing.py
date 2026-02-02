@@ -45,8 +45,13 @@ class TestFixedFormatAutoDetection:
         assert result.success, f"Parsing failed with errors: {result.errors}"
         assert result.ast is not None, "AST should not be None"
     
-    def test_ix103a_without_preprocessing_fails(self):
-        """Test that IX103A.CBL fails without preprocessing (as expected)."""
+    def test_ix103a_without_preprocessing_succeeds(self):
+        """Test that IX103A.CBL can parse without preprocessing (direct fixed-format handling).
+        
+        The lexer can handle fixed-format COBOL directly via handle_cobol_line_format(),
+        so preprocessing is an optimization, not a requirement. This test verifies that
+        fixed-format files parse successfully even without normalization preprocessing.
+        """
         filepath = Path(__file__).parent.parent.parent / "examples" / "cobol" / "IX103A.CBL"
         
         if not filepath.exists():
@@ -56,18 +61,13 @@ class TestFixedFormatAutoDetection:
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Parse without preprocessing (should fail)
+        # Parse without preprocessing (should still succeed due to lexer's fixed-format handling)
         result = parse_cobol(content, filename=str(filepath), preprocess_fixed=False)
         
-        # Should fail
-        assert not result.success, "Parsing should fail without preprocessing"
-        assert result.ast is None, "AST should be None when parsing fails"
-        assert len(result.errors) > 0, "Should have errors"
-        
-        # Should have the expected error about IDENTIFICATION DIVISION
-        error_messages = [str(e) for e in result.errors]
-        assert any("IDENTIFICATION DIVISION" in msg for msg in error_messages), \
-            f"Expected error about IDENTIFICATION DIVISION, got: {error_messages}"
+        # Should succeed because the lexer can handle fixed-format directly
+        assert result.success, f"Parsing should succeed with lexer fixed-format handling: {result.errors}"
+        assert result.ast is not None, "AST should not be None"
+        assert result.ast.program_name == "IX103A", f"Expected program name 'IX103A', got '{result.ast.program_name}'"
     
     def test_fixed_format_detection_with_sequence_numbers(self):
         """Test detection of fixed-format COBOL with sequence numbers."""

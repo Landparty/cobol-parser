@@ -43,13 +43,15 @@ class TestValueClauseFigurativeConstantsContract:
         
         # Contract: Working storage should contain the data item
         assert result.ast.data_division is not None
-        assert result.ast.data_division.working_storage is not None
+        working_storage = result.ast.data_division.get_section_by_name("WORKING-STORAGE")
+        assert working_storage is not None
         
         # Contract: AST structure preserved
         ast_dict = result.ast.to_dict()
         assert "node_type" in ast_dict
         assert "program_name" in ast_dict
-        assert "data_division" in ast_dict
+        assert "divisions" in ast_dict  # AST uses 'divisions' key, not 'data_division'
+        assert "DATA" in ast_dict["divisions"]  # DATA division should be present
 
     def test_backward_compatibility_baseline_value_spaces(self):
         """Baseline: VALUE SPACES should parse successfully."""

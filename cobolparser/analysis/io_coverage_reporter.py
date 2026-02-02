@@ -107,6 +107,7 @@ class IOCoverageReporter:
         possible_paths = [
             "specs/001-io-variation-coverage/io-variation-catalog.csv",
             "specs/io-variation-coverage/io-variation-catalog.csv",
+            "specs/archive/001-io-variation-coverage/io-variation-catalog.csv",
             "io-variation-catalog.csv",
         ]
         for path in possible_paths:
@@ -121,6 +122,7 @@ class IOCoverageReporter:
         possible_paths = [
             "contracts/io-coverage-schema.json",
             "specs/001-io-variation-coverage/contracts/io-coverage-schema.json",
+            "specs/archive/001-io-variation-coverage/contracts/io-coverage-schema.json",
             "io-coverage-schema.json",
         ]
         for path in possible_paths:

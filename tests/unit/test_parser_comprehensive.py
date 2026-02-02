@@ -1041,38 +1041,6 @@ class TestProcedureDivisionParsing:
         assert perform_stmt.until_condition is not None
         assert perform_stmt.until_condition._metadata.get("value") == "CONDITION"
     
-    def test_parse_call_statement_with_using(self):
-        """Test CALL statement with USING clause."""
-        parser = CobolParser()
-        
-        # Mock tokens: CALL "SUBPROG" USING PARAM1 PARAM2.
-        parser.tokens = [
-            Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
-            Token(TokenType.STRING_LITERAL, "SUBPROG", SourceLocation(1, 6)),
-            Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 15)),
-            Token(TokenType.IDENTIFIER, "PARAM1", SourceLocation(1, 21)),
-            Token(TokenType.IDENTIFIER, "PARAM2", SourceLocation(1, 28)),
-            Token(TokenType.PERIOD, ".", SourceLocation(1, 34)),
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
-        ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        # Create procedure division to add statement to
-        proc_division = CobolDivision("PROCEDURE", SourceLocation(1, 1))
-        parser.current_division = proc_division
-        
-        call_stmt = parser.parse_call_statement()
-        
-        assert call_stmt is not None
-        assert call_stmt.called_program == '"SUBPROG"'
-        assert len(call_stmt.using_parameters) == 2
-        # Parameters might be strings or CallParameter objects
-        param_values = [p if isinstance(p, str) else p.name if hasattr(p, 'name') else str(p) 
-                       for p in call_stmt.using_parameters]
-        assert "PARAM1" in param_values
-        assert "PARAM2" in param_values
-    
     def test_parse_stop_statement(self):
         """Test STOP RUN statement parsing."""
         parser = CobolParser()

@@ -34,9 +34,14 @@ class ParseContext:
         return self.host.current_division
 
     def parse_nested_statement(self, stream: TokenStream = None) -> Optional[CobolStatement]:
-        """Delegate back to main parser to parse a child statement."""
-        # Always use the direct parser method, not the stream-based registry
-        if hasattr(self.host, 'parse_statement'):
+        """Parse a child statement using the registry when a stream is available."""
+        if stream is not None:
+            stream.skip_whitespace_and_comments()
+            parser = self.registry.get_parser(stream)
+            if parser:
+                return parser.parse(stream, self)
+            return None
+        if hasattr(self.host, "parse_statement"):
             return self.host.parse_statement()
         return None
         

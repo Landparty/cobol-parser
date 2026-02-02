@@ -15,18 +15,28 @@ def test_evaluate_variants_sample_file():
     proc = result.ast.get_division("PROCEDURE")
     assert proc is not None
     evals = []
-    # Prefer paragraphs if present
+    
+    # Check paragraphs first
     for para in proc.paragraphs:
         for stmt in para.statements:
             if isinstance(stmt, EvaluateStatement):
                 evals.append(stmt)
+    
+    # Check sections and their paragraphs
     if not evals:
-        # Fallback to section children (implicit section when no paragraphs exist)
         for section in proc.sections:
+            # Check section children directly
             for child in section.children:
                 if isinstance(child, EvaluateStatement):
                     evals.append(child)
+            # Check section paragraphs  
+            if hasattr(section, 'paragraphs'):
+                for para in section.paragraphs:
+                    for stmt in para.statements:
+                        if isinstance(stmt, EvaluateStatement):
+                            evals.append(stmt)
+    
     # Expect three EVALUATE statements in the sample
-    assert len(evals) == 3
+    assert len(evals) == 3, f"Expected 3 EVALUATE statements, found {len(evals)}"
     # Check that WHEN OTHER exists in each
     assert all(ev.default_when is not None for ev in evals)
