@@ -316,7 +316,13 @@ class CobolProgram(ASTNode):
                 for child in node.children:
                     traverse(child)
             
-            # 2. Recurse known attribute lists (handle orphans/non-children)
+            # 2. Recurse paragraph statements (new architecture)
+            # Paragraphs store statements in a separate list
+            if hasattr(node, 'statements') and node.node_type == 'Paragraph':
+                for stmt in node.statements:
+                    traverse(stmt)
+            
+            # 3. Recurse known attribute lists (handle orphans/non-children)
             # COBOL statements often have conditional blocks in attributes
             orphan_attrs = [
                 'at_end_clause', 'not_at_end_clause',

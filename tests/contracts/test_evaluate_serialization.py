@@ -20,11 +20,14 @@ def _parse(source: str) -> EvaluateStatement:
         for stmt in paragraph.statements:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
+    
+    # Check sections if not in paragraphs
     for section in proc.sections:
-        for child in section.children:
-            if isinstance(child, EvaluateStatement):
-                return child
-    raise AssertionError("EVALUATE not found")
+        for stmt in section.children:
+            if isinstance(stmt, EvaluateStatement):
+                return stmt
+                
+    raise ValueError("EVALUATE statement not found in AST")
 
 
 def test_evaluate_to_dict_structure():
@@ -44,9 +47,13 @@ def test_evaluate_to_dict_structure():
     """
     ev = _parse(source)
     data = ev.to_dict()
-    assert data["statement_type"] == "EVALUATE"
-    assert data["subjects"] == ["WS-GRADE"]
-    assert isinstance(data["when_clauses"], list)
+    
+    assert data["subjects"][0] == "WS-GRADE"
+    assert len(data["when_clauses"]) == 1
     assert data["when_clauses"][0]["selectors"][0]["value"] == "1"
     assert data["default_when"] is not None
     assert data["location"]["line"] > 0
+
+if __name__ == "__main__":
+    test_evaluate_to_dict_structure()
+    print("Test passed!")

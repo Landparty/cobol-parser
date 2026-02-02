@@ -23,14 +23,26 @@ def _parse_and_get_program(source: str) -> CobolProgram:
 def _first_evaluate(program: CobolProgram):
     proc = program.get_division("PROCEDURE")
     assert proc is not None, "Procedure division missing"
+    
+    # Search in direct paragraphs (new architecture)
     for paragraph in proc.paragraphs:
         for stmt in paragraph.statements:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
+    
+    # Search in sections -> paragraphs -> statements (current architecture)
+    for section in proc.sections:
+        for paragraph in section.paragraphs:
+            for stmt in paragraph.statements:
+                if isinstance(stmt, EvaluateStatement):
+                    return stmt
+    
+    # Fallback: search all children (legacy)
     for section in proc.sections:
         for child in section.children:
             if isinstance(child, EvaluateStatement):
                 return child
+    
     raise AssertionError("No EVALUATE statement found")
 
 

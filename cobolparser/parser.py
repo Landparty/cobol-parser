@@ -5,7 +5,7 @@ source code into Abstract Syntax Trees (AST) representing the program structure.
 """
 
 import re
-from typing import List, Optional, Dict, Any, Union, Iterator
+from typing import List, Optional, Dict, Any, Union, Iterator, TypeVar
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -34,6 +34,7 @@ from .models.statements import (
     EvaluateStatement,
     WhenClause,
     # Arithmetic Statements
+    ArithmeticStatement,
     ComputeStatement,
     AddStatement,
     SubtractStatement,
@@ -72,6 +73,28 @@ from .plugins.core import (
 )
 from .preprocess import normalize_fixed_format
 
+# Core parsing infrastructure
+from .core.token_stream import TokenStream
+from .core.registry import StatementRegistry
+from .core.interfaces import ParseContext
+
+# Statement parsers
+from .parsers.display_parser import DisplayStatementParser
+from .parsers.move_parser import MoveStatementParser
+from .parsers.call_parser import CallStatementParser
+from .parsers.if_parser import IfStatementParser
+from .parsers.perform_parser import PerformStatementParser
+from .parsers.evaluate_parser import EvaluateStatementParser
+from .parsers.arithmetic_parsers import (
+    AddStatementParser,
+    SubtractStatementParser,
+    MultiplyStatementParser,
+    DivideStatementParser,
+    ComputeStatementParser,
+)
+
+# Type variable for generic arithmetic statements that preserves the subtype
+ArithmeticStatementT = TypeVar('ArithmeticStatementT', bound=ArithmeticStatement)
 
 class ParseState(Enum):
     """Parser state tracking for COBOL divisions and sections."""
@@ -183,7 +206,52 @@ class CobolParser:
         self.current_program: Optional[CobolProgram] = None
         self.current_division: Optional[CobolDivision] = None
         self.current_section: Optional[CobolSection] = None
+        self.current_paragraph: Optional['CobolParagraph'] = None
         self.parsing_nested_statement = False  # Track nested statement parsing
+        
+        # Statement parser registry
+        self.registry = StatementRegistry()
+        self.stream: Optional[TokenStream] = None
+        
+        # Register statement parsers
+        self._register_parsers()
+    
+    def _add_statement(self, stmt: 'CobolStatement') -> None:
+        """Add statement to the current paragraph or section.
+        
+        If there's a current paragraph, add to the paragraph's statements list.
+        Otherwise, add to the current section's children.
+        """
+        if self.current_paragraph:
+            self.current_paragraph.add_statement(stmt)
+        elif self.current_section:
+            self.current_section.add_child(stmt)
+    
+    def _get_last_statement(self) -> Optional['CobolStatement']:
+        """Get the last statement that was added to current paragraph or section.
+        
+        Works with both old architecture (section.children) and new (paragraph.statements).
+        """
+        if self.current_paragraph and self.current_paragraph.statements:
+            return self.current_paragraph.statements[-1]
+        elif self.current_section and self.current_section.children:
+            return self.current_section.children[-1]
+        return None
+    
+    def _register_parsers(self) -> None:
+        """Register all statement parsers in the registry."""
+        self.registry.register(DisplayStatementParser())
+        self.registry.register(MoveStatementParser())
+        self.registry.register(CallStatementParser())
+        self.registry.register(IfStatementParser())
+        self.registry.register(PerformStatementParser())
+        self.registry.register(EvaluateStatementParser())
+        # Arithmetic parsers
+        self.registry.register(AddStatementParser())
+        self.registry.register(SubtractStatementParser())
+        self.registry.register(MultiplyStatementParser())
+        self.registry.register(DivideStatementParser())
+        self.registry.register(ComputeStatementParser())
 
     @staticmethod
     def _skip_to_identification_division(content: str) -> str:
@@ -232,14 +300,14 @@ class CobolParser:
         try:
             # Skip lines before IDENTIFICATION DIVISION (e.g., PROCESS directives)
             cleaned_source = self._skip_to_identification_division(source)
-            print(f"DEBUG PARSE: cleaned_source len={len(cleaned_source)}")
+
 
             # Tokenize source
             lexer = CobolLexer(
                 cleaned_source, filename, self.dialect, free_form=self.free_form
             )
             self.tokens = lexer.tokenize()
-            print(f"DEBUG PARSE: tokens count={len(self.tokens)}")
+
 
             if lexer.has_errors():
                 for error in lexer.get_errors():
@@ -256,6 +324,9 @@ class CobolParser:
             self.current_token_index = 0
             self.current_token = self.tokens[0] if self.tokens else None
             self.parse_state = ParseState.INITIAL
+            
+            # Initialize TokenStream for new parsers
+            self.stream = TokenStream(self.tokens)
 
             # Parse program structure
             program = self.parse_program()
@@ -2709,7 +2780,7 @@ class CobolParser:
             debug_sentence = False
             if self.current_token.value and 'EVALUATE' in str(self.current_token.value).upper():
                 debug_sentence = True
-                print(f"DEBUG SENTENCE: Starting sentence with EVALUATE")
+
 
             while self.current_token and self.current_token.type != TokenType.EOF:
                 current_type = self.current_token.type
@@ -2760,24 +2831,18 @@ class CobolParser:
                     if not is_decimal_point and paren_depth == 0 and not expecting_to:
                         # This is a sentence-ending period - include it in sentence_tokens
                         # so that statement parsers can see it as a terminator
-                        if debug_sentence:
-                            print(f"DEBUG SENTENCE: Breaking at PERIOD, collected {len(sentence_tokens)} tokens")
                         sentence_tokens.append(self.current_token)
-                        if debug_sentence:
-                            print(f"DEBUG SENTENCE: Added token {len(sentence_tokens)}: {self.current_token.type.name} = {repr(self.current_token.value)}")
                         self.advance_token()
                         break
 
                 sentence_tokens.append(self.current_token)
                 if debug_sentence:
-                    print(f"DEBUG SENTENCE: Added token {len(sentence_tokens)}: {self.current_token.type.name} = {repr(self.current_token.value)}")
+                    pass
                 self.advance_token()
 
             # Note: The period is now included in sentence_tokens above
             # We no longer need to consume it separately here
             # Parse the sentence for multiple verbs
-            if debug_sentence:
-                print(f"DEBUG SENTENCE: Parsing sentence with {len(sentence_tokens)} tokens")
             self.parse_sentence(sentence_tokens, start_pos_token.location)
 
     def parse_sentence(self, tokens: list, location) -> None:
@@ -2794,6 +2859,14 @@ class CobolParser:
             self._set_node_context(implicit)
             self.current_division.add_section(implicit)
             self.current_section = implicit
+            
+            # Also create an implicit paragraph to hold statements
+            # Paragraphs should be in section.paragraphs and section.children (per add_paragraph)
+            from .models.program import CobolParagraph
+            implicit_para = CobolParagraph("IMPLICIT-PARAGRAPH", location)
+            self._set_node_context(implicit_para)
+            implicit.add_paragraph(implicit_para)
+            self.current_paragraph = implicit_para
         i = 0
         length = len(tokens)
         active_if = False
@@ -2846,12 +2919,142 @@ class CobolParser:
             if ttype == TokenType.EVALUATE or upper_val == "EVALUATE":
                 i = self._parse_evaluate_inline(tokens, i)
                 continue
+            # Handle arithmetic statements (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE)
+            if ttype == TokenType.ADD or upper_val == "ADD":
+                i = self._parse_arithmetic_inline(tokens, i, "ADD")
+                continue
+            if ttype == TokenType.SUBTRACT or upper_val == "SUBTRACT":
+                i = self._parse_arithmetic_inline(tokens, i, "SUBTRACT")
+                continue
+            if ttype == TokenType.MULTIPLY or upper_val == "MULTIPLY":
+                i = self._parse_arithmetic_inline(tokens, i, "MULTIPLY")
+                continue
+            if ttype == TokenType.DIVIDE or upper_val == "DIVIDE":
+                i = self._parse_arithmetic_inline(tokens, i, "DIVIDE")
+                continue
+            if ttype == TokenType.COMPUTE or upper_val == "COMPUTE":
+                i = self._parse_arithmetic_inline(tokens, i, "COMPUTE")
+                continue
             # Handle EXEC SQL blocks
             if ttype == TokenType.EXEC or upper_val == "EXEC":
                 i = self._parse_exec_inline(tokens, i)
                 continue
             # Unrecognized inside sentence: skip token
             i += 1
+
+    def _parse_arithmetic_inline(self, tokens, i, statement_type):
+        """Parse arithmetic statement (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE) using registry."""
+        if not self.stream or not self.registry:
+            # Fallback: create generic statement
+            location = tokens[i].location if i < len(tokens) else self.get_current_location()
+            stmt = CobolStatement(statement_type, location)
+            self._add_statement(stmt)
+            return i + 1
+        
+        # Save current token state
+        old_index = self.current_token_index
+        old_token = self.current_token
+        
+        # Set token pointer to start of statement in tokens array
+        # Find the position of tokens[i] in self.tokens
+        # Optimization: Search backwards from current position first (most likely location)
+        target_token = tokens[i]
+        found_index = None
+        
+        # Fast search in likely range (unlikely to be more than len(tokens) + allowance away)
+        search_limit = len(tokens) + 200
+        start_search = max(0, self.current_token_index - search_limit)
+        
+        # Search backwards from current position since we just parsed up to here
+        for idx in range(min(self.current_token_index + 10, len(self.tokens) - 1), start_search - 1, -1):
+             if self.tokens[idx] is target_token:
+                 found_index = idx
+                 break
+        
+        if found_index is None:
+             # Fallback to full search (rare)
+             for idx, t in enumerate(self.tokens):
+                 if t is target_token:
+                     found_index = idx
+                     break
+        
+        if found_index is None:
+            # Can't find token, fallback
+            location = tokens[i].location if i < len(tokens) else self.get_current_location()
+            stmt = CobolStatement(statement_type, location)
+            self._add_statement(stmt)
+            return i + 1
+        
+        # Set current token to the arithmetic statement
+        self.current_token_index = found_index
+        self.current_token = self.tokens[self.current_token_index]
+        
+        # Sync stream position
+        self.stream._pos = self.current_token_index
+        
+        # Create parse context
+        context = ParseContext(host=self, registry=self.registry)
+        
+        # Get parser from registry
+        parser = self.registry.get_parser(self.stream)
+        
+        if parser:
+            # Parse using registry
+            stmt = parser.parse(self.stream, context)
+            
+            # Add statement to current paragraph or section
+            if stmt:
+                self._add_statement(stmt)
+            
+            # Update token index based on stream position
+            self.current_token_index = self.stream._pos
+            self.current_token = (
+                self.tokens[self.current_token_index]
+                if self.current_token_index < len(self.tokens)
+                else None
+            )
+            
+            # Efficiently map consumed tokens back to invalidating 'tokens' list logic
+            # We want to find the first token in tokens[i:] that is at or beyond current_token_index
+            new_i = i
+            scan_pos = found_index
+            
+            for offset in range(len(tokens) - i):
+                t = tokens[new_i + offset]
+                
+                # Find t in self.tokens starting from scan_pos
+                # We assume optimal contiguous match, skipping comments/newlines in self.tokens
+                found_scan = False
+                while scan_pos < len(self.tokens):
+                    if self.tokens[scan_pos] is t:
+                        found_scan = True
+                        if scan_pos >= self.current_token_index:
+                             # This token was NOT consumed by the parser
+                             return new_i + offset
+                        # Consumed, check next
+                        scan_pos += 1
+                        break
+                    scan_pos += 1
+                
+                if not found_scan:
+                    # Token not found forward? Should not happen if data structures consistent.
+                    # Fallback to conservative advance
+                    pass
+            
+            # All remaining tokens consumed
+            return len(tokens)
+        else:
+            # No parser found, restore state and skip
+            self.current_token_index = old_index
+            self.current_token = old_token
+            
+            # Fallback
+            location = tokens[i].location if i < len(tokens) else self.get_current_location()
+            stmt = CobolStatement(statement_type, location)
+            self._add_statement(stmt)
+            return i + 1
+            self.current_token = old_token
+            return i + 1
 
     def _skip_to_next_verb(self, tokens, start):
         verbs = {
@@ -2948,8 +3151,8 @@ class CobolParser:
         sql_stmt = parse_exec_sql(sql_text, start_token.location)
 
         # Add to current section
-        if self.current_section:
-            self.current_section.add_child(sql_stmt)
+        if self.current_section or self.current_paragraph:
+            self._add_statement(sql_stmt)
 
         return i
 
@@ -3001,8 +3204,8 @@ class CobolParser:
                     cics_stmt.add_option(option)
                 j += 1
 
-        if self.current_section:
-            self.current_section.add_child(cics_stmt)
+        if self.current_section or self.current_paragraph:
+            self._add_statement(cics_stmt)
 
         return i
 
@@ -3052,8 +3255,8 @@ class CobolParser:
                     ims_stmt.add_option(option)
                 j += 1
 
-        if self.current_section:
-            self.current_section.add_child(ims_stmt)
+        if self.current_section or self.current_paragraph:
+            self._add_statement(ims_stmt)
 
         return i
 
@@ -3073,6 +3276,8 @@ class CobolParser:
         # i points to the MOVE token
         start = tokens[i]
         i += 1  # Move past MOVE token
+        
+        is_corresponding = False
 
         if i >= len(tokens):
             # MOVE at end of token stream - add error and return
@@ -3091,6 +3296,20 @@ class CobolParser:
             TokenType.CONTINUATION,
         ):
             i += 1
+        
+        # Check for CORR or CORRESPONDING keyword
+        if i < len(tokens) and tokens[i].value:
+            token_val_upper = tokens[i].value.upper()
+            if token_val_upper in ("CORR", "CORRESPONDING"):
+                is_corresponding = True
+                i += 1
+                # Skip separators after CORR/CORRESPONDING
+                while i < len(tokens) and tokens[i].type in (
+                    TokenType.NEWLINE,
+                    TokenType.COMMENT,
+                    TokenType.CONTINUATION,
+                ):
+                    i += 1
 
         if i >= len(tokens):
             # Still no tokens after skipping separators - add error and return
@@ -3222,6 +3441,11 @@ class CobolParser:
                     i += 1
                 else:
                     break  # No more numbers, stop here
+        # Handle STRING_LITERAL with preserved quotes
+        elif i < len(tokens) and tokens[i].type == TokenType.STRING_LITERAL:
+            # Reconstruct the quoted string literal
+            source_operand = f'"{tokens[i].value}"'
+            i += 1
         # Handle regular tokens (identifiers, literals, etc.)
         elif i < len(tokens):
             source_operand = tokens[i].value
@@ -3298,7 +3522,8 @@ class CobolParser:
             i += 1
 
         # Look for TO keyword
-        target = None
+        # Parse target(s) - can be multiple space/comma-separated identifiers
+        targets = []
         if i < len(tokens) and tokens[i].value.upper() == "TO":
             i += 1
             # Skip interstitials after TO (including continuation lines)
@@ -3308,9 +3533,45 @@ class CobolParser:
                 TokenType.CONTINUATION,
             ):
                 i += 1
-            if i < len(tokens):
-                target = tokens[i].value
-                i += 1
+            
+            # Collect all targets until we hit a keyword or period
+            while i < len(tokens):
+                token = tokens[i]
+                token_val_upper = token.value.upper() if token.value else ""
+                
+                # Stop at terminators or statement keywords
+                if (
+                    token.type in (TokenType.PERIOD, TokenType.SEMICOLON, TokenType.NEWLINE)
+                    or token_val_upper in ("ON", "NOT", "BY", "FROM", "ROUNDED", "WITH", "END-MOVE")
+                ):
+                    break
+                
+                # Skip commas between targets
+                if token.type == TokenType.COMMA:
+                    i += 1
+                    # Skip whitespace after comma
+                    while i < len(tokens) and tokens[i].type in (
+                        TokenType.NEWLINE,
+                        TokenType.COMMENT,
+                        TokenType.CONTINUATION,
+                    ):
+                        i += 1
+                    continue
+                
+                # Collect target (identifier or literal)
+                if token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL):
+                    targets.append(token.value)
+                    i += 1
+                    # Skip whitespace after target
+                    while i < len(tokens) and tokens[i].type in (
+                        TokenType.NEWLINE,
+                        TokenType.COMMENT,
+                        TokenType.CONTINUATION,
+                    ):
+                        i += 1
+                else:
+                    # Unknown token, stop collecting targets
+                    break
         else:
             # Enhanced debug info for MOVE statement issues
             debug_info = f"Expected TO in MOVE statement"
@@ -3344,22 +3605,27 @@ class CobolParser:
                 TokenType.NUMERIC_LITERAL,
                 TokenType.STRING_LITERAL,
             ):
-                target = tokens[i].value
-                i += 1
+                targets.append(tokens[i].value)
                 self.add_warning(
-                    f"MOVE statement missing TO; treated '{target}' as target at {start.location}"
+                    f"MOVE statement missing TO; treated '{tokens[i].value}' as target at {start.location}"
                 )
+                i += 1
             else:
                 self.add_error(ParseError(debug_info, location=start.location))
                 # Advance index to avoid infinite loop in sentence parsing
                 if i < len(tokens):
                     i += 1
-        if target is not None:
+        if targets:
             mv = MoveStatement(start.location)
             mv.set_source(source_operand)
-            mv.add_target(target)
-            if self.current_section:
-                self.current_section.add_child(mv)
+            for target in targets:
+                mv.add_target(target)
+            if is_corresponding:
+                mv.set_corresponding(True)
+            if self.current_section or self.current_paragraph:
+                self._add_statement(mv)
+            # Validate MOVE statement
+            self._validate_move_statement(mv)
         return i
 
     def _parse_display_inline(self, tokens, i):
@@ -3369,8 +3635,7 @@ class CobolParser:
             disp = DisplayStatement(start.location)
             disp.add_display_item(tokens[i].value)
             i += 1
-            if self.current_section:
-                self.current_section.add_child(disp)
+            self._add_statement(disp)
         return i
 
     def _parse_call_inline(self, tokens, i):
@@ -3434,8 +3699,11 @@ class CobolParser:
         # Parse optional ON EXCEPTION/OVERFLOW/NOT ON EXCEPTION clauses
         i = self._parse_call_exception_handlers(tokens, i, call_stmt)
 
-        if self.current_section:
-            self.current_section.add_child(call_stmt)
+        # Validate CALL statement
+        self._validate_call_statement(call_stmt)
+
+        if self.current_section or self.current_paragraph:
+            self._add_statement(call_stmt)
 
         return i
 
@@ -3517,8 +3785,8 @@ class CobolParser:
                     i += 1
 
         # Add to current section
-        if self.current_section:
-            self.current_section.add_child(entry_stmt)
+        if self.current_section or self.current_paragraph:
+            self._add_statement(entry_stmt)
 
         return i
 
@@ -4082,7 +4350,7 @@ class CobolParser:
         return None, i
 
     def _parse_perform_inline(self, tokens, i):
-        print(f"TRACE PERFORM ENTER: i={i}, token={tokens[i].type} {repr(tokens[i].value)}")
+        # print(f"TRACE PERFORM ENTER: i={i}, token={tokens[i].type} {repr(tokens[i].value)}")
         """Parse PERFORM statement inline (sentence-level parsing).
 
         Handles:
@@ -4279,13 +4547,15 @@ class CobolParser:
                                         # Skip other tokens (newlines, comments, etc.)
                                         i += 1
 
-            if self.current_section:
-                self.current_section.add_child(pf)
+            # Validate PERFORM statement (VARYING case)
+            self._validate_perform_statement(pf)
+            if self.current_section or self.current_paragraph:
+                self._add_statement(pf)
             return i
 
         # Simple PERFORM paragraph-name [THRU paragraph-name] [n TIMES] [WITH TEST] [UNTIL condition]
         else:
-            print(f"TRACE PERFORM SIMPLE: i={i} Target={tokens[i].value}")
+            # print(f"TRACE PERFORM SIMPLE: i={i} Target={tokens[i].value}")
             pf = PerformStatement(start.location)
             pf.set_target_paragraph(tokens[i].value)
             i += 1
@@ -4309,6 +4579,12 @@ class CobolParser:
                 if i < len(tokens) and tokens[i].type == TokenType.IDENTIFIER:
                     pf.set_thru_paragraph(tokens[i].value)
                     i += 1
+                else:
+                    # THRU was specified but no ending paragraph name found
+                    self.add_error(self.create_error(
+                        "Expected paragraph name after THRU",
+                        start.location
+                    ))
 
             # Check for TIMES clause (can be numeric or variable)
             if i < len(tokens) and tokens[i].type in (
@@ -4365,8 +4641,10 @@ class CobolParser:
                 pf.set_until_clause(until_condition)
                 pf.perform_type = "UNTIL"
 
-            if self.current_section:
-                self.current_section.add_child(pf)
+            # Validate PERFORM statement (simple case)
+            self._validate_perform_statement(pf)
+            if self.current_section or self.current_paragraph:
+                self._add_statement(pf)
             return i
 
     def _parse_inline_call_into_perform(self, tokens, i, perform_stmt):
@@ -4418,6 +4696,9 @@ class CobolParser:
 
             # Add to PERFORM's inline statements
             perform_stmt.add_inline_statement(call_stmt)
+            
+            # Validate CALL statement
+            self._validate_call_statement(call_stmt)
 
         return i
 
@@ -4485,6 +4766,9 @@ class CobolParser:
 
         # Add IF statement to PERFORM's inline statements
         perform_stmt.add_inline_statement(if_stmt)
+        
+        # Validate IF statement
+        self._validate_if_statement(if_stmt)
 
         return i
 
@@ -4540,6 +4824,9 @@ class CobolParser:
                 if_stmt.add_then_statement(call_stmt)
             else:
                 if_stmt.add_else_statement(call_stmt)
+            
+            # Validate CALL statement
+            self._validate_call_statement(call_stmt)
 
         return i
 
@@ -4551,8 +4838,7 @@ class CobolParser:
             ws = CobolStatement("WRITE", start.location)
             ws.add_operand(tokens[i].value)
             i += 1
-            if self.current_section:
-                self.current_section.add_child(ws)
+            self._add_statement(ws)
         return i
 
     def _parse_goto_inline(self, tokens, i):
@@ -4612,8 +4898,7 @@ class CobolParser:
             for target in targets:
                 gt.add_operand(target)
 
-        if self.current_section:
-            self.current_section.add_child(gt)
+        self._add_statement(gt)
         return i
 
     def _parse_if_inline(self, tokens, i):
@@ -4656,8 +4941,12 @@ class CobolParser:
         condition_expr._metadata["value"] = condition
         if_stmt.set_condition(condition_expr)
 
+        # Track whether THEN keyword was found for validation
+        found_then = False
+        
         # Parse THEN block (if THEN present, else treat next verb as THEN)
         if i < len(tokens) and tokens[i].type == TokenType.THEN:
+            found_then = True
             i += 1
 
         # Skip newlines after THEN
@@ -4685,42 +4974,37 @@ class CobolParser:
             if verb_type == TokenType.MOVE or verb_val == "MOVE":
                 j = self._parse_move_inline(tokens, i)
                 # Find last statement added to section and add to IF then_statements
-                if self.current_section and self.current_section.children:
-                    then_stmt = self.current_section.children[-1]
-                    if isinstance(then_stmt, CobolStatement):
-                        if_stmt.add_then_statement(then_stmt)
+                then_stmt = self._get_last_statement()
+                if then_stmt and isinstance(then_stmt, CobolStatement):
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.PERFORM or verb_val == "PERFORM":
                 j = self._parse_perform_inline(tokens, i)
-                if self.current_section and self.current_section.children:
-                    then_stmt = self.current_section.children[-1]
-                    if isinstance(then_stmt, CobolStatement):
-                        if_stmt.add_then_statement(then_stmt)
+                then_stmt = self._get_last_statement()
+                if then_stmt and isinstance(then_stmt, CobolStatement):
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.DISPLAY or verb_val == "DISPLAY":
                 j = self._parse_display_inline(tokens, i)
-                if self.current_section and self.current_section.children:
-                    then_stmt = self.current_section.children[-1]
-                    if isinstance(then_stmt, CobolStatement):
-                        if_stmt.add_then_statement(then_stmt)
+                then_stmt = self._get_last_statement()
+                if then_stmt and isinstance(then_stmt, CobolStatement):
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.CALL or verb_val == "CALL":
                 j = self._parse_call_inline(tokens, i)
-                if self.current_section and self.current_section.children:
-                    then_stmt = self.current_section.children[-1]
-                    if isinstance(then_stmt, CobolStatement):
-                        if_stmt.add_then_statement(then_stmt)
+                then_stmt = self._get_last_statement()
+                if then_stmt and isinstance(then_stmt, CobolStatement):
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type == TokenType.WRITE or verb_val == "WRITE":
                 j = self._parse_write_inline(tokens, i)
-                if self.current_section and self.current_section.children:
-                    then_stmt = self.current_section.children[-1]
-                    if isinstance(then_stmt, CobolStatement):
-                        if_stmt.add_then_statement(then_stmt)
+                then_stmt = self._get_last_statement()
+                if then_stmt and isinstance(then_stmt, CobolStatement):
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             if verb_type in (TokenType.GO, TokenType.GOTO) or verb_val in (
@@ -4728,10 +5012,9 @@ class CobolParser:
                 "GOTO",
             ):
                 j = self._parse_goto_inline(tokens, i)
-                if self.current_section and self.current_section.children:
-                    then_stmt = self.current_section.children[-1]
-                    if isinstance(then_stmt, CobolStatement):
-                        if_stmt.add_then_statement(then_stmt)
+                then_stmt = self._get_last_statement()
+                if then_stmt and isinstance(then_stmt, CobolStatement):
+                    if_stmt.add_then_statement(then_stmt)
                 i = j
                 continue
             # Unknown or non-verb: skip
@@ -4761,42 +5044,37 @@ class CobolParser:
 
                 if verb_type == TokenType.MOVE or verb_val == "MOVE":
                     j = self._parse_move_inline(tokens, i)
-                    if self.current_section and self.current_section.children:
-                        else_stmt = self.current_section.children[-1]
-                        if isinstance(else_stmt, CobolStatement):
-                            if_stmt.add_else_statement(else_stmt)
+                    else_stmt = self._get_last_statement()
+                    if else_stmt and isinstance(else_stmt, CobolStatement):
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.PERFORM or verb_val == "PERFORM":
                     j = self._parse_perform_inline(tokens, i)
-                    if self.current_section and self.current_section.children:
-                        else_stmt = self.current_section.children[-1]
-                        if isinstance(else_stmt, CobolStatement):
-                            if_stmt.add_else_statement(else_stmt)
+                    else_stmt = self._get_last_statement()
+                    if else_stmt and isinstance(else_stmt, CobolStatement):
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.DISPLAY or verb_val == "DISPLAY":
                     j = self._parse_display_inline(tokens, i)
-                    if self.current_section and self.current_section.children:
-                        else_stmt = self.current_section.children[-1]
-                        if isinstance(else_stmt, CobolStatement):
-                            if_stmt.add_else_statement(else_stmt)
+                    else_stmt = self._get_last_statement()
+                    if else_stmt and isinstance(else_stmt, CobolStatement):
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.CALL or verb_val == "CALL":
                     j = self._parse_call_inline(tokens, i)
-                    if self.current_section and self.current_section.children:
-                        else_stmt = self.current_section.children[-1]
-                        if isinstance(else_stmt, CobolStatement):
-                            if_stmt.add_else_statement(else_stmt)
+                    else_stmt = self._get_last_statement()
+                    if else_stmt and isinstance(else_stmt, CobolStatement):
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type == TokenType.WRITE or verb_val == "WRITE":
                     j = self._parse_write_inline(tokens, i)
-                    if self.current_section and self.current_section.children:
-                        else_stmt = self.current_section.children[-1]
-                        if isinstance(else_stmt, CobolStatement):
-                            if_stmt.add_else_statement(else_stmt)
+                    else_stmt = self._get_last_statement()
+                    if else_stmt and isinstance(else_stmt, CobolStatement):
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 if verb_type in (TokenType.GO, TokenType.GOTO) or verb_val in (
@@ -4804,17 +5082,19 @@ class CobolParser:
                     "GOTO",
                 ):
                     j = self._parse_goto_inline(tokens, i)
-                    if self.current_section and self.current_section.children:
-                        else_stmt = self.current_section.children[-1]
-                        if isinstance(else_stmt, CobolStatement):
-                            if_stmt.add_else_statement(else_stmt)
+                    else_stmt = self._get_last_statement()
+                    if else_stmt and isinstance(else_stmt, CobolStatement):
+                        if_stmt.add_else_statement(else_stmt)
                     i = j
                     continue
                 i += 1
 
         # Add IF statement to current section
-        if self.current_section:
-            self.current_section.add_child(if_stmt)
+        if self.current_section or self.current_paragraph:
+            self._add_statement(if_stmt)
+
+        # Validate IF statement
+        self._validate_if_statement(if_stmt)
 
         return i
 
@@ -4920,463 +5200,202 @@ class CobolParser:
         sort_stmt = CobolStatement("SORT", start.location)
         sort_stmt.add_operand(sort_file)
 
-        if self.current_section:
-            self.current_section.add_child(sort_stmt)
+        if self.current_section or self.current_paragraph:
+            self._add_statement(sort_stmt)
 
         return i
 
     def _parse_evaluate_inline(self, tokens: list, i: int) -> int:
-        """Parse EVALUATE statement inline.
+        """Parse EVALUATE statement inline using registry."""
+        if not self.stream or not self.registry:
+             # Fallback
+             location = tokens[i].location
+             stmt = EvaluateStatement(location)
+             self._add_statement(stmt)
+             return i + 1
+             
+        # Save current token state
+        old_index = self.current_token_index
+        old_token = self.current_token
         
-        Syntax:
-            EVALUATE {subject [ALSO subject]...}
-                [WHEN {selector [ALSO selector]...}
-                    statement...]
-                [WHEN OTHER
-                    statement...]
-            [END-EVALUATE]
+        # Set token pointer to start of statement in tokens array
+        target_token = tokens[i]
+        found_index = None
         
-        Returns:
-            Next token index after EVALUATE statement
-        """
-        start_token = tokens[i]
-        eval_stmt = EvaluateStatement(start_token.location)
-        self._set_node_context(eval_stmt)
-        i += 1  # Skip EVALUATE
+        # Fast search in likely range
+        search_limit = len(tokens) + 200
+        start_search = max(0, self.current_token_index - search_limit)
         
-        # Skip newlines/comments after EVALUATE
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-            i += 1
+        for idx in range(min(self.current_token_index + 10, len(self.tokens) - 1), start_search - 1, -1):
+             if self.tokens[idx] is target_token:
+                 found_index = idx
+                 break
         
-        # Parse subjects (one or more separated by ALSO)
-        while i < len(tokens):
-            # Skip newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
+        if found_index is None:
+             for idx, t in enumerate(self.tokens):
+                 if t is target_token:
+                     found_index = idx
+                     break
+        
+        if found_index is None:
+            # Can't find token, fallback
+            location = tokens[i].location
+            stmt = EvaluateStatement(location)
+            self._add_statement(stmt)
+            return i + 1
+        
+        # Set current token to the statement
+        self.current_token_index = found_index
+        self.current_token = self.tokens[self.current_token_index]
+        self.stream._pos = self.current_token_index
+        
+        # Parse
+        context = ParseContext(host=self, registry=self.registry)
+        parser = self.registry.get_parser(self.stream)
+        
+        if parser:
+            stmt = parser.parse(self.stream, context)
+            if stmt:
+                self._add_statement(stmt)
             
-            if i >= len(tokens):
-                break
+            # Update token index based on stream position
+            self.current_token_index = self.stream._pos
+            self.current_token = (
+                self.tokens[self.current_token_index]
+                if self.current_token_index < len(self.tokens)
+                else None
+            )
             
-            # Check for WHEN (end of subjects)
-            if tokens[i].value and tokens[i].value.upper() == "WHEN":
-                break
+            # Efficiently map consumed tokens back
+            new_i = i
+            scan_pos = found_index
             
-            # Parse subject expression - collect all tokens until WHEN, ALSO, or newline
-            # This handles complex expressions like FUNCTION MIDRANGE(1, 2, 3)
-            subject_tokens = []
-            paren_depth = 0
-            
-            while i < len(tokens):
-                token = tokens[i]
-                
-                # Stop at newline unless we're inside parentheses
-                if token.type in (TokenType.NEWLINE, TokenType.COMMENT) and paren_depth == 0:
-                    break
-                
-                # Check for WHEN or ALSO (but not if inside parentheses)
-                if paren_depth == 0 and token.value:
-                    upper_val = token.value.upper()
-                    if upper_val in ("WHEN", "ALSO"):
+            for offset in range(len(tokens) - i):
+                t = tokens[new_i + offset]
+                found_scan = False
+                while scan_pos < len(self.tokens):
+                    if self.tokens[scan_pos] is t:
+                        found_scan = True
+                        if scan_pos >= self.current_token_index:
+                             return new_i + offset
+                        scan_pos += 1
                         break
-                
-                # Track parentheses depth
-                if token.type == TokenType.LEFT_PAREN or token.value == "(":
-                    paren_depth += 1
-                elif token.type == TokenType.RIGHT_PAREN or token.value == ")":
-                    paren_depth -= 1
-                
-                # Skip newlines inside parentheses
-                if token.type in (TokenType.NEWLINE, TokenType.COMMENT):
-                    i += 1
-                    continue
-                
-                subject_tokens.append(token.value)
-                i += 1
+                    scan_pos += 1
             
-            # Add subject if we collected any tokens
-            if subject_tokens:
-                subject_val = " ".join(subject_tokens)
-                eval_stmt.add_subject(subject_val)
-            
-            # Skip newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
-            
-            # Check for ALSO (more subjects)
-            if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == "ALSO":
-                i += 1  # Skip ALSO
-                continue
-            else:
-                break  # No more subjects
-        
-        # Parse WHEN clauses
-        found_when_other = False
-        found_end_evaluate = False
-        
-        while i < len(tokens):
-            if i < len(tokens):
-                print(f"DEBUG FINAL: i={i}, token={tokens[i].type} {repr(tokens[i].value)}")
-
-            # Skip newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
-            
-            if i >= len(tokens):
-                break
-            
-            # Check for END-EVALUATE
-            if tokens[i].type == TokenType.END_EVALUATE or \
-               (tokens[i].value and tokens[i].value.upper() == "END-EVALUATE"):
-                i += 1  # Consume END-EVALUATE
-                found_end_evaluate = True
-                break
-                
-            # Check for PERIOD (Implicit termination)
-            if tokens[i].type == TokenType.PERIOD:
-                # Do NOT consume the period here if we are nested, as it needs to terminate outer scopes too.
-                # However, for this simplified inline parser, we treat it as a terminator.
-                # Current behavior of other parsers seems to be to consume it? 
-                # If we assume this is the end of the sentence, we can consume it 
-                # OR just peek and break, leaving it for the caller?
-                # The caller `_parse_evaluate_inline` returns `i`.
-                # If we don't consume it, the caller might get stuck on it?
-                # But wait, looking at the loop, `i` is the current token index.
-                # If we break without consuming, `i` points to Period.
-                # The caller will continue from Period.
-                found_end_evaluate = True # Period is a valid terminator
-                # We should probably consume it so we don't parse it as "empty statement" or similar
-                # But wait, if we consume it, outer scopes won't see it.
-                # For now, let's consume it to fix the immediate issue, consistent with how END-EVALUATE is consumed.
-                # NOTE: This might need refinement for nested implicit termination.
-                i += 1 
-                break
-            
-            # Check for WHEN
-            if not (tokens[i].value and tokens[i].value.upper() == "WHEN"):
-                break
-            
-            when_location = tokens[i].location
-            i += 1  # Skip WHEN
-            
-            # Skip newlines after WHEN
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
-            
-            # Parse selectors
-            selectors = []
-            is_when_other = False
-            
-            # Check for empty WHEN (nothing after WHEN keyword)
-            if i < len(tokens) and tokens[i].value:
-                val = tokens[i].value.upper()
-                # If next token starts a statement, selector is empty
-                if val in ("WHEN", "END-EVALUATE", "DISPLAY", "MOVE", "PERFORM", "CALL", "IF"):
-                    # Empty selector - will be caught by validation
-                    pass            
-            # Parse selectors
-            selectors = []
-            
-            while i < len(tokens):
-                # Skip newlines
-                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                    i += 1
-                
-                if i >= len(tokens):
-                    break
-                
-                # Check for PERIOD (Implicit termination)
-                print(f"DEBUG: Checking PERIOD at i={i}, type={tokens[i].type}")
-                if tokens[i].type == TokenType.PERIOD:
-                    found_end_evaluate = True
-                    i += 1
-                    break
-
-                # Check for OTHER
-                if tokens[i].value and tokens[i].value.upper() == "OTHER":
-                    is_when_other = True
-                    i += 1
-                    break
-                
-                # Check for next statement/WHEN/END-EVALUATE
-                if tokens[i].value:
-                    val = tokens[i].value.upper()
-                    if val in ("WHEN", "END-EVALUATE"):
-                        break
-                    # Check for statement-starting verbs or STOP
-                    if tokens[i].type in (TokenType.MOVE, TokenType.DISPLAY, TokenType.PERFORM, 
-                                         TokenType.CALL, TokenType.IF, TokenType.WRITE) or                        val in ("DISPLAY", "MOVE", "PERFORM", "CALL", "IF", "WRITE", "STOP", "GO"):
-                        break
-
-                # Parse selector
-                selector_dict = self._parse_evaluate_selector(tokens, i)
-                if selector_dict:
-
-                    selectors.append(selector_dict['selector'])
-                    i = selector_dict['next_i']
-                else:
-                    # If selector parsing returns None, and we didn't break on valid statement start,
-                    # we might be looking at junk or syntax error. Break to let statement parser handle (or fail).
-                    break
-                
-                # Skip newlines
-                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                    i += 1
-                
-                # Check for ALSO
-                if i < len(tokens) and tokens[i].value and tokens[i].value.upper() == "ALSO":
-                    i += 1  # Skip ALSO
-                    continue
-                else:
-                    break
-            
-            # Create WhenClause
-            when_clause = WhenClause(selectors, when_location)
-            
-            # Parse statements in WHEN block
-
-            while i < len(tokens):
-                # Skip newlines
-                while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                    i += 1
-                
-                if i >= len(tokens):
-                    break
-                
-                # Check for next WHEN or END-EVALUATE
-                if tokens[i].value:
-                    val = tokens[i].value.upper()
-                    if val in ("WHEN", "END-EVALUATE"):
-                        break
-                
-                # Check for PERIOD (Implicit termination of WHEN block)
-                if tokens[i].type == TokenType.PERIOD:
-                    break
-
-                # Check for END-EVALUATE via token type
-                if tokens[i].type == TokenType.END_EVALUATE:
-                    break
-                
-                # Parse the statement using inline parsers
-                ttype = tokens[i].type
-                upper_val = tokens[i].value.upper() if tokens[i].value else ""
-                
-                # Save current section and create temporary section to capture statements
-                saved_section = self.current_section
-                temp_section = CobolSection("TEMP", tokens[i].location)
-                self.current_section = temp_section
-                
-                # Dispatch to appropriate inline parser
-                if ttype == TokenType.CALL or upper_val == "CALL":
-                    i = self._parse_call_inline(tokens, i)
-                elif ttype == TokenType.DISPLAY or upper_val == "DISPLAY":
-                    i = self._parse_display_inline(tokens, i)
-                elif ttype == TokenType.MOVE or upper_val == "MOVE":
-                    i = self._parse_move_inline(tokens, i)
-                elif ttype == TokenType.PERFORM or upper_val == "PERFORM":
-                    i = self._parse_perform_inline(tokens, i)
-                elif ttype == TokenType.IF or upper_val == "IF":
-                    i = self._parse_if_inline(tokens, i)
-                elif ttype == TokenType.WRITE or upper_val == "WRITE":
-                    i = self._parse_write_inline(tokens, i)
-                elif ttype == TokenType.ENTRY or upper_val == "ENTRY":
-                    i = self._parse_entry_inline(tokens, i)
-                elif ttype == TokenType.SORT or upper_val == "SORT":
-                    i = self._parse_sort_inline(tokens, i)
-                elif ttype == TokenType.EXEC or upper_val == "EXEC":
-                    i = self._parse_exec_inline(tokens, i)
-                elif ttype == TokenType.EVALUATE or upper_val == "EVALUATE":
-                    i = self._parse_evaluate_inline(tokens, i)
-                elif ttype in (TokenType.GO, TokenType.GOTO) or upper_val in ("GO", "GOTO"):
-                    i = self._parse_goto_inline(tokens, i)
-                else:
-                    # Unknown statement type - skip token to avoid infinite loop
-                    self.current_section = saved_section
-                    i += 1
-                    continue
-                
-                # Extract statements from temporary section and add to when_clause
-                for stmt in temp_section.children:
-                    when_clause.add_statement(stmt)
-                
-                # Restore current section
-                self.current_section = saved_section
-            
-            # Add WHEN clause
-            if is_when_other:
-                # DIAGNOSTIC: WHEN OTHER must be last
-                if found_when_other:
-                    self.add_error(self.create_error(
-                        "Multiple WHEN OTHER clauses not allowed",
-                        when_location
-                    ))
-                found_when_other = True
-                eval_stmt.set_default_when(when_clause)
-            else:
-                # DIAGNOSTIC: Conditional WHEN after WHEN OTHER
-                if found_when_other:
-                    self.add_error(self.create_error(
-                        "Conditional WHEN after WHEN OTHER is not allowed",
-                        when_location
-                    ))
-                eval_stmt.add_when_clause(when_clause)
-        
-        # DIAGNOSTIC: Missing END-EVALUATE
-        if not found_end_evaluate:
-            if i < len(tokens):
-                print(f"DEBUG FAIL: Missing END. i={i}, len={len(tokens)}, token={tokens[i].type}")
-            else:
-                print(f"DEBUG FAIL: Missing END. i={i}, len={len(tokens)}, token=EOF")
-            self.add_error(self.create_error(
-                "EVALUATE statement requires END-EVALUATE terminator",
-                start_token.location
-            ))
-        
-        # Run diagnostics
-        self._validate_evaluate_statement(eval_stmt)
-        
-        # Add to AST
-        if self.current_section:
-            self.current_section.add_child(eval_stmt)
-        
-        return i
+            return len(tokens)
+        else:
+            # Restore
+            self.current_token_index = old_index
+            self.current_token = old_token
+            return i + 1
     
-    def _parse_evaluate_selector(self, tokens: list, i: int) -> Optional[Dict]:
-        """Parse a single EVALUATE selector.
-        
-        Returns:
-            Dict with 'selector' and 'next_i', or None
-        """
-        if i >= len(tokens):
-            return None
-        
-        start_i = i
-        
-        # Check for ANY
-        if tokens[i].value and tokens[i].value.upper() == "ANY":
-            return {
-                'selector': {'type': 'Any'},
-                'next_i': i + 1
-            }
-        
-        # Get start value
-        if not tokens[i].value:
-            return None
-            
-        # Check for PERIOD (not a valid selector start)
-        if tokens[i].type == TokenType.PERIOD:
-            return None
 
-        start_val = tokens[i].value
-        i += 1
+
+    def _validate_perform_statement(self, stmt: PerformStatement) -> None:
+        """Validate PERFORM statement and report diagnostics."""
         
-        # Skip newlines
-        while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-            i += 1
-        
-        # Check for THRU/THROUGH range
-        if i < len(tokens) and tokens[i].value and tokens[i].value.upper() in ("THRU", "THROUGH"):
-            thru_location = tokens[i].location
-            i += 1  # Skip THRU
+        # 1. Missing target paragraph for simple PERFORM
+        # (inline PERFORM with VARYING/UNTIL clauses don't need explicit target)
+        if not hasattr(stmt, 'target_paragraph') or not stmt.target_paragraph:
+            # Check if this is an inline PERFORM (has varying or until conditions)
+            has_inline_content = (
+                (hasattr(stmt, 'inline_statements') and stmt.inline_statements) or
+                (hasattr(stmt, 'until_condition') and stmt.until_condition) or
+                (hasattr(stmt, 'perform_type') and stmt.perform_type == "UNTIL")
+            )
             
-            # Skip newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
-            
-            # DIAGNOSTIC: Check for end value
-            if i >= len(tokens) or not tokens[i].value or \
-               tokens[i].value.upper() in ("ALSO", "WHEN", "END-EVALUATE", "DISPLAY", "MOVE"):
+            # Only report error if not inline PERFORM
+            if not has_inline_content:
                 self.add_error(self.create_error(
-                    "THRU/THROUGH requires both start and end values",
-                    thru_location
+                    "PERFORM statement requires a target paragraph",
+                    stmt.location
                 ))
-                return {
-                    'selector': {'type': 'Range', 'start': start_val, 'end': None},
-                    'next_i': i
-                }
+        elif stmt.target_paragraph == ".":
+            # Target is just a period (malformed PERFORM)
+            # Check if this is an inline PERFORM
+            has_inline_content = (
+                (hasattr(stmt, 'inline_statements') and stmt.inline_statements) or
+                (hasattr(stmt, 'until_condition') and stmt.until_condition) or
+                (hasattr(stmt, 'perform_type') and stmt.perform_type == "UNTIL")
+            )
             
-            end_val = tokens[i].value
-            i += 1
-            
-            return {
-                'selector': {'type': 'Range', 'start': start_val, 'end': end_val},
-                'next_i': i
-            }
+            if not has_inline_content:
+                self.add_error(self.create_error(
+                    "PERFORM statement requires a target paragraph",
+                    stmt.location
+                ))
         
-        # Check for condition with AND/OR (for EVALUATE TRUE)
-        # Collect all tokens until WHEN, ALSO, or END-EVALUATE
-        condition_text = start_val
-        found_operator = None
-        original_i = i
-        
-        while i < len(tokens):
-            # Skip newlines
-            while i < len(tokens) and tokens[i].type in (TokenType.NEWLINE, TokenType.COMMENT):
-                i += 1
-            
-            if i >= len(tokens):
-                break
-            
-            if not tokens[i].value:
-                break
-            
-            val = tokens[i].value.upper()
-            
-            # Check for terminators
-            if val in ("WHEN", "END-EVALUATE", "ALSO", "DISPLAY", "MOVE", "PERFORM", "CALL", "IF"):
-                break
-            
-            # Check for AND/OR operators
-            if val in ("AND", "OR"):
-                found_operator = val
-            
-            # Add to condition text
-            condition_text += " " + tokens[i].value
-            i += 1
-        
-        # If we found AND/OR, this is a Condition selector
-        if found_operator:
-            return {
-                'selector': {'type': 'Condition', 'operator': found_operator, 'text': condition_text},
-                'next_i': i
-            }
-        
-        # Simple literal/identifier - restore position to right after first value
-        return {
-            'selector': {'type': 'Literal', 'value': start_val},
-            'next_i': original_i
-        }
-    
-    def _validate_evaluate_statement(self, stmt: EvaluateStatement) -> None:
-        """Validate EVALUATE statement and report diagnostics."""
-        
-        # 1. Missing WHEN clause
-        if not stmt.when_clauses and not stmt.default_when:
+        # 2. THRU without ending paragraph
+        if hasattr(stmt, 'thru_paragraph') and stmt.thru_paragraph:
+            # THRU was set, which is good
+            pass
+        elif hasattr(stmt, '_metadata') and stmt._metadata and stmt._metadata.get('has_thru_keyword'):
+            # THRU keyword was encountered but no ending paragraph was provided
             self.add_error(self.create_error(
-                "EVALUATE statement requires at least one WHEN clause",
+                "PERFORM THRU requires an ending paragraph name",
+                stmt.location
+            ))
+
+    def _validate_call_statement(self, stmt: "CallStatement") -> None:
+        """Validate CALL statement and report diagnostics."""
+        
+        # 1. Missing called program name
+        if not hasattr(stmt, 'called_program') or not stmt.called_program:
+            self.add_error(self.create_error(
+                "CALL statement requires a program name or identifier",
+                stmt.location
+            ))
+        elif stmt.called_program == ".":
+            # Program name is just a period (malformed CALL)
+            self.add_error(self.create_error(
+                "CALL statement requires a program name or identifier",
+                stmt.location
+            ))
+
+    def _validate_if_statement(self, stmt: "IfStatement") -> None:
+        """Validate IF statement and report diagnostics."""
+        
+        # 1. Missing or empty condition
+        if not hasattr(stmt, 'condition') or not stmt.condition:
+            self.add_error(self.create_error(
+                "IF statement requires a condition",
+                stmt.location
+            ))
+        else:
+            # Check if condition is just a period or empty
+            cond_value = None
+            if hasattr(stmt.condition, '_metadata'):
+                cond_value = stmt.condition._metadata.get('value', '').strip()
+            
+            if not cond_value or cond_value == '.':
+                self.add_error(self.create_error(
+                    "IF statement requires a condition",
+                    stmt.location
+                ))
+
+    def _validate_move_statement(self, stmt: "MoveStatement") -> None:
+        """Validate MOVE statement and report diagnostics."""
+        
+        # 1. Missing source
+        if not hasattr(stmt, 'source') or not stmt.source:
+            self.add_error(self.create_error(
+                "MOVE statement requires a source value",
+                stmt.location
+            ))
+        elif stmt.source == ".":
+            # Source is just a period (malformed MOVE)
+            self.add_error(self.create_error(
+                "MOVE statement requires a source value",
                 stmt.location
             ))
         
-        # 2. Selector/subject count mismatch
-        expected_count = len(stmt.subjects)
-        for clause in stmt.when_clauses:
-            actual_count = len(clause.selectors)
-            if actual_count != expected_count:
+        # 2. Missing targets (unless this is MOVE CORRESPONDING without targets)
+        if not hasattr(stmt, 'targets') or not stmt.targets:
+            if not (hasattr(stmt, 'is_corresponding') and stmt.is_corresponding):
                 self.add_error(self.create_error(
-                    f"WHEN clause has {actual_count} selector(s) "
-                    f"but EVALUATE has {expected_count} subject(s)",
-                    clause.location
+                    "MOVE statement requires at least one target",
+                    stmt.location
                 ))
-        
-        # 3. Empty WHEN selector
-        for clause in stmt.when_clauses:
-            if not clause.selectors or len(clause.selectors) == 0:
-                self.add_error(self.create_error(
-                    "WHEN clause cannot have empty selector",
-                    clause.location
-                ))
-        
-        # Note: THRU validation, WHEN OTHER placement, and consecutive ALSO
-        # are validated during parsing for better error locations
 
     def parse_paragraph_or_statement(self) -> None:
         """Parse paragraph names, section names, or other statement types."""
@@ -5611,6 +5630,10 @@ class CobolParser:
         move_stmt.add_target(target)
         if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(move_stmt)
+        
+        # Validate MOVE statement
+        self._validate_move_statement(move_stmt)
+        
         return move_stmt
 
     def parse_display_statement(self) -> Optional[DisplayStatement]:
@@ -5955,6 +5978,9 @@ class CobolParser:
                 condition_expr._metadata["value"] = condition
                 perform_stmt.until_condition = condition_expr
 
+        # Validate PERFORM statement
+        self._validate_perform_statement(perform_stmt)
+
         if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(perform_stmt)
 
@@ -6002,7 +6028,31 @@ class CobolParser:
         if not self.current_token:
             return None
 
-        # Dispatch based on token type
+        # Try registry parsers first (new architecture)
+        if self.stream and self.registry:
+            # Create parse context
+            context = ParseContext(host=self, registry=self.registry)
+            
+            # Sync stream position with current token index
+            self.stream._pos = self.current_token_index
+            
+            parser = self.registry.get_parser(self.stream)
+            if parser:
+                # Parse using registry
+                old_pos = self.stream._pos
+                result = parser.parse(self.stream, context)
+                
+                # Sync token index back
+                self.current_token_index = self.stream._pos
+                self.current_token = (
+                    self.tokens[self.current_token_index]
+                    if self.current_token_index < len(self.tokens)
+                    else None
+                )
+                
+                return result
+
+        # Fallback to old dispatcher (for statements not yet in registry)
         if self.current_token.type == TokenType.MOVE or (
             self.current_token.value and self.current_token.value.upper() == "MOVE"
         ):
@@ -6057,10 +6107,7 @@ class CobolParser:
             return self.parse_start_statement()
         elif self.current_token.value and self.current_token.value.upper() == "UNLOCK":
             return self.parse_unlock_statement()
-        elif self.current_token.type == TokenType.EVALUATE or (
-            self.current_token.value and self.current_token.value.upper() == "EVALUATE"
-        ):
-            return self.parse_evaluate_statement()
+
         elif self.current_token.type == TokenType.COMPUTE:
             return self.parse_compute_statement()
         elif self.current_token.type == TokenType.ADD:
@@ -6128,164 +6175,7 @@ class CobolParser:
         }
         return token_val in keyword_set
 
-    def parse_evaluate_statement(self) -> Optional[EvaluateStatement]:
-        """Parse EVALUATE statement.
-        
-        Supports:
-        - EVALUATE subject [ALSO subject]...
-        - WHEN selector [ALSO selector]... statement...
-        - WHEN OTHER statement...
-        - END-EVALUATE terminator
-        """
-        if not self.match_token(TokenType.EVALUATE):
-            return None
-            
-        location = self.get_current_location()
-        evaluate_stmt = EvaluateStatement(location)
-        self._set_node_context(evaluate_stmt)
-        
-        # Skip optional whitespace/newlines
-        while self.current_token and self.current_token.type in (
-            TokenType.NEWLINE, TokenType.COMMENT
-        ):
-            self.advance_token()
-            
-        # Parse Subjects
-        while self.current_token and self.current_token.type != TokenType.EOF:
-            # Check for WHEN (start of clauses)
-            if self.current_token.type == TokenType.WHEN:
-                break
-                
-            # Parse subject expression
-            # For simplicity, we'll grab tokens until ALSO or WHEN
-            subject_tokens = []
-            while self.current_token and self.current_token.type not in (
-                TokenType.WHEN, TokenType.NEWLINE, TokenType.EOF
-            ):
-                if self.current_token.value.upper() == "ALSO":
-                    self.advance_token() # Skip ALSO
-                    break
-                subject_tokens.append(self.current_token.value)
-                self.advance_token()
-                
-            if subject_tokens:
-                evaluate_stmt.add_subject(" ".join(subject_tokens))
-                
-            # Skip newlines/comments
-            while self.current_token and self.current_token.type in (
-                TokenType.NEWLINE, TokenType.COMMENT
-            ):
-                self.advance_token()
-                
-        # Parse WHEN clauses
-        while self.current_token and self.current_token.type == TokenType.WHEN:
-            self.advance_token() # Skip WHEN
-            
-            clause_location = self.get_current_location()
-            selectors = []
-            is_other = False
-            
-            # Check for WHEN OTHER
-            if self.current_token and self.current_token.value.upper() == "OTHER":
-                is_other = True
-                self.advance_token()
-            else:
-                # Parse selectors
-                while self.current_token and self.current_token.type != TokenType.EOF:
-                    # Parse selector tokens
-                    selector_tokens = []
-                    while self.current_token:
-                        token_type = self.current_token.type
-                        token_val = self.current_token.value.upper()
-                        
-                        # Stop at ALSO, newlines (end of selectors), or statement keywords
-                        if self._is_statement_start(token_type, token_val) and token_val != "ALSO":
-                             break
-                        
-                        # Stop at newline if we have tokens (end of selector list)
-                        if token_type in (TokenType.NEWLINE, TokenType.COMMENT):
-                            break
-                            
-                        if token_val == "ALSO":
-                            self.advance_token()
-                            break
-                            
-                        selector_tokens.append(self.current_token.value)
-                        self.advance_token()
-                    
-                    if selector_tokens:
-                        selectors.append({"type": "Unknown", "value": " ".join(selector_tokens)})
-                        
-                    # Skip whitespace/newlines
-                    while self.current_token and self.current_token.type in (
-                        TokenType.NEWLINE, TokenType.COMMENT
-                    ):
-                        # Use a lookahead - if next token is ALSO, consume newline
-                        # If next token is statement start, stop consuming
-                        next_char = self.peek_char() # This is char lookahead, not token.
-                        # Simple logic: just skip
-                        self.advance_token()
-                        
-                    # Check if we should continue parsing selectors or start statements
-                    # If we hit a statement start keyword, or end of line without ALSO, break
-                    if self.current_token:
-                         if self._is_statement_start(self.current_token.type, self.current_token.value.upper()):
-                             break
-            
-            # Create clause
-            when_clause = WhenClause(selectors, clause_location)
-            
-            # DEBUG: Log statement parsing
-            import sys
-            print(f"[DEBUG] Starting statement parse loop, current_token: {self.current_token.type if self.current_token else 'None'}:{self.current_token.value if self.current_token else 'None'}", file=sys.stderr)
-            
-            # Parse statements for this clause
-            while self.current_token and self.current_token.type != TokenType.EOF:
-                # Stop at next WHEN, END-EVALUATE, or EOF
-                if self.current_token.type == TokenType.WHEN:
-                    break
-                if self.current_token.type == TokenType.END_EVALUATE:
-                    break
-                if (self.current_token.type == TokenType.IDENTIFIER and 
-                    self.current_token.value.upper() == "END-EVALUATE"):
-                    break
-                    
-                # Skip whitespace/newlines
-                if self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
-                    self.advance_token()
-                    continue
-                    
-                # Parse statement
-                self.parsing_nested_statement = True
-                stmt = self.parse_statement()
-                self.parsing_nested_statement = False
-                
-                if stmt:
-                    when_clause.add_statement(stmt)
-                else:
-                    self.advance_token()
 
-            if is_other:
-                evaluate_stmt.set_default_when(when_clause)
-            else:
-                evaluate_stmt.add_when_clause(when_clause)
-
-        # Skip END-EVALUATE
-        if self.current_token:
-            if self.current_token.type == TokenType.END_EVALUATE:
-                self.advance_token()
-            elif (self.current_token.type == TokenType.IDENTIFIER and 
-                  self.current_token.value.upper() == "END-EVALUATE"):
-                self.advance_token()
-
-        # Consume period if present
-        if self.current_token and self.current_token.type == TokenType.PERIOD:
-            self.advance_token()
-            
-        if not self.parsing_nested_statement and self.current_division:
-            self.current_division.add_child(evaluate_stmt)
-            
-        return evaluate_stmt
 
     def _parse_size_error_clauses(self, stmt: CobolStatement) -> bool:
         """Parse ON SIZE ERROR and NOT ON SIZE ERROR clauses.
@@ -6340,7 +6230,8 @@ class CobolParser:
                 
             # Parse statements
             stmts = self._parse_nested_statements_until_end_terminator()
-            stmt.set_on_size_error_clause(stmts)
+            if isinstance(stmt, ArithmeticStatement):
+                stmt.set_on_size_error_clause(stmts)
             return True
             
         if is_not_on_size:
@@ -6353,7 +6244,8 @@ class CobolParser:
             
             # Parse statements
             stmts = self._parse_nested_statements_until_end_terminator()
-            stmt.set_not_on_size_error_clause(stmts)
+            if isinstance(stmt, ArithmeticStatement):
+                stmt.set_not_on_size_error_clause(stmts)
             return True
             
         return False
@@ -6505,7 +6397,7 @@ class CobolParser:
         self._set_node_context(stmt)
         return self._parse_generic_arithmetic_body(stmt, "END-DIVIDE")
 
-    def _parse_generic_arithmetic_body(self, stmt: ArithmeticStatement, end_marker: str) -> ArithmeticStatement:
+    def _parse_generic_arithmetic_body(self, stmt: ArithmeticStatementT, end_marker: str) -> ArithmeticStatementT:
         """Generic body parser for ADD, SUBTRACT, MULTIPLY, DIVIDE."""
         # Simple consuming of operands until clause start
         while self.current_token and self.current_token.type != TokenType.EOF:
@@ -6658,7 +6550,7 @@ class CobolParser:
             
         return stmt
 
-    def _parse_overflow_clauses(self, stmt: CobolStatement) -> bool:
+    def _parse_overflow_clauses(self, stmt: Union[StringStatement, UnstringStatement]) -> bool:
         """Parse ON OVERFLOW and NOT ON OVERFLOW clauses.
         
         Returns True if a clause was parsed, False otherwise.
@@ -6795,6 +6687,9 @@ class CobolParser:
                 if not self.parsing_nested_statement and self.current_division:
                     self.current_division.add_child(if_stmt)
 
+                # Validate IF statement
+                self._validate_if_statement(if_stmt)
+
                 return if_stmt
 
             # Skip newlines/comments
@@ -6852,6 +6747,9 @@ class CobolParser:
 
         if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(if_stmt)
+
+        # Validate IF statement
+        self._validate_if_statement(if_stmt)
 
         return if_stmt
 
@@ -7171,6 +7069,9 @@ class CobolParser:
         # Only add to division if not parsing nested statement
         if not self.parsing_nested_statement and self.current_division:
             self.current_division.add_child(call_stmt)
+
+        # Validate CALL statement
+        self._validate_call_statement(call_stmt)
 
         return call_stmt
 
@@ -8341,9 +8242,7 @@ def parse_cobol(
         preprocess_fixed = _detect_fixed_format(source)
     
     if preprocess_fixed:
-        print(f"DEBUG PARSE: Pre-norm len={len(source)}")
         source = normalize_fixed_format(source.splitlines())
-        print(f"DEBUG PARSE: Post-norm len={len(source)}")
         free_form = True  # normalize produces free-form text
     
     parser = CobolParser(

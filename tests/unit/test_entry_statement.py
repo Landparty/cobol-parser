@@ -5,6 +5,21 @@ from cobolparser.parser import CobolParser
 from cobolparser.models.statements import EntryStatement
 
 
+def find_entry_statement(proc_div):
+    """Helper function to find ENTRY statement in new architecture."""
+    for section in proc_div.sections:
+        # Check statements in paragraph (new architecture)
+        for para in section.paragraphs:
+            for stmt in para.statements:
+                if isinstance(stmt, EntryStatement):
+                    return stmt
+        # Check direct children (old architecture / already parsed)
+        for child in section.children:
+            if isinstance(child, EntryStatement):
+                return child
+    return None
+
+
 class TestEntryStatement:
     """Test ENTRY statement parsing."""
     
@@ -25,12 +40,7 @@ PROCEDURE DIVISION.
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
         
-        entry_stmt = None
-        for section in proc_div.sections:
-            for child in section.children:
-                if isinstance(child, EntryStatement):
-                    entry_stmt = child
-                    break
+        entry_stmt = find_entry_statement(proc_div)
         
         assert entry_stmt is not None
         assert entry_stmt.entry_name == 'MAINENTRY'
@@ -57,12 +67,7 @@ PROCEDURE DIVISION.
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
         
-        entry_stmt = None
-        for section in proc_div.sections:
-            for child in section.children:
-                if isinstance(child, EntryStatement):
-                    entry_stmt = child
-                    break
+        entry_stmt = find_entry_statement(proc_div)
         
         assert entry_stmt is not None
         assert entry_stmt.entry_name == 'DLITCBL'
@@ -91,12 +96,7 @@ PROCEDURE DIVISION.
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
         
-        entry_stmt = None
-        for section in proc_div.sections:
-            for child in section.children:
-                if isinstance(child, EntryStatement):
-                    entry_stmt = child
-                    break
+        entry_stmt = find_entry_statement(proc_div)
         
         assert entry_stmt is not None
         assert entry_stmt.entry_name == 'DLITCBL'
@@ -120,12 +120,7 @@ PROCEDURE DIVISION.
         
         # Find the ENTRY statement
         proc_div = result.ast.get_division("PROCEDURE")
-        entry_stmt = None
-        for section in proc_div.sections:
-            for child in section.children:
-                if isinstance(child, EntryStatement):
-                    entry_stmt = child
-                    break
+        entry_stmt = find_entry_statement(proc_div)
         
         assert entry_stmt is not None
         

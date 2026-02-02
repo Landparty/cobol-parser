@@ -30,10 +30,19 @@ class TestPerformBackwardCompatibilityRegression:
         
         performs = []
         for section in proc_div.sections:
+            # Check direct children (old architecture)
             for child in section.children:
                 if isinstance(child, PerformStatement):
                     if perform_type is None or child.perform_type == perform_type:
                         performs.append(child)
+            
+            # Check statements in paragraphs (new architecture)
+            for para in section.paragraphs:
+                for stmt in para.statements:
+                    if isinstance(stmt, PerformStatement):
+                        if perform_type is None or stmt.perform_type == perform_type:
+                            performs.append(stmt)
+        
         return performs
     
     def test_perform_simple_paragraph_only(self):
@@ -195,10 +204,19 @@ class TestPerformEdgeCasesRegression:
         
         performs = []
         for section in proc_div.sections:
+            # Check direct children (old architecture)
             for child in section.children:
                 if isinstance(child, PerformStatement):
                     if perform_type is None or child.perform_type == perform_type:
                         performs.append(child)
+            
+            # Check statements in paragraphs (new architecture)
+            for para in section.paragraphs:
+                for stmt in para.statements:
+                    if isinstance(stmt, PerformStatement):
+                        if perform_type is None or stmt.perform_type == perform_type:
+                            performs.append(stmt)
+        
         return performs
     
     def test_perform_serialization_preserves_attributes(self):

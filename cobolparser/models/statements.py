@@ -449,10 +449,16 @@ class ComputeStatement(CobolStatement):
         if target not in self.operands:
             self.operands.append(target)
 
-    def set_expression(self, expression: "CobolExpression") -> None:
-        """Set the arithmetic expression for the computation."""
+    def set_expression(self, expression: Union[str, "CobolExpression"]) -> None:
+        """Set the arithmetic expression for the computation.
+        
+        Args:
+            expression: Either a string expression or a CobolExpression object
+        """
         self.expression = expression
-        self.add_child(expression)
+        # Only add as child if it's an ASTNode object, not a string
+        if isinstance(expression, ASTNode):
+            self.add_child(expression)
 
     def set_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
         self.on_size_error = statements
@@ -487,6 +493,20 @@ class ArithmeticStatement(CobolStatement):
         super().__init__(statement_type, location)
         self.on_size_error: Optional[List["CobolStatement"]] = None
         self.not_on_size_error: Optional[List["CobolStatement"]] = None
+        self.target: Optional[str] = None  # For TO clause
+        self.giving: Optional[str] = None  # For GIVING clause
+
+    def set_target(self, target: str) -> None:
+        """Set target for TO clause (result stored in target)."""
+        self.target = target
+        if target not in self.operands:
+            self.operands.append(target)
+
+    def set_giving(self, giving: str) -> None:
+        """Set result variable for GIVING clause."""
+        self.giving = giving
+        if giving not in self.operands:
+            self.operands.append(giving)
 
     def set_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
         self.on_size_error = statements
@@ -500,6 +520,10 @@ class ArithmeticStatement(CobolStatement):
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
+        if self.target:
+            result["target"] = self.target
+        if self.giving:
+            result["giving"] = self.giving
         if self.on_size_error:
             result["on_size_error"] = [s.to_dict() for s in self.on_size_error]
         if self.not_on_size_error:
@@ -536,6 +560,27 @@ class SearchStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("SEARCH", location)
         self.at_end_clause: Optional[List["CobolStatement"]] = None
+        self.table_name: Optional[str] = None
+        self.varying_variable: Optional[str] = None
+        self.when_clauses: List[Dict[str, Any]] = []
+
+    def set_table_name(self, name: str) -> None:
+        """Set the table name being searched."""
+        self.table_name = name
+
+    def set_varying_variable(self, variable: str) -> None:
+        """Set the VARYING variable."""
+        self.varying_variable = variable
+
+    def add_when_clause(self, condition: str, statements: List["CobolStatement"]) -> None:
+        """Add a WHEN clause with condition and statements."""
+        clause = {
+            "condition": condition,
+            "statements": statements
+        }
+        self.when_clauses.append(clause)
+        for stmt in statements:
+            self.add_child(stmt)
 
     def set_at_end_clause(self, statements: List["CobolStatement"]) -> None:
         self.at_end_clause = statements
@@ -544,6 +589,18 @@ class SearchStatement(CobolStatement):
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
+        if self.table_name:
+            result["table_name"] = self.table_name
+        if self.varying_variable:
+            result["varying_variable"] = self.varying_variable
+        if self.when_clauses:
+            result["when_clauses"] = [
+                {
+                    "condition": clause["condition"],
+                    "statements": [s.to_dict() for s in clause["statements"]]
+                }
+                for clause in self.when_clauses
+            ]
         if self.at_end_clause:
             result["at_end_clause"] = [s.to_dict() for s in self.at_end_clause]
         return result
@@ -555,6 +612,26 @@ class StringStatement(CobolStatement):
         super().__init__("STRING", location)
         self.on_overflow: Optional[List["CobolStatement"]] = None
         self.not_on_overflow: Optional[List["CobolStatement"]] = None
+        self.operands: List[str] = []
+        self.into_target: Optional[str] = None
+        self.pointer_variable: Optional[str] = None
+        self.delimiters: List[str] = []
+
+    def add_operand(self, operand: str) -> None:
+        """Add a STRING operand."""
+        self.operands.append(operand)
+
+    def set_into_target(self, target: str) -> None:
+        """Set the INTO target variable."""
+        self.into_target = target
+
+    def set_pointer_variable(self, variable: str) -> None:
+        """Set the WITH POINTER variable."""
+        self.pointer_variable = variable
+
+    def add_delimiter(self, delimiter: str) -> None:
+        """Add a DELIMITED BY delimiter."""
+        self.delimiters.append(delimiter)
 
     def set_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
         self.on_overflow = statements
@@ -568,6 +645,14 @@ class StringStatement(CobolStatement):
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
+        if self.operands:
+            result["operands"] = self.operands
+        if self.delimiters:
+            result["delimiters"] = self.delimiters
+        if self.into_target:
+            result["into_target"] = self.into_target
+        if self.pointer_variable:
+            result["pointer_variable"] = self.pointer_variable
         if self.on_overflow:
             result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
         if self.not_on_overflow:
@@ -581,6 +666,31 @@ class UnstringStatement(CobolStatement):
         super().__init__("UNSTRING", location)
         self.on_overflow: Optional[List["CobolStatement"]] = None
         self.not_on_overflow: Optional[List["CobolStatement"]] = None
+        self.source_operand: Optional[str] = None
+        self.delimiters: List[str] = []
+        self.into_targets: List[Dict[str, Any]] = []
+        self.pointer_variable: Optional[str] = None
+
+    def set_source(self, source: str) -> None:
+        """Set the UNSTRING source operand."""
+        self.source_operand = source
+
+    def add_delimiter(self, delimiter: str) -> None:
+        """Add a DELIMITED BY delimiter."""
+        self.delimiters.append(delimiter)
+
+    def add_into_target(self, target: str, delimiter_var: Optional[str] = None, count_var: Optional[str] = None) -> None:
+        """Add an INTO target with optional DELIMITER IN and COUNT IN variables."""
+        into_info = {
+            "target": target,
+            "delimiter_var": delimiter_var,
+            "count_var": count_var
+        }
+        self.into_targets.append(into_info)
+
+    def set_pointer_variable(self, variable: str) -> None:
+        """Set the WITH POINTER variable."""
+        self.pointer_variable = variable
 
     def set_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
         self.on_overflow = statements
@@ -594,6 +704,14 @@ class UnstringStatement(CobolStatement):
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
+        if self.source_operand:
+            result["source_operand"] = self.source_operand
+        if self.delimiters:
+            result["delimiters"] = self.delimiters
+        if self.into_targets:
+            result["into_targets"] = self.into_targets
+        if self.pointer_variable:
+            result["pointer_variable"] = self.pointer_variable
         if self.on_overflow:
             result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
         if self.not_on_overflow:
