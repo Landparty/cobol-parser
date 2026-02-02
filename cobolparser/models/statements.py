@@ -473,10 +473,19 @@ class ComputeStatement(CobolStatement):
     def to_dict(self) -> Dict[str, Any]:
         """Convert COMPUTE statement to dictionary representation."""
         result = super().to_dict()
+        
+        # Handle expression which can be string or ASTNode
+        expression_dict = None
+        if self.expression:
+            if isinstance(self.expression, ASTNode):
+                expression_dict = self.expression.to_dict()
+            else:
+                expression_dict = str(self.expression)
+        
         result.update(
             {
                 "targets": self.targets,
-                "expression": self.expression.to_dict() if self.expression else None,
+                "expression": expression_dict,
             }
         )
         if self.on_size_error:

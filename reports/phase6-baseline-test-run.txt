@@ -1,0 +1,1987 @@
+﻿........................F.........FFFFFFFFFF..............sssssFF....... [  2%]
+.............F...F.FFFFFF......................................FFFFFFFFF [  5%]
+FFF.FF......................................................F........... [  8%]
+..............F.F....................................................... [ 10%]
+..............FF........................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+........................................................................ [ 21%]
+........................................................................ [ 24%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 32%]
+.FFFFF.FFFFF......ssFF.ssFFFFF.FFFFFFF.FFFFFFFFF..FFFFFFF.FF.....FFFFFFF [ 35%]
+FFFFFFFFFFFFFFFFFFFFFFFFF..FF........................................... [ 38%]
+FFFFFFFF................................................................ [ 40%]
+................F..............FFF...................................... [ 43%]
+..........................................s.FFFFFFFFFFFFFFFFFFFFFFFFFFFF [ 46%]
+..................................F.FFFFFF.............................. [ 48%]
+........................................................................ [ 51%]
+.......................sss.............................................. [ 54%]
+.........FF....FF........................................FFFFFFFFFFFFFFF [ 57%]
+.F..FFF................................................................. [ 59%]
+........................................................................ [ 62%]
+..........................................................F............. [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 70%]
+....FFFF.FF.FF.FFFF.FF.FF.FFFF.F...........F..FFFFFFFFFFFFFF.FF.......FF [ 73%]
+F..F..FFFFFF.FF.FFFFFFFFFF.FFFFF...F.FFF.F.FFFFFFFFFFFFFFFFFFFFF........ [ 76%]
+................................................F.............FFFFF.F... [ 78%]
+.......F................................................................ [ 81%]
+........................................................................ [ 84%]
+........................................................................ [ 87%]
+...................FFFFFFFF.....................................F....... [ 89%]
+............................F........................................... [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................
+ERROR: Coverage failure: total of 41.58 is less than fail-under=81.00
+                                                                         [100%]
+================================== FAILURES ===================================
+__________ TestCallMissingProgram.test_missing_program_reports_error __________
+tests\contracts\test_call_diagnostics.py:101: in test_missing_program_reports_error
+    assert len(call_errors) >= 1 or len(diagnostics) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +  and   0 = len([])
+__________ TestCallStatementContract.test_call_to_dict_output_basic ___________
+tests\contracts\test_call_statement_contract.py:39: in test_call_to_dict_output_basic
+    call_dict = call_stmt.to_dict()
+                ^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'to_dict'
+___ TestCallStatementContract.test_call_with_returning_clause_serialization ___
+tests\contracts\test_call_statement_contract.py:64: in test_call_with_returning_clause_serialization
+    assert hasattr(call_stmt, 'returning_parameter')
+E   AssertionError: assert False
+E    +  where False = hasattr(None, 'returning_parameter')
+____ TestCallStatementContract.test_call_with_giving_clause_serialization _____
+tests\contracts\test_call_statement_contract.py:88: in test_call_with_giving_clause_serialization
+    assert hasattr(call_stmt, 'giving_parameter')
+E   AssertionError: assert False
+E    +  where False = hasattr(None, 'giving_parameter')
+______ TestCallStatementContract.test_call_with_parameters_serialization ______
+tests\contracts\test_call_statement_contract.py:116: in test_call_with_parameters_serialization
+    assert hasattr(call_stmt, 'using_parameters')
+E   AssertionError: assert False
+E    +  where False = hasattr(None, 'using_parameters')
+_ TestCallStatementContract.test_backward_compatibility_baseline_test_case_1 __
+tests\contracts\test_call_statement_contract.py:149: in test_backward_compatibility_baseline_test_case_1
+    call_dict = call_stmt.to_dict()
+                ^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'to_dict'
+_ TestCallStatementContract.test_backward_compatibility_baseline_test_case_2 __
+tests\contracts\test_call_statement_contract.py:171: in test_backward_compatibility_baseline_test_case_2
+    call_dict = call_stmt.to_dict()
+                ^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'to_dict'
+_ TestCallStatementContract.test_backward_compatibility_baseline_test_case_3 __
+tests\contracts\test_call_statement_contract.py:195: in test_backward_compatibility_baseline_test_case_3
+    call_dict = call_stmt.to_dict()
+                ^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'to_dict'
+_ TestCallStatementContract.test_backward_compatibility_baseline_test_case_4 __
+tests\contracts\test_call_statement_contract.py:221: in test_backward_compatibility_baseline_test_case_4
+    call_dict = call_stmt.to_dict()
+                ^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'to_dict'
+______ TestCallStatementContract.test_exception_structures_serialization ______
+tests\contracts\test_call_statement_contract.py:247: in test_exception_structures_serialization
+    if call_stmt.on_exception is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'on_exception'
+_____ TestCallStatementContract.test_dynamic_call_tracking_serialization ______
+tests\contracts\test_call_statement_contract.py:272: in test_dynamic_call_tracking_serialization
+    assert hasattr(call_stmt, 'is_dynamic')
+E   AssertionError: assert False
+E    +  where False = hasattr(None, 'is_dynamic')
+_ TestProcedureDivisionCopybookContracts.test_procedure_copybook_statements_in_ast _
+tests\contracts\test_copybook_expansion_contracts.py:278: in test_procedure_copybook_statements_in_ast
+    assert "MOVE" in statement_types, "MOVE statement from copybook not found in AST"
+E   AssertionError: MOVE statement from copybook not found in AST
+E   assert 'MOVE' in ['DISPLAY', 'PERFORM']
+_ TestProcedureDivisionCopybookContracts.test_procedure_copybook_preserves_order _
+tests\contracts\test_copybook_expansion_contracts.py:313: in test_procedure_copybook_preserves_order
+    assert "MOVE" in statement_types, "Expected MOVE statement from copybook"
+E   AssertionError: Expected MOVE statement from copybook
+E   assert 'MOVE' in ['DISPLAY', 'DISPLAY', 'PERFORM', 'DISPLAY']
+__________ TestDynamicCallAPIContract.test_dynamic_call_is_detected ___________
+tests\contracts\test_dynamic_call_contract.py:91: in test_dynamic_call_is_detected
+    assert call.is_dynamic == True, "Dynamic CALL should have is_dynamic=True"
+E   AssertionError: Dynamic CALL should have is_dynamic=True
+E   assert False == True
+E    +  where False = CallStatement(type=Statement, location=Line 7, Column 6 (length 1), children=0).is_dynamic
+_____ TestDynamicCallAPIContract.test_analyzer_populates_possible_values ______
+tests\contracts\test_dynamic_call_contract.py:154: in test_analyzer_populates_possible_values
+    assert call.is_dynamic == True
+E   assert False == True
+E    +  where False = CallStatement(type=Statement, location=Line 7, Column 6 (length 1), children=0).is_dynamic
+_ TestDynamicCallValueTracking.test_tracks_initial_value_from_working_storage _
+tests\contracts\test_dynamic_call_contract.py:215: in test_tracks_initial_value_from_working_storage
+    assert call.is_dynamic
+E   assert False
+E    +  where False = CallStatement(type=Statement, location=Line 7, Column 6 (length 1), children=0).is_dynamic
+_______ TestDynamicCallValueTracking.test_tracks_move_statement_values ________
+tests\contracts\test_dynamic_call_contract.py:237: in test_tracks_move_statement_values
+    assert call.is_dynamic
+E   assert False
+E    +  where False = CallStatement(type=Statement, location=Line 8, Column 6 (length 1), children=0).is_dynamic
+________ TestDynamicCallValueTracking.test_tracks_multiple_move_values ________
+tests\contracts\test_dynamic_call_contract.py:261: in test_tracks_multiple_move_values
+    assert call.is_dynamic
+E   assert False
+E    +  where False = CallStatement(type=Statement, location=Line 10, Column 6 (length 1), children=0).is_dynamic
+__ TestDynamicCallValueTracking.test_combines_initial_value_and_move_values ___
+tests\contracts\test_dynamic_call_contract.py:287: in test_combines_initial_value_and_move_values
+    assert call.is_dynamic
+E   assert False
+E    +  where False = CallStatement(type=Statement, location=Line 8, Column 6 (length 1), children=0).is_dynamic
+_______ TestDynamicCallAnalyzerMethods.test_get_variable_values_method ________
+tests\contracts\test_dynamic_call_contract.py:312: in test_get_variable_values_method
+    assert "VALUE1" in values
+E   AssertionError: assert 'VALUE1' in []
+____ TestDynamicCallAnalyzerMethods.test_get_all_tracked_variables_method _____
+tests\contracts\test_dynamic_call_contract.py:333: in test_get_all_tracked_variables_method
+    assert "WS-VAR1" in variables
+E   AssertionError: assert 'WS-VAR1' in []
+_________ TestEvaluateDiagnosticStructure.test_diagnostic_has_message _________
+tests\contracts\test_evaluate_diagnostics.py:102: in test_diagnostic_has_message
+    assert len(when_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+________ TestEvaluateMissingWhenClause.test_missing_when_reports_error ________
+tests\contracts\test_evaluate_diagnostics.py:124: in test_missing_when_reports_error
+    assert len(when_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+___ TestEvaluateMissingWhenClause.test_missing_when_message_contains_clause ___
+tests\contracts\test_evaluate_diagnostics.py:140: in test_missing_when_message_contains_clause
+    assert len(when_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+___ TestEvaluateMissingEndEvaluate.test_missing_end_evaluate_reports_error ____
+tests\contracts\test_evaluate_diagnostics.py:163: in test_missing_end_evaluate_reports_error
+    assert len(end_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestEvaluateMissingEndEvaluate.test_missing_end_evaluate_message_contains_term _
+tests\contracts\test_evaluate_diagnostics.py:180: in test_missing_end_evaluate_message_contains_term
+    assert len(end_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestEvaluateSelectorMismatch.test_single_subject_multiple_selectors_reports_error _
+tests\contracts\test_evaluate_diagnostics.py:211: in test_single_subject_multiple_selectors_reports_error
+    assert len(mismatch_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestEvaluateSelectorMismatch.test_multiple_subjects_single_selector_reports_error _
+tests\contracts\test_evaluate_diagnostics.py:236: in test_multiple_subjects_single_selector_reports_error
+    assert len(mismatch_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+______ TestEvaluateInvalidThrough.test_through_without_end_reports_error ______
+tests\contracts\test_evaluate_diagnostics.py:266: in test_through_without_end_reports_error
+    assert len(thru_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestEvaluateWhenOtherPlacement.test_when_other_before_conditional_reports_error _
+tests\contracts\test_evaluate_diagnostics.py:294: in test_when_other_before_conditional_reports_error
+    assert len(placement_errors) >= 1 or len(diagnostics) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +  and   0 = len([])
+____ TestEvaluateWhenOtherPlacement.test_multiple_when_other_reports_error ____
+tests\contracts\test_evaluate_diagnostics.py:320: in test_multiple_when_other_reports_error
+    assert len(multiple_other_errors) >= 1 or len(diagnostics) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +  and   0 = len([])
+_________ TestEvaluateEmptySelector.test_empty_selector_reports_error _________
+tests\contracts\test_evaluate_diagnostics.py:343: in test_empty_selector_reports_error
+    assert len(diagnostics) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_________ TestEvaluateInvalidAlso.test_consecutive_also_reports_error _________
+tests\contracts\test_evaluate_diagnostics.py:373: in test_consecutive_also_reports_error
+    assert len(also_errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+________ TestEvaluateDiagnosticSeverity.test_syntax_errors_are_errors _________
+tests\contracts\test_evaluate_diagnostics.py:416: in test_syntax_errors_are_errors
+    assert len(diagnostics) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_______________________ test_evaluate_to_dict_structure _______________________
+tests\contracts\test_evaluate_serialization.py:60: in test_evaluate_to_dict_structure
+    assert data["subjects"][0] == "WS-GRADE"
+           ^^^^^^^^^^^^^^^^^^^
+E   IndexError: list index out of range
+_________ TestIfMissingCondition.test_missing_condition_reports_error _________
+tests\contracts\test_if_statement_diagnostics.py:90: in test_missing_condition_reports_error
+    assert len(if_errors) >= 1 or len(diagnostics) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +  and   0 = len([])
+_________ TestPerformMissingTarget.test_missing_target_reports_error __________
+tests\contracts\test_perform_diagnostics.py:97: in test_missing_target_reports_error
+    assert len(target_errors) >= 1 or len(diagnostics) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +  and   0 = len([])
+_________ TestPerformInvalidThru.test_thru_without_end_reports_error __________
+tests\contracts\test_perform_diagnostics.py:132: in test_thru_without_end_reports_error
+    assert len(thru_errors) >= 1 or len(diagnostics) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +  and   0 = len([])
+_ TestValueClauseFigurativeConstantsContract.test_backward_compatibility_baseline_value_space _
+tests\contracts\test_value_clause_contract.py:42: in test_backward_compatibility_baseline_value_space
+    assert result.ast.program_name == "TEST-VALUE-SPACE"
+E   AssertionError: assert 'UNKNOWN' == 'TEST-VALUE-SPACE'
+E     
+E     - TEST-VALUE-SPACE
+E     + UNKNOWN
+_ TestValueClauseFigurativeConstantsContract.test_backward_compatibility_baseline_value_spaces _
+tests\contracts\test_value_clause_contract.py:75: in test_backward_compatibility_baseline_value_spaces
+    assert result.ast.program_name == "TEST-VALUE-SPACES"
+E   AssertionError: assert 'UNKNOWN' == 'TEST-VALUE-SPACES'
+E     
+E     - TEST-VALUE-SPACES
+E     + UNKNOWN
+________________ TestCallComprehensive.test_call_with_periods _________________
+tests\integration\test_call_comprehensive.py:75: in test_call_with_periods
+    assert call_count >= 18, f"Expected at least 18 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 18 CALL statements, found 16
+E   assert 16 >= 18
+___________ TestCallComprehensive.test_call_multiline_comprehensive ___________
+tests\integration\test_call_comprehensive.py:86: in test_call_multiline_comprehensive
+    assert call_count >= 18, f"Expected at least 18 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 18 CALL statements, found 16
+E   assert 16 >= 18
+________________ TestCallComprehensive.test_call_with_comments ________________
+tests\integration\test_call_comprehensive.py:97: in test_call_with_comments
+    assert call_count >= 16, f"Expected at least 16 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 16 CALL statements, found 13
+E   assert 13 >= 16
+_________ TestCallComprehensive.test_call_exception_handlers_complete _________
+tests\integration\test_call_comprehensive.py:108: in test_call_exception_handlers_complete
+    assert call_count >= 25, f"Expected at least 25 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 25 CALL statements, found 21
+E   assert 21 >= 25
+____________ TestCallComprehensive.test_call_in_control_structures ____________
+tests\integration\test_call_comprehensive.py:120: in test_call_in_control_structures
+    assert call_count >= 23, f"Expected at least 23 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 23 CALL statements, found 3
+E   assert 3 >= 23
+____________ TestCallComprehensive.test_call_returning_variations _____________
+tests\integration\test_call_comprehensive.py:142: in test_call_returning_variations
+    assert call_count >= 20, f"Expected at least 20 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 20 CALL statements, found 18
+E   assert 18 >= 20
+______________ TestCallComprehensive.test_call_dynamic_programs _______________
+tests\integration\test_call_comprehensive.py:153: in test_call_dynamic_programs
+    assert call_count >= 16, f"Expected at least 16 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 16 CALL statements, found 13
+E   assert 13 >= 16
+_____________ TestCallComprehensive.test_call_real_world_banking ______________
+tests\integration\test_call_comprehensive.py:164: in test_call_real_world_banking
+    assert call_count >= 34, f"Expected at least 34 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 34 CALL statements, found 20
+E   assert 20 >= 34
+____________ TestCallComprehensive.test_call_real_world_insurance _____________
+tests\integration\test_call_comprehensive.py:175: in test_call_real_world_insurance
+    assert call_count >= 33, f"Expected at least 33 CALL statements, found {call_count}"
+E   AssertionError: Expected at least 33 CALL statements, found 24
+E   assert 24 >= 33
+_________________ TestCallComprehensive.test_overall_coverage _________________
+tests\integration\test_call_comprehensive.py:211: in test_overall_coverage
+    assert total_calls >= 240, f"Expected at least 240 total CALL statements, found {total_calls}"
+E   AssertionError: Expected at least 240 total CALL statements, found 170
+E   assert 170 >= 240
+---------------------------- Captured stdout call -----------------------------
+call_with_periods.cbl: 16 CALL statements
+call_multiline_comprehensive.cbl: 16 CALL statements
+call_with_comments.cbl: 13 CALL statements
+call_exception_handlers_complete.cbl: 21 CALL statements
+call_in_control_structures.cbl: 3 CALL statements
+call_parameter_modes_complete.cbl: 26 CALL statements
+call_returning_variations.cbl: 18 CALL statements
+call_dynamic_programs.cbl: 13 CALL statements
+call_real_world_banking.cbl: 20 CALL statements
+call_real_world_insurance.cbl: 24 CALL statements
+
+Total: 170 CALL statements across 10 files
+_ TestProcedureDivisionCopybooks.test_procedure_copybook_expansion_and_parsing _
+tests\integration\test_copybook_expansion_integration.py:225: in test_procedure_copybook_expansion_and_parsing
+    assert has_move, f"Expected MOVE statement from copybook. Found types: {statement_types}"
+E   AssertionError: Expected MOVE statement from copybook. Found types: ['DISPLAY', 'DISPLAY', 'PERFORM', 'DISPLAY']
+E   assert False
+______ TestProcedureDivisionCopybooks.test_multiple_procedure_copybooks _______
+tests\integration\test_copybook_expansion_integration.py:256: in test_multiple_procedure_copybooks
+    assert move_count >= 2, f"Expected at least 2 MOVE statements from copybooks, found {move_count}"
+E   AssertionError: Expected at least 2 MOVE statements from copybooks, found 0
+E   assert 0 >= 2
+_______ TestDynamicCallIntegration.test_complete_dynamic_call_workflow ________
+tests\integration\test_dynamic_call_integration.py:53: in test_complete_dynamic_call_workflow
+    assert call.is_dynamic == True, "All CALLs should be dynamic"
+E   AssertionError: All CALLs should be dynamic
+E   assert False == True
+E    +  where False = CallStatement(type=Statement, location=Line 11, Column 6 (length 1), children=0).is_dynamic
+_______ TestDynamicCallIntegration.test_mixed_static_and_dynamic_calls ________
+tests\integration\test_dynamic_call_integration.py:123: in test_mixed_static_and_dynamic_calls
+    assert static_count == 2
+E   assert 3 == 2
+______ TestDynamicCallIntegration.test_conditional_moves_to_dynamic_call ______
+tests\integration\test_dynamic_call_integration.py:170: in test_conditional_moves_to_dynamic_call
+    assert call.is_dynamic
+E   assert False
+E    +  where False = CallStatement(type=Statement, location=Line 22, Column 6 (length 1), children=0).is_dynamic
+__________ TestDynamicCallIntegration.test_table_driven_dynamic_call __________
+tests\integration\test_dynamic_call_integration.py:215: in test_table_driven_dynamic_call
+    assert len(calls) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+______ TestDynamicCallIntegration.test_multiple_variables_dynamic_calls _______
+tests\integration\test_dynamic_call_integration.py:264: in test_multiple_variables_dynamic_calls
+    assert "WS-VALIDATION-PROG" in tracked_vars
+E   AssertionError: assert 'WS-VALIDATION-PROG' in []
+_____________________ test_evaluate_variants_sample_file ______________________
+tests\integration\test_evaluate_samples.py:42: in test_evaluate_variants_sample_file
+    assert all(ev.default_when is not None for ev in evals)
+E   assert False
+E    +  where False = all(<generator object test_evaluate_variants_sample_file.<locals>.<genexpr> at 0x000002CA0FC87C60>)
+________ TestFixedFormatAutoDetection.test_ix103a_with_auto_detection _________
+tests\integration\test_fixed_format_parsing.py:22: in test_ix103a_with_auto_detection
+    assert result.success, f"Parsing failed with errors: {result.errors}"
+E   AssertionError: Parsing failed with errors: [ParseError("3: Expected '.' after program name '\n'")]
+E   assert False
+E    +  where False = ParseResult(ast=None, errors=[ParseError("3: Expected '.' after program name '\n'")], warnings=[], statistics=ParseStatistics()).success
+____ TestFixedFormatAutoDetection.test_ix103a_with_explicit_preprocessing _____
+tests\integration\test_fixed_format_parsing.py:45: in test_ix103a_with_explicit_preprocessing
+    assert result.success, f"Parsing failed with errors: {result.errors}"
+E   AssertionError: Parsing failed with errors: [ParseError("3: Expected '.' after program name '\n'")]
+E   assert False
+E    +  where False = ParseResult(ast=None, errors=[ParseError("3: Expected '.' after program name '\n'")], warnings=[], statistics=ParseStatistics()).success
+___ TestFixedFormatAutoDetection.test_ix103a_without_preprocessing_succeeds ___
+tests\integration\test_fixed_format_parsing.py:68: in test_ix103a_without_preprocessing_succeeds
+    assert result.success, f"Parsing should succeed with lexer fixed-format handling: {result.errors}"
+E   AssertionError: Parsing should succeed with lexer fixed-format handling: [ParseError("3: Expected '.' after program name '\n'")]
+E   assert False
+E    +  where False = ParseResult(ast=None, errors=[ParseError("3: Expected '.' after program name '\n'")], warnings=[], statistics=ParseStatistics()).success
+_ TestFixedFormatAutoDetection.test_fixed_format_detection_with_sequence_numbers _
+tests\integration\test_fixed_format_parsing.py:86: in test_fixed_format_detection_with_sequence_numbers
+    assert result.ast.program_name == "TESTPROG"
+E   AssertionError: assert 'UNKNOWN' == 'TESTPROG'
+E     
+E     - TESTPROG
+E     + UNKNOWN
+____ TestFixedFormatAutoDetection.test_fixed_format_detection_with_spaces _____
+tests\integration\test_fixed_format_parsing.py:102: in test_fixed_format_detection_with_spaces
+    assert result.ast.program_name == "TESTPROG"
+E   AssertionError: assert 'UNKNOWN' == 'TESTPROG'
+E     
+E     - TESTPROG
+E     + UNKNOWN
+_____ TestFixedFormatAutoDetection.test_free_format_not_detected_as_fixed _____
+tests\integration\test_fixed_format_parsing.py:118: in test_free_format_not_detected_as_fixed
+    assert result.ast.program_name == "TESTPROG"
+E   AssertionError: assert 'UNKNOWN' == 'TESTPROG'
+E     
+E     - TESTPROG
+E     + UNKNOWN
+________________ TestOtherFixedFormatFiles.test_ix108a_parsing ________________
+tests\integration\test_fixed_format_parsing.py:150: in test_ix108a_parsing
+    assert result.success, f"IX108A parsing failed: {result.errors}"
+E   AssertionError: IX108A parsing failed: [ParseError("3: Expected '.' after program name '\n'")]
+E   assert False
+E    +  where False = ParseResult(ast=None, errors=[ParseError("3: Expected '.' after program name '\n'")], warnings=[], statistics=ParseStatistics()).success
+____________________ TestSimpleIfEndIf.test_if_then_end_if ____________________
+tests\integration\test_if_complete.py:49: in test_if_then_end_if
+    assert if_stmt.condition is not None
+E   assert None is not None
+E    +  where None = IfStatement(type=Statement, location=Line 7, Column 12 (length 1), children=0).condition
+____________________ TestSimpleIfEndIf.test_if_else_end_if ____________________
+tests\integration\test_if_complete.py:80: in test_if_else_end_if
+    assert len(if_stmt.then_statements) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+E    +    where [] = IfStatement(type=Statement, location=Line 8, Column 12 (length 1), children=0).then_statements
+__________ TestSimpleIfEndIf.test_if_multiple_statements_in_branches __________
+tests\integration\test_if_complete.py:114: in test_if_multiple_statements_in_branches
+    assert len(if_stmt.then_statements) == 2
+E   assert 0 == 2
+E    +  where 0 = len([])
+E    +    where [] = IfStatement(type=Statement, location=Line 9, Column 12 (length 1), children=0).then_statements
+____________ TestNestedIfStatements.test_nested_if_in_then_branch _____________
+tests\integration\test_if_complete.py:156: in test_nested_if_in_then_branch
+    assert len(if_stmts) == 2
+E   assert 1 == 2
+E    +  where 1 = len([IfStatement(type=Statement, location=Line 8, Column 12 (length 1), children=0)])
+____________ TestNestedIfStatements.test_nested_if_in_else_branch _____________
+tests\integration\test_if_complete.py:193: in test_nested_if_in_else_branch
+    assert len(if_stmts) == 2
+E   assert 1 == 2
+E    +  where 1 = len([IfStatement(type=Statement, location=Line 8, Column 12 (length 1), children=0)])
+___________ TestNestedIfStatements.test_deeply_nested_if_statements ___________
+tests\integration\test_if_complete.py:226: in test_deeply_nested_if_statements
+    assert len(if_stmts) == 3
+E   assert 1 == 3
+E    +  where 1 = len([IfStatement(type=Statement, location=Line 9, Column 12 (length 1), children=0)])
+___________ TestInlineIfStatements.test_inline_if_single_statement ____________
+tests\integration\test_if_complete.py:258: in test_inline_if_single_statement
+    assert len(if_stmt.then_statements) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+E    +    where [] = IfStatement(type=Statement, location=Line 7, Column 12 (length 1), children=0).then_statements
+______________ TestInlineIfStatements.test_inline_if_else_period ______________
+tests\integration\test_if_complete.py:283: in test_inline_if_else_period
+    assert len(if_stmt.then_statements) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+E    +    where [] = IfStatement(type=Statement, location=Line 8, Column 12 (length 1), children=0).then_statements
+___ TestGetAllStatements.test_get_all_statements_includes_nested_statements ___
+tests\integration\test_if_complete.py:372: in test_get_all_statements_includes_nested_statements
+    assert len(display_stmts) == 3
+E   assert 0 == 3
+E    +  where 0 = len([])
+_________ TestGetAllStatements.test_get_all_statements_with_nested_if _________
+tests\integration\test_if_complete.py:401: in test_get_all_statements_with_nested_if
+    assert len(if_stmts) == 2
+E   assert 1 == 2
+E    +  where 1 = len([IfStatement(type=Statement, location=Line 8, Column 12 (length 1), children=0)])
+_____ TestIfStatementStructure.test_if_statement_has_required_attributes ______
+tests\integration\test_if_complete.py:439: in test_if_statement_has_required_attributes
+    assert if_stmt.condition is not None
+E   assert None is not None
+E    +  where None = IfStatement(type=Statement, location=Line 7, Column 12 (length 1), children=0).condition
+________ TestIfStatementStructure.test_if_statement_json_serialization ________
+tests\integration\test_if_complete.py:476: in test_if_statement_json_serialization
+    assert len(stmt_dict['then_statements']) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+___ TestOrchestrationFullProgramParsing.test_parse_simple_complete_program ____
+tests\integration\test_orchestrator_integration.py:42: in test_parse_simple_complete_program
+    assert result.ast.program_name == "TESTPROG"
+E   AssertionError: assert 'UNKNOWN' == 'TESTPROG'
+E     
+E     - TESTPROG
+E     + UNKNOWN
+_ TestOrchestrationFullProgramParsing.test_parse_program_with_identification_only _
+tests\integration\test_orchestrator_integration.py:56: in test_parse_program_with_identification_only
+    assert result.ast.program_name == "MINIMALPROGRAM"
+E   AssertionError: assert 'UNKNOWN' == 'MINIMALPROGRAM'
+E     
+E     - MINIMALPROGRAM
+E     + UNKNOWN
+_ TestOrchestrationFullProgramParsing.test_parse_program_multiple_paragraphs __
+tests\integration\test_orchestrator_integration.py:80: in test_parse_program_multiple_paragraphs
+    assert result.ast.program_name == "MULTIPARA"
+E   AssertionError: assert 'UNKNOWN' == 'MULTIPARA'
+E     
+E     - MULTIPARA
+E     + UNKNOWN
+_ TestOrchestrationDivisionSequenceValidation.test_divisions_parsed_in_correct_order _
+tests\integration\test_orchestrator_integration.py:144: in test_divisions_parsed_in_correct_order
+    assert result.ast.program_name == "ORDERTEST"
+E   AssertionError: assert 'UNKNOWN' == 'ORDERTEST'
+E     
+E     - ORDERTEST
+E     + UNKNOWN
+_ TestOrchestrationDivisionSequenceValidation.test_program_without_procedure_division _
+tests\integration\test_orchestrator_integration.py:162: in test_program_without_procedure_division
+    assert result.ast.program_name == "NOCODE"
+E   AssertionError: assert 'UNKNOWN' == 'NOCODE'
+E     
+E     - NOCODE
+E     + UNKNOWN
+_ TestOrchestrationErrorHandling.test_orchestrator_with_error_recovery_collect_all _
+tests\integration\test_orchestrator_integration.py:307: in test_orchestrator_with_error_recovery_collect_all
+    assert result.ast.program_name == "COLLECTTEST"
+E   AssertionError: assert 'UNKNOWN' == 'COLLECTTEST'
+E     
+E     - COLLECTTEST
+E     + UNKNOWN
+__________ TestPerformStatementIntegration.test_perform_until_simple __________
+tests\integration\test_perform_statement_coverage.py:68: in test_perform_until_simple
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_____ TestPerformStatementIntegration.test_perform_until_with_test_before _____
+tests\integration\test_perform_statement_coverage.py:89: in test_perform_until_with_test_before
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_____ TestPerformStatementIntegration.test_perform_until_with_test_after ______
+tests\integration\test_perform_statement_coverage.py:109: in test_perform_until_with_test_after
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_________ TestPerformStatementIntegration.test_perform_times_variable _________
+tests\integration\test_perform_statement_coverage.py:129: in test_perform_times_variable
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+____ TestPerformStatementIntegration.test_perform_varying_with_test_before ____
+tests\integration\test_perform_statement_coverage.py:152: in test_perform_varying_with_test_before
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+____ TestPerformStatementIntegration.test_perform_varying_with_test_after _____
+tests\integration\test_perform_statement_coverage.py:174: in test_perform_varying_with_test_after
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+______ TestPerformStatementIntegration.test_perform_to_dict_test_timing _______
+tests\integration\test_perform_statement_coverage.py:194: in test_perform_to_dict_test_timing
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_____ TestPerformStatementIntegration.test_perform_to_dict_variable_times _____
+tests\integration\test_perform_statement_coverage.py:217: in test_perform_to_dict_variable_times
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+________ TestPerformBackwardCompatibility.test_backward_compat_simple _________
+tests\integration\test_perform_statement_coverage.py:272: in test_backward_compat_simple
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_____ TestPerformBackwardCompatibility.test_backward_compat_times_numeric _____
+tests\integration\test_perform_statement_coverage.py:288: in test_backward_compat_times_numeric
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+________ TestPerformBackwardCompatibility.test_backward_compat_varying ________
+tests\integration\test_perform_statement_coverage.py:308: in test_backward_compat_varying
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+____ TestPerformUntilNestedStatements.test_perform_until_with_simple_call _____
+tests\integration\test_perform_until_nested.py:31: in test_perform_until_with_simple_call
+    assert len(pf.inline_statements) >= 1, f"PERFORM should have inline statements, got {len(pf.inline_statements)}"
+E   AssertionError: PERFORM should have inline statements, got 0
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = PerformStatement(type=Statement, location=Line 5, Column 5 (length 1), children=0).inline_statements
+___ TestPerformUntilNestedStatements.test_perform_until_with_multiple_calls ___
+tests\integration\test_perform_until_nested.py:62: in test_perform_until_with_multiple_calls
+    assert len(pf.inline_statements) >= 2, \
+E   AssertionError: PERFORM should have at least 2 inline statements, got 0
+E   assert 0 >= 2
+E    +  where 0 = len([])
+E    +    where [] = PerformStatement(type=Statement, location=Line 5, Column 5 (length 1), children=0).inline_statements
+_____ TestPerformUntilNestedStatements.test_perform_until_with_nested_if ______
+tests\integration\test_perform_until_nested.py:94: in test_perform_until_with_nested_if
+    assert len(if_stmts) >= 1, f"Expected at least 1 IF in PERFORM, got {len(if_stmts)}"
+E   AssertionError: Expected at least 1 IF in PERFORM, got 0
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_____ TestPerformUntilNestedStatements.test_perform_until_varying_clause ______
+tests\integration\test_perform_until_nested.py:121: in test_perform_until_varying_clause
+    assert pf.varying_clause is not None, "varying_clause should not be None"
+E   AssertionError: varying_clause should not be None
+E   assert None is not None
+E    +  where None = PerformStatement(type=Statement, location=Line 5, Column 5 (length 1), children=0).varying_clause
+_ TestPerformUntilNestedStatements.test_get_all_statements_includes_perform_nested _
+tests\integration\test_perform_until_nested.py:146: in test_get_all_statements_includes_perform_nested
+    assert statement_types.count('CALL') >= 2, \
+E   AssertionError: get_all_statements() should include nested CALLs, got 0
+E   assert 0 >= 2
+E    +  where 0 = <built-in method count of list object at 0x000002CA0FCC0300>('CALL')
+E    +    where <built-in method count of list object at 0x000002CA0FCC0300> = ['PERFORM'].count
+___ TestPerformUntilNestedStatements.test_perform_until_json_serialization ____
+tests\integration\test_perform_until_nested.py:173: in test_perform_until_json_serialization
+    assert len(pf_dict['inline_statements']) >= 1, "inline_statements should have at least 1 item"
+E   AssertionError: inline_statements should have at least 1 item
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestPerformUntilNestedStatements.test_perform_until_with_nested_if_and_calls _
+tests\integration\test_perform_until_nested.py:201: in test_perform_until_with_nested_if_and_calls
+    assert len(if_stmts) >= 1, "Should have IF in PERFORM inline statements"
+E   AssertionError: Should have IF in PERFORM inline statements
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_________________ TestBasicSamples.test_figurative_constants __________________
+tests\integration\test_sample_programs.py:27: in test_figurative_constants
+    assert result.ast.program_name == "FIGCONST"
+E   AssertionError: assert 'UNKNOWN' == 'FIGCONST'
+E     
+E     - FIGCONST
+E     + UNKNOWN
+___________________ TestBasicSamples.test_multiline_strings ___________________
+tests\integration\test_sample_programs.py:51: in test_multiline_strings
+    assert result.ast.program_name == "MLSTRING"
+E   AssertionError: assert 'UNKNOWN' == 'MLSTRING'
+E     
+E     - MLSTRING
+E     + UNKNOWN
+____________________ TestBasicSamples.test_picture_clauses ____________________
+tests\integration\test_sample_programs.py:61: in test_picture_clauses
+    assert result.ast.program_name == "PICTEST"
+E   AssertionError: assert 'UNKNOWN' == 'PICTEST'
+E     
+E     - PICTEST
+E     + UNKNOWN
+___________________ TestBasicSamples.test_occurs_variations ___________________
+tests\integration\test_sample_programs.py:75: in test_occurs_variations
+    assert result.ast.program_name == "OCCURTEST"
+E   AssertionError: assert 'UNKNOWN' == 'OCCURTEST'
+E     
+E     - OCCURTEST
+E     + UNKNOWN
+_______________________ TestBasicSamples.test_redefines _______________________
+tests\integration\test_sample_programs.py:85: in test_redefines
+    assert result.ast.program_name == "REDEFTEST"
+E   AssertionError: assert 'UNKNOWN' == 'REDEFTEST'
+E     
+E     - REDEFTEST
+E     + UNKNOWN
+___________________ TestFileOperations.test_file_operations ___________________
+tests\integration\test_sample_programs.py:99: in test_file_operations
+    assert result.ast.program_name == "FILETEST"
+E   AssertionError: assert 'UNKNOWN' == 'FILETEST'
+E     
+E     - FILETEST
+E     + UNKNOWN
+________________ TestFileOperations.test_sort_merge_operations ________________
+tests\integration\test_sample_programs.py:113: in test_sort_merge_operations
+    assert result.ast.program_name == "SORTMERGE"
+E   AssertionError: assert 'UNKNOWN' == 'SORTMERGE'
+E     
+E     - SORTMERGE
+E     + UNKNOWN
+______________________ TestControlFlow.test_control_flow ______________________
+tests\integration\test_sample_programs.py:127: in test_control_flow
+    assert result.ast.program_name == "CTRLFLOW"
+E   AssertionError: assert 'UNKNOWN' == 'CTRLFLOW'
+E     
+E     - CTRLFLOW
+E     + UNKNOWN
+_________________ TestControlFlow.test_arithmetic_operations __________________
+tests\integration\test_sample_programs.py:137: in test_arithmetic_operations
+    assert result.ast.program_name == "ARITHOPS"
+E   AssertionError: assert 'UNKNOWN' == 'ARITHOPS'
+E     
+E     - ARITHOPS
+E     + UNKNOWN
+_________________ TestStringOperations.test_string_operations _________________
+tests\integration\test_sample_programs.py:151: in test_string_operations
+    assert result.ast.program_name == "STRMANIP"
+E   AssertionError: assert 'UNKNOWN' == 'STRMANIP'
+E     
+E     - STRMANIP
+E     + UNKNOWN
+____________________ TestIBMExtensions.test_ibm_extensions ____________________
+tests\integration\test_sample_programs.py:165: in test_ibm_extensions
+    assert result.ast.program_name == "IBMEXT"
+E   AssertionError: assert 'UNKNOWN' == 'IBMEXT'
+E     
+E     - IBMEXT
+E     + UNKNOWN
+______________ TestAcceptDisplay.test_accept_display_operations _______________
+tests\integration\test_sample_programs.py:182: in test_accept_display_operations
+    assert result.ast.program_name == "ACCEPTDISP"
+E   AssertionError: assert 'UNKNOWN' == 'ACCEPTDISP'
+E     
+E     - ACCEPTDISP
+E     + UNKNOWN
+_______________ TestAdvancedFeatures.test_declaratives_section ________________
+tests\integration\test_sample_programs.py:196: in test_declaratives_section
+    assert result.ast.program_name == "DECLTEST"
+E   AssertionError: assert 'UNKNOWN' == 'DECLTEST'
+E     
+E     - DECLTEST
+E     + UNKNOWN
+_______________ TestAdvancedFeatures.test_communication_module ________________
+tests\integration\test_sample_programs.py:234: in test_communication_module
+    assert result.ast.program_name == "COMMTEST"
+E   AssertionError: assert 'UNKNOWN' == 'COMMTEST'
+E     
+E     - COMMTEST
+E     + UNKNOWN
+_________________ TestAdvancedFeatures.test_screen_section_io _________________
+tests\integration\test_sample_programs.py:244: in test_screen_section_io
+    assert result.ast.program_name == "SCREENIO"
+E   AssertionError: assert 'UNKNOWN' == 'SCREENIO'
+E     
+E     - SCREENIO
+E     + UNKNOWN
+_ TestPerformBackwardCompatibilityRegression.test_perform_simple_paragraph_only _
+tests\regression\test_perform_backward_compat.py:62: in test_perform_simple_paragraph_only
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestPerformBackwardCompatibilityRegression.test_perform_paragraph_thru_paragraph _
+tests\regression\test_perform_backward_compat.py:88: in test_perform_paragraph_thru_paragraph
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+___ TestPerformBackwardCompatibilityRegression.test_perform_until_condition ___
+tests\regression\test_perform_backward_compat.py:109: in test_perform_until_condition
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestPerformBackwardCompatibilityRegression.test_perform_varying_until_inline _
+tests\regression\test_perform_backward_compat.py:134: in test_perform_varying_until_inline
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestPerformBackwardCompatibilityRegression.test_perform_backward_compat_test_timing_not_breaking _
+tests\regression\test_perform_backward_compat.py:158: in test_perform_backward_compat_test_timing_not_breaking
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestPerformBackwardCompatibilityRegression.test_perform_variable_times_count_not_breaking _
+tests\regression\test_perform_backward_compat.py:185: in test_perform_variable_times_count_not_breaking
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestPerformEdgeCasesRegression.test_perform_serialization_preserves_attributes _
+tests\regression\test_perform_backward_compat.py:238: in test_perform_serialization_preserves_attributes
+    assert len(performs) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_________ TestPerformEdgeCasesRegression.test_perform_two_in_sequence _________
+tests\regression\test_perform_backward_compat.py:268: in test_perform_two_in_sequence
+    assert len(all_performs) >= 2
+E   assert 0 >= 2
+E    +  where 0 = len([])
+_ TestDeclarativesAndUseStatements.test_declaratives_integration_with_main_program _
+tests\unit\test_advanced_constructs.py:146: in test_declaratives_integration_with_main_program
+    assert result.ast.program_name == "TEST-DECLARATIVES"
+E   AssertionError: assert 'UNKNOWN' == 'TEST-DECLARATIVES'
+E     
+E     - TEST-DECLARATIVES
+E     + UNKNOWN
+_______________ TestArithmeticMigration.test_compute_statement ________________
+tests\unit\test_arithmetic_migration.py:108: in test_compute_statement
+    assert "A" in stmts[0].targets
+E   AssertionError: assert 'A' in []
+E    +  where [] = ComputeStatement(type=Statement, location=Line 5, Column 12 (length 1), children=0).targets
+_______________ TestArithmeticMigration.test_size_error_clause ________________
+tests\unit\test_arithmetic_migration.py:130: in test_size_error_clause
+    assert nested is not None
+E   assert None is not None
+____________ TestArithmeticMigration.test_not_on_size_error_clause ____________
+tests\unit\test_arithmetic_migration.py:154: in test_not_on_size_error_clause
+    assert nested is not None
+E   assert None is not None
+__________ TestCallBasicParsing.test_call_with_literal_program_name ___________
+tests\unit\test_call_basic_parsing.py:29: in test_call_with_literal_program_name
+    call_stmt = parser.parse_sentence(tokens, SourceLocation(1, 1))
+                ^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_sentence'
+__________ TestCallBasicParsing.test_call_with_variable_program_name __________
+tests\unit\test_call_basic_parsing.py:50: in test_call_with_variable_program_name
+    call_stmt = parser.parse_sentence(tokens, SourceLocation(1, 1))
+                ^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_sentence'
+______________ TestCallBasicParsing.test_call_with_no_parameters ______________
+tests\unit\test_call_basic_parsing.py:71: in test_call_with_no_parameters
+    call_stmt = parser.parse_sentence(tokens, SourceLocation(1, 1))
+                ^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_sentence'
+_________ TestCallDynamicAnalysis.test_dynamic_call_variable_tracking _________
+tests\unit\test_call_dynamic_analysis.py:28: in test_dynamic_call_variable_tracking
+    assert call_stmt is not None
+E   assert None is not None
+_________ TestCallDynamicAnalysis.test_call_with_literal_vs_variable __________
+tests\unit\test_call_dynamic_analysis.py:46: in test_call_with_literal_vs_variable
+    assert call_stmt1.is_dynamic is False
+           ^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'is_dynamic'
+____________ TestCallDynamicAnalysis.test_call_parameter_analysis _____________
+tests\unit\test_call_dynamic_analysis.py:80: in test_call_parameter_analysis
+    assert call_stmt is not None
+E   assert None is not None
+_____________ TestCallExceptionHandling.test_on_exception_clause ______________
+tests\unit\test_call_exception_handling.py:33: in test_on_exception_clause
+    assert call_stmt is not None
+E   assert None is not None
+___________ TestCallExceptionHandling.test_not_on_exception_clause ____________
+tests\unit\test_call_exception_handling.py:55: in test_not_on_exception_clause
+    assert call_stmt is not None
+E   assert None is not None
+___________ TestCallExceptionHandling.test_both_exception_handlers ____________
+tests\unit\test_call_exception_handling.py:78: in test_both_exception_handlers
+    assert call_stmt is not None
+E   assert None is not None
+______________ TestCallExceptionHandling.test_on_overflow_clause ______________
+tests\unit\test_call_exception_handling.py:101: in test_on_overflow_clause
+    assert call_stmt is not None
+E   assert None is not None
+_____________ TestCallExceptionHandling.test_end_call_terminator ______________
+tests\unit\test_call_exception_handling.py:123: in test_end_call_terminator
+    assert call_stmt is not None
+E   assert None is not None
+__________ TestCallFixedFormat.test_multiline_call_with_continuation __________
+tests\unit\test_call_fixed_format.py:35: in test_multiline_call_with_continuation
+    assert call_stmt is not None
+E   assert None is not None
+______________ TestCallFixedFormat.test_columns_8_72_compliance _______________
+tests\unit\test_call_fixed_format.py:56: in test_columns_8_72_compliance
+    assert call_stmt is not None
+E   assert None is not None
+___________ TestCallFixedFormat.test_continuation_in_parameter_list ___________
+tests\unit\test_call_fixed_format.py:78: in test_continuation_in_parameter_list
+    assert call_stmt is not None
+E   assert None is not None
+________________ TestCallParameterModes.test_by_reference_mode ________________
+tests\unit\test_call_parameter_modes.py:32: in test_by_reference_mode
+    assert call_stmt is not None
+E   assert None is not None
+_________________ TestCallParameterModes.test_by_content_mode _________________
+tests\unit\test_call_parameter_modes.py:55: in test_by_content_mode
+    assert call_stmt is not None
+E   assert None is not None
+__________________ TestCallParameterModes.test_by_value_mode __________________
+tests\unit\test_call_parameter_modes.py:76: in test_by_value_mode
+    assert call_stmt is not None
+E   assert None is not None
+__________ TestCallParameterModes.test_default_mode_no_explicit_mode __________
+tests\unit\test_call_parameter_modes.py:95: in test_default_mode_no_explicit_mode
+    assert call_stmt is not None
+E   assert None is not None
+______________ TestCallParameterModes.test_mixed_parameter_modes ______________
+tests\unit\test_call_parameter_modes.py:122: in test_mixed_parameter_modes
+    assert call_stmt is not None
+E   assert None is not None
+_________________ TestCallReturningGiving.test_returning_only _________________
+tests\unit\test_call_returning_giving.py:33: in test_returning_only
+    assert call_stmt is not None
+E   assert None is not None
+__________________ TestCallReturningGiving.test_giving_only ___________________
+tests\unit\test_call_returning_giving.py:53: in test_giving_only
+    assert call_stmt is not None
+E   assert None is not None
+__________ TestCallReturningGiving.test_neither_returning_nor_giving __________
+tests\unit\test_call_returning_giving.py:71: in test_neither_returning_nor_giving
+    assert call_stmt is not None
+E   assert None is not None
+__________ TestCallReturningGiving.test_returning_with_using_clause ___________
+tests\unit\test_call_returning_giving.py:95: in test_returning_with_using_clause
+    assert call_stmt is not None
+E   assert None is not None
+____ TestCallReturningGiving.test_returning_and_giving_mutually_exclusive _____
+tests\unit\test_call_returning_giving.py:118: in test_returning_and_giving_mutually_exclusive
+    assert call_stmt is not None
+E   assert None is not None
+_____ TestCallStatementParsing.test_call_with_by_reference_content_value ______
+tests\unit\test_call_statement_parsing.py:32: in test_call_with_by_reference_content_value
+    assert call_stmt is not None
+E   assert None is not None
+______________ TestCallStatementParsing.test_call_with_returning ______________
+tests\unit\test_call_statement_parsing.py:63: in test_call_with_returning
+    assert call_stmt is not None
+E   assert None is not None
+_____________ TestCallStatementParsing.test_call_with_on_overflow _____________
+tests\unit\test_call_statement_parsing.py:85: in test_call_with_on_overflow
+    assert call_stmt is not None
+E   assert None is not None
+____________ TestCallStatementParsing.test_call_with_on_exception _____________
+tests\unit\test_call_statement_parsing.py:108: in test_call_with_on_exception
+    assert call_stmt is not None
+E   assert None is not None
+___________________ test_doubled_quote_across_continuation ____________________
+tests\unit\test_continuation_cases.py:57: in test_doubled_quote_across_continuation
+    assert any(v.replace(" ", "") == "A'B'C" for v in values)
+E   assert False
+E    +  where False = any(<generator object test_doubled_quote_across_continuation.<locals>.<genexpr> at 0x000002CA10664D60>)
+______________________________ test_go_to_parsed ______________________________
+tests\unit\test_control_flow_basic.py:35: in test_go_to_parsed
+    assert 'GOTO' in get_statement_types(r.ast)
+E   AssertionError: assert 'GOTO' in []
+E    +  where [] = get_statement_types(CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=2))
+E    +    where CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=2) = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=2), errors=[], warnings=[], statistics=ParseStatistics()).ast
+____________________________ test_if_else_minimal _____________________________
+tests\unit\test_control_flow_basic.py:48: in test_if_else_minimal
+    assert kinds.count('IF') == 1
+E   AssertionError: assert 0 == 1
+E    +  where 0 = <built-in method count of list object at 0x000002CA10700AC0>('IF')
+E    +    where <built-in method count of list object at 0x000002CA10700AC0> = [].count
+________________________ test_else_recovery_without_if ________________________
+tests\unit\test_control_flow_basic.py:74: in test_else_recovery_without_if
+    assert kinds.count('MOVE') >= 2
+E   AssertionError: assert 0 >= 2
+E    +  where 0 = <built-in method count of list object at 0x000002CA10704280>('MOVE')
+E    +    where <built-in method count of list object at 0x000002CA10704280> = [].count
+________________________ test_if_with_end_if_explicit _________________________
+tests\unit\test_control_flow_basic.py:91: in test_if_with_end_if_explicit
+    assert len(if_stmts) >= 1, "Should have at least one IfStatement"
+E   AssertionError: Should have at least one IfStatement
+E   assert 0 >= 1
+E    +  where 0 = len([])
+__________________________ test_nested_if_statements __________________________
+tests\unit\test_control_flow_basic.py:119: in test_nested_if_statements
+    assert len(if_stmts) >= 1, "Should have at least one IfStatement"
+E   AssertionError: Should have at least one IfStatement
+E   assert 0 >= 1
+E    +  where 0 = len([])
+________________ test_get_all_statements_includes_if_branches _________________
+tests\unit\test_control_flow_basic.py:151: in test_get_all_statements_includes_if_branches
+    assert statement_types.count('MOVE') >= 3, "get_all_statements() should include all MOVEs from branches"
+E   AssertionError: get_all_statements() should include all MOVEs from branches
+E   assert 0 >= 3
+E    +  where 0 = <built-in method count of list object at 0x000002CA106D5CC0>('MOVE')
+E    +    where <built-in method count of list object at 0x000002CA106D5CC0> = ['IF'].count
+_________ TestDivisionContextTracking.test_data_item_tracks_division __________
+tests\unit\test_division_context.py:57: in test_data_item_tracks_division
+    assert len(data_items) >= 2, f"Expected at least 2 data items, got {len(data_items)}"
+E   AssertionError: Expected at least 2 data items, got 0
+E   assert 0 >= 2
+E    +  where 0 = len([])
+_________ TestDivisionContextTracking.test_paragraph_tracks_division __________
+tests\unit\test_division_context.py:86: in test_paragraph_tracks_division
+    assert len(proc_div.sections) >= 2, f"Expected at least 2 sections, got {len(proc_div.sections)}"
+E   AssertionError: Expected at least 2 sections, got 0
+E   assert 0 >= 2
+E    +  where 0 = len([])
+E    +    where [] = CobolDivision(type=Division, location=Line 4, Column 12 (length 1), children=3).sections
+________ TestDivisionContextTracking.test_get_division_context_method _________
+tests\unit\test_division_context.py:223: in test_get_division_context_method
+    assert len(data_items) > 0, "No data items found"
+E   AssertionError: No data items found
+E   assert 0 > 0
+E    +  where 0 = len([])
+__ TestDivisionContextTracking.test_division_context_with_multiple_sections ___
+tests\unit\test_division_context.py:260: in test_division_context_with_multiple_sections
+    assert len(sections_found) > 1, f"Expected multiple sections, found: {sections_found}"
+E   AssertionError: Expected multiple sections, found: set()
+E   assert 0 > 1
+E    +  where 0 = len(set())
+________________ TestEntryStatement.test_basic_entry_statement ________________
+tests\unit\test_entry_statement.py:45: in test_basic_entry_statement
+    assert entry_stmt is not None
+E   assert None is not None
+_______________ TestEntryStatement.test_entry_with_using_clause _______________
+tests\unit\test_entry_statement.py:72: in test_entry_with_using_clause
+    assert entry_stmt is not None
+E   assert None is not None
+___________ TestEntryStatement.test_entry_with_multiple_parameters ____________
+tests\unit\test_entry_statement.py:101: in test_entry_with_multiple_parameters
+    assert entry_stmt is not None
+E   assert None is not None
+____________________ TestEntryStatement.test_entry_to_dict ____________________
+tests\unit\test_entry_statement.py:125: in test_entry_to_dict
+    assert entry_stmt is not None
+E   assert None is not None
+______________________ test_evaluate_missing_when_clause ______________________
+tests\unit\test_evaluate_statement_diagnostics.py:46: in test_evaluate_missing_when_clause
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+_____________________ test_evaluate_missing_end_evaluate ______________________
+tests\unit\test_evaluate_statement_diagnostics.py:66: in test_evaluate_missing_end_evaluate
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+_______________ test_evaluate_selector_mismatch_single_subject ________________
+tests\unit\test_evaluate_statement_diagnostics.py:90: in test_evaluate_selector_mismatch_single_subject
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+______________ test_evaluate_selector_mismatch_multiple_subjects ______________
+tests\unit\test_evaluate_statement_diagnostics.py:118: in test_evaluate_selector_mismatch_multiple_subjects
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+_____________________ test_evaluate_invalid_through_range _____________________
+tests\unit\test_evaluate_statement_diagnostics.py:145: in test_evaluate_invalid_through_range
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+___________________ test_evaluate_through_without_end_value ___________________
+tests\unit\test_evaluate_statement_diagnostics.py:172: in test_evaluate_through_without_end_value
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+____________________ test_evaluate_when_other_must_be_last ____________________
+tests\unit\test_evaluate_statement_diagnostics.py:192: in test_evaluate_when_other_must_be_last
+    assert len(result.errors) >= 1 or len(result.warnings) >= 1
+E   assert (0 >= 1 or 0 >= 1)
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+E    +  and   0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).warnings
+____________________ test_evaluate_true_without_condition _____________________
+tests\unit\test_evaluate_statement_diagnostics.py:211: in test_evaluate_true_without_condition
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+______________________ test_evaluate_empty_when_selector ______________________
+tests\unit\test_evaluate_statement_diagnostics.py:231: in test_evaluate_empty_when_selector
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+____________________ test_evaluate_error_location_tracked _____________________
+tests\unit\test_evaluate_statement_diagnostics.py:251: in test_evaluate_error_location_tracked
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+___________________ test_evaluate_multiple_errors_collected ___________________
+tests\unit\test_evaluate_statement_diagnostics.py:277: in test_evaluate_multiple_errors_collected
+    assert len(result.errors) >= 2
+E   assert 0 >= 2
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+______________________ test_evaluate_invalid_also_chain _______________________
+tests\unit\test_evaluate_statement_diagnostics.py:324: in test_evaluate_invalid_also_chain
+    assert len(result.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=3), errors=[], warnings=[], statistics=ParseStatistics()).errors
+___________________ test_single_subject_literals_and_ranges ___________________
+tests\unit\test_evaluate_variants.py:70: in test_single_subject_literals_and_ranges
+    assert subjects == ["WS-GRADE"]
+E   AssertionError: assert [] == ['WS-GRADE']
+E     
+E     Right contains one more item: 'WS-GRADE'
+E     Use -v to get more diff
+_____________________ test_multiple_subjects_any_and_also _____________________
+tests\unit\test_evaluate_variants.py:102: in test_multiple_subjects_any_and_also
+    assert len(ev.subjects) == 2
+E   assert 0 == 2
+E    +  where 0 = len([])
+E    +    where [] = EvaluateStatement(type=Statement, location=Line 8, Column 16 (length 1), children=0).subjects
+__________________ test_evaluate_true_with_conditions_and_or __________________
+tests\unit\test_evaluate_variants.py:135: in test_evaluate_true_with_conditions_and_or
+    assert ev.subjects == ["TRUE"]
+E   AssertionError: assert [] == ['TRUE']
+E     
+E     Right contains one more item: 'TRUE'
+E     Use -v to get more diff
+______________ test_implicit_section_created_for_top_level_code _______________
+tests\unit\test_implicit_section.py:34: in test_implicit_section_created_for_top_level_code
+    assert 'MOVE' in kinds, f"Expected MOVE captured, got {kinds}"
+E   AssertionError: Expected MOVE captured, got []
+E   assert 'MOVE' in []
+_________________________ test_move_multiple_targets __________________________
+tests\unit\test_move_advanced.py:31: in test_move_multiple_targets
+    assert mv.source == '"Hello"'
+E   assert None == '"Hello"'
+E    +  where None = MoveStatement(type=Statement, location=Line 4, Column 5 (length 1), children=0).source
+___________________________ test_move_corresponding ___________________________
+tests\unit\test_move_advanced.py:51: in test_move_corresponding
+    assert mv1.is_corresponding is True
+E   assert False is True
+E    +  where False = MoveStatement(type=Statement, location=Line 4, Column 5 (length 1), children=0).is_corresponding
+__________________________ test_move_complex_source ___________________________
+tests\unit\test_move_advanced.py:81: in test_move_complex_source
+    assert "TABLE" in mv1.source
+           ^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: argument of type 'NoneType' is not a container or iterable
+---------------------------- Captured stdout call -----------------------------
+MV1 Source: None
+_________________ test_move_missing_to_does_not_block_perform _________________
+tests\unit\test_move_resilience.py:19: in test_move_missing_to_does_not_block_perform
+    assert result.ast.program_name == "X"
+E   AssertionError: assert 'UNKNOWN' == 'X'
+E     
+E     - X
+E     + UNKNOWN
+_________ TestCobolParserProgram.test_identification_division_parsing _________
+tests\unit\test_parser.py:118: in test_identification_division_parsing
+    assert result.ast.program_name == "TEST-PROG"
+E   AssertionError: assert 'UNKNOWN' == 'TEST-PROG'
+E     
+E     - TEST-PROG
+E     + UNKNOWN
+__________ TestCobolParserProgram.test_environment_division_parsing ___________
+tests\unit\test_parser.py:160: in test_environment_division_parsing
+    assert result.ast.program_name == "ENV-TEST"
+E   AssertionError: assert 'UNKNOWN' == 'ENV-TEST'
+E     
+E     - ENV-TEST
+E     + UNKNOWN
+___________ TestCobolParserProgram.test_procedure_division_parsing ____________
+tests\unit\test_parser.py:250: in test_procedure_division_parsing
+    assert main_paragraph is not None
+E   assert None is not None
+_________ TestCobolParserDataDefinition.test_basic_data_items_parsing _________
+tests\unit\test_parser.py:300: in test_basic_data_items_parsing
+    assert emp_record is not None
+E   assert None is not None
+__________ TestCobolParserDataDefinition.test_usage_clauses_parsing ___________
+tests\unit\test_parser.py:406: in test_usage_clauses_parsing
+    assert numeric_fields is not None
+E   assert None is not None
+__________ TestCobolParserDataDefinition.test_occurs_clauses_parsing __________
+tests\unit\test_parser.py:467: in test_occurs_clauses_parsing
+    assert table_data is not None
+E   assert None is not None
+__________ TestCobolParserStatements.test_display_statement_parsing ___________
+tests\unit\test_parser.py:549: in test_display_statement_parsing
+    assert main_para is not None
+E   assert None is not None
+____________ TestCobolParserStatements.test_move_statement_parsing ____________
+tests\unit\test_parser.py:592: in test_move_statement_parsing
+    assert main_para is not None
+E   assert None is not None
+__________ TestCobolParserStatements.test_perform_statement_parsing ___________
+tests\unit\test_parser.py:725: in test_perform_statement_parsing
+    assert main_para is not None
+E   assert None is not None
+_______ TestCobolParserExpressions.test_arithmetic_expressions_parsing ________
+tests\unit\test_parser.py:774: in test_arithmetic_expressions_parsing
+    assert main_para is not None
+E   assert None is not None
+___________ TestCobolParserExpressions.test_function_calls_parsing ____________
+tests\unit\test_parser.py:878: in test_function_calls_parsing
+    assert main_para is not None
+E   assert None is not None
+______________ TestCobolParserIBMSpecific.test_exec_sql_parsing _______________
+tests\unit\test_parser.py:926: in test_exec_sql_parsing
+    assert main_para is not None
+E   assert None is not None
+_____________ TestCobolParserIBMSpecific.test_comp3_data_parsing ______________
+tests\unit\test_parser.py:1025: in test_comp3_data_parsing
+    assert packed_fields is not None
+E   assert None is not None
+__________ TestCobolParserErrorHandling.test_syntax_error_detection ___________
+tests\unit\test_parser.py:1081: in test_syntax_error_detection
+    assert not result.success
+E   assert not True
+E    +  where True = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).success
+_________ TestCobolParserErrorHandling.test_error_recovery_mechanisms _________
+tests\unit\test_parser.py:1129: in test_error_recovery_mechanisms
+    assert result.ast.program_name == "TEST"
+E   AssertionError: assert 'UNKNOWN' == 'TEST'
+E     
+E     - TEST
+E     + UNKNOWN
+_________ TestCobolParserErrorHandling.test_semantic_error_detection __________
+tests\unit\test_parser.py:1199: in test_semantic_error_detection
+    assert main_para is not None
+E   assert None is not None
+_________ TestCurrentParserCapabilities.test_basic_program_structure __________
+tests\unit\test_parser_capabilities.py:34: in test_basic_program_structure
+    assert result.ast.program_name == "BASIC-TEST"
+E   AssertionError: assert 'UNKNOWN' == 'BASIC-TEST'
+E     
+E     - BASIC-TEST
+E     + UNKNOWN
+______ TestCobolParserInitialization.test_parser_initialization_defaults ______
+tests\unit\test_parser_comprehensive.py:42: in test_parser_initialization_defaults
+    assert parser.current_token is None
+           ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'current_token'
+________________ TestTokenManagement.test_advance_token_normal ________________
+tests\unit\test_parser_comprehensive.py:103: in test_advance_token_normal
+    self.parser.advance_token()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'advance_token'
+________________ TestTokenManagement.test_advance_token_at_end ________________
+tests\unit\test_parser_comprehensive.py:122: in test_advance_token_at_end
+    result = self.parser.advance_token()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'advance_token'
+______________ TestTokenManagement.test_advance_token_beyond_end ______________
+tests\unit\test_parser_comprehensive.py:139: in test_advance_token_beyond_end
+    result = self.parser.advance_token()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'advance_token'
+_________________ TestTokenManagement.test_peek_token_normal __________________
+tests\unit\test_parser_comprehensive.py:147: in test_peek_token_normal
+    next_token = self.parser.peek_token()
+                 ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'peek_token'
+_________________ TestTokenManagement.test_peek_token_at_end __________________
+tests\unit\test_parser_comprehensive.py:170: in test_peek_token_at_end
+    next_token = self.parser.peek_token()
+                 ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'peek_token'
+_______________ TestTokenManagement.test_peek_token_with_offset _______________
+tests\unit\test_parser_comprehensive.py:176: in test_peek_token_with_offset
+    token_ahead = self.parser.peek_token(2)
+                  ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'peek_token'
+________________ TestTokenManagement.test_expect_token_success ________________
+tests\unit\test_parser_comprehensive.py:193: in test_expect_token_success
+    result = self.parser.expect_token(TokenType.IDENTIFICATION_DIVISION)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'expect_token'
+________________ TestTokenManagement.test_expect_token_failure ________________
+tests\unit\test_parser_comprehensive.py:205: in test_expect_token_failure
+    result = self.parser.expect_token(TokenType.PROCEDURE_DIVISION)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'expect_token'
+________________ TestTokenManagement.test_expect_token_at_eof _________________
+tests\unit\test_parser_comprehensive.py:226: in test_expect_token_at_eof
+    result = self.parser.expect_token(TokenType.EOF)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'expect_token'
+______________ TestTokenManagement.test_match_token_single_type _______________
+tests\unit\test_parser_comprehensive.py:239: in test_match_token_single_type
+    result = self.parser.match_token(TokenType.IDENTIFICATION_DIVISION)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'match_token'
+_____________ TestTokenManagement.test_match_token_multiple_types _____________
+tests\unit\test_parser_comprehensive.py:258: in test_match_token_multiple_types
+    result = self.parser.match_token(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'match_token'
+_________________ TestTokenManagement.test_match_token_at_eof _________________
+tests\unit\test_parser_comprehensive.py:283: in test_match_token_at_eof
+    result = self.parser.match_token(TokenType.EOF)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'match_token'
+________________ TestTokenManagement.test_get_current_location ________________
+tests\unit\test_parser_comprehensive.py:299: in test_get_current_location
+    self.parser.advance_token()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'advance_token'
+____________ TestTokenManagement.test_get_current_location_at_eof _____________
+tests\unit\test_parser_comprehensive.py:311: in test_get_current_location_at_eof
+    assert location.line == 3
+E   assert 1 == 3
+E    +  where 1 = SourceLocation(line=1, column=1, length=1).line
+___________________ TestParseErrors.test_create_error_basic ___________________
+tests\unit\test_parser_comprehensive.py:332: in test_create_error_basic
+    error = parser.create_error("Test error message")
+            ^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'create_error'
+_________________ TestParseErrors.test_create_error_no_token __________________
+tests\unit\test_parser_comprehensive.py:345: in test_create_error_no_token
+    error = parser.create_error("Error without token")
+            ^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'create_error'
+_______________ TestParseMethod.test_parse_method_basic_success _______________
+tests\unit\test_parser_comprehensive.py:441: in test_parse_method_basic_success
+    assert result.ast.program_name == "TEST-PROG"
+E   AssertionError: assert 'UNKNOWN' == 'TEST-PROG'
+E     
+E     - TEST-PROG
+E     + UNKNOWN
+________________ TestParseMethod.test_parse_method_lexer_error ________________
+tests\unit\test_parser_comprehensive.py:456: in test_parse_method_lexer_error
+    assert result.success is False
+E   assert True is False
+E    +  where True = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 8 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).success
+_______________ TestParseMethod.test_parse_method_empty_source ________________
+tests\unit\test_parser_comprehensive.py:469: in test_parse_method_empty_source
+    assert result.success is False
+E   assert True is False
+E    +  where True = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).success
+_______________ TestParseMethod.test_parse_file_method_success ________________
+tests\unit\test_parser_comprehensive.py:523: in test_parse_file_method_success
+    assert result.ast.program_name == "FILE-TEST"
+E   AssertionError: assert 'UNKNOWN' == 'FILE-TEST'
+E     
+E     - FILE-TEST
+E     + UNKNOWN
+_ TestIdentificationDivisionParsing.test_parse_identification_division_basic __
+tests\unit\test_parser_comprehensive.py:568: in test_parse_identification_division_basic
+    assert result.ast.program_name == "BASIC-PROG"
+E   AssertionError: assert 'UNKNOWN' == 'BASIC-PROG'
+E     
+E     - BASIC-PROG
+E     + UNKNOWN
+_ TestIdentificationDivisionParsing.test_parse_identification_division_missing_division_keyword _
+tests\unit\test_parser_comprehensive.py:588: in test_parse_identification_division_missing_division_keyword
+    result = parser.parse_identification_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_identification_division'
+_ TestIdentificationDivisionParsing.test_parse_identification_division_missing_period_after_division _
+tests\unit\test_parser_comprehensive.py:609: in test_parse_identification_division_missing_period_after_division
+    result = parser.parse_identification_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_identification_division'
+_ TestIdentificationDivisionParsing.test_parse_identification_division_missing_program_id _
+tests\unit\test_parser_comprehensive.py:629: in test_parse_identification_division_missing_program_id
+    result = parser.parse_identification_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_identification_division'
+_ TestIdentificationDivisionParsing.test_parse_identification_division_invalid_program_name _
+tests\unit\test_parser_comprehensive.py:653: in test_parse_identification_division_invalid_program_name
+    result = parser.parse_identification_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_identification_division'
+________ TestIdentificationDivisionParsing.test_skip_to_next_division _________
+tests\unit\test_parser_comprehensive.py:676: in test_skip_to_next_division
+    parser.skip_to_next_division()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'skip_to_next_division'
+___ TestEnvironmentDivisionParsing.test_parse_environment_division_optional ___
+tests\unit\test_parser_comprehensive.py:720: in test_parse_environment_division_optional
+    result = parser.parse_environment_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_environment_division'
+_______ TestEnvironmentDivisionParsing.test_parse_configuration_section _______
+tests\unit\test_parser_comprehensive.py:747: in test_parse_configuration_section
+    parser.parse_configuration_section()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_configuration_section'
+__________ TestDataDivisionParsing.test_parse_data_division_optional __________
+tests\unit\test_parser_comprehensive.py:792: in test_parse_data_division_optional
+    result = parser.parse_data_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_data_division'
+__ TestDataDivisionParsing.test_parse_working_storage_section_error_handling __
+tests\unit\test_parser_comprehensive.py:816: in test_parse_working_storage_section_error_handling
+    parser.parse_working_storage_section()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_working_storage_section'
+_______ TestDataDivisionParsing.test_parse_data_item_missing_data_name ________
+tests\unit\test_parser_comprehensive.py:836: in test_parse_data_item_missing_data_name
+    data_item = parser.parse_data_item()
+                ^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_data_item'
+_______ TestDataDivisionParsing.test_parse_usage_clause_with_is_keyword _______
+tests\unit\test_parser_comprehensive.py:856: in test_parse_usage_clause_with_is_keyword
+    usage = parser._parse_usage_clause()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_usage_clause'
+___________ TestDataDivisionParsing.test_parse_usage_clause_invalid ___________
+tests\unit\test_parser_comprehensive.py:873: in test_parse_usage_clause_invalid
+    usage = parser._parse_usage_clause()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_usage_clause'
+_____ TestDataDivisionParsing.test_parse_occurs_clause_with_depending_on ______
+tests\unit\test_parser_comprehensive.py:894: in test_parse_occurs_clause_with_depending_on
+    occurs_clause = parser._parse_occurs_clause()
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_occurs_clause'
+_______ TestDataDivisionParsing.test_parse_picture_pattern_with_periods _______
+tests\unit\test_parser_comprehensive.py:918: in test_parse_picture_pattern_with_periods
+    pattern, location, consumed_period = parser._parse_picture_pattern()
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_picture_pattern'
+_____ TestProcedureDivisionParsing.test_parse_procedure_division_optional _____
+tests\unit\test_parser_comprehensive.py:941: in test_parse_procedure_division_optional
+    result = parser.parse_procedure_division()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_procedure_division'
+_______ TestProcedureDivisionParsing.test_parse_paragraph_or_statement ________
+tests\unit\test_parser_comprehensive.py:964: in test_parse_paragraph_or_statement
+    parser.parse_paragraph_or_statement()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_paragraph_or_statement'. Did you mean: 'parse_perform_statement'?
+______ TestProcedureDivisionParsing.test_parse_move_statement_missing_to ______
+tests\unit\test_parser_comprehensive.py:993: in test_parse_move_statement_missing_to
+    assert len(parser.errors) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+E    +    where [] = <cobolparser.parser.CobolParser object at 0x000002CA0FC6E7B0>.errors
+____ TestProcedureDivisionParsing.test_parse_perform_statement_with_until _____
+tests\unit\test_parser_comprehensive.py:1037: in test_parse_perform_statement_with_until
+    assert perform_stmt is not None
+E   assert None is not None
+___________ TestProcedureDivisionParsing.test_parse_stop_statement ____________
+tests\unit\test_parser_comprehensive.py:1058: in test_parse_stop_statement
+    parser.parse_stop_statement()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'parse_stop_statement'. Did you mean: 'parse_add_statement'?
+__________________ TestSkipMethods.test_skip_to_token_basic ___________________
+tests\unit\test_parser_comprehensive.py:1083: in test_skip_to_token_basic
+    parser.skip_to_token(TokenType.DATA_DIVISION, TokenType.EOF)
+    ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'skip_to_token'
+________________ TestSkipMethods.test_skip_to_token_not_found _________________
+tests\unit\test_parser_comprehensive.py:1102: in test_skip_to_token_not_found
+    parser.skip_to_token(TokenType.DATA_DIVISION)
+    ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'skip_to_token'
+__________________ TestSkipMethods.test_skip_to_next_section __________________
+tests\unit\test_parser_comprehensive.py:1124: in test_skip_to_next_section
+    parser.skip_to_next_section()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'skip_to_next_section'
+___________ TestConvenienceFunction.test_parse_cobol_function_basic ___________
+tests\unit\test_parser_comprehensive.py:1203: in test_parse_cobol_function_basic
+    assert result.ast.program_name == "CONVENIENCE-TEST"
+E   AssertionError: assert 'UNKNOWN' == 'CONVENIENCE-TEST'
+E     
+E     - CONVENIENCE-TEST
+E     + UNKNOWN
+______ TestConvenienceFunction.test_parse_cobol_function_error_handling _______
+tests\unit\test_parser_comprehensive.py:1228: in test_parse_cobol_function_error_handling
+    assert result.success is False or len(result.errors) > 0
+E   assert (True is False or 0 > 0)
+E    +  where True = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 9 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).success
+E    +  and   0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 9 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).errors
+_____________________ TestEdgeCases.test_empty_token_list _____________________
+tests\unit\test_parser_comprehensive.py:1242: in test_empty_token_list
+    parser.advance_token()
+    ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'advance_token'
+_________________ TestEdgeCases.test_parser_state_transitions _________________
+tests\unit\test_parser_comprehensive.py:1262: in test_parser_state_transitions
+    assert parser.current_token is None
+           ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'current_token'
+_____________________ TestEdgeCases.test_malformed_tokens _____________________
+tests\unit\test_parser_comprehensive.py:1298: in test_malformed_tokens
+    parser.advance_token()
+    ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute 'advance_token'
+______ TestParseHelperMethods.test_parse_test_timing_clause_with_before _______
+tests\unit\test_parser_comprehensive.py:1355: in test_parse_test_timing_clause_with_before
+    test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_test_timing_clause'
+_______ TestParseHelperMethods.test_parse_test_timing_clause_with_after _______
+tests\unit\test_parser_comprehensive.py:1372: in test_parse_test_timing_clause_with_after
+    test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_test_timing_clause'
+__ TestParseHelperMethods.test_parse_test_timing_clause_with_test_no_timing ___
+tests\unit\test_parser_comprehensive.py:1388: in test_parse_test_timing_clause_with_test_no_timing
+    test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_test_timing_clause'
+________ TestParseHelperMethods.test_parse_test_timing_clause_no_with _________
+tests\unit\test_parser_comprehensive.py:1404: in test_parse_test_timing_clause_no_with
+    test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_test_timing_clause'
+___ TestParseHelperMethods.test_parse_test_timing_clause_with_without_test ____
+tests\unit\test_parser_comprehensive.py:1420: in test_parse_test_timing_clause_with_without_test
+    test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_test_timing_clause'
+____ TestParseHelperMethods.test_parse_test_timing_clause_at_end_of_tokens ____
+tests\unit\test_parser_comprehensive.py:1432: in test_parse_test_timing_clause_at_end_of_tokens
+    test_timing, next_index = parser._parse_test_timing_clause(tokens, 0)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_test_timing_clause'
+__________ TestParseHelperMethods.test_parse_until_condition_simple ___________
+tests\unit\test_parser_comprehensive.py:1450: in test_parse_until_condition_simple
+    condition, next_index = parser._parse_until_condition(tokens, 0)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_until_condition'
+_________ TestParseHelperMethods.test_parse_until_condition_no_until __________
+tests\unit\test_parser_comprehensive.py:1467: in test_parse_until_condition_no_until
+    condition, next_index = parser._parse_until_condition(tokens, 0)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_until_condition'
+______ TestParseHelperMethods.test_parse_until_condition_single_variable ______
+tests\unit\test_parser_comprehensive.py:1483: in test_parse_until_condition_single_variable
+    condition, next_index = parser._parse_until_condition(tokens, 0)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_until_condition'
+___ TestParseHelperMethods.test_parse_until_condition_stops_at_end_perform ____
+tests\unit\test_parser_comprehensive.py:1502: in test_parse_until_condition_stops_at_end_perform
+    condition, next_index = parser._parse_until_condition(tokens, 0)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_until_condition'
+_____ TestParseHelperMethods.test_parse_until_condition_empty_after_until _____
+tests\unit\test_parser_comprehensive.py:1517: in test_parse_until_condition_empty_after_until
+    condition, next_index = parser._parse_until_condition(tokens, 0)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_until_condition'
+_____ TestPerformInlineEnhancements.test_perform_simple_with_test_before ______
+tests\unit\test_parser_comprehensive.py:1549: in test_perform_simple_with_test_before
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+______ TestPerformInlineEnhancements.test_perform_simple_with_test_after ______
+tests\unit\test_parser_comprehensive.py:1582: in test_perform_simple_with_test_after
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+___________ TestPerformInlineEnhancements.test_perform_simple_until ___________
+tests\unit\test_parser_comprehensive.py:1611: in test_perform_simple_until
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+_______ TestPerformInlineEnhancements.test_perform_times_with_variable ________
+tests\unit\test_parser_comprehensive.py:1639: in test_perform_times_with_variable
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+__________ TestPerformInlineEnhancements.test_perform_times_numeric ___________
+tests\unit\test_parser_comprehensive.py:1666: in test_perform_times_numeric
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+__________ TestPerformInlineEnhancements.test_perform_thru_with_test __________
+tests\unit\test_parser_comprehensive.py:1696: in test_perform_thru_with_test
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+_______ TestPerformInlineEnhancements.test_perform_complex_all_clauses ________
+tests\unit\test_parser_comprehensive.py:1734: in test_perform_complex_all_clauses
+    result_index = parser._parse_perform_inline(tokens, 0)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'CobolParser' object has no attribute '_parse_perform_inline'
+____________ TestProgramIDClauses.test_program_id_with_is_initial _____________
+tests\unit\test_parser_coverage_complete.py:26: in test_program_id_with_is_initial
+    assert result.ast.program_name == "TESTPROG"
+E   AssertionError: assert 'UNKNOWN' == 'TESTPROG'
+E     
+E     - TESTPROG
+E     + UNKNOWN
+_____________ TestProgramIDClauses.test_program_id_with_is_common _____________
+tests\unit\test_parser_coverage_complete.py:38: in test_program_id_with_is_common
+    assert result.ast.program_name == "COMMONPG"
+E   AssertionError: assert 'UNKNOWN' == 'COMMONPG'
+E     
+E     - COMMONPG
+E     + UNKNOWN
+_________ TestProgramIDClauses.test_program_id_with_multiple_clauses __________
+tests\unit\test_parser_coverage_complete.py:50: in test_program_id_with_multiple_clauses
+    assert result.ast.program_name == "MULTIPROG"
+E   AssertionError: assert 'UNKNOWN' == 'MULTIPROG'
+E     
+E     - MULTIPROG
+E     + UNKNOWN
+___________ TestErrorRecoveryModes.test_fail_fast_mode_with_errors ____________
+tests\unit\test_parser_coverage_complete.py:1199: in test_fail_fast_mode_with_errors
+    assert result.ast is None or len(result.errors) > 0
+E   assert (CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=0) is None or 0 > 0)
+E    +  where CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=0) = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).ast
+E    +  and   0 = len([])
+E    +    where [] = ParseResult(ast=CobolProgram(type=Program, location=Line 1, Column 1 (length 1), children=0), errors=[], warnings=[], statistics=ParseStatistics()).errors
+__________________ TestPerformThru.test_simple_perform_thru ___________________
+tests\unit\test_perform_thru.py:40: in test_simple_perform_thru
+    assert main_para is not None, "MAIN-PARA should exist"
+E   AssertionError: MAIN-PARA should exist
+E   assert None is not None
+________________ TestPerformThru.test_perform_thru_with_times _________________
+tests\unit\test_perform_thru.py:79: in test_perform_thru_with_times
+    assert main_para is not None
+E   assert None is not None
+__________________ TestPerformThru.test_perform_thru_to_dict __________________
+tests\unit\test_perform_thru.py:114: in test_perform_thru_to_dict
+    perform_stmts = [c for c in main_para.children if hasattr(c, 'target_paragraph')]
+                                ^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'children'
+__________________ TestPerformThru.test_perform_without_thru __________________
+tests\unit\test_perform_thru.py:147: in test_perform_without_thru
+    perform_stmts = [c for c in main_para.children if hasattr(c, 'target_paragraph')]
+                                ^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'children'
+_____________ TestPerformThru.test_perform_thru_with_nested_calls _____________
+tests\unit\test_perform_thru.py:181: in test_perform_thru_with_nested_calls
+    perform_stmts = [c for c in main_para.children if hasattr(c, 'target_paragraph')]
+                                ^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'children'
+__ TestParsingPerformance.test_parse_performance_with_large_working_storage ___
+tests\unit\test_performance_and_edge_cases.py:91: in test_parse_performance_with_large_working_storage
+    assert len(data_items) >= 1  # Should parse at least some items
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   assert 0 >= 1
+E    +  where 0 = len([])
+___________ TestBoundaryConditions.test_minimum_valid_cobol_program ___________
+tests\unit\test_performance_and_edge_cases.py:627: in test_minimum_valid_cobol_program
+    assert result.ast.program_name == "MIN"
+E   AssertionError: assert 'UNKNOWN' == 'MIN'
+E     
+E     - MIN
+E     + UNKNOWN
+________ TestComplexPictureClauses.test_signed_decimal_picture_clauses ________
+tests\unit\test_real_world_patterns.py:66: in test_signed_decimal_picture_clauses
+    assert len(data_items) >= 4  # Adjusted to match current parser capabilities
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   assert 0 >= 4
+E    +  where 0 = len([])
+________ TestComplexPictureClauses.test_computational_fields_and_usage ________
+tests\unit\test_real_world_patterns.py:140: in test_computational_fields_and_usage
+    assert wrk_cs_18v00 is not None
+E   assert None is not None
+_____ TestRedefinesAndComplexStructures.test_multiple_redefines_patterns ______
+tests\unit\test_real_world_patterns.py:196: in test_multiple_redefines_patterns
+    assert wrk_ds_06v06 is not None
+E   assert None is not None
+______ TestRedefinesAndComplexStructures.test_complex_occurs_structures _______
+tests\unit\test_real_world_patterns.py:257: in test_complex_occurs_structures
+    assert arr is not None
+E   assert None is not None
+_______________ TestCallStatements.test_call_with_using_clause ________________
+tests\unit\test_real_world_patterns.py:350: in test_call_with_using_clause
+    assert call_1.called_program == '"IC102A"'  # type: ignore[attr-defined]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   assert None == '"IC102A"'
+E    +  where None = CallStatement(type=Statement, location=Line 9, Column 6 (length 1), children=0).called_program
+________ TestComplexFileStructures.test_file_control_and_fd_structures ________
+tests\unit\test_real_world_patterns.py:416: in test_file_control_and_fd_structures
+    assert file_control is not None
+E   assert None is not None
+__________ TestLevelNumberVariations.test_level_77_independent_items __________
+tests\unit\test_real_world_patterns.py:481: in test_level_77_independent_items
+    assert len(level_77_items) >= 5
+E   assert 0 >= 5
+E    +  where 0 = len([])
+________ TestLevelNumberVariations.test_hierarchical_level_structures _________
+tests\unit\test_real_world_patterns.py:541: in test_hierarchical_level_structures
+    assert test_results is not None
+E   assert None is not None
+________________________ test_multi_verbs_one_sentence ________________________
+tests\unit\test_sentence_multi_verbs.py:25: in test_multi_verbs_one_sentence
+    assert 'MOVE' in kinds and 'PERFORM' in kinds and 'WRITE' in kinds
+E   AssertionError: assert ('MOVE' in [])
+______________ TestExecSQLParsing.test_exec_sql_select_in_cobol _______________
+tests\unit\test_sql_statements.py:496: in test_exec_sql_select_in_cobol
+    assert sql_found, "SQL statement not found in parsed AST"
+E   AssertionError: SQL statement not found in parsed AST
+E   assert False
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.2-final-0 _______________
+
+Name                                                    Stmts   Miss Branch BrPart   Cover   Missing
+----------------------------------------------------------------------------------------------------
+cobolparser\__init__.py                                    20      0      0      0 100.00%
+cobolparser\analysis\__init__.py                            2      0      0      0 100.00%
+cobolparser\analysis\io_coverage_reporter.py              204     49     78     13  72.34%   116, 131, 177->172, 178->181, 203, 217-221, 288, 293->299, 319-320, 350, 353, 356, 361, 364, 428-484
+cobolparser\analysis\value_tracker.py                      87      1     60      5  95.92%   72->80, 73->76, 99->101, 108->116, 180
+cobolparser\core\__init__.py                                6      0      0      0 100.00%
+cobolparser\core\ast_factory.py                            84     10     30      7  85.09%   131, 156, 160, 165, 210-212, 225, 229, 233
+cobolparser\core\exceptions.py                             57      0     14      0 100.00%
+cobolparser\core\interfaces.py                             37     23     14      1  29.41%   7-9, 170-172, 177, 182, 193-202, 206-210
+cobolparser\core\registry.py                               42      4     12      0  85.19%   51-54
+cobolparser\core\token_stream.py                           59      3     12      1  94.37%   88, 100-101
+cobolparser\dialects\__init__.py                            2      0      0      0 100.00%
+cobolparser\dialects\ibm_enterprise.py                    196      1     60      2  98.83%   346->358, 356
+cobolparser\lexer.py                                      757    133    224     20  79.31%   642, 648-649, 657-661, 665-694, 698-727, 731-756, 820->858, 836->858, 850->855, 873->875, 883->900, 889-896, 905-912, 933, 940->956, 951->953, 1007, 1018, 1030, 1141-1193, 1227-1253, 1330->1334, 1334->1363, 1338-1361, 1418, 1459
+cobolparser\models\__init__.py                              6      0      0      0 100.00%
+cobolparser\models\ast_base.py                            142      4     48      1  96.32%   87-89, 93
+cobolparser\models\data_items.py                          259     15    108     11  92.92%   72, 85->119, 144->151, 148, 153->167, 165, 176-183, 190->exit, 194-198, 333->332, 387->386
+cobolparser\models\program.py                             453     50    210     47  83.26%   15-16, 33-34, 44-45, 79, 99->exit, 110->exit, 121, 188, 193, 247, 252, 266->273, 274-276, 297-299, 303, 315->321, 343, 347->350, 357, 379->378, 396, 411-412, 422->419, 423->422, 435->433, 436->435, 475->473, 506, 535-536, 540->543, 547->550, 562->561, 576-577, 598->601, 601->615, 610->613, 625, 654->660, 658, 730-731, 739-740, 751-752, 763, 767, 799, 819-820, 831-832, 839->841, 842, 844, 846, 853, 858->860, 860->862, 863, 865
+cobolparser\models\sql_statements.py                      323     19    156     22  91.02%   143, 153->152, 154->152, 161->160, 168->167, 211->209, 235->261, 243->261, 245->261, 251->261, 257->261, 264->exit, 270->exit, 290->305, 293, 296-300, 349->348, 362->364, 364->366, 370-375, 397, 402-407, 430-435, 470-475, 497->500, 501->504
+cobolparser\models\statements.py                          910    280    178     21  63.69%   24, 29, 34, 139-141, 180-181, 258-260, 263-264, 267, 350-354, 357-358, 361-362, 368-371, 426-427, 431-433, 460->exit, 464-466, 469-471, 483, 492, 494, 510-512, 516-518, 521-523, 526-528, 533, 535, 537, 539, 570-574, 578, 582, 586-592, 595-597, 600-615, 621-627, 631, 635, 639, 643, 646-648, 651-653, 656-669, 675-681, 685, 689, 693-698, 702, 705-707, 710-712, 715-728, 781-783, 822, 824, 841-843, 847-849, 853-855, 859-863, 968-969, 975, 986, 990, 994, 998, 1002, 1008-1010, 1014, 1051-1055, 1059-1061, 1065-1067, 1071, 1075, 1079-1088, 1325->exit, 1330-1332, 1337->exit, 1342-1343, 1353-1354, 1360->exit, 1366-1368, 1372, 1376-1378, 1382, 1386, 1476->exit, 1483->exit, 1501->exit, 1510, 1514-1516, 1520, 1524, 1528-1531, 1601->exit, 1611-1612, 1660->exit, 1725->exit, 1734-1735, 1743->exit, 1789-1795, 1802, 1806-1808, 1812-1814, 1818, 1822-1824, 1828-1844, 1855-1860, 1867, 1871-1873, 1877, 1881-1883, 1887-1902, 1913-1920, 1926, 1930, 1934-1936, 1940, 1944-1959, 1970-1973, 1979, 1983-1984, 1988-1995
+cobolparser\parser.py                                     239     30     60     12  83.95%   224-226, 264, 270, 279->266, 282->286, 287-290, 298-301, 309->311, 320-321, 337-340, 356, 364, 368, 372, 376, 380, 384, 388->392, 397-398, 401, 420, 468->470
+cobolparser\parser_original_backup.py                    3626   3626   2280      0   0.00%   7-7348
+cobolparser\parser_refactored.py                          193    193     44      0   0.00%   9-405
+cobolparser\parsers\__init__.py                             8      0      0      0 100.00%
+cobolparser\parsers\arithmetic_parsers.py                 342    319    180      0   4.41%   28-97, 107-162, 169-172, 185-256, 263-266, 272-341, 348-351, 357-416, 423-426, 432-494, 501-504, 510-578
+cobolparser\parsers\call_parser.py                        168    155     88      2   5.86%   14, 17-26, 37-224, 228-280
+cobolparser\parsers\display_parser.py                      53     42     30      2  15.66%   18-25, 28-86
+cobolparser\parsers\divisions\__init__.py                   3      0      0      0 100.00%
+cobolparser\parsers\divisions\base.py                      46     10     16      3  72.58%   51, 77-79, 89->95, 161-171
+cobolparser\parsers\divisions\data.py                      45      2     22      3  92.54%   49, 90->96, 94
+cobolparser\parsers\divisions\environment.py               51      3     22      5  89.04%   45, 80->86, 84, 104->110, 108
+cobolparser\parsers\divisions\factory.py                   62      0     22      1  98.81%   72->exit
+cobolparser\parsers\divisions\identification.py            73      4     30      2  94.17%   76, 178-179, 195
+cobolparser\parsers\divisions\procedure.py                145     12     68     14  87.79%   112, 118, 129->132, 132->135, 191, 195, 215-217, 238, 247, 269, 273, 289->exit, 308, 316, 367->366
+cobolparser\parsers\evaluate_parser.py                    224    215    142      0   2.46%   21-35, 48-404
+cobolparser\parsers\if_parser.py                           89     81     52      0   5.67%   12-26, 36-146
+cobolparser\parsers\move_parser.py                         91     78     56      2  10.20%   20-27, 30-153
+cobolparser\parsers\perform_parser.py                     244    228    118      2   4.97%   14, 17-26, 39-138, 144-241, 247-300, 306-333, 343-379
+cobolparser\parsers\statements\__init__.py                  9      0      0      0 100.00%
+cobolparser\parsers\statements\arithmetic_parsers.py      125     15     40     15  81.82%   27, 31-32, 45->exit, 48->50, 62, 66-67, 80->exit, 83->85, 97, 101-102, 115->exit, 118->120, 132, 136-137, 150->exit, 153->155, 167, 171-172, 185->exit, 188->190
+cobolparser\parsers\statements\call_parser.py              26      3      8      3  82.35%   18, 22-23, 32->40, 35->37
+cobolparser\parsers\statements\display_parser.py           66      5     30      7  87.50%   82, 88->131, 92, 101-102, 110->113, 145, 158->exit
+cobolparser\parsers\statements\evaluate_parser.py          30      6     10      3  77.50%   18, 22-23, 35, 43-44
+cobolparser\parsers\statements\ibm_exec_statements.py      70     50     28      4  24.49%   29, 38-46, 53-85, 105, 114-122, 129-161
+cobolparser\parsers\statements\if_parser.py                32      7     12      5  72.73%   18, 22-23, 33, 36->52, 39, 47-48
+cobolparser\parsers\statements\move_parser.py              34      3     12      4  84.78%   21, 25-26, 39->47, 42->44, 52->exit
+cobolparser\parsers\statements\perform_parser.py           30      6     10      4  75.00%   18, 22-23, 32->48, 35, 43-44
+cobolparser\plugins\__init__.py                             2      0      0      0 100.00%
+cobolparser\plugins\core.py                               198     24     40      1  81.93%   13, 323, 333-339, 350-371
+cobolparser\preprocess\__init__.py                        263      4    124      9  96.64%   339->342, 345-346, 359->362, 371-372, 426->429, 508->512, 539->544, 548->550
+cobolparser\preprocess\copy_statement_parser.py           273     22    126     17  89.22%   148->163, 152-154, 193-194, 319-320, 355, 411, 425, 433, 439, 446-449, 525-526, 532, 537, 547->554, 630, 704, 752->726, 778
+cobolparser\preprocess\copybook_expander.py               146     10     48      5  92.27%   115-120, 153-156, 400->403, 410->416, 419->430, 426->430, 442
+cobolparser\preprocess\models.py                          137      5     40      3  93.22%   276->278, 285, 288-291
+cobolparser\preprocess\path_resolver.py                    89      9     46      6  87.41%   83, 111->110, 116-117, 200->216, 221, 238, 299, 315, 327, 336
+cobolparser\reproduce_infinite_loop.py                     23     23      2      0   0.00%   2-35
+----------------------------------------------------------------------------------------------------
+TOTAL                                                   10901   5782   5010    285  41.58%
+Coverage HTML written to dir htmlcov
+FAIL Required test coverage of 81% not reached. Total coverage: 41.58%
+=========================== short test summary info ===========================
+FAILED tests/contracts/test_call_diagnostics.py::TestCallMissingProgram::test_missing_program_reports_error
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_call_to_dict_output_basic
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_call_with_returning_clause_serialization
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_call_with_giving_clause_serialization
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_call_with_parameters_serialization
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_backward_compatibility_baseline_test_case_1
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_backward_compatibility_baseline_test_case_2
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_backward_compatibility_baseline_test_case_3
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_backward_compatibility_baseline_test_case_4
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_exception_structures_serialization
+FAILED tests/contracts/test_call_statement_contract.py::TestCallStatementContract::test_dynamic_call_tracking_serialization
+FAILED tests/contracts/test_copybook_expansion_contracts.py::TestProcedureDivisionCopybookContracts::test_procedure_copybook_statements_in_ast
+FAILED tests/contracts/test_copybook_expansion_contracts.py::TestProcedureDivisionCopybookContracts::test_procedure_copybook_preserves_order
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallAPIContract::test_dynamic_call_is_detected
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallAPIContract::test_analyzer_populates_possible_values
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallValueTracking::test_tracks_initial_value_from_working_storage
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallValueTracking::test_tracks_move_statement_values
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallValueTracking::test_tracks_multiple_move_values
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallValueTracking::test_combines_initial_value_and_move_values
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallAnalyzerMethods::test_get_variable_values_method
+FAILED tests/contracts/test_dynamic_call_contract.py::TestDynamicCallAnalyzerMethods::test_get_all_tracked_variables_method
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateDiagnosticStructure::test_diagnostic_has_message
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateMissingWhenClause::test_missing_when_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateMissingWhenClause::test_missing_when_message_contains_clause
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateMissingEndEvaluate::test_missing_end_evaluate_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateMissingEndEvaluate::test_missing_end_evaluate_message_contains_term
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateSelectorMismatch::test_single_subject_multiple_selectors_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateSelectorMismatch::test_multiple_subjects_single_selector_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateInvalidThrough::test_through_without_end_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateWhenOtherPlacement::test_when_other_before_conditional_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateWhenOtherPlacement::test_multiple_when_other_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateEmptySelector::test_empty_selector_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateInvalidAlso::test_consecutive_also_reports_error
+FAILED tests/contracts/test_evaluate_diagnostics.py::TestEvaluateDiagnosticSeverity::test_syntax_errors_are_errors
+FAILED tests/contracts/test_evaluate_serialization.py::test_evaluate_to_dict_structure
+FAILED tests/contracts/test_if_statement_diagnostics.py::TestIfMissingCondition::test_missing_condition_reports_error
+FAILED tests/contracts/test_perform_diagnostics.py::TestPerformMissingTarget::test_missing_target_reports_error
+FAILED tests/contracts/test_perform_diagnostics.py::TestPerformInvalidThru::test_thru_without_end_reports_error
+FAILED tests/contracts/test_value_clause_contract.py::TestValueClauseFigurativeConstantsContract::test_backward_compatibility_baseline_value_space
+FAILED tests/contracts/test_value_clause_contract.py::TestValueClauseFigurativeConstantsContract::test_backward_compatibility_baseline_value_spaces
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_with_periods
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_multiline_comprehensive
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_with_comments
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_exception_handlers_complete
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_in_control_structures
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_returning_variations
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_dynamic_programs
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_real_world_banking
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_real_world_insurance
+FAILED tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_overall_coverage
+FAILED tests/integration/test_copybook_expansion_integration.py::TestProcedureDivisionCopybooks::test_procedure_copybook_expansion_and_parsing
+FAILED tests/integration/test_copybook_expansion_integration.py::TestProcedureDivisionCopybooks::test_multiple_procedure_copybooks
+FAILED tests/integration/test_dynamic_call_integration.py::TestDynamicCallIntegration::test_complete_dynamic_call_workflow
+FAILED tests/integration/test_dynamic_call_integration.py::TestDynamicCallIntegration::test_mixed_static_and_dynamic_calls
+FAILED tests/integration/test_dynamic_call_integration.py::TestDynamicCallIntegration::test_conditional_moves_to_dynamic_call
+FAILED tests/integration/test_dynamic_call_integration.py::TestDynamicCallIntegration::test_table_driven_dynamic_call
+FAILED tests/integration/test_dynamic_call_integration.py::TestDynamicCallIntegration::test_multiple_variables_dynamic_calls
+FAILED tests/integration/test_evaluate_samples.py::test_evaluate_variants_sample_file
+FAILED tests/integration/test_fixed_format_parsing.py::TestFixedFormatAutoDetection::test_ix103a_with_auto_detection
+FAILED tests/integration/test_fixed_format_parsing.py::TestFixedFormatAutoDetection::test_ix103a_with_explicit_preprocessing
+FAILED tests/integration/test_fixed_format_parsing.py::TestFixedFormatAutoDetection::test_ix103a_without_preprocessing_succeeds
+FAILED tests/integration/test_fixed_format_parsing.py::TestFixedFormatAutoDetection::test_fixed_format_detection_with_sequence_numbers
+FAILED tests/integration/test_fixed_format_parsing.py::TestFixedFormatAutoDetection::test_fixed_format_detection_with_spaces
+FAILED tests/integration/test_fixed_format_parsing.py::TestFixedFormatAutoDetection::test_free_format_not_detected_as_fixed
+FAILED tests/integration/test_fixed_format_parsing.py::TestOtherFixedFormatFiles::test_ix108a_parsing
+FAILED tests/integration/test_if_complete.py::TestSimpleIfEndIf::test_if_then_end_if
+FAILED tests/integration/test_if_complete.py::TestSimpleIfEndIf::test_if_else_end_if
+FAILED tests/integration/test_if_complete.py::TestSimpleIfEndIf::test_if_multiple_statements_in_branches
+FAILED tests/integration/test_if_complete.py::TestNestedIfStatements::test_nested_if_in_then_branch
+FAILED tests/integration/test_if_complete.py::TestNestedIfStatements::test_nested_if_in_else_branch
+FAILED tests/integration/test_if_complete.py::TestNestedIfStatements::test_deeply_nested_if_statements
+FAILED tests/integration/test_if_complete.py::TestInlineIfStatements::test_inline_if_single_statement
+FAILED tests/integration/test_if_complete.py::TestInlineIfStatements::test_inline_if_else_period
+FAILED tests/integration/test_if_complete.py::TestGetAllStatements::test_get_all_statements_includes_nested_statements
+FAILED tests/integration/test_if_complete.py::TestGetAllStatements::test_get_all_statements_with_nested_if
+FAILED tests/integration/test_if_complete.py::TestIfStatementStructure::test_if_statement_has_required_attributes
+FAILED tests/integration/test_if_complete.py::TestIfStatementStructure::test_if_statement_json_serialization
+FAILED tests/integration/test_orchestrator_integration.py::TestOrchestrationFullProgramParsing::test_parse_simple_complete_program
+FAILED tests/integration/test_orchestrator_integration.py::TestOrchestrationFullProgramParsing::test_parse_program_with_identification_only
+FAILED tests/integration/test_orchestrator_integration.py::TestOrchestrationFullProgramParsing::test_parse_program_multiple_paragraphs
+FAILED tests/integration/test_orchestrator_integration.py::TestOrchestrationDivisionSequenceValidation::test_divisions_parsed_in_correct_order
+FAILED tests/integration/test_orchestrator_integration.py::TestOrchestrationDivisionSequenceValidation::test_program_without_procedure_division
+FAILED tests/integration/test_orchestrator_integration.py::TestOrchestrationErrorHandling::test_orchestrator_with_error_recovery_collect_all
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_until_simple
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_until_with_test_before
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_until_with_test_after
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_times_variable
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_varying_with_test_before
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_varying_with_test_after
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_to_dict_test_timing
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformStatementIntegration::test_perform_to_dict_variable_times
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformBackwardCompatibility::test_backward_compat_simple
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformBackwardCompatibility::test_backward_compat_times_numeric
+FAILED tests/integration/test_perform_statement_coverage.py::TestPerformBackwardCompatibility::test_backward_compat_varying
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_perform_until_with_simple_call
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_perform_until_with_multiple_calls
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_perform_until_with_nested_if
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_perform_until_varying_clause
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_get_all_statements_includes_perform_nested
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_perform_until_json_serialization
+FAILED tests/integration/test_perform_until_nested.py::TestPerformUntilNestedStatements::test_perform_until_with_nested_if_and_calls
+FAILED tests/integration/test_sample_programs.py::TestBasicSamples::test_figurative_constants
+FAILED tests/integration/test_sample_programs.py::TestBasicSamples::test_multiline_strings
+FAILED tests/integration/test_sample_programs.py::TestBasicSamples::test_picture_clauses
+FAILED tests/integration/test_sample_programs.py::TestBasicSamples::test_occurs_variations
+FAILED tests/integration/test_sample_programs.py::TestBasicSamples::test_redefines
+FAILED tests/integration/test_sample_programs.py::TestFileOperations::test_file_operations
+FAILED tests/integration/test_sample_programs.py::TestFileOperations::test_sort_merge_operations
+FAILED tests/integration/test_sample_programs.py::TestControlFlow::test_control_flow
+FAILED tests/integration/test_sample_programs.py::TestControlFlow::test_arithmetic_operations
+FAILED tests/integration/test_sample_programs.py::TestStringOperations::test_string_operations
+FAILED tests/integration/test_sample_programs.py::TestIBMExtensions::test_ibm_extensions
+FAILED tests/integration/test_sample_programs.py::TestAcceptDisplay::test_accept_display_operations
+FAILED tests/integration/test_sample_programs.py::TestAdvancedFeatures::test_declaratives_section
+FAILED tests/integration/test_sample_programs.py::TestAdvancedFeatures::test_communication_module
+FAILED tests/integration/test_sample_programs.py::TestAdvancedFeatures::test_screen_section_io
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformBackwardCompatibilityRegression::test_perform_simple_paragraph_only
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformBackwardCompatibilityRegression::test_perform_paragraph_thru_paragraph
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformBackwardCompatibilityRegression::test_perform_until_condition
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformBackwardCompatibilityRegression::test_perform_varying_until_inline
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformBackwardCompatibilityRegression::test_perform_backward_compat_test_timing_not_breaking
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformBackwardCompatibilityRegression::test_perform_variable_times_count_not_breaking
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformEdgeCasesRegression::test_perform_serialization_preserves_attributes
+FAILED tests/regression/test_perform_backward_compat.py::TestPerformEdgeCasesRegression::test_perform_two_in_sequence
+FAILED tests/unit/test_advanced_constructs.py::TestDeclarativesAndUseStatements::test_declaratives_integration_with_main_program
+FAILED tests/unit/test_arithmetic_migration.py::TestArithmeticMigration::test_compute_statement
+FAILED tests/unit/test_arithmetic_migration.py::TestArithmeticMigration::test_size_error_clause
+FAILED tests/unit/test_arithmetic_migration.py::TestArithmeticMigration::test_not_on_size_error_clause
+FAILED tests/unit/test_call_basic_parsing.py::TestCallBasicParsing::test_call_with_literal_program_name
+FAILED tests/unit/test_call_basic_parsing.py::TestCallBasicParsing::test_call_with_variable_program_name
+FAILED tests/unit/test_call_basic_parsing.py::TestCallBasicParsing::test_call_with_no_parameters
+FAILED tests/unit/test_call_dynamic_analysis.py::TestCallDynamicAnalysis::test_dynamic_call_variable_tracking
+FAILED tests/unit/test_call_dynamic_analysis.py::TestCallDynamicAnalysis::test_call_with_literal_vs_variable
+FAILED tests/unit/test_call_dynamic_analysis.py::TestCallDynamicAnalysis::test_call_parameter_analysis
+FAILED tests/unit/test_call_exception_handling.py::TestCallExceptionHandling::test_on_exception_clause
+FAILED tests/unit/test_call_exception_handling.py::TestCallExceptionHandling::test_not_on_exception_clause
+FAILED tests/unit/test_call_exception_handling.py::TestCallExceptionHandling::test_both_exception_handlers
+FAILED tests/unit/test_call_exception_handling.py::TestCallExceptionHandling::test_on_overflow_clause
+FAILED tests/unit/test_call_exception_handling.py::TestCallExceptionHandling::test_end_call_terminator
+FAILED tests/unit/test_call_fixed_format.py::TestCallFixedFormat::test_multiline_call_with_continuation
+FAILED tests/unit/test_call_fixed_format.py::TestCallFixedFormat::test_columns_8_72_compliance
+FAILED tests/unit/test_call_fixed_format.py::TestCallFixedFormat::test_continuation_in_parameter_list
+FAILED tests/unit/test_call_parameter_modes.py::TestCallParameterModes::test_by_reference_mode
+FAILED tests/unit/test_call_parameter_modes.py::TestCallParameterModes::test_by_content_mode
+FAILED tests/unit/test_call_parameter_modes.py::TestCallParameterModes::test_by_value_mode
+FAILED tests/unit/test_call_parameter_modes.py::TestCallParameterModes::test_default_mode_no_explicit_mode
+FAILED tests/unit/test_call_parameter_modes.py::TestCallParameterModes::test_mixed_parameter_modes
+FAILED tests/unit/test_call_returning_giving.py::TestCallReturningGiving::test_returning_only
+FAILED tests/unit/test_call_returning_giving.py::TestCallReturningGiving::test_giving_only
+FAILED tests/unit/test_call_returning_giving.py::TestCallReturningGiving::test_neither_returning_nor_giving
+FAILED tests/unit/test_call_returning_giving.py::TestCallReturningGiving::test_returning_with_using_clause
+FAILED tests/unit/test_call_returning_giving.py::TestCallReturningGiving::test_returning_and_giving_mutually_exclusive
+FAILED tests/unit/test_call_statement_parsing.py::TestCallStatementParsing::test_call_with_by_reference_content_value
+FAILED tests/unit/test_call_statement_parsing.py::TestCallStatementParsing::test_call_with_returning
+FAILED tests/unit/test_call_statement_parsing.py::TestCallStatementParsing::test_call_with_on_overflow
+FAILED tests/unit/test_call_statement_parsing.py::TestCallStatementParsing::test_call_with_on_exception
+FAILED tests/unit/test_continuation_cases.py::test_doubled_quote_across_continuation
+FAILED tests/unit/test_control_flow_basic.py::test_go_to_parsed - AssertionEr...
+FAILED tests/unit/test_control_flow_basic.py::test_if_else_minimal - Assertio...
+FAILED tests/unit/test_control_flow_basic.py::test_else_recovery_without_if
+FAILED tests/unit/test_control_flow_basic.py::test_if_with_end_if_explicit - ...
+FAILED tests/unit/test_control_flow_basic.py::test_nested_if_statements - Ass...
+FAILED tests/unit/test_control_flow_basic.py::test_get_all_statements_includes_if_branches
+FAILED tests/unit/test_division_context.py::TestDivisionContextTracking::test_data_item_tracks_division
+FAILED tests/unit/test_division_context.py::TestDivisionContextTracking::test_paragraph_tracks_division
+FAILED tests/unit/test_division_context.py::TestDivisionContextTracking::test_get_division_context_method
+FAILED tests/unit/test_division_context.py::TestDivisionContextTracking::test_division_context_with_multiple_sections
+FAILED tests/unit/test_entry_statement.py::TestEntryStatement::test_basic_entry_statement
+FAILED tests/unit/test_entry_statement.py::TestEntryStatement::test_entry_with_using_clause
+FAILED tests/unit/test_entry_statement.py::TestEntryStatement::test_entry_with_multiple_parameters
+FAILED tests/unit/test_entry_statement.py::TestEntryStatement::test_entry_to_dict
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_missing_when_clause
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_missing_end_evaluate
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_selector_mismatch_single_subject
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_selector_mismatch_multiple_subjects
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_invalid_through_range
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_through_without_end_value
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_when_other_must_be_last
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_true_without_condition
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_empty_when_selector
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_error_location_tracked
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_multiple_errors_collected
+FAILED tests/unit/test_evaluate_statement_diagnostics.py::test_evaluate_invalid_also_chain
+FAILED tests/unit/test_evaluate_variants.py::test_single_subject_literals_and_ranges
+FAILED tests/unit/test_evaluate_variants.py::test_multiple_subjects_any_and_also
+FAILED tests/unit/test_evaluate_variants.py::test_evaluate_true_with_conditions_and_or
+FAILED tests/unit/test_implicit_section.py::test_implicit_section_created_for_top_level_code
+FAILED tests/unit/test_move_advanced.py::test_move_multiple_targets - assert ...
+FAILED tests/unit/test_move_advanced.py::test_move_corresponding - assert Fal...
+FAILED tests/unit/test_move_advanced.py::test_move_complex_source - TypeError...
+FAILED tests/unit/test_move_resilience.py::test_move_missing_to_does_not_block_perform
+FAILED tests/unit/test_parser.py::TestCobolParserProgram::test_identification_division_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserProgram::test_environment_division_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserProgram::test_procedure_division_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserDataDefinition::test_basic_data_items_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserDataDefinition::test_usage_clauses_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserDataDefinition::test_occurs_clauses_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserStatements::test_display_statement_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserStatements::test_move_statement_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserStatements::test_perform_statement_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserExpressions::test_arithmetic_expressions_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserExpressions::test_function_calls_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserIBMSpecific::test_exec_sql_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserIBMSpecific::test_comp3_data_parsing
+FAILED tests/unit/test_parser.py::TestCobolParserErrorHandling::test_syntax_error_detection
+FAILED tests/unit/test_parser.py::TestCobolParserErrorHandling::test_error_recovery_mechanisms
+FAILED tests/unit/test_parser.py::TestCobolParserErrorHandling::test_semantic_error_detection
+FAILED tests/unit/test_parser_capabilities.py::TestCurrentParserCapabilities::test_basic_program_structure
+FAILED tests/unit/test_parser_comprehensive.py::TestCobolParserInitialization::test_parser_initialization_defaults
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_advance_token_normal
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_advance_token_at_end
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_advance_token_beyond_end
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_peek_token_normal
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_peek_token_at_end
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_peek_token_with_offset
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_expect_token_success
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_expect_token_failure
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_expect_token_at_eof
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_match_token_single_type
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_match_token_multiple_types
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_match_token_at_eof
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_get_current_location
+FAILED tests/unit/test_parser_comprehensive.py::TestTokenManagement::test_get_current_location_at_eof
+FAILED tests/unit/test_parser_comprehensive.py::TestParseErrors::test_create_error_basic
+FAILED tests/unit/test_parser_comprehensive.py::TestParseErrors::test_create_error_no_token
+FAILED tests/unit/test_parser_comprehensive.py::TestParseMethod::test_parse_method_basic_success
+FAILED tests/unit/test_parser_comprehensive.py::TestParseMethod::test_parse_method_lexer_error
+FAILED tests/unit/test_parser_comprehensive.py::TestParseMethod::test_parse_method_empty_source
+FAILED tests/unit/test_parser_comprehensive.py::TestParseMethod::test_parse_file_method_success
+FAILED tests/unit/test_parser_comprehensive.py::TestIdentificationDivisionParsing::test_parse_identification_division_basic
+FAILED tests/unit/test_parser_comprehensive.py::TestIdentificationDivisionParsing::test_parse_identification_division_missing_division_keyword
+FAILED tests/unit/test_parser_comprehensive.py::TestIdentificationDivisionParsing::test_parse_identification_division_missing_period_after_division
+FAILED tests/unit/test_parser_comprehensive.py::TestIdentificationDivisionParsing::test_parse_identification_division_missing_program_id
+FAILED tests/unit/test_parser_comprehensive.py::TestIdentificationDivisionParsing::test_parse_identification_division_invalid_program_name
+FAILED tests/unit/test_parser_comprehensive.py::TestIdentificationDivisionParsing::test_skip_to_next_division
+FAILED tests/unit/test_parser_comprehensive.py::TestEnvironmentDivisionParsing::test_parse_environment_division_optional
+FAILED tests/unit/test_parser_comprehensive.py::TestEnvironmentDivisionParsing::test_parse_configuration_section
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_data_division_optional
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_working_storage_section_error_handling
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_data_item_missing_data_name
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_usage_clause_with_is_keyword
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_usage_clause_invalid
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_occurs_clause_with_depending_on
+FAILED tests/unit/test_parser_comprehensive.py::TestDataDivisionParsing::test_parse_picture_pattern_with_periods
+FAILED tests/unit/test_parser_comprehensive.py::TestProcedureDivisionParsing::test_parse_procedure_division_optional
+FAILED tests/unit/test_parser_comprehensive.py::TestProcedureDivisionParsing::test_parse_paragraph_or_statement
+FAILED tests/unit/test_parser_comprehensive.py::TestProcedureDivisionParsing::test_parse_move_statement_missing_to
+FAILED tests/unit/test_parser_comprehensive.py::TestProcedureDivisionParsing::test_parse_perform_statement_with_until
+FAILED tests/unit/test_parser_comprehensive.py::TestProcedureDivisionParsing::test_parse_stop_statement
+FAILED tests/unit/test_parser_comprehensive.py::TestSkipMethods::test_skip_to_token_basic
+FAILED tests/unit/test_parser_comprehensive.py::TestSkipMethods::test_skip_to_token_not_found
+FAILED tests/unit/test_parser_comprehensive.py::TestSkipMethods::test_skip_to_next_section
+FAILED tests/unit/test_parser_comprehensive.py::TestConvenienceFunction::test_parse_cobol_function_basic
+FAILED tests/unit/test_parser_comprehensive.py::TestConvenienceFunction::test_parse_cobol_function_error_handling
+FAILED tests/unit/test_parser_comprehensive.py::TestEdgeCases::test_empty_token_list
+FAILED tests/unit/test_parser_comprehensive.py::TestEdgeCases::test_parser_state_transitions
+FAILED tests/unit/test_parser_comprehensive.py::TestEdgeCases::test_malformed_tokens
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_test_timing_clause_with_before
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_test_timing_clause_with_after
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_test_timing_clause_with_test_no_timing
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_test_timing_clause_no_with
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_test_timing_clause_with_without_test
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_test_timing_clause_at_end_of_tokens
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_until_condition_simple
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_until_condition_no_until
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_until_condition_single_variable
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_until_condition_stops_at_end_perform
+FAILED tests/unit/test_parser_comprehensive.py::TestParseHelperMethods::test_parse_until_condition_empty_after_until
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_simple_with_test_before
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_simple_with_test_after
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_simple_until
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_times_with_variable
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_times_numeric
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_thru_with_test
+FAILED tests/unit/test_parser_comprehensive.py::TestPerformInlineEnhancements::test_perform_complex_all_clauses
+FAILED tests/unit/test_parser_coverage_complete.py::TestProgramIDClauses::test_program_id_with_is_initial
+FAILED tests/unit/test_parser_coverage_complete.py::TestProgramIDClauses::test_program_id_with_is_common
+FAILED tests/unit/test_parser_coverage_complete.py::TestProgramIDClauses::test_program_id_with_multiple_clauses
+FAILED tests/unit/test_parser_coverage_complete.py::TestErrorRecoveryModes::test_fail_fast_mode_with_errors
+FAILED tests/unit/test_perform_thru.py::TestPerformThru::test_simple_perform_thru
+FAILED tests/unit/test_perform_thru.py::TestPerformThru::test_perform_thru_with_times
+FAILED tests/unit/test_perform_thru.py::TestPerformThru::test_perform_thru_to_dict
+FAILED tests/unit/test_perform_thru.py::TestPerformThru::test_perform_without_thru
+FAILED tests/unit/test_perform_thru.py::TestPerformThru::test_perform_thru_with_nested_calls
+FAILED tests/unit/test_performance_and_edge_cases.py::TestParsingPerformance::test_parse_performance_with_large_working_storage
+FAILED tests/unit/test_performance_and_edge_cases.py::TestBoundaryConditions::test_minimum_valid_cobol_program
+FAILED tests/unit/test_real_world_patterns.py::TestComplexPictureClauses::test_signed_decimal_picture_clauses
+FAILED tests/unit/test_real_world_patterns.py::TestComplexPictureClauses::test_computational_fields_and_usage
+FAILED tests/unit/test_real_world_patterns.py::TestRedefinesAndComplexStructures::test_multiple_redefines_patterns
+FAILED tests/unit/test_real_world_patterns.py::TestRedefinesAndComplexStructures::test_complex_occurs_structures
+FAILED tests/unit/test_real_world_patterns.py::TestCallStatements::test_call_with_using_clause
+FAILED tests/unit/test_real_world_patterns.py::TestComplexFileStructures::test_file_control_and_fd_structures
+FAILED tests/unit/test_real_world_patterns.py::TestLevelNumberVariations::test_level_77_independent_items
+FAILED tests/unit/test_real_world_patterns.py::TestLevelNumberVariations::test_hierarchical_level_structures
+FAILED tests/unit/test_sentence_multi_verbs.py::test_multi_verbs_one_sentence
+FAILED tests/unit/test_sql_statements.py::TestExecSQLParsing::test_exec_sql_select_in_cobol
+296 failed, 2339 passed, 13 skipped, 54 warnings in 31.76s

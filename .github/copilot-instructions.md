@@ -10,15 +10,38 @@ This is a **two-stage parsing pipeline**: Lexer → Parser → AST with sophisti
 
 ```
 cobolparser/
-├── lexer.py             # Tokenization (680 lines) - converts source to tokens
-├── parser.py            # AST generation (712 lines) - converts tokens to AST  
+├── lexer.py             # Tokenization - converts source to tokens
+├── parser.py            # AST generation - converts tokens to AST  
 ├── models/              # AST node hierarchy
 │   ├── program.py       # Program/Division/Section structure
 │   ├── statements.py    # MOVE, DISPLAY, PERFORM statements
-│   └── data_items.py    # PictureClause, COMP-3, data definitions
-├── dialects/
-│   └── ibm_enterprise.py # IBM COBOL extensions (COMP-3, EXEC SQL/CICS)
-└── plugins/core.py      # Memory config, error recovery, serialization
+│   ├── data_items.py    # PictureClause, COMP-3, data definitions
+│   └── sql_statements.py # EXEC SQL parsing
+├── parsers/             # Statement-specific parsers
+│   ├── display_parser.py
+│   ├── move_parser.py
+│   ├── call_parser.py
+│   ├── if_parser.py
+│   ├── perform_parser.py
+│   ├── evaluate_parser.py
+│   └── arithmetic_parsers.py
+├── parsers/divisions/   # Division-specific parsing
+│   ├── factory.py       # Factory-based division parsing
+│   ├── base.py          # Base division parser
+│   ├── identification.py
+│   ├── environment.py
+│   ├── data.py          # Data division parsing
+│   └── procedure.py     # Procedure division parsing
+├── preprocess/          # Copybook expansion and preprocessing
+│   ├── copybook_expander.py
+│   ├── copy_statement_parser.py
+│   └── path_resolver.py
+├── dialects/            # COBOL dialect support
+│   └── ibm_enterprise.py # IBM COBOL extensions
+├── plugins/             # Plugin architecture
+│   └── core.py          # Memory config, error recovery, serialization
+└── analysis/            # Code analysis utilities
+    └── io_coverage_reporter.py
 ```
 
 ## Key Development Patterns
@@ -59,20 +82,32 @@ from cobolparser import CobolParser, ErrorRecoveryMode
 parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 ```
 
+### 4. Factory-Based Division Parsing
+New architecture uses factory-based division parsing with fallback:
+
+```python
+from cobolparser.parsers.divisions.factory import DivisionParserFactory
+factory = DivisionParserFactory()
+# Factory orchestrates division parsing with optional legacy fallback
+```
+
 ## Essential Commands
 
 ```bash
 # Run tests (114 total: 38 contract, 17 integration, 59 unit)
 python -m pytest tests/ -v
 
-# Test with coverage (90%+ required)
-python -m pytest --cov=cobolparser --cov-fail-under=90
+# Test with coverage (81%+ required)
+python -m pytest --cov=cobolparser --cov-fail-under=81
 
 # Code quality checks
 ruff check . && black . && mypy cobolparser/
 
 # Integration test (uses test_program.cob)
 python test_integration.py
+
+# Copybook expansion test
+python -m pytest tests/integration/test_copybook_expansion_integration.py
 ```
 
 ## Test Organization Patterns
@@ -82,6 +117,7 @@ tests/
 ├── unit/           # Component tests (lexer, parser, models)  
 ├── integration/    # End-to-end workflows
 ├── contracts/      # API contract validation (38 tests)
+├── regression/     # Backward compatibility tests
 └── samples/        # COBOL test programs
 ```
 
@@ -99,6 +135,22 @@ from cobolparser.dialects.ibm_enterprise import IBMEnterpriseCobol
 # EXEC SQL embedded SQL blocks  
 # EXEC CICS transaction commands
 # IBM intrinsic functions (LENGTH, NUMVAL, etc.)
+# Enhanced IO statements with backward compatibility
+```
+
+## Enhanced IO Statement Support
+
+New IO statement classes with backward compatibility:
+
+```python
+from cobolparser.models.statements import (
+    ReadStatement, WriteStatement, OpenStatement, CloseStatement,
+    AcceptStatement, # New IO statements
+    IORewriteStatement, RewriteStatement,
+    IODeleteStatement, DeleteStatement,
+    IOStartStatement, StartStatement,
+    IOUnlockStatement, UnlockStatement
+)
 ```
 
 ## JSON Export Architecture
@@ -114,10 +166,12 @@ ast_json = result.ast.to_json(config)
 ## Development Workflow
 
 1. **Always use Python 3.13+ features** (dataclasses, typing, enum)
-2. **TDD approach**: Write failing test → implement → pass test (90%+ coverage)
+2. **TDD approach**: Write failing test → implement → pass test (81%+ coverage)
 3. **Memory awareness**: Large COBOL programs require streaming/chunking
 4. **Error collection**: Use `COLLECT_ALL` mode during development for comprehensive validation
 5. **Dialect support**: IBM Enterprise COBOL takes priority over ANSI COBOL
+6. **Factory architecture**: Use factory-based division parsing with legacy fallback
+7. **Copybook expansion**: Support for nested copybooks and preprocessing
 
 ## Parser State Machine
 
@@ -132,3 +186,4 @@ The parser uses `ParseState` enum to track current parsing context:
 - **Streaming**: Enable for programs >1MB to avoid memory issues
 - **Token caching**: Lexer optimizations for large files
 - **Statistics tracking**: Built-in performance monitoring via `ParseStatistics`
+- **Factory orchestration**: Efficient division parsing with fallback mechanisms
