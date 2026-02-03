@@ -267,9 +267,18 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if token.value and token.value.upper() in ("END", "IDENTIFICATION", "ENVIRONMENT", "DATA"):
                 break
             
+            # Debug: Show what we're about to parse
+            _DEBUG = False
+            if _DEBUG:
+                import sys
+                print(f"DEBUG PROC: Looking for parser for token: {token.type.name} = {repr(token.value)}", file=sys.stderr)
+            
             # Try to find and use statement parser
             parser = self._statement_registry.find_parser(token_stream)
             if parser:
+                if _DEBUG:
+                    import sys
+                    print(f"DEBUG PROC: Found parser: {type(parser).__name__}", file=sys.stderr)
                 try:
                     # Attach registry to stream for nested statement parsing
                     if not hasattr(token_stream, '_registry'):
@@ -285,6 +294,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     # If parsing fails, skip statement and continue
                     self._skip_to_next_statement(token_stream)
             else:
+                if _DEBUG:
+                    import sys
+                    print(f"DEBUG PROC: No parser found for {token.type.name} = {repr(token.value)}", file=sys.stderr)
                 # No parser found for this statement - skip it
                 self._skip_to_next_statement(token_stream)
         

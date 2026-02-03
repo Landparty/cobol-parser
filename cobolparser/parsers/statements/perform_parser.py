@@ -137,12 +137,14 @@ class PerformStatementParser(IStatementParser):
             
             # Check for TIMES clause after paragraph name
             if token and (token.type == TokenType.NUMERIC_LITERAL or 
+                         token.type == TokenType.LEVEL_NUMBER or
                          (token.type == TokenType.IDENTIFIER and token.value and token.value.isdigit())):
                 try:
                     times_count = int(token.value)
                     token_stream.consume()
                     token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"):
+                    if token and (token.type == TokenType.TIMES or 
+                                 (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"))):
                         token_stream.consume()
                         stmt.set_times_clause(times_count)
                         token = token_stream.peek()
