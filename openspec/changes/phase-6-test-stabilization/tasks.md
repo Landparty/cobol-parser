@@ -1,8 +1,60 @@
 # Tasks: Phase 6 Test Stabilization & Coverage Improvement
 
-## Session Progress Summary
+## Latest Session Progress (Current Session)
 
-**Session Work - Unsupported Statement Implementation:**
+**MAJOR BREAKTHROUGH: Fixed Free-Form COBOL Division Parsing**
+
+- ✅ Identified root cause: CobolParser.parse() wasn't auto-detecting fixed-format vs free-form COBOL
+  - Problem: Free-form indented source returned 0 divisions (all paragraph data lost)
+  - Discovery: parse_cobol() had working auto-detection that CobolParser.parse() lacked
+  - Traced through tokenization, division parsing, and AST population
+  
+- ✅ **FIX #1: Auto-detect format in CobolParser.parse()**
+  - Added `_detect_fixed_format()` call in CobolParser.parse()
+  - Automatically converts fixed-format to free-form (like parse_cobol() does)
+  - Result: +69 tests fixed
+  - Tests before: 129 failing
+  - Tests after: 60 failing (69 tests fixed!)
+  - Commits: "Add auto-detection of fixed-format vs free-form COBOL in CobolParser.parse()"
+
+- ✅ **FIX #2: Procedure division sections/paragraphs compatibility**
+  - Problem: Tests expect `proc_div.sections` to iterate over paragraphs
+  - Root cause: PROCEDURE divisions without explicit sections now store paragraphs directly
+  - Solution: Modified `CobolDivision.sections` property to return paragraphs when no sections exist
+  - Maintains backward compatibility with old tests expecting sections
+  - Result: +4 tests fixed
+  - Updated from 60 failing to 56 failing
+  - Commit: "Fix procedure division sections property to include paragraphs"
+
+**Test Results This Session:**
+- Started: 2577 passing, 129 failing  
+- After Fix #1: 2646 passing, 60 failing (+69 tests fixed!)
+- After Fix #2: 2650 passing, 56 failing (+4 tests fixed)
+- **Total Progress: 73 tests fixed**
+- **Net Improvement: 57% reduction in test failures** (129 → 56)
+
+**Remaining Failures Analysis:**
+- 56 tests still failing (vs 129 at start)
+- Major categories:
+  - PERFORM TIMES parsing: 1-2 tests (times_count not being set)
+  - Division context tracking tests: 10 tests
+  - SQL/CICS statement tests: 8-10 tests
+  - Data item/section parsing: 10 tests
+  - Other (error recovery, specific patterns): 15-20 tests
+
+**Key Files Modified This Session:**
+- `cobolparser/parser.py` - Added format auto-detection to parse() method
+- `cobolparser/models/program.py` - Fixed sections property for procedure division
+
+**Next Priority Issues to Investigate:**
+1. PERFORM TIMES parsing (1 test) - need to check why times_count stays None
+2. Division context tracking (10 tests) - related to get_division() behavior
+3. Data item persistence (10tests) - issue with data division parsing  
+4. Error recovery semantics in contracts (5 tests)
+
+## Previous Session Progress - Unsupported Statement Implementation
+
+**Session Work:**
 - ✅ Implemented **ENTRY statement** parsing
   - Created `EntryStatement` model with entry_name and using_parameters
   - Created `EntryStatementParser` with support for multi-line USING clauses
@@ -15,19 +67,11 @@
   - GO TO test now passing
   - NO regressions introduced
 
-**Test Results:**
+**Test Results (Previous):**
 - Started: 2575 passing, 131 failing
 - After ENTRY: 2575 passing, 131 failing (4 tests fixed, no new failures)
 - After GO: 2576 passing, 130 failing (1 additional test fixed)
 - Net improvement: +1 test passing
-
-**Components Modified:**
-- `cobolparser/models/statements.py` - Added EntryStatement and GoStatement
-- `cobolparser/parsers/statements/entry_parser.py` - NEW: EntryStatementParser
-- `cobolparser/parsers/statements/go_parser.py` - NEW: GoStatementParser
-- `cobolparser/parsers/divisions/procedure.py` - Registered parsers and updated keywords
-- `cobolparser/parsers/statements/__init__.py` - Exported new parsers
-- `cobolparser/tests/unit/test_entry_statement.py` - Fixed helper function
 
 ## Phase 1: Root Cause Analysis & Triage (Days 1-2)
 
