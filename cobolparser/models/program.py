@@ -70,7 +70,14 @@ class CobolDivision(ASTNode):
 
     @property
     def sections(self) -> List[CobolSection]:  # type: ignore[override]
-        """List-like access for sections (tests iterate over 'sections')."""
+        """List-like access for sections (tests iterate over 'sections').
+        
+        For PROCEDURE divisions without explicit sections, returns paragraphs
+        wrapped as section-like entities since they serve the same purpose.
+        """
+        if self.division_name == "PROCEDURE" and not self._sections:
+            # Return paragraphs as sections for PROCEDURE division without sections
+            return self.paragraphs  # type: ignore
         return list(self._sections.values())
     
     @property
