@@ -201,8 +201,21 @@ class CobolParser:
         try:
             # Preprocess and tokenize
             cleaned_source = self._skip_to_identification_division(source)
+            
+            # Auto-detect fixed-format if not explicitly specified
+            actual_free_form = self.free_form
+            if not self.free_form:  # Only auto-detect if not explicitly set to free-form
+                detected_fixed = _detect_fixed_format(cleaned_source)
+                if detected_fixed:
+                    # Preprocess fixed-format source
+                    cleaned_source = normalize_fixed_format(cleaned_source.splitlines())
+                    actual_free_form = True
+                else:
+                    # Source appears to be free-form
+                    actual_free_form = True
+            
             lexer = CobolLexer(
-                cleaned_source, filename, self.dialect, free_form=self.free_form
+                cleaned_source, filename, self.dialect, free_form=actual_free_form
             )
             self.tokens = lexer.tokenize()
 
