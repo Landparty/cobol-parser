@@ -27,7 +27,10 @@ from cobolparser.parsers.statements import (
     ComputeStatementParser,
     ExecSqlStatementParser,
     ExecCicsStatementParser,
+    EntryStatementParser,
+    GoStatementParser,
 )
+from cobolparser.parsers.statements.stop_parser import StopStatementParser
 from .base import BaseDivisionParser
 
 
@@ -43,10 +46,23 @@ class ProcedureDivisionParser(BaseDivisionParser):
     division_name = "PROCEDURE"
     division_keywords = ()
 
-    def __init__(self):
-        """Initialize Procedure Division parser with statement registry."""
+    def __init__(self, host=None):
+        """Initialize Procedure Division parser with statement registry.
+        
+        Args:
+            host: Parent parser (CobolParser) for creating ParseContext
+        """
         super().__init__()
+        self.host = host
         self._statement_registry = self._create_statement_registry()
+
+    def set_host(self, host):
+        """Set the host parser after initialization.
+        
+        Args:
+            host: Parent parser (CobolParser) for creating ParseContext
+        """
+        self.host = host
 
     def _create_statement_registry(self) -> StatementParserRegistry:
         """Create and populate statement registry with all available parsers.
@@ -75,6 +91,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(DisplayStatementParser())
         registry.register(MoveStatementParser())
         registry.register(CallStatementParser())
+        registry.register(StopStatementParser())
+        registry.register(EntryStatementParser())
+        registry.register(GoStatementParser())
         
         # Arithmetic statements
         registry.register(ComputeStatementParser())
@@ -105,8 +124,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
         paragraphs: List[Dict[str, Any]] = []
         sections: Dict[str, Any] = {}
         
+        # Skip initial whitespace and comments
+        self._skip_whitespace(token_stream)
+        
         # Parse paragraphs and sections until EOF
         while not token_stream.is_empty():
+            # Skip whitespace/comments at start of each iteration
+            self._skip_whitespace(token_stream)
+            
             token = token_stream.peek(0)
             if not token:
                 break
@@ -139,8 +164,43 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 }
                 sections[section_name] = section_dict
             
+            elif self._is_statement_keyword(token_value):
+                # This is a statement keyword without an explicit paragraph
+                # Create implicit paragraph if needed (only if no paragraphs or last is named)
+                if not paragraphs or not paragraphs[-1].get("_is_implicit_paragraph"):
+                    # Create new implicit paragraph
+                    para_dict = {
+                        "type": "paragraph",
+                        "name": "",  # Implicit paragraph has empty name
+                        "location": token.location if hasattr(token, 'location') else SourceLocation(0, 0),
+                        "statements": [],
+                        "_is_implicit_paragraph": True
+                    }
+                    paragraphs.append(para_dict)
+                
+                # Try to parse the statement
+                parser = self._statement_registry.find_parser(token_stream)
+                if parser:
+                    try:
+                        # Attach registry to stream for nested statement parsing
+                        if not hasattr(token_stream, '_registry'):
+                            token_stream._registry = self._statement_registry
+                        
+                        statement = parser.parse(token_stream)
+                        paragraphs[-1]["statements"].append({
+                            "type": "statement",
+                            "node_type": type(statement).__name__,
+                            "statement": statement
+                        })
+                    except Exception as e:
+                        # Skip to next statement on error
+                        self._skip_to_next_statement(token_stream)
+                else:
+                    # No parser found, skip the statement
+                    self._skip_to_next_statement(token_stream)
+            
             elif token_value not in ("SECTION", "IDENTIFICATION", "ENVIRONMENT", "DATA", "END"):
-                # Treat as paragraph
+                # Treat as paragraph name (only if not a statement keyword)
                 para_name = token_value
                 para_location = token.location if hasattr(token, 'location') else SourceLocation(0, 0)
                 token_stream.consume()  # consume paragraph name
@@ -156,11 +216,16 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "type": "paragraph",
                     "name": para_name,
                     "location": para_location,
-                    "statements": statements
+                    "statements": statements,
+                    "_is_implicit_paragraph": False
                 }
                 paragraphs.append(para_dict)
             else:
                 token_stream.consume()
+        
+        # Clean up: remove empty implicit paragraphs at the end
+        while paragraphs and paragraphs[-1].get("_is_implicit_paragraph") and not paragraphs[-1].get("statements"):
+            paragraphs.pop()
         
         procedures["paragraphs"] = paragraphs
         procedures["sections"] = sections
@@ -206,6 +271,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
             parser = self._statement_registry.find_parser(token_stream)
             if parser:
                 try:
+                    # Attach registry to stream for nested statement parsing
+                    if not hasattr(token_stream, '_registry'):
+                        token_stream._registry = self._statement_registry
+                    
                     statement = parser.parse(token_stream)
                     statements.append({
                         "type": "statement",
@@ -332,7 +401,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             "CALL", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE",
             "ACCEPT", "STOP", "EXIT", "GO", "GOBACK",
             "RETURN", "OPEN", "CLOSE", "READ", "WRITE", "DELETE",
-            "SEARCH", "STRING", "UNSTRING", "INSPECT", "EXECUTE"
+            "SEARCH", "STRING", "UNSTRING", "INSPECT", "EXECUTE", "ENTRY"
         }
         return word.upper() in keywords
 

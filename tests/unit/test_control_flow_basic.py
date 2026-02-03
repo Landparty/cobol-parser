@@ -2,25 +2,23 @@ from cobolparser import parse_cobol, ErrorRecoveryMode
 from cobolparser.models.statements import IfStatement
 
 def get_statement_types(ast_root):
+    """Extract statement types from AST (using find_statements method)."""
     types = []
-    if not ast_root: return types
-    for div in getattr(ast_root, 'divisions', []):
-        for sec in getattr(div, 'sections', []):
-            for child in getattr(sec, 'children', []):
-                if getattr(child, 'node_type', '') == 'Statement':
-                    types.append(child.statement_type)
+    if not ast_root:
+        return types
+    
+    # Use the find_statements method to get all statements
+    all_stmts = ast_root.find_statements(None)  # Get all statements without filtering
+    for stmt in all_stmts:
+        if hasattr(stmt, 'statement_type'):
+            types.append(stmt.statement_type)
+    
     return types
 
 def get_if_statements(ast_root):
     """Extract all IfStatement objects from AST."""
-    if_stmts = []
-    if not ast_root: return if_stmts
-    for div in getattr(ast_root, 'divisions', []):
-        for sec in getattr(div, 'sections', []):
-            for child in getattr(sec, 'children', []):
-                if isinstance(child, IfStatement):
-                    if_stmts.append(child)
-    return if_stmts
+    if_stmts = ast_root.find_statements("IF") if ast_root else []
+    return [s for s in if_stmts if isinstance(s, IfStatement)]
 
 def test_go_to_parsed():
     src = """000100 IDENTIFICATION DIVISION.

@@ -112,7 +112,13 @@ class IdentificationDivisionParser(BaseDivisionParser):
     def _parse_program_id(self, token_stream: ITokenStream) -> str:
         """Parse PROGRAM-ID clause.
         
-        Format: PROGRAM-ID. program-name.
+        Format: PROGRAM-ID. program-name [IS INITIAL|COMMON].
+        
+        In fixed-format COBOL, the elements may be on different lines:
+            000200 PROGRAM-ID.
+            000300     program-name.
+        
+        Supports optional IS INITIAL or IS COMMON clauses for IBM Enterprise COBOL.
         
         Args:
             token_stream: Token stream positioned at PROGRAM-ID keyword
@@ -135,6 +141,9 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 token_stream.peek(0).location.line if not token_stream.is_empty() else 1
             )
         
+        # Skip newlines and whitespace after the period (for fixed-format COBOL)
+        token_stream.skip_whitespace_and_comments()
+        
         # Get program name (next non-period token)
         if token_stream.is_empty():
             raise ParseError("Expected program name after PROGRAM-ID.")
@@ -142,7 +151,23 @@ class IdentificationDivisionParser(BaseDivisionParser):
         name_token = token_stream.consume()
         program_name = name_token.value
         
-        # Expect period after program name
+        # Check for optional IS INITIAL or IS COMMON clause (IBM Enterprise COBOL)
+        token_stream.skip_whitespace_and_comments()
+        if not token_stream.is_empty():
+            token = token_stream.peek(0)
+            if token and token.value and token.value.upper() == "IS":
+                token_stream.consume()  # consume IS
+                token_stream.skip_whitespace_and_comments()
+                
+                if not token_stream.is_empty():
+                    next_token = token_stream.peek(0)
+                    if next_token and next_token.value:
+                        val = next_token.value.upper()
+                        if val in ("INITIAL", "COMMON"):
+                            # Store the modifier (could be extended in future)
+                            token_stream.consume()  # consume INITIAL or COMMON
+        
+        # Expect period after program name (or after IS clause if present)
         try:
             token_stream.expect(".")
         except TokenMismatch:

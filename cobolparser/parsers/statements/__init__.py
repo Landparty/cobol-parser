@@ -42,6 +42,8 @@ from .ibm_exec_statements import (
     ExecSqlStatementParser,
     ExecCicsStatementParser,
 )
+from .entry_parser import EntryStatementParser
+from .go_parser import GoStatementParser
 
 __all__ = [
     "DisplayStatementParser",
@@ -57,4 +59,6 @@ __all__ = [
     "ComputeStatementParser",
     "ExecSqlStatementParser",
     "ExecCicsStatementParser",
+    "EntryStatementParser",
+    "GoStatementParser",
 ]

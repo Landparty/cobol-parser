@@ -91,6 +91,9 @@ class BaseDivisionParser(IDivisionParser, ABC):
             if next_token and next_token.value.upper() == "DIVISION":
                 token_stream.consume()
         
+        # Skip newlines and whitespace before expecting period (for fixed-format COBOL)
+        token_stream.skip_whitespace_and_comments()
+        
         # Expect period (.) after division header
         try:
             token_stream.expect(".")

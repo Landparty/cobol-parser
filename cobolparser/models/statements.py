@@ -863,6 +863,46 @@ class EntryStatement(CobolStatement):
         return base
 
 
+class GoStatement(CobolStatement):
+    """AST node for GO TO statements.
+
+    GO TO statements transfer control to a labeled paragraph or section.
+    Syntax: GO TO paragraph-name
+
+    Example:
+        GO TO PARA-1.
+        GO TO PARA-1 DEPENDING ON var.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("GOTO", location)
+        self.target_paragraph: Optional[str] = None
+        self.depending_on_variable: Optional[str] = None
+
+    def set_target_paragraph(self, name: str) -> None:
+        """Set the target paragraph name."""
+        self.target_paragraph = name
+        if name not in self.operands:
+            self.add_operand(name)
+
+    def set_depending_on_variable(self, var_name: str) -> None:
+        """Set the DEPENDING ON variable for computed GO TO."""
+        self.depending_on_variable = var_name
+        if var_name not in self.operands:
+            self.add_operand(var_name)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        base = super().to_dict()
+        base.update(
+            {
+                "target_paragraph": self.target_paragraph,
+                "depending_on_variable": self.depending_on_variable,
+            }
+        )
+        return base
+
+
 class SelectStatement(CobolStatement):
     """AST node for SELECT statements in FILE-CONTROL paragraph.
 
@@ -2015,6 +2055,7 @@ __all__ = [
     "IfStatement",
     "CallStatement",
     "EntryStatement",
+    "GoStatement",
     "ComputeStatement",
     "CopyStatement",
     "SelectStatement",

@@ -7,6 +7,13 @@ from cobolparser.models.statements import EntryStatement
 
 def find_entry_statement(proc_div):
     """Helper function to find ENTRY statement in new architecture."""
+    # Check paragraphs directly in procedure division
+    for para in proc_div.paragraphs:
+        for stmt in para.statements:
+            if isinstance(stmt, EntryStatement):
+                return stmt
+    
+    # Also check sections (for completeness)
     for section in proc_div.sections:
         # Check statements in paragraph (new architecture)
         for para in section.paragraphs:

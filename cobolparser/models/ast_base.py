@@ -95,7 +95,11 @@ class ASTNode(ABC):
             'section': self.section_name
         }
 
-    
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Get metadata dictionary for this node."""
+        return self._metadata
+
     def add_child(self, child: 'ASTNode') -> None:
         """Add a child node and set its parent reference."""
         if child.parent is not None:

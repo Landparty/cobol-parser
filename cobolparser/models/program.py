@@ -74,6 +74,11 @@ class CobolDivision(ASTNode):
         return list(self._sections.values())
     
     @property
+    def division_name(self) -> str:
+        """Returns the name of the division."""
+        return self._own_division_name
+    
+    @property
     def division_type(self) -> str:
         """Returns the type of division."""
         return self._own_division_name
@@ -121,8 +126,23 @@ class CobolDivision(ASTNode):
             self.add_child(procedure)
     
     def get_section_by_name(self, name: str) -> Optional[CobolSection]:
-        """Get a section by name."""
-        return self._sections.get(name)
+        """Get a section by name.
+        
+        In PROCEDURE division, also searches paragraphs since they are treated
+        as section-like entities for navigation purposes.
+        """
+        # First check actual sections
+        section = self._sections.get(name)
+        if section:
+            return section
+        
+        # For PROCEDURE division, also check paragraphs
+        if self.division_name == "PROCEDURE":
+            for para in self.paragraphs:
+                if hasattr(para, 'paragraph_name') and para.paragraph_name == name:
+                    return para  # type: ignore
+        
+        return None
     
     def has_section(self, name: str) -> bool:
         """Check if division has a specific section."""
@@ -149,7 +169,14 @@ class CobolParagraph(ASTNode):
         super().__init__("Paragraph", location)
         self.paragraph_name = paragraph_name
         self.statements: List['CobolStatement'] = []
+        # For paragraphs in procedure division, section_name is the same as paragraph_name
+        self._own_section_name = paragraph_name
     
+    @property
+    def section_name(self) -> Optional[str]:
+        """Get the section name (for paragraphs, this is the paragraph name)."""
+        return self._own_section_name
+
     def add_statement(self, statement: 'CobolStatement') -> None:
         """Add a statement to this paragraph."""
         self.add_child(statement)

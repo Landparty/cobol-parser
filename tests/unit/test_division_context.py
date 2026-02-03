@@ -6,7 +6,7 @@ division and section they belong to.
 """
 
 import pytest
-from cobolparser.parser import CobolParser
+from cobolparser import parse_cobol
 from cobolparser.models.statements import CobolStatement
 from cobolparser.models.data_items import CobolDataItem
 
@@ -17,14 +17,13 @@ class TestDivisionContextTracking:
     def test_statement_tracks_division(self):
         """Test that statements know which division they belong to."""
         source = """
-           IDENTIFICATION DIVISION.
-           PROGRAM-ID. TEST.
-           PROCEDURE DIVISION.
-               MOVE 1 TO X.
-               DISPLAY "HELLO".
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            MOVE 1 TO X.
+            DISPLAY "HELLO".
         """
-        parser = CobolParser()
-        result = parser.parse(source)
+        result = parse_cobol(source)
         
         assert result.success, f"Parse failed: {result.errors}"
         statements = result.ast.get_all_statements()
@@ -40,15 +39,14 @@ class TestDivisionContextTracking:
     def test_data_item_tracks_division(self):
         """Test that data items know which division they belong to."""
         source = """
-           IDENTIFICATION DIVISION.
-           PROGRAM-ID. TEST.
-           DATA DIVISION.
-           WORKING-STORAGE SECTION.
-           01 WS-VAR PIC X(10).
-           01 WS-NUM PIC 9(5).
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        DATA DIVISION.
+        WORKING-STORAGE SECTION.
+        01 WS-VAR PIC X(10).
+        01 WS-NUM PIC 9(5).
         """
-        parser = CobolParser()
-        result = parser.parse(source)
+        result = parse_cobol(source)
         
         assert result.success, f"Parse failed: {result.errors}"
         data_items = result.ast.get_data_items()
@@ -66,16 +64,15 @@ class TestDivisionContextTracking:
     def test_paragraph_tracks_division(self):
         """Test that paragraphs know which division they belong to."""
         source = """
-           IDENTIFICATION DIVISION.
-           PROGRAM-ID. TEST.
-           PROCEDURE DIVISION.
-           MAIN-PARA.
-               DISPLAY "MAIN".
-           SUB-PARA.
-               DISPLAY "SUB".
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+        MAIN-PARA.
+            DISPLAY "MAIN".
+        SUB-PARA.
+            DISPLAY "SUB".
         """
-        parser = CobolParser()
-        result = parser.parse(source)
+        result = parse_cobol(source)
         
         assert result.success, f"Parse failed: {result.errors}"
         

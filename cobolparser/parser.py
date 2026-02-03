@@ -282,6 +282,12 @@ class CobolParser:
                     break
 
                 try:
+                    # Set host on ProcedureDivisionParser for ParseContext creation
+                    if hasattr(parser, 'set_host'):
+                        parser.set_host(self)
+                    elif hasattr(parser, 'host'):
+                        parser.host = self
+                    
                     division_ast = parser.parse(self.stream)
                     if division_ast:
                         divisions_parsed.append(division_ast)
@@ -480,7 +486,11 @@ def parse_cobol(
     
     # Auto-detect fixed-format if not explicitly specified
     if preprocess_fixed is None:
-        preprocess_fixed = _detect_fixed_format(source)
+        detected_fixed = _detect_fixed_format(source)
+        preprocess_fixed = detected_fixed
+        # If we detected free-format (not fixed), ensure free_form is True
+        if not detected_fixed and not free_form:
+            free_form = True
     
     if preprocess_fixed:
         source = normalize_fixed_format(source.splitlines())

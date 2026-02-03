@@ -24,8 +24,17 @@ class PerformStatementParser(StatementParser):
             ):
                 return True
         return False
+    
+    def matches(self, stream: TokenStream) -> bool:
+        """IStatementParser interface: Check if this parser can handle the current state."""
+        return self.can_parse(stream)
+    
+    def _report_error(self, context: Optional[ParseContext], message: str, token: Optional[object] = None) -> None:
+        """Helper to report errors safely when context may be None."""
+        if context:
+            context.error(message, token)
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> PerformStatement:
+    def parse(self, stream: TokenStream, context: Optional[ParseContext] = None) -> PerformStatement:
         """Parse PERFORM statement.
 
         Supports:
@@ -108,7 +117,7 @@ class PerformStatementParser(StatementParser):
                     stream.advance()
                     stream.skip_whitespace_and_comments()
                 else:
-                    context.error("Expected paragraph name after THRU", token)
+                    self._report_error(context, "Expected paragraph name after THRU", token)
 
             # Check for TIMES clause after paragraph name
             token = stream.peek()
@@ -147,7 +156,7 @@ class PerformStatementParser(StatementParser):
         # Get variable name
         token = stream.peek()
         if not token or token.type != TokenType.IDENTIFIER:
-            context.error("Expected variable name after VARYING", token)
+            self._report_error(context, "Expected variable name after VARYING", token)
             return
 
         variable_name = token.value
@@ -157,7 +166,7 @@ class PerformStatementParser(StatementParser):
         # Expect FROM
         token = stream.peek()
         if not token or not token.value or token.value.upper() != "FROM":
-            context.error("Expected FROM after variable in VARYING clause", token)
+            self._report_error(context, "Expected FROM after variable in VARYING clause", token)
             return
         stream.advance()
         stream.skip_whitespace_and_comments()
@@ -165,7 +174,7 @@ class PerformStatementParser(StatementParser):
         # Get FROM value
         token = stream.peek()
         if not token or not token.value:
-            context.error("Expected value after FROM", token)
+            self._report_error(context, "Expected value after FROM", token)
             return
         from_value = token.value
         stream.advance()
@@ -174,7 +183,7 @@ class PerformStatementParser(StatementParser):
         # Expect BY
         token = stream.peek()
         if not token or not token.value or token.value.upper() != "BY":
-            context.error("Expected BY in VARYING clause", token)
+            self._report_error(context, "Expected BY in VARYING clause", token)
             return
         stream.advance()
         stream.skip_whitespace_and_comments()
@@ -182,7 +191,7 @@ class PerformStatementParser(StatementParser):
         # Get BY value
         token = stream.peek()
         if not token or not token.value:
-            context.error("Expected value after BY", token)
+            self._report_error(context, "Expected value after BY", token)
             return
         by_value = token.value
         stream.advance()
@@ -191,7 +200,7 @@ class PerformStatementParser(StatementParser):
         # Expect UNTIL
         token = stream.peek()
         if not token or not token.value or token.value.upper() != "UNTIL":
-            context.error("Expected UNTIL in VARYING clause", token)
+            self._report_error(context, "Expected UNTIL in VARYING clause", token)
             return
         stream.advance()
 
