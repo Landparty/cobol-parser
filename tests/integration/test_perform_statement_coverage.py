@@ -33,15 +33,22 @@ class TestPerformStatementIntegration:
         performs = []
         # Traverse sections and find PerformStatement children
         for section in proc_div.sections:
-            # Check direct children (old architecture)
-            for child in section.children:
-                if isinstance(child, PerformStatement):
-                    if perform_type is None or child.perform_type == perform_type:
-                        performs.append(child)
-            
-            # Check statements in paragraphs (new architecture)
-            for para in section.paragraphs:
-                for stmt in para.statements:
+            # Check if it's a CobolParagraph (no explicit sections) or CobolSection
+            if hasattr(section, 'paragraphs'):
+                # It's a CobolSection - has paragraphs
+                for para in section.paragraphs:
+                    for stmt in para.statements:
+                        if isinstance(stmt, PerformStatement):
+                            if perform_type is None or stmt.perform_type == perform_type:
+                                performs.append(stmt)
+                # Also check direct children (old architecture)
+                for child in section.children:
+                    if isinstance(child, PerformStatement):
+                        if perform_type is None or child.perform_type == perform_type:
+                            performs.append(child)
+            else:
+                # It's a CobolParagraph (no explicit sections case)
+                for stmt in section.statements:
                     if isinstance(stmt, PerformStatement):
                         if perform_type is None or stmt.perform_type == perform_type:
                             performs.append(stmt)
@@ -241,14 +248,23 @@ class TestPerformBackwardCompatibility:
         performs = []
         for section in proc_div.sections:
             # Check direct children (old architecture)
-            for child in section.children:
-                if isinstance(child, PerformStatement):
-                    if perform_type is None or child.perform_type == perform_type:
-                        performs.append(child)
+            if hasattr(section, 'children'):
+                for child in section.children:
+                    if isinstance(child, PerformStatement):
+                        if perform_type is None or child.perform_type == perform_type:
+                            performs.append(child)
             
             # Check statements in paragraphs (new architecture)
-            for para in section.paragraphs:
-                for stmt in para.statements:
+            # Handle both CobolSection (has .paragraphs) and CobolParagraph (has .statements directly)
+            if hasattr(section, 'paragraphs'):
+                for para in section.paragraphs:
+                    for stmt in para.statements:
+                        if isinstance(stmt, PerformStatement):
+                            if perform_type is None or stmt.perform_type == perform_type:
+                                performs.append(stmt)
+            elif hasattr(section, 'statements'):
+                # If section is a CobolParagraph, statements are directly on it
+                for stmt in section.statements:
                     if isinstance(stmt, PerformStatement):
                         if perform_type is None or stmt.perform_type == perform_type:
                             performs.append(stmt)

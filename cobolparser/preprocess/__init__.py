@@ -406,9 +406,10 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
         if indicator in ('*', '/'):  # comment (including page eject)
-            # Skip comment lines entirely - they should not be in the normalized output
-            # COBOL comments are parsed at the lexer level and don't need special handling here
+            # Preserve comment lines - extract the text portion
             flush_buffer()
+            result.append(text_slice.rstrip())
+            pending_literal = False
             continue
         is_cont = indicator == '-'
         

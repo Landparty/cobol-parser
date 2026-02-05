@@ -48,6 +48,7 @@ from .parsers.arithmetic_parsers import (
     DivideStatementParser,
     ComputeStatementParser,
 )
+from .parsers.statements.write_parser import WriteStatementParser
 
 from .preprocess import normalize_fixed_format
 

@@ -24,7 +24,12 @@ class IfStatementParser(IStatementParser):
             return False
     
     def parse(self, token_stream: ITokenStream) -> IfStatement:
-        """Parse an IF statement with nested statement support."""
+        """Parse an IF statement with nested statement support.
+        
+        Supports:
+        - IF condition statement [ELSE statement] [END-IF]
+        - IF condition THEN statement [ELSE statement] [END-IF]
+        """
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = factory.create(IfStatement, start_token.location if start_token else SourceLocation(0, 0))
@@ -33,145 +38,216 @@ class IfStatementParser(IStatementParser):
         if not isinstance(stmt, IfStatement):
             stmt = IfStatement(start_token.location if start_token else SourceLocation(0, 0))
         
-        # Skip whitespace/comments if possible
         self._skip_whitespace(token_stream)
         
-        # Parse condition until THEN or newline
-        cond_tokens = []
+        # Parse condition tokens - stop at THEN or statement keyword
+        condition_tokens: List[str] = []
         while not token_stream.is_empty():
             token = token_stream.peek()
-            if not token:
+            if not token or not token.value:
                 break
             
-            # Check for end of condition
-            if token.type == TokenType.NEWLINE or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "THEN"):
+            token_upper = token.value.upper()
+            
+            # Stop at explicit THEN
+            if token_upper == "THEN":
                 break
             
-            if token.value:
-                cond_tokens.append(token.value)
+            # Stop at statement keywords (implicit THEN)
+            if self._is_statement_keyword(token_upper):
+                break
+            
+            # Stop at ELSE or END-IF
+            if token_upper in ("ELSE", "END-IF"):
+                break
+            
+            # Stop at period
+            if token.type == TokenType.PERIOD:
+                break
+            
+            # Add token to condition
+            condition_tokens.append(token.value)
             token_stream.consume()
         
         # Create condition expression
-        if cond_tokens:
-            condition_text = " ".join(cond_tokens).strip()
+        if condition_tokens:
+            condition_text = " ".join(condition_tokens).strip()
             condition_expr = CobolExpression("COMPARISON", start_token.location if start_token else SourceLocation(0, 0))
             condition_expr._metadata["value"] = condition_text
             stmt.set_condition(condition_expr)
         
-        # Skip THEN keyword if present
-        token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "THEN":
-            token_stream.consume()
-        
         self._skip_whitespace(token_stream)
         
-        # Parse THEN branch statements until ELSE or END-IF
+        # Skip explicit THEN keyword if present
+        if not token_stream.is_empty():
+            token = token_stream.peek()
+            if token and token.value and token.value.upper() == "THEN":
+                token_stream.consume()
+                self._skip_whitespace(token_stream)
+        
+        # Parse THEN branch statements until ELSE, END-IF, or period
+        period_found = False
         while not token_stream.is_empty():
             self._skip_whitespace(token_stream)
-            token = token_stream.peek()
             
+            if token_stream.is_empty():
+                break
+            
+            token = token_stream.peek()
             if not token:
                 break
             
-            # Check for ELSE
-            if self._is_keyword(token, "ELSE"):
+            token_upper = token.value.upper() if token.value else ""
+            
+            # End of THEN branch at ELSE
+            if token_upper == "ELSE":
                 token_stream.consume()
+                self._skip_whitespace(token_stream)
+                period_found = False  # Reset for ELSE branch
                 break
             
-            # Check for END-IF
-            if self._is_keyword(token, "END-IF"):
+            # End of IF statement at END-IF
+            if token_upper == "END-IF":
                 token_stream.consume()
-                # Skip optional period
                 self._try_consume_period(token_stream)
                 return stmt
+            
+            # End of IF statement at period (when not in a multi-line block)
+            if token.type == TokenType.PERIOD:
+                token_stream.consume()
+                return stmt
+            
+            # If we already found a period terminating the previous statement,
+            # don't parse more (this means inline IF)
+            if period_found:
+                break
             
             # Try to parse nested statement
             nested_stmt = self._try_parse_nested_statement(token_stream)
             if nested_stmt:
                 stmt.add_then_statement(nested_stmt)
+                # Check if the next token after is a period - if so, inline IF is done
+                self._skip_whitespace(token_stream)
+                if not token_stream.is_empty():
+                    next_token = token_stream.peek()
+                    if next_token and next_token.type == TokenType.PERIOD:
+                        period_found = True  # Inline IF ends here
             else:
-                # Can't parse as statement, skip this token
-                token_stream.consume()
+                # Couldn't parse - stop trying to parse statements in this branch
+                break
         
-        self._skip_whitespace(token_stream)
-        
-        # Parse ELSE branch statements until END-IF
+        # Parse ELSE branch statements until END-IF or period
+        period_found = False
         while not token_stream.is_empty():
             self._skip_whitespace(token_stream)
-            token = token_stream.peek()
             
+            if token_stream.is_empty():
+                break
+            
+            token = token_stream.peek()
             if not token:
                 break
             
-            # Check for END-IF
-            if self._is_keyword(token, "END-IF"):
+            token_upper = token.value.upper() if token.value else ""
+            
+            # End of IF statement at END-IF
+            if token_upper == "END-IF":
                 token_stream.consume()
-                # Skip optional period
                 self._try_consume_period(token_stream)
                 return stmt
+            
+            # End of IF statement at period
+            if token.type == TokenType.PERIOD:
+                token_stream.consume()
+                return stmt
+            
+            # If we already found a period terminating the previous statement,
+            # don't parse more (this means inline IF-ELSE)
+            if period_found:
+                break
             
             # Try to parse nested statement
             nested_stmt = self._try_parse_nested_statement(token_stream)
             if nested_stmt:
                 stmt.add_else_statement(nested_stmt)
+                # Check if the next token after is a period - if so, inline IF-ELSE is done
+                self._skip_whitespace(token_stream)
+                if not token_stream.is_empty():
+                    next_token = token_stream.peek()
+                    if next_token and next_token.type == TokenType.PERIOD:
+                        period_found = True  # Inline IF-ELSE ends here
             else:
-                # Can't parse as statement, skip this token
-                token_stream.consume()
+                # Couldn't parse - stop trying to parse statements in this branch
+                break
         
         return stmt
     
+    def _is_statement_keyword(self, token_upper: str) -> bool:
+        """Check if token is a COBOL statement keyword."""
+        statement_keywords = {
+            "MOVE", "DISPLAY", "CALL", "PERFORM", "IF", "EVALUATE",
+            "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE",
+            "ACCEPT", "READ", "WRITE", "OPEN", "CLOSE",
+            "STOP", "GO", "ENTRY", "EXEC", "EXIT",
+            "SEARCH", "STRING", "UNSTRING", "INSPECT",
+            "ALTER", "CONTINUE", "INITIATE", "TERMINATE",
+            "MERGE", "SORT", "RELEASE", "RETURN"
+        }
+        return token_upper in statement_keywords
+    
     def _skip_whitespace(self, stream: ITokenStream) -> None:
-        """Skip whitespace and comment tokens if possible."""
+        """Skip whitespace and comment tokens."""
         try:
-            # Try to use stream's skip_whitespace method if available
-            if hasattr(stream, 'skip_whitespace_and_comments'):
-                stream.skip_whitespace_and_comments()
-            else:
-                # Manual skip
-                while not stream.is_empty():
-                    token = stream.peek()
-                    if not token or token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE', 'CONTINUATION'):
-                        break
-                    stream.consume()
-        except Exception:
-            pass
-    
-    def _is_keyword(self, token: Any, keyword: str) -> bool:
-        """Check if token represents a specific keyword."""
-        if not token or not token.value:
-            return False
-        return token.value.upper() == keyword.upper()
-    
-    def _try_consume_period(self, stream: ITokenStream) -> None:
-        """Try to consume a period if present."""
-        try:
-            token = stream.peek()
-            if token and token.type == TokenType.PERIOD:
+            while not stream.is_empty():
+                token = stream.peek()
+                if not token or token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE', 'CONTINUATION'):
+                    break
                 stream.consume()
         except Exception:
             pass
     
+    def _try_consume_period(self, stream: ITokenStream) -> None:
+        """Try to consume a period if present."""
+        if not stream.is_empty():
+            token = stream.peek()
+            if token and token.type == TokenType.PERIOD:
+                stream.consume()
+    
     def _try_parse_nested_statement(self, stream: ITokenStream) -> Optional[Any]:
-        """Try to parse a nested statement using registry if available."""
+        """Try to parse a nested statement using registry available on stream.
+        
+        The registry is attached to the stream by ProcedureDivisionParser as _registry.
+        """
         try:
-            # Check if stream has access to a registry
-            # This is duck typing - if the stream has a way to get the registry, use it
-            if hasattr(stream, '_registry'):
-                registry = stream._registry
-            elif hasattr(stream, 'registry'):
-                registry = stream.registry
-            elif hasattr(stream, 'get_registry'):
-                registry = stream.get_registry()
-            else:
-                # No registry available
+            # Get next token to check what we're about to parse
+            token = stream.peek()
+            if not token:
                 return None
             
-            # Try to find a parser for current statement
-            if hasattr(registry, 'find_parser'):
+            # Try to get registry from stream attributes
+            registry = None
+            
+            # Check for _registry (set by ProcedureDivisionParser)
+            if hasattr(stream, '_registry'):
+                registry = stream._registry  # type: ignore[attr-defined]
+            # Check for registry property/method
+            elif hasattr(stream, 'registry'):
+                registry = stream.registry  # type: ignore[attr-defined]
+            # Check for get_registry method
+            elif hasattr(stream, 'get_registry') and callable(stream.get_registry):
+                registry = stream.get_registry()  # type: ignore[attr-defined]
+            
+            if not registry:
+                return None
+            
+            # Find appropriate parser from registry
+            if hasattr(registry, 'find_parser') and callable(registry.find_parser):
                 parser = registry.find_parser(stream)
-                if parser:
+                # Avoid infinite recursion by checking that we didn't get self
+                if parser and parser != self:
                     return parser.parse(stream)
         except Exception:
+            # Silently fail - if we can't parse nested statement, just skip it
             pass
         
         return None

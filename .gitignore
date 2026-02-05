@@ -149,4 +149,9 @@ Thumbs.db
 
 # tests
 baselines
+
+.serena
+
+.agent
+
 *.zip

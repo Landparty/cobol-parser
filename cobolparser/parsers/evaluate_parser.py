@@ -1,7 +1,7 @@
 """Parser for EVALUATE statements."""
 
 from typing import Optional, List
-from ..core.interfaces import StatementParser, ParseContext
+from ..core.interfaces import StatementParser
 from ..core.token_stream import TokenStream
 from ..models.statements import EvaluateStatement, WhenClause, CobolExpression
 from ..lexer import TokenType
@@ -33,8 +33,12 @@ class EvaluateStatementParser(StatementParser):
             ):
                 return True
         return False
+    
+    def matches(self, stream: TokenStream) -> bool:
+        """IStatementParser interface - same as can_parse."""
+        return self.can_parse(stream)
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> EvaluateStatement:
+    def parse(self, stream: TokenStream) -> EvaluateStatement:
         """Parse EVALUATE statement structure only.
 
         Supports:
@@ -45,6 +49,9 @@ class EvaluateStatementParser(StatementParser):
         
         Does NOT parse nested statements - those are handled by the main parser.
         """
+        # Get parse context from stream if available
+        context = getattr(stream, '_parse_context', None)
+        
         start_token = stream.peek()
         # Consume EVALUATE if present
         if start_token and (
@@ -158,7 +165,6 @@ class EvaluateStatementParser(StatementParser):
                 stream.skip_whitespace_and_comments()
                 
                 # Skip statements until END-EVALUATE or WHEN
-                # Don't try to parse them recursively
                 while not stream.is_at_end:
                     token = stream.peek()
                     if not token:
@@ -270,7 +276,8 @@ class EvaluateStatementParser(StatementParser):
                     break
             
             # Skip statements until next WHEN or END-EVALUATE
-            # These will be picked up by the main parser later
+            # These will be picked up by the procedure division parser when it
+            # continues parsing the paragraph
             while not stream.is_at_end:
                 token = stream.peek()
                 if not token:
@@ -285,7 +292,7 @@ class EvaluateStatementParser(StatementParser):
                 stream.advance()
                 stream.skip_whitespace_and_comments()
             
-            # Create WHEN clause with selectors
+            # Create WHEN clause with selectors (statements will be added later)
             # Convert selector strings to selector dicts
             selector_dicts = []
             

@@ -333,27 +333,22 @@ def remove_comment_lines(source: str) -> str:
     """
     Remove comment lines from COBOL source code.
     
-    This preserves line numbers by replacing comment content with spaces
-    while keeping the line structure intact.
+    This completely removes comment lines (both the line and its content)
+    to ensure that comment indicators don't pollute the normalized source.
+    This preserves the structure needed for line-specific processing while
+    ensuring that removed comment content doesn't interfere with token parsing.
     
     Args:
         source: COBOL source code
         
     Returns:
-        Source with comment lines replaced (preserving line structure)
+        Source with comment lines completely removed (not replaced with spaces)
     """
     lines = source.split('\n')
     result = []
     
     for line in lines:
-        if is_comment_line(line):
-            # Replace comment with spaces to preserve line numbers
-            # Keep first 7 columns (sequence + indicator) and blank the rest
-            if len(line) >= 7:
-                result.append(line[:7] + ' ' * max(0, len(line) - 7))
-            else:
-                result.append(line)
-        else:
+        if not is_comment_line(line):
             result.append(line)
     
     return '\n'.join(result)

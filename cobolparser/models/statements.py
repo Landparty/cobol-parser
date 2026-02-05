@@ -782,6 +782,10 @@ class CallStatement(CobolStatement):
         if param_name not in self.operands:
             self.add_operand(param_name)
 
+    def set_is_dynamic(self, value: bool) -> None:
+        """Set whether this is a dynamic CALL."""
+        self._is_dynamic = value
+
     @property
     def is_dynamic(self) -> bool:
         """Check if this is a dynamic CALL."""

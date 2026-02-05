@@ -260,10 +260,16 @@ class TestComplexFileOperations:
                 # Verify file operations are recognized
                 section = procedure_div.sections[0]
                 
-                # Get statements from all paragraphs in the section
+                # Get statements - handle both CobolSection (with paragraphs) 
+                # and CobolParagraph (with statements directly)
                 statements = []
-                for paragraph in section.paragraphs:
-                    statements.extend(paragraph.statements)
+                if hasattr(section, 'paragraphs'):
+                    # CobolSection - iterate through paragraphs
+                    for paragraph in section.paragraphs:
+                        statements.extend(paragraph.statements)
+                elif hasattr(section, 'statements'):
+                    # CobolParagraph - use statements directly
+                    statements.extend(section.statements)
                 
                 # Check for file operation keywords
                 statement_types = [str(s) for s in statements]

@@ -31,14 +31,23 @@ class TestPerformBackwardCompatibilityRegression:
         performs = []
         for section in proc_div.sections:
             # Check direct children (old architecture)
-            for child in section.children:
-                if isinstance(child, PerformStatement):
-                    if perform_type is None or child.perform_type == perform_type:
-                        performs.append(child)
+            if hasattr(section, 'children'):
+                for child in section.children:
+                    if isinstance(child, PerformStatement):
+                        if perform_type is None or child.perform_type == perform_type:
+                            performs.append(child)
             
             # Check statements in paragraphs (new architecture)
-            for para in section.paragraphs:
-                for stmt in para.statements:
+            # Handle both CobolSection (has .paragraphs) and CobolParagraph (has .statements directly)
+            if hasattr(section, 'paragraphs'):
+                for para in section.paragraphs:
+                    for stmt in para.statements:
+                        if isinstance(stmt, PerformStatement):
+                            if perform_type is None or stmt.perform_type == perform_type:
+                                performs.append(stmt)
+            elif hasattr(section, 'statements'):
+                # If section is a CobolParagraph, statements are directly on it
+                for stmt in section.statements:
                     if isinstance(stmt, PerformStatement):
                         if perform_type is None or stmt.perform_type == perform_type:
                             performs.append(stmt)
@@ -205,14 +214,23 @@ class TestPerformEdgeCasesRegression:
         performs = []
         for section in proc_div.sections:
             # Check direct children (old architecture)
-            for child in section.children:
-                if isinstance(child, PerformStatement):
-                    if perform_type is None or child.perform_type == perform_type:
-                        performs.append(child)
+            if hasattr(section, 'children'):
+                for child in section.children:
+                    if isinstance(child, PerformStatement):
+                        if perform_type is None or child.perform_type == perform_type:
+                            performs.append(child)
             
             # Check statements in paragraphs (new architecture)
-            for para in section.paragraphs:
-                for stmt in para.statements:
+            # Handle both CobolSection (has .paragraphs) and CobolParagraph (has .statements directly)
+            if hasattr(section, 'paragraphs'):
+                for para in section.paragraphs:
+                    for stmt in para.statements:
+                        if isinstance(stmt, PerformStatement):
+                            if perform_type is None or stmt.perform_type == perform_type:
+                                performs.append(stmt)
+            elif hasattr(section, 'statements'):
+                # If section is a CobolParagraph, statements are directly on it
+                for stmt in section.statements:
                     if isinstance(stmt, PerformStatement):
                         if perform_type is None or stmt.perform_type == perform_type:
                             performs.append(stmt)

@@ -16,9 +16,10 @@ class EvaluateStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return (token.type == TokenType.EVALUATE or
-                    (token.type == TokenType.IDENTIFIER and token.value and 
-                     token.value.upper() == "EVALUATE"))
+            is_evaluate = token.type == TokenType.EVALUATE
+            is_evaluate_id = (token.type == TokenType.IDENTIFIER and token.value and 
+                              token.value.upper() == "EVALUATE")
+            return bool(is_evaluate or is_evaluate_id)
         except Exception:
             return False
     
@@ -263,19 +264,19 @@ class EvaluateStatementParser(IStatementParser):
     def _try_parse_nested_statement(self, stream: ITokenStream) -> Optional[Any]:
         """Try to parse a nested statement using registry if available."""
         try:
-            # Check if stream has access to a registry
-            if hasattr(stream, '_registry'):
-                registry = stream._registry
-            elif hasattr(stream, 'registry'):
-                registry = stream.registry
-            elif hasattr(stream, 'get_registry'):
-                registry = stream.get_registry()
-            else:
+            # Check if stream has access to a registry using safe getattr
+            registry = getattr(stream, '_registry', None) or getattr(stream, 'registry', None)
+            
+            # If no registry attribute, try calling get_registry method if it exists
+            if registry is None and hasattr(stream, 'get_registry') and callable(getattr(stream, 'get_registry')):
+                registry = getattr(stream, 'get_registry')()
+            
+            if registry is None:
                 return None
             
             # Try to find a parser for current statement
-            if hasattr(registry, 'find_parser'):
-                parser = registry.find_parser(stream)
+            if hasattr(registry, 'find_parser') and callable(getattr(registry, 'find_parser')):
+                parser = getattr(registry, 'find_parser')(stream)
                 if parser:
                     return parser.parse(stream)
         except Exception:

@@ -3,7 +3,7 @@
 from typing import Optional, Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import PerformStatement
+from ...models.statements import PerformStatement, CobolExpression
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 
@@ -56,31 +56,30 @@ class PerformStatementParser(IStatementParser):
             return stmt
         
         # Check for VARYING clause (inline PERFORM VARYING)
-        if token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "VARYING":
+        if token.type == TokenType.VARYING:
             self._parse_varying_clause(token_stream, stmt)
             return stmt
         
         # Check for TEST clause (WITH TEST BEFORE/AFTER)
-        if token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "WITH":
+        if token.type == TokenType.WITH:
             try:
                 token_stream.consume()  # Skip WITH
                 token = token_stream.peek()
-                if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "TEST":
+                if token and token.type == TokenType.TEST:
                     token_stream.consume()  # Skip TEST
                     token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER and token.value:
-                        val = token.value.upper()
-                        if val in ("BEFORE", "AFTER"):
-                            stmt.set_test_timing(val)
-                            token_stream.consume()
-                            token = token_stream.peek()
+                    if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
+                        val = token.type.name  # "BEFORE" or "AFTER"
+                        stmt.set_test_timing(val)
+                        token_stream.consume()
+                        token = token_stream.peek()
             except Exception:
                 pass
                 self._skip_whitespace(token_stream)
                 token = token_stream.peek()
         
         # Check for UNTIL clause (inline PERFORM UNTIL)
-        if token and (token.type == TokenType.UNTIL or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "UNTIL")):
+        if token and token.type == TokenType.UNTIL:
             self._parse_until_clause(token_stream, stmt)
             return stmt
         
@@ -135,10 +134,26 @@ class PerformStatementParser(IStatementParser):
                 self._skip_whitespace(token_stream)
                 token = token_stream.peek()
             
-            # Check for TIMES clause after paragraph name
-            if token and (token.type == TokenType.NUMERIC_LITERAL or 
-                         token.type == TokenType.LEVEL_NUMBER or
-                         (token.type == TokenType.IDENTIFIER and token.value and token.value.isdigit())):
+            # Check for TIMES clause after paragraph name (can be numeric or variable)
+            if token and token.type == TokenType.IDENTIFIER:
+                times_value = token.value
+                times_consumed = token_stream.consume()
+                token = token_stream.peek()
+                
+                # Check if  followed by TIMES keyword
+                if token and (token.type == TokenType.TIMES or 
+                             (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"))):
+                    # Can be numeric (int) or variable (string)
+                    try:
+                        times_count = int(times_value)
+                    except ValueError:
+                        times_count = times_value  # Keep as variable name string
+                    
+                    token_stream.consume()  # Skip TIMES keyword
+                    stmt.set_times_clause(times_count)
+                    token = token_stream.peek()
+            elif token and (token.type == TokenType.NUMERIC_LITERAL or 
+                           token.type == TokenType.LEVEL_NUMBER):
                 try:
                     times_count = int(token.value)
                     token_stream.consume()
@@ -150,12 +165,31 @@ class PerformStatementParser(IStatementParser):
                         token = token_stream.peek()
                 except (ValueError, Exception):
                     pass
+            
+            self._skip_whitespace(token_stream)
+            token = token_stream.peek()
+            
+            # Check for WITH TEST clause after paragraph name (WITH TEST BEFORE/AFTER)
+            if token and token.type == TokenType.WITH:
+                try:
+                    token_stream.consume()  # Skip WITH
+                    token = token_stream.peek()
+                    if token and token.type == TokenType.TEST:
+                        token_stream.consume()  # Skip TEST
+                        token = token_stream.peek()
+                        if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
+                            val = token.type.name  # "BEFORE" or "AFTER"
+                            stmt.set_test_timing(val)
+                            token_stream.consume()
+                            token = token_stream.peek()
+                except Exception:
+                    pass
                 
                 self._skip_whitespace(token_stream)
                 token = token_stream.peek()
             
             # Check for UNTIL clause after paragraph name
-            if token and (token.type == TokenType.UNTIL or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "UNTIL")):
+            if token and token.type == TokenType.UNTIL:
                 try:
                     self._parse_until_condition_only(token_stream, stmt)
                 except Exception:
@@ -234,12 +268,36 @@ class PerformStatementParser(IStatementParser):
             stream.consume()
             self._skip_whitespace(stream)
             
+            # Check for WITH TEST clause (before UNTIL)
+            token = stream.peek()
+            if token and token.type == TokenType.WITH:
+                try:
+                    stream.consume()  # Skip WITH
+                    token = stream.peek()
+                    if token and token.type == TokenType.TEST:
+                        stream.consume()  # Skip TEST
+                        token = stream.peek()
+                        if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
+                            val = token.type.name  # "BEFORE" or "AFTER"
+                            stmt.set_test_timing(val)
+                            stream.consume()
+                            token = stream.peek()
+                except Exception:
+                    pass
+                
+                self._skip_whitespace(stream)
+                token = stream.peek()
+            
             # Parse UNTIL condition
             token = stream.peek()
-            if token and (token.type == TokenType.UNTIL or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "UNTIL")):
+            if token and token.type == TokenType.UNTIL:
                 self._parse_until_conditional(stream, stmt)
+                # Now set the varying clause with the collected values and the until condition
+                until_condition = stmt.until_condition
+                if until_condition:
+                    stmt.set_varying_clause(variable_name, from_value, by_value, until_condition)
             else:
-                # Parse inline statements
+                # Parse inline statements without UNTIL
                 self._parse_inline_statements(stream, stmt)
         except Exception:
             pass
@@ -282,7 +340,11 @@ class PerformStatementParser(IStatementParser):
             
             if condition_tokens:
                 condition_str = " ".join(condition_tokens).strip()
-                # Note: Would need to set condition on statement if supported
+                # Create CobolExpression for the condition and set it on the statement
+                location = SourceLocation(0, 0)  # Default location; ideally would be from first token
+                condition_expr = CobolExpression("CONDITION", location)
+                condition_expr.operands = [condition_str]  # Store the condition string as operand
+                stmt.set_until_clause(condition_expr)
             
             # Parse inline statements
             self._parse_inline_statements(stream, stmt)
@@ -295,17 +357,38 @@ class PerformStatementParser(IStatementParser):
             stream.consume()  # Skip UNTIL
             self._skip_whitespace(stream)
             
-            # Collect condition tokens
+            # Collect condition tokens - stop at statement keywords
+            STATEMENT_TOKEN_TYPES = {
+                TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF, 
+                TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
+                TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN, 
+                TokenType.CLOSE, TokenType.STOP, TokenType.END_PERFORM
+            }
+            
             condition_tokens = []
             while True:
                 token = stream.peek()
                 if not token:
                     break
-                if token.type == TokenType.PERIOD or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-PERFORM"):
+                # Stop at period, END-PERFORM, or statement keywords
+                if (token.type == TokenType.PERIOD or 
+                    (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-PERFORM") or
+                    token.type in STATEMENT_TOKEN_TYPES or
+                    (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("DISPLAY", "MOVE", "IF", "CALL", "PERFORM", "EVALUATE"))):
                     break
                 
                 condition_tokens.append(token.value or str(token.type))
                 stream.consume()
+            
+            # Create CobolExpression for the condition and store it
+            # This will be used in set_varying_clause call
+            if condition_tokens:
+                condition_str = " ".join(condition_tokens).strip()
+                location = SourceLocation(0, 0)  # Default location
+                condition_expr = CobolExpression("CONDITION", location)
+                condition_expr.operands = [condition_str]
+                # Store the condition on the statement (varies will be set when set_varying_clause is called)
+                stmt.until_condition = condition_expr
             
             # Parse inline statements
             self._parse_inline_statements(stream, stmt)
@@ -336,6 +419,14 @@ class PerformStatementParser(IStatementParser):
                 
                 condition_tokens.append(token.value or str(token.type))
                 stream.consume()
+            
+            # Create CobolExpression for the condition and set it on statement
+            if condition_tokens:
+                condition_str = " ".join(condition_tokens).strip()
+                location = SourceLocation(0, 0)  # Default location
+                condition_expr = CobolExpression("CONDITION", location)
+                condition_expr.operands = [condition_str]
+                stmt.set_until_clause(condition_expr)
         except Exception:
             pass
     

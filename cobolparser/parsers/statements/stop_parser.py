@@ -27,7 +27,9 @@ class StopStatementParser(IStatementParser):
             return StopStatement(SourceLocation(0, 0))
         
         # Create statement
-        stmt = StopStatement(start_token.location if hasattr(start_token, 'location') else None)
+        from ...models.ast_base import SourceLocation
+        location = getattr(start_token, 'location', None) or SourceLocation(0, 0)
+        stmt = StopStatement(location)
         
         # Parse STOP type: STOP RUN or STOP "literal"
         if not token_stream.is_empty():

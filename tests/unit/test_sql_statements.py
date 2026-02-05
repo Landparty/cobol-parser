@@ -489,7 +489,7 @@ class TestExecSQLParsing:
                 sql_found = False
                 for section in proc_div.sections:
                     for child in section.children:
-                        if hasattr(child, 'sql_type'):
+                        if isinstance(child, ExecSQLStatement):
                             sql_found = True
                             assert child.sql_type == SQLStatementType.SELECT
                 # SQL statement should be found

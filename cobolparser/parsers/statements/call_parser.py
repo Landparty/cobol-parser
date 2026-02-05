@@ -1,6 +1,8 @@
 """Call statement parser implementing IStatementParser interface."""
 
-from ...core.interfaces import IStatementParser, ITokenStream
+from typing import cast, Optional, Any
+
+from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...core.ast_factory import get_factory
 from ...models.statements import CallStatement
 from ...models.ast_base import SourceLocation
@@ -16,9 +18,11 @@ class CallStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return (token.type == TokenType.CALL or
-                    (token.type == TokenType.IDENTIFIER and token.value and 
-                     token.value.upper() == "CALL"))
+            if token.type == TokenType.CALL:
+                return True
+            if token.type == TokenType.IDENTIFIER and token.value:
+                return token.value.upper() == "CALL"
+            return False
         except Exception:
             return False
     
@@ -28,19 +32,33 @@ class CallStatementParser(IStatementParser):
         Supports:
         - CALL "program-name"  (static)
         - CALL variable-name   (dynamic)
-        - CALL ... USING parameters
+        - CALL ... USING [BY REFERENCE|CONTENT|VALUE] parameters
         - CALL ... RETURNING variable
         - CALL ... GIVING variable
         """
+        import sys
+        DEBUG = False
+        
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0))
+        stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
+        
+        # Get context for error reporting if available
+        context: Optional[ParseContext] = getattr(token_stream, '_context', None)
+        if context is None and hasattr(token_stream, 'context'):
+            context = getattr(token_stream, 'context')
         
         try:
             self._skip_whitespace(token_stream)
             token = token_stream.peek()
             
             if not token:
+                # Missing program name
+                if context:
+                    context.error(
+                        "CALL statement requires a program name (literal or variable)",
+                        start_token.location if start_token else SourceLocation(0, 0)
+                    )
                 return stmt
             
             # Parse the program name (can be literal or identifier)
@@ -56,11 +74,29 @@ class CallStatementParser(IStatementParser):
                 stmt.set_called_program(program_name, is_dynamic=True)
                 token_stream.consume()
             else:
-                # Unknown token type, skip it
+                # Unknown token type, report error  
+                if context:
+                    context.error(
+                        f"Expected program name (literal or identifier), found {token.type.name if hasattr(token.type, 'name') else str(token.type)}",
+                        token.location if hasattr(token, 'location') else SourceLocation(0, 0)
+                    )
                 token_stream.consume()
                 return stmt
             
             # Parse optional USING and RETURNING clauses
+            STATEMENT_TOKEN_TYPES = {
+                TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF,
+                TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
+                TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN,
+                TokenType.CLOSE, TokenType.STOP, TokenType.ADD, TokenType.SUBTRACT,
+                TokenType.MULTIPLY, TokenType.DIVIDE
+            }
+            STATEMENT_KEYWORDS = {
+                "PERFORM", "DISPLAY", "MOVE", "IF", "EVALUATE", "ACCEPT",
+                "CALL", "COMPUTE", "INSPECT", "READ", "WRITE", "OPEN",
+                "CLOSE", "STOP", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"
+            }
+            
             while not token_stream.is_empty():
                 self._skip_whitespace(token_stream)
                 token = token_stream.peek()
@@ -72,23 +108,23 @@ class CallStatementParser(IStatementParser):
                     token_stream.consume()
                     break
                 
+                # Check for statement keywords that end the CALL statement
+                if token.type in STATEMENT_TOKEN_TYPES:
+                    # This is a new statement, not part of CALL
+                    break
+                
+                if token.type == TokenType.IDENTIFIER and token.value:
+                    if token.value.upper() in STATEMENT_KEYWORDS and token.value.upper() not in ("RETURNING", "GIVING"):
+                        # This is a new statement, not part of CALL
+                        break
+                
                 # Parse USING clause
                 if token.type == TokenType.USING or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "USING"):
                     token_stream.consume()
                     # Parse parameter list until RETURNING or GIVING or PERIOD
-                    while not token_stream.is_empty():
-                        self._skip_whitespace(token_stream)
-                        token = token_stream.peek()
-                        if not token or token.type == TokenType.PERIOD:
-                            break
-                        if token.type == TokenType.IDENTIFIER and token.value:
-                            val_upper = token.value.upper()
-                            if val_upper in ("RETURNING", "GIVING", "ON", "BY"):
-                                break
-                        if token.type == TokenType.IDENTIFIER:
-                            stmt.add_using_parameter(token.value)
-                        token_stream.consume()
-                elif token.type == TokenType.RETURNING or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "RETURNING"):
+                    self._parse_using_clause(token_stream, stmt)
+                    continue
+                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "RETURNING":
                     token_stream.consume()
                     self._skip_whitespace(token_stream)
                     token = token_stream.peek()
@@ -103,12 +139,76 @@ class CallStatementParser(IStatementParser):
                         stmt.set_giving_parameter(token.value)
                         token_stream.consume()
                 else:
-                    # Skip unknown tokens
-                    token_stream.consume()
-        except Exception:
+                    # Skip unknown tokens or end of CALL statement
+                    break
+        except Exception as e:
+            import sys
+            print(f"DEBUG: Exception in parse: {e}", file=sys.stderr)
             pass
         
         return stmt
+    
+    def _parse_using_clause(self, token_stream: ITokenStream, stmt: CallStatement) -> None:
+        """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""
+        
+        STATEMENT_TOKEN_TYPES = {
+            TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF,
+            TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
+            TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN,
+            TokenType.CLOSE, TokenType.STOP, TokenType.ADD, TokenType.SUBTRACT,
+            TokenType.MULTIPLY, TokenType.DIVIDE
+        }
+        STATEMENT_KEYWORDS = {
+            "PERFORM", "DISPLAY", "MOVE", "IF", "EVALUATE", "ACCEPT",
+            "CALL", "COMPUTE", "INSPECT", "READ", "WRITE", "OPEN",
+            "CLOSE", "STOP", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"
+        }
+        
+        while not token_stream.is_empty():
+            self._skip_whitespace(token_stream)
+            token = token_stream.peek()
+            
+            if not token or token.type == TokenType.PERIOD:
+                break
+            
+            # Check for end of USING clause
+            if token.type == TokenType.IDENTIFIER and token.value:
+                val_upper = token.value.upper()
+                if val_upper in ("RETURNING", "GIVING", "ON"):
+                    break
+                # Check for statement keywords
+                if val_upper in STATEMENT_KEYWORDS:
+                    break
+            # Check for statement token types
+            elif token.type in STATEMENT_TOKEN_TYPES:
+                break
+            # Check for non-parameter tokens (like NUMERIC_LITERAL), end of USING clause
+            elif token.type not in (TokenType.BY, TokenType.USING) and token.type != TokenType.IDENTIFIER:
+                break
+            
+            # Check for BY [REFERENCE|CONTENT|VALUE]
+            passing_mode = "REFERENCE"  # Default
+            if token.type == TokenType.BY or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "BY"):
+                token_stream.consume()
+                self._skip_whitespace(token_stream)
+                token = token_stream.peek()
+                if token and token.type == TokenType.IDENTIFIER:
+                    mode_val = token.value.upper()
+                    if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
+                        passing_mode = mode_val
+                        token_stream.consume()
+                        self._skip_whitespace(token_stream)
+                        token = token_stream.peek()
+            
+            # Parse parameter name
+            if token and token.type == TokenType.IDENTIFIER:
+                param_name = token.value
+                stmt.add_using_parameter(param_name, passing_mode)
+                token_stream.consume()
+            else:
+                # No parameter found, end of USING clause
+                break
+
     
     def _skip_whitespace(self, stream: ITokenStream) -> None:
         """Skip whitespace and newline tokens if possible."""
@@ -121,3 +221,4 @@ class CallStatementParser(IStatementParser):
                     break
         except Exception:
             pass
+

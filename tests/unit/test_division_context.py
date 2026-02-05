@@ -6,7 +6,7 @@ division and section they belong to.
 """
 
 import pytest
-from cobolparser import parse_cobol
+from cobolparser import parse_cobol, CobolParser
 from cobolparser.models.statements import CobolStatement
 from cobolparser.models.data_items import CobolDataItem
 

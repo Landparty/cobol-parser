@@ -1,5 +1,6 @@
 """Move statement parser implementing IStatementParser interface."""
 
+from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import MoveStatement
@@ -10,7 +11,9 @@ from ...lexer import TokenType
 class MoveStatementParser(IStatementParser):
     """Parser for MOVE statements using IStatementParser interface.
     
-    Refactored to support registry-based statement parsing.
+    Supports:
+    - MOVE source TO target [target]*
+    - MOVE CORRESPONDING source TO target
     """
     
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -19,9 +22,11 @@ class MoveStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return (token.type == TokenType.MOVE or
-                    (token.type == TokenType.IDENTIFIER and token.value and 
-                     token.value.upper() == "MOVE"))
+            if token.type == TokenType.MOVE:
+                return True
+            if token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "MOVE":
+                return True
+            return False
         except Exception:
             return False
     
@@ -29,26 +34,120 @@ class MoveStatementParser(IStatementParser):
         """Parse a MOVE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = factory.create(MoveStatement, start_token.location if start_token else SourceLocation(0, 0))
+        stmt = cast(MoveStatement, factory.create(MoveStatement, start_token.location if start_token else SourceLocation(0, 0)))
         
-        # Parse: MOVE source [TO target]+ | MOVE CORRESPONDING source TO target
-        # Simplified for now - just parse basic structure
+        # Skip whitespace
         self._skip_whitespace(token_stream)
         
-        # Collect tokens until period
+        # Check for CORRESPONDING or CORR
+        token = token_stream.peek()
+        if token and token.type == TokenType.IDENTIFIER and token.value:
+            if token.value.upper() in ("CORRESPONDING", "CORR"):
+                stmt.set_corresponding(True)
+                token_stream.consume()
+                self._skip_whitespace(token_stream)
+        
+        # Parse source operand
+        source = self._parse_source(token_stream)
+        stmt.set_source(source)
+        
+        self._skip_whitespace(token_stream)
+        
+        # Expect TO keyword
+        token = token_stream.peek()
+        if token and (token.type == TokenType.TO or 
+                     (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "TO")):
+            token_stream.consume()
+        else:
+            # Missing TO, but continue parsing
+            return stmt
+        
+        self._skip_whitespace(token_stream)
+        
+        # Parse targets - only collect one target unless we have more TO keywords
+        target_count = 0
+        
+        # Build set of stop token types (only include types that exist)
+        stop_token_types = set()
+        for token_type_name in ['MOVE', 'DISPLAY', 'CALL', 'ADD', 'SUBTRACT', 'MULTIPLY', 
+                               'DIVIDE', 'IF', 'PERFORM', 'EVALUATE', 'STOP', 'EXIT', 
+                               'GO', 'ELSE', 'WHEN', 'END_IF', 'END_EVALUATE', 'END_PERFORM']:
+            if hasattr(TokenType, token_type_name):
+                stop_token_types.add(getattr(TokenType, token_type_name))
+        
         while not token_stream.is_empty():
+            self._skip_whitespace(token_stream)
             token = token_stream.peek()
+            
             if not token or token.type == TokenType.PERIOD:
-                if token:
+                if token and token.type == TokenType.PERIOD:
                     token_stream.consume()
                 break
-            token_stream.consume()
+            
+            # Stop at keywords - check by TokenType first
+            if token.type in stop_token_types:
+                break
+            
+            # Also check for keywords by value for non-statement types
+            if token.type == TokenType.IDENTIFIER and token.value:
+                val_upper = token.value.upper()
+                if val_upper in ("END-MOVE", "ON", "RETURNING", "GIVING", "END-IF", "ELSE", "THEN"):
+                    break
+            
+            # Parse target - only collect IDENTIFIERs
+            if token.type == TokenType.IDENTIFIER:
+                target_name = token.value
+                if target_name:
+                    stmt.add_target(target_name)
+                target_count += 1
+                token_stream.consume()
+            else:
+                # Skip non-identifier tokens (operators, comparisons, etc)
+                token_stream.consume()
         
         return stmt
     
-    @staticmethod
-    def _skip_whitespace(token_stream: ITokenStream) -> None:
-        """Skip whitespace tokens."""
+    def _parse_source(self, token_stream: ITokenStream) -> str:
+        """Parse source operand until TO keyword is found."""
+        source_parts = []
+        paren_depth = 0
+        
+        while not token_stream.is_empty():
+            self._skip_whitespace(token_stream)
+            token = token_stream.peek()
+            
+            if not token:
+                break
+            
+            # Check for TO keyword (only if not in parens)
+            if paren_depth == 0:
+                if token.type == TokenType.TO or (
+                    token.type == TokenType.IDENTIFIER and token.value and 
+                    token.value.upper() == "TO"):
+                    break
+            
+            # Handle parentheses
+            if token.type == TokenType.LEFT_PAREN:
+                paren_depth += 1
+            elif token.type == TokenType.RIGHT_PAREN:
+                paren_depth = max(0, paren_depth - 1)
+            
+            # Stop at period if not in parens
+            if paren_depth == 0 and token.type == TokenType.PERIOD:
+                break
+            
+            # Get token value
+            if token.type == TokenType.STRING_LITERAL:
+                source_parts.append(f'"{token.value}"')
+            elif token.value:
+                source_parts.append(token.value)
+            
+            token_stream.consume()
+        
+        return "".join(source_parts) if source_parts else ""
+    
+    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
+        """Skip whitespace and newline tokens."""
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token or token.type not in (TokenType.WHITESPACE, 

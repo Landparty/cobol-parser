@@ -97,13 +97,35 @@ class IOCoverageReporter:
             catalog_path: Path to io-variation-catalog.csv
             schema_path: Path to io-coverage-schema.json
         """
-        self.catalog_path = catalog_path or self._find_catalog_path()
-        self.schema_path = schema_path or self._find_schema_path()
+        # Only search for files if they're not provided explicitly
+        # If they can't be found, set to None to allow for test mocking
+        if catalog_path:
+            self.catalog_path = catalog_path
+        else:
+            # Try to find it, but don't fail if not found
+            try:
+                self.catalog_path = self._find_catalog_path()
+            except FileNotFoundError:
+                self.catalog_path = None
+        
+        if schema_path:
+            self.schema_path = schema_path
+        else:
+            # Try to find it, but don't fail if not found
+            self.schema_path = self._find_schema_path(optional=True)
+        
         self.variations: List[IoVariationCoverage] = []
         self.test_results: Dict[str, List[Dict[str, Any]]] = {}
 
-    def _find_catalog_path(self) -> str:
-        """Find the IO variation catalog path."""
+    def _find_catalog_path(self, optional: bool = False) -> Optional[str]:
+        """Find the IO variation catalog path.
+        
+        Args:
+            optional: If True, return None if catalog not found instead of raising
+        
+        Returns:
+            Path to catalog or None if optional and not found
+        """
         possible_paths = [
             "specs/001-io-variation-coverage/io-variation-catalog.csv",
             "specs/io-variation-coverage/io-variation-catalog.csv",
@@ -113,12 +135,23 @@ class IOCoverageReporter:
         for path in possible_paths:
             if os.path.exists(path):
                 return path
+        
+        if optional:
+            return None
+        
         raise FileNotFoundError(
             f"Could not find IO variation catalog. Searched: {possible_paths}"
         )
 
-    def _find_schema_path(self) -> str:
-        """Find the coverage schema path."""
+    def _find_schema_path(self, optional: bool = False) -> Optional[str]:
+        """Find the coverage schema path.
+        
+        Args:
+            optional: If True, return None if schema not found instead of raising
+        
+        Returns:
+            Path to schema or None if optional and not found
+        """
         possible_paths = [
             "contracts/io-coverage-schema.json",
             "specs/001-io-variation-coverage/contracts/io-coverage-schema.json",
@@ -128,6 +161,10 @@ class IOCoverageReporter:
         for path in possible_paths:
             if os.path.exists(path):
                 return path
+        
+        if optional:
+            return None
+        
         raise FileNotFoundError(
             f"Could not find coverage schema. Searched: {possible_paths}"
         )

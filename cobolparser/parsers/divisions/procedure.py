@@ -9,7 +9,7 @@ Uses StatementParserRegistry for pluggable statement parsing and dispatch.
 
 from typing import Dict, Any, List, Optional
 
-from cobolparser.core.interfaces import ITokenStream
+from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.core.registry import StatementParserRegistry
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolSection, CobolParagraph
@@ -31,6 +31,7 @@ from cobolparser.parsers.statements import (
     GoStatementParser,
 )
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
+from cobolparser.parsers.statements.write_parser import WriteStatementParser
 from .base import BaseDivisionParser
 
 
@@ -95,6 +96,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(EntryStatementParser())
         registry.register(GoStatementParser())
         
+        # IO statements
+        registry.register(WriteStatementParser())
+        
         # Arithmetic statements
         registry.register(ComputeStatementParser())
         registry.register(AddStatementParser())
@@ -138,9 +142,15 @@ class ProcedureDivisionParser(BaseDivisionParser):
             
             token_value = token.value.upper() if token.value else ""
             
-            # Check for next division start
+            # Check for next division start or END PROGRAM/DIVISION
             if token_value in ("IDENTIFICATION", "ENVIRONMENT", "DATA"):
                 break
+            
+            # Check for END PROGRAM or END DIVISION
+            if token_value == "END":
+                next_token = token_stream.peek(1)
+                if next_token and next_token.value and next_token.value.upper() in ("PROGRAM", "DIVISION"):
+                    break
             
             # Check for SECTION keyword
             if self._is_section_marker(token_stream):
@@ -186,6 +196,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         if not hasattr(token_stream, '_registry'):
                             token_stream._registry = self._statement_registry
                         
+                        # Attach context to stream for error reporting
+                        context = ParseContext(self.host, self._statement_registry)
+                        token_stream._parse_context = context
+                        
                         statement = parser.parse(token_stream)
                         paragraphs[-1]["statements"].append({
                             "type": "statement",
@@ -199,8 +213,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     # No parser found, skip the statement
                     self._skip_to_next_statement(token_stream)
             
-            elif token_value not in ("SECTION", "IDENTIFICATION", "ENVIRONMENT", "DATA", "END"):
-                # Treat as paragraph name (only if not a statement keyword)
+            elif token_value not in ("SECTION", "IDENTIFICATION", "ENVIRONMENT", "DATA", "END", "PROGRAM", "DIVISION"):
+                # Treat as paragraph name (only if not a keyword)
                 para_name = token_value
                 para_location = token.location if hasattr(token, 'location') else SourceLocation(0, 0)
                 token_stream.consume()  # consume paragraph name
@@ -284,6 +298,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     if not hasattr(token_stream, '_registry'):
                         token_stream._registry = self._statement_registry
                     
+                    # Attach context to stream for error reporting
+                    context = ParseContext(self.host, self._statement_registry)
+                    token_stream._parse_context = context
+                    
                     statement = parser.parse(token_stream)
                     statements.append({
                         "type": "statement",
@@ -293,6 +311,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 except Exception as e:
                     # If parsing fails, skip statement and continue
                     self._skip_to_next_statement(token_stream)
+            elif token.value == ".":
+                # Period terminates statement - consume it and continue
+                token_stream.consume()
             else:
                 if _DEBUG:
                     import sys
@@ -309,6 +330,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
         - A period (paragraph end/start)
         - SECTION keyword (section definition)
         
+        Handles the case where current position is at a period (end of previous
+        paragraph), and next token is a paragraph name identifier.
+        
         Args:
             token_stream: Token stream to check
             
@@ -319,7 +343,42 @@ class ProcedureDivisionParser(BaseDivisionParser):
             return False
         
         token = token_stream.peek(0)
-        if not token or token.type.name != 'IDENTIFIER':
+        if not token:
+            return False
+        
+        # Case 1: If current token is a PERIOD, check if the next token after it
+        # is an IDENTIFIER (new paragraph name)
+        if token.value == ".":
+            # Skip the period and any whitespace/newlines
+            next_idx = 1
+            while next_idx < 10:  # Reasonable lookahead
+                next_token = token_stream.peek(next_idx)
+                if not next_token:
+                    return False
+                if next_token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
+                    next_idx += 1
+                    continue
+                # Found a non-whitespace token
+                if next_token.type.name == "IDENTIFIER":
+                    # Check if it's followed by SECTION or a period (paragraph name pattern)
+                    next_next_idx = next_idx + 1
+                    while next_next_idx < 10:
+                        next_next_token = token_stream.peek(next_next_idx)
+                        if not next_next_token:
+                            return True  # Assume it's a paragraph name
+                        if next_next_token.type.name in ("NEWLINE", "WHITESPACE"):
+                            next_next_idx += 1
+                            continue
+                        # Check for SECTION or period after identifier
+                        if next_next_token.value == "." or (next_next_token.value and next_next_token.value.upper() == "SECTION"):
+                            return True
+                        break
+                    return False
+                return False
+            return False
+        
+        # Case 2: Original logic - current token is an IDENTIFIER
+        if token.type.name != 'IDENTIFIER':
             return False
         
         # Look ahead for SECTION or period
@@ -390,6 +449,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
             
             if token.value == ".":
                 token_stream.consume()
+                break
+
+            if self._is_paragraph_or_section_start(token_stream):
                 break
             
             # Stop if we hit a statement keyword
