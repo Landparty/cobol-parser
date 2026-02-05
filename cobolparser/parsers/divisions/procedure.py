@@ -194,11 +194,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     try:
                         # Attach registry to stream for nested statement parsing
                         if not hasattr(token_stream, '_registry'):
-                            token_stream._registry = self._statement_registry
+                            setattr(token_stream, '_registry', self._statement_registry)
                         
                         # Attach context to stream for error reporting
                         context = ParseContext(self.host, self._statement_registry)
-                        token_stream._parse_context = context
+                        setattr(token_stream, '_parse_context', context)
                         
                         statement = parser.parse(token_stream)
                         paragraphs[-1]["statements"].append({
@@ -296,11 +296,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 try:
                     # Attach registry to stream for nested statement parsing
                     if not hasattr(token_stream, '_registry'):
-                        token_stream._registry = self._statement_registry
+                        setattr(token_stream, '_registry', self._statement_registry)
                     
                     # Attach context to stream for error reporting
                     context = ParseContext(self.host, self._statement_registry)
-                    token_stream._parse_context = context
+                    setattr(token_stream, '_parse_context', context)
                     
                     statement = parser.parse(token_stream)
                     statements.append({

@@ -34,7 +34,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
     division_name = "IDENTIFICATION"
     division_keywords = ("ID",)
 
-    def parse_division(self, token_stream: ITokenStream) -> Dict[str, Any]:
+    def parse_division(self, token_stream: ITokenStream) -> Dict[str, Optional[str]]:
         """Parse Identification Division content.
         
         Parses all identification clauses (PROGRAM-ID is mandatory, others optional):
@@ -59,7 +59,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
             - remarks: Optional[str]
             - security: Optional[str]
         """
-        content = {
+        content: Dict[str, Optional[str]] = {
             "program_id": None,
             "author": None,
             "installation": None,
@@ -103,8 +103,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
         # Validate mandatory PROGRAM-ID
         if not content["program_id"]:
             raise ParseError(
-                "PROGRAM-ID is mandatory in IDENTIFICATION DIVISION",
-                token_stream.peek(0).location.line if not token_stream.is_empty() else 1
+                "PROGRAM-ID is mandatory in IDENTIFICATION DIVISION"
             )
         
         return content

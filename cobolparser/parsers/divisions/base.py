@@ -8,9 +8,11 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
 from cobolparser.core.interfaces import ITokenStream, IDivisionParser
+from cobolparser.models.ast_base import SourceLocation
 from cobolparser.core.exceptions import ParseError, DivisionNotFoundError
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.lexer import TokenType
+
 
 
 class BaseDivisionParser(IDivisionParser, ABC):
@@ -24,7 +26,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
     """
 
     # Must be set by subclasses
-    division_name: str = None  # e.g., "IDENTIFICATION", "DATA", "PROCEDURE"
+    division_name: Optional[str] = None  # e.g., "IDENTIFICATION", "DATA", "PROCEDURE"
     division_keywords: tuple = ()  # e.g., ("IDENTIFICATION", "ID")
     
     def __init__(self):
@@ -76,9 +78,12 @@ class BaseDivisionParser(IDivisionParser, ABC):
         if not self.can_parse(token_stream):
             first_token = token_stream.peek(0)
             token_value = first_token.value if first_token else "EOF"
+            loc = first_token.location if first_token else SourceLocation(1, 1)
             raise DivisionNotFoundError(
                 f"Expected {self.division_name} division, got {token_value}",
-                first_token.location if first_token else SourceLocation(1, 1)
+                file_path=None,
+                line_number=loc.line,
+                column=loc.column
             )
         
         # Consume division keyword
@@ -91,17 +96,15 @@ class BaseDivisionParser(IDivisionParser, ABC):
             if next_token and next_token.value.upper() == "DIVISION":
                 token_stream.consume()
         
-        # Skip newlines and whitespace before expecting period (for fixed-format COBOL)
-        token_stream.skip_whitespace_and_comments()
-        
         # Expect period (.) after division header
         try:
             token_stream.expect(".")
         except Exception as e:
             raise ParseError(
                 f"Expected '.' after {self.division_name} DIVISION header",
-                division_token.location.line,
-                division_token.location.column
+                file_path=None,
+                line_number=division_token.location.line,
+                column=division_token.location.column
             ) from e
         
         # Parse division-specific content

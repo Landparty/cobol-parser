@@ -1,12 +1,12 @@
 """Abstract base classes and interfaces for COBOL parser components."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING, Protocol, Any
+from typing import Optional, TYPE_CHECKING, Protocol, Any, Union
 
 if TYPE_CHECKING:
     from ..lexer import Token
     from ..models.ast_base import ASTNode
-    from .registry import StatementRegistry
+    from .registry import StatementRegistry, StatementParserRegistry
 
 
 class ITokenStream(ABC):
@@ -160,7 +160,7 @@ class ParseContext:
     Provides shared context during nested parsing operations.
     """
     
-    def __init__(self, host: Any, registry: Optional["StatementRegistry"] = None):
+    def __init__(self, host: Any, registry: Optional[Union["StatementRegistry", "StatementParserRegistry"]] = None):
         """Initialize parsing context.
         
         Args:
