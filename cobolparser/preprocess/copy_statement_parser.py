@@ -71,7 +71,7 @@ COPY_PATTERN = re.compile(
         r'|'
         r"'([^']+)'"  # Single-quoted member name (group 2)
         r'|'
-        r'([A-Za-z0-9_-]+)'  # Unquoted member name (group 3)
+        r'([A-Za-z0-9_.-]+)'  # Unquoted member name (group 3) - allow dots for extensions like .CPY
     r')'
     r'(?:\s+(?:IN|OF)\s+([A-Za-z0-9_-]+))?'  # Optional library qualifier (group 4)
     r'(?:\s+(SUPPRESS)(?:\s+(PRINTING))?)?'  # Optional SUPPRESS [PRINTING] clause (groups 5, 6)
@@ -436,12 +436,21 @@ class CopyStatementLexer:
         # 3. Identifier or qualified identifier
         while not self._is_at_end():
             c = self._peek()
-            if c.isspace() or c in ('.', ',', ';', '=', '(', ')'):
+            if c.isspace() or c in (',', ';', '=', '(', ')'):
                 if c == '(' : # Handle MEMBER(QUAL)
                    while not self._is_at_end() and self._peek() != ')':
                        self._advance()
                    if not self._is_at_end(): self._advance()
                    continue
+                break
+            # Allow dot inside identifier only when followed by alphanumeric
+            # (e.g. "CUSTDATA.CPY" — the .CPY is a file extension)
+            # Stop at dot if followed by space or another non-alnum (statement terminator)
+            if c == '.':
+                next_c = self._peek(1)
+                if next_c and (next_c.isalnum() or next_c == '_'):
+                    self._advance()
+                    continue
                 break
             self._advance()
             

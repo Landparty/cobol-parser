@@ -143,7 +143,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
             token_value = token.value.upper() if token.value else ""
             
             # Check for next division start or END PROGRAM/DIVISION
-            if token_value in ("IDENTIFICATION", "ENVIRONMENT", "DATA"):
+            # Handle both bare keywords and composite tokens (e.g. "DATA DIVISION")
+            _stop_div = ("IDENTIFICATION", "ENVIRONMENT", "DATA")
+            if token_value in _stop_div:
+                break
+            if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
             
             # Check for END PROGRAM or END DIVISION

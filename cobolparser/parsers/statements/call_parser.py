@@ -138,6 +138,33 @@ class CallStatementParser(IStatementParser):
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_giving_parameter(token.value)
                         token_stream.consume()
+                elif (token.type == TokenType.ON or
+                      (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "ON")):
+                    # ON EXCEPTION clause - parse nested statements
+                    next_tok = token_stream.peek(1)
+                    if next_tok and next_tok.value and next_tok.value.upper() == "EXCEPTION":
+                        token_stream.consume()  # ON
+                        token_stream.consume()  # EXCEPTION
+                        nested = self._parse_nested_stmts(token_stream, stop_at={"NOT", "END-CALL"})
+                        stmt.on_exception = nested if nested else None
+                    else:
+                        break
+                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "NOT":
+                    # NOT ON EXCEPTION clause
+                    t1 = token_stream.peek(1)
+                    t2 = token_stream.peek(2)
+                    if (t1 and t1.value and t1.value.upper() == "ON" and
+                            t2 and t2.value and t2.value.upper() == "EXCEPTION"):
+                        token_stream.consume()  # NOT
+                        token_stream.consume()  # ON
+                        token_stream.consume()  # EXCEPTION
+                        nested = self._parse_nested_stmts(token_stream, stop_at={"END-CALL"})
+                        stmt.not_on_exception = nested if nested else None
+                    else:
+                        break
+                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-CALL":
+                    token_stream.consume()  # consume END-CALL
+                    break
                 else:
                     # Skip unknown tokens or end of CALL statement
                     break
@@ -147,6 +174,36 @@ class CallStatementParser(IStatementParser):
             pass
         
         return stmt
+
+    def _parse_nested_stmts(self, token_stream: ITokenStream, stop_at: set) -> list:
+        """Parse statements until a stop keyword is found.
+
+        Used for ON EXCEPTION / NOT ON EXCEPTION clause bodies.
+        Returns list of CobolStatement objects.
+        """
+        stmts = []
+        registry = getattr(token_stream, '_registry', None)
+        while not token_stream.is_empty():
+            self._skip_whitespace(token_stream)
+            token = token_stream.peek()
+            if not token:
+                break
+            val = token.value.upper() if token.value else ""
+            if val in stop_at or val == ".":
+                break
+            if registry:
+                parser = registry.find_parser(token_stream)
+                if parser:
+                    try:
+                        nested_stmt = parser.parse(token_stream)
+                        stmts.append(nested_stmt)
+                    except Exception:
+                        token_stream.consume()
+                else:
+                    token_stream.consume()
+            else:
+                token_stream.consume()
+        return stmts
     
     def _parse_using_clause(self, token_stream: ITokenStream, stmt: CallStatement) -> None:
         """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""

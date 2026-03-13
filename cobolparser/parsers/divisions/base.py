@@ -55,8 +55,19 @@ class BaseDivisionParser(IDivisionParser, ABC):
         # Check if token matches any of the division keywords
         token_value = next_token.value.upper()
         division_keywords = (self.division_name,) + self.division_keywords
-        
-        return token_value in division_keywords
+
+        # Handle composite division tokens produced by the lexer in free-form mode
+        # e.g. IDENTIFICATION_DIVISION token has value 'IDENTIFICATION DIVISION'
+        # which won't match the bare keyword 'IDENTIFICATION'
+        if token_value in division_keywords:
+            return True
+        composite = f"{self.division_name} DIVISION"
+        if token_value == composite:
+            return True
+        for kw in self.division_keywords:
+            if token_value == f"{kw} DIVISION":
+                return True
+        return False
 
     def parse(self, token_stream: ITokenStream) -> ASTNode:
         """Parse a complete COBOL division.
@@ -96,16 +107,17 @@ class BaseDivisionParser(IDivisionParser, ABC):
             if next_token and next_token.value.upper() == "DIVISION":
                 token_stream.consume()
         
-        # Expect period (.) after division header
-        try:
-            token_stream.expect(".")
-        except Exception as e:
-            raise ParseError(
-                f"Expected '.' after {self.division_name} DIVISION header",
-                file_path=None,
-                line_number=division_token.location.line,
-                column=division_token.location.column
-            ) from e
+        # Skip optional header clauses before the period
+        # e.g. PROCEDURE DIVISION USING data-name GIVING result-name.
+        # All remaining tokens up to (and including) the period terminate the header.
+        while not token_stream.is_empty():
+            tok = token_stream.peek(0)
+            if not tok:
+                break
+            if tok.value == ".":
+                token_stream.consume()  # consume the period
+                break
+            token_stream.consume()
         
         # Parse division-specific content
         division_content = self.parse_division(token_stream)

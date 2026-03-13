@@ -78,7 +78,14 @@ class IdentificationDivisionParser(BaseDivisionParser):
             token_value = token.value.upper()
             
             # Check if we've reached next division
-            if token_value in ("ENVIRONMENT", "DATA", "PROCEDURE"):
+            # Handle both bare keywords ("ENVIRONMENT") and composite tokens
+            # ("ENVIRONMENT DIVISION") produced by the lexer in free-form mode
+            _div_keywords = ("ENVIRONMENT", "DATA", "PROCEDURE")
+            if token_value in _div_keywords:
+                break
+            if any(
+                token_value == f"{kw} DIVISION" for kw in _div_keywords
+            ):
                 break
             
             # Parse specific clauses
@@ -206,12 +213,21 @@ class IdentificationDivisionParser(BaseDivisionParser):
             )
         
         # Collect value tokens until period
+        # Also stop at division boundaries to avoid consuming the next division header
         value_tokens = []
+        _div_keywords = ("IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE")
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if token and token.value == ".":
                 token_stream.consume()
                 break
+            # Stop at division boundaries without consuming them
+            if token:
+                tv = token.value.upper()
+                if tv in _div_keywords:
+                    break
+                if any(tv == f"{kw} DIVISION" for kw in _div_keywords):
+                    break
             if token:
                 value_tokens.append(token.value)
                 token_stream.consume()

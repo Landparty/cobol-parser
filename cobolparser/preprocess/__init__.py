@@ -406,9 +406,9 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
         if indicator in ('*', '/'):  # comment (including page eject)
-            # Preserve comment lines - extract the text portion
+            # Preserve line count but drop comment content to avoid it being parsed as code
             flush_buffer()
-            result.append(text_slice.rstrip())
+            result.append("")
             pending_literal = False
             continue
         is_cont = indicator == '-'
@@ -460,6 +460,12 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
                         i += 1
                     else:
                         i += 1
+
+            # Important: If we hit the end of the buffer and pending_literal is true,
+            # this is only a valid pending literal if the next line is actually a continuation.
+            # But here we don't know the next line yet. So we just leave pending_literal as is.
+            # However, we must ensure empty buffers don't cause issues.
+            pass
 
     flush_buffer()
     return '\n'.join(result) + '\n'

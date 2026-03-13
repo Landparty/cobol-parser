@@ -1031,20 +1031,23 @@ class CobolLexer:
                         # Stop tokenizing remaining of this line (all considered part of literal)
                         return tokens
                     else:
-                        # This is clearly an unterminated string that should be an error
-                        # For test cases like 'DISPLAY "Unterminated string', there are no continuation markers
-                        # and no COBOL multi-line context, so this should be an error
+                        # This is clearly an unterminated string.
+                        # However, for free-form COBOL, an isolated quote in a comment
+                        # (e.g., COMPILER"S) should not cause the entire lexing to fail.
+                        # We emit it as a loose string token but don't add a LexerError 
+                        # if free_form is true, to make the parser more robust.
                         partial_value = (
                             text[pos + 1 : new_pos] if new_pos > pos + 1 else ""
                         )
                         err_location = SourceLocation(line_num + 1, start_col + pos, 1)
-                        self.errors.append(
-                            LexerError(
-                                "Unterminated string literal",
-                                err_location,
-                                char + partial_value,
+                        if not self.free_form:
+                            self.errors.append(
+                                LexerError(
+                                    "Unterminated string literal",
+                                    err_location,
+                                    char + partial_value,
+                                )
                             )
-                        )
                         tokens.append(
                             Token(TokenType.STRING_LITERAL, partial_value, err_location)
                         )
@@ -1413,15 +1416,15 @@ class CobolLexer:
 
         # Check for complete division headers
         if remaining.startswith("IDENTIFICATION DIVISION"):
-            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("IDENTIFICATION")
+            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("IDENTIFICATION DIVISION")
         elif remaining.startswith("ID DIVISION"):
-            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("ID")
+            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("ID DIVISION")
         elif remaining.startswith("ENVIRONMENT DIVISION"):
-            return TokenType.ENVIRONMENT_DIVISION, start_pos + len("ENVIRONMENT")
+            return TokenType.ENVIRONMENT_DIVISION, start_pos + len("ENVIRONMENT DIVISION")
         elif remaining.startswith("DATA DIVISION"):
-            return TokenType.DATA_DIVISION, start_pos + len("DATA")
+            return TokenType.DATA_DIVISION, start_pos + len("DATA DIVISION")
         elif remaining.startswith("PROCEDURE DIVISION"):
-            return TokenType.PROCEDURE_DIVISION, start_pos + len("PROCEDURE")
+            return TokenType.PROCEDURE_DIVISION, start_pos + len("PROCEDURE DIVISION")
 
         return None, start_pos
 

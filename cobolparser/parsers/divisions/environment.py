@@ -48,7 +48,11 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             token_value = token.value.upper()
             
             # Check if we've reached next division
-            if token_value in ("IDENTIFICATION", "DATA", "PROCEDURE"):
+            # Handle both bare keywords and composite tokens (e.g. "DATA DIVISION")
+            _stop_div = ("IDENTIFICATION", "DATA", "PROCEDURE")
+            if token_value in _stop_div:
+                break
+            if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
             
             # Parse specific sections
@@ -78,9 +82,12 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         
         # Skip remaining tokens until next SECTION or division
         section_keywords = {"SECTION", "INPUT-OUTPUT", "DATA", "PROCEDURE", "IDENTIFICATION"}
+        _stop_div = ("DATA", "PROCEDURE", "IDENTIFICATION")
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if token and token.value.upper() in section_keywords:
+                break
+            if token and any(token.value.upper() == f"{kw} DIVISION" for kw in _stop_div):
                 break
             token_stream.consume()
         
@@ -122,7 +129,10 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             token_value = token.value.upper()
             
             # Check if we've reached next SECTION or division
-            if token_value in ("CONFIGURATION", "DATA", "PROCEDURE", "IDENTIFICATION"):
+            _stop = ("CONFIGURATION", "DATA", "PROCEDURE", "IDENTIFICATION")
+            if token_value in _stop:
+                break
+            if any(token_value == f"{kw} DIVISION" for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")):
                 break
             
             # Parse FILE-CONTROL paragraph (may appear as "NTROL" due to tokenizer)
@@ -172,6 +182,8 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             # Check for end of FILE-CONTROL (next section/division or paragraph)
             section_keywords = {"CONFIGURATION", "DATA", "PROCEDURE", "IDENTIFICATION", "FILE-CONTROL"}
             if token_value in section_keywords:
+                break
+            if any(token_value == f"{kw} DIVISION" for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")):
                 break
             
             # Parse SELECT statement (may appear as "ECT" due to tokenizer)

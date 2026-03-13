@@ -53,7 +53,11 @@ class DataDivisionParser(BaseDivisionParser):
             token_value = token.value.upper()
             
             # Check if we've reached next division
-            if token_value in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
+            # Handle both bare keywords and composite tokens (e.g. "PROCEDURE DIVISION")
+            _stop_div = ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE")
+            if token_value in _stop_div:
+                break
+            if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
             
             # Parse specific sections
