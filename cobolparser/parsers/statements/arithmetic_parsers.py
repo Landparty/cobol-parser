@@ -1,16 +1,18 @@
-"""Arithmetic statement parsers implementing IStatementParser interface.
+﻿"""Arithmetic statement parsers implementing IStatementParser interface.
 
-Supports ADD, SUBTRACT, MULTIPLY, DIVIDE, and COMPUTE statements.
+Supports ADD, SUBTRACT, MULTIPLY, DIVIDE, and COMPUTE statements with proper
+parsing of operands, targets, expressions, and error handling clauses.
 """
 
 from ...core.interfaces import IStatementParser, ITokenStream
-from ...core.ast_factory import get_factory
 from ...models.statements import (
     AddStatement,
     SubtractStatement,
     MultiplyStatement,
     DivideStatement,
     ComputeStatement,
+    DisplayStatement,
+    MoveStatement,
 )
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
@@ -34,10 +36,53 @@ class AddStatementParser(IStatementParser):
     def parse(self, token_stream: ITokenStream) -> AddStatement:
         """Parse an ADD statement."""
         start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = factory.create(AddStatement, start_token.location if start_token else SourceLocation(0, 0))
-        self._skip_to_period(token_stream)
-        return stmt if isinstance(stmt, AddStatement) else AddStatement(start_token.location if start_token else SourceLocation(0, 0))
+        start_loc = start_token.location if start_token else SourceLocation(0, 0)
+        stmt = AddStatement(start_loc)
+        
+        # Parse operands until TO or GIVING
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+            
+            token_val_upper = token.value.upper() if token.value else ""
+            if token_val_upper in ("TO", "GIVING"):
+                break
+            
+            if token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                stmt.add_operand(token.value)
+            
+            token_stream.consume()
+        
+        # Check for TO or GIVING
+        token = token_stream.peek()
+        if token and token.value:
+            token_val_upper = token.value.upper()
+            if token_val_upper == "TO":
+                token_stream.consume()  # Skip TO
+                token = token_stream.peek()
+                if token and token.type == TokenType.IDENTIFIER:
+                    stmt.set_target(token.value)
+                    token_stream.consume()
+                # After TO, check for GIVING
+                token = token_stream.peek()
+                if token and token.value and token.value.upper() == "GIVING":
+                    token_stream.consume()  # Skip GIVING
+                    token = token_stream.peek()
+                    if token and token.type == TokenType.IDENTIFIER:
+                        stmt.set_giving(token.value)
+                        token_stream.consume()
+            elif token_val_upper == "GIVING":
+                token_stream.consume()  # Skip GIVING
+                token = token_stream.peek()
+                if token and token.type == TokenType.IDENTIFIER:
+                    stmt.set_giving(token.value)
+                    token_stream.consume()
+        
+        # Check for ON SIZE ERROR or NOT ON SIZE ERROR
+        AddStatementParser._parse_size_error_clauses(token_stream, stmt)
+        
+        return stmt
     
     @staticmethod
     def _skip_to_period(token_stream: ITokenStream) -> None:
@@ -49,6 +94,152 @@ class AddStatementParser(IStatementParser):
                     token_stream.consume()
                 break
             token_stream.consume()
+    
+    @staticmethod
+    def _parse_size_error_clauses(token_stream: ITokenStream, stmt) -> None:
+        """Parse ON SIZE ERROR or NOT ON SIZE ERROR clauses with nested statements."""
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token or token.type == TokenType.PERIOD:
+                if token:
+                    token_stream.consume()
+                break
+            
+            # Skip NEWLINE and other non-code tokens
+            if token.type == TokenType.NEWLINE:
+                token_stream.consume()
+                continue
+            
+            if token.value:
+                token_upper = token.value.upper()
+                if token_upper == "ON":
+                    token_stream.consume()
+                    next_token = token_stream.peek()
+                    # Skip NEWLINEs before SIZE
+                    while next_token and next_token.type == TokenType.NEWLINE:
+                        token_stream.consume()
+                        next_token = token_stream.peek()
+                    
+                    if next_token and next_token.value and next_token.value.upper() == "SIZE":
+                        token_stream.consume()
+                        next_token = token_stream.peek()
+                        # Skip NEWLINEs before ERROR
+                        while next_token and next_token.type == TokenType.NEWLINE:
+                            token_stream.consume()
+                            next_token = token_stream.peek()
+                        
+                        if next_token and next_token.value and next_token.value.upper() == "ERROR":
+                            token_stream.consume()
+                            nested = AddStatementParser._parse_nested_statements(token_stream)
+                            stmt.set_on_size_error_clause(nested)
+                elif token_upper == "NOT":
+                    token_stream.consume()
+                    next_token = token_stream.peek()
+                    # Skip NEWLINEs before ON
+                    while next_token and next_token.type == TokenType.NEWLINE:
+                        token_stream.consume()
+                        next_token = token_stream.peek()
+                    
+                    if next_token and next_token.value and next_token.value.upper() == "ON":
+                        token_stream.consume()
+                        next_token = token_stream.peek()
+                        # Skip NEWLINEs before SIZE
+                        while next_token and next_token.type == TokenType.NEWLINE:
+                            token_stream.consume()
+                            next_token = token_stream.peek()
+                        
+                        if next_token and next_token.value and next_token.value.upper() == "SIZE":
+                            token_stream.consume()
+                            next_token = token_stream.peek()
+                            # Skip NEWLINEs before ERROR
+                            while next_token and next_token.type == TokenType.NEWLINE:
+                                token_stream.consume()
+                                next_token = token_stream.peek()
+                            
+                            if next_token and next_token.value and next_token.value.upper() == "ERROR":
+                                token_stream.consume()
+                                nested = AddStatementParser._parse_nested_statements(token_stream)
+                                stmt.set_not_on_size_error_clause(nested)
+                else:
+                    break
+            else:
+                token_stream.consume()
+    
+    @staticmethod
+    def _parse_nested_statements(token_stream: ITokenStream) -> list:
+        """Parse nested statements within ON SIZE ERROR clause."""
+        nested = []
+        
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token or token.type == TokenType.PERIOD:
+                if token:
+                    token_stream.consume()
+                break
+            
+            # Skip NEWLINE tokens
+            if token.type == TokenType.NEWLINE:
+                token_stream.consume()
+                continue
+            
+            if token.value:
+                token_upper = token.value.upper()
+                
+                if token_upper == "DISPLAY":
+                    start = token_stream.consume()
+                    start_loc = start.location if start else SourceLocation(0, 0)
+                    stmt = DisplayStatement(start_loc)
+                    # Collect DISPLAY items
+                    while not token_stream.is_empty():
+                        t = token_stream.peek()
+                        if not t:
+                            break
+                        if t.type == TokenType.NEWLINE:
+                            token_stream.consume()
+                            continue
+                        if t.type == TokenType.PERIOD or (t.value and t.value.upper() in ("MOVE", "DISPLAY")):
+                            break
+                        if t.type in (TokenType.STRING_LITERAL, TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                            stmt.add_item(t.value)
+                        token_stream.consume()
+                    nested.append(stmt)
+                    
+                elif token_upper == "MOVE":
+                    start = token_stream.consume()
+                    start_loc = start.location if start else SourceLocation(0, 0)  
+                    stmt = MoveStatement(start_loc)
+                    # Parse MOVE source TO target
+                    while not token_stream.is_empty():
+                        t = token_stream.peek()
+                        if not t:
+                            break
+                        if t.type == TokenType.NEWLINE:
+                            token_stream.consume()
+                            continue
+                        if t.type == TokenType.PERIOD:
+                            break
+                        if t.value and t.value.upper() == "TO":
+                            token_stream.consume()
+                            target_token = token_stream.peek()
+                            # Skip NEWLINEs before target
+                            while target_token and target_token.type == TokenType.NEWLINE:
+                                token_stream.consume()
+                                target_token = token_stream.peek()
+                            
+                            if target_token and target_token.type == TokenType.IDENTIFIER:
+                                stmt.add_target(target_token.value)
+                                token_stream.consume()
+                            break
+                        if t.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL):
+                            stmt.add_operand(t.value)
+                        token_stream.consume()
+                    nested.append(stmt)
+                else:
+                    token_stream.consume()
+            else:
+                token_stream.consume()
+        
+        return nested
 
 
 class SubtractStatementParser(IStatementParser):
@@ -69,10 +260,43 @@ class SubtractStatementParser(IStatementParser):
     def parse(self, token_stream: ITokenStream) -> SubtractStatement:
         """Parse a SUBTRACT statement."""
         start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = factory.create(SubtractStatement, start_token.location if start_token else SourceLocation(0, 0))
+        start_loc = start_token.location if start_token else SourceLocation(0, 0)
+        stmt = SubtractStatement(start_loc)
+        
+        # Parse operands until FROM or GIVING
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+            
+            token_val_upper = token.value.upper() if token.value else ""
+            if token_val_upper in ("FROM", "GIVING"):
+                break
+            
+            if token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                stmt.add_operand(token.value)
+            
+            token_stream.consume()
+        
+        # Check for FROM or GIVING
+        token = token_stream.peek()
+        if token and token.value:
+            token_val_upper = token.value.upper()
+            if token_val_upper == "FROM":
+                token_stream.consume()  # Skip FROM
+                token = token_stream.peek()
+                if token and token.type == TokenType.IDENTIFIER:
+                    stmt.set_target(token.value)
+                    token_stream.consume()
+            elif token_val_upper == "GIVING":
+                token_stream.consume()  # Skip GIVING
+                token = token_stream.peek()
+                if token and token.type == TokenType.IDENTIFIER:
+                    stmt.set_giving(token.value)
+                    token_stream.consume()
+        
         self._skip_to_period(token_stream)
-        return stmt if isinstance(stmt, SubtractStatement) else SubtractStatement(start_token.location if start_token else SourceLocation(0, 0))
+        return stmt
     
     @staticmethod
     def _skip_to_period(token_stream: ITokenStream) -> None:
@@ -104,10 +328,35 @@ class MultiplyStatementParser(IStatementParser):
     def parse(self, token_stream: ITokenStream) -> MultiplyStatement:
         """Parse a MULTIPLY statement."""
         start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = factory.create(MultiplyStatement, start_token.location if start_token else SourceLocation(0, 0))
+        start_loc = start_token.location if start_token else SourceLocation(0, 0)
+        stmt = MultiplyStatement(start_loc)
+        
+        # Parse first operand
+        token = token_stream.peek()
+        if token and token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+            stmt.add_operand(token.value)
+            token_stream.consume()
+        
+        # Check for BY
+        token = token_stream.peek()
+        if token and token.value and token.value.upper() == "BY":
+            token_stream.consume()  # Skip BY
+            token = token_stream.peek()
+            if token and token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                stmt.add_operand(token.value)
+                token_stream.consume()
+        
+        # Check for GIVING
+        token = token_stream.peek()
+        if token and token.value and token.value.upper() == "GIVING":
+            token_stream.consume()  # Skip GIVING
+            token = token_stream.peek()
+            if token and token.type == TokenType.IDENTIFIER:
+                stmt.set_giving(token.value)
+                token_stream.consume()
+        
         self._skip_to_period(token_stream)
-        return stmt if isinstance(stmt, MultiplyStatement) else MultiplyStatement(start_token.location if start_token else SourceLocation(0, 0))
+        return stmt
     
     @staticmethod
     def _skip_to_period(token_stream: ITokenStream) -> None:
@@ -139,10 +388,37 @@ class DivideStatementParser(IStatementParser):
     def parse(self, token_stream: ITokenStream) -> DivideStatement:
         """Parse a DIVIDE statement."""
         start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = factory.create(DivideStatement, start_token.location if start_token else SourceLocation(0, 0))
+        start_loc = start_token.location if start_token else SourceLocation(0, 0)
+        stmt = DivideStatement(start_loc)
+        
+        # Parse first operand
+        token = token_stream.peek()
+        if token and token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+            stmt.add_operand(token.value)
+            token_stream.consume()
+        
+        # Check for BY or INTO
+        token = token_stream.peek()
+        if token and token.value:
+            token_val_upper = token.value.upper()
+            if token_val_upper in ("BY", "INTO"):
+                token_stream.consume()  # Skip BY/INTO
+                token = token_stream.peek()
+                if token and token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                    stmt.add_operand(token.value)
+                    token_stream.consume()
+        
+        # Check for GIVING
+        token = token_stream.peek()
+        if token and token.value and token.value.upper() == "GIVING":
+            token_stream.consume()  # Skip GIVING
+            token = token_stream.peek()
+            if token and token.type == TokenType.IDENTIFIER:
+                stmt.set_giving(token.value)
+                token_stream.consume()
+        
         self._skip_to_period(token_stream)
-        return stmt if isinstance(stmt, DivideStatement) else DivideStatement(start_token.location if start_token else SourceLocation(0, 0))
+        return stmt
     
     @staticmethod
     def _skip_to_period(token_stream: ITokenStream) -> None:
@@ -174,10 +450,56 @@ class ComputeStatementParser(IStatementParser):
     def parse(self, token_stream: ITokenStream) -> ComputeStatement:
         """Parse a COMPUTE statement."""
         start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = factory.create(ComputeStatement, start_token.location if start_token else SourceLocation(0, 0))
+        start_loc = start_token.location if start_token else SourceLocation(0, 0)
+        stmt = ComputeStatement(start_loc)
+        
+        # Parse target variable(s)
+        token = token_stream.peek()
+        if token and token.type == TokenType.IDENTIFIER:
+            stmt.add_target(token.value)
+            token_stream.consume()
+        
+        # Skip ROUNDED if present
+        token = token_stream.peek()
+        if token and token.value and token.value.upper() == "ROUNDED":
+            token_stream.consume()
+        
+        # Check for =
+        token = token_stream.peek()
+        if token and token.value == "=":
+            token_stream.consume()  # Skip =
+        
+        # Parse expression (collect all tokens until terminator)
+        expr_tokens = []
+        paren_depth = 0
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+            
+            token_val_upper = token.value.upper() if token.value else ""
+            
+            # Stop at terminators
+            if paren_depth == 0 and (
+                token.type == TokenType.PERIOD
+                or token_val_upper in ("ON", "NOT", "END-COMPUTE")
+            ):
+                break
+            
+            if token.type == TokenType.LEFT_PAREN:
+                paren_depth += 1
+            elif token.type == TokenType.RIGHT_PAREN:
+                paren_depth -= 1
+            
+            expr_tokens.append(token.value if token.value else "")
+            token_stream.consume()
+        
+        if expr_tokens:
+            expr_str = " ".join(expr_tokens).strip()
+            stmt.set_expression(expr_str)
+        
         self._skip_to_period(token_stream)
-        return stmt if isinstance(stmt, ComputeStatement) else ComputeStatement(start_token.location if start_token else SourceLocation(0, 0))
+        return stmt
     
     @staticmethod
     def _skip_to_period(token_stream: ITokenStream) -> None:

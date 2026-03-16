@@ -18,13 +18,17 @@ class ArithmeticParserBase:
     """Base class with shared logic for arithmetic statement parsers."""
 
     def parse_size_error_clauses(
-        self, stream: TokenStream, context: ParseContext
+        self, stream: TokenStream, context: ParseContext = None
     ) -> tuple[List[CobolStatement], List[CobolStatement]]:
         """Parse ON SIZE ERROR and NOT ON SIZE ERROR clauses.
 
         Returns:
             Tuple of (on_size_error_stmts, not_on_size_error_stmts)
         """
+        # Get context from stream if not provided
+        if context is None:
+            context = getattr(stream, '_parse_context', None)            
+
         on_size_error_stmts = []
         not_on_size_error_stmts = []
 
@@ -173,7 +177,11 @@ class AddStatementParser(StatementParser, ArithmeticParserBase):
             token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "ADD"
         )
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> AddStatement:
+    def matches(self, stream: TokenStream) -> bool:
+        """Adapter method for registry interface."""
+        return self.can_parse(stream)
+
+    def parse(self, stream: TokenStream, context: ParseContext = None) -> AddStatement:
         """Parse ADD statement.
 
         Supports:
@@ -182,6 +190,10 @@ class AddStatementParser(StatementParser, ArithmeticParserBase):
         - ON SIZE ERROR clause with nested statements
         - NOT ON SIZE ERROR clause with nested statements
         """
+        # Get context from stream if not provided
+        if context is None:
+            context = getattr(stream, '_parse_context', None)
+
         start_token = stream.peek()
         if start_token and (
             start_token.type == TokenType.ADD
@@ -267,8 +279,16 @@ class SubtractStatementParser(StatementParser, ArithmeticParserBase):
             token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "SUBTRACT"
         )
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> SubtractStatement:
+    def matches(self, stream: TokenStream) -> bool:
+        """Adapter method for registry interface."""
+        return self.can_parse(stream)
+
+    def parse(self, stream: TokenStream, context: ParseContext = None) -> SubtractStatement:
         """Parse SUBTRACT statement."""
+        # Get context from stream if not provided
+        if context is None:
+            context = getattr(stream, '_parse_context', None)
+
         start_token = stream.peek()
         if start_token and (
             start_token.type == TokenType.SUBTRACT
@@ -352,8 +372,16 @@ class MultiplyStatementParser(StatementParser, ArithmeticParserBase):
             token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "MULTIPLY"
         )
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> MultiplyStatement:
+    def matches(self, stream: TokenStream) -> bool:
+        """Adapter method for registry interface."""
+        return self.can_parse(stream)
+
+    def parse(self, stream: TokenStream, context: ParseContext = None) -> MultiplyStatement:
         """Parse MULTIPLY statement."""
+        # Get context from stream if not provided
+        if context is None:
+            context = getattr(stream, '_parse_context', None)
+
         start_token = stream.peek()
         if start_token and (
             start_token.type == TokenType.MULTIPLY
@@ -427,8 +455,16 @@ class DivideStatementParser(StatementParser, ArithmeticParserBase):
             token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "DIVIDE"
         )
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> DivideStatement:
+    def matches(self, stream: TokenStream) -> bool:
+        """Adapter method for registry interface."""
+        return self.can_parse(stream)
+
+    def parse(self, stream: TokenStream, context: ParseContext = None) -> DivideStatement:
         """Parse DIVIDE statement."""
+        # Get context from stream if not provided
+        if context is None:
+            context = getattr(stream, '_parse_context', None)
+
         start_token = stream.peek()
         if start_token and (
             start_token.type == TokenType.DIVIDE
@@ -505,8 +541,16 @@ class ComputeStatementParser(StatementParser, ArithmeticParserBase):
             token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "COMPUTE"
         )
 
-    def parse(self, stream: TokenStream, context: ParseContext) -> ComputeStatement:
+    def matches(self, stream: TokenStream) -> bool:
+        """Adapter method for registry interface."""
+        return self.can_parse(stream)
+
+    def parse(self, stream: TokenStream, context: ParseContext = None) -> ComputeStatement:
         """Parse COMPUTE statement."""
+        # Get context from stream if not provided
+        if context is None:
+            context = getattr(stream, '_parse_context', None)
+
         start_token = stream.peek()
         if start_token and (
             start_token.type == TokenType.COMPUTE
