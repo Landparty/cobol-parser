@@ -1,7 +1,7 @@
 """Perform statement parser implementing IStatementParser interface."""
 
 from typing import Optional, Any
-from ...core.interfaces import IStatementParser, ITokenStream
+from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...core.ast_factory import get_factory
 from ...models.statements import PerformStatement, CobolExpression
 from ...models.ast_base import SourceLocation
@@ -41,6 +41,7 @@ class PerformStatementParser(IStatementParser):
         # Create statement with source location
         location = start_token.location if start_token else SourceLocation(0, 0)
         stmt = factory.create(PerformStatement, location)
+        context = self._get_context(token_stream)
         
         # Skip whitespace/comments if possible
         self._skip_whitespace(token_stream)
@@ -53,6 +54,12 @@ class PerformStatementParser(IStatementParser):
             return stmt
         
         if not token:
+            self._report_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
+            return stmt
+
+        if token.type == TokenType.PERIOD:
+            self._report_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
+            token_stream.consume()
             return stmt
         
         # Check for VARYING clause (inline PERFORM VARYING)
@@ -128,6 +135,12 @@ class PerformStatementParser(IStatementParser):
                         stmt.set_thru_paragraph(token.value)
                         token_stream.consume()
                         token = token_stream.peek()
+                    else:
+                        self._report_error(
+                            context,
+                            "PERFORM THRU requires an ending paragraph name",
+                            location,
+                        )
                 except Exception:
                     pass
                 
@@ -206,6 +219,24 @@ class PerformStatementParser(IStatementParser):
             pass
         
         return stmt
+
+    @staticmethod
+    def _get_context(stream: ITokenStream) -> Optional[ParseContext]:
+        """Return the active parse context if one is attached to the stream."""
+        context = getattr(stream, '_parse_context', None)
+        if context is None:
+            context = getattr(stream, '_context', None)
+        return context
+
+    @staticmethod
+    def _report_error(
+        context: Optional[ParseContext],
+        message: str,
+        location: SourceLocation,
+    ) -> None:
+        """Report a parser error through the active parse context."""
+        if context:
+            context.error(message, location)
     
     def _skip_whitespace(self, stream: ITokenStream) -> None:
         """Skip whitespace and comment tokens if possible."""
@@ -444,8 +475,9 @@ class PerformStatementParser(IStatementParser):
                     break
                 
                 # Check for END-PERFORM
-                if (token.type == TokenType.IDENTIFIER and token.value and 
-                    token.value.upper() == "END-PERFORM"):
+                if token.type == TokenType.END_PERFORM or (
+                    token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-PERFORM"
+                ):
                     stream.consume()
                     # Skip optional period
                     self._try_consume_period(stream)

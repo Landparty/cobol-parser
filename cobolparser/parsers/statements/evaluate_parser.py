@@ -1,7 +1,7 @@
 """Evaluate statement parser implementing IStatementParser interface."""
 
 from typing import Optional, Any
-from ...core.interfaces import IStatementParser, ITokenStream
+from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...models.statements import EvaluateStatement, WhenClause
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
@@ -24,92 +24,127 @@ class EvaluateStatementParser(IStatementParser):
             return False
     
     def parse(self, token_stream: ITokenStream) -> EvaluateStatement:
-        """Parse an EVALUATE statement."""
+        """Parse an EVALUATE statement with contract-level diagnostics."""
         try:
             start_token = token_stream.consume()
             if not start_token:
                 raise Exception("Expected EVALUATE keyword")
-            
-            # Create statement
-            stmt = EvaluateStatement(start_token.location if hasattr(start_token, 'location') else SourceLocation(0, 0))
-            
-            # Parse subjects (identifier or expression before WHEN/ALSO)
+
+            start_location = start_token.location if hasattr(start_token, 'location') else SourceLocation(0, 0)
+            stmt = EvaluateStatement(start_location)
+            context = self._get_context(token_stream)
+
+            subject_count = self._parse_subjects(token_stream, stmt)
+
+            found_when_clause = False
+            found_end_evaluate = False
+            found_when_other = False
+
             while not token_stream.is_empty():
                 token = token_stream.peek()
                 if not token:
                     break
-                
+
                 token_val_upper = token.value.upper() if token.value else ""
-                
-                # Stop at WHEN or OTHER
-                if token_val_upper in ("WHEN", "OTHER"):
-                    break
-                
-                # Stop at END-EVALUATE
+
                 if token_val_upper == "END-EVALUATE":
+                    token_stream.consume()
+                    found_end_evaluate = True
                     break
-                
-                # Collect subject tokens until WHEN or ALSO
-                if token_val_upper == "ALSO":
-                    token_stream.consume()  # skip ALSO
+
+                if token_val_upper != "WHEN":
+                    token_stream.consume()
                     continue
-                
-                # Add subject (identifier)
-                if token.type == TokenType.IDENTIFIER or token.type == TokenType.STRING_LITERAL:
-                    subject_value = token.value if token.value else ""
-                    stmt.subjects.append(subject_value)
+
+                found_when_clause = True
+                when_location = token.location if hasattr(token, 'location') else start_location
+                token_stream.consume()
+
+                next_token = token_stream.peek()
+                if next_token and next_token.value and next_token.value.upper() == "OTHER":
                     token_stream.consume()
-                else:
-                    token_stream.consume()
-            
-            # Parse WHEN clauses
-            while not token_stream.is_empty():
-                token = token_stream.peek()
-                if not token:
-                    break
-                
-                token_val_upper = token.value.upper() if token.value else ""
-                
-                # Check for WHEN/WHEN OTHER
-                if token_val_upper == "WHEN":
-                    when_location = token.location if hasattr(token, 'location') else SourceLocation(0, 0)
-                    token_stream.consume()  # skip WHEN
-                    
-                    # Check if it's WHEN OTHER
-                    next_token = token_stream.peek()
-                    if next_token and next_token.value and next_token.value.upper() == "OTHER":
-                        token_stream.consume()  # skip OTHER
-                        stmt.default_when = WhenClause([], when_location)
-                        # Parse statements until next WHEN or END-EVALUATE
-                        statements = self._skip_clause_statements(token_stream)
-                        if statements:
-                            for s in statements:
-                                stmt.default_when.add_statement(s)
-                    else:
-                        # Parse selectors for WHEN clause
-                        selectors = self._parse_selectors(token_stream)
-                        when_clause = WhenClause(selectors, when_location)
-                        stmt.when_clauses.append(when_clause)
-                        # Parse statements until next WHEN or END-EVALUATE
-                        statements = self._skip_clause_statements(token_stream)
-                        if statements:
-                            for s in statements:
-                                when_clause.add_statement(s)
-                elif token_val_upper == "END-EVALUATE":
-                    token_stream.consume()  # skip END-EVALUATE
-                    break
-                else:
-                    token_stream.consume()
-            
+                    if found_when_other:
+                        self._report_error(context, "Multiple WHEN OTHER clauses not allowed", when_location)
+                    found_when_other = True
+                    stmt.default_when = WhenClause([], when_location)
+                    statements = self._skip_clause_statements(token_stream)
+                    if statements:
+                        for nested_statement in statements:
+                            stmt.default_when.add_statement(nested_statement)
+                    lookahead = token_stream.peek()
+                    if lookahead and lookahead.value and lookahead.value.upper() == "WHEN":
+                        self._report_error(context, "WHEN OTHER must be the last WHEN clause", when_location)
+                    continue
+
+                selectors, selector_count, issues = self._parse_selectors(token_stream)
+                for issue in issues:
+                    self._report_error(context, issue, when_location)
+
+                if selector_count == 0:
+                    self._report_error(context, "WHEN clause must have at least one selector", when_location)
+
+                if subject_count > 0 and selector_count > 0 and selector_count != subject_count:
+                    self._report_error(
+                        context,
+                        f"Selector count mismatch: expected {subject_count} selectors, got {selector_count}",
+                        when_location,
+                    )
+
+                when_clause = WhenClause(selectors, when_location)
+                stmt.when_clauses.append(when_clause)
+                statements = self._skip_clause_statements(token_stream)
+                if statements:
+                    for nested_statement in statements:
+                        when_clause.add_statement(nested_statement)
+
+            if not found_when_clause:
+                self._report_error(context, "EVALUATE statement must have at least one WHEN clause", start_location)
+
+            if not found_end_evaluate:
+                self._report_error(context, "EVALUATE statement missing END-EVALUATE terminator", start_location)
+
             return stmt
-        except Exception as e:
-            # Return empty statement on error
+        except Exception:
             return EvaluateStatement(SourceLocation(0, 0))
     
-    def _parse_selectors(self, token_stream: ITokenStream) -> list:
-        """Parse selector list for a WHEN clause, handling ALSO for multiple subjects and conditions."""
+    def _parse_subjects(self, token_stream: ITokenStream, stmt: EvaluateStatement) -> int:
+        """Parse EVALUATE subjects before the first WHEN clause."""
+        current_subject = []
+
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+
+            token_val_upper = token.value.upper() if token.value else ""
+            if token_val_upper in ("WHEN", "END-EVALUATE"):
+                break
+
+            if token_val_upper == "ALSO":
+                if current_subject:
+                    stmt.subjects.append(" ".join(current_subject).strip())
+                    current_subject = []
+                token_stream.consume()
+                continue
+
+            if token.type != TokenType.NEWLINE:
+                current_subject.append(token.value if token.value else "")
+            token_stream.consume()
+
+        if current_subject:
+            stmt.subjects.append(" ".join(current_subject).strip())
+
+        stmt.subjects = [subject for subject in stmt.subjects if subject]
+        return len(stmt.subjects)
+
+    def _parse_selectors(self, token_stream: ITokenStream) -> tuple[list, int, list[str]]:
+        """Parse selector list for a WHEN clause, including validation issues."""
         selectors = []
-        current_selector = None
+        current_selector = []
+        issues = []
+        selector_count = 0
+        expecting_selector = True
+        saw_separator = False
         
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -127,108 +162,89 @@ class EvaluateStatementParser(IStatementParser):
             
             # Handle ALSO separator (move to next selector)
             if token_val_upper == "ALSO":
-                # Save pending selector if any
-                if current_selector is not None:
-                    selectors.append(current_selector)
-                    current_selector = None
-                token_stream.consume()  # skip ALSO
-                continue
-            
-            # Handle ANY keyword as a special selector
-            if token_val_upper == "ANY":
-                if current_selector is not None:
-                    selectors.append(current_selector)
-                selectors.append({"type": "Any"})
-                current_selector = None
+                if expecting_selector:
+                    issues.append("Consecutive ALSO keywords without selector")
+                elif current_selector:
+                    selector = self._build_selector(current_selector)
+                    if selector:
+                        selectors.append(selector)
+                        selector_count += 1
+                    current_selector = []
+                expecting_selector = True
+                saw_separator = True
                 token_stream.consume()
                 continue
-            
-            # Accept identifiers, literals, and numbers for selector start
-            token_type_name = token.type.name if hasattr(token.type, 'name') else str(token.type)
-            numeric_types = ("NUMERIC_LITERAL", "LEVEL_NUMBER", "FLOAT_LITERAL")
-            
-            if token.type == TokenType.IDENTIFIER or \
-               token.type == TokenType.STRING_LITERAL or \
-               token_type_name in numeric_types:
-                
-                # Start building a selector
-                selector_value = token.value
-                selector_tokens = [selector_value]
-                token_stream.consume()
-                
-                # Check for THRU for ranges
-                next_token = token_stream.peek()
-                if next_token and next_token.value and next_token.value.upper() == "THRU":
-                    token_stream.consume()  # skip THRU
-                    # Get end value
-                    end_token = token_stream.peek()
-                    if end_token:
-                        end_value = end_token.value
-                        token_stream.consume()
-                        current_selector = {
-                            "type": "Range",
-                            "start": selector_value,
-                            "end": end_value
-                        }
-                    continue
-                
-                # Check for operators (=, <, >, <=, >=, <>, AND, OR) for conditions
-                if next_token and next_token.value:
-                    next_val_upper = next_token.value.upper()
-                    if next_val_upper in ("=", "<", ">", "<=", ">=", "<>", "AND", "OR", "NOT"):
-                        # This is a condition - collect all tokens until ALSO/WHEN/END-EVALUATE
-                        condition_text = selector_value
-                        condition_operator = None
-                        while not token_stream.is_empty():
-                            t = token_stream.peek()
-                            if not t:
-                                break
-                            tv_upper = t.value.upper() if t.value else ""
-                            
-                            # Stop at ALSO, WHEN, END-EVALUATE
-                            if tv_upper in ("ALSO", "WHEN", "END-EVALUATE"):
-                                break
-                            
-                            # Stop at statement keywords
-                            if self._is_statement_keyword(tv_upper):
-                                break
-                            
-                            # Track AND/OR as the main operator
-                            if tv_upper in ("AND", "OR"):
-                                condition_operator = tv_upper
-                            
-                            condition_text += " " + (t.value if t.value else "")
-                            token_stream.consume()
-                        
-                        current_selector = {
-                            "type": "Condition",
-                            "text": condition_text.strip()
-                        }
-                        if condition_operator:
-                            current_selector["operator"] = condition_operator
-                        continue
-                
-                # Determine type for simple selector
-                if token.type == TokenType.STRING_LITERAL:
-                    selector_type = "Literal"
-                elif token_type_name in numeric_types:
-                    selector_type = "Literal"
-                else:
-                    selector_type = "Identifier"
-                
-                current_selector = {
-                    "type": selector_type,
-                    "value": selector_value
-                }
-            else:
-                # Skip unrecognized tokens (like NEWLINE)
-                token_stream.consume()
+
+            if token.type != TokenType.NEWLINE:
+                current_selector.append(token.value if token.value else "")
+                expecting_selector = False
+                saw_separator = False
+            token_stream.consume()
         
         # Save final selector if any
-        if current_selector is not None:
-            selectors.append(current_selector)
-        
-        return selectors
+        if current_selector:
+            selector = self._build_selector(current_selector)
+            if selector:
+                selectors.append(selector)
+                selector_count += 1
+        elif saw_separator:
+            issues.append("Consecutive ALSO keywords without selector")
+
+        for selector in selectors:
+            if selector.get("type") == "Range" and not selector.get("end"):
+                issues.append("THRU/THROUGH range is incomplete - missing end value")
+
+        return selectors, selector_count, issues
+
+    def _build_selector(self, selector_tokens: list[str]) -> Optional[dict]:
+        """Convert raw selector tokens into a selector dictionary."""
+        normalized_tokens = [token for token in selector_tokens if token and token.strip()]
+        if not normalized_tokens:
+            return None
+
+        selector_text = " ".join(normalized_tokens).strip()
+        selector_upper = selector_text.upper()
+
+        if selector_upper == "ANY":
+            return {"type": "Any"}
+
+        parts = selector_text.split()
+        for index, part in enumerate(parts):
+            if part.upper() in ("THRU", "THROUGH"):
+                start_value = " ".join(parts[:index]).strip()
+                end_value = " ".join(parts[index + 1:]).strip()
+                return {
+                    "type": "Range",
+                    "start": start_value,
+                    "end": end_value,
+                }
+
+        if any(part.upper() in ("AND", "OR", "NOT", "=", "<", ">", "<=", ">=", "<>") for part in parts):
+            selector = {"type": "Condition", "text": selector_text}
+            if " OR " in f" {selector_upper} ":
+                selector["operator"] = "OR"
+            elif " AND " in f" {selector_upper} ":
+                selector["operator"] = "AND"
+            return selector
+
+        return {"type": "Literal", "value": selector_text}
+
+    def _get_context(self, token_stream: ITokenStream) -> Optional[ParseContext]:
+        """Return the attached parse context if available."""
+        context = getattr(token_stream, '_parse_context', None)
+        if context is None:
+            context = getattr(token_stream, '_context', None)
+        return context
+
+    def _report_error(
+        self,
+        context: Optional[ParseContext],
+        message: str,
+        location: Optional[SourceLocation],
+    ) -> None:
+        """Report a parser error through the active parse context."""
+        if context:
+            context.error(message, location)
     
     def _skip_clause_statements(self, token_stream: ITokenStream) -> Optional[list]:
         """Parse statements within WHEN clause until next WHEN or END-EVALUATE.

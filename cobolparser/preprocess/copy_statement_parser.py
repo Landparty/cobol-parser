@@ -331,24 +331,21 @@ def is_within_string_literal(source: str, match_start: int, match_end: int) -> b
 
 def remove_comment_lines(source: str) -> str:
     """
-    Remove comment lines from COBOL source code.
-    
-    This completely removes comment lines (both the line and its content)
-    to ensure that comment indicators don't pollute the normalized source.
-    This preserves the structure needed for line-specific processing while
-    ensuring that removed comment content doesn't interfere with token parsing.
+    Remove comment content from COBOL source code while preserving line count.
     
     Args:
         source: COBOL source code
         
     Returns:
-        Source with comment lines completely removed (not replaced with spaces)
+        Source with comment lines blanked out so line positions remain stable
     """
     lines = source.split('\n')
     result = []
     
     for line in lines:
-        if not is_comment_line(line):
+        if is_comment_line(line):
+            result.append(" " * len(line))
+        else:
             result.append(line)
     
     return '\n'.join(result)

@@ -157,21 +157,29 @@ class IdentificationDivisionParser(BaseDivisionParser):
         name_token = token_stream.consume()
         program_name = name_token.value
         
-        # Check for optional IS INITIAL or IS COMMON clause (IBM Enterprise COBOL)
+        # Check for optional repeated IS INITIAL / IS COMMON clauses.
         token_stream.skip_whitespace_and_comments()
-        if not token_stream.is_empty():
+        while not token_stream.is_empty():
             token = token_stream.peek(0)
-            if token and token.value and token.value.upper() == "IS":
-                token_stream.consume()  # consume IS
+            if not token or not token.value or token.value.upper() != "IS":
+                break
+
+            token_stream.consume()
+            token_stream.skip_whitespace_and_comments()
+
+            if token_stream.is_empty():
+                break
+
+            next_token = token_stream.peek(0)
+            if not next_token or not next_token.value:
+                break
+
+            val = next_token.value.upper()
+            if val in ("INITIAL", "COMMON"):
+                token_stream.consume()
                 token_stream.skip_whitespace_and_comments()
-                
-                if not token_stream.is_empty():
-                    next_token = token_stream.peek(0)
-                    if next_token and next_token.value:
-                        val = next_token.value.upper()
-                        if val in ("INITIAL", "COMMON"):
-                            # Store the modifier (could be extended in future)
-                            token_stream.consume()  # consume INITIAL or COMMON
+                continue
+            break
         
         # Expect period after program name (or after IS clause if present)
         try:

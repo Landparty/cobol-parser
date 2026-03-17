@@ -91,7 +91,11 @@ class MoveStatementParser(IStatementParser):
             # Also check for keywords by value for non-statement types
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
-                if val_upper in ("END-MOVE", "ON", "RETURNING", "GIVING", "END-IF", "ELSE", "THEN"):
+                if val_upper in (
+                    "MOVE", "DISPLAY", "CALL", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE",
+                    "IF", "PERFORM", "EVALUATE", "STOP", "GO", "ENTRY",
+                    "END-MOVE", "ON", "RETURNING", "GIVING", "END-IF", "ELSE", "THEN",
+                ):
                     break
             
             # Parse target - only collect IDENTIFIERs

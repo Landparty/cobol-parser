@@ -1,7 +1,7 @@
 """If statement parser implementing IStatementParser interface."""
 
 from typing import Optional, List, Any
-from ...core.interfaces import IStatementParser, ITokenStream
+from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...core.ast_factory import get_factory
 from ...models.statements import IfStatement, CobolExpression
 from ...models.ast_base import SourceLocation
@@ -33,6 +33,7 @@ class IfStatementParser(IStatementParser):
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = factory.create(IfStatement, start_token.location if start_token else SourceLocation(0, 0))
+        context = self._get_context(token_stream)
         
         # Type guard: ensure stmt is an IfStatement
         if not isinstance(stmt, IfStatement):
@@ -75,6 +76,12 @@ class IfStatementParser(IStatementParser):
             condition_expr = CobolExpression("COMPARISON", start_token.location if start_token else SourceLocation(0, 0))
             condition_expr._metadata["value"] = condition_text
             stmt.set_condition(condition_expr)
+        else:
+            self._report_error(
+                context,
+                "IF statement requires a condition before the THEN branch",
+                start_token.location if start_token else SourceLocation(0, 0),
+            )
         
         self._skip_whitespace(token_stream)
         
@@ -126,12 +133,14 @@ class IfStatementParser(IStatementParser):
             nested_stmt = self._try_parse_nested_statement(token_stream)
             if nested_stmt:
                 stmt.add_then_statement(nested_stmt)
-                # Check if the next token after is a period - if so, inline IF is done
+                previous_token = self._previous_meaningful_token(token_stream)
                 self._skip_whitespace(token_stream)
+                if previous_token and previous_token.type == TokenType.PERIOD:
+                    return stmt
                 if not token_stream.is_empty():
                     next_token = token_stream.peek()
                     if next_token and next_token.type == TokenType.PERIOD:
-                        period_found = True  # Inline IF ends here
+                        period_found = True
             else:
                 # Couldn't parse - stop trying to parse statements in this branch
                 break
@@ -170,12 +179,14 @@ class IfStatementParser(IStatementParser):
             nested_stmt = self._try_parse_nested_statement(token_stream)
             if nested_stmt:
                 stmt.add_else_statement(nested_stmt)
-                # Check if the next token after is a period - if so, inline IF-ELSE is done
+                previous_token = self._previous_meaningful_token(token_stream)
                 self._skip_whitespace(token_stream)
+                if previous_token and previous_token.type == TokenType.PERIOD:
+                    return stmt
                 if not token_stream.is_empty():
                     next_token = token_stream.peek()
                     if next_token and next_token.type == TokenType.PERIOD:
-                        period_found = True  # Inline IF-ELSE ends here
+                        period_found = True
             else:
                 # Couldn't parse - stop trying to parse statements in this branch
                 break
@@ -251,4 +262,34 @@ class IfStatementParser(IStatementParser):
             pass
         
         return None
+
+    @staticmethod
+    def _previous_meaningful_token(stream: ITokenStream):
+        """Return the last non-whitespace token consumed by the stream."""
+        offset = -1
+        while True:
+            token = stream.peek(offset)
+            if token is None:
+                return None
+            if token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE', 'CONTINUATION'):
+                return token
+            offset -= 1
+
+    @staticmethod
+    def _get_context(stream: ITokenStream) -> Optional[ParseContext]:
+        """Return the active parse context if one is attached to the stream."""
+        context = getattr(stream, '_parse_context', None)
+        if context is None:
+            context = getattr(stream, '_context', None)
+        return context
+
+    @staticmethod
+    def _report_error(
+        context: Optional[ParseContext],
+        message: str,
+        location: SourceLocation,
+    ) -> None:
+        """Report a parser error through the active parse context."""
+        if context:
+            context.error(message, location)
 

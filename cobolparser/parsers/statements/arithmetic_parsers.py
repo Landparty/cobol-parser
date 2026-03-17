@@ -200,7 +200,7 @@ class AddStatementParser(IStatementParser):
                         if t.type == TokenType.PERIOD or (t.value and t.value.upper() in ("MOVE", "DISPLAY")):
                             break
                         if t.type in (TokenType.STRING_LITERAL, TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
-                            stmt.add_item(t.value)
+                            stmt.add_display_item(t.value)
                         token_stream.consume()
                     nested.append(stmt)
                     
@@ -497,8 +497,8 @@ class ComputeStatementParser(IStatementParser):
         if expr_tokens:
             expr_str = " ".join(expr_tokens).strip()
             stmt.set_expression(expr_str)
-        
-        self._skip_to_period(token_stream)
+
+        AddStatementParser._parse_size_error_clauses(token_stream, stmt)
         return stmt
     
     @staticmethod

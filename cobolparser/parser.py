@@ -293,14 +293,31 @@ class CobolParser:
                 # Try to find a parser for the current token
                 parser = self._division_factory.find_parser(self.stream)
                 if not parser:
+                    current_token = self.stream.peek()
+                    current_value = current_token.value.upper() if current_token and current_token.value else "EOF"
+                    if not divisions_parsed:
+                        self.add_error(
+                            self.create_error(
+                                f"No recognizable COBOL division found near '{current_token.value if current_token and current_token.value else 'EOF'}'",
+                                self.get_current_location(),
+                            )
+                        )
+                    elif current_value not in ("END", "PROGRAM"):
+                        self.add_error(
+                            self.create_error(
+                                f"No recognizable COBOL division found near '{current_token.value if current_token and current_token.value else 'EOF'}'",
+                                self.get_current_location(),
+                            )
+                        )
                     break
 
                 try:
                     # Set host on ProcedureDivisionParser for ParseContext creation
-                    if hasattr(parser, 'set_host'):
-                        parser.set_host(self)
+                    set_host = getattr(parser, 'set_host', None)
+                    if callable(set_host):
+                        set_host(self)
                     elif hasattr(parser, 'host'):
-                        parser.host = self
+                        setattr(parser, 'host', self)
                     
                     division_ast = parser.parse(self.stream)
                     if division_ast:
@@ -336,6 +353,12 @@ class CobolParser:
             if token:
                 return token.location
         return SourceLocation(1, 1, 1)
+
+    def create_error(self, message: str, location: Optional[SourceLocation] = None) -> ParseError:
+        """Create a ParseError from a source location."""
+        if location and hasattr(location, 'line') and hasattr(location, 'column'):
+            return ParseError(message, location.line, location.column, location)
+        return ParseError(message, 1, 1)
 
     def add_error(self, error: ParseError) -> None:
         """Add a parse error."""

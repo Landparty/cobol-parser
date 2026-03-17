@@ -203,7 +203,12 @@ class ParseContext:
     
     def error(self, message: str, token: Optional[Any] = None) -> None:
         """Report an error with optional token location."""
-        loc = token.location if token else None
+        loc = None
+        if token is not None:
+            if hasattr(token, 'location'):
+                loc = token.location
+            elif hasattr(token, 'line') and hasattr(token, 'column'):
+                loc = token
         if hasattr(self.host, 'create_error'):
             err = self.host.create_error(message, loc)
             if hasattr(self.host, 'add_error'):

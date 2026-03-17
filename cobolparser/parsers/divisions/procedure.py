@@ -155,6 +155,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 next_token = token_stream.peek(1)
                 if next_token and next_token.value and next_token.value.upper() in ("PROGRAM", "DIVISION"):
                     break
+
+            # Skip stray control markers so following statements can be recovered.
+            if token_value in ("ELSE", "WHEN", "END-IF", "END-PERFORM", "END-EVALUATE"):
+                token_stream.consume()
+                continue
             
             # Check for SECTION keyword
             if self._is_section_marker(token_stream):
@@ -203,6 +208,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         # Attach context to stream for error reporting
                         context = ParseContext(self.host, self._statement_registry)
                         setattr(token_stream, '_parse_context', context)
+                        setattr(token_stream, '_context', context)
                         
                         statement = parser.parse(token_stream)
                         paragraphs[-1]["statements"].append({
@@ -305,6 +311,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     # Attach context to stream for error reporting
                     context = ParseContext(self.host, self._statement_registry)
                     setattr(token_stream, '_parse_context', context)
+                    setattr(token_stream, '_context', context)
                     
                     statement = parser.parse(token_stream)
                     statements.append({
@@ -458,9 +465,13 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if self._is_paragraph_or_section_start(token_stream):
                 break
             
-            # Stop if we hit a statement keyword
-            if token.type.name == 'IDENTIFIER' and self._is_statement_keyword(token.value or ""):
-                break
+            # Stop if we hit a statement keyword that has a registered parser.
+            # Do NOT break for keywords (READ, OPEN, CLOSE, etc.) that have no
+            # registered parser — consuming them is required to avoid an infinite
+            # loop where _skip_to_next_statement keeps breaking on the same token.
+            if token.value and self._is_statement_keyword(token.value):
+                if self._statement_registry.find_parser(token_stream) is not None:
+                    break
             
             token_stream.consume()
 

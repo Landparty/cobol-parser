@@ -1416,15 +1416,15 @@ class CobolLexer:
 
         # Check for complete division headers
         if remaining.startswith("IDENTIFICATION DIVISION"):
-            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("IDENTIFICATION DIVISION")
+            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("IDENTIFICATION")
         elif remaining.startswith("ID DIVISION"):
-            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("ID DIVISION")
+            return TokenType.IDENTIFICATION_DIVISION, start_pos + len("ID")
         elif remaining.startswith("ENVIRONMENT DIVISION"):
-            return TokenType.ENVIRONMENT_DIVISION, start_pos + len("ENVIRONMENT DIVISION")
+            return TokenType.ENVIRONMENT_DIVISION, start_pos + len("ENVIRONMENT")
         elif remaining.startswith("DATA DIVISION"):
-            return TokenType.DATA_DIVISION, start_pos + len("DATA DIVISION")
+            return TokenType.DATA_DIVISION, start_pos + len("DATA")
         elif remaining.startswith("PROCEDURE DIVISION"):
-            return TokenType.PROCEDURE_DIVISION, start_pos + len("PROCEDURE DIVISION")
+            return TokenType.PROCEDURE_DIVISION, start_pos + len("PROCEDURE")
 
         return None, start_pos
 
@@ -1439,8 +1439,8 @@ class CobolLexer:
         # First check if this might be a division header
         division_type, division_end = self.check_division_header(text, start_pos)
         if division_type:
-            # Extract just the division name part for the token value
-            division_word = text[start_pos:division_end]
+            # Preserve the division token type but keep the value to the keyword only.
+            division_word = text[start_pos:division_end].strip().split()[0]
             return Token(division_type, division_word, location), division_end
 
         # Read regular word

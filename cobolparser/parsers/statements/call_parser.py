@@ -44,7 +44,9 @@ class CallStatementParser(IStatementParser):
         stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
         
         # Get context for error reporting if available
-        context: Optional[ParseContext] = getattr(token_stream, '_context', None)
+        context: Optional[ParseContext] = getattr(token_stream, '_parse_context', None)
+        if context is None:
+            context = getattr(token_stream, '_context', None)
         if context is None and hasattr(token_stream, 'context'):
             context = getattr(token_stream, 'context')
         

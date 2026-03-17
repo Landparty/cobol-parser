@@ -13,7 +13,7 @@ from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolSection
-from cobolparser.models.data_items import CobolDataItem, PictureClause
+from cobolparser.models.data_items import CobolDataItem, PictureClause, OccursClause
 from .base import BaseDivisionParser
 
 
@@ -115,6 +115,12 @@ class DataDivisionParser(BaseDivisionParser):
             if token.type in division_token_types:
                 break
             
+            # Stop when we encounter the next section header or division header.
+            if token.value and token.value.upper() in {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"}:
+                next_token = token_stream.peek(1)
+                if next_token and next_token.value and next_token.value.upper() == "SECTION":
+                    break
+
             # Also check for section keywords that appear as identifiers
             if token.value and token.value.upper() in section_keywords and token.type != TokenType.IDENTIFIER:
                 break
@@ -265,7 +271,11 @@ class DataDivisionParser(BaseDivisionParser):
                     data_item.set_usage(usage)
             
             # COMP, COMP-3, etc. without USAGE keyword
-            elif token.value and token.value.upper() in ["COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5"]:
+            elif token.value and token.value.upper() in [
+                "COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5",
+                "COMPUTATIONAL", "COMPUTATIONAL-1", "COMPUTATIONAL-2", "COMPUTATIONAL-3",
+                "BINARY",
+            ]:
                 data_item.set_usage(token.value.upper())
                 token_stream.consume()
             
@@ -285,12 +295,25 @@ class DataDivisionParser(BaseDivisionParser):
             # OCCURS clause
             elif token.value and token.value.upper() == "OCCURS":
                 token_stream.consume()  # Consume OCCURS keyword
-                # Skip OCCURS details for now
+                occurs = OccursClause(location)
+
+                count_token = token_stream.peek()
+                if count_token and count_token.type in [TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER]:
+                    try:
+                        occurs.set_fixed_occurs(int(count_token.value))
+                    except (TypeError, ValueError):
+                        pass
+                    token_stream.consume()
+
+                # Skip optional TIMES keyword and any remaining OCCURS modifiers for now.
                 while token_stream.peek() and token_stream.peek().type not in [TokenType.PERIOD, TokenType.LEVEL_NUMBER]:
                     next_token = token_stream.peek()
-                    if next_token.value and next_token.value.upper() in ["PIC", "PICTURE", "VALUE", "USAGE"]:
+                    if next_token.value and next_token.value.upper() in ["PIC", "PICTURE", "VALUE", "USAGE", "REDEFINES"]:
                         break
                     token_stream.consume()
+
+                if occurs.max_times is not None:
+                    data_item.set_occurs_clause(occurs)
             
             else:
                 # Skip unknown tokens/clauses
@@ -325,8 +348,12 @@ class DataDivisionParser(BaseDivisionParser):
                 if token.type == TokenType.PERIOD:
                     break
                 # Stop at keywords that follow picture clause
-                if token.value and token.value.upper() in ["VALUE", "USAGE", "OCCURS", "REDEFINES", 
-                                                            "COMP", "COMP-1", "COMP-2", "COMP-4", "COMP-5"]:
+                if token.value and token.value.upper() in [
+                    "VALUE", "USAGE", "OCCURS", "REDEFINES",
+                    "COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5",
+                    "COMPUTATIONAL", "COMPUTATIONAL-1", "COMPUTATIONAL-2", "COMPUTATIONAL-3",
+                    "BINARY",
+                ]:
                     break
                 # Also stop at COMP token types
                 if token.type in [TokenType.COMP_1, TokenType.COMP_2, TokenType.COMP_3, TokenType.COMP_4, TokenType.COMP_5]:
@@ -335,7 +362,12 @@ class DataDivisionParser(BaseDivisionParser):
             # Collect picture pattern tokens
             if token.type in [TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL, TokenType.LEVEL_NUMBER]:
                 # All these token types can be part of a picture pattern
-                pattern_parts.append(token.value)
+                token_value = token.value
+                if paren_depth == 0 and token_value.endswith('.'):
+                    pattern_parts.append(token_value[:-1])
+                    token_stream.consume()
+                    break
+                pattern_parts.append(token_value)
                 token_stream.consume()
             elif token.value == "(":
                 pattern_parts.append(token.value)
@@ -366,7 +398,7 @@ class DataDivisionParser(BaseDivisionParser):
             return None
         
         if token.type in [TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL, TokenType.FIGURATIVE_CONSTANT]:
-            value = token.value
+            value = f'"{token.value}"' if token.type == TokenType.STRING_LITERAL else token.value
             token_stream.consume()
             return value
         elif token.type == TokenType.IDENTIFIER:
@@ -398,7 +430,11 @@ class DataDivisionParser(BaseDivisionParser):
             return usage
         
         # Check for COMP variations that are tokenized differently
-        if token.value and token.value.upper() in ["COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5"]:
+        if token.value and token.value.upper() in [
+            "COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5",
+            "COMPUTATIONAL", "COMPUTATIONAL-1", "COMPUTATIONAL-2", "COMPUTATIONAL-3",
+            "BINARY",
+        ]:
             usage = token.value.upper()
             token_stream.consume()
             return usage

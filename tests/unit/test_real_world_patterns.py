@@ -347,13 +347,13 @@ class TestCallStatements:
             # Test first CALL statement
             call_1 = call_statements[0]
             if isinstance(call_1, CallStatement):
-                assert call_1.called_program == '"IC102A"'  # type: ignore[attr-defined]
+                assert call_1.called_program == 'IC102A'  # type: ignore[attr-defined]
                 assert any(p.name == "DN1" for p in call_1.using_parameters)  # type: ignore[attr-defined]
             
             # Test second CALL statement  
             call_2 = call_statements[1]
             if isinstance(call_2, CallStatement):
-                assert call_2.called_program == '"IC102A"'  # type: ignore[attr-defined]
+                assert call_2.called_program == 'IC102A'  # type: ignore[attr-defined]
                 assert any(p.name == "DN2" for p in call_2.using_parameters)  # type: ignore[attr-defined]
 
 

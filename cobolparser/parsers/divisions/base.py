@@ -106,18 +106,27 @@ class BaseDivisionParser(IDivisionParser, ABC):
             next_token = token_stream.peek(0)
             if next_token and next_token.value.upper() == "DIVISION":
                 token_stream.consume()
-        
-        # Skip optional header clauses before the period
-        # e.g. PROCEDURE DIVISION USING data-name GIVING result-name.
-        # All remaining tokens up to (and including) the period terminate the header.
-        while not token_stream.is_empty():
-            tok = token_stream.peek(0)
-            if not tok:
-                break
-            if tok.value == ".":
-                token_stream.consume()  # consume the period
-                break
+
+        # Identification, environment, and data division headers end immediately.
+        if self.division_name != "PROCEDURE":
+            next_token = token_stream.peek(0)
+            if not next_token or next_token.value != ".":
+                line = next_token.location.line if next_token and hasattr(next_token, 'location') else 1
+                raise ParseError(f"Expected '.' after {self.division_name} DIVISION", line_number=line)
             token_stream.consume()
+        else:
+        
+            # Skip optional header clauses before the period
+            # e.g. PROCEDURE DIVISION USING data-name GIVING result-name.
+            # All remaining tokens up to (and including) the period terminate the header.
+            while not token_stream.is_empty():
+                tok = token_stream.peek(0)
+                if not tok:
+                    break
+                if tok.value == ".":
+                    token_stream.consume()  # consume the period
+                    break
+                token_stream.consume()
         
         # Parse division-specific content
         division_content = self.parse_division(token_stream)
