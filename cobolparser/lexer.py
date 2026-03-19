@@ -326,6 +326,11 @@ class LexerError(ParseError):
         self.token_value = token_value
 
 
+# Pre-compiled regex patterns for hot-path performance
+_LEVEL_NUMBER_2DIGIT_RE = re.compile(r"^\d{2}$")
+_LEVEL_NUMBER_1_2DIGIT_RE = re.compile(r"^\d{1,2}$")
+
+
 class CobolLexer:
     """COBOL lexical analyzer with support for multiple dialects.
 
@@ -336,6 +341,24 @@ class CobolLexer:
     - IBM Enterprise COBOL extensions
     - Embedded SQL and CICS statements
     """
+
+    # Single character token mapping (class-level to avoid per-call dict creation)
+    SINGLE_CHAR_TOKENS = {
+        ".": TokenType.PERIOD,
+        ",": TokenType.COMMA,
+        ";": TokenType.SEMICOLON,
+        ":": TokenType.COLON,
+        "(": TokenType.LEFT_PAREN,
+        ")": TokenType.RIGHT_PAREN,
+        "+": TokenType.PLUS,
+        "-": TokenType.MINUS,
+        "*": TokenType.MULTIPLY_OP,
+        "/": TokenType.DIVIDE_OP,
+        "=": TokenType.ASSIGN,
+        "$": TokenType.CURRENCY,
+        ">": TokenType.GREATER,
+        "<": TokenType.LESS,
+    }
 
     # COBOL keywords mapping
     KEYWORDS = {
@@ -748,7 +771,7 @@ class CobolLexer:
             token_type = self.KEYWORDS[upper_value]
         elif upper_value in self.FIGURATIVE_CONSTANTS:
             token_type = TokenType.FIGURATIVE_CONSTANT
-        elif re.match(r"^\d{2}$", value):  # Level numbers 01-99
+        elif _LEVEL_NUMBER_2DIGIT_RE.match(value):  # Level numbers 01-99
             token_type = TokenType.LEVEL_NUMBER
         else:
             token_type = TokenType.IDENTIFIER
@@ -1099,26 +1122,9 @@ class CobolLexer:
                 pos = new_pos
                 continue
 
-            # Single character tokens
-            single_char_tokens = {
-                ".": TokenType.PERIOD,
-                ",": TokenType.COMMA,
-                ";": TokenType.SEMICOLON,
-                ":": TokenType.COLON,
-                "(": TokenType.LEFT_PAREN,
-                ")": TokenType.RIGHT_PAREN,
-                "+": TokenType.PLUS,
-                "-": TokenType.MINUS,
-                "*": TokenType.MULTIPLY_OP,
-                "/": TokenType.DIVIDE_OP,
-                "=": TokenType.ASSIGN,
-                "$": TokenType.CURRENCY,  # Dollar sign for PICTURE clauses
-                ">": TokenType.GREATER,  # Greater than operator
-                "<": TokenType.LESS,  # Less than operator
-            }
-
-            if char in single_char_tokens:
-                tokens.append(Token(single_char_tokens[char], char, location))
+            # Single character tokens (class-level dict for performance)
+            if char in self.SINGLE_CHAR_TOKENS:
+                tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
                 pos += 1
                 continue
 
@@ -1400,7 +1406,7 @@ class CobolLexer:
         if (
             not has_decimal
             and not has_exponent
-            and re.match(r"^\d{1,2}$", value)
+            and _LEVEL_NUMBER_1_2DIGIT_RE.match(value)
             and 1 <= int(value) <= 99
         ):
             # Only treat as level number if it's a valid COBOL level number
@@ -1458,7 +1464,7 @@ class CobolLexer:
             token_type = self.KEYWORDS[upper_value]
         elif upper_value in self.FIGURATIVE_CONSTANTS:
             token_type = TokenType.FIGURATIVE_CONSTANT
-        elif re.match(r"^\d{2}$", value):
+        elif _LEVEL_NUMBER_2DIGIT_RE.match(value):
             token_type = TokenType.LEVEL_NUMBER
         else:
             token_type = TokenType.IDENTIFIER

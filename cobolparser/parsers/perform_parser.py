@@ -7,6 +7,7 @@ from ..lexer import TokenType
 
 class PerformStatementParser(StatementParser):
     """Parser for PERFORM statements."""
+    token_type = TokenType.PERFORM
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()

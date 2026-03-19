@@ -168,6 +168,7 @@ class ArithmeticParserBase:
 
 class AddStatementParser(StatementParser, ArithmeticParserBase):
     """Parser for ADD statements."""
+    token_type = TokenType.ADD
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
@@ -270,6 +271,7 @@ class AddStatementParser(StatementParser, ArithmeticParserBase):
 
 class SubtractStatementParser(StatementParser, ArithmeticParserBase):
     """Parser for SUBTRACT statements."""
+    token_type = TokenType.SUBTRACT
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
@@ -363,6 +365,7 @@ class SubtractStatementParser(StatementParser, ArithmeticParserBase):
 
 class MultiplyStatementParser(StatementParser, ArithmeticParserBase):
     """Parser for MULTIPLY statements."""
+    token_type = TokenType.MULTIPLY
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
@@ -446,6 +449,7 @@ class MultiplyStatementParser(StatementParser, ArithmeticParserBase):
 
 class DivideStatementParser(StatementParser, ArithmeticParserBase):
     """Parser for DIVIDE statements."""
+    token_type = TokenType.DIVIDE
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
@@ -532,6 +536,7 @@ class DivideStatementParser(StatementParser, ArithmeticParserBase):
 
 class ComputeStatementParser(StatementParser, ArithmeticParserBase):
     """Parser for COMPUTE statements."""
+    token_type = TokenType.COMPUTE
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()

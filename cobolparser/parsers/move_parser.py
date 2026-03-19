@@ -7,7 +7,8 @@ from ..plugins.core import ParseError
 
 class MoveStatementParser(StatementParser):
     """Parser for MOVE statements."""
-    
+    token_type = TokenType.MOVE
+
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
         if token:

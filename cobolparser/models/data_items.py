@@ -5,8 +5,23 @@ This module implements AST nodes for COBOL data definitions including
 data items, PICTURE clauses, OCCURS clauses, and IBM-specific data types.
 """
 
+import re
 from typing import Dict, Any, List, Optional, Union
 from .ast_base import ASTNode, SourceLocation
+
+# Pre-compiled regex patterns for PictureClause parsing (avoids re-compilation per instance)
+_PIC_P_FACTOR_RE = re.compile(r'P(\((\d+)\))?')
+_PIC_ALPHA_RE = re.compile(r'([XA])(\((\d+)\))?$')
+_PIC_BASIC_NUMERIC_RE = re.compile(r'S?9(\((\d+)\))?$')
+_PIC_SIGNED_RE = re.compile(r'S(9+|\((\d+)\)|9\((\d+)\))$')
+_PIC_LEFT_V_RE = re.compile(r'S?(9+|9\((\d+)\))$')
+_PIC_RIGHT_V_RE = re.compile(r'(9+|9\((\d+)\))$')
+_PIC_SCALING_LEFT_RE = re.compile(r'S?P(\((\d+)\))?9+$')
+_PIC_SCALING_RIGHT_RE = re.compile(r'S?9+P(\((\d+)\))?$')
+_PIC_EDITED_INT_RE = re.compile(r'9(\((\d+)\))?|9+$')
+_PIC_COMPLEX_RE = re.compile(r'S?(9+)V(9+)$')
+_PIC_DIGIT_X_RE = re.compile(r'[9X]')
+_PIC_NINE_RE = re.compile(r'9')
 
 
 class PictureClause(ASTNode):
@@ -27,33 +42,30 @@ class PictureClause(ASTNode):
     
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
-        import re
-        
         # Check for sign
         if 'S' in self.pattern:
             self.is_signed = True
-        
+
         # Check for scaling factor P
-        p_matches = re.findall(r'P(\((\d+)\))?', self.pattern)
+        p_matches = _PIC_P_FACTOR_RE.findall(self.pattern)
         if p_matches:
             self.has_scaling_factor = True
             if p_matches[0][1]:  # P(n) format
                 self.scaling_factor = int(p_matches[0][1])
             else:  # Single P
                 self.scaling_factor = 1
-        
+
         # Handle various PICTURE patterns
-        
+
         # 1. Basic alphanumeric patterns: X, X(n), A, A(n)
-        alpha_match = re.match(r'([XA])(\((\d+)\))?$', self.pattern)
+        alpha_match = _PIC_ALPHA_RE.match(self.pattern)
         if alpha_match:
-            char_type = alpha_match.group(1)
             count_str = alpha_match.group(3)
             self.size = int(count_str) if count_str else 1
             return
-        
+
         # 2. Basic numeric patterns: 9, 9(n)
-        basic_numeric = re.match(r'S?9(\((\d+)\))?$', self.pattern)
+        basic_numeric = _PIC_BASIC_NUMERIC_RE.match(self.pattern)
         if basic_numeric:
             count_str = basic_numeric.group(2)
             digit_count = int(count_str) if count_str else 1
@@ -62,9 +74,9 @@ class PictureClause(ASTNode):
             self.total_digits = digit_count
             self.size = digit_count
             return
-        
+
         # 3. Signed patterns: S9(n), S999, etc.
-        signed_match = re.match(r'S(9+|\((\d+)\)|9\((\d+)\))$', self.pattern)
+        signed_match = _PIC_SIGNED_RE.match(self.pattern)
         if signed_match:
             if signed_match.group(2):  # S(n) format
                 digit_count = int(signed_match.group(2))
@@ -72,119 +84,119 @@ class PictureClause(ASTNode):
                 digit_count = int(signed_match.group(3))
             else:  # S999... format
                 digit_count = len(signed_match.group(1))
-            
+
             self.integer_digits = digit_count
             self.decimal_digits = 0
             self.total_digits = digit_count
             self.size = digit_count
             return
-        
+
         # 4. Decimal patterns: split at V and parse each side
         if 'V' in self.pattern:
             parts = self.pattern.split('V')
             if len(parts) == 2:
                 left_part = parts[0]
                 right_part = parts[1]
-                
+
                 # Parse integer part (before V)
-                left_match = re.match(r'S?(9+|9\((\d+)\))$', left_part)
+                left_match = _PIC_LEFT_V_RE.match(left_part)
                 if left_match:
                     if left_match.group(2):  # 9(n) format
                         integer_part = int(left_match.group(2))
                     else:  # 9999... format
-                        integer_part = len(re.findall(r'9', left_part))
+                        integer_part = len(_PIC_NINE_RE.findall(left_part))
                 else:
                     integer_part = 0  # SV format
-                
+
                 # Parse decimal part (after V)
-                right_match = re.match(r'(9+|9\((\d+)\))$', right_part)
+                right_match = _PIC_RIGHT_V_RE.match(right_part)
                 if right_match:
                     if right_match.group(2):  # 9(n) format
                         decimal_part = int(right_match.group(2))
                     else:  # 9999... format
-                        decimal_part = len(re.findall(r'9', right_part))
+                        decimal_part = len(_PIC_NINE_RE.findall(right_part))
                 else:
                     decimal_part = 0
-                
+
                 self.integer_digits = integer_part
                 self.decimal_digits = decimal_part
                 self.total_digits = integer_part + decimal_part
                 self.size = self.total_digits
                 return
-        
+
         # 5. Leading decimal patterns: SV9(n), V9(n) - already handled above in V parsing
         # This is redundant now since we handle V patterns above
-        
+
         # 6. Scaling factor patterns: SP(n)9, S9P(n)
-        scaling_match = re.match(r'S?P(\((\d+)\))?9+$', self.pattern) or re.match(r'S?9+P(\((\d+)\))?$', self.pattern)
+        scaling_match = _PIC_SCALING_LEFT_RE.match(self.pattern) or _PIC_SCALING_RIGHT_RE.match(self.pattern)
         if scaling_match:
             # Count digits (9s)
-            digit_count = len(re.findall(r'9', self.pattern))
+            digit_count = len(_PIC_NINE_RE.findall(self.pattern))
             self.integer_digits = digit_count
             self.decimal_digits = 0
             self.total_digits = digit_count
             self.size = digit_count
             return
-        
+
         # 7. Display numeric edited patterns: -9(n), -9(n).9(n), -.9(n), -99.99
         if self.pattern.startswith('-'):
             self.is_numeric_edited = True
             pattern_without_minus = self.pattern[1:]  # Remove leading minus
             integer_part = 0
             decimal_part = 0
-            
+
             if '.' in pattern_without_minus:
                 parts = pattern_without_minus.split('.')
                 int_part = parts[0] if parts[0] else ""
                 dec_part = parts[1] if len(parts) > 1 else ""
-                
+
                 # Parse integer part
                 if int_part:
-                    int_match = re.match(r'9(\((\d+)\))?|9+$', int_part)
+                    int_match = _PIC_EDITED_INT_RE.match(int_part)
                     if int_match:
                         if int_match.group(2):  # 9(n) format
                             integer_part = int(int_match.group(2))
                         else:  # 9+ format
-                            integer_part = len(re.findall(r'9', int_part))
-                
+                            integer_part = len(_PIC_NINE_RE.findall(int_part))
+
                 # Parse decimal part
                 if dec_part:
-                    dec_match = re.match(r'9(\((\d+)\))?|9+$', dec_part)
+                    dec_match = _PIC_EDITED_INT_RE.match(dec_part)
                     if dec_match:
                         if dec_match.group(2):  # 9(n) format
                             decimal_part = int(dec_match.group(2))
                         else:  # 9+ format
-                            decimal_part = len(re.findall(r'9', dec_part))
+                            decimal_part = len(_PIC_NINE_RE.findall(dec_part))
             else:
                 # No decimal point, just integer part
-                int_match = re.match(r'9(\((\d+)\))?|9+$', pattern_without_minus)
+                int_match = _PIC_EDITED_INT_RE.match(pattern_without_minus)
                 if int_match:
                     if int_match.group(2):  # 9(n) format
                         integer_part = int(int_match.group(2))
                     else:  # 9+ format
-                        integer_part = len(re.findall(r'9', pattern_without_minus))
-            
+                        integer_part = len(_PIC_NINE_RE.findall(pattern_without_minus))
+
             self.integer_digits = integer_part
             self.decimal_digits = decimal_part
             self.total_digits = integer_part + decimal_part
             self.size = self.total_digits + 1  # +1 for the sign/decimal point
             return
-        
+
         # 8. Complex patterns with repetition: S999V999, etc.
-        complex_match = re.match(r'S?(9+)V(9+)$', self.pattern)
+        complex_match = _PIC_COMPLEX_RE.match(self.pattern)
         if complex_match:
             integer_part = len(complex_match.group(1))
             decimal_part = len(complex_match.group(2))
-            
+
             self.integer_digits = integer_part
             self.decimal_digits = decimal_part
             self.total_digits = integer_part + decimal_part
             self.size = self.total_digits
             return
-        
+
         # 8. Fallback for unrecognized patterns
         # Count all 9s and Xs to estimate size
-        digit_count = len(re.findall(r'[9X]', self.pattern))
+        digit_count = len(_PIC_DIGIT_X_RE.findall(self.pattern))
         if digit_count > 0:
             self.size = digit_count
             if '9' in self.pattern:
@@ -192,8 +204,8 @@ class PictureClause(ASTNode):
                 # Estimate integer vs decimal based on V
                 if 'V' in self.pattern:
                     v_pos = self.pattern.find('V')
-                    integer_nines = len(re.findall(r'9', self.pattern[:v_pos]))
-                    decimal_nines = len(re.findall(r'9', self.pattern[v_pos:]))
+                    integer_nines = len(_PIC_NINE_RE.findall(self.pattern[:v_pos]))
+                    decimal_nines = len(_PIC_NINE_RE.findall(self.pattern[v_pos:]))
                     self.integer_digits = integer_nines
                     self.decimal_digits = decimal_nines
                 else:

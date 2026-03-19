@@ -7,6 +7,7 @@ from ..lexer import TokenType
 
 class IfStatementParser(StatementParser):
     """Parser for IF statements."""
+    token_type = TokenType.IF
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()

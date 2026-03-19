@@ -5,7 +5,8 @@ from ..lexer import TokenType
 
 class DisplayStatementParser(StatementParser):
     """Parser for DISPLAY statements."""
-    
+    token_type = TokenType.DISPLAY
+
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
         if token:
