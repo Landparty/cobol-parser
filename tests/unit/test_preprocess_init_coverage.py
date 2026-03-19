@@ -301,13 +301,18 @@ class TestNormalizeFixedFormat:
         assert result.strip() == ""
     
     def test_comment_lines(self):
-        """Test handling of comment lines (indicator *)."""
+        """Test handling of comment lines (indicator *).
+
+        Comment lines are skipped (emitted as empty lines) to prevent
+        the free-form lexer from misinterpreting comment text as code.
+        """
         lines = [
             "000100*This is a comment line"
         ]
         result = normalize_fixed_format(lines)
-        assert "This is a comment" in result
-    
+        # Comment text should NOT appear in output (would be parsed as code)
+        assert "This is a comment" not in result
+
     def test_page_eject_comment_lines(self):
         """Test handling of page eject comment lines (indicator /)."""
         lines = [
@@ -316,9 +321,10 @@ class TestNormalizeFixedFormat:
             "       IDENTIFICATION DIVISION."
         ]
         result = normalize_fixed_format(lines)
-        # Both / and * lines should be treated as comments
-        assert "+---------------------------------------------------------------+" in result
-        assert "|                                                               |" in result
+        # Comment lines (/ and *) are skipped to avoid misparse
+        assert "+-------" not in result
+        assert "|" not in result.replace("IDENTIFICATION DIVISION.", "")
+        # But real code lines are preserved
         assert "IDENTIFICATION DIVISION." in result
     
     def test_regular_lines(self):
