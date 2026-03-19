@@ -10,12 +10,13 @@ from ..plugins.core import ParseError
 
 class EvaluateStatementParser(StatementParser):
     """Parser for EVALUATE statements.
-    
+
     NOTE: This parser only extracts the EVALUATE structure (subjects, WHEN clauses,
     selectors) but does NOT recursively parse nested statements. The nested statements
     are left to be parsed by the main statement parser when parse_statement() is called
     at the sentence level.
     """
+    token_type = TokenType.EVALUATE
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()

@@ -52,6 +52,9 @@ from .parsers.statements.write_parser import WriteStatementParser
 
 from .preprocess import normalize_fixed_format
 
+# Pre-compiled regex for ID division detection (avoids re-compilation per parse call)
+_ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE)
+
 
 class ParseState(Enum):
     """Parser state tracking for COBOL divisions and sections."""
@@ -167,12 +170,9 @@ class CobolParser:
     def _skip_to_identification_division(content: str) -> str:
         """Skip all lines before IDENTIFICATION DIVISION, preserving line numbers."""
         lines = content.splitlines(keepends=True)
-        id_div_pattern = re.compile(
-            r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE
-        )
 
         for i, line in enumerate(lines):
-            if id_div_pattern.search(line):
+            if _ID_DIV_RE.search(line):
                 blank_lines = ["\n"] * i
                 return "".join(blank_lines + lines[i:])
 

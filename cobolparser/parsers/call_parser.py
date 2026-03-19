@@ -7,6 +7,7 @@ from ..lexer import TokenType
 
 class CallStatementParser(StatementParser):
     """Parser for CALL statements."""
+    token_type = TokenType.CALL
 
     def can_parse(self, stream: TokenStream) -> bool:
         token = stream.peek()
