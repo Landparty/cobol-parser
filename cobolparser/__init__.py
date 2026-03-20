@@ -105,6 +105,10 @@ from .parser import (
     ParseState,
     parse_cobol,
 )
+from .batch import (
+    parse_files,
+    BatchResult,
+)
 
 # Import normalize_fixed_format from the preprocess package
 from .preprocess import normalize_fixed_format
@@ -180,6 +184,9 @@ __all__ = [
     "ParseResult",
     "ParseState",
     "parse_cobol",
+    # Batch parsing
+    "parse_files",
+    "BatchResult",
     # Preprocessing utilities
     "normalize_fixed_format",
     # Enhanced features
