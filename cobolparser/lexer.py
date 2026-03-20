@@ -777,7 +777,7 @@ class CobolLexer:
             token_type = self.KEYWORDS[upper_value]
         elif upper_value in self.FIGURATIVE_CONSTANTS:
             token_type = TokenType.FIGURATIVE_CONSTANT
-        elif re.match(r"^\d{2}$", value):  # Level numbers 01-99
+        elif _LEVEL_NUM_RE.match(value):  # Level numbers 01-99
             token_type = TokenType.LEVEL_NUMBER
         else:
             token_type = TokenType.IDENTIFIER
@@ -1472,7 +1472,7 @@ class CobolLexer:
             token_type = self.KEYWORDS[upper_value]
         elif upper_value in self.FIGURATIVE_CONSTANTS:
             token_type = TokenType.FIGURATIVE_CONSTANT
-        elif re.match(r"^\d{2}$", value):
+        elif _LEVEL_NUM_RE.match(value):
             token_type = TokenType.LEVEL_NUMBER
         else:
             token_type = TokenType.IDENTIFIER
