@@ -46,7 +46,7 @@ class TestParseFilesCorrectness:
                 error_recovery=ErrorRecoveryMode.COLLECT_ALL,
             )
 
-        batch = parse_files(files, workers=1, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        batch = parse_files(files, workers=2, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
         assert len(batch) == len(files)
         for br in batch:

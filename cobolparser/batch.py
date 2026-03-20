@@ -43,16 +43,13 @@ def _parse_one(
     except OSError as exc:
         return BatchResult(path=path, result=None, read_error=str(exc))
 
-    try:
-        result = parse_cobol(
-            source,
-            filename=path_str,
-            error_recovery=error_recovery,
-            dialect=dialect,
-        )
-        return BatchResult(path=path, result=result, read_error=None)
-    except Exception as exc:
-        return BatchResult(path=path, result=None, read_error=str(exc))
+    result = parse_cobol(
+        source,
+        filename=path_str,
+        error_recovery=error_recovery,
+        dialect=dialect,
+    )
+    return BatchResult(path=path, result=result, read_error=None)
 
 
 def _parse_one_packed(args: tuple) -> BatchResult:
