@@ -5,7 +5,15 @@
       "mcp__plugin_serena_serena__activate_project",
       "mcp__plugin_serena_serena__get_symbols_overview",
       "mcp__plugin_serena_serena__find_symbol",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "mcp__plugin_serena_serena__read_memory",
+      "mcp__plugin_serena_serena__read_file",
+      "mcp__plugin_serena_serena__search_for_pattern",
+      "Bash(jq -r \".result | split\\(\"\"\\\\n\"\"\\)[0:20] | join\\(\"\"\\\\n\"\"\\)\")",
+      "Bash(git stash:*)",
+      "Bash(rtk git:*)",
+      "Bash(python3:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

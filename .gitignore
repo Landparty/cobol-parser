@@ -156,3 +156,4 @@ baselines
 
 *.zip
 .serena/project.yml
+.claude/settings.local.json
