@@ -11,12 +11,15 @@ This module provides comprehensive tokenization of COBOL source code including:
 """
 
 import re
+import sys
 from enum import Enum, auto
 from typing import List, Optional, Iterator, NamedTuple
 from dataclasses import dataclass
 
 from .models.ast_base import SourceLocation
 from .plugins.core import ParseError, DialectType
+
+_LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 
 
 class TokenType(Enum):
@@ -554,6 +557,7 @@ class CobolLexer:
         "COPY": TokenType.COPY,
         "REPLACING": TokenType.REPLACING,
     }
+    KEYWORDS = {sys.intern(k): v for k, v in KEYWORDS.items()}
 
     # Figurative constants
     FIGURATIVE_CONSTANTS = {
@@ -729,7 +733,7 @@ class CobolLexer:
     def read_identifier(self) -> Token:
         """Read an identifier or keyword."""
         start_location = self.get_current_location()
-        value = ""
+        chars = []
 
         while True:
             char = self.peek_char()
@@ -737,18 +741,20 @@ class CobolLexer:
                 break
 
             if char.isalnum() or char in "-_":
-                value += char
+                chars.append(char)
                 self.advance_char()
             else:
                 break
 
+        value = "".join(chars)
+
         # Check if it's a keyword
-        upper_value = value.upper()
+        upper_value = sys.intern(value.upper())
         if upper_value in self.KEYWORDS:
             token_type = self.KEYWORDS[upper_value]
         elif upper_value in self.FIGURATIVE_CONSTANTS:
             token_type = TokenType.FIGURATIVE_CONSTANT
-        elif re.match(r"^\d{2}$", value):  # Level numbers 01-99
+        elif _LEVEL_NUM_RE.match(value):  # Level numbers 01-99
             token_type = TokenType.LEVEL_NUMBER
         else:
             token_type = TokenType.IDENTIFIER
@@ -758,17 +764,17 @@ class CobolLexer:
     def read_comment(self) -> Token:
         """Read a comment (line starting with * in column 7 or inline)."""
         start_location = self.get_current_location()
-        value = ""
+        chars = []
 
         # Read until end of line
         while True:
             char = self.peek_char()
             if char is None or char == "\n":
                 break
-            value += char
+            chars.append(char)
             self.advance_char()
 
-        return Token(TokenType.COMMENT, value, start_location)
+        return Token(TokenType.COMMENT, "".join(chars), start_location)
 
     def handle_cobol_line_format(self, line: str, line_num: int) -> List[Token]:
         """Handle COBOL fixed-format line structure.
@@ -809,18 +815,19 @@ class CobolLexer:
         program_text = line[7:72] if len(line) > 7 else ""
 
         # Special handling for VALUE clause with unterminated string pattern
+        program_text_upper = program_text.upper()
         if (
             not self._open_string_quote
-            and "VALUE" in program_text.upper()
+            and "VALUE" in program_text_upper
             and '"' in program_text
         ):
             # Check if this line has VALUE followed by unterminated string and next line is continuation
-            value_upper = program_text.upper()
+            value_upper = program_text_upper
             value_pos = value_upper.find("VALUE")
             if value_pos != -1:
                 after_value = program_text[value_pos + 5 :].strip()
                 # Skip "IS" if present
-                if after_value.upper().startswith("IS"):
+                if after_value.upper().startswith("IS"):  # short string, cheap
                     after_value = after_value[2:].strip()
                 
                 # Check if VALUE is followed by a figurative constant - if so, skip string mode
@@ -967,12 +974,13 @@ class CobolLexer:
 
         while pos < len(text):
             char = text[pos]
-            location = SourceLocation(line_num + 1, start_col + pos, 1)
 
-            # Skip whitespace
+            # Skip whitespace (no location needed)
             if char in " \t":
                 pos += 1
                 continue
+
+            location = SourceLocation(line_num + 1, start_col + pos, 1)
 
             # String literals
             if char in "\"'":
@@ -1453,12 +1461,12 @@ class CobolLexer:
                 break
 
         # Determine token type
-        upper_value = value.upper()
+        upper_value = sys.intern(value.upper())
         if upper_value in self.KEYWORDS:
             token_type = self.KEYWORDS[upper_value]
         elif upper_value in self.FIGURATIVE_CONSTANTS:
             token_type = TokenType.FIGURATIVE_CONSTANT
-        elif re.match(r"^\d{2}$", value):
+        elif _LEVEL_NUM_RE.match(value):
             token_type = TokenType.LEVEL_NUMBER
         else:
             token_type = TokenType.IDENTIFIER

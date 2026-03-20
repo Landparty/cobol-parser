@@ -406,9 +406,9 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
         if indicator in ('*', '/'):  # comment (including page eject)
-            # Preserve comment content for normalization callers that inspect comments.
+            # Comment lines: flush pending buffer but do not emit comment text.
+            # Emitting comment text causes the free-form lexer to tokenize it as code.
             flush_buffer()
-            result.append(text_slice.rstrip())
             pending_literal = False
             continue
         is_cont = indicator == '-'

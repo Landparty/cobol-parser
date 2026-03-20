@@ -242,7 +242,8 @@ class CallStatementParser(IStatementParser):
             elif token.type in STATEMENT_TOKEN_TYPES:
                 break
             # Check for non-parameter tokens (like NUMERIC_LITERAL), end of USING clause
-            elif token.type not in (TokenType.BY, TokenType.USING) and token.type != TokenType.IDENTIFIER:
+            elif token.type not in (TokenType.BY, TokenType.USING) and \
+                 token.type not in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.VALUE):
                 break
             
             # Check for BY [REFERENCE|CONTENT|VALUE]
@@ -251,8 +252,9 @@ class CallStatementParser(IStatementParser):
                 token_stream.consume()
                 self._skip_whitespace(token_stream)
                 token = token_stream.peek()
-                if token and token.type == TokenType.IDENTIFIER:
-                    mode_val = token.value.upper()
+                if token and (token.type == TokenType.IDENTIFIER or
+                              token.type == TokenType.VALUE):
+                    mode_val = token.value.upper() if token.value else ""
                     if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
                         passing_mode = mode_val
                         token_stream.consume()
@@ -260,7 +262,7 @@ class CallStatementParser(IStatementParser):
                         token = token_stream.peek()
             
             # Parse parameter name
-            if token and token.type == TokenType.IDENTIFIER:
+            if token and token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 param_name = token.value
                 stmt.add_using_parameter(param_name, passing_mode)
                 token_stream.consume()

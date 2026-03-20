@@ -7,11 +7,12 @@ of parsed COBOL programs, including node hierarchy and navigation.
 
 import json
 from abc import ABC, abstractmethod
+from collections import deque
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, List, Optional, Iterator, TypeVar, Type
 
 
-@dataclass
+@dataclass(slots=True)
 class SourceLocation:
     """Source code location information with line and column tracking."""
     
@@ -133,10 +134,10 @@ class ASTNode(ABC):
             yield from child.traverse_depth_first()
     
     def traverse_breadth_first(self) -> Iterator['ASTNode']:
-        """Traverse the AST in breadth-first order starting from this node.""" 
-        queue: List[ASTNode] = [self]
+        """Traverse the AST in breadth-first order starting from this node."""
+        queue: deque[ASTNode] = deque([self])
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             yield node
             queue.extend(node.children)  # type: ignore[arg-type]
     
@@ -170,11 +171,11 @@ class ASTNode(ABC):
     def set_metadata(self, key: str, value: Any) -> None:
         """Set metadata for this node."""
         self._metadata[key] = value
-    
+
     def get_metadata(self, key: str, default: Any = None) -> Any:
         """Get metadata for this node."""
         return self._metadata.get(key, default)
-    
+
     def has_metadata(self, key: str) -> bool:
         """Check if node has specific metadata."""
         return key in self._metadata
