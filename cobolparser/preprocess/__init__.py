@@ -48,6 +48,15 @@ Usage Example:
 from typing import Optional, Iterable, List
 import re
 
+# Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
+_DEFINE_RE = re.compile(r'>>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?')
+_IS_DEFINED_RE = re.compile(r'(\w+)\s+IS\s+(NOT\s+)?DEFINED')
+_DATA_DEF_RE = re.compile(
+    r'^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$',
+    re.MULTILINE
+)
+_LEVEL_NUMBER_RE = re.compile(r'^\s*(\d{2})\s+[A-Za-z]', re.MULTILINE)
+
 
 class CircularReferenceError(Exception):
     """
@@ -511,7 +520,7 @@ def preprocess_conditional_compilation(
         
         # >>DEFINE symbol [AS value]
         if stripped.startswith('>>DEFINE'):
-            match = re.match(r'>>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?', stripped)
+            match = _DEFINE_RE.match(stripped)
             if match:
                 symbol = match.group(1)
                 value = match.group(2).strip() if match.group(2) else 'TRUE'
@@ -523,7 +532,7 @@ def preprocess_conditional_compilation(
             condition_text = stripped[4:].strip()
             
             # Parse condition
-            is_defined_match = re.match(r'(\w+)\s+IS\s+(NOT\s+)?DEFINED', condition_text)
+            is_defined_match = _IS_DEFINED_RE.match(condition_text)
             if is_defined_match:
                 symbol = is_defined_match.group(1)
                 is_not = is_defined_match.group(2) is not None
@@ -621,12 +630,7 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
         warnings.append(f"Possible unbalanced double quotes in '{copybook_path}'")
     
     # Check for potential missing terminating period on data definitions
-    # Look for lines that appear to be data definitions without periods
-    data_def_pattern = re.compile(
-        r'^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$',
-        re.MULTILINE
-    )
-    for match in data_def_pattern.finditer(content):
+    for match in _DATA_DEF_RE.finditer(content):
         line_num = content[:match.start()].count('\n') + 1
         warnings.append(
             f"Line {line_num} in '{copybook_path}' may be missing terminating period"
@@ -656,16 +660,14 @@ def validate_level_numbers(
     warnings = []
     
     # Extract last level number before COPY statement
-    level_pattern = re.compile(r'^\s*(\d{2})\s+[A-Za-z]', re.MULTILINE)
-    
-    pre_levels = list(level_pattern.finditer(pre_context))
+    pre_levels = list(_LEVEL_NUMBER_RE.finditer(pre_context))
     if not pre_levels:
         return warnings  # No prior data definitions
     
     last_level = int(pre_levels[-1].group(1))
     
     # Extract first level number in copybook
-    copy_levels = list(level_pattern.finditer(copybook_content))
+    copy_levels = list(_LEVEL_NUMBER_RE.finditer(copybook_content))
     if not copy_levels:
         return warnings  # No data definitions in copybook
     

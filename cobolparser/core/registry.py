@@ -17,40 +17,68 @@ from ..lexer import TokenType
 
 
 class StatementRegistry:
-    """Legacy registry - maps tokens to their corresponding parsers.
-    
-    This class provides backward compatibility for existing code that uses
-    the older StatementRegistry interface. New code should use
-    StatementParserRegistry instead.
+    """Registry that maps tokens to their corresponding parsers.
+
+    Uses a token-type dispatch map for O(1) lookup of candidate parsers,
+    falling back to linear scan only for parsers without a declared token type.
     """
-    
+
     def __init__(self):
-        """Initialize the legacy statement registry."""
+        """Initialize the statement registry."""
         self._parsers: List[StatementParser] = []
-    
+        self._token_map: Dict[TokenType, List[StatementParser]] = {}
+        self._untyped_parsers: List[StatementParser] = []
+
     def register(self, parser: StatementParser) -> None:
         """Register a statement parser.
-        
+
+        If the parser has a `token_type` attribute, it is indexed for fast
+        dispatch. Otherwise it goes into the fallback linear scan list.
+
         Args:
             parser: The parser to register (must implement can_parse())
         """
         self._parsers.append(parser)
-    
+
+        # Build token dispatch map from parser's token_type attribute
+        token_type = getattr(parser, 'token_type', None)
+        if token_type is not None:
+            if token_type not in self._token_map:
+                self._token_map[token_type] = []
+            self._token_map[token_type].append(parser)
+        else:
+            self._untyped_parsers.append(parser)
+
     def get_parser(self, stream) -> Optional[StatementParser]:
         """Get a parser for the current token stream position.
-        
-        Uses first-match strategy - returns the first parser whose
-        can_parse() method returns True.
-        
+
+        First tries O(1) token-type dispatch, then falls back to
+        linear scan of untyped parsers.
+
         Args:
             stream: TokenStream to find parser for
-            
+
         Returns:
             First matching parser or None if no parser matches
         """
-        for parser in self._parsers:
+        # Fast path: try token-type dispatch
+        token = stream.peek() if stream and not stream.is_empty() else None
+        if token is not None and token.type in self._token_map:
+            for parser in self._token_map[token.type]:
+                if hasattr(parser, 'can_parse') and parser.can_parse(stream):
+                    return parser
+
+        # Slow path: check untyped parsers
+        for parser in self._untyped_parsers:
             if hasattr(parser, 'can_parse') and parser.can_parse(stream):
                 return parser
+
+        # Final fallback: check all parsers (handles text-match parsers)
+        if token is not None and token.type not in self._token_map:
+            for parser in self._parsers:
+                if hasattr(parser, 'can_parse') and parser.can_parse(stream):
+                    return parser
+
         return None
 
 

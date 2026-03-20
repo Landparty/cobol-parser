@@ -301,7 +301,11 @@ class TestNormalizeFixedFormat:
         assert result.strip() == ""
     
     def test_comment_lines(self):
-        """Test handling of comment lines (indicator *)."""
+        """Test handling of comment lines (indicator *).
+
+        Comment lines are skipped (emitted as empty lines) to prevent
+        the free-form lexer from misinterpreting comment text as code.
+        """
         lines = [
             "000100*This is a comment line"
         ]
