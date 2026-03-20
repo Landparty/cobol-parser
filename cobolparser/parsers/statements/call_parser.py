@@ -142,13 +142,18 @@ class CallStatementParser(IStatementParser):
                         token_stream.consume()
                 elif (token.type == TokenType.ON or
                       (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "ON")):
-                    # ON EXCEPTION clause - parse nested statements
                     next_tok = token_stream.peek(1)
-                    if next_tok and next_tok.value and next_tok.value.upper() == "EXCEPTION":
+                    next_val = next_tok.value.upper() if next_tok and next_tok.value else ""
+                    if next_val == "EXCEPTION":
                         token_stream.consume()  # ON
                         token_stream.consume()  # EXCEPTION
                         nested = self._parse_nested_stmts(token_stream, stop_at={"NOT", "END-CALL"})
                         stmt.on_exception = nested if nested else None
+                    elif next_val == "OVERFLOW":
+                        token_stream.consume()  # ON
+                        token_stream.consume()  # OVERFLOW
+                        nested = self._parse_nested_stmts(token_stream, stop_at={"END-CALL"})
+                        stmt.on_overflow = nested if nested else []
                     else:
                         break
                 elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "NOT":

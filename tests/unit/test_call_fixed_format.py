@@ -33,7 +33,7 @@ class TestCallFixedFormat:
         call_stmt = parser.parse_call_statement()
         
         assert call_stmt is not None
-        assert call_stmt.called_program == '"MULTILINE"'
+        assert call_stmt.called_program == 'MULTILINE'
         assert len(call_stmt.using_parameters) == 2
 
     def test_columns_8_72_compliance(self):
@@ -54,7 +54,7 @@ class TestCallFixedFormat:
         call_stmt = parser.parse_call_statement()
         
         assert call_stmt is not None
-        assert call_stmt.called_program == '"COLUMNS"'
+        assert call_stmt.called_program == 'COLUMNS'
         assert len(call_stmt.using_parameters) == 2
 
     def test_continuation_in_parameter_list(self):

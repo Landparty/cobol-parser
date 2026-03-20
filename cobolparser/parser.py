@@ -26,7 +26,7 @@ from .plugins.core import (
 
 # Core parsing infrastructure
 from .core.token_stream import TokenStream
-from .core.registry import StatementRegistry
+from .core.registry import StatementParserRegistry
 from .core.interfaces import ParseContext
 from .parsers.divisions.factory import DivisionParserFactory, DivisionType
 from .parsers.divisions.identification import IdentificationDivisionParser
@@ -35,13 +35,13 @@ from .parsers.divisions.data import DataDivisionParser
 from .parsers.divisions.procedure import ProcedureDivisionParser
 
 # Statement parsers
-from .parsers.display_parser import DisplayStatementParser
-from .parsers.move_parser import MoveStatementParser
-from .parsers.call_parser import CallStatementParser
-from .parsers.if_parser import IfStatementParser
-from .parsers.perform_parser import PerformStatementParser
-from .parsers.evaluate_parser import EvaluateStatementParser
-from .parsers.arithmetic_parsers import (
+from .parsers.statements.display_parser import DisplayStatementParser
+from .parsers.statements.move_parser import MoveStatementParser
+from .parsers.statements.call_parser import CallStatementParser
+from .parsers.statements.if_parser import IfStatementParser
+from .parsers.statements.perform_parser import PerformStatementParser
+from .parsers.statements.evaluate_parser import EvaluateStatementParser
+from .parsers.statements.arithmetic_parsers import (
     AddStatementParser,
     SubtractStatementParser,
     MultiplyStatementParser,
@@ -126,7 +126,7 @@ class CobolParser:
         self._division_factory = DivisionParserFactory()
         self._register_division_parsers()
         
-        self.registry = StatementRegistry()
+        self.registry = StatementParserRegistry()
         self._register_statement_parsers()
 
     def _register_division_parsers(self) -> None:
@@ -387,7 +387,7 @@ class CobolParser:
         if not self.stream and self.current_token_index < len(self.tokens):
             self.stream = TokenStream(self.tokens)
             self.stream._pos = self.current_token_index
-        return self.registry.get_parser(self.stream) if self.stream else None
+        return self.registry.find_parser(self.stream) if self.stream else None
 
     def parse_call_statement(self):
         """Parse CALL statement (backward compatibility)."""
@@ -438,14 +438,15 @@ class CobolParser:
         if not self.stream and self.current_token_index < len(self.tokens):
             self.stream = TokenStream(self.tokens)
             self.stream._pos = self.current_token_index
-        
+
         if self.stream:
             try:
                 if not self.stream.is_empty():
-                    if parser.can_parse(self.stream):
-                        # Create ParseContext for statement parser
+                    if parser.matches(self.stream):
                         context = ParseContext(self, self.registry)
-                        result = parser.parse(self.stream, context)
+                        setattr(self.stream, '_parse_context', context)
+                        setattr(self.stream, '_registry', self.registry)
+                        result = parser.parse(self.stream)
                         self.current_token_index = self.stream._pos
                         return result
             except Exception:

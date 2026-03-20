@@ -1,12 +1,12 @@
 """Statement parsers for COBOL statements."""
 
-from .display_parser import DisplayStatementParser
-from .move_parser import MoveStatementParser
-from .call_parser import CallStatementParser
-from .if_parser import IfStatementParser
-from .perform_parser import PerformStatementParser
-from .evaluate_parser import EvaluateStatementParser
-from .arithmetic_parsers import (
+from .statements.display_parser import DisplayStatementParser
+from .statements.move_parser import MoveStatementParser
+from .statements.call_parser import CallStatementParser
+from .statements.if_parser import IfStatementParser
+from .statements.perform_parser import PerformStatementParser
+from .statements.evaluate_parser import EvaluateStatementParser
+from .statements.arithmetic_parsers import (
     AddStatementParser,
     SubtractStatementParser,
     MultiplyStatementParser,

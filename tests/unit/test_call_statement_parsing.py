@@ -84,7 +84,7 @@ class TestCallStatementParsing:
         
         assert call_stmt is not None
         # Currently we don't parse the inner statements into the AST, but we should verify parsing succeeds
-        assert call_stmt.called_program == '"SUB"'
+        assert call_stmt.called_program == 'SUB'
 
     def test_call_with_on_exception(self):
         """Test CALL with ON EXCEPTION clause."""
@@ -106,4 +106,4 @@ class TestCallStatementParsing:
         call_stmt = parser.parse_call_statement()
         
         assert call_stmt is not None
-        assert call_stmt.called_program == '"SUB"'
+        assert call_stmt.called_program == 'SUB'

@@ -54,7 +54,7 @@ class TestCallExceptionHandling:
         
         assert call_stmt is not None
         # NOT ON EXCEPTION handling verified in both_exception_handlers test
-        assert call_stmt.called_program == '"SERVICE"'
+        assert call_stmt.called_program == 'SERVICE'
 
     def test_both_exception_handlers(self):
         """Test both ON EXCEPTION and NOT ON EXCEPTION in same CALL (FR-007, FR-008)."""
@@ -121,7 +121,7 @@ class TestCallExceptionHandling:
         call_stmt = parser.parse_call_statement()
         
         assert call_stmt is not None
-        assert call_stmt.called_program == '"SUB"'
+        assert call_stmt.called_program == 'SUB'
 
 
 if __name__ == "__main__":
