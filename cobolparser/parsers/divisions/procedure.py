@@ -32,6 +32,14 @@ from cobolparser.parsers.statements import (
 )
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
 from cobolparser.parsers.statements.write_parser import WriteStatementParser
+from cobolparser.parsers.statements import (
+    ReadStatementParser,
+    OpenStatementParser,
+    CloseStatementParser,
+    RewriteStatementParser,
+    DeleteStatementParser,
+    StartStatementParser,
+)
 from .base import BaseDivisionParser
 
 
@@ -97,6 +105,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(GoStatementParser())
         
         # IO statements
+        registry.register(ReadStatementParser())
+        registry.register(OpenStatementParser())
+        registry.register(CloseStatementParser())
+        registry.register(RewriteStatementParser())
+        registry.register(DeleteStatementParser())
+        registry.register(StartStatementParser())
         registry.register(WriteStatementParser())
         
         # Arithmetic statements

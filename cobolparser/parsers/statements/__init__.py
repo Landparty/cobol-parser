@@ -44,6 +44,12 @@ from .ibm_exec_statements import (
 )
 from .entry_parser import EntryStatementParser
 from .go_parser import GoStatementParser
+from .read_parser import ReadStatementParser
+from .open_parser import OpenStatementParser
+from .close_parser import CloseStatementParser
+from .rewrite_parser import RewriteStatementParser
+from .delete_parser import DeleteStatementParser
+from .start_parser import StartStatementParser
 
 __all__ = [
     "DisplayStatementParser",
@@ -61,4 +67,10 @@ __all__ = [
     "ExecCicsStatementParser",
     "EntryStatementParser",
     "GoStatementParser",
+    "ReadStatementParser",
+    "OpenStatementParser",
+    "CloseStatementParser",
+    "RewriteStatementParser",
+    "DeleteStatementParser",
+    "StartStatementParser",
 ]

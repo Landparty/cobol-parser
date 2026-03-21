@@ -1,0 +1,107 @@
+"""Open statement parser implementing IStatementParser interface."""
+
+from typing import cast
+from ...core.interfaces import IStatementParser, ITokenStream
+from ...core.ast_factory import get_factory
+from ...models.statements import OpenStatement
+from ...models.ast_base import SourceLocation
+from ...lexer import TokenType
+
+# Open modes recognized as IDENTIFIER tokens with these values
+_OPEN_MODES = {"INPUT", "OUTPUT", "EXTEND"}
+# I-O is also a mode but contains a hyphen
+
+
+class OpenStatementParser(IStatementParser):
+    """Parser for OPEN statements.
+
+    Supports:
+    - OPEN INPUT|OUTPUT|I-O|EXTEND file-name...
+    - OPEN I-O file-name WITH REPOSITION (VSAM)
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        """Check if next token is OPEN keyword."""
+        try:
+            token = token_stream.peek()
+            return bool(token and token.type == TokenType.OPEN)
+        except Exception:
+            return False
+
+    def parse(self, token_stream: ITokenStream) -> OpenStatement:
+        """Parse an OPEN statement."""
+        start_token = token_stream.consume()
+        factory = get_factory()
+        stmt = cast(
+            OpenStatement,
+            factory.create(
+                OpenStatement,
+                start_token.location if start_token else SourceLocation(0, 0),
+            ),
+        )
+
+        self._skip_whitespace(token_stream)
+
+        # Parse open mode: INPUT, OUTPUT, I-O, EXTEND
+        token = token_stream.peek()
+        if token and token.type == TokenType.IDENTIFIER and token.value:
+            val = token.value.upper()
+            if val in _OPEN_MODES or val == "I-O":
+                stmt.set_open_mode(val)
+                token_stream.consume()
+                self._skip_whitespace(token_stream)
+
+        # Parse one or more file names
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+            if token.type == TokenType.PERIOD:
+                break
+            if token.type == TokenType.IDENTIFIER and token.value:
+                val = token.value.upper()
+                # Stop at next open mode or WITH keyword
+                if val in _OPEN_MODES or val == "I-O" or val == "WITH":
+                    break
+                # WITH REPOSITION for VSAM
+                if val == "REPOSITION":
+                    token_stream.consume()
+                    stmt.set_reposition(True)
+                    self._skip_whitespace(token_stream)
+                    continue
+                # Otherwise it's a file name
+                stmt.add_file(token.value)
+                token_stream.consume()
+                self._skip_whitespace(token_stream)
+            else:
+                break
+
+        # Optional WITH REPOSITION
+        token = token_stream.peek()
+        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "WITH":
+            token_stream.consume()
+            self._skip_whitespace(token_stream)
+            token = token_stream.peek()
+            if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "REPOSITION":
+                token_stream.consume()
+                stmt.set_reposition(True)
+                self._skip_whitespace(token_stream)
+
+        # Consume period if present
+        token = token_stream.peek()
+        if token and token.type == TokenType.PERIOD:
+            token_stream.consume()
+
+        return stmt
+
+    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
+        """Skip whitespace and newline tokens."""
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token or token.type not in (
+                TokenType.WHITESPACE,
+                TokenType.COMMENT,
+                TokenType.NEWLINE,
+            ):
+                break
+            token_stream.consume()
