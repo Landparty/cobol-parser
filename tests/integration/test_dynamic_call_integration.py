@@ -9,6 +9,8 @@ import pytest
 from cobolparser import parse_cobol, ErrorRecoveryMode
 from cobolparser.analysis import DynamicCallAnalyzer
 
+pytestmark = pytest.mark.integration
+
 
 class TestDynamicCallIntegration:
     """Integration tests for dynamic CALL analysis."""
@@ -310,6 +312,7 @@ class TestDynamicCallIntegration:
         
         # Verify JSON contains the information (basic check)
         import json
+
         ast_dict = json.loads(json_output)
         assert ast_dict is not None
         

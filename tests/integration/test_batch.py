@@ -26,6 +26,8 @@ class TestBatchResult:
     def test_importable_from_package(self):
         from cobolparser import parse_files as pf, BatchResult as BR  # noqa: F401
 
+pytestmark = pytest.mark.integration
+
 
 class TestParseFilesCorrectness:
     """parse_files() must produce identical output to parse_cobol() per file."""

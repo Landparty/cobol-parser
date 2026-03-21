@@ -10,6 +10,8 @@ from cobolparser import CobolParser
 from cobolparser.models.program import CobolProgram, CobolDivision
 from cobolparser.plugins.core import ErrorRecoveryMode
 
+pytestmark = pytest.mark.integration
+
 
 class TestOrchestrationFullProgramParsing:
     """Tests for full program parsing through the orchestrator."""

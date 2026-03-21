@@ -1,7 +1,10 @@
 import pathlib
 
+import pytest
 from cobolparser import CobolParser
 from cobolparser.models.statements import EvaluateStatement  # type: ignore
+
+pytestmark = pytest.mark.integration
 
 SAMPLES_DIR = pathlib.Path(__file__).parent.parent / "samples"
 

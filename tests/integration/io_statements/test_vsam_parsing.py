@@ -15,6 +15,8 @@ from cobolparser.models.statements import (
     IOCloseStatement,
 )
 
+pytestmark = pytest.mark.integration
+
 
 VSAM_KSDS_PROGRAM = """
        IDENTIFICATION DIVISION.

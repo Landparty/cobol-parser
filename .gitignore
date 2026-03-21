@@ -159,3 +159,7 @@ baselines
 .serena/project.yml
 .claude/settings.local.json
 .claude/settings.local.json
+
+# Runtime-generated log files
+error_log.txt
+**/error_log.txt
