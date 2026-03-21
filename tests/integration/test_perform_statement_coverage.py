@@ -12,6 +12,8 @@ import pytest
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements import PerformStatement
 
+pytestmark = pytest.mark.integration
+
 
 class TestPerformStatementIntegration:
     """Integration tests for PERFORM statement enhancements."""

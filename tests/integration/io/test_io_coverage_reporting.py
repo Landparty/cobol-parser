@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 class TestIOCoverageReportingIntegration:
     """Integration tests for IO coverage reporting pipeline."""

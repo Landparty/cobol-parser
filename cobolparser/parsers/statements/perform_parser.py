@@ -107,7 +107,7 @@ class PerformStatementParser(IStatementParser):
                     # Parse inline statements until END-PERFORM
                     self._parse_inline_statements(token_stream, stmt)
                     return stmt
-            except (ValueError, Exception):
+            except Exception:
                 pass
             
             self._skip_whitespace(token_stream)
@@ -176,7 +176,7 @@ class PerformStatementParser(IStatementParser):
                         token_stream.consume()
                         stmt.set_times_clause(times_count)
                         token = token_stream.peek()
-                except (ValueError, Exception):
+                except Exception:
                     pass
             
             self._skip_whitespace(token_stream)

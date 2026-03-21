@@ -11,6 +11,8 @@ from cobolparser.models.statements import (
     ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
 )
 
+pytestmark = pytest.mark.integration
+
 
 class TestReadStatementParsing:
     """Test parsing of READ statements."""

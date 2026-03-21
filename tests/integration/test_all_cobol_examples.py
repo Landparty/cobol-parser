@@ -13,6 +13,8 @@ from typing import List, Tuple
 from cobolparser import CobolParser, parse_cobol
 from cobolparser.plugins.core import ErrorRecoveryMode
 
+pytestmark = pytest.mark.integration
+
 
 # Get the path to examples/cobol directory
 EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol"

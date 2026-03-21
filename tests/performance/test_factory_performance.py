@@ -9,9 +9,12 @@ import time
 from statistics import mean, stdev
 from typing import List, Callable
 
+import pytest
 from cobolparser.core.ast_factory import ASTNodeFactory, get_factory
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements import DisplayStatement, MoveStatement
+
+pytestmark = pytest.mark.slow
 
 
 def benchmark_function(func: Callable, iterations: int = 1000) -> tuple[float, float]:

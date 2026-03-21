@@ -14,6 +14,8 @@ import pytest
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements import IfStatement
 
+pytestmark = pytest.mark.integration
+
 
 class TestSimpleIfEndIf:
     """Test simple IF-ELSE-END-IF with explicit END-IF terminator."""

@@ -8,6 +8,8 @@ import pytest
 from pathlib import Path
 from cobolparser.parser import CobolParser
 
+pytestmark = pytest.mark.integration
+
 
 class TestCallComprehensive:
     """Test comprehensive CALL statement parsing across all test programs."""
@@ -25,7 +27,7 @@ class TestCallComprehensive:
     def count_call_statements(self, ast):
         """Recursively count CALL statements in AST."""
         from cobolparser.models.statements import CallStatement
-        
+
         if ast is None:
             return 0
         
