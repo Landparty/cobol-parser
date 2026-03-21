@@ -229,7 +229,7 @@ class PictureClause(ASTNode):
             "scaling_factor": self.scaling_factor,
             "is_edited": self.is_edited,
             "location": self.location.to_dict(),
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
 
 
@@ -274,7 +274,7 @@ class OccursClause(ASTNode):
             "depending_on": self.depending_on,
             "indexed_by": self.indexed_by,
             "location": self.location.to_dict(),
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
 
 
@@ -414,7 +414,7 @@ class CobolDataItem(ASTNode):
             "is_elementary_item": self.is_elementary_item(),
             "calculated_size": self.calculate_size(),
             "location": self.location.to_dict(),
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
         
         if self.picture_clause:

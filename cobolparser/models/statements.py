@@ -44,7 +44,7 @@ class CobolStatement(ASTNode):
             "statement_type": self.statement_type,
             "operands": self.operands,
             "location": self.location.to_dict(),
-            "metadata": self._metadata,
+            "metadata": self._metadata or {},
         }
 
 
@@ -269,7 +269,7 @@ class WhenClause(ASTNode):
             "selectors": self.selectors,
             "statements": [s.to_dict() for s in self.statements],
             "location": self.location.to_dict(),
-            "metadata": self._metadata,
+            "metadata": self._metadata or {},
         }
 
 
@@ -1145,7 +1145,7 @@ class CobolExpression(ASTNode):
             "node_type": self.node_type,
             "expression_type": self.expression_type,
             "location": self.location.to_dict(),
-            "metadata": self._metadata,
+            "metadata": self._metadata or {},
         }
 
 
@@ -1359,9 +1359,9 @@ class IOReadStatement(CobolStatement):
         self.not_invalid_key_clause: Optional[List["CobolStatement"]] = None
         self.retry_count: Optional[int] = None
         # Metadata tracking
-        self._metadata["has_invalid_key"] = False
-        self._metadata["has_at_end"] = False
-        self._metadata["uses_lock"] = False
+        self.set_metadata("has_invalid_key", False)
+        self.set_metadata("has_at_end", False)
+        self.set_metadata("uses_lock", False)
 
     def set_file_name(self, name: str) -> None:
         """Set the file name to read from."""
@@ -1402,14 +1402,14 @@ class IOReadStatement(CobolStatement):
         self.with_lock = with_lock
         self.with_nowait = with_nowait
         if with_lock:
-            self._metadata["uses_lock"] = True
+            self.metadata["uses_lock"] = True
             self.lock_scope = "record"
 
     def set_at_end_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the AT END clause."""
         self.at_end_clause = statements
         if statements:
-            self._metadata["has_at_end"] = True
+            self.metadata["has_at_end"] = True
 
     def set_not_at_end_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the NOT AT END clause."""
@@ -1419,7 +1419,7 @@ class IOReadStatement(CobolStatement):
         """Set the INVALID KEY clause."""
         self.invalid_key_clause = statements
         if statements:
-            self._metadata["has_invalid_key"] = True
+            self.metadata["has_invalid_key"] = True
 
     def set_not_invalid_key_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the NOT INVALID KEY clause."""
@@ -1510,9 +1510,9 @@ class IOWriteStatement(CobolStatement):
         self.with_lock: bool = False
         self.lock_scope: Optional[str] = None  # Contract field
         # Metadata tracking
-        self._metadata["has_invalid_key"] = False
-        self._metadata["uses_advancing"] = False
-        self._metadata["uses_lock"] = False
+        self.set_metadata("has_invalid_key", False)
+        self.set_metadata("uses_advancing", False)
+        self.set_metadata("uses_lock", False)
 
     def set_record_name(self, name: str) -> None:
         """Set the record being written."""
@@ -1543,7 +1543,7 @@ class IOWriteStatement(CobolStatement):
             "unit": "CHANNEL" if page else ("LINES" if lines else None),
         }
         if self.advancing_clause:
-            self._metadata["uses_advancing"] = True
+            self.metadata["uses_advancing"] = True
 
     def set_delete(self, delete: bool = True) -> None:
         """Set the VSAM DELETE flag."""
@@ -1557,7 +1557,7 @@ class IOWriteStatement(CobolStatement):
         """Set the INVALID KEY clause."""
         self.invalid_key_clause = statements
         if statements:
-            self._metadata["has_invalid_key"] = True
+            self.metadata["has_invalid_key"] = True
 
     def set_not_invalid_key_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the NOT INVALID KEY clause."""
@@ -1571,7 +1571,7 @@ class IOWriteStatement(CobolStatement):
         """Set the LOCK flag."""
         self.with_lock = with_lock
         if with_lock:
-            self._metadata["uses_lock"] = True
+            self.metadata["uses_lock"] = True
             self.lock_scope = "record"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1653,7 +1653,7 @@ class IOOpenStatement(CobolStatement):
     def set_reel_unit_control(self, control: str) -> None:
         """Set the REEL/UNIT control (contract field)."""
         self.reel_unit_control = control.upper()
-        self._metadata["has_reel_unit"] = True
+        self.metadata["has_reel_unit"] = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert OPEN statement to dictionary representation per contract."""
@@ -1711,9 +1711,9 @@ class IOCloseStatement(CobolStatement):
                 "with_lock": with_lock,
             }
             if with_lock:
-                self._metadata["has_lock"] = True
+                self.metadata["has_lock"] = True
             if reel or unit:
-                self._metadata["has_reel_unit"] = True
+                self.metadata["has_reel_unit"] = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert CLOSE statement to dictionary representation per contract."""
@@ -1776,7 +1776,7 @@ class IOAcceptStatement(CobolStatement):
     def set_environment_name(self, name: str) -> None:
         """Set the ENVIRONMENT-NAME for FROM ENVIRONMENT clause (contract field)."""
         self.environment_name = name
-        self._metadata["has_environment_name"] = True
+        self.metadata["has_environment_name"] = True
 
     def set_position(
         self, line: Optional[int] = None, column: Optional[int] = None
@@ -1785,7 +1785,7 @@ class IOAcceptStatement(CobolStatement):
         self.at_line = line
         self.at_column = column
         if line is not None or column is not None:
-            self._metadata["has_position"] = True
+            self.metadata["has_position"] = True
 
     def set_cursor(self, with_cursor: bool = True) -> None:
         """Set the WITH CURSOR flag."""
@@ -1855,7 +1855,7 @@ class IORewriteStatement(CobolStatement):
         """Set the INVALID KEY clause."""
         self.invalid_key_clause = statements
         if statements:
-            self._metadata["has_invalid_key"] = True
+            self.metadata["has_invalid_key"] = True
 
     def set_not_invalid_key_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the NOT INVALID KEY clause."""
@@ -1865,7 +1865,7 @@ class IORewriteStatement(CobolStatement):
         """Set the LOCK flag."""
         self.with_lock = with_lock
         if with_lock:
-            self._metadata["uses_lock"] = True
+            self.metadata["uses_lock"] = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert REWRITE statement to dictionary representation per contract."""
@@ -1914,7 +1914,7 @@ class IODeleteStatement(CobolStatement):
         """Set the INVALID KEY clause."""
         self.invalid_key_clause = statements
         if statements:
-            self._metadata["has_invalid_key"] = True
+            self.metadata["has_invalid_key"] = True
 
     def set_not_invalid_key_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the NOT INVALID KEY clause."""
@@ -1924,7 +1924,7 @@ class IODeleteStatement(CobolStatement):
         """Set the LOCK flag."""
         self.with_lock = with_lock
         if with_lock:
-            self._metadata["uses_lock"] = True
+            self.metadata["uses_lock"] = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert DELETE statement to dictionary representation per contract."""
@@ -1977,7 +1977,7 @@ class IOStartStatement(CobolStatement):
         """Set the INVALID KEY clause."""
         self.invalid_key_clause = statements
         if statements:
-            self._metadata["has_invalid_key"] = True
+            self.metadata["has_invalid_key"] = True
 
     def set_not_invalid_key_clause(self, statements: List["CobolStatement"]) -> None:
         """Set the NOT INVALID KEY clause."""
@@ -2025,7 +2025,7 @@ class IOUnlockStatement(CobolStatement):
     def set_record_scope(self, scope: str) -> None:
         """Set the record scope (RECORD or FILE)."""
         self.record_scope = scope.upper()
-        self._metadata["has_record_scope"] = True
+        self.metadata["has_record_scope"] = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert UNLOCK statement to dictionary representation per contract."""

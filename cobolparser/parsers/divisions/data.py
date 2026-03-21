@@ -483,7 +483,7 @@ class DataDivisionParser(BaseDivisionParser):
                 division_node.add_section(section)
         
         # Store metadata
-        division_node._metadata.update({
+        division_node.metadata.update({
             "has_file": "file" in division_content,
             "has_working_storage": "working_storage" in division_content,
             "has_local_storage": "local_storage" in division_content,

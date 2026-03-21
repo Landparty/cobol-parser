@@ -267,7 +267,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
         division_node = CobolDivision("IDENTIFICATION", start_location)
         
         # Store identification metadata in division metadata
-        division_node._metadata.update({
+        division_node.metadata.update({
             "program_id": division_content.get("program_id"),
             "author": division_content.get("author"),
             "installation": division_content.get("installation"),

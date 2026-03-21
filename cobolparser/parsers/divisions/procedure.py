@@ -547,7 +547,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             division_node.add_section(section)
         
         # Store metadata
-        division_node._metadata.update({
+        division_node.metadata.update({
             "paragraph_count": len(division_content.get("paragraphs", [])),
             "section_count": len(division_content.get("sections", {})),
             "statement_count": sum(

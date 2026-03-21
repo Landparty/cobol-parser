@@ -512,7 +512,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         division_node = CobolDivision("ENVIRONMENT", start_location)
         
         # Store environment metadata
-        division_node._metadata.update({
+        division_node.metadata.update({
             "has_configuration": "configuration" in division_content,
             "has_input_output": "input_output" in division_content,
         })

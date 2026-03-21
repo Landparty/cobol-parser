@@ -44,7 +44,7 @@ class ASTNode(ABC):
         self.location = location
         self.parent: Optional['ASTNode'] = None
         self.children: List['ASTNode'] = []
-        self._metadata: Dict[str, Any] = {}
+        self._metadata: Optional[Dict[str, Any]] = None
         self._division_name: Optional[str] = None  # Track division context
         self._section_name: Optional[str] = None   # Track section context
     
@@ -98,7 +98,9 @@ class ASTNode(ABC):
 
     @property
     def metadata(self) -> Dict[str, Any]:
-        """Get metadata dictionary for this node."""
+        """Get metadata dictionary for this node (lazily initialized)."""
+        if self._metadata is None:
+            self._metadata = {}
         return self._metadata
 
     def add_child(self, child: 'ASTNode') -> None:
@@ -170,14 +172,18 @@ class ASTNode(ABC):
     
     def set_metadata(self, key: str, value: Any) -> None:
         """Set metadata for this node."""
-        self._metadata[key] = value
+        self.metadata[key] = value
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
         """Get metadata for this node."""
+        if self._metadata is None:
+            return default
         return self._metadata.get(key, default)
 
     def has_metadata(self, key: str) -> bool:
         """Check if node has specific metadata."""
+        if self._metadata is None:
+            return False
         return key in self._metadata
     
     @abstractmethod

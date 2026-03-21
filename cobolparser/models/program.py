@@ -53,7 +53,7 @@ class CobolSection(ASTNode):
             "location": self.location.to_dict(),
             "paragraphs": [p.to_dict() for p in self.paragraphs],
             "data_items": [d.to_dict() for d in self.data_items],
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
 
 
@@ -165,7 +165,7 @@ class CobolDivision(ASTNode):
             # Provide a list form for simple iteration in consumers/tests
             "sections_list": [section.to_dict() for section in self._sections.values()],
             "paragraphs": [p.to_dict() for p in self.paragraphs],
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
 
 
@@ -196,7 +196,7 @@ class CobolParagraph(ASTNode):
             "paragraph_name": self.paragraph_name,
             "location": self.location.to_dict(),
             "statements": [stmt.to_dict() for stmt in self.statements],
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
 
 
@@ -637,7 +637,7 @@ class CobolProgram(ASTNode):
                 "statistics": self.get_statistics(),
                 "parser_version": "1.0.0",
                 "created_at": "2024-01-01T00:00:00Z",  # Would be actual timestamp
-                **self._metadata
+                **(self._metadata or {})
             }
             
             # Add source_locations if requested
@@ -841,7 +841,7 @@ class CobolFileDescription(ASTNode):
             "data_records": len(self.data_records),
             "data_record_details": [d.to_dict() for d in self.data_records],
             "location": self.location.to_dict(),
-            "metadata": self._metadata
+            "metadata": self._metadata or {}
         }
         
         # BLOCK CONTAINS
