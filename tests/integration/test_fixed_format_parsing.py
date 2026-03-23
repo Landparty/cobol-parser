@@ -4,6 +4,8 @@ import pytest
 from pathlib import Path
 from cobolparser import parse_cobol
 
+pytestmark = pytest.mark.integration
+
 
 class TestFixedFormatAutoDetection:
     """Test suite for automatic detection of fixed-format COBOL."""

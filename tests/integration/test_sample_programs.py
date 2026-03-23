@@ -7,6 +7,8 @@ from pathlib import Path
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.plugins.core import MemoryConfiguration, SerializationConfig
 
+pytestmark = pytest.mark.integration
+
 
 # Get samples directory
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"

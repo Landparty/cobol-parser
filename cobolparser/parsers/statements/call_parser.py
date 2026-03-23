@@ -36,9 +36,6 @@ class CallStatementParser(IStatementParser):
         - CALL ... RETURNING variable
         - CALL ... GIVING variable
         """
-        import sys
-        DEBUG = False
-        
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
@@ -175,9 +172,7 @@ class CallStatementParser(IStatementParser):
                 else:
                     # Skip unknown tokens or end of CALL statement
                     break
-        except Exception as e:
-            import sys
-            print(f"DEBUG: Exception in parse: {e}", file=sys.stderr)
+        except Exception:
             pass
         
         return stmt

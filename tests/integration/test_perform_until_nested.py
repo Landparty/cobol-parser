@@ -1,7 +1,10 @@
 """Test PERFORM UNTIL with nested CALL and IF statements."""
 
+import pytest
 from cobolparser import parse_cobol, ErrorRecoveryMode
 from cobolparser.models.statements import PerformStatement, CallStatement, IfStatement
+
+pytestmark = pytest.mark.integration
 
 
 class TestPerformUntilNestedStatements:

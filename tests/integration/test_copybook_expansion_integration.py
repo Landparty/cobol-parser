@@ -14,6 +14,8 @@ from pathlib import Path
 from cobolparser.preprocess import expand_copybooks, parse_cobol_with_expansion, CircularReferenceError
 from cobolparser import parse_cobol
 
+pytestmark = pytest.mark.integration
+
 
 class TestBasicExpansion:
     """Integration tests for basic copybook expansion (US1)."""

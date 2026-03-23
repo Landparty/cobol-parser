@@ -17,6 +17,8 @@ from cobolparser.parsers.statements import (
 )
 from cobolparser.lexer import CobolLexer, TokenType
 
+pytestmark = pytest.mark.integration
+
 
 class TestRegistryStatementDispatch:
     """Test statement dispatch through registry in realistic scenarios."""
