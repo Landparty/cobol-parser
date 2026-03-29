@@ -8,7 +8,6 @@ import pytest
 from cobolparser import parse_cobol, ErrorRecoveryMode
 from cobolparser.models.statements import (
     IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement, IOAcceptStatement,
-    ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
 )
 
 pytestmark = pytest.mark.integration

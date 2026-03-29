@@ -3,7 +3,7 @@
 from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import StartStatement
+from ...models.statements import IOStartStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
@@ -33,14 +33,14 @@ class StartStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> StartStatement:
+    def parse(self, token_stream: ITokenStream) -> IOStartStatement:
         """Parse a START statement."""
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(
-            StartStatement,
+            IOStartStatement,
             factory.create(
-                StartStatement,
+                IOStartStatement,
                 start_token.location if start_token else SourceLocation(0, 0),
             ),
         )

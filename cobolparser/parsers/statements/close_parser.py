@@ -3,7 +3,7 @@
 from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import CloseStatement
+from ...models.statements import IOCloseStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 from cobolparser.parsers.statements._utils import skip_whitespace
@@ -24,14 +24,14 @@ class CloseStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> CloseStatement:
+    def parse(self, token_stream: ITokenStream) -> IOCloseStatement:
         """Parse a CLOSE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(
-            CloseStatement,
+            IOCloseStatement,
             factory.create(
-                CloseStatement,
+                IOCloseStatement,
                 start_token.location if start_token else SourceLocation(0, 0),
             ),
         )

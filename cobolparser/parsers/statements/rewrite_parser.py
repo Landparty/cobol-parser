@@ -3,7 +3,7 @@
 from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import RewriteStatement
+from ...models.statements import IORewriteStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
@@ -25,14 +25,14 @@ class RewriteStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> RewriteStatement:
+    def parse(self, token_stream: ITokenStream) -> IORewriteStatement:
         """Parse a REWRITE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(
-            RewriteStatement,
+            IORewriteStatement,
             factory.create(
-                RewriteStatement,
+                IORewriteStatement,
                 start_token.location if start_token else SourceLocation(0, 0),
             ),
         )

@@ -9,7 +9,6 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.models.statements import (
     IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement, IOAcceptStatement,
-    ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
 )
 from cobolparser.models.ast_base import SourceLocation
 
@@ -20,7 +19,7 @@ class TestReadStatementContract:
     def test_read_statement_to_dict_structure(self):
         """Verify ReadStatement.to_dict() produces required fields."""
         location = SourceLocation(line=10, column=1)
-        stmt = ReadStatement(location)
+        stmt = IOReadStatement(location)
         stmt.set_file_name("MYFILE")
         stmt.set_into("INPUT-DATA")
         stmt.set_access_mode("NEXT")
@@ -46,7 +45,7 @@ class TestReadStatementContract:
     def test_read_statement_json_serializable(self):
         """Verify ReadStatement can be serialized to JSON."""
         location = SourceLocation(line=10, column=1)
-        stmt = ReadStatement(location)
+        stmt = IOReadStatement(location)
         stmt.set_file_name("MYFILE")
         stmt.set_into("INPUT-DATA")
         
@@ -61,7 +60,7 @@ class TestReadStatementContract:
     def test_read_statement_location_metadata(self):
         """Verify ReadStatement includes source location."""
         location = SourceLocation(line=15, column=8)
-        stmt = ReadStatement(location)
+        stmt = IOReadStatement(location)
         
         result = stmt.to_dict()
         
@@ -76,7 +75,7 @@ class TestWriteStatementContract:
     def test_write_statement_to_dict_structure(self):
         """Verify WriteStatement.to_dict() produces required fields."""
         location = SourceLocation(line=20, column=1)
-        stmt = WriteStatement(location)
+        stmt = IOWriteStatement(location)
         stmt.set_record_name("OUTPUT-RECORD")
         stmt.set_from("SOURCE-DATA")
         stmt.set_advancing("AFTER", 2, False)
@@ -99,7 +98,7 @@ class TestWriteStatementContract:
     def test_write_statement_advancing_page(self):
         """Verify WriteStatement with ADVANCING PAGE."""
         location = SourceLocation(line=20, column=1)
-        stmt = WriteStatement(location)
+        stmt = IOWriteStatement(location)
         stmt.set_record_name("PRINT-RECORD")
         stmt.set_advancing("BEFORE", None, True)
         
@@ -112,7 +111,7 @@ class TestWriteStatementContract:
     def test_write_statement_delete_record(self):
         """Verify WriteStatement can mark record for deletion."""
         location = SourceLocation(line=20, column=1)
-        stmt = WriteStatement(location)
+        stmt = IOWriteStatement(location)
         stmt.set_record_name("INDEXED-RECORD")
         stmt.set_delete(True)
         
@@ -128,7 +127,7 @@ class TestOpenStatementContract:
     def test_open_statement_to_dict_structure(self):
         """Verify OpenStatement.to_dict() produces required fields."""
         location = SourceLocation(line=30, column=1)
-        stmt = OpenStatement(location)
+        stmt = IOOpenStatement(location)
         stmt.set_open_mode("INPUT")
         stmt.add_file("FILE1")
         stmt.add_file("FILE2")
@@ -152,7 +151,7 @@ class TestOpenStatementContract:
         location = SourceLocation(line=30, column=1)
         
         for mode in ["INPUT", "OUTPUT", "I-O", "EXTEND"]:
-            stmt = OpenStatement(location)
+            stmt = IOOpenStatement(location)
             stmt.set_open_mode(mode)
             result = stmt.to_dict()
             assert result["open_mode"] == mode
@@ -160,7 +159,7 @@ class TestOpenStatementContract:
     def test_open_statement_with_reposition(self):
         """Verify OpenStatement can set reposition flag."""
         location = SourceLocation(line=30, column=1)
-        stmt = OpenStatement(location)
+        stmt = IOOpenStatement(location)
         stmt.set_open_mode("INPUT")
         stmt.add_file("MYFILE")
         stmt.set_reposition()
@@ -177,7 +176,7 @@ class TestCloseStatementContract:
     def test_close_statement_to_dict_structure(self):
         """Verify CloseStatement.to_dict() produces required fields."""
         location = SourceLocation(line=40, column=1)
-        stmt = CloseStatement(location)
+        stmt = IOCloseStatement(location)
         stmt.add_file("FILE1")
         stmt.add_file("FILE2", reel=True)
         
@@ -194,7 +193,7 @@ class TestCloseStatementContract:
     def test_close_statement_file_options(self):
         """Verify CloseStatement properly tracks file-specific options."""
         location = SourceLocation(line=40, column=1)
-        stmt = CloseStatement(location)
+        stmt = IOCloseStatement(location)
         stmt.add_file("TAPE-FILE", reel=True, no_rewind=True, with_lock=True)
         
         result = stmt.to_dict()
@@ -207,7 +206,7 @@ class TestCloseStatementContract:
     def test_close_statement_multiple_files(self):
         """Verify CloseStatement handles multiple files with different options."""
         location = SourceLocation(line=40, column=1)
-        stmt = CloseStatement(location)
+        stmt = IOCloseStatement(location)
         
         # File with no options
         stmt.add_file("FILE1")
@@ -232,7 +231,7 @@ class TestAcceptStatementContract:
     def test_accept_statement_to_dict_structure(self):
         """Verify AcceptStatement.to_dict() produces required fields."""
         location = SourceLocation(line=50, column=1)
-        stmt = AcceptStatement(location)
+        stmt = IOAcceptStatement(location)
         stmt.set_target("USER-INPUT")
         stmt.set_from("CONSOLE")
         
@@ -251,7 +250,7 @@ class TestAcceptStatementContract:
     def test_accept_statement_with_position(self):
         """Verify AcceptStatement with AT LINE/COLUMN."""
         location = SourceLocation(line=50, column=1)
-        stmt = AcceptStatement(location)
+        stmt = IOAcceptStatement(location)
         stmt.set_target("SCREEN-FIELD")
         stmt.set_position(10, 20)
         
@@ -265,7 +264,7 @@ class TestAcceptStatementContract:
     def test_accept_statement_display_attributes(self):
         """Verify AcceptStatement with display attributes."""
         location = SourceLocation(line=50, column=1)
-        stmt = AcceptStatement(location)
+        stmt = IOAcceptStatement(location)
         stmt.set_target("SCREEN-INPUT")
         stmt.set_cursor()
         stmt.set_color("YELLOW")
@@ -282,7 +281,7 @@ class TestAcceptStatementContract:
     def test_accept_statement_all_attributes(self):
         """Verify AcceptStatement with all attributes combined."""
         location = SourceLocation(line=50, column=1)
-        stmt = AcceptStatement(location)
+        stmt = IOAcceptStatement(location)
         stmt.set_target("FULL-INPUT")
         stmt.set_from("ENVIRONMENT NAME")
         stmt.set_position(5, 15)

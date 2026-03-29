@@ -3,7 +3,7 @@
 from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import OpenStatement
+from ...models.statements import IOOpenStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 from cobolparser.parsers.statements._utils import skip_whitespace
@@ -29,14 +29,14 @@ class OpenStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> OpenStatement:
+    def parse(self, token_stream: ITokenStream) -> IOOpenStatement:
         """Parse an OPEN statement."""
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(
-            OpenStatement,
+            IOOpenStatement,
             factory.create(
-                OpenStatement,
+                IOOpenStatement,
                 start_token.location if start_token else SourceLocation(0, 0),
             ),
         )

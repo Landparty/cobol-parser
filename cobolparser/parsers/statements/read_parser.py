@@ -3,7 +3,7 @@
 from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import ReadStatement
+from ...models.statements import IOReadStatement  # noqa: F401 used via factory
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
@@ -29,14 +29,14 @@ class ReadStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> ReadStatement:
+    def parse(self, token_stream: ITokenStream) -> IOReadStatement:
         """Parse a READ statement."""
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(
-            ReadStatement,
+            IOReadStatement,
             factory.create(
-                ReadStatement,
+                IOReadStatement,
                 start_token.location if start_token else SourceLocation(0, 0),
             ),
         )

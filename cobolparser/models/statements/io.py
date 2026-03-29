@@ -138,9 +138,6 @@ class IOReadStatement(CobolStatement):
         return result
 
 
-# Backward compatibility alias
-ReadStatement = IOReadStatement
-
 
 class IOWriteStatement(CobolStatement):
     """AST node for WRITE statements with comprehensive IBM Enterprise COBOL variation support.
@@ -262,9 +259,6 @@ class IOWriteStatement(CobolStatement):
         return result
 
 
-# Backward compatibility alias
-WriteStatement = IOWriteStatement
-
 
 class IOOpenStatement(CobolStatement):
     """AST node for OPEN statements with comprehensive IO variation support.
@@ -318,9 +312,6 @@ class IOOpenStatement(CobolStatement):
         )
         return result
 
-
-# Backward compatibility alias
-OpenStatement = IOOpenStatement
 
 
 class IOCloseStatement(CobolStatement):
@@ -376,9 +367,6 @@ class IOCloseStatement(CobolStatement):
         )
         return result
 
-
-# Backward compatibility alias
-CloseStatement = IOCloseStatement
 
 
 class IOAcceptStatement(CobolStatement):
@@ -472,9 +460,6 @@ class IOAcceptStatement(CobolStatement):
         return result
 
 
-# Backward compatibility alias
-AcceptStatement = IOAcceptStatement
-
 
 class IORewriteStatement(CobolStatement):
     """IBM Enterprise COBOL REWRITE statement AST node."""
@@ -538,9 +523,6 @@ class IORewriteStatement(CobolStatement):
         return result
 
 
-# Backward compatibility alias
-RewriteStatement = IORewriteStatement
-
 
 class IODeleteStatement(CobolStatement):
     """IBM Enterprise COBOL DELETE statement AST node."""
@@ -596,9 +578,6 @@ class IODeleteStatement(CobolStatement):
         return result
 
 
-# Backward compatibility alias
-DeleteStatement = IODeleteStatement
-
 
 class IOStartStatement(CobolStatement):
     """IBM Enterprise COBOL START statement AST node."""
@@ -653,9 +632,6 @@ class IOStartStatement(CobolStatement):
         return result
 
 
-# Backward compatibility alias
-StartStatement = IOStartStatement
-
 
 class IOUnlockStatement(CobolStatement):
     """IBM Enterprise COBOL UNLOCK statement AST node."""
@@ -688,6 +664,3 @@ class IOUnlockStatement(CobolStatement):
         )
         return result
 
-
-# Backward compatibility alias
-UnlockStatement = IOUnlockStatement

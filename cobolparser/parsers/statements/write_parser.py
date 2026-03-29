@@ -3,7 +3,7 @@
 from typing import cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
-from ...models.statements import WriteStatement
+from ...models.statements import IOWriteStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
 from cobolparser.parsers.statements._utils import skip_whitespace
@@ -30,11 +30,11 @@ class WriteStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> WriteStatement:
+    def parse(self, token_stream: ITokenStream) -> IOWriteStatement:
         """Parse a WRITE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = cast(WriteStatement, factory.create(WriteStatement, start_token.location if start_token else SourceLocation(0, 0)))
+        stmt = cast(IOWriteStatement, factory.create(IOWriteStatement, start_token.location if start_token else SourceLocation(0, 0)))
         
         # Skip whitespace
         skip_whitespace(token_stream)

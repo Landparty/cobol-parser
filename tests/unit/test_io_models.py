@@ -1,12 +1,12 @@
 """Unit tests for IO statement models.
 
-Tests verify that ReadStatement, WriteStatement, OpenStatement, CloseStatement,
-and AcceptStatement models work correctly.
+Tests verify that IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement,
+and IOAcceptStatement models work correctly.
 """
 
 import pytest
 from cobolparser.models.statements import (
-    ReadStatement, WriteStatement, OpenStatement, CloseStatement, AcceptStatement
+    IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement, IOAcceptStatement,
 )
 from cobolparser.models.ast_base import SourceLocation
 
@@ -17,14 +17,14 @@ class TestReadStatement:
     def test_read_statement_creation(self):
         """ReadStatement should be creatable with a location."""
         loc = SourceLocation(line=10, column=5)
-        read_stmt = ReadStatement(loc)
+        read_stmt = IOReadStatement(loc)
         assert read_stmt.statement_type == "READ"
         assert read_stmt.file_name is None
     
     def test_read_statement_set_file_name(self):
         """ReadStatement should allow setting the file name."""
         loc = SourceLocation(line=10, column=5)
-        read_stmt = ReadStatement(loc)
+        read_stmt = IOReadStatement(loc)
         read_stmt.set_file_name("INPUT-FILE")
         assert read_stmt.file_name == "INPUT-FILE"
         assert "INPUT-FILE" in read_stmt.operands
@@ -32,7 +32,7 @@ class TestReadStatement:
     def test_read_statement_set_into(self):
         """ReadStatement should allow setting the INTO target."""
         loc = SourceLocation(line=10, column=5)
-        read_stmt = ReadStatement(loc)
+        read_stmt = IOReadStatement(loc)
         read_stmt.set_into("RECORD-AREA")
         assert read_stmt.into_target == "RECORD-AREA"
         assert "RECORD-AREA" in read_stmt.operands
@@ -40,14 +40,14 @@ class TestReadStatement:
     def test_read_statement_set_access_mode(self):
         """ReadStatement should allow setting the record format."""
         loc = SourceLocation(line=10, column=5)
-        read_stmt = ReadStatement(loc)
+        read_stmt = IOReadStatement(loc)
         read_stmt.set_access_mode("next")
         assert read_stmt.access_mode == "NEXT"
     
     def test_read_statement_to_dict(self):
         """ReadStatement should serialize to dict."""
         loc = SourceLocation(line=10, column=5)
-        read_stmt = ReadStatement(loc)
+        read_stmt = IOReadStatement(loc)
         read_stmt.set_file_name("INPUT-FILE")
         read_stmt.set_into("RECORD-AREA")
         
@@ -63,14 +63,14 @@ class TestWriteStatement:
     def test_write_statement_creation(self):
         """WriteStatement should be creatable with a location."""
         loc = SourceLocation(line=20, column=5)
-        write_stmt = WriteStatement(loc)
+        write_stmt = IOWriteStatement(loc)
         assert write_stmt.statement_type == "WRITE"
         assert write_stmt.record_name is None
     
     def test_write_statement_set_record_name(self):
         """WriteStatement should allow setting the record name."""
         loc = SourceLocation(line=20, column=5)
-        write_stmt = WriteStatement(loc)
+        write_stmt = IOWriteStatement(loc)
         write_stmt.set_record_name("OUTPUT-RECORD")
         assert write_stmt.record_name == "OUTPUT-RECORD"
         assert "OUTPUT-RECORD" in write_stmt.operands
@@ -78,7 +78,7 @@ class TestWriteStatement:
     def test_write_statement_set_from(self):
         """WriteStatement should allow setting the FROM source."""
         loc = SourceLocation(line=20, column=5)
-        write_stmt = WriteStatement(loc)
+        write_stmt = IOWriteStatement(loc)
         write_stmt.set_from("SOURCE-DATA")
         assert write_stmt.from_clause == "SOURCE-DATA"
         assert "SOURCE-DATA" in write_stmt.operands
@@ -86,7 +86,7 @@ class TestWriteStatement:
     def test_write_statement_set_advancing(self):
         """WriteStatement should allow setting ADVANCING clause."""
         loc = SourceLocation(line=20, column=5)
-        write_stmt = WriteStatement(loc)
+        write_stmt = IOWriteStatement(loc)
         write_stmt.set_advancing("AFTER", lines=2)
         assert write_stmt.advancing_clause["type"] == "AFTER"
         assert write_stmt.advancing_clause["value"] == 2
@@ -94,7 +94,7 @@ class TestWriteStatement:
     def test_write_statement_to_dict(self):
         """WriteStatement should serialize to dict."""
         loc = SourceLocation(line=20, column=5)
-        write_stmt = WriteStatement(loc)
+        write_stmt = IOWriteStatement(loc)
         write_stmt.set_record_name("OUTPUT-RECORD")
         write_stmt.set_from("SOURCE-DATA")
         write_stmt.set_advancing("BEFORE", lines=1)
@@ -113,21 +113,21 @@ class TestOpenStatement:
     def test_open_statement_creation(self):
         """OpenStatement should be creatable with a location."""
         loc = SourceLocation(line=30, column=5)
-        open_stmt = OpenStatement(loc)
+        open_stmt = IOOpenStatement(loc)
         assert open_stmt.statement_type == "OPEN"
         assert open_stmt.open_mode is None
     
     def test_open_statement_set_mode(self):
         """OpenStatement should allow setting the OPEN mode."""
         loc = SourceLocation(line=30, column=5)
-        open_stmt = OpenStatement(loc)
+        open_stmt = IOOpenStatement(loc)
         open_stmt.set_open_mode("INPUT")
         assert open_stmt.open_mode == "INPUT"
     
     def test_open_statement_add_file(self):
         """OpenStatement should allow adding files."""
         loc = SourceLocation(line=30, column=5)
-        open_stmt = OpenStatement(loc)
+        open_stmt = IOOpenStatement(loc)
         open_stmt.add_file("FILE-1")
         open_stmt.add_file("FILE-2")
         assert open_stmt.file_names == ["FILE-1", "FILE-2"]
@@ -137,7 +137,7 @@ class TestOpenStatement:
     def test_open_statement_to_dict(self):
         """OpenStatement should serialize to dict."""
         loc = SourceLocation(line=30, column=5)
-        open_stmt = OpenStatement(loc)
+        open_stmt = IOOpenStatement(loc)
         open_stmt.set_open_mode("INPUT")
         open_stmt.add_file("FILE-1")
         open_stmt.add_file("FILE-2")
@@ -154,14 +154,14 @@ class TestCloseStatement:
     def test_close_statement_creation(self):
         """CloseStatement should be creatable with a location."""
         loc = SourceLocation(line=40, column=5)
-        close_stmt = CloseStatement(loc)
+        close_stmt = IOCloseStatement(loc)
         assert close_stmt.statement_type == "CLOSE"
         assert len(close_stmt.file_names) == 0
     
     def test_close_statement_add_file(self):
         """CloseStatement should allow adding files."""
         loc = SourceLocation(line=40, column=5)
-        close_stmt = CloseStatement(loc)
+        close_stmt = IOCloseStatement(loc)
         close_stmt.add_file("FILE-1", no_rewind=True)
         close_stmt.add_file("FILE-2", with_lock=True)
         assert close_stmt.file_names == ["FILE-1", "FILE-2"]
@@ -171,7 +171,7 @@ class TestCloseStatement:
     def test_close_statement_to_dict(self):
         """CloseStatement should serialize to dict."""
         loc = SourceLocation(line=40, column=5)
-        close_stmt = CloseStatement(loc)
+        close_stmt = IOCloseStatement(loc)
         close_stmt.add_file("FILE-1", no_rewind=True)
         
         result = close_stmt.to_dict()
@@ -186,14 +186,14 @@ class TestAcceptStatement:
     def test_accept_statement_creation(self):
         """AcceptStatement should be creatable with a location."""
         loc = SourceLocation(line=50, column=5)
-        accept_stmt = AcceptStatement(loc)
+        accept_stmt = IOAcceptStatement(loc)
         assert accept_stmt.statement_type == "ACCEPT"
         assert accept_stmt.target is None
     
     def test_accept_statement_set_target(self):
         """AcceptStatement should allow setting the target."""
         loc = SourceLocation(line=50, column=5)
-        accept_stmt = AcceptStatement(loc)
+        accept_stmt = IOAcceptStatement(loc)
         accept_stmt.set_target("USER-INPUT")
         assert accept_stmt.target == "USER-INPUT"
         assert "USER-INPUT" in accept_stmt.operands
@@ -201,14 +201,14 @@ class TestAcceptStatement:
     def test_accept_statement_set_from(self):
         """AcceptStatement should allow setting the FROM source."""
         loc = SourceLocation(line=50, column=5)
-        accept_stmt = AcceptStatement(loc)
+        accept_stmt = IOAcceptStatement(loc)
         accept_stmt.set_from("CONSOLE")
         assert accept_stmt.from_source == "CONSOLE"
     
     def test_accept_statement_set_position(self):
         """AcceptStatement should allow setting position."""
         loc = SourceLocation(line=50, column=5)
-        accept_stmt = AcceptStatement(loc)
+        accept_stmt = IOAcceptStatement(loc)
         accept_stmt.set_position(line=10, column=20)
         assert accept_stmt.at_line == 10
         assert accept_stmt.at_column == 20
@@ -216,7 +216,7 @@ class TestAcceptStatement:
     def test_accept_statement_to_dict(self):
         """AcceptStatement should serialize to dict."""
         loc = SourceLocation(line=50, column=5)
-        accept_stmt = AcceptStatement(loc)
+        accept_stmt = IOAcceptStatement(loc)
         accept_stmt.set_target("USER-INPUT")
         accept_stmt.set_from("CONSOLE")
         accept_stmt.set_position(line=5, column=10)
@@ -239,19 +239,19 @@ class TestIOStatementIntegration:
         base_loc = SourceLocation(line=10, column=5)
         
         # Create OPEN statement
-        open_stmt = OpenStatement(base_loc)
+        open_stmt = IOOpenStatement(base_loc)
         open_stmt.set_open_mode("INPUT")
         open_stmt.add_file("INPUT-FILE")
         assert open_stmt.open_mode == "INPUT"
         
         # Create READ statement
-        read_stmt = ReadStatement(base_loc)
+        read_stmt = IOReadStatement(base_loc)
         read_stmt.set_file_name("INPUT-FILE")
         read_stmt.set_into("RECORD-BUFFER")
         assert read_stmt.file_name == "INPUT-FILE"
         
         # Create CLOSE statement
-        close_stmt = CloseStatement(base_loc)
+        close_stmt = IOCloseStatement(base_loc)
         close_stmt.add_file("INPUT-FILE")
         assert "INPUT-FILE" in close_stmt.file_names
     
@@ -260,11 +260,11 @@ class TestIOStatementIntegration:
         loc = SourceLocation(line=10, column=5)
         
         statements = [
-            OpenStatement(loc),
-            ReadStatement(loc),
-            WriteStatement(loc),
-            CloseStatement(loc),
-            AcceptStatement(loc)
+            IOOpenStatement(loc),
+            IOReadStatement(loc),
+            IOWriteStatement(loc),
+            IOCloseStatement(loc),
+            IOAcceptStatement(loc)
         ]
         
         for stmt in statements:
