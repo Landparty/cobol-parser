@@ -304,78 +304,61 @@ class PerformStatementParser(IStatementParser):
         except Exception:
             pass
     
+    def _collect_until_condition_tokens(
+        self, stream: ITokenStream, for_varying: bool = False
+    ) -> list:
+        """Consume tokens forming a UNTIL condition and return them as strings.
+
+        When *for_varying* is True, also stops on IDENTIFIER tokens whose value
+        matches known statement keywords (extra guard needed for VARYING context).
+        """
+        tokens: list = []
+        while True:
+            token = stream.peek()
+            if not token:
+                break
+            if token.type == TokenType.PERIOD:
+                break
+            if token.type == TokenType.END_PERFORM:
+                break
+            if token.type in STATEMENT_TOKEN_TYPES:
+                break
+            if for_varying and (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() in STATEMENT_KEYWORDS
+            ):
+                break
+            tokens.append(token.value or str(token.type))
+            stream.consume()
+        return tokens
+
     def _parse_until_clause(self, stream: ITokenStream, stmt: PerformStatement) -> None:
-        """Parse UNTIL clause for inline PERFORM."""
+        """Parse UNTIL clause for an inline PERFORM."""
         try:
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
-            
-            condition_tokens = []
-            while True:
-                token = stream.peek()
-                if not token:
-                    break
-                
-                # Check if we've hit a statement keyword (by TokenType)
-                if token.type in STATEMENT_TOKEN_TYPES:
-                    break
-                
-                # Check for END-PERFORM
-                if token.type == TokenType.END_PERFORM:
-                    break
-                
-                # Check for period
-                if token.type == TokenType.PERIOD:
-                    break
-                
-                condition_tokens.append(token.value or str(token.type))
-                stream.consume()
-            
+            condition_tokens = self._collect_until_condition_tokens(stream)
             if condition_tokens:
                 condition_str = " ".join(condition_tokens).strip()
-                # Create CobolExpression for the condition and set it on the statement
-                location = SourceLocation(0, 0)  # Default location; ideally would be from first token
-                condition_expr = CobolExpression("CONDITION", location)
-                condition_expr.operands = [condition_str]  # Store the condition string as operand
+                condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
+                condition_expr.operands = [condition_str]
                 stmt.set_until_clause(condition_expr)
-            
-            # Parse inline statements
             self._parse_inline_statements(stream, stmt)
         except Exception:
             pass
-    
+
     def _parse_until_conditional(self, stream: ITokenStream, stmt: PerformStatement) -> None:
-        """Parse UNTIL condition for VARYING clause."""
+        """Parse UNTIL condition within a VARYING clause."""
         try:
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
-            
-            condition_tokens = []
-            while True:
-                token = stream.peek()
-                if not token:
-                    break
-                # Stop at period, END-PERFORM, or statement keywords
-                if (token.type == TokenType.PERIOD or 
-                    (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-PERFORM") or
-                    token.type in STATEMENT_TOKEN_TYPES or
-                    (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("DISPLAY", "MOVE", "IF", "CALL", "PERFORM", "EVALUATE"))):
-                    break
-                
-                condition_tokens.append(token.value or str(token.type))
-                stream.consume()
-            
-            # Create CobolExpression for the condition and store it
-            # This will be used in set_varying_clause call
+            condition_tokens = self._collect_until_condition_tokens(stream, for_varying=True)
             if condition_tokens:
                 condition_str = " ".join(condition_tokens).strip()
-                location = SourceLocation(0, 0)  # Default location
-                condition_expr = CobolExpression("CONDITION", location)
+                condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
                 condition_expr.operands = [condition_str]
-                # Store the condition on the statement (varies will be set when set_varying_clause is called)
                 stmt.until_condition = condition_expr
-            
-            # Parse inline statements
             self._parse_inline_statements(stream, stmt)
         except Exception:
             pass
