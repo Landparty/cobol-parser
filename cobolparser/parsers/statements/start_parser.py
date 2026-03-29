@@ -6,6 +6,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import StartStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
 
 # Key conditions recognized as IDENTIFIER tokens
 _KEY_CONDITIONS = {
@@ -44,7 +45,7 @@ class StartStatementParser(IStatementParser):
             ),
         )
 
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
 
         # Parse file name (required)
         token = token_stream.peek()
@@ -54,23 +55,23 @@ class StartStatementParser(IStatementParser):
         else:
             return stmt
 
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
 
         # Optional KEY clause (may be tokenized as KEY_IS or KEY + IS)
         token = token_stream.peek()
         if token and token.type in (TokenType.KEY_IS, TokenType.KEY):
             consumed_key = token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
 
             # If KEY (not KEY_IS), consume optional IS keyword
             if consumed_key.type == TokenType.KEY:
                 nxt = token_stream.peek()
                 if nxt and nxt.type == TokenType.IS:
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                 elif nxt and nxt.type == TokenType.IDENTIFIER and nxt.value and nxt.value.upper() == "IS":
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
 
             # Parse condition: EQUAL, GREATER, LESS, NOT LESS, GREATER THAN OR EQUAL, etc.
             condition_parts = []
@@ -78,7 +79,7 @@ class StartStatementParser(IStatementParser):
             if token and token.type == TokenType.NOT:
                 condition_parts.append("NOT")
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
 
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER and token.value:
@@ -86,23 +87,23 @@ class StartStatementParser(IStatementParser):
                 if val in _COMPARISON_OPS or val in ("THAN", "TO"):
                     condition_parts.append(val)
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                     # Parse THAN or TO
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("THAN", "TO"):
                         condition_parts.append(token.value.upper())
                         token_stream.consume()
-                        self._skip_whitespace(token_stream)
+                        skip_whitespace(token_stream)
                         # Optional OR EQUAL
                         token = token_stream.peek()
                         if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "OR":
                             token_stream.consume()
-                            self._skip_whitespace(token_stream)
+                            skip_whitespace(token_stream)
                             token = token_stream.peek()
                             if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("EQUAL", "EQUALS"):
                                 condition_parts.append("OR EQUAL")
                                 token_stream.consume()
-                                self._skip_whitespace(token_stream)
+                                skip_whitespace(token_stream)
 
             if condition_parts:
                 stmt.set_key_condition(" ".join(condition_parts))
@@ -111,12 +112,12 @@ class StartStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type == TokenType.INVALID:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.KEY:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
-            clause_stmts = self._collect_clause_stmts(
+                skip_whitespace(token_stream)
+            clause_stmts = collect_clause_stmts(
                 token_stream, {"END-START"}
             )
             stmt.set_invalid_key_clause(clause_stmts)
@@ -125,57 +126,28 @@ class StartStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type == TokenType.NOT:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.INVALID:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
                 if token and token.type == TokenType.KEY:
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
-                clause_stmts = self._collect_clause_stmts(
+                    skip_whitespace(token_stream)
+                clause_stmts = collect_clause_stmts(
                     token_stream, {"END-START"}
                 )
                 stmt.set_not_invalid_key_clause(clause_stmts)
 
         # Consume END-START or PERIOD
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-START":
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
         token = token_stream.peek()
         if token and token.type == TokenType.PERIOD:
             token_stream.consume()
 
         return stmt
-
-    def _collect_clause_stmts(self, token_stream: ITokenStream, stop_at: set) -> list:
-        """Consume clause tokens until a boundary. Returns empty list."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token:
-                break
-            if token.type == TokenType.PERIOD:
-                break
-            if token.type == TokenType.NOT:
-                break
-            if token.type == TokenType.INVALID:
-                break
-            if token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in stop_at:
-                break
-            token_stream.consume()
-        return []
-
-    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
-        """Skip whitespace and newline tokens."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type not in (
-                TokenType.WHITESPACE,
-                TokenType.COMMENT,
-                TokenType.NEWLINE,
-            ):
-                break
-            token_stream.consume()

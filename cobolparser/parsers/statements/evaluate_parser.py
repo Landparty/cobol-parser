@@ -5,6 +5,7 @@ from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...models.statements import EvaluateStatement, WhenClause
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import get_parse_context, report_parse_error, try_parse_nested_statement
 
 
 class EvaluateStatementParser(IStatementParser):
@@ -32,7 +33,7 @@ class EvaluateStatementParser(IStatementParser):
 
             start_location = start_token.location if hasattr(start_token, 'location') else SourceLocation(0, 0)
             stmt = EvaluateStatement(start_location)
-            context = self._get_context(token_stream)
+            context = get_parse_context(token_stream)
 
             subject_count = self._parse_subjects(token_stream, stmt)
 
@@ -64,7 +65,7 @@ class EvaluateStatementParser(IStatementParser):
                 if next_token and next_token.value and next_token.value.upper() == "OTHER":
                     token_stream.consume()
                     if found_when_other:
-                        self._report_error(context, "Multiple WHEN OTHER clauses not allowed", when_location)
+                        report_parse_error(context, "Multiple WHEN OTHER clauses not allowed", when_location)
                     found_when_other = True
                     stmt.default_when = WhenClause([], when_location)
                     statements = self._skip_clause_statements(token_stream)
@@ -73,18 +74,18 @@ class EvaluateStatementParser(IStatementParser):
                             stmt.default_when.add_statement(nested_statement)
                     lookahead = token_stream.peek()
                     if lookahead and lookahead.value and lookahead.value.upper() == "WHEN":
-                        self._report_error(context, "WHEN OTHER must be the last WHEN clause", when_location)
+                        report_parse_error(context, "WHEN OTHER must be the last WHEN clause", when_location)
                     continue
 
                 selectors, selector_count, issues = self._parse_selectors(token_stream)
                 for issue in issues:
-                    self._report_error(context, issue, when_location)
+                    report_parse_error(context, issue, when_location)
 
                 if selector_count == 0:
-                    self._report_error(context, "WHEN clause must have at least one selector", when_location)
+                    report_parse_error(context, "WHEN clause must have at least one selector", when_location)
 
                 if subject_count > 0 and selector_count > 0 and selector_count != subject_count:
-                    self._report_error(
+                    report_parse_error(
                         context,
                         f"Selector count mismatch: expected {subject_count} selectors, got {selector_count}",
                         when_location,
@@ -98,10 +99,10 @@ class EvaluateStatementParser(IStatementParser):
                         when_clause.add_statement(nested_statement)
 
             if not found_when_clause:
-                self._report_error(context, "EVALUATE statement must have at least one WHEN clause", start_location)
+                report_parse_error(context, "EVALUATE statement must have at least one WHEN clause", start_location)
 
             if not found_end_evaluate:
-                self._report_error(context, "EVALUATE statement missing END-EVALUATE terminator", start_location)
+                report_parse_error(context, "EVALUATE statement missing END-EVALUATE terminator", start_location)
 
             return stmt
         except Exception:
@@ -229,23 +230,6 @@ class EvaluateStatementParser(IStatementParser):
 
         return {"type": "Literal", "value": selector_text}
 
-    def _get_context(self, token_stream: ITokenStream) -> Optional[ParseContext]:
-        """Return the attached parse context if available."""
-        context = getattr(token_stream, '_parse_context', None)
-        if context is None:
-            context = getattr(token_stream, '_context', None)
-        return context
-
-    def _report_error(
-        self,
-        context: Optional[ParseContext],
-        message: str,
-        location: Optional[SourceLocation],
-    ) -> None:
-        """Report a parser error through the active parse context."""
-        if context:
-            context.error(message, location)
-    
     def _skip_clause_statements(self, token_stream: ITokenStream) -> Optional[list]:
         """Parse statements within WHEN clause until next WHEN or END-EVALUATE.
         
@@ -265,7 +249,7 @@ class EvaluateStatementParser(IStatementParser):
                 break
             
             # Try to parse a nested statement if registry is available
-            nested_stmt = self._try_parse_nested_statement(token_stream)
+            nested_stmt = try_parse_nested_statement(token_stream)
             if nested_stmt:
                 statements.append(nested_stmt)
             else:
@@ -276,29 +260,6 @@ class EvaluateStatementParser(IStatementParser):
                 token_stream.consume()
         
         return statements if statements else None
-    
-    def _try_parse_nested_statement(self, stream: ITokenStream) -> Optional[Any]:
-        """Try to parse a nested statement using registry if available."""
-        try:
-            # Check if stream has access to a registry using safe getattr
-            registry = getattr(stream, '_registry', None) or getattr(stream, 'registry', None)
-            
-            # If no registry attribute, try calling get_registry method if it exists
-            if registry is None and hasattr(stream, 'get_registry') and callable(getattr(stream, 'get_registry')):
-                registry = getattr(stream, 'get_registry')()
-            
-            if registry is None:
-                return None
-            
-            # Try to find a parser for current statement
-            if hasattr(registry, 'find_parser') and callable(getattr(registry, 'find_parser')):
-                parser = getattr(registry, 'find_parser')(stream)
-                if parser:
-                    return parser.parse(stream)
-        except Exception:
-            pass
-        
-        return None
     
     @staticmethod
     def _is_statement_keyword(word: str) -> bool:

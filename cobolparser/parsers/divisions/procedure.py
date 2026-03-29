@@ -41,6 +41,7 @@ from cobolparser.parsers.statements import (
     StartStatementParser,
 )
 from .base import BaseDivisionParser
+from cobolparser.parsers.statements._utils import skip_whitespace
 
 
 class ProcedureDivisionParser(BaseDivisionParser):
@@ -143,12 +144,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         sections: Dict[str, Any] = {}
         
         # Skip initial whitespace and comments
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         
         # Parse paragraphs and sections until EOF
         while not token_stream.is_empty():
             # Skip whitespace/comments at start of each iteration
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             
             token = token_stream.peek(0)
             if not token:
@@ -221,7 +222,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         
                         # Attach context to stream for error reporting
                         context = ParseContext(self.host, self._statement_registry)
-                        setattr(token_stream, '_parse_context', context)
+                        token_stream.context = context
                         setattr(token_stream, '_context', context)
                         
                         statement = parser.parse(token_stream)
@@ -288,7 +289,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         
         while not token_stream.is_empty():
             # Skip whitespace/comments
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             
             if token_stream.is_empty():
                 break
@@ -324,7 +325,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     
                     # Attach context to stream for error reporting
                     context = ParseContext(self.host, self._statement_registry)
-                    setattr(token_stream, '_parse_context', context)
+                    token_stream.context = context
                     setattr(token_stream, '_context', context)
                     
                     statement = parser.parse(token_stream)
@@ -444,19 +445,6 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 return True
         
         return False
-
-    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
-        """Skip whitespace and comment tokens.
-        
-        Args:
-            token_stream: Token stream to advance
-        """
-        while not token_stream.is_empty():
-            token = token_stream.peek(0)
-            if not token or (hasattr(token, 'type') and 
-                            token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE')):
-                break
-            token_stream.consume()
 
     def _skip_to_next_statement(self, token_stream: ITokenStream) -> None:
         """Skip to start of next statement or paragraph.

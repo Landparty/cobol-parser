@@ -6,6 +6,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import ReadStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
 
 
 class ReadStatementParser(IStatementParser):
@@ -40,7 +41,7 @@ class ReadStatementParser(IStatementParser):
             ),
         )
 
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
 
         # Parse file name (required)
         token = token_stream.peek()
@@ -50,93 +51,93 @@ class ReadStatementParser(IStatementParser):
         else:
             return stmt
 
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
 
         # Optional access mode: NEXT, FIRST, LAST, PREVIOUS, CURRENT
         token = token_stream.peek()
         if token and token.type == TokenType.NEXT:
             stmt.set_record_format("NEXT")
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
         elif token and token.type == TokenType.IDENTIFIER and token.value:
             val = token.value.upper()
             if val in ("FIRST", "LAST", "PREVIOUS", "CURRENT"):
                 stmt.set_record_format(val)
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
 
         # Optional RECORD keyword (consumed, ignored)
         token = token_stream.peek()
         if token and token.type == TokenType.RECORD:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
 
         # Optional INTO clause
         token = token_stream.peek()
         if token and token.type == TokenType.INTO:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
                 stmt.set_into(token.value)
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
 
         # Optional KEY IS clause (may be tokenized as KEY_IS or KEY + IS)
         token = token_stream.peek()
         if token and token.type in (TokenType.KEY_IS, TokenType.KEY):
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             # If KEY (not KEY_IS), consume optional IS keyword
             if token.type == TokenType.KEY:
                 nxt = token_stream.peek()
                 if nxt and nxt.type == TokenType.IS:
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                 elif nxt and nxt.type == TokenType.IDENTIFIER and nxt.value and nxt.value.upper() == "IS":
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
                 stmt.set_key(token.value)
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
 
         # Optional WITH [NO] LOCK
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "WITH":
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "NO":
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 # Consume LOCK
                 token = token_stream.peek()
                 if token and token.type == TokenType.LOCK:
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                 stmt.set_lock_mode(with_lock=False, with_nowait=True)
             elif token and token.type == TokenType.LOCK:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 stmt.set_lock_mode(with_lock=True)
             elif token and token.type == TokenType.WITH_LOCK:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 stmt.set_lock_mode(with_lock=True)
 
         # Optional AT END clause
         token = token_stream.peek()
         if token and token.type == TokenType.AT:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             # Consume END keyword
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END":
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
-            clause_stmts = self._collect_clause_stmts(
+                skip_whitespace(token_stream)
+            clause_stmts = collect_clause_stmts(
                 token_stream, {"END-READ", "NOT", "END_READ"}
             )
             stmt.set_at_end_clause(clause_stmts)
@@ -147,17 +148,17 @@ class ReadStatementParser(IStatementParser):
             # Peek ahead to confirm NOT AT END (not NOT INVALID KEY)
             saved = token_stream.peek()
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             next_tok = token_stream.peek()
             if next_tok and next_tok.type == TokenType.AT:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 # Consume END
                 token = token_stream.peek()
                 if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END":
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
-                clause_stmts = self._collect_clause_stmts(
+                    skip_whitespace(token_stream)
+                clause_stmts = collect_clause_stmts(
                     token_stream, {"END-READ", "INVALID", "NOT"}
                 )
                 stmt.set_not_at_end_clause(clause_stmts)
@@ -165,12 +166,12 @@ class ReadStatementParser(IStatementParser):
                 # NOT INVALID KEY — fall through handled below after re-peeking
                 # We already consumed NOT, so handle INVALID KEY now
                 token_stream.consume()  # INVALID
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
                 if token and token.type == TokenType.KEY:
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
-                clause_stmts = self._collect_clause_stmts(
+                    skip_whitespace(token_stream)
+                clause_stmts = collect_clause_stmts(
                     token_stream, {"END-READ", "NOT"}
                 )
                 stmt.set_not_invalid_key_clause(clause_stmts)
@@ -180,12 +181,12 @@ class ReadStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type == TokenType.INVALID:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.KEY:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
-            clause_stmts = self._collect_clause_stmts(
+                skip_whitespace(token_stream)
+            clause_stmts = collect_clause_stmts(
                 token_stream, {"END-READ", "NOT"}
             )
             stmt.set_invalid_key_clause(clause_stmts)
@@ -194,59 +195,28 @@ class ReadStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type == TokenType.NOT:
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.INVALID:
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
                 if token and token.type == TokenType.KEY:
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
-                clause_stmts = self._collect_clause_stmts(
+                    skip_whitespace(token_stream)
+                clause_stmts = collect_clause_stmts(
                     token_stream, {"END-READ"}
                 )
                 stmt.set_not_invalid_key_clause(clause_stmts)
 
         # Consume END-READ or PERIOD
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-READ":
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
         token = token_stream.peek()
         if token and token.type == TokenType.PERIOD:
             token_stream.consume()
 
         return stmt
-
-    def _collect_clause_stmts(self, token_stream: ITokenStream, stop_at: set) -> list:
-        """Consume clause tokens until a boundary. Returns empty list."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token:
-                break
-            if token.type == TokenType.PERIOD:
-                break
-            if token.type == TokenType.NOT:
-                break
-            if token.type == TokenType.INVALID:
-                break
-            if token.type == TokenType.AT:
-                break
-            if token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in stop_at:
-                break
-            token_stream.consume()
-        return []
-
-    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
-        """Skip whitespace and newline tokens."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type not in (
-                TokenType.WHITESPACE,
-                TokenType.COMMENT,
-                TokenType.NEWLINE,
-            ):
-                break
-            token_stream.consume()

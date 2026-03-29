@@ -6,6 +6,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import OpenStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace
 
 # Open modes recognized as IDENTIFIER tokens with these values
 _OPEN_MODES = {"INPUT", "OUTPUT", "EXTEND"}
@@ -40,7 +41,7 @@ class OpenStatementParser(IStatementParser):
             ),
         )
 
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
 
         # Parse open mode: INPUT, OUTPUT, I-O, EXTEND
         token = token_stream.peek()
@@ -49,7 +50,7 @@ class OpenStatementParser(IStatementParser):
             if val in _OPEN_MODES or val == "I-O":
                 stmt.set_open_mode(val)
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
 
         # Parse one or more file names
         while not token_stream.is_empty():
@@ -67,12 +68,12 @@ class OpenStatementParser(IStatementParser):
                 if val == "REPOSITION":
                     token_stream.consume()
                     stmt.set_reposition(True)
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                     continue
                 # Otherwise it's a file name
                 stmt.add_file(token.value)
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
             else:
                 break
 
@@ -80,12 +81,12 @@ class OpenStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "WITH":
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "REPOSITION":
                 token_stream.consume()
                 stmt.set_reposition(True)
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
 
         # Consume period if present
         token = token_stream.peek()
@@ -93,15 +94,3 @@ class OpenStatementParser(IStatementParser):
             token_stream.consume()
 
         return stmt
-
-    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
-        """Skip whitespace and newline tokens."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type not in (
-                TokenType.WHITESPACE,
-                TokenType.COMMENT,
-                TokenType.NEWLINE,
-            ):
-                break
-            token_stream.consume()

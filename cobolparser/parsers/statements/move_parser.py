@@ -6,6 +6,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import MoveStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace
 
 
 class MoveStatementParser(IStatementParser):
@@ -37,7 +38,7 @@ class MoveStatementParser(IStatementParser):
         stmt = cast(MoveStatement, factory.create(MoveStatement, start_token.location if start_token else SourceLocation(0, 0)))
         
         # Skip whitespace
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         
         # Check for CORRESPONDING or CORR
         token = token_stream.peek()
@@ -45,13 +46,13 @@ class MoveStatementParser(IStatementParser):
             if token.value.upper() in ("CORRESPONDING", "CORR"):
                 stmt.set_corresponding(True)
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
         
         # Parse source operand
         source = self._parse_source(token_stream)
         stmt.set_source(source)
         
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         
         # Expect TO keyword
         token = token_stream.peek()
@@ -62,7 +63,7 @@ class MoveStatementParser(IStatementParser):
             # Missing TO, but continue parsing
             return stmt
         
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         
         # Parse targets - only collect one target unless we have more TO keywords
         target_count = 0
@@ -76,7 +77,7 @@ class MoveStatementParser(IStatementParser):
                 stop_token_types.add(getattr(TokenType, token_type_name))
         
         while not token_stream.is_empty():
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             
             if not token or token.type == TokenType.PERIOD:
@@ -117,7 +118,7 @@ class MoveStatementParser(IStatementParser):
         paren_depth = 0
         
         while not token_stream.is_empty():
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             
             if not token:
@@ -150,12 +151,3 @@ class MoveStatementParser(IStatementParser):
         
         return "".join(source_parts) if source_parts else ""
     
-    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
-        """Skip whitespace and newline tokens."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type not in (TokenType.WHITESPACE, 
-                                               TokenType.COMMENT, 
-                                               TokenType.NEWLINE):
-                break
-            token_stream.consume()

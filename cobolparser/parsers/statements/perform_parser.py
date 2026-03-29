@@ -2,10 +2,12 @@
 
 from typing import Optional, Any
 from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
+from ...core.exceptions import TokenMismatch, UnexpectedEndOfInput
 from ...core.ast_factory import get_factory
 from ...models.statements import PerformStatement, CobolExpression
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace, get_parse_context, report_parse_error, try_parse_nested_statement
 
 
 class PerformStatementParser(IStatementParser):
@@ -41,10 +43,10 @@ class PerformStatementParser(IStatementParser):
         # Create statement with source location
         location = start_token.location if start_token else SourceLocation(0, 0)
         stmt = factory.create(PerformStatement, location)
-        context = self._get_context(token_stream)
+        context = get_parse_context(token_stream)
         
         # Skip whitespace/comments if possible
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         
         # Try to get the next meaningful token (peek without consuming)
         try:
@@ -54,11 +56,11 @@ class PerformStatementParser(IStatementParser):
             return stmt
         
         if not token:
-            self._report_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
+            report_parse_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
             return stmt
 
         if token.type == TokenType.PERIOD:
-            self._report_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
+            report_parse_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
             token_stream.consume()
             return stmt
         
@@ -80,10 +82,10 @@ class PerformStatementParser(IStatementParser):
                         stmt.set_test_timing(val)
                         token_stream.consume()
                         token = token_stream.peek()
-            except Exception:
+            except (TokenMismatch, UnexpectedEndOfInput):
                 pass
-                self._skip_whitespace(token_stream)
-                token = token_stream.peek()
+            skip_whitespace(token_stream)
+            token = token_stream.peek()
         
         # Check for UNTIL clause (inline PERFORM UNTIL)
         if token and token.type == TokenType.UNTIL:
@@ -110,7 +112,7 @@ class PerformStatementParser(IStatementParser):
             except Exception:
                 pass
             
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
         
         # Simple PERFORM paragraph-name
@@ -123,7 +125,7 @@ class PerformStatementParser(IStatementParser):
             except Exception:
                 token = None
             
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             
             # Check for THRU clause
@@ -136,7 +138,7 @@ class PerformStatementParser(IStatementParser):
                         token_stream.consume()
                         token = token_stream.peek()
                     else:
-                        self._report_error(
+                        report_parse_error(
                             context,
                             "PERFORM THRU requires an ending paragraph name",
                             location,
@@ -144,7 +146,7 @@ class PerformStatementParser(IStatementParser):
                 except Exception:
                     pass
                 
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
             
             # Check for TIMES clause after paragraph name (can be numeric or variable)
@@ -179,7 +181,7 @@ class PerformStatementParser(IStatementParser):
                 except Exception:
                     pass
             
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             
             # Check for WITH TEST clause after paragraph name (WITH TEST BEFORE/AFTER)
@@ -198,7 +200,7 @@ class PerformStatementParser(IStatementParser):
                 except Exception:
                     pass
                 
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
             
             # Check for UNTIL clause after paragraph name
@@ -220,45 +222,11 @@ class PerformStatementParser(IStatementParser):
         
         return stmt
 
-    @staticmethod
-    def _get_context(stream: ITokenStream) -> Optional[ParseContext]:
-        """Return the active parse context if one is attached to the stream."""
-        context = getattr(stream, '_parse_context', None)
-        if context is None:
-            context = getattr(stream, '_context', None)
-        return context
-
-    @staticmethod
-    def _report_error(
-        context: Optional[ParseContext],
-        message: str,
-        location: SourceLocation,
-    ) -> None:
-        """Report a parser error through the active parse context."""
-        if context:
-            context.error(message, location)
-    
-    def _skip_whitespace(self, stream: ITokenStream) -> None:
-        """Skip whitespace and comment tokens if possible."""
-        try:
-            # Try to use stream's skip_whitespace method if available
-            if hasattr(stream, 'skip_whitespace_and_comments'):
-                stream.skip_whitespace_and_comments()
-            else:
-                # Manual skip
-                while not stream.is_empty():
-                    token = stream.peek()
-                    if not token or token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE', 'CONTINUATION'):
-                        break
-                    stream.consume()
-        except Exception:
-            pass
-    
     def _parse_varying_clause(self, stream: ITokenStream, stmt: PerformStatement) -> None:
         """Parse VARYING clause for PERFORM statement."""
         try:
             stream.consume()  # Skip VARYING
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Get variable name
             token = stream.peek()
@@ -267,14 +235,14 @@ class PerformStatementParser(IStatementParser):
             
             variable_name = token.value
             stream.consume()
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Expect FROM
             token = stream.peek()
             if not token or not token.value or token.value.upper() != "FROM":
                 return
             stream.consume()
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Get FROM value
             token = stream.peek()
@@ -282,14 +250,14 @@ class PerformStatementParser(IStatementParser):
                 return
             from_value = token.value
             stream.consume()
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Expect BY
             token = stream.peek()
             if not token or not token.value or token.value.upper() != "BY":
                 return
             stream.consume()
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Get BY value
             token = stream.peek()
@@ -297,7 +265,7 @@ class PerformStatementParser(IStatementParser):
                 return
             by_value = token.value
             stream.consume()
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Check for WITH TEST clause (before UNTIL)
             token = stream.peek()
@@ -316,7 +284,7 @@ class PerformStatementParser(IStatementParser):
                 except Exception:
                     pass
                 
-                self._skip_whitespace(stream)
+                skip_whitespace(stream)
                 token = stream.peek()
             
             # Parse UNTIL condition
@@ -337,7 +305,7 @@ class PerformStatementParser(IStatementParser):
         """Parse UNTIL clause for inline PERFORM."""
         try:
             stream.consume()  # Skip UNTIL
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Parse condition - collect tokens until we hit a statement keyword
             # Statement keywords include PERFORM, DISPLAY, MOVE, IF, EVALUATE, etc.
@@ -386,7 +354,7 @@ class PerformStatementParser(IStatementParser):
         """Parse UNTIL condition for VARYING clause."""
         try:
             stream.consume()  # Skip UNTIL
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Collect condition tokens - stop at statement keywords
             STATEMENT_TOKEN_TYPES = {
@@ -432,7 +400,7 @@ class PerformStatementParser(IStatementParser):
             if stream.peek() and stream.peek().value and stream.peek().value.upper() == "UNTIL":
                 stream.consume()
             
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Parse condition (simplified)
             condition_tokens = []
@@ -464,11 +432,11 @@ class PerformStatementParser(IStatementParser):
     def _parse_inline_statements(self, stream: ITokenStream, stmt: PerformStatement) -> None:
         """Parse inline statements within PERFORM ... END-PERFORM block."""
         try:
-            self._skip_whitespace(stream)
+            skip_whitespace(stream)
             
             # Parse statements until END-PERFORM or PERIOD
             while not stream.is_empty():
-                self._skip_whitespace(stream)
+                skip_whitespace(stream)
                 token = stream.peek()
                 
                 if not token:
@@ -489,7 +457,7 @@ class PerformStatementParser(IStatementParser):
                     break
                 
                 # Try to parse nested statement
-                nested_stmt = self._try_parse_nested_statement(stream)
+                nested_stmt = try_parse_nested_statement(stream)
                 if nested_stmt:
                     stmt.add_inline_statement(nested_stmt)
                 else:
@@ -507,29 +475,3 @@ class PerformStatementParser(IStatementParser):
         except Exception:
             pass
     
-    def _try_parse_nested_statement(self, stream: ITokenStream) -> Optional[Any]:
-        """Try to parse a nested statement using registry if available."""
-        try:
-            # Check if stream has access to a registry
-            # This is duck typing - if the stream has a way to get the registry, use it
-            if hasattr(stream, '_registry'):
-                registry = stream._registry
-            elif hasattr(stream, 'registry'):
-                registry = stream.registry
-            elif hasattr(stream, 'get_registry'):
-                registry = stream.get_registry()
-            else:
-                # No registry available
-                return None
-            
-            # Try to find a parser for current statement
-            if hasattr(registry, 'find_parser'):
-                parser = registry.find_parser(stream)
-                if parser:
-                    return parser.parse(stream)
-        except Exception:
-            pass
-        
-        return None
-
-

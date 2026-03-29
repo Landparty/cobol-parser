@@ -6,6 +6,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import CloseStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace
 
 
 class CloseStatementParser(IStatementParser):
@@ -35,7 +36,7 @@ class CloseStatementParser(IStatementParser):
             ),
         )
 
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
 
         # Parse one or more file names with options
         while not token_stream.is_empty():
@@ -49,7 +50,7 @@ class CloseStatementParser(IStatementParser):
 
             file_name = token.value
             token_stream.consume()
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
 
             reel = False
             unit = False
@@ -61,34 +62,34 @@ class CloseStatementParser(IStatementParser):
             if token and token.type == TokenType.REEL:
                 reel = True
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
             elif token and token.type == TokenType.IDENTIFIER and token.value:
                 val = token.value.upper()
                 if val == "UNIT":
                     unit = True
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                 elif val == "WITH":
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER and token.value:
                         inner = token.value.upper()
                         if inner == "NO":
                             token_stream.consume()
-                            self._skip_whitespace(token_stream)
+                            skip_whitespace(token_stream)
                             token = token_stream.peek()
                             if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "REWIND":
                                 token_stream.consume()
-                                self._skip_whitespace(token_stream)
+                                skip_whitespace(token_stream)
                             no_rewind = True
                         elif inner == "LOCK":
                             token_stream.consume()
-                            self._skip_whitespace(token_stream)
+                            skip_whitespace(token_stream)
                             with_lock = True
                     elif token and token.type == TokenType.LOCK:
                         token_stream.consume()
-                        self._skip_whitespace(token_stream)
+                        skip_whitespace(token_stream)
                         with_lock = True
 
             stmt.add_file(
@@ -105,15 +106,3 @@ class CloseStatementParser(IStatementParser):
             token_stream.consume()
 
         return stmt
-
-    def _skip_whitespace(self, token_stream: ITokenStream) -> None:
-        """Skip whitespace and newline tokens."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type not in (
-                TokenType.WHITESPACE,
-                TokenType.COMMENT,
-                TokenType.NEWLINE,
-            ):
-                break
-            token_stream.consume()
