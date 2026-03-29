@@ -37,12 +37,12 @@ class TestReadStatement:
         assert read_stmt.into_target == "RECORD-AREA"
         assert "RECORD-AREA" in read_stmt.operands
     
-    def test_read_statement_set_record_format(self):
+    def test_read_statement_set_access_mode(self):
         """ReadStatement should allow setting the record format."""
         loc = SourceLocation(line=10, column=5)
         read_stmt = ReadStatement(loc)
-        read_stmt.set_record_format("next")
-        assert read_stmt.record_format == "NEXT"
+        read_stmt.set_access_mode("next")
+        assert read_stmt.access_mode == "NEXT"
     
     def test_read_statement_to_dict(self):
         """ReadStatement should serialize to dict."""
@@ -80,7 +80,7 @@ class TestWriteStatement:
         loc = SourceLocation(line=20, column=5)
         write_stmt = WriteStatement(loc)
         write_stmt.set_from("SOURCE-DATA")
-        assert write_stmt.from_source == "SOURCE-DATA"
+        assert write_stmt.from_clause == "SOURCE-DATA"
         assert "SOURCE-DATA" in write_stmt.operands
     
     def test_write_statement_set_advancing(self):
@@ -88,8 +88,8 @@ class TestWriteStatement:
         loc = SourceLocation(line=20, column=5)
         write_stmt = WriteStatement(loc)
         write_stmt.set_advancing("AFTER", lines=2)
-        assert write_stmt.advancing_mode == "AFTER"
-        assert write_stmt.advancing_lines == 2
+        assert write_stmt.advancing_clause["type"] == "AFTER"
+        assert write_stmt.advancing_clause["value"] == 2
     
     def test_write_statement_to_dict(self):
         """WriteStatement should serialize to dict."""
@@ -102,9 +102,9 @@ class TestWriteStatement:
         result = write_stmt.to_dict()
         assert result["statement_type"] == "WRITE"
         assert result["record_name"] == "OUTPUT-RECORD"
-        assert result["from_source"] == "SOURCE-DATA"
-        assert result["advancing_mode"] == "BEFORE"
-        assert result["advancing_lines"] == 1
+        assert result["from_clause"] == "SOURCE-DATA"
+        assert result["advancing_clause"]["type"] == "BEFORE"
+        assert result["advancing_clause"]["value"] == 1
 
 
 class TestOpenStatement:

@@ -23,11 +23,11 @@ class TestReadStatementContract:
         stmt = ReadStatement(location)
         stmt.set_file_name("MYFILE")
         stmt.set_into("INPUT-DATA")
-        stmt.set_record_format("NEXT")
+        stmt.set_access_mode("NEXT")
         stmt.set_lock_mode(with_lock=True)
-        
+
         result = stmt.to_dict()
-        
+
         # Verify required fields exist
         assert "node_type" in result
         assert result["node_type"] == "Statement"
@@ -37,8 +37,8 @@ class TestReadStatementContract:
         assert result["file_name"] == "MYFILE"
         assert "into_target" in result
         assert result["into_target"] == "INPUT-DATA"
-        assert "record_format" in result
-        assert result["record_format"] == "NEXT"
+        assert "access_mode" in result
+        assert result["access_mode"] == "NEXT"
         assert "with_lock" in result
         assert result["with_lock"] is True
         assert "location" in result
@@ -90,12 +90,11 @@ class TestWriteStatementContract:
         assert result["statement_type"] == "WRITE"
         assert "record_name" in result
         assert result["record_name"] == "OUTPUT-RECORD"
-        assert "from_source" in result
-        assert result["from_source"] == "SOURCE-DATA"
-        assert "advancing_mode" in result
-        assert result["advancing_mode"] == "AFTER"
-        assert "advancing_lines" in result
-        assert result["advancing_lines"] == 2
+        assert "from_clause" in result
+        assert result["from_clause"] == "SOURCE-DATA"
+        assert "advancing_clause" in result
+        assert result["advancing_clause"]["type"] == "AFTER"
+        assert result["advancing_clause"]["value"] == 2
     
     def test_write_statement_advancing_page(self):
         """Verify WriteStatement with ADVANCING PAGE."""
@@ -106,9 +105,9 @@ class TestWriteStatementContract:
         
         result = stmt.to_dict()
         
-        assert result["advancing_mode"] == "BEFORE"
-        assert result["advancing_page"] is True
-        assert result["advancing_lines"] is None
+        assert result["advancing_clause"]["type"] == "BEFORE"
+        assert result["advancing_clause"]["value"] == "PAGE"
+        assert result["advancing_clause"]["unit"] == "CHANNEL"
     
     def test_write_statement_delete_record(self):
         """Verify WriteStatement can mark record for deletion."""

@@ -56,13 +56,13 @@ class ReadStatementParser(IStatementParser):
         # Optional access mode: NEXT, FIRST, LAST, PREVIOUS, CURRENT
         token = token_stream.peek()
         if token and token.type == TokenType.NEXT:
-            stmt.set_record_format("NEXT")
+            stmt.set_access_mode("NEXT")
             token_stream.consume()
             skip_whitespace(token_stream)
         elif token and token.type == TokenType.IDENTIFIER and token.value:
             val = token.value.upper()
             if val in ("FIRST", "LAST", "PREVIOUS", "CURRENT"):
-                stmt.set_record_format(val)
+                stmt.set_access_mode(val)
                 token_stream.consume()
                 skip_whitespace(token_stream)
 
