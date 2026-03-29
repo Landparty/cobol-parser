@@ -11,7 +11,7 @@ Family modules:
     control     — IfStatement, EvaluateStatement, WhenClause, PerformStatement,
                   GoStatement, StopStatement, SearchStatement
     data        — MoveStatement, DisplayStatement, StringStatement, UnstringStatement
-    io          — IO* classes and backward-compat aliases
+    io          — IO* statement classes (IOReadStatement, IOWriteStatement, etc.)
     call        — CallStatement, EntryStatement, CallParameter
     misc        — SelectStatement, CopyStatement
 """
