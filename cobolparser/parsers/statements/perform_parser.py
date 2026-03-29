@@ -7,7 +7,10 @@ from ...core.ast_factory import get_factory
 from ...models.statements import PerformStatement, CobolExpression
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
-from cobolparser.parsers.statements._utils import skip_whitespace, get_parse_context, report_parse_error, try_parse_nested_statement
+from cobolparser.parsers.statements._utils import (
+    skip_whitespace, get_parse_context, report_parse_error,
+    try_parse_nested_statement, STATEMENT_TOKEN_TYPES, STATEMENT_KEYWORDS,
+)
 
 
 class PerformStatementParser(IStatementParser):
@@ -307,15 +310,6 @@ class PerformStatementParser(IStatementParser):
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
             
-            # Parse condition - collect tokens until we hit a statement keyword
-            # Statement keywords include PERFORM, DISPLAY, MOVE, IF, EVALUATE, etc.
-            STATEMENT_TOKEN_TYPES = {
-                TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF, 
-                TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
-                TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN, 
-                TokenType.CLOSE, TokenType.STOP
-            }
-            
             condition_tokens = []
             while True:
                 token = stream.peek()
@@ -355,14 +349,6 @@ class PerformStatementParser(IStatementParser):
         try:
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
-            
-            # Collect condition tokens - stop at statement keywords
-            STATEMENT_TOKEN_TYPES = {
-                TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF, 
-                TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
-                TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN, 
-                TokenType.CLOSE, TokenType.STOP, TokenType.END_PERFORM
-            }
             
             condition_tokens = []
             while True:

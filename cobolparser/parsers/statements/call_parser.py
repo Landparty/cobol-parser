@@ -7,6 +7,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import CallStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from cobolparser.parsers.statements._utils import skip_whitespace, STATEMENT_TOKEN_TYPES, STATEMENT_KEYWORDS
 
 
 class CallStatementParser(IStatementParser):
@@ -41,14 +42,14 @@ class CallStatementParser(IStatementParser):
         stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
         
         # Get context for error reporting if available
-        context: Optional[ParseContext] = getattr(token_stream, '_parse_context', None)
+        context: Optional[ParseContext] = token_stream.context
         if context is None:
             context = getattr(token_stream, '_context', None)
         if context is None and hasattr(token_stream, 'context'):
             context = getattr(token_stream, 'context')
         
         try:
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             
             if not token:
@@ -83,21 +84,10 @@ class CallStatementParser(IStatementParser):
                 return stmt
             
             # Parse optional USING and RETURNING clauses
-            STATEMENT_TOKEN_TYPES = {
-                TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF,
-                TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
-                TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN,
-                TokenType.CLOSE, TokenType.STOP, TokenType.ADD, TokenType.SUBTRACT,
-                TokenType.MULTIPLY, TokenType.DIVIDE
-            }
-            STATEMENT_KEYWORDS = {
-                "PERFORM", "DISPLAY", "MOVE", "IF", "EVALUATE", "ACCEPT",
-                "CALL", "COMPUTE", "INSPECT", "READ", "WRITE", "OPEN",
-                "CLOSE", "STOP", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"
-            }
+
             
             while not token_stream.is_empty():
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
                 
                 if not token:
@@ -125,14 +115,14 @@ class CallStatementParser(IStatementParser):
                     continue
                 elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "RETURNING":
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_returning_parameter(token.value)
                         token_stream.consume()
                 elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "GIVING":
                     token_stream.consume()
-                    self._skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_giving_parameter(token.value)
@@ -186,7 +176,7 @@ class CallStatementParser(IStatementParser):
         stmts = []
         registry = getattr(token_stream, '_registry', None)
         while not token_stream.is_empty():
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             if not token:
                 break
@@ -210,21 +200,10 @@ class CallStatementParser(IStatementParser):
     def _parse_using_clause(self, token_stream: ITokenStream, stmt: CallStatement) -> None:
         """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""
         
-        STATEMENT_TOKEN_TYPES = {
-            TokenType.PERFORM, TokenType.DISPLAY, TokenType.MOVE, TokenType.IF,
-            TokenType.EVALUATE, TokenType.ACCEPT, TokenType.CALL, TokenType.COMPUTE,
-            TokenType.INSPECT, TokenType.READ, TokenType.WRITE, TokenType.OPEN,
-            TokenType.CLOSE, TokenType.STOP, TokenType.ADD, TokenType.SUBTRACT,
-            TokenType.MULTIPLY, TokenType.DIVIDE
-        }
-        STATEMENT_KEYWORDS = {
-            "PERFORM", "DISPLAY", "MOVE", "IF", "EVALUATE", "ACCEPT",
-            "CALL", "COMPUTE", "INSPECT", "READ", "WRITE", "OPEN",
-            "CLOSE", "STOP", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"
-        }
+
         
         while not token_stream.is_empty():
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
             token = token_stream.peek()
             
             if not token or token.type == TokenType.PERIOD:
@@ -250,7 +229,7 @@ class CallStatementParser(IStatementParser):
             passing_mode = "REFERENCE"  # Default
             if token.type == TokenType.BY or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "BY"):
                 token_stream.consume()
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
                 if token and (token.type == TokenType.IDENTIFIER or
                               token.type == TokenType.VALUE):
@@ -258,7 +237,7 @@ class CallStatementParser(IStatementParser):
                     if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
                         passing_mode = mode_val
                         token_stream.consume()
-                        self._skip_whitespace(token_stream)
+                        skip_whitespace(token_stream)
                         token = token_stream.peek()
             
             # Parse parameter name
@@ -270,16 +249,4 @@ class CallStatementParser(IStatementParser):
                 # No parameter found, end of USING clause
                 break
 
-    
-    def _skip_whitespace(self, stream: ITokenStream) -> None:
-        """Skip whitespace and newline tokens if possible."""
-        try:
-            while not stream.is_empty():
-                token = stream.peek()
-                if token and token.type in (TokenType.WHITESPACE, TokenType.NEWLINE):
-                    stream.consume()
-                else:
-                    break
-        except Exception:
-            pass
 
