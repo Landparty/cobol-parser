@@ -21,6 +21,7 @@ class TokenStream(ITokenStream):
         self._tokens = tokens
         self._pos = 0
         self._lookahead_size = lookahead
+        self._parse_context = None
     
     def peek(self, offset: int = 0) -> Optional[Token]:
         """Look at token without consuming it.
@@ -81,15 +82,6 @@ class TokenStream(ITokenStream):
         """
         return self._pos >= len(self._tokens)
     
-    # Backward compatibility methods
-    def advance(self) -> Token:
-        """Legacy method - use consume() instead."""
-        if self.is_at_end:
-            return self._tokens[-1] if self._tokens else None  # type: ignore
-        token = self._tokens[self._pos]
-        self._pos += 1
-        return token
-    
     def match(self, *types: TokenType) -> bool:
         """Check if next token matches any of the given types."""
         token = self.peek()
@@ -101,9 +93,17 @@ class TokenStream(ITokenStream):
         return token is not None and token.value and token.value.upper() in [v.upper() for v in values]
     
     def skip_whitespace_and_comments(self) -> None:
-        """Skip whitespace and comment tokens."""
-        while self.match(TokenType.WHITESPACE, TokenType.COMMENT, TokenType.NEWLINE, TokenType.CONTINUATION):
-            self.advance()
+        """Skip whitespace, comment, newline, and continuation tokens."""
+        while not self.is_empty():
+            token = self.peek()
+            if not token or token.type not in (
+                TokenType.WHITESPACE,
+                TokenType.COMMENT,
+                TokenType.NEWLINE,
+                TokenType.CONTINUATION,
+            ):
+                break
+            self.consume()
             
     @contextmanager
     def transaction(self):
@@ -116,11 +116,16 @@ class TokenStream(ITokenStream):
             raise
     
     @property
+    def context(self):
+        """Optional ParseContext attached to this stream."""
+        return self._parse_context
+
+    @context.setter
+    def context(self, value) -> None:
+        self._parse_context = value
+
+    @property
     def position(self) -> int:
         """Current position in token stream."""
         return self._pos
     
-    @property
-    def is_at_end(self) -> bool:
-        """Check if at end of stream (legacy property)."""
-        return self._pos >= len(self._tokens)
