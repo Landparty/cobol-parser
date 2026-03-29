@@ -220,7 +220,7 @@ def bench_sql_parsing(iterations: int) -> list[float]:
 def bench_statement_registry(source: str, iterations: int) -> list[float]:
     """Benchmark statement registry dispatch (parser initialization + lookup)."""
     from cobolparser.core.token_stream import TokenStream
-    from cobolparser.core.registry import StatementRegistry
+    from cobolparser.core.registry import StatementParserRegistry
     from cobolparser.parsers.display_parser import DisplayStatementParser
     from cobolparser.parsers.move_parser import MoveStatementParser
     from cobolparser.parsers.call_parser import CallStatementParser
@@ -238,7 +238,7 @@ def bench_statement_registry(source: str, iterations: int) -> list[float]:
     tokens = lexer.tokenize()
 
     def run():
-        registry = StatementRegistry()
+        registry = StatementParserRegistry()
         registry.register(DisplayStatementParser())
         registry.register(MoveStatementParser())
         registry.register(CallStatementParser())
@@ -254,7 +254,7 @@ def bench_statement_registry(source: str, iterations: int) -> list[float]:
         stream = TokenStream(tokens)
         lookups = 0
         while not stream.is_empty():
-            parser = registry.get_parser(stream)
+            parser = registry.find_parser(stream)
             lookups += 1
             stream.consume()
 

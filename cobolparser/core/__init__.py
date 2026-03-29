@@ -10,7 +10,7 @@ from .exceptions import (
     UnknownStatementError,
     ValidationError,
 )
-from .registry import StatementParserRegistry, StatementRegistry
+from .registry import StatementParserRegistry
 from .ast_factory import ASTNodeFactory, get_factory, set_factory, create_node
 
 __all__ = [
@@ -25,7 +25,6 @@ __all__ = [
     "UnknownStatementError",
     "ValidationError",
     "StatementParserRegistry",
-    "StatementRegistry",
     "ASTNodeFactory",
     "get_factory",
     "set_factory",
