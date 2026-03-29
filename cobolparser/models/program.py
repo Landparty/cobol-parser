@@ -6,6 +6,7 @@ including program nodes, division nodes, and section nodes with full
 JSON serialization support.
 """
 
+import fnmatch
 import json
 from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
 from .ast_base import ASTNode, SourceLocation, ValidationResult
@@ -41,7 +42,7 @@ class CobolSection(ASTNode):
     def get_paragraph_by_name(self, name: str) -> Optional['CobolParagraph']:
         """Find a paragraph by name in this section."""
         for paragraph in self.paragraphs:
-            if hasattr(paragraph, 'paragraph_name') and paragraph.paragraph_name == name:
+            if isinstance(paragraph, CobolParagraph) and paragraph.paragraph_name == name:
                 return paragraph
         return None
     
@@ -69,15 +70,15 @@ class CobolDivision(ASTNode):
         self.set_division_context(division_name, None)
 
     @property
-    def sections(self) -> List[CobolSection]:  # type: ignore[override]
+    def sections(self) -> List[Union[CobolSection, 'CobolParagraph']]:
         """List-like access for sections (tests iterate over 'sections').
-        
+
         For PROCEDURE divisions without explicit sections, returns paragraphs
         wrapped as section-like entities since they serve the same purpose.
         """
         if self.division_name == "PROCEDURE" and not self._sections:
             # Return paragraphs as sections for PROCEDURE division without sections
-            return self.paragraphs  # type: ignore
+            return self.paragraphs
         return list(self._sections.values())
     
     @property
@@ -132,9 +133,9 @@ class CobolDivision(ASTNode):
             # Generic add as child
             self.add_child(procedure)
     
-    def get_section_by_name(self, name: str) -> Optional[CobolSection]:
+    def get_section_by_name(self, name: str) -> Optional[Union[CobolSection, 'CobolParagraph']]:
         """Get a section by name.
-        
+
         In PROCEDURE division, also searches paragraphs since they are treated
         as section-like entities for navigation purposes.
         """
@@ -142,13 +143,13 @@ class CobolDivision(ASTNode):
         section = self._sections.get(name)
         if section:
             return section
-        
+
         # For PROCEDURE division, also check paragraphs
         if self.division_name == "PROCEDURE":
             for para in self.paragraphs:
-                if hasattr(para, 'paragraph_name') and para.paragraph_name == name:
-                    return para  # type: ignore
-        
+                if isinstance(para, CobolParagraph) and para.paragraph_name == name:
+                    return para
+
         return None
     
     def has_section(self, name: str) -> bool:
@@ -245,10 +246,6 @@ class CobolProgram(ASTNode):
         """Get a division by name."""
         return self._divisions.get(name)
     
-    def get_division_by_name(self, name: str) -> Optional[CobolDivision]:
-        """Get a division by name (alias for compatibility)."""
-        return self.get_division(name)
-    
     def has_division(self, name: str) -> bool:
         """Check if program has a specific division."""
         return name in self._divisions
@@ -270,7 +267,7 @@ class CobolProgram(ASTNode):
     
     def find_data_items(self, name_pattern: Optional[str] = None, level: Optional[int] = None) -> List['CobolDataItem']:
         """Find data items by name pattern and/or level number."""
-        import fnmatch
+
         all_items = self.get_data_items()
         results = []
         
@@ -291,7 +288,7 @@ class CobolProgram(ASTNode):
     
     def find_procedures(self, proc_type: Optional[str] = None, name_pattern: Optional[str] = None) -> List['CobolProcedure']:
         """Find procedures by type (PARAGRAPH/SECTION) and/or name pattern."""
-        import fnmatch
+
         all_procedures = self.get_procedures()
         results = []
         
@@ -585,31 +582,25 @@ class CobolProgram(ASTNode):
         return self._statistics
     
     def _calculate_statistics(self) -> None:
-        """Calculate program statistics."""
+        """Calculate program statistics in a single depth-first traversal."""
+        from .data_items import CobolDataItem  # avoid circular at module level
+
         total_lines = 0
         data_item_count = 0
         procedure_count = 0
         statement_count = 0
-        
-        # Count lines from all nodes
+
         for node in self.traverse_depth_first():
             if hasattr(node, 'location') and node.location:
                 total_lines = max(total_lines, node.location.line)
-        
-        # Count data items
-        data_item_count = len(self.get_data_items())
-        
-        # Count procedures
-        procedure_count = len(self.get_procedures())
-        
-        # Count statements: sum all Statement nodes in PROCEDURE division
-        for division in self._divisions.values():
-            if division.division_name == "PROCEDURE":
-                for section in division._sections.values():
-                    for child in getattr(section, 'children', []):
-                        if getattr(child, 'node_type', '') == 'Statement':
-                            statement_count += 1
-        
+            nt = getattr(node, 'node_type', '')
+            if isinstance(node, CobolDataItem):
+                data_item_count += 1
+            elif isinstance(node, (CobolParagraph, CobolSection)):
+                procedure_count += 1
+            elif nt == 'Statement':
+                statement_count += 1
+
         self._statistics = {
             "total_lines": total_lines,
             "data_item_count": data_item_count,
@@ -663,7 +654,6 @@ class CobolProgram(ASTNode):
     @classmethod
     def from_json(cls, json_str: str) -> 'CobolProgram':
         """Create a CobolProgram instance from JSON representation."""
-        import json
         data = json.loads(json_str)
         
         # Extract basic program information
@@ -905,15 +895,10 @@ class CobolFileDescription(ASTNode):
 # These are imported at runtime to avoid circular imports
 
 
-# Create CobolAST alias for CobolProgram to satisfy contract
-CobolAST = CobolProgram
-
-
 # Module exports
 __all__ = [
     "CobolProgram",
-    "CobolAST",
-    "CobolDivision", 
+    "CobolDivision",
     "CobolSection",
     "CobolParagraph",
     "CobolFileDescription",

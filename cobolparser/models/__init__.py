@@ -13,7 +13,6 @@ from .ast_base import (
 )
 from .program import (
     CobolProgram,
-    CobolAST,
     CobolDivision,
     CobolSection,
 )
@@ -55,7 +54,6 @@ __all__ = [
     "ValidationResult",
     "ASTValidator",
     "CobolProgram",
-    "CobolAST",
     "CobolDivision",
     "CobolSection",
     "CobolDataItem",

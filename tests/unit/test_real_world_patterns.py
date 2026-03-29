@@ -185,7 +185,7 @@ class TestRedefinesAndComplexStructures:
         assert result.success, f"Parsing failed: {result.errors}"
         
         assert result.ast is not None
-        data_division = result.ast.get_division_by_name("DATA")
+        data_division = result.ast.get_division("DATA")
         assert data_division is not None
         ws_section = data_division.get_section_by_name("WORKING-STORAGE")
         assert ws_section is not None
@@ -246,7 +246,7 @@ class TestRedefinesAndComplexStructures:
         assert result.success, f"Parsing failed: {result.errors}"
         
         assert result.ast is not None
-        data_division = result.ast.get_division_by_name("DATA")
+        data_division = result.ast.get_division("DATA")
         assert data_division is not None
         ws_section = data_division.get_section_by_name("WORKING-STORAGE")
         assert ws_section is not None
@@ -315,7 +315,7 @@ class TestCallStatements:
         
         # Get procedure division
         assert result.ast is not None
-        proc_division = result.ast.get_division_by_name("PROCEDURE")
+        proc_division = result.ast.get_division("PROCEDURE")
         assert proc_division is not None
         
         # Verify CALL statements are parsed - check both sections and paragraphs
@@ -340,7 +340,7 @@ class TestCallStatements:
         
         # Based on integration test behavior, focus on successful parsing rather than specific count
         # The key is that the program parses without crashing
-        assert len(call_statements) >= 0
+        assert isinstance(call_statements, list)
         
         # Only test specific CALL statement details if they exist
         if len(call_statements) >= 2:
@@ -398,7 +398,7 @@ class TestComplexFileStructures:
         
         # Verify ENVIRONMENT DIVISION structure
         assert result.ast is not None
-        env_division = result.ast.get_division_by_name("ENVIRONMENT")
+        env_division = result.ast.get_division("ENVIRONMENT")
         assert env_division is not None
         
         # Check CONFIGURATION SECTION
@@ -432,7 +432,7 @@ class TestComplexFileStructures:
         
         # Verify FILE SECTION with FD records
         assert result.ast is not None
-        data_division = result.ast.get_division_by_name("DATA")
+        data_division = result.ast.get_division("DATA")
         assert data_division is not None
         file_section = data_division.get_section_by_name("FILE")
         assert file_section is not None
@@ -441,7 +441,7 @@ class TestComplexFileStructures:
         # For now, just verify the file section exists and has some children
         fd_records = [item for item in file_section.children if isinstance(item, CobolDataItem)]
         # Assert that we can at least access the file section structure
-        assert len(fd_records) >= 0  # Lenient check - file section exists
+        assert isinstance(fd_records, list)  # File section structure is accessible
 
 
 class TestLevelNumberVariations:
@@ -470,7 +470,7 @@ class TestLevelNumberVariations:
         assert result.success, f"Parsing failed: {result.errors}"
         
         assert result.ast is not None
-        data_division = result.ast.get_division_by_name("DATA")
+        data_division = result.ast.get_division("DATA")
         assert data_division is not None
         ws_section = data_division.get_section_by_name("WORKING-STORAGE")
         assert ws_section is not None
@@ -530,7 +530,7 @@ class TestLevelNumberVariations:
         assert result.success, f"Parsing failed: {result.errors}"
         
         assert result.ast is not None
-        data_division = result.ast.get_division_by_name("DATA")
+        data_division = result.ast.get_division("DATA")
         assert data_division is not None
         ws_section = data_division.get_section_by_name("WORKING-STORAGE")
         assert ws_section is not None

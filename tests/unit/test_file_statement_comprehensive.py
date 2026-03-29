@@ -68,7 +68,7 @@ class TestSelectAssignClause:
         result = parse(src)
         assert result.ast is not None
         # Find the SELECT statement
-        env_div = result.ast.get_division_by_name("ENVIRONMENT")
+        env_div = result.ast.get_division("ENVIRONMENT")
         if env_div:
             io_section = env_div.get_section_by_name("INPUT-OUTPUT")
             if io_section:
@@ -459,7 +459,7 @@ class TestSelectOptionalClause:
         result = parse(src)
         assert result.ast is not None
         # Verify OPTIONAL flag was captured
-        env_div = result.ast.get_division_by_name("ENVIRONMENT")
+        env_div = result.ast.get_division("ENVIRONMENT")
         if env_div:
             io_section = env_div.get_section_by_name("INPUT-OUTPUT")
             if io_section:
@@ -651,7 +651,7 @@ class TestSelectCombinedClauses:
         result = parse(src)
         assert result.ast is not None
         # Verify multiple SELECT statements were parsed
-        env_div = result.ast.get_division_by_name("ENVIRONMENT")
+        env_div = result.ast.get_division("ENVIRONMENT")
         if env_div:
             io_section = env_div.get_section_by_name("INPUT-OUTPUT")
             if io_section:

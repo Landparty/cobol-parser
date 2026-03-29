@@ -368,7 +368,7 @@ class IBMEnterpriseCobol:
                 warnings.append(f"Missing required {div_name} DIVISION")
                 
         # Check for IBM-specific sections
-        data_division = program.get_division_by_name("DATA")
+        data_division = program.get_division("DATA")
         if data_division:
             if not data_division.has_section("WORKING-STORAGE"):
                 warnings.append("Consider adding WORKING-STORAGE SECTION for local variables")

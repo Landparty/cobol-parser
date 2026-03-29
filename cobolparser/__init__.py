@@ -102,7 +102,6 @@ from .lexer import (
 from .parser import (
     CobolParser,
     ParseResult,
-    ParseState,
     parse_cobol,
 )
 from .batch import (
@@ -129,6 +128,7 @@ from .preprocess.models import (
     ExpansionStatistics,
 )
 from .preprocess import (
+    PreprocessingError,
     CircularReferenceError,
     CopybookNotFoundError,
     PathTraversalError,
@@ -182,7 +182,6 @@ __all__ = [
     # Parser components
     "CobolParser",
     "ParseResult",
-    "ParseState",
     "parse_cobol",
     # Batch parsing
     "parse_files",
@@ -194,7 +193,6 @@ __all__ = [
     "SerializationConfig",
     "ErrorRecoveryMode",
     "DialectType",
-    "PluginManager",
     # Package metadata
     "__version__",
     "__author__",
@@ -208,6 +206,7 @@ __all__ = [
     "CopyStatement",
     "CopybookSearchPath",
     "ExpansionStatistics",
+    "PreprocessingError",
     "CircularReferenceError",
     "CopybookNotFoundError",
     "PathTraversalError",

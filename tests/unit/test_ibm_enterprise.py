@@ -710,7 +710,7 @@ class TestIBMEnterpriseCobol:
             def has_division(self, name):
                 return name in self.divisions
             
-            def get_division_by_name(self, name):
+            def get_division(self, name):
                 if name == "DATA":
                     return self.data_division
                 return None
@@ -740,7 +740,7 @@ class TestIBMEnterpriseCobol:
             def has_division(self, name):
                 return name in self.divisions
             
-            def get_division_by_name(self, name):
+            def get_division(self, name):
                 return None
         
         program = MockProgram()
@@ -763,7 +763,7 @@ class TestIBMEnterpriseCobol:
             def has_division(self, name):
                 return name in self.divisions
             
-            def get_division_by_name(self, name):
+            def get_division(self, name):
                 if name == "DATA":
                     return self.data_division
                 return None
