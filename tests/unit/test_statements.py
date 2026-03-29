@@ -13,7 +13,7 @@ from cobolparser.models.statements import (
     CobolStatement, MoveStatement, DisplayStatement, PerformStatement,
     ComputeStatement, CallStatement, SelectStatement, CobolExpression,
     ArithmeticExpression, ConditionalExpression, LogicalExpression,
-    FunctionCall, ProcedureParagraph, ProcedureSection
+    FunctionCall
 )
 
 # Import base classes for testing
@@ -1900,59 +1900,6 @@ class TestFunctionCall:
         assert inner_result["arguments"] == ["WS-INPUT-STRING"]
 
 
-class TestModuleExportsAndAliases:
-    """Test module exports and aliases."""
-    
-    def test_procedure_paragraph_alias(self):
-        """Test ProcedureParagraph alias."""
-        # Import the module to check exports
-        import cobolparser.models.statements as stmt_module
-        
-        # ProcedureParagraph should be an alias for CobolParagraph
-        assert hasattr(stmt_module, 'ProcedureParagraph')
-        assert stmt_module.ProcedureParagraph == stmt_module.CobolParagraph
-    
-    def test_procedure_section_alias(self):
-        """Test ProcedureSection alias."""
-        import cobolparser.models.statements as stmt_module
-        
-        # ProcedureSection should be an alias for CobolSection
-        assert hasattr(stmt_module, 'ProcedureSection')
-        assert stmt_module.ProcedureSection == stmt_module.CobolSection
-    
-    def test_module_all_exports(self):
-        """Test __all__ exports include all expected classes."""
-        import cobolparser.models.statements as stmt_module
-        
-        expected_exports = [
-            "CobolStatement", "MoveStatement", "DisplayStatement",
-            "PerformStatement", "CallStatement", "ComputeStatement",
-            "CobolExpression", "ArithmeticExpression", "ConditionalExpression",
-            "ProcedureParagraph", "ProcedureSection"
-        ]
-        
-        # Check that __all__ is defined
-        assert hasattr(stmt_module, '__all__')
-        
-        # Check that all expected classes are in __all__
-        for expected_class in expected_exports:
-            assert expected_class in stmt_module.__all__, f"{expected_class} not in __all__"
-    
-    def test_all_classes_importable(self):
-        """Test that all classes in __all__ are importable."""
-        import cobolparser.models.statements as stmt_module
-        
-        # Test that we can access each class in __all__
-        for class_name in stmt_module.__all__:
-            assert hasattr(stmt_module, class_name), f"Cannot import {class_name}"
-            
-            # Get the class
-            cls = getattr(stmt_module, class_name)
-            
-            # Should be a class (callable)
-            assert callable(cls), f"{class_name} is not callable"
-
-
 class TestEdgeCasesAndErrorConditions:
     """Test edge cases and error conditions for comprehensive coverage."""
     
@@ -2115,7 +2062,6 @@ def test_statements_module_exports():
         'PerformStatement', 'ComputeStatement', 'CallStatement',
         'SelectStatement', 'CobolExpression', 'ArithmeticExpression',
         'ConditionalExpression', 'LogicalExpression', 'FunctionCall',
-        'ProcedureParagraph', 'ProcedureSection'
     ]
     
     for class_name in expected_classes:

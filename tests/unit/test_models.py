@@ -511,17 +511,16 @@ class TestASTQuery:
         # 3. Find by name patterns
         # 4. Find by statement content
         
-        from cobolparser.models.program import CobolProgram, CobolDivision
-        from cobolparser.models.statements import ProcedureParagraph, ProcedureSection
-        
+        from cobolparser.models.program import CobolProgram, CobolDivision, CobolParagraph, CobolSection
+
         # Create program with procedures
         program = CobolProgram("PROC-QUERY-TEST", SourceLocation(1, 1))
         proc_div = CobolDivision("PROCEDURE", SourceLocation(10, 1))
         program.add_division(proc_div)
-        
+
         # Add sample procedures
-        main_para = ProcedureParagraph("MAIN-PARAGRAPH", SourceLocation(15, 5))
-        process_sect = ProcedureSection("PROCESS-SECTION", SourceLocation(20, 5))
+        main_para = CobolParagraph("MAIN-PARAGRAPH", SourceLocation(15, 5))
+        process_sect = CobolSection("PROCESS-SECTION", SourceLocation(20, 5))
         proc_div.add_procedure(main_para)
         proc_div.add_procedure(process_sect)
         
@@ -566,7 +565,7 @@ class TestASTQuery:
         
         # Find statements using a variable
         var_usage = program.find_statements_using_variable("WS-COUNTER")
-        assert len(var_usage) >= 0
+        assert isinstance(var_usage, list)
 
 
 def test_models_tdd_constitutional_compliance():

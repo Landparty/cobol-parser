@@ -74,13 +74,6 @@ from .misc import (
     CopyStatement,
 )
 
-# Import the base classes for procedure elements
-from ..program import CobolParagraph, CobolSection
-
-# Aliases for procedure-specific elements
-ProcedureParagraph = CobolParagraph
-ProcedureSection = CobolSection
-
 # Module exports — preserved from original statements.py
 __all__ = [
     "CobolStatement",
@@ -108,6 +101,4 @@ __all__ = [
     "CobolExpression",
     "ArithmeticExpression",
     "ConditionalExpression",
-    "ProcedureParagraph",
-    "ProcedureSection",
 ]
