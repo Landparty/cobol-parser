@@ -307,28 +307,6 @@ COBOL Source Code
 - `parse_statements()` - Parse individual statements
 - `parse_data_items()` - Parse DATA DIVISION items
 
-**Parse State Machine**:
-```python
-class ParseState(Enum):
-    INITIAL
-    IDENTIFICATION_DIVISION
-    ENVIRONMENT_DIVISION
-    DATA_DIVISION
-    PROCEDURE_DIVISION
-    
-    # Sections within divisions
-    PROGRAM_ID_SECTION
-    FILE_SECTION
-    WORKING_STORAGE_SECTION
-    LOCAL_STORAGE_SECTION
-    LINKAGE_SECTION
-    
-    # Active parsing contexts
-    STATEMENT_PARSING
-    EXPRESSION_PARSING
-    DATA_ITEM_PARSING
-```
-
 **Output**: `CobolProgram` AST node with:
 - Program name
 - Author, date written, etc.
@@ -898,6 +876,29 @@ if result.success:
     full_json = result.ast.to_json(config)
     print(json.dumps(full_json, indent=2))
 ```
+
+### 5. Batch / Multi-File Parsing
+
+**Parallel parsing of multiple files** using multiprocessing:
+
+```python
+from cobolparser import parse_files
+
+paths = ["program1.cbl", "program2.cbl", "program3.cbl"]
+results = parse_files(paths)   # parallel, uses multiprocessing
+
+for r in results:
+    if r.result.success:
+        print(f"{r.filename}: {r.result.ast.program_name}")
+    else:
+        print(f"{r.filename}: FAILED — {r.result.errors[0].message}")
+```
+
+**Features**:
+- Parallel processing (one process per file)
+- Automatic resource cleanup
+- Per-file error handling
+- Return type: `List[BatchResult]`
 
 ---
 
