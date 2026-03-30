@@ -1,12 +1,12 @@
 # COBOL Parser for Python
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-618%20passing-green.svg)](#testing)
-[![Coverage](https://img.shields.io/badge/coverage-57%2B%25%20parser-yellow.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-2975%20passing-green.svg)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-81%25%2B%20enforced-green.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![IBM COBOL](https://img.shields.io/badge/IBM%20Enterprise%20COBOL-supported-blue.svg)](#ibm-enterprise-cobol-support)
 
-A comprehensive COBOL source code parser for Python 3.13+ with enhanced features including configurable memory management, JSON export, IBM Enterprise COBOL dialect support, and advanced error recovery. Built following Test-Driven Development (TDD) principles with comprehensive test coverage (618 tests, 57%+ parser coverage).
+A comprehensive COBOL source code parser for Python 3.13+ with enhanced features including configurable memory management, JSON export, IBM Enterprise COBOL dialect support, and advanced error recovery. Built following Test-Driven Development (TDD) principles with comprehensive test coverage (2,975 tests, 81%+ coverage enforced).
 
 ## 🚀 Quick Start
 
@@ -20,7 +20,7 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - ✅ **Memory Efficient** - Configurable limits from 64MB to 8GB
 - ✅ **Error Recovery** - Robust parsing with multiple recovery modes
 - ✅ **JSON Export** - Cross-platform AST serialization
-- ✅ **TDD Compliant** - 618 comprehensive tests ensuring reliability
+- ✅ **TDD Compliant** - 2,975 comprehensive tests ensuring reliability
 
 ## Table of Contents
 
@@ -46,7 +46,7 @@ A comprehensive COBOL source code parser for Python 3.13+ with enhanced features
 - 🏢 **IBM Enterprise COBOL** - Priority support for COMP-3, EXEC SQL, EXEC CICS
 - 🧩 **Plugin Architecture** - Extensible design for custom dialects and features
 - 📊 **Statistics** - Detailed parsing metrics and performance monitoring
-- ✅ **TDD Compliant** - 618 comprehensive tests ensuring reliability
+- ✅ **TDD Compliant** - 2,975 comprehensive tests ensuring reliability
 - 🔍 **Lexical Analysis** - Complete tokenization with comprehensive COBOL verb support (75+ verbs), multi-line string continuation, and robust error reporting
 - ⚡ **Auto-Detection** - Intelligent auto-detection of fixed-format COBOL with automatic preprocessing
 - 🏗️ **AST Generation** - Full Abstract Syntax Tree with source location tracking
@@ -393,7 +393,7 @@ class CobolProgram(ASTNode):
     divisions: Dict[str, CobolDivision]
     source_location: SourceLocation
 
-    def get_division_by_name(self, name: str) -> Optional[CobolDivision]
+    def get_division(self, name: str) -> Optional[CobolDivision]
     def to_json(self, config: SerializationConfig) -> Dict[str, Any]
 ```
 
@@ -424,13 +424,24 @@ from cobolparser import tokenize_cobol
 tokens = tokenize_cobol(source_code, filename="program.cob")
 ```
 
+#### parse_files()
+Parallel multi-file batch parsing.
+
+```python
+from cobolparser import parse_files, BatchResult
+
+results = parse_files(["a.cbl", "b.cbl", "c.cbl"])
+for r in results:
+    print(r.filename, r.result.success)
+```
+
 ## Testing
 
-The parser includes a comprehensive test suite with 618 tests organized by category:
+The parser includes a comprehensive test suite with 2,975 tests organized by category:
 
 ### Test Categories
 
-- **Unit Tests (500+)**: Component-specific functionality testing including comprehensive parser coverage
+- **Unit Tests (2,000+)**: Component-specific functionality testing including comprehensive parser coverage
 - **Integration Tests (75+)**: End-to-end workflow validation
 - **Contract Tests (38)**: API contract compliance and stability
 
@@ -457,7 +468,7 @@ python -m pytest -n auto tests/
 The project includes comprehensive test coverage with detailed test cases covering:
 
 - **Lexer**: Comprehensive COBOL verb recognition (75+ verbs including all IBM Enterprise verbs)
-- **Parser**: 57%+ statement coverage with detailed AST generation testing (417/636 statements covered)
+- **Parser**: 81%+ coverage enforced across all modules
 - **Memory management** under various conditions and large program scenarios
 - **Error recovery** behavior in both fail-fast and collect-all modes
 - **IBM Enterprise COBOL** dialect features including COMP-3, EXEC SQL, EXEC CICS
@@ -925,7 +936,7 @@ We welcome contributions! Please follow these guidelines:
 
 3. **Run Full Test Suite**
    ```bash
-   python -m pytest tests/ --cov=cobolparser --cov-fail-under=90
+   python -m pytest tests/ --cov=cobolparser --cov-fail-under=81
    ```
 
 4. **Code Quality Checks**
@@ -945,7 +956,7 @@ We welcome contributions! Please follow these guidelines:
 - **Python 3.13+** features only
 - **Type hints** required for all public APIs
 - **Docstrings** for all public functions/classes
-- **Comprehensive test coverage** maintained (618 tests, 57%+ parser coverage)
+- **Comprehensive test coverage** maintained (2,975 tests, 81%+ coverage enforced)
 - **Black formatting** enforced
 - **Ruff linting** passes
 
@@ -1075,7 +1086,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Built following Test-Driven Development (TDD) principles
 - Designed for IBM Enterprise COBOL compatibility with comprehensive verb support
 - Supports modern Python 3.13+ features
-- Comprehensive test coverage with 618 test cases across all components
+- Comprehensive test coverage with 2,975 test cases across all components
 - Memory-efficient parsing for large legacy codebases
 - Enhanced lexer supporting 75+ COBOL verbs including all major IBM Enterprise verbs
 
