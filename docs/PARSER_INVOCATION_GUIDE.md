@@ -888,10 +888,11 @@ paths = ["program1.cbl", "program2.cbl", "program3.cbl"]
 results = parse_files(paths)   # parallel, uses multiprocessing
 
 for r in results:
-    if r.result.success:
-        print(f"{r.filename}: {r.result.ast.program_name}")
+    if r.result and r.result.success:
+        print(f"{r.path}: {r.result.ast.program_name}")
     else:
-        print(f"{r.filename}: FAILED — {r.result.errors[0].message}")
+        error = r.read_error or r.result.errors[0].message
+        print(f"{r.path}: FAILED — {error}")
 ```
 
 **Features**:
