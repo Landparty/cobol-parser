@@ -444,9 +444,63 @@ def update_cobol_data_item_placeholder():
     pass
 
 
+class ConditionNameItem(ASTNode):
+    """AST node for COBOL level-88 condition name items.
+
+    A condition name binds one or more VALUES to a boolean condition that
+    can be tested in the Procedure Division (e.g. ``IF STATUS-OPEN PERFORM ...``).
+    It is always stored as a child of the immediately preceding elementary data item.
+    """
+
+    def __init__(self, name: str, location: SourceLocation):
+        super().__init__("ConditionNameItem", location)
+        self.name = name
+        self.values: List[str] = []
+
+    def add_value(self, value: str) -> None:
+        """Add a VALUE entry for this condition name."""
+        self.values.append(value)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": self.node_type,
+            "name": self.name,
+            "values": self.values,
+            "location": self.location.to_dict(),
+            "metadata": self._metadata or {},
+        }
+
+
+class RenamesItem(ASTNode):
+    """AST node for COBOL level-66 RENAMES items.
+
+    Declares a contiguous alias view over one or more existing data items.
+    Always appears at the top level of a section (not nested under any 01-item).
+    """
+
+    def __init__(self, name: str, renames_from: str, location: SourceLocation,
+                 renames_through: Optional[str] = None):
+        super().__init__("RenamesItem", location)
+        self.name = name
+        self.renames_from = renames_from
+        self.renames_through = renames_through
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": self.node_type,
+            "name": self.name,
+            "renames_from": self.renames_from,
+            "renames_through": self.renames_through,
+            "location": self.location.to_dict(),
+            "metadata": self._metadata or {},
+        }
+
+
 # Module exports
 __all__ = [
     "PictureClause",
-    "OccursClause", 
+    "OccursClause",
     "CobolDataItem",
+    "ConditionNameItem",
+    "RenamesItem",
 ]

@@ -13,7 +13,7 @@ from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolSection
-from cobolparser.models.data_items import CobolDataItem, PictureClause, OccursClause
+from cobolparser.models.data_items import CobolDataItem, PictureClause, OccursClause, ConditionNameItem, RenamesItem
 from .base import BaseDivisionParser
 
 
@@ -137,9 +137,23 @@ class DataDivisionParser(BaseDivisionParser):
             
             # Try to parse a data item (should start with level number, but not inside parentheses)
             if token.type == TokenType.LEVEL_NUMBER and paren_depth == 0:
-                data_item = self._parse_data_item(token_stream)
-                if data_item:
-                    data_items.append(data_item)
+                try:
+                    lvl = int(token.value)
+                except (ValueError, TypeError):
+                    lvl = -1
+
+                if lvl == 88:
+                    cond_item = self._parse_condition_name_item(token_stream)
+                    if cond_item:
+                        data_items.append(cond_item)
+                elif lvl == 66:
+                    renames_item = self._parse_renames_item(token_stream)
+                    if renames_item:
+                        data_items.append(renames_item)
+                else:
+                    data_item = self._parse_data_item(token_stream)
+                    if data_item:
+                        data_items.append(data_item)
             else:
                 # Skip unexpected tokens
                 token_stream.consume()
@@ -171,12 +185,26 @@ class DataDivisionParser(BaseDivisionParser):
         stack = []  # Stack of (level, item) pairs
         
         for item in data_items:
+            # Level-88 condition names attach to the most recent item on the stack
+            if isinstance(item, ConditionNameItem):
+                if stack:
+                    stack[-1][1].add_child(item)
+                else:
+                    top_level_items.append(item)
+                # Do NOT push 88-level onto the stack
+                continue
+
+            # Level-66 RENAMES are always top-level aliases
+            if isinstance(item, RenamesItem):
+                top_level_items.append(item)
+                continue
+
             current_level = item.level
-            
+
             # Remove items from stack that have higher or equal level
             while stack and stack[-1][0] >= current_level:
                 stack.pop()
-            
+
             # If stack is empty, this is a top-level item
             if not stack:
                 top_level_items.append(item)
@@ -184,7 +212,7 @@ class DataDivisionParser(BaseDivisionParser):
                 # Add as child to the most recent item with lower level
                 parent_item = stack[-1][1]
                 parent_item.add_child(item)
-            
+
             # Add current item to stack
             stack.append((current_level, item))
         
@@ -297,20 +325,67 @@ class DataDivisionParser(BaseDivisionParser):
                 token_stream.consume()  # Consume OCCURS keyword
                 occurs = OccursClause(location)
 
+                # Read first (minimum or fixed) count
+                min_count = 0
+                max_count = 0
                 count_token = token_stream.peek()
                 if count_token and count_token.type in [TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER]:
                     try:
-                        occurs.set_fixed_occurs(int(count_token.value))
+                        min_count = int(count_token.value)
+                        max_count = min_count
                     except (TypeError, ValueError):
                         pass
                     token_stream.consume()
 
-                # Skip optional TIMES keyword and any remaining OCCURS modifiers for now.
-                while token_stream.peek() and token_stream.peek().type not in [TokenType.PERIOD, TokenType.LEVEL_NUMBER]:
-                    next_token = token_stream.peek()
-                    if next_token.value and next_token.value.upper() in ["PIC", "PICTURE", "VALUE", "USAGE", "REDEFINES"]:
-                        break
+                # Variable OCCURS: OCCURS min TO max [TIMES] DEPENDING ON var
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "TO":
+                    token_stream.consume()  # consume TO
+                    max_token = token_stream.peek()
+                    if max_token and max_token.type in [TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER]:
+                        try:
+                            max_count = int(max_token.value)
+                        except (TypeError, ValueError):
+                            max_count = min_count
+                        token_stream.consume()
+
+                # Skip optional TIMES keyword (may be preceded by newlines)
+                self._skip_newlines(token_stream)
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "TIMES":
                     token_stream.consume()
+
+                # DEPENDING ON clause
+                depending_var = None
+                self._skip_newlines(token_stream)
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "DEPENDING":
+                    token_stream.consume()  # consume DEPENDING
+                    on_token = token_stream.peek()
+                    if on_token and on_token.value and on_token.value.upper() == "ON":
+                        token_stream.consume()  # consume ON
+                    dep_token = token_stream.peek()
+                    if dep_token and dep_token.type == TokenType.IDENTIFIER:
+                        depending_var = dep_token.value
+                        token_stream.consume()
+
+                # INDEXED BY clause
+                self._skip_newlines(token_stream)
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "INDEXED":
+                    token_stream.consume()  # consume INDEXED
+                    by_token = token_stream.peek()
+                    if by_token and by_token.value and by_token.value.upper() == "BY":
+                        token_stream.consume()  # consume BY
+                    idx_token = token_stream.peek()
+                    if idx_token and idx_token.type == TokenType.IDENTIFIER:
+                        occurs.set_indexed_by(idx_token.value)
+                        token_stream.consume()
+
+                if depending_var:
+                    occurs.set_variable_occurs(min_count, max_count, depending_var)
+                else:
+                    occurs.set_fixed_occurs(max_count)
 
                 if occurs.max_times is not None:
                     data_item.set_occurs_clause(occurs)
@@ -330,6 +405,134 @@ class DataDivisionParser(BaseDivisionParser):
         
         return data_item
     
+    def _parse_condition_name_item(self, token_stream: ITokenStream) -> Optional[ConditionNameItem]:
+        """Parse a level-88 condition name item.
+
+        Format: 88 condition-name VALUE [IS] literal {literal | THROUGH literal}...
+        """
+        level_token = token_stream.consume()  # consume '88'
+        location = getattr(level_token, "location", None)
+        if location is None:
+            from cobolparser.models.ast_base import SourceLocation
+            location = SourceLocation(0, 0)
+
+        name_token = token_stream.peek()
+        if not name_token or not name_token.value:
+            return None
+        name = name_token.value
+        token_stream.consume()
+
+        item = ConditionNameItem(name, location)
+
+        # Skip tokens until VALUE keyword
+        while not token_stream.is_empty():
+            t = token_stream.peek()
+            if not t:
+                break
+            if t.type == TokenType.PERIOD or t.type == TokenType.LEVEL_NUMBER:
+                break
+            if t.value and t.value.upper() == "VALUE":
+                token_stream.consume()
+                # optional IS / ARE
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() in ("IS", "ARE"):
+                    token_stream.consume()
+                break
+            token_stream.consume()
+
+        # Collect value literals
+        while not token_stream.is_empty():
+            t = token_stream.peek()
+            if not t:
+                break
+            if t.type == TokenType.PERIOD or t.type == TokenType.LEVEL_NUMBER:
+                break
+            if t.type in (TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL, TokenType.FIGURATIVE_CONSTANT):
+                item.add_value(t.value)
+                token_stream.consume()
+            elif t.value == ",":
+                token_stream.consume()
+            elif t.type == TokenType.NEWLINE:
+                token_stream.consume()
+            elif t.value and t.value.upper() in ("THROUGH", "THRU"):
+                token_stream.consume()
+                end_token = token_stream.peek()
+                if end_token and end_token.type in (TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL):
+                    item.add_value(f"THROUGH:{end_token.value}")
+                    token_stream.consume()
+            else:
+                break
+
+        # Consume trailing period
+        if not token_stream.is_empty():
+            t = token_stream.peek()
+            if t and t.type == TokenType.PERIOD:
+                token_stream.consume()
+
+        return item
+
+    def _parse_renames_item(self, token_stream: ITokenStream) -> Optional[RenamesItem]:
+        """Parse a level-66 RENAMES item.
+
+        Format: 66 data-name RENAMES data-name-1 [THROUGH|THRU data-name-2].
+        """
+        level_token = token_stream.consume()  # consume '66'
+        location = getattr(level_token, "location", None)
+        if location is None:
+            from cobolparser.models.ast_base import SourceLocation
+            location = SourceLocation(0, 0)
+
+        name_token = token_stream.peek()
+        if not name_token or not name_token.value:
+            return None
+        name = name_token.value
+        token_stream.consume()
+
+        # Expect RENAMES keyword
+        renames_kw = token_stream.peek()
+        if not renames_kw or not renames_kw.value or renames_kw.value.upper() != "RENAMES":
+            # Not a valid RENAMES — skip to period
+            while not token_stream.is_empty():
+                t = token_stream.peek()
+                if not t or t.type in (TokenType.PERIOD, TokenType.LEVEL_NUMBER):
+                    break
+                token_stream.consume()
+            return None
+        token_stream.consume()  # consume RENAMES
+
+        from_token = token_stream.peek()
+        if not from_token or not from_token.value:
+            return None
+        renames_from = from_token.value
+        token_stream.consume()
+
+        renames_through = None
+        nxt = token_stream.peek()
+        if nxt and nxt.value and nxt.value.upper() in ("THROUGH", "THRU"):
+            token_stream.consume()
+            thru_token = token_stream.peek()
+            if thru_token and thru_token.value:
+                renames_through = thru_token.value
+                token_stream.consume()
+
+        # Consume trailing period
+        if not token_stream.is_empty():
+            t = token_stream.peek()
+            if t and t.type == TokenType.PERIOD:
+                token_stream.consume()
+
+        return RenamesItem(name, renames_from, location, renames_through)
+
+    @staticmethod
+    def _skip_newlines(token_stream: ITokenStream) -> None:
+        """Consume any NEWLINE tokens at the current position."""
+        while not token_stream.is_empty():
+            t = token_stream.peek()
+            if t and t.type == TokenType.NEWLINE:
+                token_stream.consume()
+            else:
+                break
+
     def _parse_picture_clause(self, token_stream: ITokenStream) -> Optional[str]:
         """Parse PICTURE clause pattern.
         
@@ -479,6 +682,9 @@ class DataDivisionParser(BaseDivisionParser):
                     for data_item in division_content[key]["data_items"]:
                         if isinstance(data_item, CobolDataItem):
                             section.add_data_item(data_item)
+                        elif isinstance(data_item, RenamesItem):
+                            # RenamesItem is not a CobolDataItem but must be in the AST tree
+                            section.add_child(data_item)
                 
                 division_node.add_section(section)
         

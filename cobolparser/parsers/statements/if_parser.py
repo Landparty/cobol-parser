@@ -71,17 +71,23 @@ class IfStatementParser(IStatementParser):
             condition_tokens.append(token.value)
             token_stream.consume()
         
-        # Create condition expression
+        # Create condition expression tree
+        loc = start_token.location if start_token else SourceLocation(0, 0)
         if condition_tokens:
-            condition_text = " ".join(condition_tokens).strip()
-            condition_expr = CobolExpression("COMPARISON", start_token.location if start_token else SourceLocation(0, 0))
-            condition_expr._metadata["value"] = condition_text
-            stmt.set_condition(condition_expr)
+            condition_expr = self._build_condition_expression(condition_tokens, loc)
+            if condition_expr:
+                stmt.set_condition(condition_expr)
+            else:
+                report_parse_error(
+                    context,
+                    "IF statement: could not parse condition expression",
+                    loc,
+                )
         else:
             report_parse_error(
                 context,
                 "IF statement requires a condition before the THEN branch",
-                start_token.location if start_token else SourceLocation(0, 0),
+                loc,
             )
         
         skip_whitespace(token_stream)
@@ -194,6 +200,97 @@ class IfStatementParser(IStatementParser):
         
         return stmt
     
+    _COMPARISON_OPS = {
+        "=": "EQUAL",
+        "EQUAL": "EQUAL",
+        ">": "GREATER",
+        "GREATER": "GREATER",
+        "<": "LESS",
+        "LESS": "LESS",
+        ">=": "GREATER_OR_EQUAL",
+        "<=": "LESS_OR_EQUAL",
+        "<>": "NOT_EQUAL",
+    }
+
+    def _build_condition_expression(
+        self, tokens: List[str], location: SourceLocation
+    ) -> Optional[CobolExpression]:
+        """Convert a flat list of condition token strings into an expression tree.
+
+        Handles simple comparisons (LHS op RHS), NOT-prefixed operators, and
+        compound conditions joined by AND / OR.
+        """
+        from cobolparser.models.statements.base import ConditionalExpression, LogicalExpression
+
+        # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.)
+        cleaned: List[str] = []
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i].upper()
+            if tok == "NOT" and i + 1 < len(tokens):
+                nxt = tokens[i + 1].upper()
+                combined = {
+                    "NOT EQUAL": "NOT_EQUAL",
+                    "NOT =": "NOT_EQUAL",
+                    "NOT LESS": "GREATER_OR_EQUAL",
+                    "NOT <": "GREATER_OR_EQUAL",
+                    "NOT GREATER": "LESS_OR_EQUAL",
+                    "NOT >": "LESS_OR_EQUAL",
+                }.get(f"NOT {nxt}")
+                if combined:
+                    cleaned.append(combined)
+                    i += 2
+                    continue
+            cleaned.append(tokens[i])
+            i += 1
+
+        # Split on AND / OR (left-to-right, lowest precedence)
+        for logical_op in ("AND", "OR"):
+            upper_cleaned = [t.upper() for t in cleaned]
+            if logical_op in upper_cleaned:
+                idx = upper_cleaned.index(logical_op)
+                left_expr = self._build_condition_expression(cleaned[:idx], location)
+                right_expr = self._build_condition_expression(cleaned[idx + 1:], location)
+                if left_expr and right_expr:
+                    logical = LogicalExpression(logical_op, location)
+                    logical.set_left_condition(left_expr)
+                    logical.set_right_condition(right_expr)
+                    return logical
+
+        # Simple comparison: find the first comparison operator token
+        upper_cleaned = [t.upper() for t in cleaned]
+        op_idx = None
+        resolved_op = None
+        for idx, tok in enumerate(upper_cleaned):
+            if tok in self._COMPARISON_OPS:
+                op_idx = idx
+                resolved_op = self._COMPARISON_OPS[tok]
+                break
+            if tok in ("NOT_EQUAL", "GREATER_OR_EQUAL", "LESS_OR_EQUAL"):
+                op_idx = idx
+                resolved_op = tok
+                break
+
+        if op_idx is not None and resolved_op:
+            left_parts = [t for t in cleaned[:op_idx] if t.upper() != "IS"]
+            right_parts = cleaned[op_idx + 1:]
+            lhs = " ".join(left_parts).strip() if left_parts else None
+            rhs = " ".join(right_parts).strip() if right_parts else None
+            if lhs:
+                expr = ConditionalExpression(resolved_op, location)
+                expr.set_left_operand(lhs)
+                if rhs:
+                    expr.set_right_operand(rhs)
+                return expr
+
+        # Fallback: wrap entire token list as a raw comparison node
+        if cleaned:
+            expr = ConditionalExpression("COMPARISON", location)
+            expr._metadata["raw_condition"] = " ".join(cleaned)
+            return expr
+
+        return None
+
     def _is_statement_keyword(self, token_upper: str) -> bool:
         """Check if token is a COBOL statement keyword."""
         statement_keywords = {

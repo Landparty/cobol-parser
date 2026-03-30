@@ -4,6 +4,7 @@ from typing import List
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...models.statements import GoStatement
 from ...models.ast_base import SourceLocation
+from cobolparser.parsers.statements._utils import get_parse_context, report_parse_error
 
 
 class GoStatementParser(IStatementParser):
@@ -54,33 +55,35 @@ class GoStatementParser(IStatementParser):
             ValueError: If TO or target paragraph is missing
         """
         start_token = token_stream.consume()  # consume GO keyword
-        
-        # Create statement with location
+        context = get_parse_context(token_stream)
+
         stmt = GoStatement(
             start_token.location if hasattr(start_token, 'location') else SourceLocation(0, 0)
         )
-        
+
         # Expect TO keyword
         if token_stream.is_empty():
-            raise ValueError("GO statement requires TO keyword")
-        
+            report_parse_error(context, "GO statement requires TO keyword", stmt.location)
+            return stmt
+
         next_token = token_stream.peek()
-        if not next_token or next_token.value.upper() != "TO":
-            raise ValueError("GO statement requires TO keyword")
-        
+        if not next_token or not next_token.value or next_token.value.upper() != "TO":
+            report_parse_error(context, "GO statement requires TO keyword", stmt.location)
+            return stmt
+
         token_stream.consume()  # consume TO
-        
+
         # Parse target paragraph name
         if token_stream.is_empty():
-            raise ValueError("GO TO statement requires a target paragraph")
-        
+            report_parse_error(context, "GO TO statement requires a target paragraph", stmt.location)
+            return stmt
+
         next_token = token_stream.peek()
-        if not next_token:
-            raise ValueError("GO TO statement requires a target paragraph")
-        
+        if not next_token or not next_token.value:
+            report_parse_error(context, "GO TO statement requires a target paragraph", stmt.location)
+            return stmt
+
         target_name = next_token.value
-        if not target_name:
-            raise ValueError("GO TO statement requires a target paragraph")
         
         stmt.set_target_paragraph(target_name)
         token_stream.consume()  # consume target name

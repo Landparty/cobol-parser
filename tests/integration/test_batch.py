@@ -55,7 +55,11 @@ class TestParseFilesCorrectness:
         for br in batch:
             assert br.read_error is None, f"{br.path}: unexpected read error"
             ref = reference[br.path]
-            assert br.result.ast.to_dict() == ref.ast.to_dict(), f"{br.path}: AST mismatch"
+            if ref.ast is None:
+                assert br.result.ast is None, f"{br.path}: AST mismatch (expected None)"
+            else:
+                assert br.result.ast is not None, f"{br.path}: unexpected None AST"
+                assert br.result.ast.to_dict() == ref.ast.to_dict(), f"{br.path}: AST mismatch"
             assert len(br.result.errors) == len(ref.errors), f"{br.path}: error count mismatch"
 
     def test_results_in_input_order(self):

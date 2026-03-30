@@ -20,6 +20,8 @@ from .data_items import (
     CobolDataItem,
     PictureClause,
     OccursClause,
+    ConditionNameItem,
+    RenamesItem,
 )
 from .statements import (
     CobolStatement,
@@ -59,6 +61,8 @@ __all__ = [
     "CobolDataItem",
     "PictureClause",
     "OccursClause",
+    "ConditionNameItem",
+    "RenamesItem",
     "CobolStatement",
     "CobolExpression",
     "MoveStatement",

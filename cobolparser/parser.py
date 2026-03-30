@@ -515,7 +515,15 @@ def parse_cobol(
             free_form = True
     
     if preprocess_fixed:
-        source = normalize_fixed_format(source.splitlines())
+        try:
+            source = normalize_fixed_format(source.splitlines())
+        except ValueError as exc:
+            # Preprocessing failed (e.g. unterminated string literal at EOF).
+            # Return a result with no AST and the preprocessing error so callers
+            # can handle it gracefully under COLLECT_ALL error recovery.
+            err = ParseError(str(exc), 0, 0)
+            stats = ParseStatistics()
+            return ParseResult(ast=None, errors=[err], warnings=[], statistics=stats)
         free_form = True
     
     parser = CobolParser(

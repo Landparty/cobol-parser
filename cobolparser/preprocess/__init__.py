@@ -486,6 +486,15 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
             # But here we don't know the next line yet. So we just leave pending_literal as is.
 
     flush_parts()
+
+    # If pending_literal is True at EOF there is no subsequent continuation line,
+    # so the string is genuinely unterminated.
+    if pending_literal and merge_continued_literals:
+        raise ValueError(
+            f"Unterminated string literal at end of input "
+            f"(opened with quote character '{quote_char or '?'}')"
+        )
+
     return '\n'.join(result) + '\n'
 
 
