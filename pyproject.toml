@@ -75,13 +75,6 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "cobolparser/reproduce_infinite_loop.py",
-    "cobolparser/parsers/arithmetic_parsers.py",
-    "cobolparser/parsers/evaluate_parser.py",
-    "cobolparser/parsers/if_parser.py",
-    "cobolparser/parsers/perform_parser.py",
-    "cobolparser/parsers/call_parser.py",
-    "cobolparser/parsers/display_parser.py",
-    "cobolparser/parsers/move_parser.py",
 ]
 
 [tool.coverage.report]

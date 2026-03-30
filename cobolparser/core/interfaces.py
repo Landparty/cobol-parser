@@ -57,11 +57,21 @@ class ITokenStream(ABC):
     @abstractmethod
     def is_empty(self) -> bool:
         """Check if stream is exhausted.
-        
+
         Returns:
             True if no more tokens, False otherwise
         """
         pass
+
+    @property
+    def context(self) -> Optional[Any]:
+        """Optional parse context attached to this stream.
+
+        Statement parsers read this to access shared parsing state such as
+        the current host parser and nested-statement registry.  The default
+        implementation returns None; TokenStream overrides it.
+        """
+        return None
 
 
 class IDivisionParser(ABC):
@@ -126,10 +136,10 @@ class IStatementParser(ABC):
         pass
 
 
-# Backward compatibility support for existing codebase
+# Parser host and context protocols
 
 class ParserHost(Protocol):
-    """Backward compatibility protocol for main parser interface."""
+    """Protocol for the main parser interface used by division and statement parsers."""
     
     @property
     def current_section(self) -> Optional[Any]:
@@ -155,10 +165,7 @@ class ParserHost(Protocol):
 
 
 class ParseContext:
-    """Backward compatibility context class for statement parsing.
-    
-    Provides shared context during nested parsing operations.
-    """
+    """Shared context passed to statement parsers during nested parsing operations."""
     
     def __init__(self, host: Any, registry: Optional[Union["StatementRegistry", "StatementParserRegistry"]] = None):
         """Initialize parsing context.
@@ -213,19 +220,3 @@ class ParseContext:
             err = self.host.create_error(message, loc)
             if hasattr(self.host, 'add_error'):
                 self.host.add_error(err)
-
-
-class StatementParser(Protocol):
-    """Backward compatibility: legacy interface for statement parsers (Protocol).
-    
-    This matches the duck-typing pattern used by StatementRegistry.
-    New code should implement IStatementParser instead.
-    """
-    
-    def can_parse(self, stream) -> bool:
-        """Return True if this parser handles the current token."""
-        ...
-    
-    def parse(self, stream, context=None):
-        """Parse and return the statement."""
-        ...

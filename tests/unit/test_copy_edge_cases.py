@@ -428,7 +428,7 @@ class TestFuzzyMatching:
             )
             suggestions = suggest_similar_copybooks("employe", config)
             # Should find EMPLOYEE despite case difference
-            assert len(suggestions) >= 0  # May or may not find depending on threshold
+            assert isinstance(suggestions, list)  # May or may not find depending on threshold
 
 
 class TestConditionalCompilation:

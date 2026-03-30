@@ -44,9 +44,10 @@ class ASTNode(ABC):
         self.location = location
         self.parent: Optional['ASTNode'] = None
         self.children: List['ASTNode'] = []
-        self._metadata: Optional[Dict[str, Any]] = None
+        self._metadata: Dict[str, Any] = {}
         self._division_name: Optional[str] = None  # Track division context
         self._section_name: Optional[str] = None   # Track section context
+        self._type_cache: Optional[Dict[str, List['ASTNode']]] = None
     
     def set_division_context(self, division_name: Optional[str], section_name: Optional[str] = None) -> None:
         """Set the division and section context for this node."""
@@ -103,19 +104,28 @@ class ASTNode(ABC):
             self._metadata = {}
         return self._metadata
 
+    def _invalidate_type_cache(self) -> None:
+        """Invalidate the type-index cache on this node and all ancestors."""
+        node: Optional['ASTNode'] = self
+        while node is not None:
+            node._type_cache = None
+            node = node.parent
+
     def add_child(self, child: 'ASTNode') -> None:
         """Add a child node and set its parent reference."""
         if child.parent is not None:
             child.parent.remove_child(child)
-        
+
         child.parent = self
         self.children.append(child)
-    
+        self._invalidate_type_cache()
+
     def remove_child(self, child: 'ASTNode') -> bool:
         """Remove a child node and clear its parent reference."""
         if child in self.children:
             child.parent = None
             self.children.remove(child)
+            self._invalidate_type_cache()
             return True
         return False
     
@@ -151,8 +161,19 @@ class ASTNode(ABC):
         return None
     
     def find_all_by_type(self, node_type: str) -> List['ASTNode']:
-        """Find all nodes of a specific type in the subtree."""
-        return [node for node in self.traverse_depth_first() if node.node_type == node_type]
+        """Find all nodes of a specific type in the subtree.
+
+        Results are cached per node_type; the cache is invalidated automatically
+        when children are added or removed.
+        """
+        if self._type_cache is None:
+            self._type_cache = {}
+        if node_type not in self._type_cache:
+            self._type_cache[node_type] = [
+                node for node in self.traverse_depth_first()
+                if node.node_type == node_type
+            ]
+        return self._type_cache[node_type]
     
     def get_root(self) -> 'ASTNode':
         """Get the root node of the AST."""

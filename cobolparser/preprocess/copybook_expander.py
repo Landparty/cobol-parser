@@ -90,7 +90,7 @@ def detect_encoding(file_path: str) -> str:
         # Fallback to ASCII
         return 'ascii'
         
-    except Exception as e:
+    except (OSError, IOError, ValueError) as e:
         raise EncodingError(file_path, f"Failed to detect encoding: {str(e)}")
 
 

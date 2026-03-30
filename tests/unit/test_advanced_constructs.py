@@ -66,7 +66,7 @@ class TestDeclarativesAndUseStatements:
             if procedure_div:
                 # Look for DECLARATIVES section if supported
                 sections = procedure_div.sections
-                assert len(sections) >= 0  # Should have some sections
+                assert isinstance(sections, list)  # sections attribute is a list
                 
                 # Check for key tokens that should be recognized
                 declarative_found = any("DECLARATIVES" in str(section) for section in sections)
@@ -101,7 +101,7 @@ class TestDeclarativesAndUseStatements:
             if procedure_div:
                 # Verify we can handle exception handling syntax
                 sections = procedure_div.sections
-                assert len(sections) >= 0
+                assert isinstance(sections, list)
                 
                 # Look for exception-related keywords in the parsed content
                 use_found = any("USE" in str(section) for section in sections)

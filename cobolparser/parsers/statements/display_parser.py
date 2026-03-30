@@ -12,6 +12,7 @@ from ...core.ast_factory import get_factory
 from ...models.statements import DisplayStatement
 from ...models.ast_base import SourceLocation
 from ...lexer import TokenType
+from ._utils import skip_whitespace
 
 
 class DisplayStatementParser(IStatementParser):
@@ -82,7 +83,7 @@ class DisplayStatementParser(IStatementParser):
             stmt = DisplayStatement(start_location)
         
         # Skip whitespace
-        self._skip_whitespace(token_stream)
+        skip_whitespace(token_stream)
         
         # Parse display items and optional output device
         while not token_stream.is_empty():
@@ -104,7 +105,7 @@ class DisplayStatementParser(IStatementParser):
             # Check for UPON (output device specification)
             if self._is_keyword(token, "UPON"):
                 token_stream.consume()  # Consume UPON
-                self._skip_whitespace(token_stream)
+                skip_whitespace(token_stream)
                 
                 device_token = token_stream.peek()
                 if device_token:
@@ -126,7 +127,7 @@ class DisplayStatementParser(IStatementParser):
                 # Unknown token - probably next statement, stop parsing
                 break
             
-            self._skip_whitespace(token_stream)
+            skip_whitespace(token_stream)
         
         return stmt if isinstance(stmt, DisplayStatement) else DisplayStatement(start_location)
     
@@ -148,18 +149,3 @@ class DisplayStatementParser(IStatementParser):
                 token.value and 
                 token.value.upper() == keyword.upper())
     
-    @staticmethod
-    def _skip_whitespace(token_stream: ITokenStream) -> None:
-        """Skip whitespace and comment tokens in stream.
-        
-        Args:
-            token_stream: The token stream to advance
-        """
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type not in (TokenType.WHITESPACE, 
-                                               TokenType.COMMENT, 
-                                               TokenType.NEWLINE,
-                                               TokenType.CONTINUATION):
-                break
-            token_stream.consume()

@@ -13,7 +13,18 @@
       "Bash(git stash:*)",
       "Bash(rtk git:*)",
       "Bash(python3:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(1:*)",
+      "Bash(wc -l /c/Users/samdi/Documents/workspace/cobol-parser/cobolparser/parsers/statements/*.py)",
+      "Bash(grep -l \"ParseContext\" \"/c/Users/samdi/Documents/workspace/cobol-parser/cobolparser/parsers/statements/\"*.py)",
+      "Bash(grep -r \"assert.*is not None\" C:/Users/samdi/Documents/workspace/cobol-parser/tests/integration/*.py)",
+      "Bash(grep -r \"tmp_path\\\\|tempfile\\\\|mktemp\" C:/Users/samdi/Documents/workspace/cobol-parser/tests/integration/*.py)",
+      "Bash(grep -n \"if.*if.*if\" /c/Users/samdi/Documents/workspace/cobol-parser/cobolparser/parsers/statements/*.py)",
+      "Bash(for file:*)",
+      "Bash(find C:/Users/samdi/Documents/workspace/cobol-parser/tests -name \"*$file*\" -type f ! -path \"*/__pycache__/*\")",
+      "Bash(done)",
+      "Bash(grep -l \"arithmetic_parsers\\\\|evaluate_parser\\\\|if_parser\\\\|perform_parser\\\\|call_parser\\\\|display_parser\\\\|move_parser\" C:/Users/samdi/Documents/workspace/cobol-parser/tests/unit/*.py)",
+      "Bash(rtk test:*)"
     ]
   }
 }

@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from .models.ast_base import SourceLocation
 from .plugins.core import ParseError, DialectType
 
+# Fixed-format COBOL column layout (0-based indices)
+_FF_SEQ_END = 6       # columns 1-6: sequence number area (indices 0-5)
+_FF_INDICATOR = 6     # column 7: indicator (* / - space) — index 6
+_FF_AREA_A = 7        # column 8: Area A start — index 7
+_FF_LINE_END = 72     # column 73+: identification area (ignored) — index 72
+
 _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 
 
@@ -814,11 +820,11 @@ class CobolLexer:
             return line_tokens
 
         # Check column 7 indicator
-        indicator = line[6] if len(line) > 6 else " "
+        indicator = line[_FF_INDICATOR] if len(line) > _FF_INDICATOR else " "
 
         if indicator == "*":
             # Comment line
-            comment_text = line[6:72].rstrip() if len(line) > 6 else ""
+            comment_text = line[_FF_INDICATOR:_FF_LINE_END].rstrip() if len(line) > _FF_INDICATOR else ""
             location = SourceLocation(line_num + 1, 7, 1)
             line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
             return line_tokens
@@ -835,7 +841,7 @@ class CobolLexer:
             line_tokens.append(Token(TokenType.CONTINUATION, "-", location))
 
         # Extract program text (columns 8-72)
-        program_text = line[7:72] if len(line) > 7 else ""
+        program_text = line[_FF_AREA_A:_FF_LINE_END] if len(line) > _FF_AREA_A else ""
 
         # Special handling for VALUE clause with unterminated string pattern
         program_text_upper = program_text.upper()
@@ -865,7 +871,7 @@ class CobolLexer:
                         # Check if next line is continuation
                         if line_num + 1 < len(self.lines):
                             next_line = self.lines[line_num + 1]
-                            if len(next_line) > 6 and next_line[6] == "-":
+                            if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
                                 # This is a VALUE with unterminated string - start multi-line mode
                                 self._open_string_quote = '"'
                                 self._open_string_location = SourceLocation(
@@ -889,7 +895,7 @@ class CobolLexer:
             # Look ahead to see if next line has continuation marker
             if line_num + 1 < len(self.lines):
                 next_line = self.lines[line_num + 1]
-                if len(next_line) > 6 and next_line[6] == "-":
+                if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
                     # This is the start of a multi-line string literal
                     quote_char = '"'
                     quote_pos = program_text.find(quote_char)
@@ -936,7 +942,7 @@ class CobolLexer:
                 self._open_string_value = []
                 self._open_string_location = None
                 # Process as normal comment line
-                comment_text = line[6:72].rstrip() if len(line) > 6 else ""
+                comment_text = line[_FF_INDICATOR:_FF_LINE_END].rstrip() if len(line) > _FF_INDICATOR else ""
                 location = SourceLocation(line_num + 1, 7, 1)
                 line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
                 return line_tokens
@@ -1025,7 +1031,7 @@ class CobolLexer:
                         # Check if next line has continuation marker
                         if next_line_index < len(self.lines):
                             next_line = self.lines[next_line_index]
-                            if len(next_line) > 6 and next_line[6] == "-":
+                            if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
                                 start_continuation = True
 
                         # Also check if current line is a continuation of a VALUE clause
@@ -1033,7 +1039,7 @@ class CobolLexer:
                         if (
                             is_line_start_quote
                             and len(current_line) > 6
-                            and current_line[6] == "-"
+                            and current_line[_FF_INDICATOR] == "-"
                         ):
                             start_continuation = True
 
@@ -1043,8 +1049,8 @@ class CobolLexer:
                         if (
                             "VALUE" in current_line_upper
                             and next_line_index < len(self.lines)
-                            and len(self.lines[next_line_index]) > 6
-                            and self.lines[next_line_index][6] == "-"
+                            and len(self.lines[next_line_index]) > _FF_INDICATOR
+                            and self.lines[next_line_index][_FF_INDICATOR] == "-"
                         ):
                             start_continuation = True
 
@@ -1182,7 +1188,7 @@ class CobolLexer:
             is_multi_line_context = (
                 not self.free_form
                 and len(current_line) > 6
-                and current_line[6] == "-"  # Continuation line
+                and current_line[_FF_INDICATOR] == "-"  # Continuation line
                 and line_num > 0  # Not the first line
                 and (
                     "VALUE"
@@ -1350,7 +1356,7 @@ class CobolLexer:
         # Validate that this physical line is actually marked as a continuation ('-' in column 7)
         if not self.free_form:
             src_line = self.lines[line_num] if line_num < len(self.lines) else ""
-            if not (len(src_line) > 6 and src_line[6] == "-"):
+            if not (len(src_line) > _FF_INDICATOR and src_line[_FF_INDICATOR] == "-"):
                 # Not a valid continuation line -> emit token without error for robust parsing
                 loc = self._open_string_location or SourceLocation(line_num + 1, 8, 1)
                 # For COBOL robustness, emit the string token even if continuation is imperfect

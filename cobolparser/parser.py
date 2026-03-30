@@ -9,8 +9,6 @@ This module provides delegating CobolParser that orchestrates parsing through:
 import re
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-from enum import Enum, auto
-
 from .lexer import CobolLexer, Token, TokenType, LexerError
 from .models.ast_base import SourceLocation, ASTNode
 from .models.program import CobolProgram, CobolDivision
@@ -48,21 +46,10 @@ from .parsers.statements.arithmetic_parsers import (
     DivideStatementParser,
     ComputeStatementParser,
 )
-from .parsers.statements.write_parser import WriteStatementParser
-
 from .preprocess import normalize_fixed_format
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call)
 _ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE)
-
-
-class ParseState(Enum):
-    """Parser state tracking for COBOL divisions and sections."""
-    INITIAL = auto()
-    IDENTIFICATION_DIVISION = auto()
-    ENVIRONMENT_DIVISION = auto()
-    DATA_DIVISION = auto()
-    PROCEDURE_DIVISION = auto()
 
 
 @dataclass
@@ -115,7 +102,6 @@ class CobolParser:
         # Parser state
         self.tokens: List[Token] = []
         self.current_token_index = 0
-        self.parse_state = ParseState.INITIAL
         self.errors: List[ParseError] = []
         self.warnings: List[str] = []
         self.statistics = ParseStatistics()
@@ -126,6 +112,12 @@ class CobolParser:
         self._division_factory = DivisionParserFactory()
         self._register_division_parsers()
         
+        # NOTE: self.registry is used only by the backward-compat statement methods
+        # (parse_call_statement, parse_move_statement, etc.) for direct statement
+        # parsing in tests.  Actual full-program parsing is done by
+        # ProcedureDivisionParser, which owns its own StatementParserRegistry that
+        # also includes EXEC SQL/CICS parsers.  The two registries are intentionally
+        # separate and should stay that way.
         self.registry = StatementParserRegistry()
         self._register_statement_parsers()
 
@@ -295,14 +287,7 @@ class CobolParser:
                 if not parser:
                     current_token = self.stream.peek()
                     current_value = current_token.value.upper() if current_token and current_token.value else "EOF"
-                    if not divisions_parsed:
-                        self.add_error(
-                            self.create_error(
-                                f"No recognizable COBOL division found near '{current_token.value if current_token and current_token.value else 'EOF'}'",
-                                self.get_current_location(),
-                            )
-                        )
-                    elif current_value not in ("END", "PROGRAM"):
+                    if not divisions_parsed or current_value not in ("END", "PROGRAM"):
                         self.add_error(
                             self.create_error(
                                 f"No recognizable COBOL division found near '{current_token.value if current_token and current_token.value else 'EOF'}'",
@@ -382,13 +367,6 @@ class CobolParser:
     # ========== Backward Compatibility Methods ==========
     # For tests that directly call statement parsing methods
 
-    def _get_statement_parser(self):
-        """Find statement parser for current stream position."""
-        if not self.stream and self.current_token_index < len(self.tokens):
-            self.stream = TokenStream(self.tokens)
-            self.stream._pos = self.current_token_index
-        return self.registry.find_parser(self.stream) if self.stream else None
-
     def parse_call_statement(self):
         """Parse CALL statement (backward compatibility)."""
         return self._dispatch_statement_parser(CallStatementParser())
@@ -444,12 +422,18 @@ class CobolParser:
                 if not self.stream.is_empty():
                     if parser.matches(self.stream):
                         context = ParseContext(self, self.registry)
-                        setattr(self.stream, '_parse_context', context)
+                        self.stream.context = context
                         setattr(self.stream, '_registry', self.registry)
                         result = parser.parse(self.stream)
                         self.current_token_index = self.stream._pos
                         return result
-            except Exception:
+            except Exception as e:
+                import warnings
+                warnings.warn(
+                    f"Statement parsing fallback failed: {type(e).__name__}: {e}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 return None
         return None
 

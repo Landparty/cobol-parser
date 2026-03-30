@@ -58,7 +58,16 @@ _DATA_DEF_RE = re.compile(
 _LEVEL_NUMBER_RE = re.compile(r'^\s*(\d{2})\s+[A-Za-z]', re.MULTILINE)
 
 
-class CircularReferenceError(Exception):
+class PreprocessingError(Exception):
+    """Base class for all preprocessing exceptions.
+
+    Catch this to handle any failure that occurs during copybook expansion
+    or source normalization, without needing to enumerate every subtype.
+    """
+    pass
+
+
+class CircularReferenceError(PreprocessingError):
     """
     Raised when a circular dependency is detected in copybook includes.
     
@@ -75,7 +84,7 @@ class CircularReferenceError(Exception):
         super().__init__(message)
 
 
-class CopybookNotFoundError(Exception):
+class CopybookNotFoundError(PreprocessingError):
     """
     Raised when a referenced copybook file cannot be found.
     
@@ -104,7 +113,7 @@ class CopybookNotFoundError(Exception):
         super().__init__(message)
 
 
-class PathTraversalError(Exception):
+class PathTraversalError(PreprocessingError):
     """
     Raised when a path traversal attempt is detected (security violation).
     
@@ -120,7 +129,7 @@ class PathTraversalError(Exception):
         super().__init__(message)
 
 
-class EncodingError(Exception):
+class EncodingError(PreprocessingError):
     """
     Raised when file encoding cannot be detected or conversion fails.
     
@@ -140,7 +149,7 @@ class EncodingError(Exception):
         super().__init__(message)
 
 
-class NestingDepthError(Exception):
+class NestingDepthError(PreprocessingError):
     """
     Raised when copybook nesting exceeds the configured maximum depth.
     
@@ -158,7 +167,7 @@ class NestingDepthError(Exception):
         super().__init__(message)
 
 
-class CopybookSizeExceededError(Exception):
+class CopybookSizeExceededError(PreprocessingError):
     """
     Raised when a copybook file exceeds the configured size limit.
     
@@ -187,7 +196,7 @@ class CopybookSizeExceededError(Exception):
         super().__init__(message)
 
 
-class CopybookSyntaxError(Exception):
+class CopybookSyntaxError(PreprocessingError):
     """
     Raised when copybook contains invalid or malformed content.
     
@@ -226,7 +235,7 @@ class LevelNumberMismatchWarning(UserWarning):
     pass
 
 
-class TotalExpansionSizeExceededError(Exception):
+class TotalExpansionSizeExceededError(PreprocessingError):
     """
     Raised when total expanded content exceeds the configured limit.
     
@@ -399,29 +408,30 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
     result: List[str] = []
     pending_literal = False
     quote_char: str | None = None
-    buffer = ''
+    parts: List[str] = []  # accumulates chunks for the current logical line
 
-    def flush_buffer():
-        nonlocal buffer
-        if buffer:
-            result.append(buffer)
-            buffer = ''
+    def flush_parts():
+        nonlocal parts
+        combined = ''.join(parts)
+        if combined:
+            result.append(combined)
+        parts = []
 
     for raw in lines:
         line = raw.rstrip('\n')
         if len(line) < TEXT_START_COL - 1:
-            flush_buffer()
+            flush_parts()
             continue
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
         text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
         if indicator in ('*', '/'):  # comment (including page eject)
             # Comment lines: flush pending buffer but do not emit comment text.
             # Emitting comment text causes the free-form lexer to tokenize it as code.
-            flush_buffer()
+            flush_parts()
             pending_literal = False
             continue
         is_cont = indicator == '-'
-        
+
         # Handle continuation lines
         if is_cont:
             # This is a continuation line - merge with previous buffer
@@ -436,26 +446,27 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
                 if chunk and chunk[0] == quote_char:
                     # Remove the continuation quote marker
                     chunk = chunk[1:]
-                buffer += chunk.rstrip()
+                parts.append(chunk.rstrip())
             else:
                 # Regular continuation (non-literal) - just append with a space
-                buffer += ' ' + text_slice.lstrip()
+                parts.append(' ' + text_slice.lstrip())
         else:
             # Non-continuation line - start new logical line
-            flush_buffer()
-            buffer = text_slice.rstrip()
+            flush_parts()
+            parts.append(text_slice.rstrip())
 
         if merge_continued_literals:
             # Count quotes ignoring doubled ones
+            current = ''.join(parts)
             i = 0
             quote_char = None
             pending_literal = False
-            
-            while i < len(buffer):
-                ch = buffer[i]
+
+            while i < len(current):
+                ch = current[i]
                 if quote_char:
                     if ch == quote_char:
-                        if i + 1 < len(buffer) and buffer[i+1] == quote_char:  # escaped
+                        if i + 1 < len(current) and current[i+1] == quote_char:  # escaped
                             i += 2
                             continue
                         # closing quote
@@ -473,10 +484,8 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
             # Important: If we hit the end of the buffer and pending_literal is true,
             # this is only a valid pending literal if the next line is actually a continuation.
             # But here we don't know the next line yet. So we just leave pending_literal as is.
-            # However, we must ensure empty buffers don't cause issues.
-            pass
 
-    flush_buffer()
+    flush_parts()
     return '\n'.join(result) + '\n'
 
 

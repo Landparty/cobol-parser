@@ -54,10 +54,10 @@ class TestDatabaseDebugPrograms:
             
             # Verify that we can get statements and data items from the program
             all_statements = result.ast.get_all_statements()
-            assert len(all_statements) >= 0
-            
+            assert isinstance(all_statements, list)
+
             all_data_items = result.ast.get_data_items()
-            assert len(all_data_items) >= 0
+            assert isinstance(all_data_items, list)
     
     def test_parse_db101a_basic_debug(self, cobol_examples_dir):
         """Test parsing DB101A - Basic debug functionality."""
@@ -77,7 +77,7 @@ class TestDatabaseDebugPrograms:
             assert result.ast.program_name == "DB101A"
             
             # Verify program has basic structure
-            assert len(result.ast.divisions) >= 0
+            assert len(result.ast.divisions) > 0
     
     def test_parse_all_db_programs(self, cobol_examples_dir):
         """Test parsing all DB* programs for consistent debug syntax."""
@@ -97,7 +97,7 @@ class TestDatabaseDebugPrograms:
             # Test that all DB programs can be parsed
             if result.success and result.ast:
                 # All DB programs should have basic program structure
-                assert len(result.ast.divisions) >= 0
+                assert len(result.ast.divisions) > 0
         
         assert len(db_files) > 0  # At least some DB files exist
     
@@ -134,11 +134,11 @@ class TestInterCommunicationPrograms:
             
             # Verify CALL statements are parsed
             call_statements = result.ast.find_statements("CALL")
-            assert len(call_statements) >= 0
-            
+            assert isinstance(call_statements, list)
+
             # Check that we can analyze statements
             all_statements = result.ast.get_all_statements()
-            assert len(all_statements) >= 0
+            assert isinstance(all_statements, list)
     
     def test_parse_ic_series_call_patterns(self, cobol_examples_dir):
         """Test parsing various IC* programs for CALL statement patterns."""
@@ -198,11 +198,11 @@ class TestIntrinsicFunctionPrograms:
             assert result.ast.program_name == "IF101A"
             
             # Verify program structure
-            assert len(result.ast.divisions) >= 0
-            
-            # Verify data items are parsed
+            assert len(result.ast.divisions) > 0
+
+            # Verify data items are parseable
             data_items = result.ast.get_data_items()
-            assert len(data_items) >= 0
+            assert isinstance(data_items, list)
     
     def test_parse_if_series_mathematical_functions(self, cobol_examples_dir):
         """Test parsing all IF* programs for mathematical function support."""

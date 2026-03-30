@@ -1,10 +1,11 @@
 """Integration tests for the batch parsing API."""
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 
 from cobolparser import parse_cobol
-from cobolparser.batch import BatchResult, parse_files
-from cobolparser.plugins.core import ErrorRecoveryMode
+from cobolparser.batch import BatchResult, parse_files, _parse_one
+from cobolparser.plugins.core import ErrorRecoveryMode, DialectType
 
 
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
@@ -114,3 +115,60 @@ class TestParseFilesWorkersParity:
             assert (a.result is None) == (b.result is None)
             if a.result is not None:
                 assert a.result.ast.to_dict() == b.result.ast.to_dict()
+
+    @pytest.mark.parametrize("workers", [1, 2, None])
+    def test_worker_count_variants_produce_same_results(self, workers):
+        """Results should be identical regardless of worker count."""
+        files = sorted(SAMPLES_DIR.glob("*.cbl"))[:4]
+        if not files:
+            pytest.skip("No sample files found")
+
+        baseline = parse_files(files, workers=1)
+        results = parse_files(files, workers=workers)
+
+        assert len(results) == len(baseline)
+        for a, b in zip(results, baseline):
+            assert a.path == b.path
+            assert (a.result is None) == (b.result is None)
+            if a.result is not None:
+                assert a.result.ast.to_dict() == b.result.ast.to_dict()
+
+
+class TestParseFilesEncoding:
+    def test_latin1_encoded_file(self, tmp_path):
+        """parse_files() reads latin-1 encoded files when encoding is specified."""
+        # Write minimal COBOL content encoded as latin-1
+        content = "IDENTIFICATION DIVISION.\nPROGRAM-ID. LATIN1.\n"
+        latin1_file = tmp_path / "latin1.cbl"
+        latin1_file.write_bytes(content.encode("latin-1"))
+
+        results = parse_files([latin1_file], workers=1, encoding="latin-1")
+
+        assert len(results) == 1
+        assert results[0].read_error is None
+        assert results[0].result is not None
+
+    def test_utf8_default_encoding(self, tmp_path):
+        """parse_files() defaults to utf-8 encoding."""
+        content = "IDENTIFICATION DIVISION.\nPROGRAM-ID. UTF8TEST.\n"
+        utf8_file = tmp_path / "utf8.cbl"
+        utf8_file.write_text(content, encoding="utf-8")
+
+        results = parse_files([utf8_file], workers=1)
+
+        assert len(results) == 1
+        assert results[0].read_error is None
+
+
+class TestParseOneInternal:
+    def test_parse_cobol_exception_propagates(self, tmp_path):
+        """If parse_cobol() raises unexpectedly, the exception surfaces from _parse_one."""
+        cobl = tmp_path / "boom.cbl"
+        cobl.write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. BOOM.\n")
+
+        with patch("cobolparser.batch.parse_cobol", side_effect=RuntimeError("unexpected")):
+            with pytest.raises(RuntimeError, match="unexpected"):
+                _parse_one(
+                    str(cobl), "utf-8", "replace",
+                    ErrorRecoveryMode.COLLECT_ALL, DialectType.IBM_ENTERPRISE,
+                )

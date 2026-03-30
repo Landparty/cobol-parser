@@ -8,9 +8,8 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
 from cobolparser.core.interfaces import ITokenStream, IDivisionParser
-from cobolparser.models.ast_base import SourceLocation
-from cobolparser.core.exceptions import ParseError, DivisionNotFoundError
 from cobolparser.models.ast_base import ASTNode, SourceLocation
+from cobolparser.core.exceptions import ParseError, DivisionNotFoundError
 from cobolparser.lexer import TokenType
 
 

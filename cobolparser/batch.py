@@ -4,6 +4,15 @@ Provides parse_files() for parsing 500-5000 COBOL files in parallel.
 File I/O happens inside workers to avoid pickling large strings.
 All worker functions are module-level (not lambdas/closures) for
 Windows spawn-based pickling compatibility.
+
+Executor reuse example (avoids spawn overhead on large repeated batches)::
+
+    from concurrent.futures import ProcessPoolExecutor
+    from cobolparser.batch import parse_files
+
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        batch1 = parse_files(files1, executor=executor)
+        batch2 = parse_files(files2, executor=executor)
 """
 from __future__ import annotations
 
@@ -11,7 +20,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from cobolparser.parser import parse_cobol, ParseResult
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
@@ -68,16 +77,21 @@ def parse_files(
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
     encoding: str = "utf-8",
     errors: str = "replace",
+    executor: Optional[ProcessPoolExecutor] = None,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files in parallel.
 
     Args:
         paths: File paths to parse.
         workers: Worker processes. None → os.cpu_count() (or 1). Must be >= 1.
+            Ignored when *executor* is provided.
         error_recovery: Passed to parse_cobol for each file.
         dialect: COBOL dialect, passed to parse_cobol for each file.
         encoding: Passed to Path.read_text(). Override for EBCDIC/Latin-1.
         errors: Passed to Path.read_text(). 'replace' avoids crashes on legacy files.
+        executor: Optional pre-created ProcessPoolExecutor to reuse.  When
+            provided the caller owns the executor lifecycle (shutdown/cleanup).
+            Useful for amortising spawn overhead across many consecutive batches.
 
     Returns:
         list[BatchResult] in input order.
@@ -99,12 +113,17 @@ def parse_files(
         for p in path_list
     ]
 
-    if resolved_workers == 1:
+    if executor is None and resolved_workers == 1:
         # Sequential fast path: clean stack traces, no pickle overhead
         return [_parse_one(*a) for a in args]
 
     chunksize = max(1, len(path_list) // (resolved_workers * 4))
 
-    with ProcessPoolExecutor(max_workers=resolved_workers) as executor:
+    if executor is not None:
+        # Caller-managed executor: use it directly without a context manager
         results = list(executor.map(_parse_one_packed, args, chunksize=chunksize))
+        return results
+
+    with ProcessPoolExecutor(max_workers=resolved_workers) as pool:
+        results = list(pool.map(_parse_one_packed, args, chunksize=chunksize))
     return results

@@ -13,7 +13,7 @@ from typing import List, Tuple
 from cobolparser import CobolParser, parse_cobol
 from cobolparser.plugins.core import ErrorRecoveryMode
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
 # Get the path to examples/cobol directory

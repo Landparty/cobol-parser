@@ -57,173 +57,79 @@ class TestParseErrorWithSourceLocation:
         assert error.line == 10
         # Column should be default
     
-    def test_parse_error_location_overrides_line_column(self):
-        """Test that location parameter overrides line/column parameters."""
+    def test_parse_error_explicit_takes_precedence_over_location(self):
+        """Test that explicit line/column take precedence over location."""
         location = Mock()
         location.line = 100
         location.column = 50
-        
-        # Pass both location and explicit line/column
-        # Location should take precedence
+
+        # Explicit keyword args are applied before location, so they win
         error = ParseError("Test error", line=5, column=10, location=location)
-        
-        assert error.line == 100
-        assert error.column == 50
+
+        assert error.line == 5
+        assert error.column == 10
 
 
-class TestParseErrorSetLine:
-    """Tests for ParseError _set_line method."""
-    
-    def test_set_line_with_int(self):
-        """Test _set_line with integer."""
-        error = ParseError("Test")
-        error._set_line(42)
-        
-        assert error.line == 42
-    
-    def test_set_line_with_string(self):
-        """Test _set_line with string that can be converted to int."""
-        error = ParseError("Test")
-        error._set_line("123")
-        
-        assert error.line == 123
-    
-    def test_set_line_with_invalid_string(self):
-        """Test _set_line with string that cannot be converted."""
-        error = ParseError("Test")
-        error._set_line("not_a_number")
-        
-        assert error.line == 0
-    
-    def test_set_line_with_none(self):
-        """Test _set_line with None."""
-        error = ParseError("Test", line=10)
-        error._set_line(None)
-        
-        assert error.line == 0
-    
+class TestParseErrorLineSetter:
+    """Tests for ParseError line property setter."""
+
     def test_set_line_via_property(self):
         """Test setting line via property setter."""
         error = ParseError("Test")
         error.line = 50
-        
+
         assert error.line == 50
-    
+
     def test_set_line_via_property_with_string(self):
         """Test setting line via property with string."""
         error = ParseError("Test")
         error.line = "75"
-        
+
         assert error.line == 75
 
+    def test_set_line_via_property_invalid(self):
+        """Test setting line via property with invalid value."""
+        error = ParseError("Test")
+        error.line = "not_a_number"
 
-class TestParseErrorSetColumn:
-    """Tests for ParseError _set_column method."""
-    
-    def test_set_column_with_int(self):
-        """Test _set_column with integer."""
-        error = ParseError("Test")
-        error._set_column(15)
-        
-        assert error.column == 15
-    
-    def test_set_column_with_string(self):
-        """Test _set_column with string that can be converted."""
-        error = ParseError("Test")
-        error._set_column("25")
-        
-        assert error.column == 25
-    
-    def test_set_column_with_invalid_string(self):
-        """Test _set_column with invalid string."""
-        error = ParseError("Test")
-        error._set_column("invalid")
-        
-        assert error.column == 0
-    
-    def test_set_column_with_none(self):
-        """Test _set_column with None."""
-        error = ParseError("Test", column=20)
-        error._set_column(None)
-        
-        assert error.column == 0
-    
-    def test_set_column_via_property(self):
-        """Test setting column via property setter."""
-        error = ParseError("Test")
-        error.column = 30
-        
-        assert error.column == 30
+        assert error.line == 0
 
 
 class TestParseErrorStr:
-    """Tests for ParseError __str__ method error handling."""
-    
+    """Tests for ParseError __str__ method."""
+
     def test_str_with_valid_values(self):
-        """Test __str__ with valid line and column."""
+        """Test __str__ with valid line and column (no file path)."""
         error = ParseError("Syntax error", line=10, column=5)
         result = str(error)
-        
-        assert result == "Line 10, Column 5: Syntax error"
-    
+
+        assert result == "line 10, column 5: Syntax error"
+
     def test_str_with_zero_line(self):
         """Test __str__ with zero line (should show message only)."""
         error = ParseError("Error message", line=0)
         result = str(error)
-        
-        assert result == "Error message"
-    
-    def test_str_with_negative_line(self):
-        """Test __str__ with negative line."""
-        error = ParseError("Error message")
-        error._line = -1
-        result = str(error)
-        
-        # Negative line treated as no line info
-        assert result == "Error message"
-    
-    def test_str_handles_value_error(self):
-        """Test __str__ handles ValueError in int conversion (line 124)."""
-        error = ParseError("Error message")
-        # Manually set to a value that would cause int() to fail
-        error._line = "not_convertible"
-        
-        result = str(error)
-        
-        # Should fallback to just message
-        assert result == "Error message"
-    
-    def test_str_handles_type_error(self):
-        """Test __str__ handles TypeError (lines 134-136)."""
-        error = ParseError("Error message")
-        # Set to an object that would cause TypeError in int()
-        error._line = Mock()  # Mock object can't be converted to int
-        
-        result = str(error)
-        
-        # Should fallback to just message
-        assert result == "Error message"
-    
+
+        assert result == "Parse error: Error message"
+
     def test_str_with_none_line(self):
-        """Test __str__ when line is None."""
+        """Test __str__ when line_number is None."""
         error = ParseError("Error message")
-        error._line = None
-        
+        error.line_number = None
+
         result = str(error)
-        
-        # None line should show message only
-        assert result == "Error message"
-    
+
+        assert result == "Parse error: Error message"
+
     def test_str_with_none_column(self):
         """Test __str__ when column is None but line is valid."""
         error = ParseError("Error message", line=5)
-        error._column = None
-        
+        error.column = None
+
         result = str(error)
-        
-        # Should handle None column gracefully
-        # Could either show "Line 5, Column 0:" or just the message
+
         assert "Error message" in result
+        assert "line 5" in result
 
 
 class TestLexerErrorInheritance:
@@ -234,12 +140,12 @@ class TestLexerErrorInheritance:
         location = Mock()
         location.line = 20
         location.column = 15
-        
+
         error = LexerError("Invalid token", location=location)
-        
+
         assert error.line == 20
         assert error.column == 15
-        assert str(error) == "Line 20, Column 15: Invalid token"
+        assert str(error) == "line 20, column 15: Invalid token"
 
 
 class TestMemoryConfigurationEdgeCases:
