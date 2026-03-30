@@ -277,7 +277,7 @@ cobolparser/
 ├── models/              # AST node hierarchy
 │   ├── ast_base.py     # Base AST classes and SourceLocation
 │   ├── program.py      # Program/Division/Section structure
-│   ├── statements.py   # MOVE, DISPLAY, PERFORM statements
+│   ├── statements/     # Statement AST nodes (arithmetic, call, control, data, io, misc)
 │   └── data_items.py   # PictureClause, COMP-3, data definitions
 ├── dialects/           # Dialect-specific support
 │   └── ibm_enterprise.py # IBM Enterprise COBOL extensions
@@ -293,14 +293,6 @@ cobolparser/
 4. **Plugin Architecture**: Extensible design for dialects and custom features
 5. **Source Location Tracking**: Line/column information preserved throughout parsing
 ```
-
-### Key Design Patterns
-
-1. **AST Node Hierarchy**: All AST nodes inherit from `ASTNode` with mandatory `to_dict()` for JSON serialization
-2. **Memory Management**: Configurable limits with streaming support for large programs
-3. **Error Recovery**: Choice between fail-fast and collect-all modes
-4. **Plugin Architecture**: Extensible design for dialects and custom features
-5. **Source Location Tracking**: Line/column information preserved throughout parsing
 
 ## IBM Enterprise COBOL Support
 

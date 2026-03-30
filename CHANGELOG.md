@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BC-1**: Removed 9 IO statement backward-compatibility class aliases (use classes in `cobolparser.models.statements.io` directly)
 - **BC-2**: Removed legacy `file_name`/`record_name` field pairs from `IOReadStatement` and `IOWriteStatement` (use `file_identifier` and `record_identifier`)
 - **BC-3**: Removed `ParseState` export, `CobolAST` alias, `IOErrorCode`/`IODiagnosticHelper` re-exports, and `get_division_by_name()` compat alias (use `get_division()`)
-- **BC-4 – BC-6**: Same commit as BC-3 (see above)
+- **BC-4**: Removed `CobolAST` alias (use `CobolProgram`)
+- **BC-5**: Removed `IOErrorCode` and `IODiagnosticHelper` re-exports from top-level package
+- **BC-6**: Removed `get_division_by_name()` compatibility alias (use `get_division()`)
 - **BC-7**: Removed `ProcedureParagraph` and `ProcedureSection` compatibility aliases (use `CobolParagraph` and `CobolSection`)
 - **BC-8**: Removed legacy `TokenStream.advance()` and `TokenStream.is_at_end`; fixed `skip_whitespace_and_comments`
 
