@@ -5,95 +5,33 @@ All notable changes to the COBOL parser project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-03-30
-
-### Breaking Changes
-
-- **BC-1**: Removed 9 IO statement backward-compatibility class aliases (use classes in `cobolparser.models.statements.io` directly)
-- **BC-2**: Removed legacy `file_name`/`record_name` field pairs from `IOReadStatement` and `IOWriteStatement` (use `file_identifier` and `record_identifier`)
-- **BC-3**: Removed `ParseState` export, `CobolAST` alias, `IOErrorCode`/`IODiagnosticHelper` re-exports, and `get_division_by_name()` compat alias (use `get_division()`)
-- **BC-4**: Removed `CobolAST` alias (use `CobolProgram`)
-- **BC-5**: Removed `IOErrorCode` and `IODiagnosticHelper` re-exports from top-level package
-- **BC-6**: Removed `get_division_by_name()` compatibility alias (use `get_division()`)
-- **BC-7**: Removed `ProcedureParagraph` and `ProcedureSection` compatibility aliases (use `CobolParagraph` and `CobolSection`)
-- **BC-8**: Removed legacy `TokenStream.advance()` and `TokenStream.is_at_end`; fixed `skip_whitespace_and_comments`
-
-### Removed
-
-- `StatementRegistry` dead code; benchmark migrated to `StatementParserRegistry` (DUP-6)
-- Root-level statement parsers replaced by `parsers/statements/` subpackage
-
-### Refactored
-
-- Deduplicated `_skip_whitespace`, `_collect_clause_stmts`, `_get_context`, `_report_error`, `_try_parse_nested_statement` into shared `parsers/statements/_utils` (DUP-1–4)
-- Deduplicated `STATEMENT_TOKEN_TYPES`/`KEYWORDS` into `_utils` (DUP-5)
-- Extracted `_collect_until_condition_tokens`; merged `_parse_until_clause`/`_parse_until_conditional` (DUP-7)
-- Updated metadata handling to use lazy initialization
-
-### Fixed
-
-- Resolved 6 critical parser edge cases causing silent data loss or crashes
-- Fixed fixed-format comment lines being incorrectly parsed as code
-
-### Changed
-
-- License updated to proprietary EULA (copyright Samuel Dion, all rights reserved)
-
-## [1.3.0] - 2026-03-20
+## [1.0.0] - 2026-03-31
 
 ### Added
 
-- **Batch parsing**: `parse_files(paths)` for parallel multi-file parsing using multiprocessing; returns `List[BatchResult]`
-- `BatchResult` and `parse_files` exported from top-level `cobolparser` package
-- IO statement parsers: `OPEN`, `CLOSE`, `READ`, `WRITE`, `REWRITE`, `DELETE`, `START`
-- Advanced configuration options for ignored memory patterns and language server settings
-- Performance benchmark suite
+- COBOL parser for Python 3.13+ with full two-stage pipeline: preprocessing → lexing → parsing → AST
+- IBM Enterprise COBOL dialect support: COMP-3, EXEC SQL, EXEC CICS, 75+ verbs, IBM intrinsic functions
+- Fixed-format and free-form COBOL support with auto-detection; automatic column normalization and comment stripping
+- Multi-line string continuation handling with doubled-quote escape sequences
+- Statement parsers: CALL, PERFORM, MOVE, DISPLAY, ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE, IF, EVALUATE, OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START, COPY, and more
+- Embedded SQL/CICS/IMS statement parsing (EXEC blocks)
+- FD/SD file description and FILE-CONTROL SELECT parsing (including multi-line ASSIGN, ORGANIZATION, ACCESS clauses)
+- Copybook expansion via `expand_copybooks()`
+- JSON serialization of all AST nodes with optional source location and metadata
+- Error recovery modes: `FAIL_FAST` (default) and `COLLECT_ALL`
+- Configurable memory management: 64MB–8GB limits, chunk-based streaming for large files
+- `parse_files(paths)` for parallel multi-file batch parsing using multiprocessing
+- `ParseResult` with AST, errors, warnings, and `ParseStatistics` (timings, counts, peak memory)
+- Plugin architecture (`cobolparser/plugins/core.py`) for memory config, dialect, and serialization config
+- `ASTNodeFactory` for validated, consistent AST node construction
+- `StatementParserRegistry` for dynamic statement parser dispatch
+- IO coverage reporter and CLI (`python -m cobolparser.cli.coverage`)
+- 2,975 unit, integration, and contract tests; 81%+ line coverage enforced
 
-### Fixed
+### Design
 
-- `parse_cobol` exceptions now caught in worker to prevent batch abort
-- Level number matching uses pre-compiled regex pattern
-
-## [1.1.0] - 2026-01-29
-
-### Added
-
-- **Auto-detection of fixed-format COBOL**: The `parse_cobol` function now automatically detects if a file is in fixed-format based on sequence numbers and indicator area.
-- **Enhanced Multi-line String Support**: Robust handling of COBOL string literals spanning multiple lines, including support for continuation indicators and doubled quotes as escape sequences.
-- **Comprehensive Lexer Tests**: New suite of 14 unit tests specifically for multi-line string literal edge cases and real-world scenarios.
-
-### Improvements
-
-- Improved lexer robustness for malformed continuation patterns.
-- Added COBOL fixed-format column constants for better code maintainability.
-- Refactored `_continue_multiline_string` to use character-by-character scanning for accurate quote escaping.
-
-
-## [1.0.0] - 2026-01-11
-
-### Added
-
-- Initial COBOL parser implementation
-- Support for IBM Enterprise COBOL dialect
-- Core statement parsing (CALL, PERFORM, MOVE, DISPLAY, etc.)
-- File I/O statement parsing (OPEN, CLOSE, READ, WRITE, etc.)
-- SQL/CICS/IMS embedded statement parsing
-- COPY statement processing with copybook expansion
-- FD/SD file description parsing
-- JSON serialization of AST nodes
-- Error recovery modes (FAIL_FAST, COLLECT_ALL)
-- Plugin architecture for extensibility
-
-### Features
-
-- Fixed-format and free-form COBOL support
-- Multi-line string continuation
-- Comprehensive error reporting with SourceLocation
-- Performance monitoring with configurable memory limits
-- Type hints for all public APIs
-
-### Tests
-
-- 618+ unit, integration, and contract tests
-- 90%+ code coverage on core modules
-- Performance test suite for parsing speed
+- All AST nodes extend `ASTNode` with mandatory `to_dict()` for JSON serialization
+- `TokenStream` wraps `List[Token]` with `peek()`, `consume()`, `expect()`
+- Division parsers (`IdentificationDivisionParser`, `DataDivisionParser`, `ProcedureDivisionParser`, etc.) are each independently testable
+- Statement parsers live in `cobolparser/parsers/statements/`, one file per verb or verb group
+- Proprietary license — copyright © 2026 Samuel Dion, all rights reserved

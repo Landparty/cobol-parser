@@ -6,7 +6,12 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 
 ### 🎯 Getting Started
 - **[Cookbook / Usage Examples](cookbook.md)** - 🍳 **Start Here!** Real-world recipes for SQL extraction, dependency mapping, and more.
-- **[Parser Invocation Guide](PARSER_INVOCATION_GUIDE.md)** - How to use the parser API
+- **[Parser Invocation Guide](PARSER_INVOCATION_GUIDE.md)** - Full API reference and usage patterns
+- **[Configuration](configuration.md)** - Memory, error recovery, serialization, batch parsing
+- **[Architecture](architecture.md)** - Pipeline, packages, adding new statement parsers
+- **[Performance](performance.md)** - Benchmarks, monitoring, optimization tips
+- **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
+- **[Contributing](contributing.md)** - Development setup and PR checklist
 
 ### 📖 Statement Parsing Examples
 - **[CALL Statements](call-statements.md)** - Function/procedure calls with parameters
@@ -79,7 +84,7 @@ These examples demonstrate how the COBOL parser converts COBOL source code into 
 
 ## ⚙️ Parser Configuration
 
-All examples use the default parser configuration with IBM Enterprise COBOL dialect support enabled. For custom parsing configurations, see the main [README](../README.md).
+All examples use the default parser configuration with IBM Enterprise COBOL dialect support enabled. For custom configurations, see [configuration.md](configuration.md).
 
 ## 📦 Archived Documentation
 
