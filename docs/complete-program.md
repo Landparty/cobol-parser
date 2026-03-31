@@ -279,8 +279,6 @@ This document shows the complete AST output for a comprehensive COBOL program th
               "sql_type": "DECLARE",
               "sql_text": "DECLARE EMP_CURSOR CURSOR FOR SELECT EMP_ID, EMP_NAME, SALARY FROM EMPLOYEE WHERE DEPT_ID = :WS-DEPT-ID ORDER BY EMP_NAME",
               "host_variables": ["WS-DEPT-ID"],
-              "sql_operation": "DECLARE",
-              "table_references": ["EMPLOYEE"],
               "location": {
                 "file": "employee-report.cob",
                 "line": 18,
@@ -297,8 +295,6 @@ This document shows the complete AST output for a comprehensive COBOL program th
               "sql_type": "OPEN",
               "sql_text": "OPEN EMP_CURSOR",
               "host_variables": [],
-              "sql_operation": "OPEN",
-              "table_references": [],
               "location": {
                 "file": "employee-report.cob",
                 "line": 24,
@@ -334,8 +330,6 @@ This document shows the complete AST output for a comprehensive COBOL program th
               "sql_type": "CLOSE",
               "sql_text": "CLOSE EMP_CURSOR",
               "host_variables": [],
-              "sql_operation": "CLOSE",
-              "table_references": [],
               "location": {
                 "file": "employee-report.cob",
                 "line": 30,
@@ -424,8 +418,6 @@ This document shows the complete AST output for a comprehensive COBOL program th
               "sql_type": "FETCH",
               "sql_text": "FETCH EMP_CURSOR INTO :WS-EMP-ID, :WS-EMP-NAME, :WS-EMP-SALARY",
               "host_variables": ["WS-EMP-ID", "WS-EMP-NAME", "WS-EMP-SALARY"],
-              "sql_operation": "FETCH",
-              "table_references": [],
               "location": {
                 "file": "employee-report.cob",
                 "line": 43,

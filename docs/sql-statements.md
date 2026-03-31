@@ -28,8 +28,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "WS-SALARY",
     "SEARCH-ID"
   ],
-  "sql_operation": "SELECT",
-  "table_references": ["EMPLOYEE"],
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -47,8 +45,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
 - `sql_type`: Type of SQL operation (SELECT, INSERT, UPDATE, DELETE, etc.)
 - `sql_text`: Complete SQL statement text
 - `host_variables`: Array of COBOL variable names used as host variables (prefixed with :)
-- `table_references`: Tables accessed by the SQL statement
-- `sql_operation`: Specific SQL command being executed
 
 ## INSERT Statement
 
@@ -73,8 +69,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "WS-EMP-NAME",
     "WS-SALARY"
   ],
-  "sql_operation": "INSERT",
-  "table_references": ["EMPLOYEE"],
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -112,8 +106,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "NEW-SALARY",
     "WS-EMP-ID"
   ],
-  "sql_operation": "UPDATE",
-  "table_references": ["EMPLOYEE"],
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -149,8 +141,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
   "host_variables": [
     "WS-EMP-ID"
   ],
-  "sql_operation": "DELETE",
-  "table_references": ["EMPLOYEE"],
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -180,8 +170,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
   "sql_type": "COMMIT",
   "sql_text": "COMMIT",
   "host_variables": [],
-  "sql_operation": "COMMIT",
-  "table_references": [],
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -224,8 +212,6 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "WS-PROJECT-COUNT",
     "WS-DEPT-ID"
   ],
-  "sql_operation": "SELECT",
-  "table_references": ["EMPLOYEE", "PROJECTS"],
   "location": {
     "file": "example.cob",
     "line": 3,
@@ -254,9 +240,7 @@ def analyze_sql_statements(cobol_source):
         if isinstance(node, ExecSQLStatement):
             sql_info.append({
                 'type': node.sql_type,
-                'operation': node.sql_operation,
                 'host_variables': node.host_variables,
-                'tables': node.table_references,
                 'line': node.location.line,
                 'has_host_vars': len(node.host_variables) > 0
             })
@@ -270,10 +254,10 @@ def analyze_sql_statements(cobol_source):
 
 # Example output:
 # [
-#   {'type': 'SELECT', 'operation': 'SELECT', 'host_variables': ['WS-EMP-ID', 'WS-EMP-NAME', 'WS-SALARY', 'SEARCH-ID'], 'tables': ['EMPLOYEE'], 'line': 3, 'has_host_vars': True},
-#   {'type': 'INSERT', 'operation': 'INSERT', 'host_variables': ['WS-EMP-ID', 'WS-EMP-NAME', 'WS-SALARY'], 'tables': ['EMPLOYEE'], 'line': 3, 'has_host_vars': True},
-#   {'type': 'UPDATE', 'operation': 'UPDATE', 'host_variables': ['NEW-SALARY', 'WS-EMP-ID'], 'tables': ['EMPLOYEE'], 'line': 3, 'has_host_vars': True},
-#   {'type': 'DELETE', 'operation': 'DELETE', 'host_variables': ['WS-EMP-ID'], 'tables': ['EMPLOYEE'], 'line': 3, 'has_host_vars': True},
-#   {'type': 'COMMIT', 'operation': 'COMMIT', 'host_variables': [], 'tables': [], 'line': 3, 'has_host_vars': False}
+#   {'type': 'SELECT', 'host_variables': ['WS-EMP-ID', 'WS-EMP-NAME', 'WS-SALARY', 'SEARCH-ID'], 'line': 3, 'has_host_vars': True},
+#   {'type': 'INSERT', 'host_variables': ['WS-EMP-ID', 'WS-EMP-NAME', 'WS-SALARY'], 'line': 3, 'has_host_vars': True},
+#   {'type': 'UPDATE', 'host_variables': ['NEW-SALARY', 'WS-EMP-ID'], 'line': 3, 'has_host_vars': True},
+#   {'type': 'DELETE', 'host_variables': ['WS-EMP-ID'], 'line': 3, 'has_host_vars': True},
+#   {'type': 'COMMIT', 'host_variables': [], 'line': 3, 'has_host_vars': False}
 # ]
 ```

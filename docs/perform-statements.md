@@ -133,7 +133,7 @@ This document shows examples of how PERFORM statements are parsed into AST nodes
     "right_operand": 10
   },
   "varying_clause": {
-    "control_variable": "WS-I",
+    "variable": "WS-I",
     "from_value": 1,
     "by_value": 1
   },
@@ -243,7 +243,7 @@ def analyze_perform_statements(cobol_source):
             elif node.perform_type == 'UNTIL':
                 info['condition'] = str(node.until_condition) if node.until_condition else None
             elif node.perform_type == 'VARYING':
-                info['varying_var'] = node.varying_clause.control_variable if node.varying_clause else None
+                info['varying_var'] = node.varying_clause.get('variable') if node.varying_clause else None
             elif node.perform_type == 'INLINE':
                 info['statement_count'] = len(node.inline_statements) if node.inline_statements else 0
 
