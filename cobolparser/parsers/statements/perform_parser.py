@@ -1,6 +1,6 @@
 """Perform statement parser implementing IStatementParser interface."""
 
-from typing import Optional, Any
+from typing import Optional, Any, cast
 from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...core.exceptions import TokenMismatch, UnexpectedEndOfInput
 from ...core.ast_factory import get_factory
@@ -22,13 +22,13 @@ class PerformStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return (token.type == TokenType.PERFORM or
-                    (token.type == TokenType.IDENTIFIER and token.value and 
-                     token.value.upper() == "PERFORM"))
+            return bool(token.type == TokenType.PERFORM or
+                        (token.type == TokenType.IDENTIFIER and token.value and
+                         token.value.upper() == "PERFORM"))
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> PerformStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> PerformStatement:
         """Parse a PERFORM statement.
         
         Supports:
@@ -45,7 +45,7 @@ class PerformStatementParser(IStatementParser):
         
         # Create statement with source location
         location = start_token.location if start_token else SourceLocation(0, 0)
-        stmt = factory.create(PerformStatement, location)
+        stmt = cast(PerformStatement, factory.create(PerformStatement, location))
         context = get_parse_context(token_stream)
         
         # Skip whitespace/comments if possible
@@ -162,24 +162,25 @@ class PerformStatementParser(IStatementParser):
                 if token and (token.type == TokenType.TIMES or 
                              (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"))):
                     # Can be numeric (int) or variable (string)
+                    para_times_count: Any
                     try:
-                        times_count = int(times_value)
+                        para_times_count = int(times_value)
                     except ValueError:
-                        times_count = times_value  # Keep as variable name string
-                    
+                        para_times_count = times_value  # Keep as variable name string
+
                     token_stream.consume()  # Skip TIMES keyword
-                    stmt.set_times_clause(times_count)
+                    stmt.set_times_clause(para_times_count)
                     token = token_stream.peek()
-            elif token and (token.type == TokenType.NUMERIC_LITERAL or 
+            elif token and (token.type == TokenType.NUMERIC_LITERAL or
                            token.type == TokenType.LEVEL_NUMBER):
                 try:
-                    times_count = int(token.value)
+                    num_times_count = int(token.value)
                     token_stream.consume()
                     token = token_stream.peek()
-                    if token and (token.type == TokenType.TIMES or 
+                    if token and (token.type == TokenType.TIMES or
                                  (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"))):
                         token_stream.consume()
-                        stmt.set_times_clause(times_count)
+                        stmt.set_times_clause(num_times_count)
                         token = token_stream.peek()
                 except Exception:
                     pass
@@ -366,7 +367,8 @@ class PerformStatementParser(IStatementParser):
     def _parse_until_condition_only(self, stream: ITokenStream, stmt: PerformStatement) -> None:
         """Parse just the UNTIL condition after paragraph name."""
         try:
-            if stream.peek() and stream.peek().value and stream.peek().value.upper() == "UNTIL":
+            _ut = stream.peek()
+            if _ut and _ut.value and _ut.value.upper() == "UNTIL":
                 stream.consume()
             
             skip_whitespace(stream)

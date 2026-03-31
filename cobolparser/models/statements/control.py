@@ -168,7 +168,7 @@ class EvaluateStatement(CobolStatement):
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
-        subjects_serialized = []
+        subjects_serialized: List[Any] = []
         for subj in self.subjects:
             if isinstance(subj, CobolExpression):
                 subjects_serialized.append(subj.to_dict())

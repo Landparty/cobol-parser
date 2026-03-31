@@ -438,7 +438,7 @@ class CobolDataItem(ASTNode):
 
 
 # Update the placeholder in program.py to use the full implementation
-def update_cobol_data_item_placeholder():
+def update_cobol_data_item_placeholder() -> None:
     """Update the CobolDataItem placeholder in program.py with full implementation."""
     # This would be handled by importing the real implementation
     pass

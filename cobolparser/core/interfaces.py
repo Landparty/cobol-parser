@@ -6,24 +6,21 @@ from typing import Optional, TYPE_CHECKING, Protocol, Any, Union
 if TYPE_CHECKING:
     from ..lexer import Token
     from ..models.ast_base import ASTNode
-    from .registry import StatementRegistry, StatementParserRegistry
+    from .registry import StatementParserRegistry
 
 
 class ITokenStream(ABC):
     """Minimal interface for token stream navigation."""
 
     @abstractmethod
-    def peek(self, offset: int = 0) -> "Token":
+    def peek(self, offset: int = 0) -> Optional["Token"]:
         """Look at token without consuming it.
-        
+
         Args:
             offset: How many tokens ahead to peek (default: 0 = next token)
-            
+
         Returns:
-            The token at the specified position
-            
-        Raises:
-            UnexpectedEndOfInput: If offset exceeds remaining tokens
+            The token at the specified position, or None if out of bounds
         """
         pass
 
@@ -63,6 +60,10 @@ class ITokenStream(ABC):
         """
         pass
 
+    def skip_whitespace_and_comments(self) -> None:
+        """Skip whitespace, comment, newline, and continuation tokens."""
+        pass
+
     @property
     def context(self) -> Optional[Any]:
         """Optional parse context attached to this stream.
@@ -72,6 +73,11 @@ class ITokenStream(ABC):
         implementation returns None; TokenStream overrides it.
         """
         return None
+
+    @context.setter
+    def context(self, value: Optional[Any]) -> None:
+        """Set the parse context attached to this stream."""
+        pass
 
 
 class IDivisionParser(ABC):
@@ -109,15 +115,16 @@ class IStatementParser(ABC):
     """Interface for statement-specific parsers."""
 
     @abstractmethod
-    def parse(self, token_stream: ITokenStream) -> "ASTNode":
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> "ASTNode":
         """Parse the statement from token stream.
-        
+
         Args:
             token_stream: The token stream to parse from
-            
+            context: Optional parse context for nested parsing
+
         Returns:
             AST node representing the parsed statement
-            
+
         Raises:
             ParseError: If statement cannot be parsed
         """
@@ -167,7 +174,7 @@ class ParserHost(Protocol):
 class ParseContext:
     """Shared context passed to statement parsers during nested parsing operations."""
     
-    def __init__(self, host: Any, registry: Optional[Union["StatementRegistry", "StatementParserRegistry"]] = None):
+    def __init__(self, host: Any, registry: Optional["StatementParserRegistry"] = None):
         """Initialize parsing context.
         
         Args:
@@ -200,7 +207,7 @@ class ParseContext:
         if stream is not None and self.registry:
             if hasattr(stream, 'skip_whitespace_and_comments'):
                 stream.skip_whitespace_and_comments()
-            parser = self.registry.get_parser(stream)
+            parser = self.registry.find_parser(stream)
             if parser:
                 return parser.parse(stream, self)
             return None

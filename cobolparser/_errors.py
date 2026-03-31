@@ -37,6 +37,7 @@ class ParseError(Exception):
         column: Optional[int] = None,
     ) -> None:
         self.message = message
+        self.code: Optional[str] = None
 
         if isinstance(file_path_or_line, int):
             # Legacy calling convention: ParseError(message, line_int, col_int[, location])
@@ -47,7 +48,7 @@ class ParseError(Exception):
                 location = column_or_location
         else:
             # Structured calling convention: ParseError(message, file_path, line_number, column)
-            self.file_path = file_path_or_line  # type: ignore[assignment]
+            self.file_path = file_path_or_line
             self.line_number = line_number_or_col
             self.column = (
                 column_or_location if isinstance(column_or_location, int) else None

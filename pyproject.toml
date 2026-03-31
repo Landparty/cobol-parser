@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel", "mypy>=1.5.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -39,10 +39,9 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cobolparser/cobolparser"
-Documentation = "https://cobolparser.readthedocs.io"
-Repository = "https://github.com/cobolparser/cobolparser"
-"Bug Tracker" = "https://github.com/cobolparser/cobolparser/issues"
+Homepage = "https://github.com/Landparty/cobol-parser"
+Repository = "https://github.com/Landparty/cobol-parser"
+"Bug Tracker" = "https://github.com/Landparty/cobol-parser/issues"
 
 [tool.setuptools.packages.find]
 include = ["cobolparser*"]

@@ -266,7 +266,7 @@ class IBMEnterpriseCobol:
         "XRST", "XDLT", "XRPL"  # Extended operations
     }
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize IBM Enterprise COBOL dialect."""
         self.dialect_type = DialectType.IBM_ENTERPRISE
         self.supported_features = {
@@ -357,7 +357,7 @@ class IBMEnterpriseCobol:
                     
         return stmt
     
-    def validate_program_structure(self, program) -> List[str]:
+    def validate_program_structure(self, program: Any) -> List[str]:
         """Validate program structure for IBM Enterprise COBOL."""
         warnings = []
         
@@ -377,7 +377,7 @@ class IBMEnterpriseCobol:
     
     def get_intrinsic_function_signature(self, function_name: str) -> Optional[Dict[str, Any]]:
         """Get signature information for IBM intrinsic functions."""
-        function_signatures = {
+        function_signatures: Dict[str, Dict[str, Any]] = {
             "CURRENT-DATE": {
                 "return_type": "alphanumeric",
                 "length": 21,

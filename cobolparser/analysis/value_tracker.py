@@ -39,7 +39,7 @@ class DynamicCallAnalyzer:
         ```
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the value tracker."""
         self._variable_values: Dict[str, Set[str]] = {}
         self._dynamic_calls: List[CallStatement] = []

@@ -1,6 +1,6 @@
 """Entry statement parser implementing IStatementParser interface."""
 
-from typing import List
+from typing import Any, List, Optional
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...models.statements import EntryStatement
 from ...models.ast_base import SourceLocation
@@ -34,7 +34,7 @@ class EntryStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> EntryStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> EntryStatement:
         """Parse an ENTRY statement.
         
         Handles:
@@ -88,11 +88,12 @@ class EntryStatementParser(IStatementParser):
         self._parse_using_clause(token_stream, stmt)
         
         # Consume period if present
-        if not token_stream.is_empty() and token_stream.peek().value == ".":
+        _t = token_stream.peek()
+        if not token_stream.is_empty() and _t and _t.value == ".":
             token_stream.consume()
-        
+
         return stmt
-    
+
     def _parse_using_clause(self, token_stream: ITokenStream, stmt: EntryStatement) -> None:
         """Parse the optional USING clause of an ENTRY statement.
         

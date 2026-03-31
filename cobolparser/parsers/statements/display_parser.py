@@ -6,7 +6,7 @@ statement parsing in the extracted statement parser architecture.
 Uses ASTNodeFactory for validated node creation.
 """
 
-from typing import Optional
+from typing import Any, Optional
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import DisplayStatement
@@ -54,7 +54,7 @@ class DisplayStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> DisplayStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> DisplayStatement:
         """Parse a DISPLAY statement from the token stream.
         
         Consumes tokens starting from DISPLAY keyword through statement terminator
@@ -132,7 +132,7 @@ class DisplayStatementParser(IStatementParser):
         return stmt if isinstance(stmt, DisplayStatement) else DisplayStatement(start_location)
     
     @staticmethod
-    def _is_keyword(token, keyword: str) -> bool:
+    def _is_keyword(token: Any, keyword: str) -> bool:
         """Check if token is a specific keyword (case-insensitive).
         
         Args:
@@ -145,7 +145,7 @@ class DisplayStatementParser(IStatementParser):
         if not token or not hasattr(token, 'value'):
             return False
         
-        return (token.type == TokenType.IDENTIFIER and 
-                token.value and 
-                token.value.upper() == keyword.upper())
+        return bool(token.type == TokenType.IDENTIFIER and
+                    token.value and
+                    token.value.upper() == keyword.upper())
     

@@ -5,7 +5,7 @@ establishing the contract that all division-specific parsers must follow.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from cobolparser.core.interfaces import ITokenStream, IDivisionParser
 from cobolparser.models.ast_base import ASTNode, SourceLocation
@@ -28,7 +28,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
     division_name: Optional[str] = None  # e.g., "IDENTIFICATION", "DATA", "PROCEDURE"
     division_keywords: tuple = ()  # e.g., ("IDENTIFICATION", "ID")
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the base division parser."""
         if not self.division_name:
             raise ValueError(
@@ -157,7 +157,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
     @abstractmethod
     def _create_ast_node(
         self,
-        division_token,
+        division_token: Any,
         division_content: Dict[str, Any],
         start_location: SourceLocation
     ) -> ASTNode:

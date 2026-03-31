@@ -1,6 +1,6 @@
 """Read statement parser implementing IStatementParser interface."""
 
-from typing import cast
+from typing import Any, Optional, cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import IOReadStatement  # noqa: F401 used via factory
@@ -29,7 +29,7 @@ class ReadStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> IOReadStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOReadStatement:
         """Parse a READ statement."""
         start_token = token_stream.consume()
         factory = get_factory()

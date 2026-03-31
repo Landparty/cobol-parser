@@ -120,7 +120,7 @@ class ExpansionStatistics:
             "total_bytes_processed": self.total_bytes_processed,
         }
         if self.warnings:
-            result["warnings"] = self.warnings
+            result["warnings"] = self.warnings  # type: ignore[assignment]
         return result
 
 
@@ -279,7 +279,7 @@ class ExpansionContext:
             return self.content_cache[key]
         return None
         
-    def cache_put(self, key: str, value: str):
+    def cache_put(self, key: str, value: str) -> None:
         """Put item in cache with eviction if full."""
         if key in self.content_cache:
             self.cache_order.remove(key)

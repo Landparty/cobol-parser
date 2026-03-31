@@ -12,6 +12,7 @@ from enum import Enum
 
 from cobolparser.core.interfaces import IDivisionParser, ITokenStream
 from cobolparser.core.exceptions import DivisionNotFoundError
+from cobolparser.models.ast_base import ASTNode
 
 
 class DivisionType(Enum):
@@ -35,7 +36,7 @@ class DivisionParserFactory:
     it can parse (via can_parse()) will be used.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the division parser factory with empty registry."""
         self._parser_registry: Dict[DivisionType, Type[IDivisionParser]] = {}
         self._parser_instances: Dict[DivisionType, IDivisionParser] = {}
@@ -114,7 +115,7 @@ class DivisionParserFactory:
         
         return None
 
-    def parse_division(self, token_stream: ITokenStream):
+    def parse_division(self, token_stream: ITokenStream) -> "ASTNode":
         """Parse a division using the appropriate registered parser.
         
         Finds the correct parser and uses it to parse the division.
@@ -139,8 +140,7 @@ class DivisionParserFactory:
             first_token = token_stream.peek(0)
             token_value = first_token.value if first_token else "EOF"
             raise DivisionNotFoundError(
-                f"Unknown division type: {token_value}",
-                first_token.location if first_token else None
+                f"Unknown division type: {token_value}"
             )
         
         return parser.parse(token_stream)

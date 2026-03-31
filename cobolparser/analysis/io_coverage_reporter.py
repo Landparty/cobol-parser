@@ -99,6 +99,7 @@ class IOCoverageReporter:
         """
         # Only search for files if they're not provided explicitly
         # If they can't be found, set to None to allow for test mocking
+        self.catalog_path: Optional[str]
         if catalog_path:
             self.catalog_path = catalog_path
         else:
@@ -107,7 +108,8 @@ class IOCoverageReporter:
                 self.catalog_path = self._find_catalog_path()
             except FileNotFoundError:
                 self.catalog_path = None
-        
+
+        self.schema_path: Optional[str]
         if schema_path:
             self.schema_path = schema_path
         else:
@@ -173,7 +175,7 @@ class IOCoverageReporter:
         """Load the IO variation catalog from CSV."""
         import csv
 
-        if not os.path.exists(self.catalog_path):
+        if not self.catalog_path or not os.path.exists(self.catalog_path):
             raise FileNotFoundError(f"Catalog not found: {self.catalog_path}")
 
         self.variations = []
@@ -460,7 +462,7 @@ class IOCoverageReporter:
         }
 
 
-def main():
+def main() -> int:
     """CLI entry point for IO coverage reporting."""
     import argparse
 

@@ -491,7 +491,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
     def _create_ast_node(
         self,
-        division_token,
+        division_token: Any,
         division_content: Dict[str, Any],
         start_location: SourceLocation
     ) -> ASTNode:
@@ -551,7 +551,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         Returns:
             SelectStatement AST node
         """
-        location = select_data.get("location")
+        location = select_data.get("location") or SourceLocation(0, 0)
         select_stmt = SelectStatement(location)
         
         # Set file name

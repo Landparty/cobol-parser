@@ -5,7 +5,7 @@ This module provides comprehensive AST nodes for all types of SQL statements
 embedded within COBOL EXEC SQL blocks, with structured output for analysis.
 """
 
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Union
 from dataclasses import dataclass, field
 import re
 
@@ -479,61 +479,61 @@ def parse_exec_sql(sql_text: str, location: SourceLocation) -> ExecSQLStatement:
 
     # Determine statement type and create appropriate node
     if upper_sql.startswith("DECLARE") and "CURSOR" in upper_sql:
-        stmt = DeclareCursorStatement(location)
-        stmt.set_sql_text(sql_text)
+        declare_stmt = DeclareCursorStatement(location)
+        declare_stmt.set_sql_text(sql_text)
         # Extract cursor name
         match = _SQL_DECLARE_CURSOR_RE.search(sql_text)
         if match:
-            stmt.cursor_name = match.group(1)
+            declare_stmt.cursor_name = match.group(1)
         # Extract SELECT statement
         match = _SQL_FOR_SELECT_RE.search(sql_text)
         if match:
-            stmt.set_select_statement(match.group(1))
+            declare_stmt.set_select_statement(match.group(1))
         # Extract cursor options
         if "WITH HOLD" in upper_sql:
-            stmt.add_cursor_option("WITH HOLD")
+            declare_stmt.add_cursor_option("WITH HOLD")
         if "FOR UPDATE" in upper_sql:
-            stmt.add_cursor_option("FOR UPDATE")
-        return stmt
+            declare_stmt.add_cursor_option("FOR UPDATE")
+        return declare_stmt
 
     elif upper_sql.startswith("FETCH"):
-        stmt = FetchStatement(location)
-        stmt.set_sql_text(sql_text)
+        fetch_stmt = FetchStatement(location)
+        fetch_stmt.set_sql_text(sql_text)
         # Extract direction
         for direction in ["NEXT", "PRIOR", "FIRST", "LAST"]:
             if direction in upper_sql:
-                stmt.set_fetch_direction(direction)
+                fetch_stmt.set_fetch_direction(direction)
                 break
-        return stmt
+        return fetch_stmt
 
     elif upper_sql.startswith("PREPARE") or upper_sql.startswith("EXECUTE"):
-        stmt = DynamicSQLStatement(location)
-        stmt.set_sql_text(sql_text)
+        dynamic_stmt = DynamicSQLStatement(location)
+        dynamic_stmt.set_sql_text(sql_text)
         # Extract USING variables
         match = _SQL_USING_VARS_RE.search(sql_text)
         if match:
             using_clause = match.group(1)
             vars_matches = _SQL_HOST_VAR_RE.findall(using_clause)
             for var in vars_matches:
-                stmt.add_using_variable(var)
-        return stmt
+                dynamic_stmt.add_using_variable(var)
+        return dynamic_stmt
 
     elif upper_sql.startswith("COMMIT") or upper_sql.startswith("ROLLBACK"):
-        stmt = TransactionControlStatement(location)
-        stmt.set_sql_text(sql_text)
+        txn_stmt = TransactionControlStatement(location)
+        txn_stmt.set_sql_text(sql_text)
         if "WORK" in upper_sql:
-            stmt.is_work = True
+            txn_stmt.is_work = True
         # Check for savepoint
         match = _SQL_SAVEPOINT_RE.search(sql_text)
         if match:
-            stmt.set_savepoint(match.group(1))
-        return stmt
+            txn_stmt.set_savepoint(match.group(1))
+        return txn_stmt
 
     else:
         # Default to generic ExecSQLStatement
-        stmt = ExecSQLStatement(location)
-        stmt.set_sql_text(sql_text)
-        return stmt
+        generic_stmt = ExecSQLStatement(location)
+        generic_stmt.set_sql_text(sql_text)
+        return generic_stmt
 
 
 __all__ = [

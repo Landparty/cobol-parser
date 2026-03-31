@@ -56,7 +56,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
     division_name = "PROCEDURE"
     division_keywords = ()
 
-    def __init__(self, host=None):
+    def __init__(self, host: Any = None) -> None:
         """Initialize Procedure Division parser with statement registry.
         
         Args:
@@ -66,7 +66,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         self.host = host
         self._statement_registry = self._create_statement_registry()
 
-    def set_host(self, host):
+    def set_host(self, host: Any) -> None:
         """Set the host parser after initialization.
         
         Args:
@@ -182,13 +182,16 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 token_stream.consume()  # consume section name
                 
                 # Skip to SECTION keyword
-                while not token_stream.is_empty() and token_stream.peek(0).value.upper() != "SECTION":
+                _ps = token_stream.peek(0)
+                while not token_stream.is_empty() and _ps and _ps.value and _ps.value.upper() != "SECTION":
                     token_stream.consume()
-                
+                    _ps = token_stream.peek(0)
+
                 if not token_stream.is_empty():
                     token_stream.consume()  # consume SECTION
-                
-                if not token_stream.is_empty() and token_stream.peek(0).value == ".":
+
+                _pp = token_stream.peek(0)
+                if not token_stream.is_empty() and _pp and _pp.value == ".":
                     token_stream.consume()  # consume period
                 
                 section_dict = {
@@ -245,7 +248,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 token_stream.consume()  # consume paragraph name
                 
                 # Skip period after paragraph name if present
-                if not token_stream.is_empty() and token_stream.peek(0).value == ".":
+                _pn = token_stream.peek(0)
+                if not token_stream.is_empty() and _pn and _pn.value == ".":
                     token_stream.consume()
                 
                 # Parse statements in paragraph until next paragraph/section or EOF
@@ -498,7 +502,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
     def _create_ast_node(
         self,
-        division_token,
+        division_token: Any,
         division_content: Dict[str, Any],
         start_location: SourceLocation
     ) -> ASTNode:

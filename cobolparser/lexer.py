@@ -814,7 +814,7 @@ class CobolLexer:
         - Columns 8-72: Program text
         - Columns 73-80: Identification (ignored)
         """
-        line_tokens = []
+        line_tokens: List[Token] = []
 
         if len(line) < 7:
             return line_tokens
@@ -998,7 +998,7 @@ class CobolLexer:
         self, text: str, line_num: int, start_col: int
     ) -> List[Token]:
         """Tokenize COBOL program text from a line."""
-        tokens = []
+        tokens: List[Token] = []
         pos = 0
 
         while pos < len(text):
@@ -1091,7 +1091,8 @@ class CobolLexer:
                         pos = new_pos
                         continue
                 else:
-                    tokens.append(token)
+                    if token is not None:
+                        tokens.append(token)
                     pos = new_pos
                     continue
 

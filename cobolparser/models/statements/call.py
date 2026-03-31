@@ -36,27 +36,27 @@ class CallStatement(CobolStatement):
         self._is_dynamic: bool = False
         self._possible_values: List[str] = []
 
-    def set_called_program(self, program_name: str, is_dynamic: bool = False):
+    def set_called_program(self, program_name: str, is_dynamic: bool = False) -> None:
         """Set the called program name and type."""
         self.called_program = program_name
         self._is_dynamic = is_dynamic
         if program_name not in self.operands:
             self.add_operand(program_name)
 
-    def add_using_parameter(self, param_name: str, passing_mode: str = "REFERENCE"):
+    def add_using_parameter(self, param_name: str, passing_mode: str = "REFERENCE") -> None:
         """Add a parameter to the USING clause."""
         param = CallParameter(param_name, passing_mode)
         self.using_parameters.append(param)
         if param_name not in self.operands:
             self.add_operand(param_name)
 
-    def set_giving_parameter(self, param_name: str):
+    def set_giving_parameter(self, param_name: str) -> None:
         """Set the GIVING parameter."""
         self.giving_parameter = param_name
         if param_name not in self.operands:
             self.add_operand(param_name)
 
-    def set_returning_parameter(self, param_name: str):
+    def set_returning_parameter(self, param_name: str) -> None:
         """Set the RETURNING parameter."""
         self.returning_parameter = param_name
         if param_name not in self.operands:
@@ -76,12 +76,12 @@ class CallStatement(CobolStatement):
         """Get possible values for dynamic call target."""
         return list(self._possible_values)
 
-    def add_possible_value(self, value: str):
+    def add_possible_value(self, value: str) -> None:
         """Add a possible value for dynamic call."""
         if value not in self._possible_values:
             self._possible_values.append(value)
 
-    def set_possible_values(self, values: List[str]):
+    def set_possible_values(self, values: List[str]) -> None:
         """Set all possible values."""
         self._possible_values = list(set(values))  # Deduplicate
 

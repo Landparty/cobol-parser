@@ -1,3 +1,4 @@
+from typing import Any, Optional
 """Stop statement parser implementing IStatementParser interface."""
 
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -18,7 +19,7 @@ class StopStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> StopStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> StopStatement:
         """Parse a STOP statement."""
         start_token = token_stream.consume()
         if not start_token:

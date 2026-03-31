@@ -142,9 +142,10 @@ class IdentificationDivisionParser(BaseDivisionParser):
         try:
             token_stream.expect(".")
         except TokenMismatch:
+            _t147 = token_stream.peek(0)
             raise ParseError(
                 "Expected '.' after PROGRAM-ID keyword",
-                token_stream.peek(0).location.line if not token_stream.is_empty() else 1
+                (_t147.location.line if _t147 is not None else 1) if not token_stream.is_empty() else 1
             )
         
         # Skip newlines and whitespace after the period (for fixed-format COBOL)
@@ -215,9 +216,10 @@ class IdentificationDivisionParser(BaseDivisionParser):
         try:
             token_stream.expect(".")
         except TokenMismatch:
+            _t220 = token_stream.peek(0)
             raise ParseError(
                 "Expected '.' after clause keyword",
-                token_stream.peek(0).location.line if not token_stream.is_empty() else 1
+                (_t220.location.line if _t220 is not None else 1) if not token_stream.is_empty() else 1
             )
         
         # Collect value tokens until period
@@ -247,7 +249,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
 
     def _create_ast_node(
         self,
-        division_token,
+        division_token: Any,
         division_content: Dict[str, Any],
         start_location: SourceLocation
     ) -> ASTNode:

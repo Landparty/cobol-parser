@@ -6,7 +6,7 @@ data flow analysis, call graph analysis, and value tracking.
 """
 
 # Lazy import to avoid circular dependency with cobolparser.plugins
-def __getattr__(name):
+def __getattr__(name: str) -> object:
     if name == "DynamicCallAnalyzer":
         from .value_tracker import DynamicCallAnalyzer
         return DynamicCallAnalyzer

@@ -1,6 +1,6 @@
 """Open statement parser implementing IStatementParser interface."""
 
-from typing import cast
+from typing import Any, Optional, cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import IOOpenStatement
@@ -29,7 +29,7 @@ class OpenStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> IOOpenStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOOpenStatement:
         """Parse an OPEN statement."""
         start_token = token_stream.consume()
         factory = get_factory()

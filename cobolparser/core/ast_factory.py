@@ -20,30 +20,30 @@ from ..core.exceptions import ValidationError, ParseError
 
 class NodeTypeError(ValidationError):
     """Raised when node type validation fails."""
-    
+
     def __init__(self, expected_type: str, actual_type: str):
         """Initialize type error.
-        
+
         Args:
             expected_type: Expected node type class name
             actual_type: Actual type provided
         """
-        super().__init__(f"Expected node type {expected_type}, got {actual_type}")
+        super().__init__(expected_type, f"Expected node type {expected_type}, got {actual_type}")
 
 
 class FieldValidationError(ValidationError):
     """Raised when required field validation fails."""
-    
+
     def __init__(self, field_name: str, reason: str, node_type: str = ""):
         """Initialize field validation error.
-        
+
         Args:
             field_name: Name of the field that failed validation
             reason: Reason for validation failure
             node_type: Optional node type for context
         """
         context = f" in {node_type}" if node_type else ""
-        super().__init__(f"Field '{field_name}' validation failed{context}: {reason}")
+        super().__init__(node_type or field_name, f"Field '{field_name}' validation failed{context}: {reason}")
 
 
 class ASTNodeFactory:
@@ -66,7 +66,7 @@ class ASTNodeFactory:
     # Registry of known node types and their validation rules
     _node_validators: Dict[str, Dict[str, Any]] = {}
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the AST node factory."""
         self._creation_count = 0
         self._validation_errors: List[str] = []
@@ -176,7 +176,7 @@ class ASTNodeFactory:
         return True
     
     def create(self, node_class: Type[ASTNode], location: SourceLocation,
-              **kwargs) -> ASTNode:
+              **kwargs: Any) -> ASTNode:
         """Create an AST node with validation.
         
         Generic factory method for creating any AST node class with
@@ -200,7 +200,7 @@ class ASTNodeFactory:
         
         try:
             # Create the node
-            node = node_class(location, **kwargs)
+            node = node_class(location, **kwargs)  # type: ignore[arg-type]
             self._creation_count += 1
             
             # Post-creation validation
@@ -222,15 +222,15 @@ class ASTNodeFactory:
         """
         # Validate location is set
         if not hasattr(node, 'location') or node.location is None:
-            raise ValidationError("Node location must be set")
-        
+            raise ValidationError(type(node).__name__, "Node location must be set")
+
         # Validate location is correct type
         if not isinstance(node.location, SourceLocation):
-            raise ValidationError("Node location must be SourceLocation")
-        
+            raise ValidationError(type(node).__name__, "Node location must be SourceLocation")
+
         # Validate node_type is set
         if not hasattr(node, 'node_type') or not node.node_type:
-            raise ValidationError("Node type must be set")
+            raise ValidationError(type(node).__name__, "Node type must be set")
     
     def with_metadata(self, node: ASTNode, metadata: Dict[str, Any]) -> ASTNode:
         """Add metadata to a node.
@@ -314,7 +314,7 @@ def set_factory(factory: ASTNodeFactory) -> None:
 
 
 def create_node(node_class: Type[ASTNode], location: SourceLocation,
-               **kwargs) -> ASTNode:
+               **kwargs: Any) -> ASTNode:
     """Convenience function to create a node using the default factory.
     
     Args:

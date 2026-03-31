@@ -270,7 +270,7 @@ class CobolParser:
         self.current_program = CobolProgram(program_name, program_location)
 
         # Parse divisions in order: IDENTIFICATION -> ENVIRONMENT -> DATA -> PROCEDURE
-        divisions_parsed = []
+        divisions_parsed: List[Any] = []
         
         try:
             if not self.stream:
@@ -367,51 +367,51 @@ class CobolParser:
     # ========== Backward Compatibility Methods ==========
     # For tests that directly call statement parsing methods
 
-    def parse_call_statement(self):
+    def parse_call_statement(self) -> Optional[Any]:
         """Parse CALL statement (backward compatibility)."""
         return self._dispatch_statement_parser(CallStatementParser())
 
-    def parse_move_statement(self):
+    def parse_move_statement(self) -> Optional[Any]:
         """Parse MOVE statement (backward compatibility)."""
         return self._dispatch_statement_parser(MoveStatementParser())
 
-    def parse_display_statement(self):
+    def parse_display_statement(self) -> Optional[Any]:
         """Parse DISPLAY statement (backward compatibility)."""
         return self._dispatch_statement_parser(DisplayStatementParser())
 
-    def parse_if_statement(self):
+    def parse_if_statement(self) -> Optional[Any]:
         """Parse IF statement (backward compatibility)."""
         return self._dispatch_statement_parser(IfStatementParser())
 
-    def parse_perform_statement(self):
+    def parse_perform_statement(self) -> Optional[Any]:
         """Parse PERFORM statement (backward compatibility)."""
         return self._dispatch_statement_parser(PerformStatementParser())
 
-    def parse_evaluate_statement(self):
+    def parse_evaluate_statement(self) -> Optional[Any]:
         """Parse EVALUATE statement (backward compatibility)."""
         return self._dispatch_statement_parser(EvaluateStatementParser())
 
-    def parse_add_statement(self):
+    def parse_add_statement(self) -> Optional[Any]:
         """Parse ADD statement (backward compatibility)."""
         return self._dispatch_statement_parser(AddStatementParser())
 
-    def parse_subtract_statement(self):
+    def parse_subtract_statement(self) -> Optional[Any]:
         """Parse SUBTRACT statement (backward compatibility)."""
         return self._dispatch_statement_parser(SubtractStatementParser())
 
-    def parse_multiply_statement(self):
+    def parse_multiply_statement(self) -> Optional[Any]:
         """Parse MULTIPLY statement (backward compatibility)."""
         return self._dispatch_statement_parser(MultiplyStatementParser())
 
-    def parse_divide_statement(self):
+    def parse_divide_statement(self) -> Optional[Any]:
         """Parse DIVIDE statement (backward compatibility)."""
         return self._dispatch_statement_parser(DivideStatementParser())
 
-    def parse_compute_statement(self):
+    def parse_compute_statement(self) -> Optional[Any]:
         """Parse COMPUTE statement (backward compatibility)."""
         return self._dispatch_statement_parser(ComputeStatementParser())
 
-    def _dispatch_statement_parser(self, parser):
+    def _dispatch_statement_parser(self, parser: Any) -> Optional[Any]:
         """Common dispatcher for statement parsers."""
         if not self.stream and self.current_token_index < len(self.tokens):
             self.stream = TokenStream(self.tokens)

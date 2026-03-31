@@ -1,6 +1,6 @@
 """Write statement parser implementing IStatementParser interface."""
 
-from typing import cast
+from typing import Any, Optional, cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import IOWriteStatement
@@ -30,7 +30,7 @@ class WriteStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> IOWriteStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOWriteStatement:
         """Parse a WRITE statement."""
         start_token = token_stream.consume()
         factory = get_factory()

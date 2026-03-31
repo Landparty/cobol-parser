@@ -63,8 +63,8 @@ class ASTNode(ABC):
         """
         # Check if this node has its own division_name attribute (like CobolDivision)
         if hasattr(self, '_own_division_name'):
-            return getattr(self, '_own_division_name')
-        
+            return str(getattr(self, '_own_division_name'))
+
         if self._division_name:
             return self._division_name
         # Fallback: traverse up to find division
@@ -81,8 +81,8 @@ class ASTNode(ABC):
         """
         # Check if this node has its own section_name attribute (like CobolSection)
         if hasattr(self, '_own_section_name'):
-            return getattr(self, '_own_section_name')
-        
+            return str(getattr(self, '_own_section_name'))
+
         if self._section_name:
             return self._section_name
         # Fallback: traverse up to find section
@@ -100,8 +100,6 @@ class ASTNode(ABC):
     @property
     def metadata(self) -> Dict[str, Any]:
         """Get metadata dictionary for this node (lazily initialized)."""
-        if self._metadata is None:
-            self._metadata = {}
         return self._metadata
 
     def _invalidate_type_cache(self) -> None:
@@ -151,7 +149,7 @@ class ASTNode(ABC):
         while queue:
             node = queue.popleft()
             yield node
-            queue.extend(node.children)  # type: ignore[arg-type]
+            queue.extend(node.children)
     
     def find_first_by_type(self, node_type: str) -> Optional['ASTNode']:
         """Find the first node of a specific type in the subtree."""
@@ -184,8 +182,8 @@ class ASTNode(ABC):
     
     def get_path_from_root(self) -> List['ASTNode']:
         """Get the path from the root to this node."""
-        path = []
-        node = self
+        path: List['ASTNode'] = []
+        node: Optional['ASTNode'] = self
         while node is not None:
             path.insert(0, node)
             node = node.parent
@@ -197,14 +195,10 @@ class ASTNode(ABC):
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
         """Get metadata for this node."""
-        if self._metadata is None:
-            return default
         return self._metadata.get(key, default)
 
     def has_metadata(self, key: str) -> bool:
         """Check if node has specific metadata."""
-        if self._metadata is None:
-            return False
         return key in self._metadata
     
     @abstractmethod
@@ -220,8 +214,7 @@ class ASTNode(ABC):
         """Check if this node is structurally equal to another node."""
         if not isinstance(other, ASTNode):
             return False
-        
-        if (self.node_type != other.node_type or 
+        if (self.node_type != other.node_type or
             len(self.children) != len(other.children)):
             return False
         
@@ -243,8 +236,8 @@ class ASTNode(ABC):
 
 class ValidationResult:
     """Result of AST validation with errors and warnings."""
-    
-    def __init__(self):
+
+    def __init__(self) -> None:
         self.errors: List[str] = []
         self.warnings: List[str] = []
     

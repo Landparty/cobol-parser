@@ -40,7 +40,7 @@ class MemoryConfiguration:
     enable_streaming: bool = False
     chunk_size_kb: int = 512
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate memory configuration parameters."""
         if not (self.MINIMUM_MEMORY_MB <= self.max_memory_mb <= self.MAXIMUM_MEMORY_MB):
             raise ValueError(
@@ -60,7 +60,7 @@ class SerializationConfig:
     include_source_locations: bool = True
     compact_format: bool = False
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate serialization configuration."""
         # All boolean options are always valid
         pass
@@ -96,7 +96,7 @@ class MemoryLimitExceededError(ParseError):
 class ParseStatistics:
     """Comprehensive parsing statistics."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.lines_processed: int = 0
         self.lines_parsed: int = 0
         self.tokens_processed: int = 0
@@ -149,7 +149,7 @@ class ParseStatistics:
 class PluginManager:
     """Plugin management system for parser extensibility."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._plugins: dict[str, object] = {}
         self._active_plugins: list[str] = []
     

@@ -27,7 +27,7 @@ class CallStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> CallStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> CallStatement:
         """Parse a CALL statement.
         
         Supports:
@@ -42,11 +42,11 @@ class CallStatementParser(IStatementParser):
         stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
         
         # Get context for error reporting if available
-        context: Optional[ParseContext] = token_stream.context
-        if context is None:
-            context = getattr(token_stream, '_context', None)
-        if context is None and hasattr(token_stream, 'context'):
-            context = getattr(token_stream, 'context')
+        parse_ctx: Optional[ParseContext] = token_stream.context
+        if parse_ctx is None:
+            parse_ctx = getattr(token_stream, '_context', None)
+        if parse_ctx is None and hasattr(token_stream, 'context'):
+            parse_ctx = getattr(token_stream, 'context')
         
         try:
             skip_whitespace(token_stream)
@@ -54,8 +54,8 @@ class CallStatementParser(IStatementParser):
             
             if not token:
                 # Missing program name
-                if context:
-                    context.error(
+                if parse_ctx:
+                    parse_ctx.error(
                         "CALL statement requires a program name (literal or variable)",
                         start_token.location if start_token else SourceLocation(0, 0)
                     )
@@ -75,8 +75,8 @@ class CallStatementParser(IStatementParser):
                 token_stream.consume()
             else:
                 # Unknown token type, report error  
-                if context:
-                    context.error(
+                if parse_ctx:
+                    parse_ctx.error(
                         f"Expected program name (literal or identifier), found {token.type.name if hasattr(token.type, 'name') else str(token.type)}",
                         token.location if hasattr(token, 'location') else SourceLocation(0, 0)
                     )

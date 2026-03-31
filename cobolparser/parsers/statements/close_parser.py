@@ -1,6 +1,6 @@
 """Close statement parser implementing IStatementParser interface."""
 
-from typing import cast
+from typing import Any, Optional, cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import IOCloseStatement
@@ -24,7 +24,7 @@ class CloseStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> IOCloseStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOCloseStatement:
         """Parse a CLOSE statement."""
         start_token = token_stream.consume()
         factory = get_factory()

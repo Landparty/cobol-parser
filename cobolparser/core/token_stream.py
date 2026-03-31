@@ -1,4 +1,4 @@
-from typing import Optional, Iterator, List
+from typing import Any, Optional, Iterator, List
 from contextlib import contextmanager
 from ..lexer import Token, TokenType
 from .exceptions import TokenMismatch, UnexpectedEndOfInput
@@ -90,7 +90,7 @@ class TokenStream(ITokenStream):
     def match_value(self, *values: str) -> bool:
         """Check if next token value matches (case-insensitive)."""
         token = self.peek()
-        return token is not None and token.value and token.value.upper() in [v.upper() for v in values]
+        return bool(token is not None and token.value and token.value.upper() in [v.upper() for v in values])
     
     def skip_whitespace_and_comments(self) -> None:
         """Skip whitespace, comment, newline, and continuation tokens."""
@@ -106,7 +106,7 @@ class TokenStream(ITokenStream):
             self.consume()
             
     @contextmanager
-    def transaction(self):
+    def transaction(self) -> Any:
         """Context manager for backtracking on failure."""
         saved_pos = self._pos
         try:
@@ -114,14 +114,14 @@ class TokenStream(ITokenStream):
         except Exception:
             self._pos = saved_pos
             raise
-    
+
     @property
-    def context(self):
+    def context(self) -> Optional[Any]:
         """Optional ParseContext attached to this stream."""
         return self._parse_context
 
     @context.setter
-    def context(self, value) -> None:
+    def context(self, value: Optional[Any]) -> None:
         self._parse_context = value
 
     @property

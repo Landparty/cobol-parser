@@ -7,7 +7,7 @@ This module implements parsing of the Data Division which contains:
 - LINKAGE SECTION: Program parameter definitions
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Union
 
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
@@ -91,15 +91,17 @@ class DataDivisionParser(BaseDivisionParser):
         token_stream.consume()
         
         # Consume 'SECTION' keyword if present
-        if token_stream.peek() and token_stream.peek().value.upper() == "SECTION":
+        _dt = token_stream.peek()
+        if _dt and _dt.value and _dt.value.upper() == "SECTION":
             token_stream.consume()
-        
+
         # Consume period if present
-        if token_stream.peek() and token_stream.peek().type == TokenType.PERIOD:
+        _dp = token_stream.peek()
+        if _dp and _dp.type == TokenType.PERIOD:
             token_stream.consume()
         
         # Parse data items until we reach next section or division
-        data_items = []
+        data_items: List[Union[ConditionNameItem, RenamesItem, CobolDataItem]] = []
         section_keywords = {"SECTION", "FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE",
                            "DATA", "PROCEDURE", "ENVIRONMENT", "IDENTIFICATION"}
         division_token_types = {TokenType.IDENTIFICATION_DIVISION, TokenType.ENVIRONMENT_DIVISION, 
@@ -181,8 +183,8 @@ class DataDivisionParser(BaseDivisionParser):
         if not data_items:
             return []
         
-        top_level_items = []
-        stack = []  # Stack of (level, item) pairs
+        top_level_items: List[Any] = []
+        stack: List[Any] = []  # Stack of (level, item) pairs
         
         for item in data_items:
             # Level-88 condition names attach to the most recent item on the stack
@@ -646,7 +648,7 @@ class DataDivisionParser(BaseDivisionParser):
 
     def _create_ast_node(
         self,
-        division_token,
+        division_token: Any,
         division_content: Dict[str, Any],
         start_location: SourceLocation
     ) -> ASTNode:

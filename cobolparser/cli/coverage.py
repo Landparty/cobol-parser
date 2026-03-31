@@ -137,7 +137,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_render(args: argparse.Namespace) -> int:
     """Render coverage artifact as Markdown/CSV."""
     sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "io_coverage"))
-    from render_markdown import CoverageRenderer
+    from render_markdown import CoverageRenderer  # type: ignore[import-not-found]
 
     try:
         renderer = CoverageRenderer(args.input)

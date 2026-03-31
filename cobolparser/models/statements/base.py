@@ -51,6 +51,7 @@ class CobolExpression(ASTNode):
     def __init__(self, expression_type: str, location: SourceLocation):
         super().__init__("Expression", location)
         self.expression_type = expression_type
+        self.operands: List[str] = []
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert expression to dictionary representation."""
@@ -219,7 +220,7 @@ class FunctionCall(CobolExpression):
         """Convert function call to dictionary representation."""
         result = super().to_dict()
 
-        args_dict = []
+        args_dict: List[Any] = []
         for arg in self.arguments:
             if isinstance(arg, CobolExpression):
                 args_dict.append(arg.to_dict())

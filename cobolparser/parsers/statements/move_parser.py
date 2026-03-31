@@ -1,6 +1,6 @@
 """Move statement parser implementing IStatementParser interface."""
 
-from typing import cast
+from typing import Any, Optional, cast
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...core.ast_factory import get_factory
 from ...models.statements import MoveStatement
@@ -31,7 +31,7 @@ class MoveStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> MoveStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> MoveStatement:
         """Parse a MOVE statement."""
         start_token = token_stream.consume()
         factory = get_factory()

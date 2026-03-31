@@ -8,7 +8,7 @@ JSON serialization support.
 
 import fnmatch
 import json
-from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING, cast
 from .ast_base import ASTNode, SourceLocation, ValidationResult
 from ..plugins import SerializationConfig
 
@@ -78,7 +78,7 @@ class CobolDivision(ASTNode):
         """
         if self.division_name == "PROCEDURE" and not self._sections:
             # Return paragraphs as sections for PROCEDURE division without sections
-            return self.paragraphs
+            return cast(List[Union[CobolSection, 'CobolParagraph']], self.paragraphs)
         return list(self._sections.values())
     
     @property
@@ -94,7 +94,7 @@ class CobolDivision(ASTNode):
     def add_section(self, section: CobolSection) -> None:
         """Add a section to this division."""
         self.add_child(section)
-        self._sections[section.section_name] = section
+        self._sections[section.section_name or ""] = section
     
     def add_paragraph(self, paragraph: 'CobolParagraph') -> None:
         """Add a paragraph directly to this division (procedure division)."""
@@ -108,9 +108,9 @@ class CobolDivision(ASTNode):
             ws_section = CobolSection("WORKING-STORAGE", SourceLocation(1, 1))
             self.add_section(ws_section)
         
-        ws_section = self.get_section_by_name("WORKING-STORAGE")
-        if ws_section:
-            ws_section.add_data_item(data_item)
+        ws_section_node = self.get_section_by_name("WORKING-STORAGE")
+        if isinstance(ws_section_node, CobolSection):
+            ws_section_node.add_data_item(data_item)
     
     def add_statement(self, statement: 'CobolStatement') -> None:
         """Add a statement to this division (procedure division)."""
@@ -129,9 +129,6 @@ class CobolDivision(ASTNode):
             self.add_paragraph(procedure)
         elif isinstance(procedure, CobolSection):
             self.add_section(procedure)
-        else:
-            # Generic add as child
-            self.add_child(procedure)
     
     def get_section_by_name(self, name: str) -> Optional[Union[CobolSection, 'CobolParagraph']]:
         """Get a section by name.
@@ -214,7 +211,7 @@ class CobolProgram(ASTNode):
 
     # Backwards compatibility: expose divisions as list for simple iteration
     @property
-    def divisions(self) -> List[CobolDivision]:  # type: ignore[override]
+    def divisions(self) -> List[CobolDivision]:
         return list(self._divisions.values())
     
     @property
@@ -472,7 +469,7 @@ class CobolProgram(ASTNode):
     
     def get_procedures(self) -> List['CobolProcedure']:
         """Get all procedure paragraphs/sections in the program."""
-        procedures = []
+        procedures: List[CobolProcedure] = []
         
         # Look in PROCEDURE division
         proc_division = self.get_division("PROCEDURE")
@@ -545,7 +542,7 @@ class CobolProgram(ASTNode):
                 found_divisions.append(division_name)
         
         # Check if divisions are in correct order
-        expected_order = [d for d in division_order if d in self.divisions]
+        expected_order = [d for d in division_order if self.has_division(d)]
         if found_divisions != expected_order:
             result.add_warning(f"Divisions not in standard order. Found: {found_divisions}, Expected: {expected_order}")
         
@@ -639,17 +636,16 @@ class CobolProgram(ASTNode):
         
         return result
     
-    def to_json(self, config: Optional[SerializationConfig] = None) -> str:
+    def to_json(self, config_or_indent: Optional[Union[SerializationConfig, int]] = None) -> str:
         """Convert program to JSON representation with configuration options."""
-        if config is None:
-            config = SerializationConfig()
-        
-        data = self.to_dict(config)
-        
-        if config.compact_format:
-            return json.dumps(data, indent=None)
+        if isinstance(config_or_indent, SerializationConfig):
+            config = config_or_indent
+            indent = 2
         else:
-            return json.dumps(data, indent=2)
+            config = SerializationConfig()
+            indent = config_or_indent if config_or_indent is not None else 2
+        data = self.to_dict(config)
+        return json.dumps(data, indent=indent)
     
     @classmethod
     def from_json(cls, json_str: str) -> 'CobolProgram':

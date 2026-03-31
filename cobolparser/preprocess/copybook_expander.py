@@ -8,7 +8,7 @@ source location tracking, content validation, and caching.
 
 import time
 import os
-from typing import Optional
+from typing import Any, Optional
 from pathlib import Path
 from .models import (
     CopybookExpansion,
@@ -276,7 +276,7 @@ def expand_copybooks(
     # If is_normalized is False, it means no changes were made (passthrough), so we return as-is.
     final_source = expanded_source
     if is_normalized:
-        final_lines = []
+        final_lines: list[str] = []
         for line in expanded_lines:
             if not line:
                 final_lines.append(line)
@@ -525,8 +525,8 @@ def parse_cobol_with_expansion(
     filename: str,
     copybook_paths: list[str],
     max_nesting_depth: int = 100,
-    **parser_kwargs,
-):
+    **parser_kwargs: Any,
+) -> Any:
     """
     Convenience function that expands copybooks and parses in one step.
     

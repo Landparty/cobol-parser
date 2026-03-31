@@ -3,6 +3,7 @@
 Support for embedded SQL and CICS statements in COBOL procedures.
 """
 
+from typing import Any, Dict, Optional
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...models.statements import CobolStatement
 from ...models.ast_base import ASTNode, SourceLocation
@@ -47,7 +48,7 @@ class ExecSqlStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream) -> ASTNode:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> ASTNode:
         """Parse an EXEC SQL statement.
         
         Simplified implementation that skips to END-EXEC.
@@ -61,7 +62,7 @@ class ExecSqlStatementParser(IStatementParser):
         
         # Collect SQL content until END-EXEC, preserving host variable syntax (:VAR)
         _NO_SPACE_BEFORE = {TokenType.COLON, TokenType.COMMA, TokenType.PERIOD, TokenType.SEMICOLON}
-        sql_parts = []
+        sql_parts: list[str] = []
         prev_was_colon = False
         while not token_stream.is_empty():
             token = token_stream.peek(0)
@@ -128,7 +129,7 @@ class ExecCicsStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> ASTNode:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> ASTNode:
         """Parse an EXEC CICS statement.
         
         Simplified implementation that skips to END-EXEC.
@@ -156,10 +157,10 @@ class ExecCicsStatementParser(IStatementParser):
         
         # Create a simple AST node for EXEC CICS
         class ExecCicsStatement(ASTNode):
-            def __init__(self, location):
+            def __init__(self, location: SourceLocation) -> None:
                 super().__init__("EXEC_CICS", location)
-            
-            def to_dict(self):
+
+            def to_dict(self) -> Dict[str, Any]:
                 return {
                     "node_type": self.node_type,
                     "location": self.location.to_dict(),

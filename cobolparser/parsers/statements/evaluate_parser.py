@@ -24,7 +24,7 @@ class EvaluateStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> EvaluateStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> EvaluateStatement:
         """Parse an EVALUATE statement with contract-level diagnostics."""
         try:
             start_token = token_stream.consume()
@@ -110,7 +110,7 @@ class EvaluateStatementParser(IStatementParser):
     
     def _parse_subjects(self, token_stream: ITokenStream, stmt: EvaluateStatement) -> int:
         """Parse EVALUATE subjects before the first WHEN clause."""
-        current_subject = []
+        current_subject: list[str] = []
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -141,7 +141,7 @@ class EvaluateStatementParser(IStatementParser):
     def _parse_selectors(self, token_stream: ITokenStream) -> tuple[list, int, list[str]]:
         """Parse selector list for a WHEN clause, including validation issues."""
         selectors = []
-        current_selector = []
+        current_selector: list[str] = []
         issues = []
         selector_count = 0
         expecting_selector = True

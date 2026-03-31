@@ -1,6 +1,6 @@
 """Go statement parser implementing IStatementParser interface."""
 
-from typing import List
+from typing import Any, List, Optional
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...models.statements import GoStatement
 from ...models.ast_base import SourceLocation
@@ -38,7 +38,7 @@ class GoStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> GoStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> GoStatement:
         """Parse a GO statement.
         
         Handles:
@@ -92,11 +92,12 @@ class GoStatementParser(IStatementParser):
         self._parse_depending_on_clause(token_stream, stmt)
         
         # Consume period if present
-        if not token_stream.is_empty() and token_stream.peek().value == ".":
+        _t = token_stream.peek()
+        if not token_stream.is_empty() and _t and _t.value == ".":
             token_stream.consume()
-        
+
         return stmt
-    
+
     def _parse_depending_on_clause(self, token_stream: ITokenStream, stmt: GoStatement) -> None:
         """Parse the optional DEPENDING ON clause of a GO statement.
         

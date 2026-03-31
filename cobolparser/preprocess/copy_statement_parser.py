@@ -119,8 +119,8 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
         "       COPY EMPLOYEE REPLACING ==OLD== BY ==NEW==."
     """
     lines = source.split('\n')
-    result = []
-    
+    result: list[str] = []
+
     # Text starts after the indicator column
     text_start = indicator_position + 1
     
@@ -366,13 +366,13 @@ class CopyStatementLexer:
         idx = self.pos + offset
         return self.source[idx] if idx < self.length else ""
         
-    def _advance(self, count: int = 1):
+    def _advance(self, count: int = 1) -> None:
         self.pos = min(self.pos + count, self.length)
         
     def _is_at_end(self) -> bool:
         return self.pos >= self.length
         
-    def _skip_separators(self):
+    def _skip_separators(self) -> None:
         """Skip whitespace and COBOL separators (comma, semicolon)."""
         while not self._is_at_end():
             c = self._peek()
@@ -477,7 +477,7 @@ class CopyStatementLexer:
             
             library_qualifier = None
             suppress_clause = None
-            replacing_clauses = []
+            replacing_clauses: list[ReplacingClause] = []
             
             # 4. Parse Clauses
             while not self._is_at_end():

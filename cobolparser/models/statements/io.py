@@ -168,6 +168,7 @@ class IOWriteStatement(CobolStatement):
         self.retry_count: Optional[int] = None
         self.with_lock: bool = False
         self.lock_scope: Optional[str] = None  # Contract field
+        self.advancing_mode: Optional[str] = None  # Simple advancing mode string
         # Metadata tracking
         self.set_metadata("has_invalid_key", False)
         self.set_metadata("uses_advancing", False)

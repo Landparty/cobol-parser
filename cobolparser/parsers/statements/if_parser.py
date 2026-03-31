@@ -24,7 +24,7 @@ class IfStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> IfStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IfStatement:
         """Parse an IF statement with nested statement support.
         
         Supports:
@@ -312,7 +312,7 @@ class IfStatementParser(IStatementParser):
                 stream.consume()
     
     @staticmethod
-    def _previous_meaningful_token(stream: ITokenStream):
+    def _previous_meaningful_token(stream: ITokenStream) -> Optional[Any]:
         """Return the last non-whitespace token consumed by the stream."""
         offset = -1
         while True:

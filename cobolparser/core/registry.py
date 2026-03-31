@@ -36,7 +36,7 @@ class StatementParserRegistry:
             ast_node = parser.parse(token_stream)
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the statement parser registry."""
         self._parsers: List[IStatementParser] = []
     

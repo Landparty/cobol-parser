@@ -118,7 +118,7 @@ class ComputeStatement(CobolStatement):
         result = super().to_dict()
 
         # Handle expression which can be string or ASTNode
-        expression_dict = None
+        expression_dict: Optional[Union[Dict[str, Any], str]] = None
         if self.expression:
             if isinstance(self.expression, ASTNode):
                 expression_dict = self.expression.to_dict()

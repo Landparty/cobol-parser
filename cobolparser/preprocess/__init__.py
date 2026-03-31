@@ -410,7 +410,7 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
     quote_char: str | None = None
     parts: List[str] = []  # accumulates chunks for the current logical line
 
-    def flush_parts():
+    def flush_parts() -> None:
         nonlocal parts
         combined = ''.join(parts)
         if combined:
@@ -675,8 +675,8 @@ def validate_level_numbers(
     """
     import warnings as warn_module
     
-    warnings = []
-    
+    warnings: List[str] = []
+
     # Extract last level number before COPY statement
     pre_levels = list(_LEVEL_NUMBER_RE.finditer(pre_context))
     if not pre_levels:

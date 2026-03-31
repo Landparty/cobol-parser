@@ -4,6 +4,7 @@ Supports ADD, SUBTRACT, MULTIPLY, DIVIDE, and COMPUTE statements with proper
 parsing of operands, targets, expressions, and error handling clauses.
 """
 
+from typing import Any, Optional, Union
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...models.statements import (
     AddStatement,
@@ -33,7 +34,7 @@ class AddStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> AddStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> AddStatement:
         """Parse an ADD statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -96,7 +97,7 @@ class AddStatementParser(IStatementParser):
             token_stream.consume()
     
     @staticmethod
-    def _parse_size_error_clauses(token_stream: ITokenStream, stmt) -> None:
+    def _parse_size_error_clauses(token_stream: ITokenStream, stmt: Any) -> None:
         """Parse ON SIZE ERROR or NOT ON SIZE ERROR clauses with nested statements."""
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -168,7 +169,7 @@ class AddStatementParser(IStatementParser):
     @staticmethod
     def _parse_nested_statements(token_stream: ITokenStream) -> list:
         """Parse nested statements within ON SIZE ERROR clause."""
-        nested = []
+        nested: list = []
         
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -188,7 +189,7 @@ class AddStatementParser(IStatementParser):
                 if token_upper == "DISPLAY":
                     start = token_stream.consume()
                     start_loc = start.location if start else SourceLocation(0, 0)
-                    stmt = DisplayStatement(start_loc)
+                    display_stmt = DisplayStatement(start_loc)
                     # Collect DISPLAY items
                     while not token_stream.is_empty():
                         t = token_stream.peek()
@@ -200,14 +201,14 @@ class AddStatementParser(IStatementParser):
                         if t.type == TokenType.PERIOD or (t.value and t.value.upper() in ("MOVE", "DISPLAY")):
                             break
                         if t.type in (TokenType.STRING_LITERAL, TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
-                            stmt.add_display_item(t.value)
+                            display_stmt.add_display_item(t.value)
                         token_stream.consume()
-                    nested.append(stmt)
+                    nested.append(display_stmt)
                     
                 elif token_upper == "MOVE":
                     start = token_stream.consume()
-                    start_loc = start.location if start else SourceLocation(0, 0)  
-                    stmt = MoveStatement(start_loc)
+                    start_loc = start.location if start else SourceLocation(0, 0)
+                    move_stmt = MoveStatement(start_loc)
                     # Parse MOVE source TO target
                     while not token_stream.is_empty():
                         t = token_stream.peek()
@@ -225,15 +226,15 @@ class AddStatementParser(IStatementParser):
                             while target_token and target_token.type == TokenType.NEWLINE:
                                 token_stream.consume()
                                 target_token = token_stream.peek()
-                            
+
                             if target_token and target_token.type == TokenType.IDENTIFIER:
-                                stmt.add_target(target_token.value)
+                                move_stmt.add_target(target_token.value)
                                 token_stream.consume()
                             break
                         if t.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL):
-                            stmt.add_operand(t.value)
+                            move_stmt.add_operand(t.value)
                         token_stream.consume()
-                    nested.append(stmt)
+                    nested.append(move_stmt)
                 else:
                     token_stream.consume()
             else:
@@ -257,7 +258,7 @@ class SubtractStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> SubtractStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> SubtractStatement:
         """Parse a SUBTRACT statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -325,7 +326,7 @@ class MultiplyStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> MultiplyStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> MultiplyStatement:
         """Parse a MULTIPLY statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -385,7 +386,7 @@ class DivideStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> DivideStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> DivideStatement:
         """Parse a DIVIDE statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -447,7 +448,7 @@ class ComputeStatementParser(IStatementParser):
         except Exception:
             return False
     
-    def parse(self, token_stream: ITokenStream) -> ComputeStatement:
+    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> ComputeStatement:
         """Parse a COMPUTE statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
