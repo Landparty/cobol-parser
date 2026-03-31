@@ -3,7 +3,7 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-2975%20passing-green.svg)](#testing)
 [![Coverage](https://img.shields.io/badge/coverage-81%25%2B%20enforced-green.svg)](#testing)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 [![IBM COBOL](https://img.shields.io/badge/IBM%20Enterprise%20COBOL-supported-blue.svg)](#ibm-enterprise-cobol-support)
 
 A comprehensive COBOL source code parser for Python 3.13+ with enhanced features including configurable memory management, JSON export, IBM Enterprise COBOL dialect support, and advanced error recovery. Built following Test-Driven Development (TDD) principles with comprehensive test coverage (2,975 tests, 81%+ coverage enforced).
@@ -1071,7 +1071,7 @@ The parser is designed to support compliance with common enterprise requirements
 
 ## 📋 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+Proprietary — Copyright © 2026 Samuel Dion. All rights reserved. See [LICENSE](LICENSE) for terms.
 
 ## 🙏 Acknowledgments
 

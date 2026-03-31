@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- License changed to MIT (copyright Samuel Dion)
+- License updated to proprietary EULA (copyright Samuel Dion, all rights reserved)
 
 ## [1.3.0] - 2026-03-20
 
