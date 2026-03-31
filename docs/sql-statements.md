@@ -33,11 +33,7 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "line": 3,
     "column": 12
   },
-  "metadata": {
-    "dialect": "IBM_ENTERPRISE",
-    "has_host_variables": true,
-    "host_variable_count": 4
-  }
+  "metadata": {}
 }
 ```
 
@@ -74,11 +70,7 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "line": 3,
     "column": 12
   },
-  "metadata": {
-    "dialect": "IBM_ENTERPRISE",
-    "has_host_variables": true,
-    "host_variable_count": 3
-  }
+  "metadata": {}
 }
 ```
 
@@ -111,11 +103,7 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "line": 3,
     "column": 12
   },
-  "metadata": {
-    "dialect": "IBM_ENTERPRISE",
-    "has_host_variables": true,
-    "host_variable_count": 2
-  }
+  "metadata": {}
 }
 ```
 
@@ -146,11 +134,7 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "line": 3,
     "column": 12
   },
-  "metadata": {
-    "dialect": "IBM_ENTERPRISE",
-    "has_host_variables": true,
-    "host_variable_count": 1
-  }
+  "metadata": {}
 }
 ```
 
@@ -175,11 +159,7 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "line": 3,
     "column": 12
   },
-  "metadata": {
-    "dialect": "IBM_ENTERPRISE",
-    "has_host_variables": false,
-    "host_variable_count": 0
-  }
+  "metadata": {}
 }
 ```
 
@@ -217,12 +197,7 @@ This document shows examples of how EXEC SQL statements are parsed into AST node
     "line": 3,
     "column": 12
   },
-  "metadata": {
-    "dialect": "IBM_ENTERPRISE",
-    "has_host_variables": true,
-    "host_variable_count": 4,
-    "has_subqueries": true
-  }
+  "metadata": {}
 }
 ```
 

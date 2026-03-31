@@ -276,7 +276,7 @@ This document shows the complete AST output for a comprehensive COBOL program th
             },
             {
               "node_type": "ExecSQLStatement",
-              "sql_type": "DECLARE",
+              "sql_type": "DECLARE CURSOR",
               "sql_text": "DECLARE EMP_CURSOR CURSOR FOR SELECT EMP_ID, EMP_NAME, SALARY FROM EMPLOYEE WHERE DEPT_ID = :WS-DEPT-ID ORDER BY EMP_NAME",
               "host_variables": ["WS-DEPT-ID"],
               "location": {
@@ -284,11 +284,7 @@ This document shows the complete AST output for a comprehensive COBOL program th
                 "line": 18,
                 "column": 12
               },
-              "metadata": {
-                "dialect": "IBM_ENTERPRISE",
-                "has_host_variables": true,
-                "host_variable_count": 1
-              }
+              "metadata": {}
             },
             {
               "node_type": "ExecSQLStatement",
@@ -300,11 +296,7 @@ This document shows the complete AST output for a comprehensive COBOL program th
                 "line": 24,
                 "column": 12
               },
-              "metadata": {
-                "dialect": "IBM_ENTERPRISE",
-                "has_host_variables": false,
-                "host_variable_count": 0
-              }
+              "metadata": {}
             },
             {
               "node_type": "PerformStatement",
@@ -335,11 +327,7 @@ This document shows the complete AST output for a comprehensive COBOL program th
                 "line": 30,
                 "column": 12
               },
-              "metadata": {
-                "dialect": "IBM_ENTERPRISE",
-                "has_host_variables": false,
-                "host_variable_count": 0
-              }
+              "metadata": {}
             },
             {
               "node_type": "PerformStatement",
@@ -423,11 +411,7 @@ This document shows the complete AST output for a comprehensive COBOL program th
                 "line": 43,
                 "column": 12
               },
-              "metadata": {
-                "dialect": "IBM_ENTERPRISE",
-                "has_host_variables": true,
-                "host_variable_count": 3
-              }
+              "metadata": {}
             },
             {
               "node_type": "IfStatement",
