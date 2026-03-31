@@ -569,7 +569,7 @@ def analyze_data_items(cobol_source):
             analyze_item(child, indent + 1)
 
     if result.ast:
-        data_div = result.ast.get_division_by_name("DATA")
+        data_div = result.ast.get_division("DATA")
         if data_div:
             ws_section = data_div.get_section_by_name("WORKING-STORAGE")
             if ws_section:
