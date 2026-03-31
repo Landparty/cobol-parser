@@ -149,8 +149,8 @@ from .analysis import (
 
 # Version info
 __version__ = "1.0.0"
-__author__ = "COBOL Parser Team"
-__license__ = "MIT"
+__author__ = "Samuel Dion"
+__license__ = "Proprietary"
 
 # Public API - controls what gets imported with "from cobolparser import *"
 __all__ = [

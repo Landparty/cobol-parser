@@ -43,7 +43,8 @@
       "Bash(then)",
       "Read(//c/Users/samdi/Documents/workspace/cobol-parser/**)",
       "Bash(else)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(rtk ls:*)"
     ]
   }
 }
