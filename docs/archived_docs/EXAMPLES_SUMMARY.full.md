@@ -1,1 +1,0 @@
-(archived) See original EXAMPLES_SUMMARY.md in project root. Archived on 2026-01-11.

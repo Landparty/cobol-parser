@@ -24,7 +24,26 @@
       "Bash(find C:/Users/samdi/Documents/workspace/cobol-parser/tests -name \"*$file*\" -type f ! -path \"*/__pycache__/*\")",
       "Bash(done)",
       "Bash(grep -l \"arithmetic_parsers\\\\|evaluate_parser\\\\|if_parser\\\\|perform_parser\\\\|call_parser\\\\|display_parser\\\\|move_parser\" C:/Users/samdi/Documents/workspace/cobol-parser/tests/unit/*.py)",
-      "Bash(rtk test:*)"
+      "Bash(rtk test:*)",
+      "Bash(grep -n \"^class \" /c/Users/samdi/Documents/workspace/cobol-parser/cobolparser/models/statements/*.py)",
+      "Bash(ls -1 /c/Users/samdi/Documents/workspace/cobol-parser/cobolparser/parsers/statements/*.py)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(grep -l \"class.*StatementParser\" /c/Users/samdi/Documents/workspace/cobol-parser/cobolparser/parsers/statements/*.py)",
+      "Bash(grep:*)",
+      "Bash(/tmp/analyze_tokens.py:*)",
+      "Bash(git -C \"C:/Users/samdi/Documents/workspace/cobol-parser\" status --short)",
+      "Bash(git -C \"C:/Users/samdi/Documents/workspace/cobol-parser\" branch)",
+      "Bash(python -c \":*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(rtk grep:*)",
+      "Bash(do)",
+      "Bash(echo \"=== Checking $file ===\")",
+      "Bash(if grep:*)",
+      "Bash(then)",
+      "Read(//c/Users/samdi/Documents/workspace/cobol-parser/**)",
+      "Bash(else)",
+      "Bash(fi)"
     ]
   }
 }

@@ -28,7 +28,7 @@ from cobolparser import parse_cobol
 # Parse a COBOL string directly
 cobol_code = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. HELLO-WORLD.
-       PROCEDURE DIVISION.
+       PROCEDURE DIVISION.1
            DISPLAY "Hello, World!".
            STOP RUN.
 """

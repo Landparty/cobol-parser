@@ -5,6 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# Requires Python >= 3.13
+
 # Run all tests with coverage (81% minimum enforced)
 python -m pytest tests/ -v
 
@@ -17,6 +19,10 @@ python -m pytest -m "integration"   # integration tests
 python -m pytest -m "slow"          # slow tests
 python -m pytest -m "contract"      # API contract tests
 python -m pytest -m "io"            # IO statement tests
+
+# Regression and contract suites (no dedicated marker — run by path)
+python -m pytest tests/regression/ -v
+python -m pytest tests/contracts/ -v
 
 # Lint and format
 python -m ruff check .
@@ -53,6 +59,7 @@ COBOL source
 - `token_stream.py` — `TokenStream` wraps `List[Token]` with `peek()`, `consume()`, `expect()`
 - `registry.py` — `StatementParserRegistry` dynamically dispatches to statement parsers
 - `exceptions.py` — Typed parse exceptions (`TokenMismatch`, `UnexpectedEndOfInput`, etc.)
+- `ast_factory.py` — `ASTNodeFactory` for validated AST node creation; use `get_factory()` / `create_node()` rather than instantiating nodes directly
 
 **`cobolparser/parsers/`** — All statement and division parsers live here:
 - `divisions/` — One parser per COBOL division (identification, environment, data, procedure)
@@ -62,11 +69,15 @@ COBOL source
 - `ast_base.py` — `ASTNode`, `SourceLocation`, `ASTValidator`
 - `program.py` — `CobolProgram`, `CobolDivision`, `CobolSection`, `CobolParagraph`
 - `data_items.py` — `CobolDataItem`, `PictureClause`, `OccursClause`
-- `statements.py` — `CobolStatement` and concrete statement nodes
+- `statements/` — Package (not a single file) with statement node classes split by category: `arithmetic.py`, `call.py`, `control.py`, `data.py`, `io.py`, `misc.py`, `base.py`
 
 **`cobolparser/plugins/core.py`** — Configuration objects: `ErrorRecoveryMode` (FAIL_FAST / COLLECT_ALL), `DialectType`, `MemoryConfiguration`, `SerializationConfig`.
 
 **`cobolparser/dialects/ibm_enterprise.py`** — IBM Enterprise COBOL extensions: COMP-3, EXEC SQL/CICS, IBM intrinsic functions.
+
+**`cobolparser/analysis/`** — IO coverage and diagnostics: `io_coverage_reporter.py`, `io_diagnostics.py`, `value_tracker.py`. Used to report which IO operations are covered across a codebase.
+
+**`cobolparser/batch.py`** — `parse_files(paths)` for parallel multi-file parsing using multiprocessing. Returns a list of `BatchResult` objects.
 
 ### Data flow detail
 
@@ -80,13 +91,14 @@ COBOL source
 ### Public API
 
 ```python
-from cobolparser import parse_cobol, CobolParser, ErrorRecoveryMode
+from cobolparser import parse_cobol, CobolParser, ErrorRecoveryMode, MemoryConfiguration
 
 # Simple
 result = parse_cobol(source, filename="prog.cob")
 
 # Configurable
-parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+config = MemoryConfiguration(max_memory_mb=256)
+parser = CobolParser(memory_config=config, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 result = parser.parse(source)
 
 ast = result.ast          # CobolProgram
@@ -94,6 +106,10 @@ result.errors             # List[ParseError]
 result.statistics         # ParseStatistics (timings, counts)
 ast.to_json()             # JSON export
 ast.find_all_by_type("MoveStatement")
+
+# Parallel multi-file parsing
+from cobolparser import parse_files
+results = parse_files(["a.cbl", "b.cbl"])   # List[BatchResult]
 ```
 
 ### Adding a new statement parser
@@ -101,7 +117,7 @@ ast.find_all_by_type("MoveStatement")
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser`
 2. Register it in `cobolparser/core/registry.py` (or via the registry's discovery mechanism)
 3. Add a `TokenType` entry in `lexer.py` if the verb isn't already a keyword
-4. Add AST node(s) in `cobolparser/models/statements.py` with `to_dict()`
+4. Add AST node(s) in the appropriate `cobolparser/models/statements/<category>.py` with `to_dict()`; use `ASTNodeFactory` from `core/ast_factory.py` to instantiate nodes
 
 ### Fixed-format COBOL column layout
 
