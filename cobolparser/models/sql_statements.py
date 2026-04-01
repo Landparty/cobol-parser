@@ -5,7 +5,7 @@ This module provides comprehensive AST nodes for all types of SQL statements
 embedded within COBOL EXEC SQL blocks, with structured output for analysis.
 """
 
-from typing import Dict, Any, List, Optional, Set, Union
+from typing import ClassVar, Dict, Any, List, Optional, Set, Union
 from dataclasses import dataclass, field
 import re
 
@@ -55,21 +55,21 @@ class SQLStatementInfo:
 
 class SQLStatementType:
     """SQL statement type constants."""
-    SELECT = "SELECT"
-    INSERT = "INSERT"
-    UPDATE = "UPDATE"
-    DELETE = "DELETE"
-    DECLARE_CURSOR = "DECLARE CURSOR"
-    OPEN_CURSOR = "OPEN"
-    FETCH = "FETCH"
-    CLOSE_CURSOR = "CLOSE"
-    COMMIT = "COMMIT"
-    ROLLBACK = "ROLLBACK"
-    PREPARE = "PREPARE"
-    EXECUTE = "EXECUTE"
-    INCLUDE = "INCLUDE"
-    WHENEVER = "WHENEVER"
-    UNKNOWN = "UNKNOWN"
+    SELECT: ClassVar[str] = "SELECT"
+    INSERT: ClassVar[str] = "INSERT"
+    UPDATE: ClassVar[str] = "UPDATE"
+    DELETE: ClassVar[str] = "DELETE"
+    DECLARE_CURSOR: ClassVar[str] = "DECLARE CURSOR"
+    OPEN_CURSOR: ClassVar[str] = "OPEN"
+    FETCH: ClassVar[str] = "FETCH"
+    CLOSE_CURSOR: ClassVar[str] = "CLOSE"
+    COMMIT: ClassVar[str] = "COMMIT"
+    ROLLBACK: ClassVar[str] = "ROLLBACK"
+    PREPARE: ClassVar[str] = "PREPARE"
+    EXECUTE: ClassVar[str] = "EXECUTE"
+    INCLUDE: ClassVar[str] = "INCLUDE"
+    WHENEVER: ClassVar[str] = "WHENEVER"
+    UNKNOWN: ClassVar[str] = "UNKNOWN"
 
 
 class ExecSQLStatement(CobolStatement):

@@ -47,7 +47,16 @@
       "Bash(rtk ls:*)",
       "Bash(.venv/Scripts/python -c \"import mypy; print\\(mypy.__version__\\)\")",
       "Bash(.venv/Scripts/python --version)",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "Bash(where cl.exe)",
+      "Read(//c/Program Files \\(x86\\)/Microsoft Visual Studio/**)",
+      "Read(//c/Program Files/**)",
+      "Bash(ls \"C:/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/\")",
+      "Bash(ls \"C:/Program Files \\(x86\\)/Microsoft Visual Studio/\")",
+      "Bash(\"C:/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/vswhere.exe\" -all -format json)",
+      "Bash(ls:*)",
+      "Bash(\"C:/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/vswhere.exe\" -all -prerelease -format json)",
+      "Bash(cmd /c \"C:\\\\\\\\Users\\\\\\\\samdi\\\\\\\\Documents\\\\\\\\workspace\\\\\\\\cobol-parser\\\\\\\\build_mypyc.bat\" 2>&1)"
     ],
     "additionalDirectories": [
       "\\tmp"

@@ -210,7 +210,7 @@ class ASTNode(ABC):
         """Convert node to JSON representation."""
         return json.dumps(self.to_dict(), indent=indent)
     
-    def equals(self, other: 'ASTNode') -> bool:
+    def equals(self, other: object) -> bool:
         """Check if this node is structurally equal to another node."""
         if not isinstance(other, ASTNode):
             return False

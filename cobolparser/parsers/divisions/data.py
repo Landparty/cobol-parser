@@ -24,8 +24,8 @@ class DataDivisionParser(BaseDivisionParser):
     Supports FILE, WORKING-STORAGE, LOCAL-STORAGE, and LINKAGE sections.
     """
 
-    division_name = "DATA"
-    division_keywords = ()
+    division_name: Optional[str] = "DATA"
+    division_keywords: tuple = ()
 
     def parse_division(self, token_stream: ITokenStream) -> Dict[str, Any]:
         """Parse Data Division content.

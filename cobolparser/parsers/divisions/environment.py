@@ -21,8 +21,8 @@ class EnvironmentDivisionParser(BaseDivisionParser):
     Processes CONFIGURATION SECTION and INPUT-OUTPUT SECTION.
     """
 
-    division_name = "ENVIRONMENT"
-    division_keywords = ()
+    division_name: Optional[str] = "ENVIRONMENT"
+    division_keywords: tuple = ()
 
     def parse_division(self, token_stream: ITokenStream) -> Dict[str, Any]:
         """Parse Environment Division content.

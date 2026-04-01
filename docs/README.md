@@ -12,6 +12,7 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 - **[Performance](performance.md)** - Benchmarks, monitoring, optimization tips
 - **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
 - **[Contributing](contributing.md)** - Development setup and PR checklist
+- **[Packaging with mypyc](packaging-mypyc.md)** - Build a compiled binary wheel with no readable source
 
 ### 📖 Statement Parsing Examples
 - **[CALL Statements](call-statements.md)** - Function/procedure calls with parameters

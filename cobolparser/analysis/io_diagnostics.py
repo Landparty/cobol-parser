@@ -5,7 +5,7 @@ so that IO-specific domain logic lives alongside other IO analysis modules.
 """
 
 from enum import Enum
-from typing import Optional
+from typing import ClassVar, Dict, Optional
 
 from cobolparser._errors import ParseError
 
@@ -60,7 +60,7 @@ class IODiagnosticHelper:
     """Helper class for generating IO-related diagnostics and error messages."""
 
     # Mapping of error codes to user-friendly messages
-    ERROR_MESSAGES = {
+    ERROR_MESSAGES: ClassVar[Dict[IOErrorCode, str]] = {
         IOErrorCode.IO_READ_INVALID_KEY_ORDER:
             "INVALID KEY clause must appear after KEY clause in READ statement",
         IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL:

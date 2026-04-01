@@ -31,8 +31,8 @@ class IdentificationDivisionParser(BaseDivisionParser):
     from BaseDivisionParser.
     """
 
-    division_name = "IDENTIFICATION"
-    division_keywords = ("ID",)
+    division_name: Optional[str] = "IDENTIFICATION"
+    division_keywords: tuple = ("ID",)
 
     def parse_division(self, token_stream: ITokenStream) -> Dict[str, Optional[str]]:
         """Parse Identification Division content.

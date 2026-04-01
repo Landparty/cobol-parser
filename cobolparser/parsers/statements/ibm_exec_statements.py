@@ -11,6 +11,19 @@ from ...models.sql_statements import parse_exec_sql
 from ...lexer import TokenType
 
 
+class ExecCicsStatement(ASTNode):
+    """AST node for EXEC CICS statements."""
+
+    def __init__(self, location: SourceLocation) -> None:
+        super().__init__("EXEC_CICS", location)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_type": self.node_type,
+            "location": self.location.to_dict(),
+        }
+
+
 class ExecSqlStatementParser(IStatementParser):
     """Parser for EXEC SQL statements (embedded SQL in COBOL).
     
@@ -154,16 +167,5 @@ class ExecCicsStatementParser(IStatementParser):
                 break
             
             token_stream.consume()
-        
-        # Create a simple AST node for EXEC CICS
-        class ExecCicsStatement(ASTNode):
-            def __init__(self, location: SourceLocation) -> None:
-                super().__init__("EXEC_CICS", location)
-
-            def to_dict(self) -> Dict[str, Any]:
-                return {
-                    "node_type": self.node_type,
-                    "location": self.location.to_dict(),
-                }
         
         return ExecCicsStatement(start_location)

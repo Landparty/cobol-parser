@@ -53,8 +53,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
     Supports PERFORM, IF, EVALUATE, MOVE, DISPLAY, arithmetic statements, and others.
     """
 
-    division_name = "PROCEDURE"
-    division_keywords = ()
+    division_name: Optional[str] = "PROCEDURE"
+    division_keywords: tuple = ()
 
     def __init__(self, host: Any = None) -> None:
         """Initialize Procedure Division parser with statement registry.
