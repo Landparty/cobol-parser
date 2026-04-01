@@ -6,12 +6,11 @@ individual parser files.
 """
 from __future__ import annotations
 
-from typing import Optional, Any
+from typing import Any
 
 from cobolparser.core.interfaces import ITokenStream, ParseContext
-from cobolparser.models.ast_base import SourceLocation
 from cobolparser.lexer import TokenType
-
+from cobolparser.models.ast_base import SourceLocation
 
 # ---------------------------------------------------------------------------
 # Token-type sets used by multiple parsers to detect statement boundaries
@@ -97,7 +96,7 @@ def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
 # Parse-context helpers (used by IF / PERFORM / EVALUATE)
 # ---------------------------------------------------------------------------
 
-def get_parse_context(stream: ITokenStream) -> Optional[ParseContext]:
+def get_parse_context(stream: ITokenStream) -> ParseContext | None:
     """Return the active parse context attached to *stream*, or None."""
     context = stream.context
     if context is None:
@@ -106,7 +105,7 @@ def get_parse_context(stream: ITokenStream) -> Optional[ParseContext]:
 
 
 def report_parse_error(
-    context: Optional[ParseContext],
+    context: ParseContext | None,
     message: str,
     location: SourceLocation,
 ) -> None:
@@ -121,8 +120,8 @@ def report_parse_error(
 
 def try_parse_nested_statement(
     stream: ITokenStream,
-    exclude_self: Optional[Any] = None,
-) -> Optional[Any]:
+    exclude_self: Any | None = None,
+) -> Any | None:
     """Attempt to parse a nested statement via the registry on *stream*.
 
     Pass *exclude_self* (the calling parser instance) to prevent the registry

@@ -1,12 +1,14 @@
 """Read statement parser implementing IStatementParser interface."""
 
-from typing import Any, Optional, cast
-from ...core.interfaces import IStatementParser, ITokenStream
+from typing import Any, cast
+
+from cobolparser.parsers.statements._utils import collect_clause_stmts, skip_whitespace
+
 from ...core.ast_factory import get_factory
-from ...models.statements import IOReadStatement  # noqa: F401 used via factory
-from ...models.ast_base import SourceLocation
+from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
+from ...models.ast_base import SourceLocation
+from ...models.statements import IOReadStatement  # noqa: F401 used via factory
 
 
 class ReadStatementParser(IStatementParser):
@@ -29,7 +31,7 @@ class ReadStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOReadStatement:
+    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IOReadStatement:
         """Parse a READ statement."""
         start_token = token_stream.consume()
         factory = get_factory()
@@ -146,7 +148,7 @@ class ReadStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type == TokenType.NOT:
             # Peek ahead to confirm NOT AT END (not NOT INVALID KEY)
-            saved = token_stream.peek()
+            token_stream.peek()
             token_stream.consume()
             skip_whitespace(token_stream)
             next_tok = token_stream.peek()

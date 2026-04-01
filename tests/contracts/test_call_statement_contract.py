@@ -9,9 +9,25 @@ Tests verify:
 """
 
 import pytest
-from cobolparser.parser import CobolParser, TokenType, Token, SourceLocation
+from cobolparser.lexer import Token, TokenType
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.core.token_stream import TokenStream
+from cobolparser.core.registry import StatementParserRegistry
+from cobolparser.parsers.statements.call_parser import CallStatementParser
+from cobolparser.parsers.statements.display_parser import DisplayStatementParser
+from cobolparser.parsers.statements.move_parser import MoveStatementParser
 from cobolparser.models.statements import CallStatement, CallParameter
 import json
+
+
+def _make_stream_with_registry(tokens):
+    """Create a TokenStream with a statement registry for nested parsing."""
+    stream = TokenStream(tokens)
+    registry = StatementParserRegistry()
+    registry.register(DisplayStatementParser())
+    registry.register(MoveStatementParser())
+    stream._registry = registry
+    return stream
 
 
 class TestCallStatementContract:
@@ -19,8 +35,7 @@ class TestCallStatementContract:
     
     def test_call_to_dict_output_basic(self):
         """Verify CallStatement.to_dict() structure matches contract specification."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'MYPROG'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 16)),
@@ -30,10 +45,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 37)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Serialize to dict
         call_dict = call_stmt.to_dict()
@@ -46,8 +60,7 @@ class TestCallStatementContract:
     
     def test_call_with_returning_clause_serialization(self):
         """Verify RETURNING clause properly serialized in to_dict()."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'FUNC'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "RETURNING", SourceLocation(1, 13)),
@@ -55,10 +68,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 32)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Verify RETURNING parameter is accessible
         assert hasattr(call_stmt, 'returning_parameter')
@@ -70,8 +82,7 @@ class TestCallStatementContract:
     
     def test_call_with_giving_clause_serialization(self):
         """Verify GIVING clause properly serialized in to_dict()."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'PROCESS'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "GIVING", SourceLocation(1, 16)),
@@ -79,10 +90,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 32)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Verify GIVING parameter is accessible
         assert hasattr(call_stmt, 'giving_parameter')
@@ -93,8 +103,7 @@ class TestCallStatementContract:
     
     def test_call_with_parameters_serialization(self):
         """Verify parameter list serialized correctly in to_dict()."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'SUB'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 12)),
@@ -107,10 +116,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 49)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Verify parameters are accessible
         assert hasattr(call_stmt, 'using_parameters')
@@ -123,8 +131,7 @@ class TestCallStatementContract:
     
     def test_backward_compatibility_baseline_test_case_1(self):
         """Verify baseline test case 1 (mixed modes) still parses correctly."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'SUBPROG'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 16)),
@@ -140,10 +147,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 75)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Should still be serializable
         call_dict = call_stmt.to_dict()
@@ -153,8 +159,7 @@ class TestCallStatementContract:
     
     def test_backward_compatibility_baseline_test_case_2(self):
         """Verify baseline test case 2 (RETURNING) still parses correctly."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'FUNCTION'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "RETURNING", SourceLocation(1, 17)),
@@ -162,10 +167,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 33)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Should still be serializable
         call_dict = call_stmt.to_dict()
@@ -174,8 +178,7 @@ class TestCallStatementContract:
     
     def test_backward_compatibility_baseline_test_case_3(self):
         """Verify baseline test case 3 (ON OVERFLOW) still parses correctly."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'PROCESS'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 16)),
@@ -186,10 +189,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 55)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Should still be serializable
         call_dict = call_stmt.to_dict()
@@ -198,8 +200,7 @@ class TestCallStatementContract:
     
     def test_backward_compatibility_baseline_test_case_4(self):
         """Verify baseline test case 4 (ON EXCEPTION) still parses correctly."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'ERROR-HANDLER'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 22)),
@@ -212,10 +213,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 65)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Should still be serializable
         call_dict = call_stmt.to_dict()
@@ -224,8 +224,7 @@ class TestCallStatementContract:
     
     def test_exception_structures_serialization(self):
         """Verify exception handler statement structures serialize correctly."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "'APP'", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 12)),
@@ -238,10 +237,9 @@ class TestCallStatementContract:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 55)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # In implementation, on_exception contains list of statements
         if call_stmt.on_exception is not None:
@@ -256,17 +254,15 @@ class TestCallStatementContract:
     
     def test_dynamic_call_tracking_serialization(self):
         """Verify dynamic CALL tracking info serializes correctly."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.IDENTIFIER, "WS-PROG-NAME", SourceLocation(1, 6)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 18)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         # Verify is_dynamic flag
         assert hasattr(call_stmt, 'is_dynamic')

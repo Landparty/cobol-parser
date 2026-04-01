@@ -2,8 +2,8 @@
 Base classes for COBOL statement and expression AST nodes.
 """
 
-from typing import Dict, Any, List, Optional, Union
-from dataclasses import dataclass
+from typing import Any, Union
+
 from ..ast_base import ASTNode, SourceLocation
 
 
@@ -13,20 +13,20 @@ class CobolStatement(ASTNode):
     def __init__(self, statement_type: str, location: SourceLocation):
         super().__init__("Statement", location)
         self.statement_type = statement_type
-        self.operands: List[str] = []
+        self.operands: list[str] = []
 
     @property
-    def sql_type(self) -> Optional[str]:
+    def sql_type(self) -> str | None:
         """Return SQL type if this is an SQL statement, None otherwise."""
         return None
 
     @property
-    def cics_command(self) -> Optional[str]:
+    def cics_command(self) -> str | None:
         """Return CICS command if this is a CICS statement, None otherwise."""
         return None
 
     @property
-    def ims_command(self) -> Optional[str]:
+    def ims_command(self) -> str | None:
         """Return IMS command if this is an IMS statement, None otherwise."""
         return None
 
@@ -34,7 +34,7 @@ class CobolStatement(ASTNode):
         """Add an operand to the statement."""
         self.operands.append(operand)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statement to dictionary representation."""
         return {
             "node_type": self.node_type,
@@ -51,9 +51,9 @@ class CobolExpression(ASTNode):
     def __init__(self, expression_type: str, location: SourceLocation):
         super().__init__("Expression", location)
         self.expression_type = expression_type
-        self.operands: List[str] = []
+        self.operands: list[str] = []
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert expression to dictionary representation."""
         return {
             "node_type": self.node_type,
@@ -69,8 +69,8 @@ class ArithmeticExpression(CobolExpression):
     def __init__(self, operator: str, location: SourceLocation):
         super().__init__("ARITHMETIC", location)
         self.operator = operator
-        self.left_operand: Optional[Union[str, "CobolExpression"]] = None
-        self.right_operand: Optional[Union[str, "CobolExpression"]] = None
+        self.left_operand: str | CobolExpression | None = None
+        self.right_operand: str | CobolExpression | None = None
 
     def set_left_operand(self, operand: Union[str, "CobolExpression"]) -> None:
         """Set the left operand of the expression."""
@@ -84,7 +84,7 @@ class ArithmeticExpression(CobolExpression):
         if isinstance(operand, CobolExpression):
             self.add_child(operand)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert arithmetic expression to dictionary representation."""
         result = super().to_dict()
 
@@ -115,8 +115,8 @@ class ConditionalExpression(CobolExpression):
     def __init__(self, operator: str, location: SourceLocation):
         super().__init__("COMPARISON", location)
         self.operator = operator
-        self.left_operand: Optional[Union[str, "CobolExpression"]] = None
-        self.right_operand: Optional[Union[str, "CobolExpression"]] = None
+        self.left_operand: str | CobolExpression | None = None
+        self.right_operand: str | CobolExpression | None = None
 
     @property
     def condition_type(self) -> str:
@@ -135,7 +135,7 @@ class ConditionalExpression(CobolExpression):
         if isinstance(operand, CobolExpression):
             self.add_child(operand)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert conditional expression to dictionary representation."""
         result = super().to_dict()
 
@@ -167,8 +167,8 @@ class LogicalExpression(CobolExpression):
     def __init__(self, operator: str, location: SourceLocation):
         super().__init__("LOGICAL", location)
         self.operator = operator
-        self.left_condition: Optional["CobolExpression"] = None
-        self.right_condition: Optional["CobolExpression"] = None
+        self.left_condition: CobolExpression | None = None
+        self.right_condition: CobolExpression | None = None
 
     def set_left_condition(self, condition: "CobolExpression") -> None:
         """Set the left condition of the logical expression."""
@@ -180,7 +180,7 @@ class LogicalExpression(CobolExpression):
         self.right_condition = condition
         self.add_child(condition)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert logical expression to dictionary representation."""
         result = super().to_dict()
         result.update(
@@ -204,7 +204,7 @@ class FunctionCall(CobolExpression):
         super().__init__("FUNCTION", location)
         self.function_name = function_name
         self.function_type = "INTRINSIC"  # INTRINSIC or USER_DEFINED
-        self.arguments: List[Union[str, "CobolExpression"]] = []
+        self.arguments: list[str | CobolExpression] = []
 
     def add_argument(self, argument: Union[str, "CobolExpression"]) -> None:
         """Add an argument to the function call."""
@@ -216,11 +216,11 @@ class FunctionCall(CobolExpression):
         """Set the function type (INTRINSIC or USER_DEFINED)."""
         self.function_type = func_type
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert function call to dictionary representation."""
         result = super().to_dict()
 
-        args_dict: List[Any] = []
+        args_dict: list[Any] = []
         for arg in self.arguments:
             if isinstance(arg, CobolExpression):
                 args_dict.append(arg.to_dict())

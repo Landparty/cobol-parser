@@ -5,7 +5,10 @@ Covers continuation handling with hyphen in column 7 and column boundaries (8-72
 """
 
 import pytest
-from cobolparser.parser import CobolParser, TokenType, Token, SourceLocation
+from cobolparser.lexer import Token, TokenType
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.core.token_stream import TokenStream
+from cobolparser.parsers.statements.call_parser import CallStatementParser
 
 
 class TestCallFixedFormat:
@@ -13,8 +16,7 @@ class TestCallFixedFormat:
 
     def test_multiline_call_with_continuation(self):
         """Test CALL spanning multiple lines with hyphen continuation (FR-011)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "MULTILINE", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 17)),
@@ -27,10 +29,9 @@ class TestCallFixedFormat:
             Token(TokenType.PERIOD, ".", SourceLocation(2, 52)),
             Token(TokenType.EOF, "", SourceLocation(3, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert call_stmt.called_program == 'MULTILINE'
@@ -38,8 +39,7 @@ class TestCallFixedFormat:
 
     def test_columns_8_72_compliance(self):
         """Test CALL statements confined to columns 8-72 (FR-012)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 8)),  # Column 8 start
             Token(TokenType.STRING_LITERAL, "COLUMNS", SourceLocation(1, 13)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 22)),
@@ -48,10 +48,9 @@ class TestCallFixedFormat:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 72)),  # Column 72 end
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert call_stmt.called_program == 'COLUMNS'
@@ -59,8 +58,7 @@ class TestCallFixedFormat:
 
     def test_continuation_in_parameter_list(self):
         """Test continuation in the middle of parameter list (FR-011)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "PROG", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 12)),
@@ -70,10 +68,9 @@ class TestCallFixedFormat:
             Token(TokenType.PERIOD, ".", SourceLocation(3, 39)),
             Token(TokenType.EOF, "", SourceLocation(4, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert len(call_stmt.using_parameters) == 3

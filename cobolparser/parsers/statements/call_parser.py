@@ -1,18 +1,23 @@
 """Call statement parser implementing IStatementParser interface."""
 
-from typing import cast, Optional, Any
+from typing import Any, cast
 
-from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
+from cobolparser.parsers.statements._utils import (
+    STATEMENT_KEYWORDS,
+    STATEMENT_TOKEN_TYPES,
+    skip_whitespace,
+)
+
 from ...core.ast_factory import get_factory
-from ...models.statements import CallStatement
-from ...models.ast_base import SourceLocation
+from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...lexer import TokenType
-from cobolparser.parsers.statements._utils import skip_whitespace, STATEMENT_TOKEN_TYPES, STATEMENT_KEYWORDS
+from ...models.ast_base import SourceLocation
+from ...models.statements import CallStatement
 
 
 class CallStatementParser(IStatementParser):
     """Parser for CALL statements using IStatementParser interface."""
-    
+
     def matches(self, token_stream: ITokenStream) -> bool:
         """Check if next token is CALL keyword."""
         try:
@@ -26,10 +31,10 @@ class CallStatementParser(IStatementParser):
             return False
         except Exception:
             return False
-    
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> CallStatement:
+
+    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> CallStatement:
         """Parse a CALL statement.
-        
+
         Supports:
         - CALL "program-name"  (static)
         - CALL variable-name   (dynamic)
@@ -40,18 +45,18 @@ class CallStatementParser(IStatementParser):
         start_token = token_stream.consume()
         factory = get_factory()
         stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
-        
+
         # Get context for error reporting if available
-        parse_ctx: Optional[ParseContext] = token_stream.context
+        parse_ctx: ParseContext | None = token_stream.context
         if parse_ctx is None:
             parse_ctx = getattr(token_stream, '_context', None)
         if parse_ctx is None and hasattr(token_stream, 'context'):
-            parse_ctx = getattr(token_stream, 'context')
-        
+            parse_ctx = token_stream.context
+
         try:
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            
+
             if not token:
                 # Missing program name
                 if parse_ctx:
@@ -60,9 +65,8 @@ class CallStatementParser(IStatementParser):
                         start_token.location if start_token else SourceLocation(0, 0)
                     )
                 return stmt
-            
+
             # Parse the program name (can be literal or identifier)
-            is_dynamic = False
             if token.type == TokenType.STRING_LITERAL:
                 # Static CALL with literal program name
                 program_name = token.value
@@ -74,7 +78,7 @@ class CallStatementParser(IStatementParser):
                 stmt.set_called_program(program_name, is_dynamic=True)
                 token_stream.consume()
             else:
-                # Unknown token type, report error  
+                # Unknown token type, report error
                 if parse_ctx:
                     parse_ctx.error(
                         f"Expected program name (literal or identifier), found {token.type.name if hasattr(token.type, 'name') else str(token.type)}",
@@ -82,31 +86,31 @@ class CallStatementParser(IStatementParser):
                     )
                 token_stream.consume()
                 return stmt
-            
+
             # Parse optional USING and RETURNING clauses
 
-            
+
             while not token_stream.is_empty():
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
-                
+
                 if not token:
                     break
-                
+
                 if token.type == TokenType.PERIOD:
                     token_stream.consume()
                     break
-                
+
                 # Check for statement keywords that end the CALL statement
                 if token.type in STATEMENT_TOKEN_TYPES:
                     # This is a new statement, not part of CALL
                     break
-                
+
                 if token.type == TokenType.IDENTIFIER and token.value:
                     if token.value.upper() in STATEMENT_KEYWORDS and token.value.upper() not in ("RETURNING", "GIVING"):
                         # This is a new statement, not part of CALL
                         break
-                
+
                 # Parse USING clause
                 if token.type == TokenType.USING or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "USING"):
                     token_stream.consume()
@@ -164,7 +168,7 @@ class CallStatementParser(IStatementParser):
                     break
         except Exception:
             pass
-        
+
         return stmt
 
     def _parse_nested_stmts(self, token_stream: ITokenStream, stop_at: set) -> list:
@@ -196,19 +200,19 @@ class CallStatementParser(IStatementParser):
             else:
                 token_stream.consume()
         return stmts
-    
+
     def _parse_using_clause(self, token_stream: ITokenStream, stmt: CallStatement) -> None:
         """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""
-        
 
-        
+
+
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            
+
             if not token or token.type == TokenType.PERIOD:
                 break
-            
+
             # Check for end of USING clause
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
@@ -224,7 +228,7 @@ class CallStatementParser(IStatementParser):
             elif token.type not in (TokenType.BY, TokenType.USING) and \
                  token.type not in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.VALUE):
                 break
-            
+
             # Check for BY [REFERENCE|CONTENT|VALUE]
             passing_mode = "REFERENCE"  # Default
             if token.type == TokenType.BY or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "BY"):
@@ -239,7 +243,7 @@ class CallStatementParser(IStatementParser):
                         token_stream.consume()
                         skip_whitespace(token_stream)
                         token = token_stream.peek()
-            
+
             # Parse parameter name
             if token and token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 param_name = token.value

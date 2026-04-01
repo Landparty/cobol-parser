@@ -5,7 +5,7 @@ so that IO-specific domain logic lives alongside other IO analysis modules.
 """
 
 from enum import Enum
-from typing import ClassVar, Dict, Optional
+from typing import ClassVar
 
 from cobolparser._errors import ParseError
 
@@ -60,7 +60,7 @@ class IODiagnosticHelper:
     """Helper class for generating IO-related diagnostics and error messages."""
 
     # Mapping of error codes to user-friendly messages
-    ERROR_MESSAGES: ClassVar[Dict[IOErrorCode, str]] = {
+    ERROR_MESSAGES: ClassVar[dict[IOErrorCode, str]] = {
         IOErrorCode.IO_READ_INVALID_KEY_ORDER:
             "INVALID KEY clause must appear after KEY clause in READ statement",
         IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL:
@@ -126,7 +126,7 @@ class IODiagnosticHelper:
         code: IOErrorCode,
         line: int = 0,
         column: int = 0,
-        context: Optional[str] = None
+        context: str | None = None
     ) -> ParseError:
         """Create a ParseError for IO statement issues."""
         message = IODiagnosticHelper.get_error_message(code)
@@ -140,8 +140,8 @@ class IODiagnosticHelper:
     @staticmethod
     def validate_io_statement_type(
         statement_type: str,
-        file_organization: Optional[str] = None
-    ) -> Optional[IOErrorCode]:
+        file_organization: str | None = None
+    ) -> IOErrorCode | None:
         """Validate IO statement against file organization.
 
         Returns error code if validation fails, None if valid.

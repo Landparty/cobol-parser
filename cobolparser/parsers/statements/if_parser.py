@@ -1,17 +1,24 @@
 """If statement parser implementing IStatementParser interface."""
 
-from typing import Optional, List, Any
-from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
+from typing import Any
+
+from cobolparser.parsers.statements._utils import (
+    get_parse_context,
+    report_parse_error,
+    skip_whitespace,
+    try_parse_nested_statement,
+)
+
 from ...core.ast_factory import get_factory
-from ...models.statements import IfStatement, CobolExpression
-from ...models.ast_base import SourceLocation
+from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from cobolparser.parsers.statements._utils import skip_whitespace, get_parse_context, report_parse_error, try_parse_nested_statement
+from ...models.ast_base import SourceLocation
+from ...models.statements import CobolExpression, IfStatement
 
 
 class IfStatementParser(IStatementParser):
     """Parser for IF statements using IStatementParser interface."""
-    
+
     def matches(self, token_stream: ITokenStream) -> bool:
         """Check if next token is IF keyword."""
         try:
@@ -19,14 +26,14 @@ class IfStatementParser(IStatementParser):
             if not token:
                 return False
             return bool(token.type == TokenType.IF or
-                    (token.type == TokenType.IDENTIFIER and token.value and 
+                    (token.type == TokenType.IDENTIFIER and token.value and
                      token.value.upper() == "IF"))
         except Exception:
             return False
-    
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IfStatement:
+
+    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IfStatement:
         """Parse an IF statement with nested statement support.
-        
+
         Supports:
         - IF condition statement [ELSE statement] [END-IF]
         - IF condition THEN statement [ELSE statement] [END-IF]
@@ -35,42 +42,42 @@ class IfStatementParser(IStatementParser):
         factory = get_factory()
         stmt = factory.create(IfStatement, start_token.location if start_token else SourceLocation(0, 0))
         context = get_parse_context(token_stream)
-        
+
         # Type guard: ensure stmt is an IfStatement
         if not isinstance(stmt, IfStatement):
             stmt = IfStatement(start_token.location if start_token else SourceLocation(0, 0))
-        
+
         skip_whitespace(token_stream)
-        
+
         # Parse condition tokens - stop at THEN or statement keyword
-        condition_tokens: List[str] = []
+        condition_tokens: list[str] = []
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token or not token.value:
                 break
-            
+
             token_upper = token.value.upper()
-            
+
             # Stop at explicit THEN
             if token_upper == "THEN":
                 break
-            
+
             # Stop at statement keywords (implicit THEN)
             if self._is_statement_keyword(token_upper):
                 break
-            
+
             # Stop at ELSE or END-IF
             if token_upper in ("ELSE", "END-IF"):
                 break
-            
+
             # Stop at period
             if token.type == TokenType.PERIOD:
                 break
-            
+
             # Add token to condition
             condition_tokens.append(token.value)
             token_stream.consume()
-        
+
         # Create condition expression tree
         loc = start_token.location if start_token else SourceLocation(0, 0)
         if condition_tokens:
@@ -89,53 +96,53 @@ class IfStatementParser(IStatementParser):
                 "IF statement requires a condition before the THEN branch",
                 loc,
             )
-        
+
         skip_whitespace(token_stream)
-        
+
         # Skip explicit THEN keyword if present
         if not token_stream.is_empty():
             token = token_stream.peek()
             if token and token.value and token.value.upper() == "THEN":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-        
+
         # Parse THEN branch statements until ELSE, END-IF, or period
         period_found = False
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
-            
+
             if token_stream.is_empty():
                 break
-            
+
             token = token_stream.peek()
             if not token:
                 break
-            
+
             token_upper = token.value.upper() if token.value else ""
-            
+
             # End of THEN branch at ELSE
             if token_upper == "ELSE":
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 period_found = False  # Reset for ELSE branch
                 break
-            
+
             # End of IF statement at END-IF
             if token_upper == "END-IF":
                 token_stream.consume()
                 self._try_consume_period(token_stream)
                 return stmt
-            
+
             # End of IF statement at period (when not in a multi-line block)
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
                 return stmt
-            
+
             # If we already found a period terminating the previous statement,
             # don't parse more (this means inline IF)
             if period_found:
                 break
-            
+
             # Try to parse nested statement
             nested_stmt = try_parse_nested_statement(token_stream)
             if nested_stmt:
@@ -151,37 +158,37 @@ class IfStatementParser(IStatementParser):
             else:
                 # Couldn't parse - stop trying to parse statements in this branch
                 break
-        
+
         # Parse ELSE branch statements until END-IF or period
         period_found = False
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
-            
+
             if token_stream.is_empty():
                 break
-            
+
             token = token_stream.peek()
             if not token:
                 break
-            
+
             token_upper = token.value.upper() if token.value else ""
-            
+
             # End of IF statement at END-IF
             if token_upper == "END-IF":
                 token_stream.consume()
                 self._try_consume_period(token_stream)
                 return stmt
-            
+
             # End of IF statement at period
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
                 return stmt
-            
+
             # If we already found a period terminating the previous statement,
             # don't parse more (this means inline IF-ELSE)
             if period_found:
                 break
-            
+
             # Try to parse nested statement
             nested_stmt = try_parse_nested_statement(token_stream)
             if nested_stmt:
@@ -197,9 +204,9 @@ class IfStatementParser(IStatementParser):
             else:
                 # Couldn't parse - stop trying to parse statements in this branch
                 break
-        
+
         return stmt
-    
+
     _COMPARISON_OPS = {
         "=": "EQUAL",
         "EQUAL": "EQUAL",
@@ -213,17 +220,20 @@ class IfStatementParser(IStatementParser):
     }
 
     def _build_condition_expression(
-        self, tokens: List[str], location: SourceLocation
-    ) -> Optional[CobolExpression]:
+        self, tokens: list[str], location: SourceLocation
+    ) -> CobolExpression | None:
         """Convert a flat list of condition token strings into an expression tree.
 
         Handles simple comparisons (LHS op RHS), NOT-prefixed operators, and
         compound conditions joined by AND / OR.
         """
-        from cobolparser.models.statements.base import ConditionalExpression, LogicalExpression
+        from cobolparser.models.statements.base import (
+            ConditionalExpression,
+            LogicalExpression,
+        )
 
         # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.)
-        cleaned: List[str] = []
+        cleaned: list[str] = []
         i = 0
         while i < len(tokens):
             tok = tokens[i].upper()
@@ -303,16 +313,16 @@ class IfStatementParser(IStatementParser):
             "MERGE", "SORT", "RELEASE", "RETURN"
         }
         return token_upper in statement_keywords
-    
+
     def _try_consume_period(self, stream: ITokenStream) -> None:
         """Try to consume a period if present."""
         if not stream.is_empty():
             token = stream.peek()
             if token and token.type == TokenType.PERIOD:
                 stream.consume()
-    
+
     @staticmethod
-    def _previous_meaningful_token(stream: ITokenStream) -> Optional[Any]:
+    def _previous_meaningful_token(stream: ITokenStream) -> Any | None:
         """Return the last non-whitespace token consumed by the stream."""
         offset = -1
         while True:

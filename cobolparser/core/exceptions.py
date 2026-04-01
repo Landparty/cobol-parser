@@ -1,6 +1,5 @@
 """Structured error types for COBOL parser with detailed context."""
 
-from typing import Optional
 
 # Single canonical ParseError lives in cobolparser._errors to avoid circular
 # imports between cobolparser.plugins.core and cobolparser.core.
@@ -20,10 +19,10 @@ class TokenMismatch(ParseError):
         self,
         expected: str,
         actual: str,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
-        token_value: Optional[str] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
+        token_value: str | None = None,
     ):
         self.expected = expected
         self.actual = actual
@@ -37,9 +36,9 @@ class UnexpectedEndOfInput(ParseError):
 
     def __init__(
         self,
-        expected: Optional[str] = None,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
+        expected: str | None = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
     ):
         message = "Unexpected end of input"
         if expected:
@@ -53,9 +52,9 @@ class DivisionNotFoundError(ParseError):
     def __init__(
         self,
         division_name: str,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
     ):
         self.division_name = division_name
         message = f"Unknown division: {division_name}"
@@ -67,10 +66,10 @@ class UnknownStatementError(ParseError):
 
     def __init__(
         self,
-        token_value: Optional[str] = None,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
+        token_value: str | None = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
     ):
         self.token_value = token_value
         message = "Unknown or unrecognized statement"
@@ -86,9 +85,9 @@ class ValidationError(ParseError):
         self,
         node_type: str,
         issue: str,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
     ):
         self.node_type = node_type
         self.issue = issue

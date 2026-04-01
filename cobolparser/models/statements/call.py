@@ -2,8 +2,9 @@
 CALL and ENTRY statement AST nodes.
 """
 
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from typing import Any
+
 from ..ast_base import SourceLocation
 from .base import CobolStatement
 
@@ -26,15 +27,15 @@ class CallStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("CALL", location)
-        self.called_program: Optional[str] = None
-        self.using_parameters: List[CallParameter] = []
-        self.returning_parameter: Optional[str] = None
-        self.giving_parameter: Optional[str] = None
-        self.on_overflow: Optional[List["CobolStatement"]] = None
-        self.on_exception: Optional[List["CobolStatement"]] = None
-        self.not_on_exception: Optional[List["CobolStatement"]] = None
+        self.called_program: str | None = None
+        self.using_parameters: list[CallParameter] = []
+        self.returning_parameter: str | None = None
+        self.giving_parameter: str | None = None
+        self.on_overflow: list[CobolStatement] | None = None
+        self.on_exception: list[CobolStatement] | None = None
+        self.not_on_exception: list[CobolStatement] | None = None
         self._is_dynamic: bool = False
-        self._possible_values: List[str] = []
+        self._possible_values: list[str] = []
 
     def set_called_program(self, program_name: str, is_dynamic: bool = False) -> None:
         """Set the called program name and type."""
@@ -72,7 +73,7 @@ class CallStatement(CobolStatement):
         return self._is_dynamic
 
     @property
-    def possible_values(self) -> List[str]:
+    def possible_values(self) -> list[str]:
         """Get possible values for dynamic call target."""
         return list(self._possible_values)
 
@@ -81,11 +82,11 @@ class CallStatement(CobolStatement):
         if value not in self._possible_values:
             self._possible_values.append(value)
 
-    def set_possible_values(self, values: List[str]) -> None:
+    def set_possible_values(self, values: list[str]) -> None:
         """Set all possible values."""
         self._possible_values = list(set(values))  # Deduplicate
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         base = super().to_dict()
         base.update(
@@ -123,8 +124,8 @@ class EntryStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("ENTRY", location)
-        self.entry_name: Optional[str] = None
-        self.using_parameters: List[str] = []
+        self.entry_name: str | None = None
+        self.using_parameters: list[str] = []
 
     def set_entry_name(self, name: str) -> None:
         """Set the entry point name (literal)."""
@@ -138,7 +139,7 @@ class EntryStatement(CobolStatement):
         if param_name not in self.operands:
             self.add_operand(param_name)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         base = super().to_dict()
         base.update(

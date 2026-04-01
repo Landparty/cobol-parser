@@ -1,12 +1,14 @@
 """Start statement parser implementing IStatementParser interface."""
 
-from typing import Any, Optional, cast
-from ...core.interfaces import IStatementParser, ITokenStream
+from typing import Any, cast
+
+from cobolparser.parsers.statements._utils import collect_clause_stmts, skip_whitespace
+
 from ...core.ast_factory import get_factory
-from ...models.statements import IOStartStatement
-from ...models.ast_base import SourceLocation
+from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
+from ...models.ast_base import SourceLocation
+from ...models.statements import IOStartStatement
 
 # Key conditions recognized as IDENTIFIER tokens
 _KEY_CONDITIONS = {
@@ -33,7 +35,7 @@ class StartStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOStartStatement:
+    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IOStartStatement:
         """Parse a START statement."""
         start_token = token_stream.consume()
         factory = get_factory()

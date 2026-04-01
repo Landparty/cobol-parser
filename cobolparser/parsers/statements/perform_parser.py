@@ -1,21 +1,27 @@
 """Perform statement parser implementing IStatementParser interface."""
 
-from typing import Optional, Any, cast
-from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
-from ...core.exceptions import TokenMismatch, UnexpectedEndOfInput
-from ...core.ast_factory import get_factory
-from ...models.statements import PerformStatement, CobolExpression
-from ...models.ast_base import SourceLocation
-from ...lexer import TokenType
+from typing import Any, cast
+
 from cobolparser.parsers.statements._utils import (
-    skip_whitespace, get_parse_context, report_parse_error,
-    try_parse_nested_statement, STATEMENT_TOKEN_TYPES, STATEMENT_KEYWORDS,
+    STATEMENT_KEYWORDS,
+    STATEMENT_TOKEN_TYPES,
+    get_parse_context,
+    report_parse_error,
+    skip_whitespace,
+    try_parse_nested_statement,
 )
+
+from ...core.ast_factory import get_factory
+from ...core.exceptions import TokenMismatch, UnexpectedEndOfInput
+from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
+from ...models.ast_base import SourceLocation
+from ...models.statements import CobolExpression, PerformStatement
 
 
 class PerformStatementParser(IStatementParser):
     """Parser for PERFORM statements using IStatementParser interface."""
-    
+
     def matches(self, token_stream: ITokenStream) -> bool:
         """Check if next token is PERFORM keyword."""
         try:
@@ -27,10 +33,10 @@ class PerformStatementParser(IStatementParser):
                          token.value.upper() == "PERFORM"))
         except Exception:
             return False
-    
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> PerformStatement:
+
+    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> PerformStatement:
         """Parse a PERFORM statement.
-        
+
         Supports:
         - PERFORM paragraph-name
         - PERFORM paragraph-name THRU paragraph-name
@@ -42,22 +48,22 @@ class PerformStatementParser(IStatementParser):
         # Consume PERFORM keyword
         start_token = token_stream.consume()
         factory = get_factory()
-        
+
         # Create statement with source location
         location = start_token.location if start_token else SourceLocation(0, 0)
         stmt = cast(PerformStatement, factory.create(PerformStatement, location))
         context = get_parse_context(token_stream)
-        
+
         # Skip whitespace/comments if possible
         skip_whitespace(token_stream)
-        
+
         # Try to get the next meaningful token (peek without consuming)
         try:
             token = token_stream.peek()
         except Exception:
             # End of stream
             return stmt
-        
+
         if not token:
             report_parse_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
             return stmt
@@ -66,12 +72,12 @@ class PerformStatementParser(IStatementParser):
             report_parse_error(context, "PERFORM statement requires a target paragraph or inline clause", location)
             token_stream.consume()
             return stmt
-        
+
         # Check for VARYING clause (inline PERFORM VARYING)
         if token.type == TokenType.VARYING:
             self._parse_varying_clause(token_stream, stmt)
             return stmt
-        
+
         # Check for TEST clause (WITH TEST BEFORE/AFTER)
         if token.type == TokenType.WITH:
             try:
@@ -89,15 +95,15 @@ class PerformStatementParser(IStatementParser):
                 pass
             skip_whitespace(token_stream)
             token = token_stream.peek()
-        
+
         # Check for UNTIL clause (inline PERFORM UNTIL)
         if token and token.type == TokenType.UNTIL:
             self._parse_until_clause(token_stream, stmt)
             return stmt
-        
+
         # Check for TIMES clause (inline PERFORM n TIMES)
         # Check for numeric literals: TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER, or numeric IDENTIFIER
-        if token and (token.type == TokenType.NUMERIC_LITERAL or 
+        if token and (token.type == TokenType.NUMERIC_LITERAL or
                       token.type == TokenType.LEVEL_NUMBER or
                       (token.type == TokenType.IDENTIFIER and token.value and token.value.isdigit())):
             try:
@@ -105,7 +111,7 @@ class PerformStatementParser(IStatementParser):
                 token_stream.consume()
                 token = token_stream.peek()
                 # Check for TIMES keyword: TokenType.TIMES or IDENTIFIER "TIMES"
-                if token and (token.type == TokenType.TIMES or 
+                if token and (token.type == TokenType.TIMES or
                              (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"))):
                     token_stream.consume()
                     stmt.set_times_clause(times_count)
@@ -114,10 +120,10 @@ class PerformStatementParser(IStatementParser):
                     return stmt
             except Exception:
                 pass
-            
+
             skip_whitespace(token_stream)
             token = token_stream.peek()
-        
+
         # Simple PERFORM paragraph-name
         if token and token.type == TokenType.IDENTIFIER:
             paragraph = token.value
@@ -127,10 +133,10 @@ class PerformStatementParser(IStatementParser):
                 token = token_stream.peek()
             except Exception:
                 token = None
-            
+
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            
+
             # Check for THRU clause
             if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "THRU":
                 try:
@@ -148,18 +154,18 @@ class PerformStatementParser(IStatementParser):
                         )
                 except Exception:
                     pass
-                
+
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
-            
+
             # Check for TIMES clause after paragraph name (can be numeric or variable)
             if token and token.type == TokenType.IDENTIFIER:
                 times_value = token.value
-                times_consumed = token_stream.consume()
+                token_stream.consume()
                 token = token_stream.peek()
-                
+
                 # Check if  followed by TIMES keyword
-                if token and (token.type == TokenType.TIMES or 
+                if token and (token.type == TokenType.TIMES or
                              (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("TIMES", "TIME"))):
                     # Can be numeric (int) or variable (string)
                     para_times_count: Any
@@ -184,10 +190,10 @@ class PerformStatementParser(IStatementParser):
                         token = token_stream.peek()
                 except Exception:
                     pass
-            
+
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            
+
             # Check for WITH TEST clause after paragraph name (WITH TEST BEFORE/AFTER)
             if token and token.type == TokenType.WITH:
                 try:
@@ -203,17 +209,17 @@ class PerformStatementParser(IStatementParser):
                             token = token_stream.peek()
                 except Exception:
                     pass
-                
+
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
-            
+
             # Check for UNTIL clause after paragraph name
             if token and token.type == TokenType.UNTIL:
                 try:
                     self._parse_until_condition_only(token_stream, stmt)
                 except Exception:
                     pass
-        
+
         # Expect period or END-PERFORM
         try:
             token = token_stream.peek()
@@ -223,7 +229,7 @@ class PerformStatementParser(IStatementParser):
                 token_stream.consume()
         except Exception:
             pass
-        
+
         return stmt
 
     def _parse_varying_clause(self, stream: ITokenStream, stmt: PerformStatement) -> None:
@@ -231,23 +237,23 @@ class PerformStatementParser(IStatementParser):
         try:
             stream.consume()  # Skip VARYING
             skip_whitespace(stream)
-            
+
             # Get variable name
             token = stream.peek()
             if not token or token.type != TokenType.IDENTIFIER:
                 return
-            
+
             variable_name = token.value
             stream.consume()
             skip_whitespace(stream)
-            
+
             # Expect FROM
             token = stream.peek()
             if not token or not token.value or token.value.upper() != "FROM":
                 return
             stream.consume()
             skip_whitespace(stream)
-            
+
             # Get FROM value
             token = stream.peek()
             if not token or not token.value:
@@ -255,14 +261,14 @@ class PerformStatementParser(IStatementParser):
             from_value = token.value
             stream.consume()
             skip_whitespace(stream)
-            
+
             # Expect BY
             token = stream.peek()
             if not token or not token.value or token.value.upper() != "BY":
                 return
             stream.consume()
             skip_whitespace(stream)
-            
+
             # Get BY value
             token = stream.peek()
             if not token or not token.value:
@@ -270,7 +276,7 @@ class PerformStatementParser(IStatementParser):
             by_value = token.value
             stream.consume()
             skip_whitespace(stream)
-            
+
             # Check for WITH TEST clause (before UNTIL)
             token = stream.peek()
             if token and token.type == TokenType.WITH:
@@ -287,10 +293,10 @@ class PerformStatementParser(IStatementParser):
                             token = stream.peek()
                 except Exception:
                     pass
-                
+
                 skip_whitespace(stream)
                 token = stream.peek()
-            
+
             # Parse UNTIL condition
             token = stream.peek()
             if token and token.type == TokenType.UNTIL:
@@ -304,7 +310,7 @@ class PerformStatementParser(IStatementParser):
                 self._parse_inline_statements(stream, stmt)
         except Exception:
             pass
-    
+
     def _collect_until_condition_tokens(
         self, stream: ITokenStream, for_varying: bool = False
     ) -> list:
@@ -363,16 +369,16 @@ class PerformStatementParser(IStatementParser):
             self._parse_inline_statements(stream, stmt)
         except Exception:
             pass
-    
+
     def _parse_until_condition_only(self, stream: ITokenStream, stmt: PerformStatement) -> None:
         """Parse just the UNTIL condition after paragraph name."""
         try:
             _ut = stream.peek()
             if _ut and _ut.value and _ut.value.upper() == "UNTIL":
                 stream.consume()
-            
+
             skip_whitespace(stream)
-            
+
             # Parse condition (simplified)
             condition_tokens = []
             while True:
@@ -382,14 +388,14 @@ class PerformStatementParser(IStatementParser):
                 if token.type == TokenType.PERIOD:
                     stream.consume()
                     break
-                if (token.type == TokenType.IDENTIFIER and token.value and 
+                if (token.type == TokenType.IDENTIFIER and token.value and
                     token.value.upper() == "END-PERFORM"):
                     stream.consume()
                     break
-                
+
                 condition_tokens.append(token.value or str(token.type))
                 stream.consume()
-            
+
             # Create CobolExpression for the condition and set it on statement
             if condition_tokens:
                 condition_str = " ".join(condition_tokens).strip()
@@ -399,20 +405,20 @@ class PerformStatementParser(IStatementParser):
                 stmt.set_until_clause(condition_expr)
         except Exception:
             pass
-    
+
     def _parse_inline_statements(self, stream: ITokenStream, stmt: PerformStatement) -> None:
         """Parse inline statements within PERFORM ... END-PERFORM block."""
         try:
             skip_whitespace(stream)
-            
+
             # Parse statements until END-PERFORM or PERIOD
             while not stream.is_empty():
                 skip_whitespace(stream)
                 token = stream.peek()
-                
+
                 if not token:
                     break
-                
+
                 # Check for END-PERFORM
                 if token.type == TokenType.END_PERFORM or (
                     token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-PERFORM"
@@ -421,12 +427,12 @@ class PerformStatementParser(IStatementParser):
                     # Skip optional period
                     self._try_consume_period(stream)
                     break
-                
+
                 # Check for PERIOD (inline PERFORM without END-PERFORM)
                 if token.type == TokenType.PERIOD:
                     stream.consume()
                     break
-                
+
                 # Try to parse nested statement
                 nested_stmt = try_parse_nested_statement(stream)
                 if nested_stmt:
@@ -436,7 +442,7 @@ class PerformStatementParser(IStatementParser):
                     stream.consume()
         except Exception:
             pass
-    
+
     def _try_consume_period(self, stream: ITokenStream) -> None:
         """Try to consume a period if present."""
         try:
@@ -445,4 +451,3 @@ class PerformStatementParser(IStatementParser):
                 stream.consume()
         except Exception:
             pass
-    

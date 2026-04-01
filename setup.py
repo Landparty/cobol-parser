@@ -1,6 +1,11 @@
 import setuptools  # must be imported before mypyc to patch distutils on Python 3.12+
-from mypyc.build import mypycify
 from setuptools import setup
+
+try:
+    from mypyc.build import mypycify
+    USE_MYPYC = True
+except ImportError:
+    USE_MYPYC = False
 
 modules = [
     "cobolparser/__init__.py",
@@ -78,5 +83,5 @@ modules = [
 ]
 
 setup(
-    ext_modules=mypycify(modules),
+    ext_modules=mypycify(modules) if USE_MYPYC else [],
 )

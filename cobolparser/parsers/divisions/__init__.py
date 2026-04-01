@@ -13,7 +13,12 @@ Structure:
 """
 
 from .base import BaseDivisionParser
-from .factory import DivisionParserFactory, DivisionType, get_default_factory, reset_default_factory
+from .factory import (
+    DivisionParserFactory,
+    DivisionType,
+    get_default_factory,
+    reset_default_factory,
+)
 
 __all__ = [
     "BaseDivisionParser",

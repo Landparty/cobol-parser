@@ -9,14 +9,13 @@ Contract: contracts/io-coverage-schema.json
 
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from enum import Enum
+from enum import StrEnum
+from typing import Any
 
 
-class CoverageStatus(str, Enum):
+class CoverageStatus(StrEnum):
     """IO variation coverage status."""
 
     COVERED = "covered"
@@ -25,7 +24,7 @@ class CoverageStatus(str, Enum):
     UNSUPPORTED = "unsupported"
 
 
-class TestType(str, Enum):
+class TestType(StrEnum):
     """Type of test coverage."""
 
     UNIT = "unit"
@@ -40,7 +39,7 @@ class TestReference:
     file_path: str
     test_name: str
     test_type: str
-    line_number: Optional[int] = None
+    line_number: int | None = None
 
 
 @dataclass
@@ -55,9 +54,9 @@ class IoVariationCoverage:
     status: str
     requires_fd: bool
     ibm_reference: str
-    tests: List[Dict[str, Any]] = field(default_factory=list)
-    last_tested: Optional[str] = None
-    notes: Optional[str] = None
+    tests: list[dict[str, Any]] = field(default_factory=list)
+    last_tested: str | None = None
+    notes: str | None = None
 
 
 @dataclass
@@ -73,9 +72,9 @@ class IoCoverageArtifact:
     gap_variations: int = 0
     unsupported_variations: int = 0
     coverage_percent: float = 0.0
-    variations: List[Dict[str, Any]] = field(default_factory=list)
-    summary: Dict[str, int] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    variations: list[dict[str, Any]] = field(default_factory=list)
+    summary: dict[str, int] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class IOCoverageReporter:
@@ -89,7 +88,7 @@ class IOCoverageReporter:
     """
 
     def __init__(
-        self, catalog_path: Optional[str] = None, schema_path: Optional[str] = None
+        self, catalog_path: str | None = None, schema_path: str | None = None
     ):
         """Initialize the IO coverage reporter.
 
@@ -99,7 +98,7 @@ class IOCoverageReporter:
         """
         # Only search for files if they're not provided explicitly
         # If they can't be found, set to None to allow for test mocking
-        self.catalog_path: Optional[str]
+        self.catalog_path: str | None
         if catalog_path:
             self.catalog_path = catalog_path
         else:
@@ -109,22 +108,22 @@ class IOCoverageReporter:
             except FileNotFoundError:
                 self.catalog_path = None
 
-        self.schema_path: Optional[str]
+        self.schema_path: str | None
         if schema_path:
             self.schema_path = schema_path
         else:
             # Try to find it, but don't fail if not found
             self.schema_path = self._find_schema_path(optional=True)
-        
-        self.variations: List[IoVariationCoverage] = []
-        self.test_results: Dict[str, List[Dict[str, Any]]] = {}
 
-    def _find_catalog_path(self, optional: bool = False) -> Optional[str]:
+        self.variations: list[IoVariationCoverage] = []
+        self.test_results: dict[str, list[dict[str, Any]]] = {}
+
+    def _find_catalog_path(self, optional: bool = False) -> str | None:
         """Find the IO variation catalog path.
-        
+
         Args:
             optional: If True, return None if catalog not found instead of raising
-        
+
         Returns:
             Path to catalog or None if optional and not found
         """
@@ -137,20 +136,20 @@ class IOCoverageReporter:
         for path in possible_paths:
             if os.path.exists(path):
                 return path
-        
+
         if optional:
             return None
-        
+
         raise FileNotFoundError(
             f"Could not find IO variation catalog. Searched: {possible_paths}"
         )
 
-    def _find_schema_path(self, optional: bool = False) -> Optional[str]:
+    def _find_schema_path(self, optional: bool = False) -> str | None:
         """Find the coverage schema path.
-        
+
         Args:
             optional: If True, return None if schema not found instead of raising
-        
+
         Returns:
             Path to schema or None if optional and not found
         """
@@ -163,10 +162,10 @@ class IOCoverageReporter:
         for path in possible_paths:
             if os.path.exists(path):
                 return path
-        
+
         if optional:
             return None
-        
+
         raise FileNotFoundError(
             f"Could not find coverage schema. Searched: {possible_paths}"
         )
@@ -179,7 +178,7 @@ class IOCoverageReporter:
             raise FileNotFoundError(f"Catalog not found: {self.catalog_path}")
 
         self.variations = []
-        with open(self.catalog_path, "r", encoding="utf-8") as f:
+        with open(self.catalog_path, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 variation = IoVariationCoverage(
@@ -204,7 +203,7 @@ class IOCoverageReporter:
         if not os.path.exists(results_path):
             raise FileNotFoundError(f"Pytest results not found: {results_path}")
 
-        with open(results_path, "r", encoding="utf-8") as f:
+        with open(results_path, encoding="utf-8") as f:
             data = json.load(f)
 
         self.test_results = {}
@@ -241,7 +240,7 @@ class IOCoverageReporter:
             return TestType.UNIT.value
         return TestType.UNIT.value
 
-    def _extract_io_variation(self, test_id: str) -> Optional[str]:
+    def _extract_io_variation(self, test_id: str) -> str | None:
         """Extract IO variation ID from test ID."""
         import re
 
@@ -373,7 +372,7 @@ class IOCoverageReporter:
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(artifact_dict, f, indent=2)
 
-    def validate_artifact(self, artifact: IoCoverageArtifact) -> List[str]:
+    def validate_artifact(self, artifact: IoCoverageArtifact) -> list[str]:
         """Validate artifact against the coverage schema.
 
         Args:
@@ -423,7 +422,7 @@ class IOCoverageReporter:
 
     def generate_report(
         self, pytest_results_path: str, output_path: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate a complete IO coverage report.
 
         This is the main entry point for generating coverage reports.
@@ -493,7 +492,7 @@ def main() -> int:
             print(f"Error: Artifact not found: {args.output}")
             return 1
 
-        with open(args.output, "r") as f:
+        with open(args.output) as f:
             artifact_dict = json.load(f)
             artifact = IoCoverageArtifact(**artifact_dict)
 
@@ -515,7 +514,7 @@ def main() -> int:
         print(f"  Covered: {result['covered_variations']}/{result['total_variations']}")
         print(f"  Gaps: {result['gap_variations']}")
     else:
-        print(f"Report generation failed:")
+        print("Report generation failed:")
         for error in result["validation_errors"]:
             print(f"  - {error}")
         return 1

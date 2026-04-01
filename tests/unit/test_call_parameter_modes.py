@@ -5,7 +5,10 @@ Covers all three modes and default behavior.
 """
 
 import pytest
-from cobolparser.parser import CobolParser, TokenType, Token, SourceLocation
+from cobolparser.lexer import Token, TokenType
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.core.token_stream import TokenStream
+from cobolparser.parsers.statements.call_parser import CallStatementParser
 
 
 class TestCallParameterModes:
@@ -13,8 +16,7 @@ class TestCallParameterModes:
 
     def test_by_reference_mode(self):
         """Test BY REFERENCE parameter passing mode (FR-003)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "PROCESS", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 15)),
@@ -24,10 +26,9 @@ class TestCallParameterModes:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 43)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert len(call_stmt.using_parameters) == 1
@@ -36,8 +37,7 @@ class TestCallParameterModes:
 
     def test_by_content_mode(self):
         """Test BY CONTENT parameter passing mode (FR-003)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "PROCESS", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 15)),
@@ -47,18 +47,16 @@ class TestCallParameterModes:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 41)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert call_stmt.using_parameters[0].passing_mode == "CONTENT"
 
     def test_by_value_mode(self):
         """Test BY VALUE parameter passing mode (FR-004)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "INCREMENT", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 17)),
@@ -68,18 +66,16 @@ class TestCallParameterModes:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 41)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert call_stmt.using_parameters[0].passing_mode == "VALUE"
 
     def test_default_mode_no_explicit_mode(self):
         """Test default mode (BY REFERENCE) when no mode specified (FR-003)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "PROCESS", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 15)),
@@ -87,18 +83,16 @@ class TestCallParameterModes:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 30)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert call_stmt.using_parameters[0].passing_mode == "REFERENCE"
 
     def test_mixed_parameter_modes(self):
         """Test mixed parameter passing modes in single CALL (FR-003, FR-004)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "MIXED", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 13)),
@@ -114,10 +108,9 @@ class TestCallParameterModes:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 61)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
+        stream = TokenStream(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
         
         assert call_stmt is not None
         assert len(call_stmt.using_parameters) == 3

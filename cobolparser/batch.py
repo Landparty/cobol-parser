@@ -17,12 +17,12 @@ Executor reuse example (avoids spawn overhead on large repeated batches)::
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
 
-from cobolparser.parser import parse_cobol, ParseResult
+from cobolparser.parser import ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
 
 
@@ -77,7 +77,7 @@ def parse_files(
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
     encoding: str = "utf-8",
     errors: str = "replace",
-    executor: Optional[ProcessPoolExecutor] = None,
+    executor: ProcessPoolExecutor | None = None,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files in parallel.
 

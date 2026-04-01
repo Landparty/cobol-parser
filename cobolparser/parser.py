@@ -2,49 +2,32 @@
 
 This module provides delegating CobolParser that orchestrates parsing through:
 - DivisionParserFactory for IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE divisions
-- StatementRegistry for dynamic statement parsing within PROCEDURE division
+- ProcedureDivisionParser with its own StatementParserRegistry for statement parsing
 - TokenStream abstraction for lookahead and error recovery
 """
 
 import re
-from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-from .lexer import CobolLexer, Token, TokenType, LexerError
-from .models.ast_base import SourceLocation, ASTNode
-from .models.program import CobolProgram, CobolDivision
-from .plugins.core import (
-    ParseError,
-    ParseStatistics,
-    ErrorRecoveryMode,
-    DialectType,
-    MemoryConfiguration,
-    SerializationConfig,
-    PluginManager,
-)
+from typing import Any
 
 # Core parsing infrastructure
 from .core.token_stream import TokenStream
-from .core.registry import StatementParserRegistry
-from .core.interfaces import ParseContext
+from .lexer import CobolLexer, Token
+from .models.ast_base import SourceLocation
+from .models.program import CobolDivision, CobolProgram
+from .parsers.divisions.data import DataDivisionParser
+from .parsers.divisions.environment import EnvironmentDivisionParser
 from .parsers.divisions.factory import DivisionParserFactory, DivisionType
 from .parsers.divisions.identification import IdentificationDivisionParser
-from .parsers.divisions.environment import EnvironmentDivisionParser
-from .parsers.divisions.data import DataDivisionParser
 from .parsers.divisions.procedure import ProcedureDivisionParser
-
-# Statement parsers
-from .parsers.statements.display_parser import DisplayStatementParser
-from .parsers.statements.move_parser import MoveStatementParser
-from .parsers.statements.call_parser import CallStatementParser
-from .parsers.statements.if_parser import IfStatementParser
-from .parsers.statements.perform_parser import PerformStatementParser
-from .parsers.statements.evaluate_parser import EvaluateStatementParser
-from .parsers.statements.arithmetic_parsers import (
-    AddStatementParser,
-    SubtractStatementParser,
-    MultiplyStatementParser,
-    DivideStatementParser,
-    ComputeStatementParser,
+from .plugins.core import (
+    DialectType,
+    ErrorRecoveryMode,
+    MemoryConfiguration,
+    ParseError,
+    ParseStatistics,
+    PluginManager,
+    SerializationConfig,
 )
 from .preprocess import normalize_fixed_format
 
@@ -55,9 +38,9 @@ _ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECA
 @dataclass
 class ParseResult:
     """Result of parsing operation with AST and metadata."""
-    ast: Optional[CobolProgram]
-    errors: List[ParseError]
-    warnings: List[str]
+    ast: CobolProgram | None
+    errors: list[ParseError]
+    warnings: list[str]
     statistics: ParseStatistics
 
     @property
@@ -73,12 +56,12 @@ class ParseResult:
 
 class CobolParser:
     """COBOL parser orchestrator using factory-based architecture.
-    
+
     Delegates parsing to specialized components:
     - DivisionParserFactory for division parsing
     - StatementRegistry for statement parsing
     - TokenStream for lookahead-enabled token navigation
-    
+
     Supports multiple dialects, error recovery modes, and memory management.
     """
 
@@ -86,9 +69,9 @@ class CobolParser:
         self,
         dialect: DialectType = DialectType.IBM_ENTERPRISE,
         error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
-        memory_config: Optional[MemoryConfiguration] = None,
-        serialization_config: Optional[SerializationConfig] = None,
-        plugin_manager: Optional[PluginManager] = None,
+        memory_config: MemoryConfiguration | None = None,
+        serialization_config: SerializationConfig | None = None,
+        plugin_manager: PluginManager | None = None,
         free_form: bool = False,
     ):
         """Initialize the COBOL parser with required configurations."""
@@ -100,26 +83,16 @@ class CobolParser:
         self.free_form = free_form
 
         # Parser state
-        self.tokens: List[Token] = []
-        self.current_token_index = 0
-        self.errors: List[ParseError] = []
-        self.warnings: List[str] = []
+        self.tokens: list[Token] = []
+        self.errors: list[ParseError] = []
+        self.warnings: list[str] = []
         self.statistics = ParseStatistics()
-        self.current_program: Optional[CobolProgram] = None
-        self.stream: Optional[TokenStream] = None
+        self.current_program: CobolProgram | None = None
+        self.stream: TokenStream | None = None
 
-        # Initialize factories and registries
+        # Initialize division parser factory
         self._division_factory = DivisionParserFactory()
         self._register_division_parsers()
-        
-        # NOTE: self.registry is used only by the backward-compat statement methods
-        # (parse_call_statement, parse_move_statement, etc.) for direct statement
-        # parsing in tests.  Actual full-program parsing is done by
-        # ProcedureDivisionParser, which owns its own StatementParserRegistry that
-        # also includes EXEC SQL/CICS parsers.  The two registries are intentionally
-        # separate and should stay that way.
-        self.registry = StatementParserRegistry()
-        self._register_statement_parsers()
 
     def _register_division_parsers(self) -> None:
         """Register all division parsers in the factory."""
@@ -144,20 +117,6 @@ class CobolParser:
             instantiate=True
         )
 
-    def _register_statement_parsers(self) -> None:
-        """Register all statement parsers in the registry."""
-        self.registry.register(DisplayStatementParser())
-        self.registry.register(MoveStatementParser())
-        self.registry.register(CallStatementParser())
-        self.registry.register(IfStatementParser())
-        self.registry.register(PerformStatementParser())
-        self.registry.register(EvaluateStatementParser())
-        self.registry.register(AddStatementParser())
-        self.registry.register(SubtractStatementParser())
-        self.registry.register(MultiplyStatementParser())
-        self.registry.register(DivideStatementParser())
-        self.registry.register(ComputeStatementParser())
-
     @staticmethod
     def _skip_to_identification_division(content: str) -> str:
         """Skip all lines before IDENTIFICATION DIVISION, preserving line numbers."""
@@ -170,22 +129,22 @@ class CobolParser:
 
         return content
 
-    def parse(self, source: str, filename: str = "<string>", error_recovery: Optional[ErrorRecoveryMode] = None) -> ParseResult:
+    def parse(self, source: str, filename: str = "<string>", error_recovery: ErrorRecoveryMode | None = None) -> ParseResult:
         """Parse COBOL source code into AST.
-        
+
         Args:
             source: COBOL source code
             filename: Source filename for error reporting
-            error_recovery: Error recovery mode (FAIL_FAST or COLLECT_ALL). 
+            error_recovery: Error recovery mode (FAIL_FAST or COLLECT_ALL).
                            Defaults to FAIL_FAST if not specified.
-            
+
         Returns:
             ParseResult with AST and metadata
         """
         # Set error recovery mode if provided
         if error_recovery is not None:
             self.error_recovery = error_recovery
-        
+
         self.statistics.reset()
         self.statistics.start_timing()
         self.errors.clear()
@@ -194,19 +153,19 @@ class CobolParser:
         try:
             # Preprocess and tokenize
             cleaned_source = self._skip_to_identification_division(source)
-            
+
             # Auto-detect fixed-format if not explicitly specified
             actual_free_form = self.free_form
             if not self.free_form:  # Only auto-detect if not explicitly set to free-form
                 detected_fixed = _detect_fixed_format(cleaned_source)
                 if detected_fixed:
-                    # Preprocess fixed-format source
+                    # Preprocess fixed-format source to free-form
                     cleaned_source = normalize_fixed_format(cleaned_source.splitlines())
                     actual_free_form = True
                 else:
-                    # Source appears to be free-form
-                    actual_free_form = True
-            
+                    # Source is already free-form, no preprocessing needed
+                    actual_free_form = False
+
             lexer = CobolLexer(
                 cleaned_source, filename, self.dialect, free_form=actual_free_form
             )
@@ -240,45 +199,44 @@ class CobolParser:
 
     def parse_file(self, filepath: str) -> ParseResult:
         """Parse COBOL source code from a file.
-        
+
         Args:
             filepath: Path to COBOL source file
-            
+
         Returns:
             ParseResult with AST and metadata
         """
         try:
-            with open(filepath, "r", encoding="utf-8") as file:
+            with open(filepath, encoding="utf-8") as file:
                 source = file.read()
             return self.parse(source, filepath)
-        except IOError as e:
+        except OSError as e:
             self.add_error(ParseError(f"File error: {str(e)}", 1, 1))
             return self._create_result(None)
 
-    def parse_program(self) -> Optional[CobolProgram]:
+    def parse_program(self) -> CobolProgram | None:
         """Parse a complete COBOL program delegating to division parsers.
-        
+
         Uses DivisionParserFactory to parse IDENTIFICATION, ENVIRONMENT, DATA,
         and PROCEDURE divisions in sequence. Implements error recovery modes
         and coordinated error handling across divisions.
         """
         program_name = "UNKNOWN"
         program_location = self.get_current_location()
-        errors_at_start = len(self.errors)
 
         # Create initial program (will be updated with metadata from ID division)
         self.current_program = CobolProgram(program_name, program_location)
 
         # Parse divisions in order: IDENTIFICATION -> ENVIRONMENT -> DATA -> PROCEDURE
-        divisions_parsed: List[Any] = []
-        
+        divisions_parsed: list[Any] = []
+
         try:
             if not self.stream:
                 return self.current_program
-                
+
             while not self.stream.is_empty():
                 self.stream.skip_whitespace_and_comments()
-                
+
                 if self.stream.is_empty():
                     break
 
@@ -302,22 +260,22 @@ class CobolParser:
                     if callable(set_host):
                         set_host(self)
                     elif hasattr(parser, 'host'):
-                        setattr(parser, 'host', self)
-                    
+                        parser.host = self
+
                     division_ast = parser.parse(self.stream)
                     if division_ast:
                         divisions_parsed.append(division_ast)
                         # Cast to CobolDivision - parser.parse should return compatible type
                         if isinstance(division_ast, CobolDivision):
                             self.current_program.add_division(division_ast)
-                        
+
                         # Update program name from IDENTIFICATION division
                         if hasattr(division_ast, 'metadata'):
                             metadata = getattr(division_ast, 'metadata', {})
                             if isinstance(metadata, dict) and 'program_id' in metadata:
                                 program_name = metadata['program_id']
                                 self.current_program.program_name = program_name
-                            
+
                 except Exception as e:
                     error = ParseError(str(e), 1, 1)
                     self.add_error(error)
@@ -339,7 +297,7 @@ class CobolParser:
                 return token.location
         return SourceLocation(1, 1, 1)
 
-    def create_error(self, message: str, location: Optional[SourceLocation] = None) -> ParseError:
+    def create_error(self, message: str, location: SourceLocation | None = None) -> ParseError:
         """Create a ParseError from a source location."""
         if location and hasattr(location, 'line') and hasattr(location, 'column'):
             return ParseError(message, location.line, location.column, location)
@@ -355,7 +313,7 @@ class CobolParser:
         self.warnings.append(message)
         self.statistics.warning_count += 1
 
-    def _create_result(self, ast: Optional[CobolProgram]) -> ParseResult:
+    def _create_result(self, ast: CobolProgram | None) -> ParseResult:
         """Create parse result with current state."""
         return ParseResult(
             ast=ast,
@@ -364,111 +322,39 @@ class CobolParser:
             statistics=self.statistics,
         )
 
-    # ========== Backward Compatibility Methods ==========
-    # For tests that directly call statement parsing methods
-
-    def parse_call_statement(self) -> Optional[Any]:
-        """Parse CALL statement (backward compatibility)."""
-        return self._dispatch_statement_parser(CallStatementParser())
-
-    def parse_move_statement(self) -> Optional[Any]:
-        """Parse MOVE statement (backward compatibility)."""
-        return self._dispatch_statement_parser(MoveStatementParser())
-
-    def parse_display_statement(self) -> Optional[Any]:
-        """Parse DISPLAY statement (backward compatibility)."""
-        return self._dispatch_statement_parser(DisplayStatementParser())
-
-    def parse_if_statement(self) -> Optional[Any]:
-        """Parse IF statement (backward compatibility)."""
-        return self._dispatch_statement_parser(IfStatementParser())
-
-    def parse_perform_statement(self) -> Optional[Any]:
-        """Parse PERFORM statement (backward compatibility)."""
-        return self._dispatch_statement_parser(PerformStatementParser())
-
-    def parse_evaluate_statement(self) -> Optional[Any]:
-        """Parse EVALUATE statement (backward compatibility)."""
-        return self._dispatch_statement_parser(EvaluateStatementParser())
-
-    def parse_add_statement(self) -> Optional[Any]:
-        """Parse ADD statement (backward compatibility)."""
-        return self._dispatch_statement_parser(AddStatementParser())
-
-    def parse_subtract_statement(self) -> Optional[Any]:
-        """Parse SUBTRACT statement (backward compatibility)."""
-        return self._dispatch_statement_parser(SubtractStatementParser())
-
-    def parse_multiply_statement(self) -> Optional[Any]:
-        """Parse MULTIPLY statement (backward compatibility)."""
-        return self._dispatch_statement_parser(MultiplyStatementParser())
-
-    def parse_divide_statement(self) -> Optional[Any]:
-        """Parse DIVIDE statement (backward compatibility)."""
-        return self._dispatch_statement_parser(DivideStatementParser())
-
-    def parse_compute_statement(self) -> Optional[Any]:
-        """Parse COMPUTE statement (backward compatibility)."""
-        return self._dispatch_statement_parser(ComputeStatementParser())
-
-    def _dispatch_statement_parser(self, parser: Any) -> Optional[Any]:
-        """Common dispatcher for statement parsers."""
-        if not self.stream and self.current_token_index < len(self.tokens):
-            self.stream = TokenStream(self.tokens)
-            self.stream._pos = self.current_token_index
-
-        if self.stream:
-            try:
-                if not self.stream.is_empty():
-                    if parser.matches(self.stream):
-                        context = ParseContext(self, self.registry)
-                        self.stream.context = context
-                        setattr(self.stream, '_registry', self.registry)
-                        result = parser.parse(self.stream)
-                        self.current_token_index = self.stream._pos
-                        return result
-            except Exception as e:
-                import warnings
-                warnings.warn(
-                    f"Statement parsing fallback failed: {type(e).__name__}: {e}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                return None
-        return None
 
 
 def _detect_fixed_format(source: str) -> bool:
     """Detect if source appears to be in fixed-format COBOL.
-    
+
     Returns True if source appears to be fixed-format, False if free-form.
     """
     lines = source.splitlines()
     non_empty_lines = [line for line in lines if line.strip()]
-    
+
     if len(non_empty_lines) < 3:
         return False
-    
+
     sample_size = min(10, len(non_empty_lines))
     fixed_format_indicators = 0
-    
+
     for line in non_empty_lines[:sample_size]:
         if len(line) < 7:
             continue
-            
+
         seq_area = line[:6]
         indicator = line[6] if len(line) > 6 else ' '
-        
+
         seq_is_spaces_or_digits = (
-            seq_area.strip() == '' or 
+            seq_area.strip() == '' or
             seq_area.replace(' ', '').isdigit()
         )
-        
+
         valid_indicator = indicator in (' ', '*', '/', '-', 'D', 'd')
-        
+
         if seq_is_spaces_or_digits and valid_indicator:
             fixed_format_indicators += 1
-    
+
     threshold = sample_size * 0.6
     return fixed_format_indicators >= threshold
 
@@ -482,9 +368,9 @@ def parse_cobol(
     preprocess_fixed: bool | None = None,
 ) -> ParseResult:
     """Convenience function to parse COBOL source code.
-    
+
     Automatically detects fixed-format COBOL and preprocesses if needed.
-    
+
     Args:
         source: COBOL source code or path to COBOL file
         filename: Source filename for error reporting
@@ -492,20 +378,20 @@ def parse_cobol(
         error_recovery: Error recovery mode
         free_form: Whether source is in free-form format
         preprocess_fixed: Whether to preprocess fixed-format COBOL (auto-detect if None)
-        
+
     Returns:
         ParseResult with AST and metadata
     """
     import os
-    
+
     # Handle file paths
     if os.path.isfile(source):
-        with open(source, 'r', encoding='utf-8', errors='replace') as f:
+        with open(source, encoding='utf-8', errors='replace') as f:
             file_content = f.read()
         if filename == "<string>":
             filename = source
         source = file_content
-    
+
     # Auto-detect fixed-format if not explicitly specified
     if preprocess_fixed is None:
         detected_fixed = _detect_fixed_format(source)
@@ -513,7 +399,7 @@ def parse_cobol(
         # If we detected free-format (not fixed), ensure free_form is True
         if not detected_fixed and not free_form:
             free_form = True
-    
+
     if preprocess_fixed:
         try:
             source = normalize_fixed_format(source.splitlines())
@@ -525,7 +411,7 @@ def parse_cobol(
             stats = ParseStatistics()
             return ParseResult(ast=None, errors=[err], warnings=[], statistics=stats)
         free_form = True
-    
+
     parser = CobolParser(
         dialect=dialect, error_recovery=error_recovery, free_form=free_form
     )

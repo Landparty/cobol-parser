@@ -5,7 +5,21 @@ Covers all exception handler variations and their combinations.
 """
 
 import pytest
-from cobolparser.parser import CobolParser, TokenType, Token, SourceLocation
+from cobolparser.lexer import Token, TokenType
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.core.token_stream import TokenStream
+from cobolparser.core.registry import StatementParserRegistry
+from cobolparser.parsers.statements.call_parser import CallStatementParser
+from cobolparser.parsers.statements.display_parser import DisplayStatementParser
+
+
+def _make_stream_with_registry(tokens):
+    """Create a TokenStream with a statement registry for nested parsing."""
+    stream = TokenStream(tokens)
+    registry = StatementParserRegistry()
+    registry.register(DisplayStatementParser())
+    stream._registry = registry
+    return stream
 
 
 class TestCallExceptionHandling:
@@ -13,8 +27,7 @@ class TestCallExceptionHandling:
 
     def test_on_exception_clause(self):
         """Test ON EXCEPTION handler in CALL statement (FR-007)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "SERVICE", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 15)),
@@ -25,18 +38,16 @@ class TestCallExceptionHandling:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 52)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
-        
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
+
         assert call_stmt is not None
         assert call_stmt.on_exception is not None
 
     def test_not_on_exception_clause(self):
         """Test NOT ON EXCEPTION handler in CALL statement (FR-008)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "SERVICE", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 15)),
@@ -47,19 +58,17 @@ class TestCallExceptionHandling:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 52)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
-        
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
+
         assert call_stmt is not None
         # NOT ON EXCEPTION handling verified in both_exception_handlers test
         assert call_stmt.called_program == 'SERVICE'
 
     def test_both_exception_handlers(self):
         """Test both ON EXCEPTION and NOT ON EXCEPTION in same CALL (FR-007, FR-008)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "SERVICE", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 15)),
@@ -70,19 +79,17 @@ class TestCallExceptionHandling:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 52)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
-        
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
+
         assert call_stmt is not None
         # Verify both exception handlers are recognized (at least one should be present)
         assert call_stmt.on_exception is not None or call_stmt.not_on_exception is not None
 
     def test_on_overflow_clause(self):
         """Test ON OVERFLOW handler in CALL statement (FR-009)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "UTILITY", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 15)),
@@ -93,18 +100,16 @@ class TestCallExceptionHandling:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 54)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
-        
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
+
         assert call_stmt is not None
         assert call_stmt.on_overflow is not None
 
     def test_end_call_terminator(self):
         """Test END-CALL terminator for exception handlers (FR-010)."""
-        parser = CobolParser()
-        parser.tokens = [
+        tokens = [
             Token(TokenType.CALL, "CALL", SourceLocation(1, 1)),
             Token(TokenType.STRING_LITERAL, "SUB", SourceLocation(1, 6)),
             Token(TokenType.IDENTIFIER, "ON", SourceLocation(1, 11)),
@@ -115,11 +120,10 @@ class TestCallExceptionHandling:
             Token(TokenType.PERIOD, ".", SourceLocation(1, 47)),
             Token(TokenType.EOF, "", SourceLocation(2, 1))
         ]
-        parser.current_token_index = 0
-        parser.current_token = parser.tokens[0]
-        
-        call_stmt = parser.parse_call_statement()
-        
+        stream = _make_stream_with_registry(tokens)
+        call_parser = CallStatementParser()
+        call_stmt = call_parser.parse(stream)
+
         assert call_stmt is not None
         assert call_stmt.called_program == 'SUB'
 

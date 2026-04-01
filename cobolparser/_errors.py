@@ -5,7 +5,7 @@ from this module so that all ParseError instances share one class hierarchy,
 regardless of which import path was used.
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 
 
 class ParseError(Exception):
@@ -26,24 +26,24 @@ class ParseError(Exception):
     def __init__(
         self,
         message: str,
-        file_path_or_line: Union[str, int, None] = None,
-        line_number_or_col: Optional[int] = None,
+        file_path_or_line: str | int | None = None,
+        line_number_or_col: int | None = None,
         column_or_location: Any = None,
         location: Any = None,
         *,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        line: Optional[int] = None,
-        column: Optional[int] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        line: int | None = None,
+        column: int | None = None,
     ) -> None:
         self.message = message
-        self.code: Optional[str] = None
+        self.code: str | None = None
 
         if isinstance(file_path_or_line, int):
             # Legacy calling convention: ParseError(message, line_int, col_int[, location])
-            self.file_path: Optional[str] = None
-            self.line_number: Optional[int] = file_path_or_line
-            self.column: Optional[int] = line_number_or_col
+            self.file_path: str | None = None
+            self.line_number: int | None = file_path_or_line
+            self.column: int | None = line_number_or_col
             if column_or_location is not None and not isinstance(column_or_location, int):
                 location = column_or_location
         else:

@@ -18,7 +18,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 from cobolparser.analysis.io_coverage_reporter import IOCoverageReporter
 
@@ -63,7 +62,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(json.dumps(output, indent=2))
     else:
         # Table format
-        print(f"IO Coverage Status")
+        print("IO Coverage Status")
         print(f"{'=' * 80}")
         print(f"Total variations: {len(variations)}")
         covered = len([v for v in variations if v.get("status") == "covered"])

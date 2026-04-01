@@ -219,7 +219,7 @@ class CoverageSchemaValidator:
         variations = self.artifact.get("variations", [])
 
         # Count by verb
-        verb_counts = {}
+        verb_counts: dict[str, int] = {}
         for variation in variations:
             verb = variation.get("verb", "")
             verb_counts[verb] = verb_counts.get(verb, 0) + 1
@@ -274,7 +274,7 @@ class CoverageSchemaValidator:
         print("=" * 60)
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate IO coverage artifact against schema"
     )

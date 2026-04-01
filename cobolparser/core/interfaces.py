@@ -1,7 +1,7 @@
 """Abstract base classes and interfaces for COBOL parser components."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING, Protocol, Any, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 if TYPE_CHECKING:
     from ..lexer import Token
@@ -27,10 +27,10 @@ class ITokenStream(ABC):
     @abstractmethod
     def consume(self) -> "Token":
         """Consume and return the next token.
-        
+
         Returns:
             The consumed token
-            
+
         Raises:
             UnexpectedEndOfInput: If stream is exhausted
         """
@@ -39,13 +39,13 @@ class ITokenStream(ABC):
     @abstractmethod
     def expect(self, value: str) -> "Token":
         """Expect a specific token value before consuming.
-        
+
         Args:
             value: Expected token value (case-insensitive)
-            
+
         Returns:
             The consumed token if it matches
-            
+
         Raises:
             TokenMismatch: If next token doesn't match expected value
         """
@@ -60,12 +60,13 @@ class ITokenStream(ABC):
         """
         pass
 
+    @abstractmethod
     def skip_whitespace_and_comments(self) -> None:
         """Skip whitespace, comment, newline, and continuation tokens."""
         pass
 
     @property
-    def context(self) -> Optional[Any]:
+    def context(self) -> Any | None:  # noqa: B027
         """Optional parse context attached to this stream.
 
         Statement parsers read this to access shared parsing state such as
@@ -74,8 +75,8 @@ class ITokenStream(ABC):
         """
         return None
 
-    @context.setter
-    def context(self, value: Optional[Any]) -> None:
+    @context.setter  # noqa: B027
+    def context(self, value: Any | None) -> None:
         """Set the parse context attached to this stream."""
         pass
 
@@ -86,13 +87,13 @@ class IDivisionParser(ABC):
     @abstractmethod
     def parse(self, token_stream: ITokenStream) -> "ASTNode":
         """Parse the division from token stream.
-        
+
         Args:
             token_stream: The token stream to parse from
-            
+
         Returns:
             AST node representing the parsed division
-            
+
         Raises:
             ParseError: If division cannot be parsed
         """
@@ -101,10 +102,10 @@ class IDivisionParser(ABC):
     @abstractmethod
     def can_parse(self, token_stream: ITokenStream) -> bool:
         """Check if this parser can handle the current division.
-        
+
         Args:
             token_stream: The token stream to check
-            
+
         Returns:
             True if parser can handle this division, False otherwise
         """
@@ -115,7 +116,7 @@ class IStatementParser(ABC):
     """Interface for statement-specific parsers."""
 
     @abstractmethod
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> "ASTNode":
+    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> "ASTNode":
         """Parse the statement from token stream.
 
         Args:
@@ -133,10 +134,10 @@ class IStatementParser(ABC):
     @abstractmethod
     def matches(self, token_stream: ITokenStream) -> bool:
         """Check if this parser matches the current statement.
-        
+
         Args:
             token_stream: The token stream to check
-            
+
         Returns:
             True if parser can handle this statement, False otherwise
         """
@@ -147,36 +148,36 @@ class IStatementParser(ABC):
 
 class ParserHost(Protocol):
     """Protocol for the main parser interface used by division and statement parsers."""
-    
+
     @property
-    def current_section(self) -> Optional[Any]:
+    def current_section(self) -> Any | None:
         """Current COBOL section being parsed."""
         ...
-    
+
     @property
-    def current_division(self) -> Optional[Any]:
+    def current_division(self) -> Any | None:
         """Current COBOL division being parsed."""
         ...
-    
+
     def add_error(self, error: Any) -> None:
         """Add an error to the error list."""
         ...
-    
+
     def add_warning(self, message: str) -> None:
         """Add a warning message."""
         ...
-    
-    def create_error(self, message: str, location: Optional[Any] = None) -> Any:
+
+    def create_error(self, message: str, location: Any | None = None) -> Any:
         """Create a ParseError with optional location."""
         ...
 
 
 class ParseContext:
     """Shared context passed to statement parsers during nested parsing operations."""
-    
+
     def __init__(self, host: Any, registry: Optional["StatementParserRegistry"] = None):
         """Initialize parsing context.
-        
+
         Args:
             host: The parser host with division/section context
             registry: Statement parser registry for nested statement parsing
@@ -184,23 +185,23 @@ class ParseContext:
         self.host = host
         self.registry = registry
         self.parser = host
-    
+
     @property
-    def current_section(self) -> Optional[Any]:
+    def current_section(self) -> Any | None:
         """Current COBOL section being parsed."""
         return self.host.current_section if hasattr(self.host, 'current_section') else None
-    
+
     @property
-    def current_division(self) -> Optional[Any]:
+    def current_division(self) -> Any | None:
         """Current COBOL division being parsed."""
         return self.host.current_division if hasattr(self.host, 'current_division') else None
-    
-    def parse_nested_statement(self, stream: Optional[Any] = None) -> Optional[Any]:
+
+    def parse_nested_statement(self, stream: Any | None = None) -> Any | None:
         """Parse a nested statement using the registry.
-        
+
         Args:
             stream: Optional token stream to parse from
-            
+
         Returns:
             Parsed statement or None
         """
@@ -214,8 +215,8 @@ class ParseContext:
         if hasattr(self.host, 'parse_statement'):
             return self.host.parse_statement()
         return None
-    
-    def error(self, message: str, token: Optional[Any] = None) -> None:
+
+    def error(self, message: str, token: Any | None = None) -> None:
         """Report an error with optional token location."""
         loc = None
         if token is not None:

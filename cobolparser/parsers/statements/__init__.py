@@ -19,36 +19,36 @@ patterns for matching statement starts.
 Example:
     from cobolparser.core.statement_registry import StatementParserRegistry
     from cobolparser.parsers.statements.display_parser import DisplayStatementParser
-    
+
     registry = StatementParserRegistry()
     registry.register(DisplayStatementParser())
     parser = registry.find_parser(token_stream)  # Finds matching parser
 """
 
-from .display_parser import DisplayStatementParser
-from .move_parser import MoveStatementParser
-from .if_parser import IfStatementParser
-from .perform_parser import PerformStatementParser
-from .evaluate_parser import EvaluateStatementParser
-from .call_parser import CallStatementParser
 from .arithmetic_parsers import (
     AddStatementParser,
-    SubtractStatementParser,
-    MultiplyStatementParser,
-    DivideStatementParser,
     ComputeStatementParser,
+    DivideStatementParser,
+    MultiplyStatementParser,
+    SubtractStatementParser,
 )
-from .ibm_exec_statements import (
-    ExecSqlStatementParser,
-    ExecCicsStatementParser,
-)
-from .entry_parser import EntryStatementParser
-from .go_parser import GoStatementParser
-from .read_parser import ReadStatementParser
-from .open_parser import OpenStatementParser
+from .call_parser import CallStatementParser
 from .close_parser import CloseStatementParser
-from .rewrite_parser import RewriteStatementParser
 from .delete_parser import DeleteStatementParser
+from .display_parser import DisplayStatementParser
+from .entry_parser import EntryStatementParser
+from .evaluate_parser import EvaluateStatementParser
+from .go_parser import GoStatementParser
+from .ibm_exec_statements import (
+    ExecCicsStatementParser,
+    ExecSqlStatementParser,
+)
+from .if_parser import IfStatementParser
+from .move_parser import MoveStatementParser
+from .open_parser import OpenStatementParser
+from .perform_parser import PerformStatementParser
+from .read_parser import ReadStatementParser
+from .rewrite_parser import RewriteStatementParser
 from .start_parser import StartStatementParser
 
 __all__ = [

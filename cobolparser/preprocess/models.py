@@ -6,15 +6,14 @@ process, including expansion results, parsed COPY statements, search configurati
 and internal expansion state.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, Any
-from pathlib import Path
 import sys
+from dataclasses import dataclass, field
+from typing import Any
 
 
 def get_default_case_sensitivity() -> bool:
     """Determine case sensitivity based on platform.
-    
+
     Returns:
         True for case-sensitive filesystems (Linux/Unix),
         False for case-insensitive filesystems (Windows, macOS)
@@ -36,7 +35,7 @@ MAX_TOTAL_EXPANSION_BYTES = 100 * 1024 * 1024  # 100MB total expansion
 class ReplacingClause:
     """
     Represents a single REPLACING clause entry.
-    
+
     Attributes:
         find_text: Text pattern to find
         replace_text: Text to replace with
@@ -45,7 +44,7 @@ class ReplacingClause:
     find_text: str
     replace_text: str
     mode: str = "ALL"  # ALL, LEADING, TRAILING
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -59,7 +58,7 @@ class ReplacingClause:
 class SuppressClause:
     """
     Represents a SUPPRESS clause in a COPY statement.
-    
+
     Attributes:
         suppress_all: If True, suppress entire copybook listing
         line_ranges: List of (start, end) tuples for specific line suppression
@@ -68,7 +67,7 @@ class SuppressClause:
     suppress_all: bool = False
     line_ranges: list[tuple[int, int]] = field(default_factory=list)
     single_lines: list[int] = field(default_factory=list)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         if self.suppress_all:
@@ -79,7 +78,7 @@ class SuppressClause:
         if self.single_lines:
             result["lines"] = self.single_lines
         return result
-    
+
     def get_suppressed_lines(self) -> set[int]:
         """Get all suppressed line numbers."""
         if self.suppress_all:
@@ -94,7 +93,7 @@ class SuppressClause:
 class ExpansionStatistics:
     """
     Performance and diagnostic statistics for copybook expansion.
-    
+
     Attributes:
         parse_time_ms: Total expansion time in milliseconds
         file_count: Number of copybooks processed (including main program)
@@ -109,7 +108,7 @@ class ExpansionStatistics:
     peak_memory_bytes: int = 0
     warnings: list[str] = field(default_factory=list)
     total_bytes_processed: int = 0
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary for JSON serialization."""
         result = {
@@ -128,7 +127,7 @@ class ExpansionStatistics:
 class CopybookExpansion:
     """
     Result of copybook expansion operation.
-    
+
     Attributes:
         expanded_source: Complete expanded COBOL source code with all COPY statements resolved
         included_copybooks: List of all copybook file paths that were included (in order)
@@ -139,9 +138,9 @@ class CopybookExpansion:
     expanded_source: str
     included_copybooks: list[str] = field(default_factory=list)
     max_depth_reached: int = 0
-    source_location_map: Optional[dict[int, tuple[str, int]]] = None
+    source_location_map: dict[int, tuple[str, int]] | None = None
     statistics: ExpansionStatistics = field(default_factory=ExpansionStatistics)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert expansion result to dictionary for JSON serialization."""
         result = {
@@ -163,7 +162,7 @@ class CopybookExpansion:
 class CopyStatement:
     """
     Parsed COPY statement from COBOL source.
-    
+
     Attributes:
         member_name: Name of the copybook member to be included
         library_qualifier: Optional library name (from IN/OF clause)
@@ -173,24 +172,24 @@ class CopyStatement:
         original_text: The original COPY statement text from source
     """
     member_name: str
-    library_qualifier: Optional[str] = None
-    replacing_clauses: Optional[list[ReplacingClause]] = None
-    suppress_clause: Optional[SuppressClause] = None
-    source_location: Optional[tuple[str, int, int]] = None
+    library_qualifier: str | None = None
+    replacing_clauses: list[ReplacingClause] | None = None
+    suppress_clause: SuppressClause | None = None
+    source_location: tuple[str, int, int] | None = None
     original_text: str = ""
     start_index: int = 0
     end_index: int = 0
-    
+
     @property
     def is_suppressed(self) -> bool:
         """Check if this COPY statement has SUPPRESS clause."""
         return self.suppress_clause is not None
-    
+
     @property
     def has_replacements(self) -> bool:
         """Check if this COPY statement has REPLACING clauses."""
         return bool(self.replacing_clauses)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert COPY statement to dictionary for JSON serialization."""
         result: dict[str, Any] = {
@@ -213,7 +212,7 @@ class CopyStatement:
 class CopybookSearchPath:
     """
     Configuration for locating copybook files.
-    
+
     Attributes:
         directories: Ordered list of directory paths to search for copybooks
         extensions: File extensions to try when resolving copybook names
@@ -229,7 +228,7 @@ class CopybookSearchPath:
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES
     max_cache_entries: int = 100
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert search configuration to dictionary for JSON serialization."""
         return {
@@ -247,7 +246,7 @@ class CopybookSearchPath:
 class ExpansionContext:
     """
     Internal state tracking during recursive copybook expansion.
-    
+
     Attributes:
         current_file: Path to the file currently being processed
         expansion_stack: Stack of files being expanded (for circular reference detection)
@@ -264,12 +263,12 @@ class ExpansionContext:
     content_cache: dict[str, str] = field(default_factory=dict)
     total_bytes: int = 0
     defined_symbols: dict[str, str] = field(default_factory=dict)
-    
+
     # LRU management
     cache_order: list[str] = field(default_factory=list)
     max_cache_size: int = 100
-    
-    def cache_get(self, key: str) -> Optional[str]:
+
+    def cache_get(self, key: str) -> str | None:
         """Get item from cache and update its position (LRU)."""
         if key in self.content_cache:
             # Move to front (most recent)
@@ -278,7 +277,7 @@ class ExpansionContext:
             self.cache_order.append(key)
             return self.content_cache[key]
         return None
-        
+
     def cache_put(self, key: str, value: str) -> None:
         """Put item in cache with eviction if full."""
         if key in self.content_cache:
@@ -289,18 +288,18 @@ class ExpansionContext:
                 oldest_key = self.cache_order.pop(0)
                 if oldest_key in self.content_cache:
                     del self.content_cache[oldest_key]
-        
+
         self.content_cache[key] = value
         self.cache_order.append(key)
 
-    def get_cache_key(self, copybook_path: str, replacing_clauses: Optional[list] = None) -> str:
+    def get_cache_key(self, copybook_path: str, replacing_clauses: list | None = None) -> str:
         """Generate cache key for a copybook with specific replacements."""
         if replacing_clauses:
-            replace_str = str(sorted((rc.find_text, rc.replace_text, rc.mode) 
+            replace_str = str(sorted((rc.find_text, rc.replace_text, rc.mode)
                                      for rc in replacing_clauses))
             return f"{copybook_path}::{replace_str}"
         return copybook_path
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert expansion context to dictionary for debugging/serialization."""
         return {

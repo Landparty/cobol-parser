@@ -5,11 +5,11 @@ This module provides comprehensive AST nodes for all types of SQL statements
 embedded within COBOL EXEC SQL blocks, with structured output for analysis.
 """
 
-from typing import ClassVar, Dict, Any, List, Optional, Set, Union
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
-from .ast_base import ASTNode, SourceLocation
+from .ast_base import SourceLocation
 from .statements import CobolStatement
 
 # Pre-compiled regex patterns for SQL statement parsing (avoids re-compilation per statement)
@@ -40,11 +40,11 @@ _SQL_KEYWORDS = frozenset(['SELECT', 'INSERT', 'UPDATE', 'DELETE',
 @dataclass
 class SQLStatementInfo:
     """Structured information about a parsed SQL statement."""
-    table: Optional[str] = None
-    query: Optional[str] = None
-    cursor: Optional[str] = None
+    table: str | None = None
+    query: str | None = None
+    cursor: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "table": self.table,
@@ -83,12 +83,12 @@ class ExecSQLStatement(CobolStatement):
         super().__init__("EXEC-SQL", location)
         self.sql_text: str = ""
         self._sql_type: str = SQLStatementType.UNKNOWN
-        self.host_variables: List[str] = []
-        self.null_indicators: List[str] = []
-        self.tables: List[str] = []
-        self.cursor_name: Optional[str] = None
-        self.prepared_statement_name: Optional[str] = None
-        self.into_variables: List[str] = []
+        self.host_variables: list[str] = []
+        self.null_indicators: list[str] = []
+        self.tables: list[str] = []
+        self.cursor_name: str | None = None
+        self.prepared_statement_name: str | None = None
+        self.into_variables: list[str] = []
 
     @property
     def sql_type(self) -> str:
@@ -177,7 +177,7 @@ class ExecSQLStatement(CobolStatement):
 
         # Extract null indicators (either :var:indicator or INDICATOR :var)
         indicator_matches = _SQL_INDICATOR_RE.findall(sql)
-        for var, indicator in indicator_matches:
+        for _var, indicator in indicator_matches:
             if indicator not in self.null_indicators:
                 self.null_indicators.append(indicator)
 
@@ -296,7 +296,7 @@ class ExecSQLStatement(CobolStatement):
 
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
         structured = self.get_structured_output()
@@ -320,8 +320,8 @@ class DeclareCursorStatement(ExecSQLStatement):
     def __init__(self, location: SourceLocation):
         super().__init__(location)
         self.statement_type = "DECLARE-CURSOR"
-        self.select_statement: Optional[str] = None
-        self.cursor_options: List[str] = []  # WITH HOLD, FOR UPDATE, etc.
+        self.select_statement: str | None = None
+        self.cursor_options: list[str] = []  # WITH HOLD, FOR UPDATE, etc.
 
     def set_select_statement(self, select_sql: str) -> None:
         """Set the SELECT statement for the cursor."""
@@ -354,7 +354,7 @@ class DeclareCursorStatement(ExecSQLStatement):
             result.table = self.tables[0]
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
         result.update({
@@ -371,7 +371,7 @@ class FetchStatement(ExecSQLStatement):
         super().__init__(location)
         self.statement_type = "FETCH"
         self.fetch_direction: str = "NEXT"  # NEXT, PRIOR, FIRST, LAST
-        self.fetch_count: Optional[int] = None
+        self.fetch_count: int | None = None
 
     def set_fetch_direction(self, direction: str) -> None:
         """Set fetch direction (NEXT, PRIOR, FIRST, LAST)."""
@@ -386,7 +386,7 @@ class FetchStatement(ExecSQLStatement):
             result.cursor = f"FETCH FROM {self.cursor_name or 'UNKNOWN'}"
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
         result.update({
@@ -402,8 +402,8 @@ class DynamicSQLStatement(ExecSQLStatement):
     def __init__(self, location: SourceLocation):
         super().__init__(location)
         self.statement_type = "DYNAMIC-SQL"
-        self.dynamic_sql_text: Optional[str] = None
-        self.using_variables: List[str] = []
+        self.dynamic_sql_text: str | None = None
+        self.using_variables: list[str] = []
 
     def set_dynamic_sql(self, sql: str) -> None:
         """Set the dynamic SQL text."""
@@ -414,7 +414,7 @@ class DynamicSQLStatement(ExecSQLStatement):
         if variable not in self.using_variables:
             self.using_variables.append(variable)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
         result.update({
@@ -430,7 +430,7 @@ class TransactionControlStatement(ExecSQLStatement):
     def __init__(self, location: SourceLocation):
         super().__init__(location)
         self.statement_type = "TRANSACTION-CONTROL"
-        self.savepoint_name: Optional[str] = None
+        self.savepoint_name: str | None = None
         self.is_work: bool = False  # COMMIT WORK vs COMMIT
 
     def set_sql_text(self, sql: str) -> None:
@@ -454,7 +454,7 @@ class TransactionControlStatement(ExecSQLStatement):
         result.query = self.sql_text
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
         result.update({
