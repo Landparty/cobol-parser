@@ -87,11 +87,6 @@ class CobolDivision(ASTNode):
         """Returns the name of the division."""
         return self._own_division_name
 
-    @property
-    def division_type(self) -> str:
-        """Returns the type of division."""
-        return self._own_division_name
-
     def add_section(self, section: CobolSection) -> None:
         """Add a section to this division."""
         self.add_child(section)
@@ -161,8 +156,6 @@ class CobolDivision(ASTNode):
             "division_name": self.division_name,
             "location": self.location.to_dict(),
             "sections": {name: section.to_dict() for name, section in self._sections.items()},
-            # Provide a list form for simple iteration in consumers/tests
-            "sections_list": [section.to_dict() for section in self._sections.values()],
             "paragraphs": [p.to_dict() for p in self.paragraphs],
             "metadata": self._metadata or {}
         }

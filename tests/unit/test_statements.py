@@ -1423,13 +1423,12 @@ class TestConditionalExpression:
         assert cond_expr.left_operand is None
         assert cond_expr.right_operand is None
     
-    def test_condition_type_property(self):
-        """Test the condition_type property."""
+    def test_expression_type(self):
+        """Test the expression_type attribute."""
         location = SourceLocation(1, 1)
         cond_expr = ConditionalExpression(">", location)
-        
-        assert cond_expr.condition_type == "COMPARISON"
-        assert cond_expr.condition_type == cond_expr.expression_type
+
+        assert cond_expr.expression_type == "COMPARISON"
     
     def test_set_left_operand_string(self):
         """Test setting left operand as string."""

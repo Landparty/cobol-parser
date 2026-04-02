@@ -377,7 +377,7 @@ class TestExpressionNode:
         
         # Test conditional expression functionality
         assert cond_expr.operator == "="
-        assert cond_expr.condition_type == "COMPARISON"
+        assert cond_expr.expression_type == "COMPARISON"
         
         # Test logical combination
         logical_expr = LogicalExpression("AND", SourceLocation(15, 30))

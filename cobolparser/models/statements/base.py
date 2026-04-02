@@ -118,11 +118,6 @@ class ConditionalExpression(CobolExpression):
         self.left_operand: str | CobolExpression | None = None
         self.right_operand: str | CobolExpression | None = None
 
-    @property
-    def condition_type(self) -> str:
-        """Return the condition type."""
-        return self.expression_type
-
     def set_left_operand(self, operand: Union[str, "CobolExpression"]) -> None:
         """Set the left operand of the condition."""
         self.left_operand = operand
@@ -155,7 +150,7 @@ class ConditionalExpression(CobolExpression):
                 "operator": self.operator,
                 "left_operand": left_dict,
                 "right_operand": right_dict,
-                "condition_type": self.condition_type,
+                "condition_type": self.expression_type,
             }
         )
         return result
