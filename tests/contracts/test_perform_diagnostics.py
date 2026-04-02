@@ -44,9 +44,9 @@ class TestPerformDiagnosticStructure:
         diagnostics = _get_perform_diagnostics(source)
         if diagnostics:
             for d in diagnostics:
-                assert hasattr(d, "line") or hasattr(d, "location")
-                if hasattr(d, "line"):
-                    assert d.line > 0
+                assert hasattr(d, "line_number") or hasattr(d, "location")
+                if hasattr(d, "line_number"):
+                    assert d.line_number > 0
                 if hasattr(d, "location"):
                     assert d.location.line > 0
 

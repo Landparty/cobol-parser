@@ -125,7 +125,7 @@ class TestIODiagnosticHelperCreateError:
         err = IODiagnosticHelper.create_io_error(
             IOErrorCode.IO_DELETE_INVALID_ORG, line=42, column=8
         )
-        assert err.line == 42
+        assert err.line_number == 42
 
     def test_error_with_column(self):
         err = IODiagnosticHelper.create_io_error(

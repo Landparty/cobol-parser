@@ -47,7 +47,7 @@ class TestMoveDiagnosticStructure:
         diagnostics = _get_move_diagnostics(source)
         if diagnostics:
             for d in diagnostics:
-                assert hasattr(d, "line") or hasattr(d, "location")
+                assert hasattr(d, "line_number") or hasattr(d, "location")
 
     def test_diagnostic_has_column_number(self):
         """Each diagnostic must include a valid column number."""

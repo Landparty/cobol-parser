@@ -210,9 +210,9 @@ class CobolProgram(ASTNode):
         # Cached statistics
         self._statistics: dict[str, Any] | None = None
 
-    # Backwards compatibility: expose divisions as list for simple iteration
     @property
     def divisions(self) -> list[CobolDivision]:
+        """Get all divisions as a list."""
         return list(self._divisions.values())
 
     @property

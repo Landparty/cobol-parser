@@ -250,9 +250,9 @@ def test_evaluate_error_location_tracked():
     result = _parse_with_errors(_fixed_source(source))
     assert len(result.errors) >= 1
     for error in result.errors:
-        assert hasattr(error, "line") or hasattr(error, "location")
-        if hasattr(error, "line"):
-            assert error.line > 0
+        assert hasattr(error, "line_number") or hasattr(error, "location")
+        if hasattr(error, "line_number"):
+            assert error.line_number > 0
         if hasattr(error, "location"):
             assert error.location.line > 0
 

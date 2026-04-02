@@ -176,8 +176,8 @@ class CobolParser:
                     self.add_error(
                         ParseError(
                             f"Lexer error: {error.message}",
-                            error.location.line if error.location else 1,
-                            error.location.column if error.location else 1,
+                            line_number=error.location.line if error.location else 1,
+                            column=error.location.column if error.location else 1,
                         )
                     )
                 if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
@@ -194,7 +194,7 @@ class CobolParser:
             return self._create_result(program)
 
         except Exception as e:
-            self.add_error(ParseError(f"Parser error: {str(e)}", 1, 1))
+            self.add_error(ParseError(f"Parser error: {str(e)}", line_number=1, column=1))
             return self._create_result(None)
 
     def parse_file(self, filepath: str) -> ParseResult:
@@ -211,7 +211,7 @@ class CobolParser:
                 source = file.read()
             return self.parse(source, filepath)
         except OSError as e:
-            self.add_error(ParseError(f"File error: {str(e)}", 1, 1))
+            self.add_error(ParseError(f"File error: {str(e)}", line_number=1, column=1))
             return self._create_result(None)
 
     def parse_program(self) -> CobolProgram | None:
@@ -277,13 +277,13 @@ class CobolParser:
                                 self.current_program.program_name = program_name
 
                 except Exception as e:
-                    error = ParseError(str(e), 1, 1)
+                    error = ParseError(str(e), line_number=1, column=1)
                     self.add_error(error)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                         return self.current_program if divisions_parsed else None
 
         except Exception as e:
-            self.add_error(ParseError(f"Division parsing error: {str(e)}", 1, 1))
+            self.add_error(ParseError(f"Division parsing error: {str(e)}", line_number=1, column=1))
             if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                 return self.current_program if divisions_parsed else None
 
@@ -300,8 +300,8 @@ class CobolParser:
     def create_error(self, message: str, location: SourceLocation | None = None) -> ParseError:
         """Create a ParseError from a source location."""
         if location and hasattr(location, 'line') and hasattr(location, 'column'):
-            return ParseError(message, location.line, location.column, location)
-        return ParseError(message, 1, 1)
+            return ParseError(message, line_number=location.line, column=location.column, location=location)
+        return ParseError(message, line_number=1, column=1)
 
     def add_error(self, error: ParseError) -> None:
         """Add a parse error."""
@@ -407,7 +407,7 @@ def parse_cobol(
             # Preprocessing failed (e.g. unterminated string literal at EOF).
             # Return a result with no AST and the preprocessing error so callers
             # can handle it gracefully under COLLECT_ALL error recovery.
-            err = ParseError(str(exc), 0, 0)
+            err = ParseError(str(exc), line_number=0, column=0)
             stats = ParseStatistics()
             return ParseResult(ast=None, errors=[err], warnings=[], statistics=stats)
         free_form = True

@@ -30,33 +30,33 @@ class TestParseErrorWithSourceLocation:
         location = Mock()
         location.line = 15
         location.column = 25
-        
+
         error = ParseError("Test error", location=location)
-        
+
         assert error.message == "Test error"
-        assert error.line == 15
+        assert error.line_number == 15
         assert error.column == 25
-    
+
     def test_parse_error_location_without_line_attr(self):
         """Test ParseError with location missing line attribute."""
         location = Mock(spec=[])  # No attributes
-        
+
         error = ParseError("Test error", location=location)
-        
+
         # Should fallback to default
-        assert error.line == 0
-    
+        assert error.line_number is None
+
     def test_parse_error_location_without_column_attr(self):
         """Test ParseError with location missing column attribute."""
         location = Mock()
         location.line = 10
         del location.column  # Remove column attribute
-        
+
         error = ParseError("Test error", location=location)
-        
-        assert error.line == 10
+
+        assert error.line_number == 10
         # Column should be default
-    
+
     def test_parse_error_explicit_takes_precedence_over_location(self):
         """Test that explicit line/column take precedence over location."""
         location = Mock()
@@ -64,35 +64,10 @@ class TestParseErrorWithSourceLocation:
         location.column = 50
 
         # Explicit keyword args are applied before location, so they win
-        error = ParseError("Test error", line=5, column=10, location=location)
+        error = ParseError("Test error", line_number=5, column=10, location=location)
 
-        assert error.line == 5
+        assert error.line_number == 5
         assert error.column == 10
-
-
-class TestParseErrorLineSetter:
-    """Tests for ParseError line property setter."""
-
-    def test_set_line_via_property(self):
-        """Test setting line via property setter."""
-        error = ParseError("Test")
-        error.line = 50
-
-        assert error.line == 50
-
-    def test_set_line_via_property_with_string(self):
-        """Test setting line via property with string."""
-        error = ParseError("Test")
-        error.line = "75"
-
-        assert error.line == 75
-
-    def test_set_line_via_property_invalid(self):
-        """Test setting line via property with invalid value."""
-        error = ParseError("Test")
-        error.line = "not_a_number"
-
-        assert error.line == 0
 
 
 class TestParseErrorStr:
@@ -100,14 +75,14 @@ class TestParseErrorStr:
 
     def test_str_with_valid_values(self):
         """Test __str__ with valid line and column (no file path)."""
-        error = ParseError("Syntax error", line=10, column=5)
+        error = ParseError("Syntax error", line_number=10, column=5)
         result = str(error)
 
         assert result == "line 10, column 5: Syntax error"
 
     def test_str_with_zero_line(self):
         """Test __str__ with zero line (should show message only)."""
-        error = ParseError("Error message", line=0)
+        error = ParseError("Error message", line_number=0)
         result = str(error)
 
         assert result == "Parse error: Error message"
@@ -123,7 +98,7 @@ class TestParseErrorStr:
 
     def test_str_with_none_column(self):
         """Test __str__ when column is None but line is valid."""
-        error = ParseError("Error message", line=5)
+        error = ParseError("Error message", line_number=5)
         error.column = None
 
         result = str(error)
@@ -143,7 +118,7 @@ class TestLexerErrorInheritance:
 
         error = LexerError("Invalid token", location=location)
 
-        assert error.line == 20
+        assert error.line_number == 20
         assert error.column == 15
         assert str(error) == "line 20, column 15: Invalid token"
 
@@ -218,7 +193,7 @@ class TestTypeCheckingImport:
         location = SourceLocation(1, 1)
         error = ParseError("Test", location=location)
         
-        assert error.line == 1
+        assert error.line_number == 1
         assert error.column == 1
 
 

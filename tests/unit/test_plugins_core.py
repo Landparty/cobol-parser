@@ -256,31 +256,31 @@ class TestParseError:
         error = ParseError("Test error message")
         assert str(error) == "Parse error: Test error message"
         assert error.message == "Test error message"
-        assert error.line == 0
+        assert error.line_number is None
         assert error.column is None
 
     def test_parse_error_creation_with_line_column(self):
         """Test creation with line and column."""
-        error = ParseError("Test error", line=10, column=5)
+        error = ParseError("Test error", line_number=10, column=5)
         assert error.message == "Test error"
-        assert error.line == 10
+        assert error.line_number == 10
         assert error.column == 5
 
     def test_parse_error_str_with_line_column(self):
         """Test string representation with line and column info."""
-        error = ParseError("Syntax error", line=15, column=8)
+        error = ParseError("Syntax error", line_number=15, column=8)
         expected = "line 15, column 8: Syntax error"
         assert str(error) == expected
 
     def test_parse_error_str_with_line_only(self):
         """Test string representation with line only (column 0 omitted)."""
-        error = ParseError("Missing token", line=20, column=0)
+        error = ParseError("Missing token", line_number=20, column=0)
         expected = "line 20: Missing token"
         assert str(error) == expected
 
     def test_parse_error_str_with_zero_line(self):
         """Test string representation with line 0."""
-        error = ParseError("Unexpected character", line=0)
+        error = ParseError("Unexpected character", line_number=0)
         expected = "Parse error: Unexpected character"  # Line 0 means no line info
         assert str(error) == expected
 
@@ -292,27 +292,20 @@ class TestParseError:
 
     def test_parse_error_zero_line_column(self):
         """Test edge case with zero line and column."""
-        error = ParseError("Error at start", line=0, column=0)
+        error = ParseError("Error at start", line_number=0, column=0)
         expected = "Parse error: Error at start"  # Line 0 means no line info
         assert str(error) == expected
 
     def test_parse_error_negative_line_column(self):
         """Test edge case with negative values."""
-        error = ParseError("Negative position", line=-1, column=-5)
+        error = ParseError("Negative position", line_number=-1, column=-5)
         expected = "Parse error: Negative position"  # Negative line shows no position
         assert str(error) == expected
 
     def test_parse_error_invalid_line_handling(self):
-        """Test exception handling in __str__ method."""
+        """Test __str__ with None line_number."""
         error = ParseError("Test message")
-
-        # Test with invalid line that causes ValueError in setter
-        error.line = "not_a_number"  # setter catches ValueError, sets line_number=0
-        result = str(error)
-        assert result == "Parse error: Test message"  # Falls back to no-location format
-
-        # Test with None line (TypeError case)
-        error.line = None
+        error.line_number = None
         result = str(error)
         assert result == "Parse error: Test message"  # Falls back to no-location format
 
@@ -322,9 +315,9 @@ class TestLexerError:
 
     def test_lexer_error_creation(self):
         """Test LexerError creation."""
-        error = LexerError("Invalid token", line=5, column=10)
+        error = LexerError("Invalid token", line_number=5, column=10)
         assert error.message == "Invalid token"
-        assert error.line == 5
+        assert error.line_number == 5
         assert error.column == 10
         assert str(error) == "line 5, column 10: Invalid token"
 
@@ -339,7 +332,7 @@ class TestLexerError:
         """Test LexerError without line/column info."""
         error = LexerError("General lexer error")
         assert str(error) == "Parse error: General lexer error"
-        assert error.line == 0
+        assert error.line_number is None
         assert error.column is None
 
 
@@ -348,9 +341,9 @@ class TestUnterminatedStringError:
 
     def test_unterminated_string_error_creation(self):
         """Test UnterminatedStringError creation."""
-        error = UnterminatedStringError("String not closed", line=3, column=25)
+        error = UnterminatedStringError("String not closed", line_number=3, column=25)
         assert error.message == "String not closed"
-        assert error.line == 3
+        assert error.line_number == 3
         assert error.column == 25
         assert str(error) == "line 3, column 25: String not closed"
 
@@ -366,7 +359,7 @@ class TestUnterminatedStringError:
         """Test UnterminatedStringError without line/column info."""
         error = UnterminatedStringError("Unterminated string literal")
         assert str(error) == "Parse error: Unterminated string literal"
-        assert error.line == 0
+        assert error.line_number is None
         assert error.column is None
 
 
@@ -917,11 +910,11 @@ class TestEdgeCases:
         assert str(error1) == "Parse error: message"
 
         # Line > 0, column 0 — column omitted (falsy)
-        error2 = ParseError("message", line=5, column=0)
+        error2 = ParseError("message", line_number=5, column=0)
         assert str(error2) == "line 5: message"
 
         # Both line and column > 0
-        error3 = ParseError("message", line=5, column=10)
+        error3 = ParseError("message", line_number=5, column=10)
         assert str(error3) == "line 5, column 10: message"
 
     def test_memory_configuration_all_validation_paths(self):

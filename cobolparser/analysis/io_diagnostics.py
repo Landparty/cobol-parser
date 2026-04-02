@@ -133,7 +133,7 @@ class IODiagnosticHelper:
         if context:
             message = f"{message} ({context})"
 
-        error = ParseError(message, line, column)
+        error = ParseError(message, line_number=line, column=column)
         error.code = code.value  # Add error code attribute
         return error
 

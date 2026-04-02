@@ -114,7 +114,7 @@ class TestAllCobolExamples:
         if result.errors:
             print(f"\nFirst 3 errors:")
             for i, error in enumerate(result.errors[:3]):
-                print(f"  {i+1}. Line {error.line}: {error.message}")
+                print(f"  {i+1}. Line {error.line_number}: {error.message}")
         
         print(f"{'='*60}\n")
         

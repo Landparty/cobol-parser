@@ -145,7 +145,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
             _t147 = token_stream.peek(0)
             raise ParseError(
                 "Expected '.' after PROGRAM-ID keyword",
-                (_t147.location.line if _t147 is not None else 1) if not token_stream.is_empty() else 1
+                line_number=(_t147.location.line if _t147 is not None else 1) if not token_stream.is_empty() else 1,
             ) from e
 
         # Skip newlines and whitespace after the period (for fixed-format COBOL)
@@ -188,7 +188,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
         except TokenMismatch as e:
             raise ParseError(
                 f"Expected '.' after program name '{program_name}'",
-                name_token.location.line
+                line_number=name_token.location.line,
             ) from e
 
         return program_name
@@ -219,7 +219,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
             _t220 = token_stream.peek(0)
             raise ParseError(
                 "Expected '.' after clause keyword",
-                (_t220.location.line if _t220 is not None else 1) if not token_stream.is_empty() else 1
+                line_number=(_t220.location.line if _t220 is not None else 1) if not token_stream.is_empty() else 1,
             ) from e
 
         # Collect value tokens until period

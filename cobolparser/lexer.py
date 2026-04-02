@@ -329,7 +329,7 @@ class LexerError(ParseError):
     """Error during lexical analysis."""
 
     def __init__(self, message: str, location: SourceLocation, token_value: str = ""):
-        super().__init__(message, location.line, location.column)
+        super().__init__(message, line_number=location.line, column=location.column)
         self.location = location
         self.token_value = token_value
 

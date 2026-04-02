@@ -566,9 +566,6 @@ class CopyStatementLexer:
 
         return statements
 
-    def extract_statements(self) -> list[CopyStatement]:
-        """Backward compatibility or entry point."""
-        return self.tokenize_copy_statements()
 
 
 def extract_copy_statements(source_code: str, source_file: str = "<main>") -> list[CopyStatement]:
@@ -599,7 +596,7 @@ def extract_copy_statements(source_code: str, source_file: str = "<main>") -> li
 
     # Step 4: Use CopyStatementLexer for extraction
     lexer = CopyStatementLexer(normalized_source, source_file)
-    return lexer.extract_statements()
+    return lexer.tokenize_copy_statements()
 
 
 def parse_suppress_clause(suppress_text: str | None) -> SuppressClause:

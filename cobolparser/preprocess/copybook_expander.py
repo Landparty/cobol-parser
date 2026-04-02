@@ -352,7 +352,7 @@ def _expand_source_recursive(
 
     # Extract COPY statements using the robust lexer on normalized source
     lexer = CopyStatementLexer(normalized_source, source_file)
-    copy_statements = lexer.extract_statements()
+    copy_statements = lexer.tokenize_copy_statements()
 
     # If no COPY statements, return source unchanged to preserve full fidelity
     if not copy_statements:
