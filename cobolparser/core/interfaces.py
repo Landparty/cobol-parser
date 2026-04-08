@@ -116,7 +116,9 @@ class IStatementParser(ABC):
     """Interface for statement-specific parsers."""
 
     @abstractmethod
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> "ASTNode":
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> "ASTNode":
         """Parse the statement from token stream.
 
         Args:
@@ -145,6 +147,7 @@ class IStatementParser(ABC):
 
 
 # Parser host and context protocols
+
 
 class ParserHost(Protocol):
     """Protocol for the main parser interface used by division and statement parsers."""
@@ -189,12 +192,18 @@ class ParseContext:
     @property
     def current_section(self) -> Any | None:
         """Current COBOL section being parsed."""
-        return self.host.current_section if hasattr(self.host, 'current_section') else None
+        return (
+            self.host.current_section if hasattr(self.host, "current_section") else None
+        )
 
     @property
     def current_division(self) -> Any | None:
         """Current COBOL division being parsed."""
-        return self.host.current_division if hasattr(self.host, 'current_division') else None
+        return (
+            self.host.current_division
+            if hasattr(self.host, "current_division")
+            else None
+        )
 
     def parse_nested_statement(self, stream: Any | None = None) -> Any | None:
         """Parse a nested statement using the registry.
@@ -206,13 +215,13 @@ class ParseContext:
             Parsed statement or None
         """
         if stream is not None and self.registry:
-            if hasattr(stream, 'skip_whitespace_and_comments'):
+            if hasattr(stream, "skip_whitespace_and_comments"):
                 stream.skip_whitespace_and_comments()
             parser = self.registry.find_parser(stream)
             if parser:
                 return parser.parse(stream, self)
             return None
-        if hasattr(self.host, 'parse_statement'):
+        if hasattr(self.host, "parse_statement"):
             return self.host.parse_statement()
         return None
 
@@ -220,11 +229,11 @@ class ParseContext:
         """Report an error with optional token location."""
         loc = None
         if token is not None:
-            if hasattr(token, 'location'):
+            if hasattr(token, "location"):
                 loc = token.location
-            elif hasattr(token, 'line') and hasattr(token, 'column'):
+            elif hasattr(token, "line") and hasattr(token, "column"):
                 loc = token
-        if hasattr(self.host, 'create_error'):
+        if hasattr(self.host, "create_error"):
             err = self.host.create_error(message, loc)
-            if hasattr(self.host, 'add_error'):
+            if hasattr(self.host, "add_error"):
                 self.host.add_error(err)

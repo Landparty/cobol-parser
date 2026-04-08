@@ -180,9 +180,9 @@ class EvaluateStatement(CobolStatement):
             {
                 "subjects": subjects_serialized,
                 "when_clauses": [wc.to_dict() for wc in self.when_clauses],
-                "default_when": self.default_when.to_dict()
-                if self.default_when
-                else None,
+                "default_when": (
+                    self.default_when.to_dict() if self.default_when else None
+                ),
             }
         )
         return result
@@ -233,9 +233,7 @@ class PerformStatement(CobolStatement):
         self.target_paragraph: str | None = None
         self.thru_paragraph: str | None = None  # Ending paragraph for PERFORM THRU
         self.perform_type: str = "SIMPLE"  # SIMPLE, TIMES, UNTIL, VARYING
-        self.times_count: int | str | None = (
-            None  # Can be int literal or variable name
-        )
+        self.times_count: int | str | None = None  # Can be int literal or variable name
         self.until_condition: CobolExpression | None = None
         self.test_timing: str = "BEFORE"  # BEFORE or AFTER for WITH TEST clause
         self.varying_clause: dict[str, Any] | None = None
@@ -302,9 +300,9 @@ class PerformStatement(CobolStatement):
                 "thru_paragraph": self.thru_paragraph,
                 "perform_type": self.perform_type,
                 "times_count": self.times_count,
-                "until_condition": self.until_condition.to_dict()
-                if self.until_condition
-                else None,
+                "until_condition": (
+                    self.until_condition.to_dict() if self.until_condition else None
+                ),
                 "test_timing": self.test_timing,
                 "varying_clause": self.varying_clause,
                 "inline_statements": [
@@ -371,6 +369,7 @@ class StopStatement(CobolStatement):
 
 class SearchStatement(CobolStatement):
     """AST node for SEARCH statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("SEARCH", location)
         self.at_end_clause: list[CobolStatement] | None = None
@@ -386,12 +385,11 @@ class SearchStatement(CobolStatement):
         """Set the VARYING variable."""
         self.varying_variable = variable
 
-    def add_when_clause(self, condition: str, statements: list["CobolStatement"]) -> None:
+    def add_when_clause(
+        self, condition: str, statements: list["CobolStatement"]
+    ) -> None:
         """Add a WHEN clause with condition and statements."""
-        clause = {
-            "condition": condition,
-            "statements": statements
-        }
+        clause = {"condition": condition, "statements": statements}
         self.when_clauses.append(clause)
         for stmt in statements:
             self.add_child(stmt)
@@ -411,7 +409,7 @@ class SearchStatement(CobolStatement):
             result["when_clauses"] = [
                 {
                     "condition": clause["condition"],
-                    "statements": [s.to_dict() for s in clause["statements"]]
+                    "statements": [s.to_dict() for s in clause["statements"]],
                 }
                 for clause in self.when_clauses
             ]

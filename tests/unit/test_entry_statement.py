@@ -1,8 +1,7 @@
 """Unit tests for ENTRY statement parsing."""
 
-import pytest
-from cobolparser.parser import CobolParser
 from cobolparser.models.statements import EntryStatement
+from cobolparser.parser import CobolParser
 
 
 def find_entry_statement(proc_div):
@@ -12,7 +11,7 @@ def find_entry_statement(proc_div):
         for stmt in para.statements:
             if isinstance(stmt, EntryStatement):
                 return stmt
-    
+
     # Also check sections (for completeness)
     for section in proc_div.sections:
         # Check statements in paragraph (new architecture)
@@ -29,7 +28,7 @@ def find_entry_statement(proc_div):
 
 class TestEntryStatement:
     """Test ENTRY statement parsing."""
-    
+
     def test_basic_entry_statement(self):
         """Test basic ENTRY statement without parameters."""
         parser = CobolParser(free_form=True)
@@ -39,20 +38,20 @@ PROCEDURE DIVISION.
     ENTRY 'MAINENTRY'.
     STOP RUN.
 """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
         # Find the ENTRY statement
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
-        
+
         entry_stmt = find_entry_statement(proc_div)
-        
+
         assert entry_stmt is not None
-        assert entry_stmt.entry_name == 'MAINENTRY'
+        assert entry_stmt.entry_name == "MAINENTRY"
         assert len(entry_stmt.using_parameters) == 0
-    
+
     def test_entry_with_using_clause(self):
         """Test ENTRY statement with USING clause."""
         parser = CobolParser(free_form=True)
@@ -66,28 +65,28 @@ PROCEDURE DIVISION.
     ENTRY 'DLITCBL' USING PARAM1 PARAM2.
     STOP RUN.
 """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
         # Find the ENTRY statement
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
-        
+
         entry_stmt = find_entry_statement(proc_div)
-        
+
         assert entry_stmt is not None
-        assert entry_stmt.entry_name == 'DLITCBL'
+        assert entry_stmt.entry_name == "DLITCBL"
         assert len(entry_stmt.using_parameters) == 2
-        assert entry_stmt.using_parameters == ['PARAM1', 'PARAM2']
-    
+        assert entry_stmt.using_parameters == ["PARAM1", "PARAM2"]
+
     def test_entry_with_multiple_parameters(self):
         """Test ENTRY statement with many parameters (IMS style)."""
         parser = CobolParser(free_form=True)
         source = """IDENTIFICATION DIVISION.
 PROGRAM-ID. TEST.
 PROCEDURE DIVISION.
-    ENTRY 'DLITCBL' USING 
+    ENTRY 'DLITCBL' USING
         LKPCB-IO
         LKPCB-ALT
         LKPCB-BPP100MA
@@ -95,23 +94,23 @@ PROCEDURE DIVISION.
         LKPCB-ENF200MA.
     STOP RUN.
 """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
         # Find the ENTRY statement
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
-        
+
         entry_stmt = find_entry_statement(proc_div)
-        
+
         assert entry_stmt is not None
-        assert entry_stmt.entry_name == 'DLITCBL'
+        assert entry_stmt.entry_name == "DLITCBL"
         assert len(entry_stmt.using_parameters) == 5
-        assert 'LKPCB-IO' in entry_stmt.using_parameters
-        assert 'LKPCB-ALT' in entry_stmt.using_parameters
-        assert 'LKPCB-ENF200MA' in entry_stmt.using_parameters
-    
+        assert "LKPCB-IO" in entry_stmt.using_parameters
+        assert "LKPCB-ALT" in entry_stmt.using_parameters
+        assert "LKPCB-ENF200MA" in entry_stmt.using_parameters
+
     def test_entry_to_dict(self):
         """Test ENTRY statement to_dict() method."""
         parser = CobolParser(free_form=True)
@@ -121,19 +120,19 @@ PROCEDURE DIVISION.
     ENTRY 'TESTENTRY' USING PARAM1 PARAM2.
     STOP RUN.
 """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
         # Find the ENTRY statement
         proc_div = result.ast.get_division("PROCEDURE")
         entry_stmt = find_entry_statement(proc_div)
-        
+
         assert entry_stmt is not None
-        
+
         # Test to_dict()
         entry_dict = entry_stmt.to_dict()
-        assert entry_dict['statement_type'] == 'ENTRY'
-        assert entry_dict['entry_name'] == 'TESTENTRY'
-        assert entry_dict['using_parameters'] == ['PARAM1', 'PARAM2']
-        assert 'location' in entry_dict
+        assert entry_dict["statement_type"] == "ENTRY"
+        assert entry_dict["entry_name"] == "TESTENTRY"
+        assert entry_dict["using_parameters"] == ["PARAM1", "PARAM2"]
+        assert "location" in entry_dict

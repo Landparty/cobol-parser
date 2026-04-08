@@ -11,18 +11,18 @@ from typing import Any
 from .ast_base import ASTNode, SourceLocation
 
 # Pre-compiled regex patterns for PictureClause parsing (avoids re-compilation per instance)
-_PIC_P_FACTOR_RE = re.compile(r'P(\((\d+)\))?')
-_PIC_ALPHA_RE = re.compile(r'([XA])(\((\d+)\))?$')
-_PIC_BASIC_NUMERIC_RE = re.compile(r'S?9(\((\d+)\))?$')
-_PIC_SIGNED_RE = re.compile(r'S(9+|\((\d+)\)|9\((\d+)\))$')
-_PIC_LEFT_V_RE = re.compile(r'S?(9+|9\((\d+)\))$')
-_PIC_RIGHT_V_RE = re.compile(r'(9+|9\((\d+)\))$')
-_PIC_SCALING_LEFT_RE = re.compile(r'S?P(\((\d+)\))?9+$')
-_PIC_SCALING_RIGHT_RE = re.compile(r'S?9+P(\((\d+)\))?$')
-_PIC_EDITED_INT_RE = re.compile(r'9(\((\d+)\))?|9+$')
-_PIC_COMPLEX_RE = re.compile(r'S?(9+)V(9+)$')
-_PIC_DIGIT_X_RE = re.compile(r'[9X]')
-_PIC_NINE_RE = re.compile(r'9')
+_PIC_P_FACTOR_RE = re.compile(r"P(\((\d+)\))?")
+_PIC_ALPHA_RE = re.compile(r"([XA])(\((\d+)\))?$")
+_PIC_BASIC_NUMERIC_RE = re.compile(r"S?9(\((\d+)\))?$")
+_PIC_SIGNED_RE = re.compile(r"S(9+|\((\d+)\)|9\((\d+)\))$")
+_PIC_LEFT_V_RE = re.compile(r"S?(9+|9\((\d+)\))$")
+_PIC_RIGHT_V_RE = re.compile(r"(9+|9\((\d+)\))$")
+_PIC_SCALING_LEFT_RE = re.compile(r"S?P(\((\d+)\))?9+$")
+_PIC_SCALING_RIGHT_RE = re.compile(r"S?9+P(\((\d+)\))?$")
+_PIC_EDITED_INT_RE = re.compile(r"9(\((\d+)\))?|9+$")
+_PIC_COMPLEX_RE = re.compile(r"S?(9+)V(9+)$")
+_PIC_DIGIT_X_RE = re.compile(r"[9X]")
+_PIC_NINE_RE = re.compile(r"9")
 
 
 class PictureClause(ASTNode):
@@ -44,7 +44,7 @@ class PictureClause(ASTNode):
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
         # Check for sign
-        if 'S' in self.pattern:
+        if "S" in self.pattern:
             self.is_signed = True
 
         # Check for scaling factor P
@@ -93,8 +93,8 @@ class PictureClause(ASTNode):
             return
 
         # 4. Decimal patterns: split at V and parse each side
-        if 'V' in self.pattern:
-            parts = self.pattern.split('V')
+        if "V" in self.pattern:
+            parts = self.pattern.split("V")
             if len(parts) == 2:
                 left_part = parts[0]
                 right_part = parts[1]
@@ -129,7 +129,9 @@ class PictureClause(ASTNode):
         # This is redundant now since we handle V patterns above
 
         # 6. Scaling factor patterns: SP(n)9, S9P(n)
-        scaling_match = _PIC_SCALING_LEFT_RE.match(self.pattern) or _PIC_SCALING_RIGHT_RE.match(self.pattern)
+        scaling_match = _PIC_SCALING_LEFT_RE.match(
+            self.pattern
+        ) or _PIC_SCALING_RIGHT_RE.match(self.pattern)
         if scaling_match:
             # Count digits (9s)
             digit_count = len(_PIC_NINE_RE.findall(self.pattern))
@@ -140,14 +142,14 @@ class PictureClause(ASTNode):
             return
 
         # 7. Display numeric edited patterns: -9(n), -9(n).9(n), -.9(n), -99.99
-        if self.pattern.startswith('-'):
+        if self.pattern.startswith("-"):
             self.is_numeric_edited = True
             pattern_without_minus = self.pattern[1:]  # Remove leading minus
             integer_part = 0
             decimal_part = 0
 
-            if '.' in pattern_without_minus:
-                parts = pattern_without_minus.split('.')
+            if "." in pattern_without_minus:
+                parts = pattern_without_minus.split(".")
                 int_part = parts[0] if parts[0] else ""
                 dec_part = parts[1] if len(parts) > 1 else ""
 
@@ -200,11 +202,11 @@ class PictureClause(ASTNode):
         digit_count = len(_PIC_DIGIT_X_RE.findall(self.pattern))
         if digit_count > 0:
             self.size = digit_count
-            if '9' in self.pattern:
+            if "9" in self.pattern:
                 self.total_digits = digit_count
                 # Estimate integer vs decimal based on V
-                if 'V' in self.pattern:
-                    v_pos = self.pattern.find('V')
+                if "V" in self.pattern:
+                    v_pos = self.pattern.find("V")
                     integer_nines = len(_PIC_NINE_RE.findall(self.pattern[:v_pos]))
                     decimal_nines = len(_PIC_NINE_RE.findall(self.pattern[v_pos:]))
                     self.integer_digits = integer_nines
@@ -230,7 +232,7 @@ class PictureClause(ASTNode):
             "scaling_factor": self.scaling_factor,
             "is_edited": self.is_edited,
             "location": self.location.to_dict(),
-            "metadata": self._metadata or {}
+            "metadata": self._metadata or {},
         }
 
 
@@ -256,7 +258,9 @@ class OccursClause(ASTNode):
         self.min_times = times
         self.max_times = times
 
-    def set_variable_occurs(self, min_times: int, max_times: int, depending_on: str) -> None:
+    def set_variable_occurs(
+        self, min_times: int, max_times: int, depending_on: str
+    ) -> None:
         """Set variable OCCURS (e.g., OCCURS 1 TO 100 TIMES DEPENDING ON)."""
         self.min_times = min_times
         self.max_times = max_times
@@ -275,7 +279,7 @@ class OccursClause(ASTNode):
             "depending_on": self.depending_on,
             "indexed_by": self.indexed_by,
             "location": self.location.to_dict(),
-            "metadata": self._metadata or {}
+            "metadata": self._metadata or {},
         }
 
 
@@ -291,7 +295,7 @@ class CobolDataItem(ASTNode):
         self.value_clause: str | None = None
         self.occurs_clause: OccursClause | None = None
         self.redefines: str | None = None
-        self.is_filler: bool = (name.upper() == "FILLER")
+        self.is_filler: bool = name.upper() == "FILLER"
 
     @property
     def initial_value(self) -> str | None:
@@ -327,15 +331,19 @@ class CobolDataItem(ASTNode):
 
     def is_group_item(self) -> bool:
         """Check if this is a group item (has CobolDataItem children, no PICTURE)."""
-        cobol_data_children = [child for child in self.children if isinstance(child, CobolDataItem)]
+        cobol_data_children = [
+            child for child in self.children if isinstance(child, CobolDataItem)
+        ]
         return len(cobol_data_children) > 0 and self.picture_clause is None
 
     def is_elementary_item(self) -> bool:
         """Check if this is an elementary item (has PICTURE, no CobolDataItem children)."""
-        cobol_data_children = [child for child in self.children if isinstance(child, CobolDataItem)]
+        cobol_data_children = [
+            child for child in self.children if isinstance(child, CobolDataItem)
+        ]
         return self.picture_clause is not None and len(cobol_data_children) == 0
 
-    def get_elementary_items(self) -> list['CobolDataItem']:
+    def get_elementary_items(self) -> list["CobolDataItem"]:
         """Get all elementary items under this data item."""
         elementary_items = []
 
@@ -348,7 +356,7 @@ class CobolDataItem(ASTNode):
 
         return elementary_items
 
-    def get_all_children(self) -> list['CobolDataItem']:
+    def get_all_children(self) -> list["CobolDataItem"]:
         """Get all child data items recursively."""
         all_children = []
 
@@ -415,7 +423,7 @@ class CobolDataItem(ASTNode):
             "is_elementary_item": self.is_elementary_item(),
             "calculated_size": self.calculate_size(),
             "location": self.location.to_dict(),
-            "metadata": self._metadata or {}
+            "metadata": self._metadata or {},
         }
 
         if self.picture_clause:
@@ -431,7 +439,11 @@ class CobolDataItem(ASTNode):
             result["redefines"] = self.redefines
 
         # Include child data items
-        child_data_items = [child.to_dict() for child in self.children if isinstance(child, CobolDataItem)]
+        child_data_items = [
+            child.to_dict()
+            for child in self.children
+            if isinstance(child, CobolDataItem)
+        ]
         if child_data_items:
             result["children"] = child_data_items
 
@@ -479,8 +491,13 @@ class RenamesItem(ASTNode):
     Always appears at the top level of a section (not nested under any 01-item).
     """
 
-    def __init__(self, name: str, renames_from: str, location: SourceLocation,
-                 renames_through: str | None = None):
+    def __init__(
+        self,
+        name: str,
+        renames_from: str,
+        location: SourceLocation,
+        renames_through: str | None = None,
+    ):
         super().__init__("RenamesItem", location)
         self.name = name
         self.renames_from = renames_from

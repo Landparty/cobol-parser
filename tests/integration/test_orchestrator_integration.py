@@ -6,8 +6,8 @@ division sequence validation, and data-to-procedure linking.
 """
 
 import pytest
+
 from cobolparser import CobolParser
-from cobolparser.models.program import CobolProgram, CobolDivision
 from cobolparser.plugins.core import ErrorRecoveryMode
 
 pytestmark = pytest.mark.integration
@@ -22,23 +22,23 @@ class TestOrchestrationFullProgramParsing:
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        AUTHOR. Test Author.
-       
+
        ENVIRONMENT DIVISION.
        CONFIGURATION SECTION.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 WS-VAR PIC X(10).
-       
+
        PROCEDURE DIVISION.
        MAIN-PARAGRAPH.
            DISPLAY "Hello World".
            STOP RUN.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.ast is not None
         assert result.success
         assert result.ast.program_name == "TESTPROG"
@@ -50,10 +50,10 @@ class TestOrchestrationFullProgramParsing:
        IDENTIFICATION DIVISION.
        PROGRAM-ID. MINIMALPROGRAM.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.ast is not None
         assert result.ast.program_name == "MINIMALPROGRAM"
 
@@ -62,25 +62,25 @@ class TestOrchestrationFullProgramParsing:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. MULTIPARA.
-       
+
        PROCEDURE DIVISION.
        MAIN-PARAGRAPH.
            DISPLAY "Main".
-       
+
        SECONDARY-PARAGRAPH.
            DISPLAY "Secondary".
-       
+
        FINAL-PARAGRAPH.
            STOP RUN.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.success
         assert result.ast is not None
         assert result.ast.program_name == "MULTIPARA"
-        
+
         # Verify procedure division exists
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
@@ -90,7 +90,7 @@ class TestOrchestrationFullProgramParsing:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. DATAPROGRAM.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 WS-ROOT.
@@ -99,17 +99,17 @@ class TestOrchestrationFullProgramParsing:
            05 WS-SALARY PIC 9(7)V99.
            05 WS-ITEMS.
                10 WS-ITEM OCCURS 5 TIMES PIC X(20).
-       
+
        PROCEDURE DIVISION.
            STOP RUN.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.success
         assert result.ast is not None
-        
+
         # Verify data division was parsed
         data_div = result.ast.get_division("DATA")
         assert data_div is not None
@@ -123,25 +123,25 @@ class TestOrchestrationDivisionSequenceValidation:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. ORDERTEST.
-       
+
        ENVIRONMENT DIVISION.
        CONFIGURATION SECTION.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 WS-VAR PIC X(10).
-       
+
        PROCEDURE DIVISION.
            DISPLAY "Test".
            STOP RUN.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.success
         assert result.ast is not None
-        
+
         # Verify IDENTIFICATION division exists
         assert result.ast.program_name == "ORDERTEST"
 
@@ -150,15 +150,15 @@ class TestOrchestrationDivisionSequenceValidation:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. NOCODE.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 WS-VAR PIC X(10).
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         # Should still succeed, though missing procedure division
         assert result.ast is not None
         assert result.ast.program_name == "NOCODE"
@@ -172,12 +172,12 @@ class TestOrchestrationDataToProcedureLinking:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. LINKTEST.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 WS-COUNTER PIC 9(5) VALUE 0.
        01 WS-NAME PIC X(30).
-       
+
        PROCEDURE DIVISION.
        MAIN-PARAGRAPH.
            MOVE 100 TO WS-COUNTER.
@@ -186,17 +186,17 @@ class TestOrchestrationDataToProcedureLinking:
            DISPLAY WS-NAME.
            STOP RUN.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.success
         assert result.ast is not None
-        
+
         # Verify data division has items
         data_div = result.ast.get_division("DATA")
         assert data_div is not None
-        
+
         # Verify procedure division references exist
         proc_div = result.ast.get_division("PROCEDURE")
         assert proc_div is not None
@@ -206,28 +206,28 @@ class TestOrchestrationDataToProcedureLinking:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. WSLINKTEST.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 COUNTER PIC 999 VALUE 0.
        01 FLAG PIC X VALUE 'N'.
-       
+
        PROCEDURE DIVISION.
            PERFORM INITIALIZE-SECTION.
            PERFORM MAIN-LOGIC UNTIL FLAG = 'Y'.
            STOP RUN.
-       
+
        INITIALIZE-SECTION.
            MOVE 0 TO COUNTER.
            MOVE 'N' TO FLAG.
-       
+
        MAIN-LOGIC.
            MOVE 'Y' TO FLAG.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.success
         assert result.ast is not None
 
@@ -236,7 +236,7 @@ class TestOrchestrationDataToProcedureLinking:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. NESTEDLINK.
-       
+
        DATA DIVISION.
        WORKING-STORAGE SECTION.
        01 WS-RECORD.
@@ -244,16 +244,16 @@ class TestOrchestrationDataToProcedureLinking:
            05 REC-DATA.
                10 REC-NAME PIC X(30).
                10 REC-VALUE PIC 9(7).
-       
+
        PROCEDURE DIVISION.
            MOVE 1 TO REC-ID OF WS-RECORD.
            MOVE "TEST" TO REC-NAME OF REC-DATA OF WS-RECORD.
            STOP RUN.
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         assert result.success
         assert result.ast is not None
 
@@ -268,10 +268,10 @@ class TestOrchestrationErrorHandling:
        WORKING-STORAGE SECTION.
        01 WS-VAR PIC X(10).
         """
-        
+
         parser = CobolParser()
         result = parser.parse(source)
-        
+
         # Parser should handle this - it will use legacy parsing as fallback
         # The program name will be UNKNOWN since no PROGRAM-ID was found
         if result.ast:
@@ -283,10 +283,10 @@ class TestOrchestrationErrorHandling:
        IDENTIFICATION DIVISION.
        PROGRAM-ID. FAILFASTTEST.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(source)
-        
+
         # Should parse successfully
         assert result.ast is not None
 
@@ -295,15 +295,15 @@ class TestOrchestrationErrorHandling:
         source = """
        IDENTIFICATION DIVISION.
        PROGRAM-ID. COLLECTTEST.
-       
+
        PROCEDURE DIVISION.
            DISPLAY "Test".
            STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         result = parser.parse(source)
-        
+
         # Should parse successfully with any collected errors
         assert result.ast is not None
         assert result.ast.program_name == "COLLECTTEST"

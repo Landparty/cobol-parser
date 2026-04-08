@@ -254,9 +254,9 @@ class TestIOCoverageSchemaCompliance:
             text=True,
         )
 
-        assert result.returncode != 0, (
-            "Should fail validation - missing required fields"
-        )
+        assert (
+            result.returncode != 0
+        ), "Should fail validation - missing required fields"
 
 
 if __name__ == "__main__":

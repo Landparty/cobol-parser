@@ -27,7 +27,9 @@ class NodeTypeError(ValidationError):
             expected_type: Expected node type class name
             actual_type: Actual type provided
         """
-        super().__init__(expected_type, f"Expected node type {expected_type}, got {actual_type}")
+        super().__init__(
+            expected_type, f"Expected node type {expected_type}, got {actual_type}"
+        )
 
 
 class FieldValidationError(ValidationError):
@@ -42,7 +44,10 @@ class FieldValidationError(ValidationError):
             node_type: Optional node type for context
         """
         context = f" in {node_type}" if node_type else ""
-        super().__init__(node_type or field_name, f"Field '{field_name}' validation failed{context}: {reason}")
+        super().__init__(
+            node_type or field_name,
+            f"Field '{field_name}' validation failed{context}: {reason}",
+        )
 
 
 class ASTNodeFactory:
@@ -70,7 +75,9 @@ class ASTNodeFactory:
         self._creation_count = 0
         self._validation_errors: list[str] = []
 
-    def register_validator(self, node_type: str, validator_config: dict[str, Any]) -> None:
+    def register_validator(
+        self, node_type: str, validator_config: dict[str, Any]
+    ) -> None:
         """Register a validator for a specific node type.
 
         Args:
@@ -96,14 +103,12 @@ class ASTNodeFactory:
             NodeTypeError: If node type doesn't match expected type
         """
         if not isinstance(node, expected_type):
-            raise NodeTypeError(
-                expected_type.__name__,
-                type(node).__name__
-            )
+            raise NodeTypeError(expected_type.__name__, type(node).__name__)
         return True
 
-    def validate_required_fields(self, node: ASTNode, required_fields: list[str],
-                                node_type_name: str = "") -> bool:
+    def validate_required_fields(
+        self, node: ASTNode, required_fields: list[str], node_type_name: str = ""
+    ) -> bool:
         """Validate that required fields exist on a node.
 
         Args:
@@ -120,23 +125,18 @@ class ASTNodeFactory:
         for field_name in required_fields:
             if not hasattr(node, field_name):
                 raise FieldValidationError(
-                    field_name,
-                    "field does not exist",
-                    node_type_name
+                    field_name, "field does not exist", node_type_name
                 )
 
             value = getattr(node, field_name)
             if value is None:
-                raise FieldValidationError(
-                    field_name,
-                    "field is None",
-                    node_type_name
-                )
+                raise FieldValidationError(field_name, "field is None", node_type_name)
 
         return True
 
-    def validate_field_types(self, node: ASTNode, field_types: dict[str, type],
-                            node_type_name: str = "") -> bool:
+    def validate_field_types(
+        self, node: ASTNode, field_types: dict[str, type], node_type_name: str = ""
+    ) -> bool:
         """Validate that field types match expectations.
 
         Args:
@@ -159,7 +159,7 @@ class ASTNodeFactory:
                 continue  # Skip None values (checked separately)
 
             # Handle Optional types
-            if hasattr(expected_type, '__origin__'):
+            if hasattr(expected_type, "__origin__"):
                 # This is a generic type like Optional[str]
                 continue  # Skip complex type checking for now
 
@@ -169,13 +169,14 @@ class ASTNodeFactory:
                 raise FieldValidationError(
                     field_name,
                     f"expected {expected_name}, got {actual_type}",
-                    node_type_name
+                    node_type_name,
                 )
 
         return True
 
-    def create(self, node_class: type[ASTNode], location: SourceLocation,
-              **kwargs: Any) -> ASTNode:
+    def create(
+        self, node_class: type[ASTNode], location: SourceLocation, **kwargs: Any
+    ) -> ASTNode:
         """Create an AST node with validation.
 
         Generic factory method for creating any AST node class with
@@ -220,15 +221,17 @@ class ASTNodeFactory:
             ValidationError: If validation fails
         """
         # Validate location is set
-        if not hasattr(node, 'location') or node.location is None:
+        if not hasattr(node, "location") or node.location is None:
             raise ValidationError(type(node).__name__, "Node location must be set")
 
         # Validate location is correct type
         if not isinstance(node.location, SourceLocation):
-            raise ValidationError(type(node).__name__, "Node location must be SourceLocation")
+            raise ValidationError(
+                type(node).__name__, "Node location must be SourceLocation"
+            )
 
         # Validate node_type is set
-        if not hasattr(node, 'node_type') or not node.node_type:
+        if not hasattr(node, "node_type") or not node.node_type:
             raise ValidationError(type(node).__name__, "Node type must be set")
 
     def with_metadata(self, node: ASTNode, metadata: dict[str, Any]) -> ASTNode:
@@ -245,8 +248,9 @@ class ASTNodeFactory:
             node.set_metadata(key, value)
         return node
 
-    def with_context(self, node: ASTNode, division_name: str,
-                    section_name: str | None = None) -> ASTNode:
+    def with_context(
+        self, node: ASTNode, division_name: str, section_name: str | None = None
+    ) -> ASTNode:
         """Set division and section context on a node.
 
         Args:
@@ -282,8 +286,10 @@ class ASTNodeFactory:
 
     def __repr__(self) -> str:
         """Return string representation of factory."""
-        return (f"ASTNodeFactory(created={self._creation_count}, "
-                f"errors={len(self._validation_errors)})")
+        return (
+            f"ASTNodeFactory(created={self._creation_count}, "
+            f"errors={len(self._validation_errors)})"
+        )
 
 
 # Global factory instance for use throughout the parser
@@ -312,8 +318,9 @@ def set_factory(factory: ASTNodeFactory) -> None:
     _default_factory = factory
 
 
-def create_node(node_class: type[ASTNode], location: SourceLocation,
-               **kwargs: Any) -> ASTNode:
+def create_node(
+    node_class: type[ASTNode], location: SourceLocation, **kwargs: Any
+) -> ASTNode:
     """Convenience function to create a node using the default factory.
 
     Args:

@@ -44,14 +44,12 @@ class SelectStatement(CobolStatement):
 
         # RECORD KEY clause
         self.record_key: str | None = None
-        self.record_key_source: str | None = (
-            None  # SOURCE IS data-name (IBM extension)
-        )
+        self.record_key_source: str | None = None  # SOURCE IS data-name (IBM extension)
 
         # ALTERNATE RECORD KEY clause(s)
-        self.alternate_keys: list[
-            dict[str, Any]
-        ] = []  # [{key, duplicates_allowed, password}]
+        self.alternate_keys: list[dict[str, Any]] = (
+            []
+        )  # [{key, duplicates_allowed, password}]
 
         # FILE STATUS clause
         self.file_status: str | None = None

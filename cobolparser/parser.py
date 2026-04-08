@@ -38,6 +38,7 @@ _ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECA
 @dataclass
 class ParseResult:
     """Result of parsing operation with AST and metadata."""
+
     ast: CobolProgram | None
     errors: list[ParseError]
     warnings: list[str]
@@ -97,24 +98,16 @@ class CobolParser:
     def _register_division_parsers(self) -> None:
         """Register all division parsers in the factory."""
         self._division_factory.register_parser(
-            DivisionType.IDENTIFICATION,
-            IdentificationDivisionParser,
-            instantiate=True
+            DivisionType.IDENTIFICATION, IdentificationDivisionParser, instantiate=True
         )
         self._division_factory.register_parser(
-            DivisionType.ENVIRONMENT,
-            EnvironmentDivisionParser,
-            instantiate=True
+            DivisionType.ENVIRONMENT, EnvironmentDivisionParser, instantiate=True
         )
         self._division_factory.register_parser(
-            DivisionType.DATA,
-            DataDivisionParser,
-            instantiate=True
+            DivisionType.DATA, DataDivisionParser, instantiate=True
         )
         self._division_factory.register_parser(
-            DivisionType.PROCEDURE,
-            ProcedureDivisionParser,
-            instantiate=True
+            DivisionType.PROCEDURE, ProcedureDivisionParser, instantiate=True
         )
 
     @staticmethod
@@ -129,7 +122,12 @@ class CobolParser:
 
         return content
 
-    def parse(self, source: str, filename: str = "<string>", error_recovery: ErrorRecoveryMode | None = None) -> ParseResult:
+    def parse(
+        self,
+        source: str,
+        filename: str = "<string>",
+        error_recovery: ErrorRecoveryMode | None = None,
+    ) -> ParseResult:
         """Parse COBOL source code into AST.
 
         Args:
@@ -156,7 +154,9 @@ class CobolParser:
 
             # Auto-detect fixed-format if not explicitly specified
             actual_free_form = self.free_form
-            if not self.free_form:  # Only auto-detect if not explicitly set to free-form
+            if (
+                not self.free_form
+            ):  # Only auto-detect if not explicitly set to free-form
                 detected_fixed = _detect_fixed_format(cleaned_source)
                 if detected_fixed:
                     # Preprocess fixed-format source to free-form
@@ -194,7 +194,9 @@ class CobolParser:
             return self._create_result(program)
 
         except Exception as e:
-            self.add_error(ParseError(f"Parser error: {str(e)}", line_number=1, column=1))
+            self.add_error(
+                ParseError(f"Parser error: {str(e)}", line_number=1, column=1)
+            )
             return self._create_result(None)
 
     def parse_file(self, filepath: str) -> ParseResult:
@@ -244,7 +246,11 @@ class CobolParser:
                 parser = self._division_factory.find_parser(self.stream)
                 if not parser:
                     current_token = self.stream.peek()
-                    current_value = current_token.value.upper() if current_token and current_token.value else "EOF"
+                    current_value = (
+                        current_token.value.upper()
+                        if current_token and current_token.value
+                        else "EOF"
+                    )
                     if not divisions_parsed or current_value not in ("END", "PROGRAM"):
                         self.add_error(
                             self.create_error(
@@ -256,10 +262,10 @@ class CobolParser:
 
                 try:
                     # Set host on ProcedureDivisionParser for ParseContext creation
-                    set_host = getattr(parser, 'set_host', None)
+                    set_host = getattr(parser, "set_host", None)
                     if callable(set_host):
                         set_host(self)
-                    elif hasattr(parser, 'host'):
+                    elif hasattr(parser, "host"):
                         parser.host = self
 
                     division_ast = parser.parse(self.stream)
@@ -270,10 +276,10 @@ class CobolParser:
                             self.current_program.add_division(division_ast)
 
                         # Update program name from IDENTIFICATION division
-                        if hasattr(division_ast, 'metadata'):
-                            metadata = getattr(division_ast, 'metadata', {})
-                            if isinstance(metadata, dict) and 'program_id' in metadata:
-                                program_name = metadata['program_id']
+                        if hasattr(division_ast, "metadata"):
+                            metadata = getattr(division_ast, "metadata", {})
+                            if isinstance(metadata, dict) and "program_id" in metadata:
+                                program_name = metadata["program_id"]
                                 self.current_program.program_name = program_name
 
                 except Exception as e:
@@ -283,7 +289,9 @@ class CobolParser:
                         return self.current_program if divisions_parsed else None
 
         except Exception as e:
-            self.add_error(ParseError(f"Division parsing error: {str(e)}", line_number=1, column=1))
+            self.add_error(
+                ParseError(f"Division parsing error: {str(e)}", line_number=1, column=1)
+            )
             if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                 return self.current_program if divisions_parsed else None
 
@@ -297,10 +305,17 @@ class CobolParser:
                 return token.location
         return SourceLocation(1, 1, 1)
 
-    def create_error(self, message: str, location: SourceLocation | None = None) -> ParseError:
+    def create_error(
+        self, message: str, location: SourceLocation | None = None
+    ) -> ParseError:
         """Create a ParseError from a source location."""
-        if location and hasattr(location, 'line') and hasattr(location, 'column'):
-            return ParseError(message, line_number=location.line, column=location.column, location=location)
+        if location and hasattr(location, "line") and hasattr(location, "column"):
+            return ParseError(
+                message,
+                line_number=location.line,
+                column=location.column,
+                location=location,
+            )
         return ParseError(message, line_number=1, column=1)
 
     def add_error(self, error: ParseError) -> None:
@@ -323,7 +338,6 @@ class CobolParser:
         )
 
 
-
 def _detect_fixed_format(source: str) -> bool:
     """Detect if source appears to be in fixed-format COBOL.
 
@@ -343,14 +357,13 @@ def _detect_fixed_format(source: str) -> bool:
             continue
 
         seq_area = line[:6]
-        indicator = line[6] if len(line) > 6 else ' '
+        indicator = line[6] if len(line) > 6 else " "
 
         seq_is_spaces_or_digits = (
-            seq_area.strip() == '' or
-            seq_area.replace(' ', '').isdigit()
+            seq_area.strip() == "" or seq_area.replace(" ", "").isdigit()
         )
 
-        valid_indicator = indicator in (' ', '*', '/', '-', 'D', 'd')
+        valid_indicator = indicator in (" ", "*", "/", "-", "D", "d")
 
         if seq_is_spaces_or_digits and valid_indicator:
             fixed_format_indicators += 1
@@ -386,7 +399,7 @@ def parse_cobol(
 
     # Handle file paths
     if os.path.isfile(source):
-        with open(source, encoding='utf-8', errors='replace') as f:
+        with open(source, encoding="utf-8", errors="replace") as f:
             file_content = f.read()
         if filename == "<string>":
             filename = source

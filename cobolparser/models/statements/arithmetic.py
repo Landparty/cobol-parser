@@ -55,24 +55,28 @@ class ArithmeticStatement(CobolStatement):
 
 class AddStatement(ArithmeticStatement):
     """AST node for ADD statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("ADD", location)
 
 
 class SubtractStatement(ArithmeticStatement):
     """AST node for SUBTRACT statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("SUBTRACT", location)
 
 
 class MultiplyStatement(ArithmeticStatement):
     """AST node for MULTIPLY statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("MULTIPLY", location)
 
 
 class DivideStatement(ArithmeticStatement):
     """AST node for DIVIDE statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("DIVIDE", location)
 

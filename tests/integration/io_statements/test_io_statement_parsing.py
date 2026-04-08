@@ -5,17 +5,15 @@ and ACCEPT statements with full clause variations.
 """
 
 import pytest
-from cobolparser import parse_cobol, ErrorRecoveryMode
-from cobolparser.models.statements import (
-    IOReadStatement, IOWriteStatement, IOOpenStatement, IOCloseStatement, IOAcceptStatement,
-)
+
+from cobolparser import ErrorRecoveryMode, parse_cobol
 
 pytestmark = pytest.mark.integration
 
 
 class TestReadStatementParsing:
     """Test parsing of READ statements."""
-    
+
     def test_parse_simple_read(self):
         """Parse a simple READ statement."""
         code = """
@@ -37,7 +35,7 @@ class TestReadStatementParsing:
         """
         result = parse_cobol(code)
         assert result.success or len(result.errors) == 0
-    
+
     def test_parse_read_with_into(self):
         """Parse READ with INTO clause."""
         code = """
@@ -53,7 +51,7 @@ class TestReadStatementParsing:
         result = parse_cobol(code)
         # Should parse even if file not defined
         assert result.ast is not None
-    
+
     def test_parse_read_with_next_record(self):
         """Parse READ with NEXT record format."""
         code = """
@@ -72,7 +70,7 @@ class TestReadStatementParsing:
 
 class TestWriteStatementParsing:
     """Test parsing of WRITE statements."""
-    
+
     def test_parse_simple_write(self):
         """Parse a simple WRITE statement."""
         code = """
@@ -87,7 +85,7 @@ class TestWriteStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_write_with_from(self):
         """Parse WRITE with FROM clause."""
         code = """
@@ -103,7 +101,7 @@ class TestWriteStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_write_with_advancing(self):
         """Parse WRITE with ADVANCING clause."""
         code = """
@@ -122,7 +120,7 @@ class TestWriteStatementParsing:
 
 class TestOpenStatementParsing:
     """Test parsing of OPEN statements."""
-    
+
     def test_parse_simple_open(self):
         """Parse a simple OPEN statement."""
         code = """
@@ -142,7 +140,7 @@ class TestOpenStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_open_multiple_files(self):
         """Parse OPEN with multiple files."""
         code = """
@@ -162,7 +160,7 @@ class TestOpenStatementParsing:
 
 class TestCloseStatementParsing:
     """Test parsing of CLOSE statements."""
-    
+
     def test_parse_simple_close(self):
         """Parse a simple CLOSE statement."""
         code = """
@@ -177,7 +175,7 @@ class TestCloseStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_close_multiple_files(self):
         """Parse CLOSE with multiple files."""
         code = """
@@ -193,7 +191,7 @@ class TestCloseStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_close_with_no_rewind(self):
         """Parse CLOSE with NO REWIND clause."""
         code = """
@@ -212,7 +210,7 @@ class TestCloseStatementParsing:
 
 class TestAcceptStatementParsing:
     """Test parsing of ACCEPT statements."""
-    
+
     def test_parse_simple_accept(self):
         """Parse a simple ACCEPT statement."""
         code = """
@@ -227,7 +225,7 @@ class TestAcceptStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_accept_from_console(self):
         """Parse ACCEPT with FROM CONSOLE."""
         code = """
@@ -242,7 +240,7 @@ class TestAcceptStatementParsing:
         """
         result = parse_cobol(code)
         assert result.ast is not None
-    
+
     def test_parse_accept_with_at_line_column(self):
         """Parse ACCEPT with AT LINE and COLUMN."""
         code = """
@@ -261,7 +259,7 @@ class TestAcceptStatementParsing:
 
 class TestIOStatementIntegration:
     """Integration tests for mixed IO statements."""
-    
+
     def test_parse_complete_io_sequence(self):
         """Parse a complete file I/O sequence."""
         code = """
@@ -299,7 +297,7 @@ class TestIOStatementIntegration:
         result = parse_cobol(code)
         # Parser should handle the structure even if some parts aren't fully parsed
         assert result.ast is not None
-    
+
     def test_parse_io_with_accept_display(self):
         """Parse a program using ACCEPT and DISPLAY."""
         code = """
@@ -323,7 +321,7 @@ class TestIOStatementIntegration:
 
 class TestIOStatementErrorHandling:
     """Test error handling in IO statements."""
-    
+
     def test_read_without_period(self):
         """Test READ statement without period."""
         code = """
@@ -336,7 +334,7 @@ class TestIOStatementErrorHandling:
         result = parse_cobol(code, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         # Should have errors or warnings
         assert result.ast is not None
-    
+
     def test_open_without_mode(self):
         """Test OPEN statement without explicit mode."""
         code = """

@@ -91,7 +91,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
                 f"Expected {self.division_name} division, got {token_value}",
                 file_path=None,
                 line_number=loc.line,
-                column=loc.column
+                column=loc.column,
             )
 
         # Consume division keyword
@@ -108,8 +108,15 @@ class BaseDivisionParser(IDivisionParser, ABC):
         if self.division_name != "PROCEDURE":
             next_token = token_stream.peek(0)
             if not next_token or next_token.value != ".":
-                line = next_token.location.line if next_token and hasattr(next_token, 'location') else 1
-                raise ParseError(f"Expected '.' after {self.division_name} DIVISION", line_number=line)
+                line = (
+                    next_token.location.line
+                    if next_token and hasattr(next_token, "location")
+                    else 1
+                )
+                raise ParseError(
+                    f"Expected '.' after {self.division_name} DIVISION",
+                    line_number=line,
+                )
             token_stream.consume()
         else:
 
@@ -130,9 +137,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
 
         # Create and return AST node
         ast_node = self._create_ast_node(
-            division_token,
-            division_content,
-            start_location
+            division_token, division_content, start_location
         )
 
         return ast_node
@@ -157,7 +162,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
         self,
         division_token: Any,
         division_content: dict[str, Any],
-        start_location: SourceLocation
+        start_location: SourceLocation,
     ) -> ASTNode:
         """Create AST node for this division.
 
@@ -183,9 +188,17 @@ class BaseDivisionParser(IDivisionParser, ABC):
             token_stream: Token stream to scan
         """
         section_keywords = {
-            "SECTION", "FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE",
-            "IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE",
-            "CONFIGURATION", "INPUT-OUTPUT"
+            "SECTION",
+            "FILE",
+            "WORKING-STORAGE",
+            "LOCAL-STORAGE",
+            "LINKAGE",
+            "IDENTIFICATION",
+            "ENVIRONMENT",
+            "DATA",
+            "PROCEDURE",
+            "CONFIGURATION",
+            "INPUT-OUTPUT",
         }
 
         while not token_stream.is_empty():

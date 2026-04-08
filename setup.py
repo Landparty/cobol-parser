@@ -1,8 +1,8 @@
-import setuptools  # must be imported before mypyc to patch distutils on Python 3.12+
 from setuptools import setup
 
 try:
     from mypyc.build import mypycify
+
     USE_MYPYC = True
 except ImportError:
     USE_MYPYC = False

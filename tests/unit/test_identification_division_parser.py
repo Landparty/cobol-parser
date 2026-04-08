@@ -5,9 +5,10 @@ including program metadata extraction, optional clauses, and error handling.
 """
 
 import pytest
-from cobolparser.lexer import Token, TokenType
+
+from cobolparser.core.exceptions import ParseError
 from cobolparser.core.token_stream import TokenStream
-from cobolparser.core.exceptions import ParseError, TokenMismatch
+from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.program import CobolDivision
 from cobolparser.parsers.divisions.identification import IdentificationDivisionParser
@@ -29,7 +30,13 @@ class TestIdentificationDivisionParserBasics:
     def test_can_parse_identification_keyword(self):
         """Test can_parse() correctly identifies IDENTIFICATION keyword."""
         parser = IdentificationDivisionParser()
-        tokens = [Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1))]
+        tokens = [
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            )
+        ]
         stream = self.create_token_stream(tokens)
         assert parser.can_parse(stream)
 
@@ -65,7 +72,11 @@ class TestIdentificationDivisionParsing:
         """Test parsing minimal valid Identification Division (PROGRAM-ID only)."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -74,9 +85,9 @@ class TestIdentificationDivisionParsing:
             Token(TokenType.PERIOD, ".", SourceLocation(2, 19)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert isinstance(result, CobolDivision)
         assert result.node_type == "Division"
         assert result._metadata.get("program_id") == "MYPROG"
@@ -85,7 +96,11 @@ class TestIdentificationDivisionParsing:
         """Test parsing Identification Division with AUTHOR clause."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -99,9 +114,9 @@ class TestIdentificationDivisionParsing:
             Token(TokenType.PERIOD, ".", SourceLocation(3, 19)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert isinstance(result, CobolDivision)
         assert result._metadata.get("program_id") == "PAYROLL"
         assert result._metadata.get("author") == "John Smith"
@@ -110,7 +125,11 @@ class TestIdentificationDivisionParsing:
         """Test parsing with multiple optional clauses."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -131,9 +150,9 @@ class TestIdentificationDivisionParsing:
             Token(TokenType.PERIOD, ".", SourceLocation(5, 25)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert isinstance(result, CobolDivision)
         assert result._metadata.get("program_id") == "TESTPROG"
         assert result._metadata.get("author") == "Alice"
@@ -144,7 +163,11 @@ class TestIdentificationDivisionParsing:
         """Test parsing REMARKS clause with multi-word content."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -161,9 +184,9 @@ class TestIdentificationDivisionParsing:
             Token(TokenType.PERIOD, ".", SourceLocation(3, 35)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "UTIL"
         assert result._metadata.get("remarks") == "This is a utility program"
 
@@ -171,7 +194,11 @@ class TestIdentificationDivisionParsing:
         """Test parser stops parsing at next division keyword."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -185,9 +212,9 @@ class TestIdentificationDivisionParsing:
             Token(TokenType.DATA_DIVISION, "DATA", SourceLocation(4, 1)),  # Stop here
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "STOPTEST"
         assert result._metadata.get("author") == "Bob"
         # DATA_DIVISION token should remain in stream
@@ -206,14 +233,20 @@ class TestIdentificationDivisionErrorHandling:
         """Test error when PROGRAM-ID is missing."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
-            Token(TokenType.AUTHOR, "AUTHOR", SourceLocation(2, 1)),  # Missing PROGRAM-ID
+            Token(
+                TokenType.AUTHOR, "AUTHOR", SourceLocation(2, 1)
+            ),  # Missing PROGRAM-ID
             Token(TokenType.PERIOD, ".", SourceLocation(2, 7)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         with pytest.raises(ParseError) as exc_info:
             parser.parse(stream)
         assert "PROGRAM-ID is mandatory" in str(exc_info.value)
@@ -222,14 +255,20 @@ class TestIdentificationDivisionErrorHandling:
         """Test error when period is missing after PROGRAM-ID keyword."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
-            Token(TokenType.IDENTIFIER, "BADPROG", SourceLocation(2, 12)),  # Missing period
+            Token(
+                TokenType.IDENTIFIER, "BADPROG", SourceLocation(2, 12)
+            ),  # Missing period
         ]
         stream = self.create_token_stream(tokens)
-        
+
         with pytest.raises(ParseError) as exc_info:
             parser.parse(stream)
         assert "Expected '.'" in str(exc_info.value)
@@ -238,7 +277,11 @@ class TestIdentificationDivisionErrorHandling:
         """Test error when period is missing after program name."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -247,7 +290,7 @@ class TestIdentificationDivisionErrorHandling:
             Token(TokenType.AUTHOR, "AUTHOR", SourceLocation(2, 25)),  # Missing period
         ]
         stream = self.create_token_stream(tokens)
-        
+
         with pytest.raises(ParseError) as exc_info:
             parser.parse(stream)
         assert "Expected '.'" in str(exc_info.value)
@@ -256,7 +299,11 @@ class TestIdentificationDivisionErrorHandling:
         """Test error when stream ends unexpectedly during PROGRAM-ID parsing."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -264,7 +311,7 @@ class TestIdentificationDivisionErrorHandling:
             # EOF - missing program name
         ]
         stream = self.create_token_stream(tokens)
-        
+
         with pytest.raises(ParseError) as exc_info:
             parser.parse(stream)
         assert "Expected program name" in str(exc_info.value)
@@ -273,12 +320,18 @@ class TestIdentificationDivisionErrorHandling:
         """Test error when period after DIVISION keyword is missing."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
-            Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(1, 28)),  # Missing period
+            Token(
+                TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(1, 28)
+            ),  # Missing period
         ]
         stream = self.create_token_stream(tokens)
-        
+
         with pytest.raises(ParseError) as exc_info:
             parser.parse(stream)
         assert "Expected '.'" in str(exc_info.value)
@@ -295,7 +348,11 @@ class TestIdentificationDivisionAST:
         """Test that parsed result is CobolDivision AST node."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -304,9 +361,9 @@ class TestIdentificationDivisionAST:
             Token(TokenType.PERIOD, ".", SourceLocation(2, 18)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert isinstance(result, CobolDivision)
         assert result.node_type == "Division"
         assert result.location.line == 1
@@ -315,7 +372,11 @@ class TestIdentificationDivisionAST:
         """Test that AST node metadata can be serialized to dict."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -329,10 +390,10 @@ class TestIdentificationDivisionAST:
             Token(TokenType.PERIOD, ".", SourceLocation(3, 20)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
         result_dict = result.to_dict()
-        
+
         assert result_dict["node_type"] == "Division"
         assert result_dict["division_name"] == "IDENTIFICATION"
         assert result_dict["metadata"]["program_id"] == "SERIALIZE"
@@ -342,7 +403,11 @@ class TestIdentificationDivisionAST:
         """Test that AST node includes source location."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(5, 10)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(5, 10),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(5, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(5, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(6, 1)),
@@ -351,10 +416,10 @@ class TestIdentificationDivisionAST:
             Token(TokenType.PERIOD, ".", SourceLocation(6, 19)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
         location = result.location
-        
+
         assert location.line == 5
         assert location.column == 10
 
@@ -370,25 +435,35 @@ class TestIdentificationDivisionEdgeCases:
         """Test that keywords are case-insensitive."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "identification", SourceLocation(1, 1)),  # lowercase
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "identification",
+                SourceLocation(1, 1),
+            ),  # lowercase
             Token(TokenType.IDENTIFIER, "division", SourceLocation(1, 20)),  # lowercase
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
-            Token(TokenType.PROGRAM_ID, "program-id", SourceLocation(2, 1)),  # lowercase
+            Token(
+                TokenType.PROGRAM_ID, "program-id", SourceLocation(2, 1)
+            ),  # lowercase
             Token(TokenType.PERIOD, ".", SourceLocation(2, 11)),
             Token(TokenType.IDENTIFIER, "CASETEST", SourceLocation(2, 13)),
             Token(TokenType.PERIOD, ".", SourceLocation(2, 21)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "CASETEST"
 
     def test_parse_with_date_compiled(self):
         """Test parsing DATE-COMPILED clause (optional, may be omitted)."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -401,9 +476,9 @@ class TestIdentificationDivisionEdgeCases:
             Token(TokenType.PERIOD, ".", SourceLocation(3, 26)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "COMPDATE"
         assert result._metadata.get("date_compiled") == "2024-01-20"
 
@@ -411,7 +486,11 @@ class TestIdentificationDivisionEdgeCases:
         """Test parsing SECURITY clause."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -424,9 +503,9 @@ class TestIdentificationDivisionEdgeCases:
             Token(TokenType.PERIOD, ".", SourceLocation(3, 23)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "SECRET"
         assert result._metadata.get("security") == "CONFIDENTIAL"
 
@@ -434,7 +513,11 @@ class TestIdentificationDivisionEdgeCases:
         """Test handling of empty clause values."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -443,12 +526,14 @@ class TestIdentificationDivisionEdgeCases:
             Token(TokenType.PERIOD, ".", SourceLocation(2, 21)),
             Token(TokenType.AUTHOR, "AUTHOR", SourceLocation(3, 1)),
             Token(TokenType.PERIOD, ".", SourceLocation(3, 7)),
-            Token(TokenType.PERIOD, ".", SourceLocation(3, 9)),  # Empty value (back-to-back periods)
+            Token(
+                TokenType.PERIOD, ".", SourceLocation(3, 9)
+            ),  # Empty value (back-to-back periods)
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "EMPTYVAL"
         assert result._metadata.get("author") == ""
 
@@ -456,7 +541,11 @@ class TestIdentificationDivisionEdgeCases:
         """Test parsing with all optional clauses."""
         parser = IdentificationDivisionParser()
         tokens = [
-            Token(TokenType.IDENTIFICATION_DIVISION, "IDENTIFICATION", SourceLocation(1, 1)),
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
             Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
@@ -490,9 +579,9 @@ class TestIdentificationDivisionEdgeCases:
             Token(TokenType.PERIOD, ".", SourceLocation(8, 23)),
         ]
         stream = self.create_token_stream(tokens)
-        
+
         result = parser.parse(stream)
-        
+
         assert result._metadata.get("program_id") == "FULLPROG"
         assert result._metadata.get("author") == "Jane"
         assert result._metadata.get("installation") == "NY Office"

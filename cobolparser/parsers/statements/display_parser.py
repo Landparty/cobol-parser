@@ -55,7 +55,9 @@ class DisplayStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> DisplayStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> DisplayStatement:
         """Parse a DISPLAY statement from the token stream.
 
         Consumes tokens starting from DISPLAY keyword through statement terminator
@@ -115,7 +117,11 @@ class DisplayStatementParser(IStatementParser):
                 break
 
             # Collect display item
-            if token.type in (TokenType.STRING_LITERAL, TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+            if token.type in (
+                TokenType.STRING_LITERAL,
+                TokenType.IDENTIFIER,
+                TokenType.NUMERIC_LITERAL,
+            ):
                 item_token = token_stream.consume()
 
                 # Format string literals
@@ -130,7 +136,11 @@ class DisplayStatementParser(IStatementParser):
 
             skip_whitespace(token_stream)
 
-        return stmt if isinstance(stmt, DisplayStatement) else DisplayStatement(start_location)
+        return (
+            stmt
+            if isinstance(stmt, DisplayStatement)
+            else DisplayStatement(start_location)
+        )
 
     @staticmethod
     def _is_keyword(token: Any, keyword: str) -> bool:
@@ -143,10 +153,11 @@ class DisplayStatementParser(IStatementParser):
         Returns:
             True if token matches keyword
         """
-        if not token or not hasattr(token, 'value'):
+        if not token or not hasattr(token, "value"):
             return False
 
-        return bool(token.type == TokenType.IDENTIFIER and
-                    token.value and
-                    token.value.upper() == keyword.upper())
-
+        return bool(
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == keyword.upper()
+        )

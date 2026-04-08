@@ -25,13 +25,20 @@ class IfStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return bool(token.type == TokenType.IF or
-                    (token.type == TokenType.IDENTIFIER and token.value and
-                     token.value.upper() == "IF"))
+            return bool(
+                token.type == TokenType.IF
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "IF"
+                )
+            )
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IfStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IfStatement:
         """Parse an IF statement with nested statement support.
 
         Supports:
@@ -40,12 +47,16 @@ class IfStatementParser(IStatementParser):
         """
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = factory.create(IfStatement, start_token.location if start_token else SourceLocation(0, 0))
+        stmt = factory.create(
+            IfStatement, start_token.location if start_token else SourceLocation(0, 0)
+        )
         context = get_parse_context(token_stream)
 
         # Type guard: ensure stmt is an IfStatement
         if not isinstance(stmt, IfStatement):
-            stmt = IfStatement(start_token.location if start_token else SourceLocation(0, 0))
+            stmt = IfStatement(
+                start_token.location if start_token else SourceLocation(0, 0)
+            )
 
         skip_whitespace(token_stream)
 
@@ -260,7 +271,9 @@ class IfStatementParser(IStatementParser):
             if logical_op in upper_cleaned:
                 idx = upper_cleaned.index(logical_op)
                 left_expr = self._build_condition_expression(cleaned[:idx], location)
-                right_expr = self._build_condition_expression(cleaned[idx + 1:], location)
+                right_expr = self._build_condition_expression(
+                    cleaned[idx + 1 :], location
+                )
                 if left_expr and right_expr:
                     logical = LogicalExpression(logical_op, location)
                     logical.set_left_condition(left_expr)
@@ -283,7 +296,7 @@ class IfStatementParser(IStatementParser):
 
         if op_idx is not None and resolved_op:
             left_parts = [t for t in cleaned[:op_idx] if t.upper() != "IS"]
-            right_parts = cleaned[op_idx + 1:]
+            right_parts = cleaned[op_idx + 1 :]
             lhs = " ".join(left_parts).strip() if left_parts else None
             rhs = " ".join(right_parts).strip() if right_parts else None
             if lhs:
@@ -304,13 +317,39 @@ class IfStatementParser(IStatementParser):
     def _is_statement_keyword(self, token_upper: str) -> bool:
         """Check if token is a COBOL statement keyword."""
         statement_keywords = {
-            "MOVE", "DISPLAY", "CALL", "PERFORM", "IF", "EVALUATE",
-            "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE",
-            "ACCEPT", "READ", "WRITE", "OPEN", "CLOSE",
-            "STOP", "GO", "ENTRY", "EXEC", "EXIT",
-            "SEARCH", "STRING", "UNSTRING", "INSPECT",
-            "ALTER", "CONTINUE", "INITIATE", "TERMINATE",
-            "MERGE", "SORT", "RELEASE", "RETURN"
+            "MOVE",
+            "DISPLAY",
+            "CALL",
+            "PERFORM",
+            "IF",
+            "EVALUATE",
+            "ADD",
+            "SUBTRACT",
+            "MULTIPLY",
+            "DIVIDE",
+            "COMPUTE",
+            "ACCEPT",
+            "READ",
+            "WRITE",
+            "OPEN",
+            "CLOSE",
+            "STOP",
+            "GO",
+            "ENTRY",
+            "EXEC",
+            "EXIT",
+            "SEARCH",
+            "STRING",
+            "UNSTRING",
+            "INSPECT",
+            "ALTER",
+            "CONTINUE",
+            "INITIATE",
+            "TERMINATE",
+            "MERGE",
+            "SORT",
+            "RELEASE",
+            "RETURN",
         }
         return token_upper in statement_keywords
 
@@ -329,7 +368,11 @@ class IfStatementParser(IStatementParser):
             token = stream.peek(offset)
             if token is None:
                 return None
-            if token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE', 'CONTINUATION'):
+            if token.type.name not in (
+                "WHITESPACE",
+                "COMMENT",
+                "NEWLINE",
+                "CONTINUATION",
+            ):
                 return token
             offset -= 1
-

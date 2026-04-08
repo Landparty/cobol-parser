@@ -5,9 +5,10 @@ Covers all three modes and default behavior.
 """
 
 import pytest
+
+from cobolparser.core.token_stream import TokenStream
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
-from cobolparser.core.token_stream import TokenStream
 from cobolparser.parsers.statements.call_parser import CallStatementParser
 
 
@@ -24,12 +25,12 @@ class TestCallParameterModes:
             Token(TokenType.IDENTIFIER, "REFERENCE", SourceLocation(1, 24)),
             Token(TokenType.IDENTIFIER, "WS-PARAM", SourceLocation(1, 34)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 43)),
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
+            Token(TokenType.EOF, "", SourceLocation(2, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
         assert len(call_stmt.using_parameters) == 1
         assert call_stmt.using_parameters[0].name == "WS-PARAM"
@@ -45,12 +46,12 @@ class TestCallParameterModes:
             Token(TokenType.IDENTIFIER, "CONTENT", SourceLocation(1, 24)),
             Token(TokenType.IDENTIFIER, "WS-PARAM", SourceLocation(1, 32)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 41)),
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
+            Token(TokenType.EOF, "", SourceLocation(2, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
         assert call_stmt.using_parameters[0].passing_mode == "CONTENT"
 
@@ -64,12 +65,12 @@ class TestCallParameterModes:
             Token(TokenType.IDENTIFIER, "VALUE", SourceLocation(1, 26)),
             Token(TokenType.IDENTIFIER, "WS-COUNT", SourceLocation(1, 32)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 41)),
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
+            Token(TokenType.EOF, "", SourceLocation(2, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
         assert call_stmt.using_parameters[0].passing_mode == "VALUE"
 
@@ -81,12 +82,12 @@ class TestCallParameterModes:
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 15)),
             Token(TokenType.IDENTIFIER, "WS-PARAM", SourceLocation(1, 21)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 30)),
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
+            Token(TokenType.EOF, "", SourceLocation(2, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
         assert call_stmt.using_parameters[0].passing_mode == "REFERENCE"
 
@@ -106,12 +107,12 @@ class TestCallParameterModes:
             Token(TokenType.IDENTIFIER, "VALUE", SourceLocation(1, 52)),
             Token(TokenType.IDENTIFIER, "P3", SourceLocation(1, 58)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 61)),
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
+            Token(TokenType.EOF, "", SourceLocation(2, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
         assert len(call_stmt.using_parameters) == 3
         assert call_stmt.using_parameters[0].passing_mode == "REFERENCE"

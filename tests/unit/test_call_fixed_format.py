@@ -5,9 +5,10 @@ Covers continuation handling with hyphen in column 7 and column boundaries (8-72
 """
 
 import pytest
+
+from cobolparser.core.token_stream import TokenStream
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
-from cobolparser.core.token_stream import TokenStream
 from cobolparser.parsers.statements.call_parser import CallStatementParser
 
 
@@ -22,19 +23,21 @@ class TestCallFixedFormat:
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 17)),
             Token(TokenType.IDENTIFIER, "BY", SourceLocation(1, 23)),
             Token(TokenType.IDENTIFIER, "REFERENCE", SourceLocation(1, 26)),
-            Token(TokenType.IDENTIFIER, "P1", SourceLocation(2, 35)),  # Continuation line
+            Token(
+                TokenType.IDENTIFIER, "P1", SourceLocation(2, 35)
+            ),  # Continuation line
             Token(TokenType.IDENTIFIER, "BY", SourceLocation(2, 38)),
             Token(TokenType.IDENTIFIER, "CONTENT", SourceLocation(2, 41)),
             Token(TokenType.IDENTIFIER, "P2", SourceLocation(2, 49)),
             Token(TokenType.PERIOD, ".", SourceLocation(2, 52)),
-            Token(TokenType.EOF, "", SourceLocation(3, 1))
+            Token(TokenType.EOF, "", SourceLocation(3, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
-        assert call_stmt.called_program == 'MULTILINE'
+        assert call_stmt.called_program == "MULTILINE"
         assert len(call_stmt.using_parameters) == 2
 
     def test_columns_8_72_compliance(self):
@@ -46,14 +49,14 @@ class TestCallFixedFormat:
             Token(TokenType.IDENTIFIER, "PARAM1", SourceLocation(1, 28)),
             Token(TokenType.IDENTIFIER, "PARAM2", SourceLocation(1, 36)),
             Token(TokenType.PERIOD, ".", SourceLocation(1, 72)),  # Column 72 end
-            Token(TokenType.EOF, "", SourceLocation(2, 1))
+            Token(TokenType.EOF, "", SourceLocation(2, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
-        assert call_stmt.called_program == 'COLUMNS'
+        assert call_stmt.called_program == "COLUMNS"
         assert len(call_stmt.using_parameters) == 2
 
     def test_continuation_in_parameter_list(self):
@@ -64,14 +67,16 @@ class TestCallFixedFormat:
             Token(TokenType.IDENTIFIER, "USING", SourceLocation(1, 12)),
             Token(TokenType.IDENTIFIER, "P1", SourceLocation(1, 18)),
             Token(TokenType.IDENTIFIER, "P2", SourceLocation(2, 35)),  # Continuation
-            Token(TokenType.IDENTIFIER, "P3", SourceLocation(3, 35)),  # Second continuation
+            Token(
+                TokenType.IDENTIFIER, "P3", SourceLocation(3, 35)
+            ),  # Second continuation
             Token(TokenType.PERIOD, ".", SourceLocation(3, 39)),
-            Token(TokenType.EOF, "", SourceLocation(4, 1))
+            Token(TokenType.EOF, "", SourceLocation(4, 1)),
         ]
         stream = TokenStream(tokens)
         call_parser = CallStatementParser()
         call_stmt = call_parser.parse(stream)
-        
+
         assert call_stmt is not None
         assert len(call_stmt.using_parameters) == 3
 

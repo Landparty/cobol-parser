@@ -14,6 +14,7 @@ Executor reuse example (avoids spawn overhead on large repeated batches)::
         batch1 = parse_files(files1, executor=executor)
         batch2 = parse_files(files2, executor=executor)
 """
+
 from __future__ import annotations
 
 import os
@@ -29,6 +30,7 @@ from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
 @dataclass
 class BatchResult:
     """Result for a single file in a batch parse run."""
+
     path: Path
     result: ParseResult | None
     read_error: str | None  # str(exc) — always pickle-safe on Windows spawn
@@ -108,10 +110,7 @@ def parse_files(
         return []
 
     resolved_workers = workers if workers is not None else (os.cpu_count() or 1)
-    args = [
-        (p, encoding, errors, error_recovery, dialect)
-        for p in path_list
-    ]
+    args = [(p, encoding, errors, error_recovery, dialect) for p in path_list]
 
     if executor is None and resolved_workers == 1:
         # Sequential fast path: clean stack traces, no pickle overhead

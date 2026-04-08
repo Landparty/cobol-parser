@@ -5,6 +5,7 @@ Covers both static and dynamic CALL variations.
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
@@ -22,10 +23,10 @@ class TestCallBasicParsing:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert call_stmt.called_program == "SUBPROGRAM"
         assert call_stmt.is_dynamic is False
@@ -44,10 +45,10 @@ class TestCallBasicParsing:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert call_stmt.called_program == "WS-PROGRAM"
         assert call_stmt.is_dynamic is True
@@ -63,10 +64,10 @@ class TestCallBasicParsing:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert len(call_stmt.using_parameters) == 0
 

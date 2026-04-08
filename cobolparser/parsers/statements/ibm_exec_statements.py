@@ -44,9 +44,11 @@ class ExecSqlStatementParser(IStatementParser):
                 return False
 
             # Check if first token is EXEC (dedicated token type or identifier)
-            is_exec = (token.type == TokenType.EXEC or
-                       (token.type == TokenType.IDENTIFIER and
-                        token.value and token.value.upper() == "EXEC"))
+            is_exec = token.type == TokenType.EXEC or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "EXEC"
+            )
             if not is_exec:
                 return False
 
@@ -55,9 +57,14 @@ class ExecSqlStatementParser(IStatementParser):
             if not next_token:
                 return False
 
-            return bool(next_token.type == TokenType.SQL or
-                        (next_token.type == TokenType.IDENTIFIER and
-                         next_token.value and next_token.value.upper() == "SQL"))
+            return bool(
+                next_token.type == TokenType.SQL
+                or (
+                    next_token.type == TokenType.IDENTIFIER
+                    and next_token.value
+                    and next_token.value.upper() == "SQL"
+                )
+            )
         except Exception:
             return False
 
@@ -74,7 +81,12 @@ class ExecSqlStatementParser(IStatementParser):
             token_stream.consume()
 
         # Collect SQL content until END-EXEC, preserving host variable syntax (:VAR)
-        _NO_SPACE_BEFORE = {TokenType.COLON, TokenType.COMMA, TokenType.PERIOD, TokenType.SEMICOLON}
+        _NO_SPACE_BEFORE = {
+            TokenType.COLON,
+            TokenType.COMMA,
+            TokenType.PERIOD,
+            TokenType.SEMICOLON,
+        }
         sql_parts: list[str] = []
         prev_was_colon = False
         while not token_stream.is_empty():
@@ -82,9 +94,11 @@ class ExecSqlStatementParser(IStatementParser):
             if not token:
                 break
 
-            is_end_exec = (token.type == TokenType.END_EXEC or
-                           (token.type == TokenType.IDENTIFIER and
-                            token.value and token.value.upper() == "END-EXEC"))
+            is_end_exec = token.type == TokenType.END_EXEC or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "END-EXEC"
+            )
             if is_end_exec:
                 token_stream.consume()
                 break
@@ -99,7 +113,7 @@ class ExecSqlStatementParser(IStatementParser):
                         sql_parts.append(token.value)
                 else:
                     sql_parts.append(token.value)
-                prev_was_colon = (token.type == TokenType.COLON)
+                prev_was_colon = token.type == TokenType.COLON
             token_stream.consume()
 
         sql_text = " ".join(sql_parts)
@@ -126,9 +140,11 @@ class ExecCicsStatementParser(IStatementParser):
                 return False
 
             # Check if first token is EXEC (dedicated token type or identifier)
-            is_exec = (token.type == TokenType.EXEC or
-                       (token.type == TokenType.IDENTIFIER and
-                        token.value and token.value.upper() == "EXEC"))
+            is_exec = token.type == TokenType.EXEC or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "EXEC"
+            )
             if not is_exec:
                 return False
 
@@ -137,8 +153,11 @@ class ExecCicsStatementParser(IStatementParser):
             if not next_token:
                 return False
 
-            return bool(next_token.type == TokenType.IDENTIFIER and
-                        next_token.value and next_token.value.upper() == "CICS")
+            return bool(
+                next_token.type == TokenType.IDENTIFIER
+                and next_token.value
+                and next_token.value.upper() == "CICS"
+            )
         except Exception:
             return False
 
@@ -160,9 +179,11 @@ class ExecCicsStatementParser(IStatementParser):
             if not token:
                 break
 
-            if (token.type == TokenType.IDENTIFIER and
-                token.value and
-                token.value.upper() == "END-EXEC"):
+            if (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "END-EXEC"
+            ):
                 token_stream.consume()
                 break
 

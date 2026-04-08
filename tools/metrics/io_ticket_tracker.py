@@ -7,7 +7,7 @@ Establishes a weekly baseline and provides utilities for comparing current count
 Usage:
     # Capture baseline
     python io_ticket_tracker.py --mode baseline --output baseline.json
-    
+
     # Check current status
     python io_ticket_tracker.py --mode current --baseline baseline.json
 """
@@ -16,10 +16,10 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 
-def create_baseline_record() -> Dict[str, Any]:
+def create_baseline_record() -> dict[str, Any]:
     """Create a baseline record for IO ticket tracking."""
     return {
         "timestamp": datetime.utcnow().isoformat(),
@@ -32,14 +32,14 @@ def create_baseline_record() -> Dict[str, Any]:
     }
 
 
-def generate_baseline(output_path: Path) -> Dict[str, Any]:
+def generate_baseline(output_path: Path) -> dict[str, Any]:
     """Generate and save a baseline ticket record."""
     record = create_baseline_record()
     output_path.write_text(json.dumps(record, indent=2))
     return record
 
 
-def load_baseline(baseline_path: Path) -> Dict[str, Any]:
+def load_baseline(baseline_path: Path) -> dict[str, Any]:
     """Load a baseline record from file."""
     if not baseline_path.exists():
         raise FileNotFoundError(f"Baseline file not found: {baseline_path}")
@@ -74,7 +74,10 @@ def main() -> int:
 
     if args.mode == "baseline":
         if not args.output:
-            print("Error: --output required for baseline mode", file=__import__("sys").stderr)
+            print(
+                "Error: --output required for baseline mode",
+                file=__import__("sys").stderr,
+            )
             return 1
         record = generate_baseline(args.output)
         print(f"✅ Baseline created: {args.output}")
@@ -83,7 +86,10 @@ def main() -> int:
 
     elif args.mode == "current":
         if not args.baseline:
-            print("Error: --baseline required for current mode", file=__import__("sys").stderr)
+            print(
+                "Error: --baseline required for current mode",
+                file=__import__("sys").stderr,
+            )
             return 1
         baseline = load_baseline(args.baseline)
         print(f"📊 Baseline record (from {baseline['baseline_date']}):")
@@ -111,7 +117,7 @@ def main() -> int:
             else f"⏳ Progress: {reduction_pct:.1f}% (need {target_count})"
         )
 
-        print(f"📈 Ticket Tracking Report:")
+        print("📈 Ticket Tracking Report:")
         print(f"  Baseline: {baseline_count} tickets ({baseline['baseline_date']})")
         print(f"  Current:  {args.current} tickets")
         print(f"  Target:   {target_count} tickets (40% reduction)")

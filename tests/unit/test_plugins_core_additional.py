@@ -9,21 +9,21 @@ This test module specifically targets:
 - Lines 134-136: ParseError __str__ with TypeError
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch
-from typing import TYPE_CHECKING
 
 from cobolparser.plugins.core import (
-    ParseError,
     LexerError,
     MemoryConfiguration,
+    ParseError,
     ParseStatistics,
 )
 
 
 class TestParseErrorWithSourceLocation:
     """Tests for ParseError with SourceLocation parameter (lines 101-104)."""
-    
+
     def test_parse_error_with_source_location_object(self):
         """Test ParseError initialized with SourceLocation object."""
         # Create a mock SourceLocation
@@ -109,7 +109,7 @@ class TestParseErrorStr:
 
 class TestLexerErrorInheritance:
     """Tests for LexerError inheriting ParseError behavior."""
-    
+
     def test_lexer_error_with_location(self):
         """Test LexerError with SourceLocation."""
         location = Mock()
@@ -125,17 +125,17 @@ class TestLexerErrorInheritance:
 
 class TestMemoryConfigurationEdgeCases:
     """Additional edge case tests for MemoryConfiguration."""
-    
+
     def test_memory_config_at_minimum_boundary(self):
         """Test configuration exactly at minimum boundary."""
         config = MemoryConfiguration(max_memory_mb=64)
         assert config.max_memory_mb == 64
-    
+
     def test_memory_config_at_maximum_boundary(self):
         """Test configuration exactly at maximum boundary."""
         config = MemoryConfiguration(max_memory_mb=8192)
         assert config.max_memory_mb == 8192
-    
+
     def test_chunk_size_minimum(self):
         """Test minimum valid chunk size."""
         config = MemoryConfiguration(chunk_size_kb=1)
@@ -144,22 +144,22 @@ class TestMemoryConfigurationEdgeCases:
 
 class TestParseStatisticsEdgeCases:
     """Additional edge case tests for ParseStatistics."""
-    
+
     def test_stats_timing_very_short_duration(self):
         """Test timing with very short duration."""
         stats = ParseStatistics()
-        
-        with patch('time.time', side_effect=[1000.0, 1000.001]):
+
+        with patch("time.time", side_effect=[1000.0, 1000.001]):
             stats.start_timing()
             stats.end_timing()
-        
+
         assert stats.parse_time_seconds == pytest.approx(0.001, abs=0.0001)
         assert stats.total_time_ms == pytest.approx(1.0, abs=0.1)
-    
+
     def test_stats_all_fields_set(self):
         """Test setting all statistics fields."""
         stats = ParseStatistics()
-        
+
         stats.lines_processed = 1000
         stats.lines_parsed = 950
         stats.tokens_processed = 5000
@@ -168,9 +168,9 @@ class TestParseStatisticsEdgeCases:
         stats.total_time_ms = 2500.0
         stats.error_count = 5
         stats.warning_count = 10
-        
+
         result = stats.to_dict()
-        
+
         assert result["lines_processed"] == 1000
         assert result["lines_parsed"] == 950
         assert result["tokens_processed"] == 5000
@@ -183,16 +183,16 @@ class TestParseStatisticsEdgeCases:
 
 class TestTypeCheckingImport:
     """Tests verifying TYPE_CHECKING usage."""
-    
+
     def test_source_location_type_hint_works(self):
         """Test that SourceLocation type hint is properly used."""
         # This test verifies that the TYPE_CHECKING import (line 13)
         # is used correctly for type hints
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1)
         error = ParseError("Test", location=location)
-        
+
         assert error.line_number == 1
         assert error.column == 1
 

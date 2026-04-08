@@ -11,10 +11,7 @@ Diagnostic Record Structure (per Data Model):
 - severity: Error severity (ERROR, WARNING, INFO)
 """
 
-import pytest
-
-from cobolparser import CobolParser, ParseResult, ParseError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser import CobolParser
 
 
 def _fixed_source(body: str) -> str:
@@ -93,7 +90,11 @@ class TestPerformMissingTarget:
             PERFORM.
         """
         diagnostics = _get_perform_diagnostics(source)
-        target_errors = [d for d in diagnostics if "target" in str(d).lower() or "paragraph" in str(d).lower()]
+        target_errors = [
+            d
+            for d in diagnostics
+            if "target" in str(d).lower() or "paragraph" in str(d).lower()
+        ]
         assert len(target_errors) >= 1 or len(diagnostics) >= 1
 
     def test_missing_target_message_contains_keyword(self):
@@ -107,7 +108,11 @@ class TestPerformMissingTarget:
         diagnostics = _get_perform_diagnostics(source)
         if diagnostics:
             error_text = str(diagnostics[0]).upper()
-            assert "target" in error_text.lower() or "paragraph" in error_text.lower() or len(error_text) > 5
+            assert (
+                "target" in error_text.lower()
+                or "paragraph" in error_text.lower()
+                or len(error_text) > 5
+            )
 
 
 class TestPerformInvalidThru:
@@ -127,7 +132,9 @@ class TestPerformInvalidThru:
         thru_errors = [
             d
             for d in diagnostics
-            if "THRU" in str(d).upper() or "through" in str(d).lower() or "range" in str(d).lower()
+            if "THRU" in str(d).upper()
+            or "through" in str(d).lower()
+            or "range" in str(d).lower()
         ]
         assert len(thru_errors) >= 1 or len(diagnostics) >= 1
 
@@ -161,7 +168,9 @@ class TestPerformInlineWithoutEnd:
         """
         diagnostics = _get_perform_diagnostics(source)
         # Should detect missing END-PERFORM or syntax issue
-        assert len(diagnostics) >= 1 or True  # Lenient check as inline PERFORM can be tricky
+        assert (
+            len(diagnostics) >= 1 or True
+        )  # Lenient check as inline PERFORM can be tricky
 
 
 class TestPerformConflictingClauses:
@@ -178,7 +187,7 @@ class TestPerformConflictingClauses:
             DISPLAY 'PARA-1'.
         """
         diagnostics = _get_perform_diagnostics(source)
-        conflict_errors = [
+        [
             d
             for d in diagnostics
             if ("TIMES" in str(d).upper() and "UNTIL" in str(d).upper())
@@ -196,8 +205,8 @@ class TestPerformConflictingClauses:
         WORKING-STORAGE SECTION.
         01  WS-IDX PIC 99 VALUE 1.
         PROCEDURE DIVISION.
-            PERFORM PARA-1 
-                5 TIMES 
+            PERFORM PARA-1
+                5 TIMES
                 VARYING WS-IDX FROM 1 BY 1 UNTIL WS-IDX > 5.
         PARA-1.
             DISPLAY 'PARA-1'.
@@ -237,7 +246,11 @@ class TestPerformWithTestTiming:
         """
         diagnostics = _get_perform_diagnostics(source)
         # Should parse successfully, no errors expected
-        test_errors = [d for d in diagnostics if "TEST" in str(d).upper() and "invalid" in str(d).lower()]
+        test_errors = [
+            d
+            for d in diagnostics
+            if "TEST" in str(d).upper() and "invalid" in str(d).lower()
+        ]
         assert len(test_errors) == 0
 
 
@@ -253,7 +266,7 @@ class TestPerformVaryingClause:
         WORKING-STORAGE SECTION.
         01  WS-IDX PIC 99 VALUE 1.
         PROCEDURE DIVISION.
-            PERFORM PARA-1 
+            PERFORM PARA-1
                 WITH TEST BEFORE
                 VARYING WS-IDX FROM 1 BY 1 UNTIL WS-IDX > 5.
         PARA-1.
@@ -272,7 +285,7 @@ class TestPerformVaryingClause:
         WORKING-STORAGE SECTION.
         01  WS-IDX PIC 99 VALUE 1.
         PROCEDURE DIVISION.
-            PERFORM PARA-1 
+            PERFORM PARA-1
                 WITH TEST AFTER
                 VARYING WS-IDX FROM 1 BY 1 UNTIL WS-IDX > 5.
         PARA-1.
@@ -314,7 +327,9 @@ class TestPerformDiagnosticSeverity:
         """
         diagnostics = _get_perform_diagnostics(source)
         # Should report an error for missing target
-        assert len(diagnostics) >= 1 or True  # Lenient, as PERFORM can have inline block semantics
+        assert (
+            len(diagnostics) >= 1 or True
+        )  # Lenient, as PERFORM can have inline block semantics
 
 
 class TestPerformNullClause:
@@ -333,6 +348,10 @@ class TestPerformNullClause:
             DISPLAY 'PARA-2'.
         """
         diagnostics = _get_perform_diagnostics(source)
-        range_errors = [d for d in diagnostics if "range" in str(d).lower() or "THRU" in str(d).upper()]
+        range_errors = [
+            d
+            for d in diagnostics
+            if "range" in str(d).lower() or "THRU" in str(d).upper()
+        ]
         # Should not report range errors for valid range
         assert len(range_errors) == 0

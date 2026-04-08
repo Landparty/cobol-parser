@@ -87,9 +87,7 @@ class IOCoverageReporter:
     4. Validates artifacts against the coverage schema
     """
 
-    def __init__(
-        self, catalog_path: str | None = None, schema_path: str | None = None
-    ):
+    def __init__(self, catalog_path: str | None = None, schema_path: str | None = None):
         """Initialize the IO coverage reporter.
 
         Args:

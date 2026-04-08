@@ -50,13 +50,12 @@ from collections.abc import Iterable
 from typing import Optional
 
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
-_DEFINE_RE = re.compile(r'>>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?')
-_IS_DEFINED_RE = re.compile(r'(\w+)\s+IS\s+(NOT\s+)?DEFINED')
+_DEFINE_RE = re.compile(r">>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?")
+_IS_DEFINED_RE = re.compile(r"(\w+)\s+IS\s+(NOT\s+)?DEFINED")
 _DATA_DEF_RE = re.compile(
-    r'^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$',
-    re.MULTILINE
+    r"^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$", re.MULTILINE
 )
-_LEVEL_NUMBER_RE = re.compile(r'^\s*(\d{2})\s+[A-Za-z]', re.MULTILINE)
+_LEVEL_NUMBER_RE = re.compile(r"^\s*(\d{2})\s+[A-Za-z]", re.MULTILINE)
 
 
 class PreprocessingError(Exception):
@@ -65,6 +64,7 @@ class PreprocessingError(Exception):
     Catch this to handle any failure that occurs during copybook expansion
     or source normalization, without needing to enumerate every subtype.
     """
+
     pass
 
 
@@ -101,14 +101,18 @@ class CopybookNotFoundError(PreprocessingError):
         copybook_name: str,
         search_paths: list[str],
         suggestions: list[str] | None = None,
-        message: str | None = None
+        message: str | None = None,
     ):
         self.copybook_name = copybook_name
         self.search_paths = search_paths
         self.suggestions = suggestions or []
         if message is None:
-            paths_str = ", ".join(search_paths) if search_paths else "(no paths configured)"
-            message = f"Copybook '{copybook_name}' not found in search paths: {paths_str}"
+            paths_str = (
+                ", ".join(search_paths) if search_paths else "(no paths configured)"
+            )
+            message = (
+                f"Copybook '{copybook_name}' not found in search paths: {paths_str}"
+            )
             if self.suggestions:
                 message += f". Did you mean: {', '.join(self.suggestions)}?"
         super().__init__(message)
@@ -140,7 +144,9 @@ class EncodingError(PreprocessingError):
         message: Human-readable error message
     """
 
-    def __init__(self, file_path: str, details: str | None = None, message: str | None = None):
+    def __init__(
+        self, file_path: str, details: str | None = None, message: str | None = None
+    ):
         self.file_path = file_path
         self.details = details
         if message is None:
@@ -180,11 +186,7 @@ class CopybookSizeExceededError(PreprocessingError):
     """
 
     def __init__(
-        self,
-        copybook_path: str,
-        size: int,
-        limit: int,
-        message: str | None = None
+        self, copybook_path: str, size: int, limit: int, message: str | None = None
     ):
         self.copybook_path = copybook_path
         self.size = size
@@ -213,7 +215,7 @@ class CopybookSyntaxError(PreprocessingError):
         copybook_path: str,
         details: str,
         line: int | None = None,
-        message: str | None = None
+        message: str | None = None,
     ):
         self.copybook_path = copybook_path
         self.line = line
@@ -233,6 +235,7 @@ class LevelNumberMismatchWarning(UserWarning):
     This is a warning rather than an error because some level mismatches
     may be intentional (e.g., copybook designed for specific contexts).
     """
+
     pass
 
 
@@ -259,15 +262,13 @@ class TotalExpansionSizeExceededError(PreprocessingError):
 
 # Fixed-format COBOL normalization constants
 DEFAULT_SEQ_COL_END = 6  # 1-6 sequence numbers
-INDICATOR_COL = 7        # column 7 indicator position (1-based)
-TEXT_START_COL = 8       # program text begins (1-based)
-TEXT_END_COL = 72        # program text end (inclusive, 1-based)
+INDICATOR_COL = 7  # column 7 indicator position (1-based)
+TEXT_START_COL = 8  # program text begins (1-based)
+TEXT_END_COL = 72  # program text end (inclusive, 1-based)
 
 
 def strip_compiler_directives(
-    source: str,
-    *,
-    preserve_line_numbers: bool = True
+    source: str, *, preserve_line_numbers: bool = True
 ) -> str:
     """Remove PROCESS and CBL compiler directives from fixed-format COBOL source.
 
@@ -307,8 +308,8 @@ def strip_compiler_directives(
 
     for line in lines:
         # Preserve the original line ending
-        line_content = line.rstrip('\r\n')
-        line_ending = line[len(line_content):]
+        line_content = line.rstrip("\r\n")
+        line_ending = line[len(line_content) :]
 
         # Determine where program text starts
         # Check if line has sequence area (columns 1-7 are typically spaces or sequence numbers)
@@ -316,9 +317,9 @@ def strip_compiler_directives(
         has_sequence_area = False
         if len(line_content) >= TEXT_START_COL:
             # Check if first 7 chars look like sequence area (spaces or digits)
-            first_seven = line_content[:TEXT_START_COL-1]
+            first_seven = line_content[: TEXT_START_COL - 1]
             # If first 7 chars are all spaces or digits, it's likely a sequence area
-            if first_seven.strip() == '' or first_seven.replace(' ', '').isdigit():
+            if first_seven.strip() == "" or first_seven.replace(" ", "").isdigit():
                 has_sequence_area = True
 
         if has_sequence_area:
@@ -330,13 +331,15 @@ def strip_compiler_directives(
             indicator_pos = 6 if len(line_content) > 6 else 0
 
         # Extract program text area
-        text_area = line_content[text_start:].strip() if len(line_content) > text_start else ""
+        text_area = (
+            line_content[text_start:].strip() if len(line_content) > text_start else ""
+        )
 
         # Check if we've reached IDENTIFICATION DIVISION
         # This marks the end of the directive section
         if in_directive_section and text_area:
             text_upper = text_area.upper()
-            if text_upper.startswith('IDENTIFICATION') or text_upper.startswith('ID '):
+            if text_upper.startswith("IDENTIFICATION") or text_upper.startswith("ID "):
                 in_directive_section = False
                 in_continuation = False
                 result_lines.append(line)
@@ -349,10 +352,12 @@ def strip_compiler_directives(
 
         # We're in the directive section - check for PROCESS/CBL
         # Get the indicator column (column 7, or position 6 for short lines)
-        indicator = line_content[indicator_pos] if len(line_content) > indicator_pos else ' '
+        indicator = (
+            line_content[indicator_pos] if len(line_content) > indicator_pos else " "
+        )
 
         # Check for continuation line
-        if indicator == '-':
+        if indicator == "-":
             if in_continuation:
                 # This is a continuation of a PROCESS/CBL directive
                 if preserve_line_numbers:
@@ -371,11 +376,13 @@ def strip_compiler_directives(
             # Check if line starts with PROCESS or CBL
             # Handle various formats: "PROCESS ", "PROCESS\t", "PROCESS", "CBL ", etc.
             is_directive = False
-            if text_upper == 'PROCESS' or text_upper == 'CBL':
+            if text_upper == "PROCESS" or text_upper == "CBL":
                 is_directive = True
-            elif text_upper.startswith('PROCESS ') or text_upper.startswith('PROCESS\t'):
+            elif text_upper.startswith("PROCESS ") or text_upper.startswith(
+                "PROCESS\t"
+            ):
                 is_directive = True
-            elif text_upper.startswith('CBL ') or text_upper.startswith('CBL\t'):
+            elif text_upper.startswith("CBL ") or text_upper.startswith("CBL\t"):
                 is_directive = True
 
             if is_directive:
@@ -390,10 +397,12 @@ def strip_compiler_directives(
         in_continuation = False
         result_lines.append(line)
 
-    return ''.join(result_lines)
+    return "".join(result_lines)
 
 
-def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bool = True) -> str:
+def normalize_fixed_format(
+    lines: Iterable[str], *, merge_continued_literals: bool = True
+) -> str:
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
     Steps:
@@ -413,25 +422,25 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
 
     def flush_parts() -> None:
         nonlocal parts
-        combined = ''.join(parts)
+        combined = "".join(parts)
         if combined:
             result.append(combined)
         parts = []
 
     for raw in lines:
-        line = raw.rstrip('\n')
+        line = raw.rstrip("\n")
         if len(line) < TEXT_START_COL - 1:
             flush_parts()
             continue
-        indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else ' '
-        text_slice = line[TEXT_START_COL - 1:TEXT_END_COL]
-        if indicator in ('*', '/'):  # comment (including page eject)
+        indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else " "
+        text_slice = line[TEXT_START_COL - 1 : TEXT_END_COL]
+        if indicator in ("*", "/"):  # comment (including page eject)
             # Comment lines: flush pending buffer but do not emit comment text.
             # Emitting comment text causes the free-form lexer to tokenize it as code.
             flush_parts()
             pending_literal = False
             continue
-        is_cont = indicator == '-'
+        is_cont = indicator == "-"
 
         # Handle continuation lines
         if is_cont:
@@ -450,7 +459,7 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
                 parts.append(chunk.rstrip())
             else:
                 # Regular continuation (non-literal) - just append with a space
-                parts.append(' ' + text_slice.lstrip())
+                parts.append(" " + text_slice.lstrip())
         else:
             # Non-continuation line - start new logical line
             flush_parts()
@@ -458,7 +467,7 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
 
         if merge_continued_literals:
             # Count quotes ignoring doubled ones
-            current = ''.join(parts)
+            current = "".join(parts)
             i = 0
             quote_char = None
             pending_literal = False
@@ -467,7 +476,9 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
                 ch = current[i]
                 if quote_char:
                     if ch == quote_char:
-                        if i + 1 < len(current) and current[i+1] == quote_char:  # escaped
+                        if (
+                            i + 1 < len(current) and current[i + 1] == quote_char
+                        ):  # escaped
                             i += 2
                             continue
                         # closing quote
@@ -496,12 +507,11 @@ def normalize_fixed_format(lines: Iterable[str], *, merge_continued_literals: bo
             f"(opened with quote character '{quote_char or '?'}')"
         )
 
-    return '\n'.join(result) + '\n'
+    return "\n".join(result) + "\n"
 
 
 def preprocess_conditional_compilation(
-    source: str,
-    defined_symbols: dict[str, str] | None = None
+    source: str, defined_symbols: dict[str, str] | None = None
 ) -> str:
     """
     Process IBM >>IF/>>DEFINE conditional compilation directives.
@@ -538,16 +548,16 @@ def preprocess_conditional_compilation(
         stripped = line.strip().upper()
 
         # >>DEFINE symbol [AS value]
-        if stripped.startswith('>>DEFINE'):
+        if stripped.startswith(">>DEFINE"):
             match = _DEFINE_RE.match(stripped)
             if match:
                 symbol = match.group(1)
-                value = match.group(2).strip() if match.group(2) else 'TRUE'
+                value = match.group(2).strip() if match.group(2) else "TRUE"
                 defined[symbol] = value
             continue
 
         # >>IF condition
-        elif stripped.startswith('>>IF'):
+        elif stripped.startswith(">>IF"):
             condition_text = stripped[4:].strip()
 
             # Parse condition
@@ -570,7 +580,7 @@ def preprocess_conditional_compilation(
             continue
 
         # >>ELSE
-        elif stripped.startswith('>>ELSE'):
+        elif stripped.startswith(">>ELSE"):
             if len(skip_stack) > 1:
                 # Only toggle if parent is not skipping
                 parent_skip = any(skip_stack[:-1])
@@ -579,7 +589,7 @@ def preprocess_conditional_compilation(
             continue
 
         # >>END-IF
-        elif stripped.startswith('>>END-IF'):
+        elif stripped.startswith(">>END-IF"):
             if len(skip_stack) > 1:
                 skip_stack.pop()
             continue
@@ -588,7 +598,7 @@ def preprocess_conditional_compilation(
         if not any(skip_stack):
             result_lines.append(line)
 
-    return '\n'.join(result_lines)
+    return "\n".join(result_lines)
 
 
 def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
@@ -621,15 +631,18 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
         return warnings
 
     # Check for comment-only content
-    lines = [line for line in stripped.splitlines() if line.strip() and not line.strip().startswith('*')]
+    lines = [
+        line
+        for line in stripped.splitlines()
+        if line.strip() and not line.strip().startswith("*")
+    ]
     if not lines:
         warnings.append(f"Copybook '{copybook_path}' contains only comments")
 
     # Check for binary content indicators
-    if '\x00' in content:
+    if "\x00" in content:
         raise CopybookSyntaxError(
-            copybook_path,
-            "Binary content detected (null bytes found)"
+            copybook_path, "Binary content detected (null bytes found)"
         )
 
     # Check for unbalanced quotes (simple check)
@@ -650,7 +663,7 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
 
     # Check for potential missing terminating period on data definitions
     for match in _DATA_DEF_RE.finditer(content):
-        line_num = content[:match.start()].count('\n') + 1
+        line_num = content[: match.start()].count("\n") + 1
         warnings.append(
             f"Line {line_num} in '{copybook_path}' may be missing terminating period"
         )
@@ -659,9 +672,7 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
 
 
 def validate_level_numbers(
-    pre_context: str,
-    copybook_content: str,
-    copybook_path: str
+    pre_context: str, copybook_content: str, copybook_path: str
 ) -> list[str]:
     """
     Validate level number continuity between main program and copybook.
@@ -707,22 +718,22 @@ def validate_level_numbers(
 
 
 __all__ = [
-    'CircularReferenceError',
-    'CopybookNotFoundError',
-    'PathTraversalError',
-    'EncodingError',
-    'NestingDepthError',
-    'CopybookSizeExceededError',
-    'CopybookSyntaxError',
-    'LevelNumberMismatchWarning',
-    'TotalExpansionSizeExceededError',
-    'strip_compiler_directives',
-    'normalize_fixed_format',
-    'preprocess_conditional_compilation',
-    'validate_copybook_content',
-    'validate_level_numbers',
-    'expand_copybooks',
-    'parse_cobol_with_expansion',
+    "CircularReferenceError",
+    "CopybookNotFoundError",
+    "PathTraversalError",
+    "EncodingError",
+    "NestingDepthError",
+    "CopybookSizeExceededError",
+    "CopybookSyntaxError",
+    "LevelNumberMismatchWarning",
+    "TotalExpansionSizeExceededError",
+    "strip_compiler_directives",
+    "normalize_fixed_format",
+    "preprocess_conditional_compilation",
+    "validate_copybook_content",
+    "validate_level_numbers",
+    "expand_copybooks",
+    "parse_cobol_with_expansion",
 ]
 
 

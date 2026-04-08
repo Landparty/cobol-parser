@@ -25,7 +25,7 @@ FIXED_FORMAT_CODE_END_COLUMN = 72
 
 # Regex to identify comment lines in fixed-format COBOL
 # Column 7 (index 6) contains '*' for full-line comments or '/' for page break comments
-COMMENT_LINE_PATTERN = re.compile(r'^.{6}[*\/]', re.MULTILINE)
+COMMENT_LINE_PATTERN = re.compile(r"^.{6}[*\/]", re.MULTILINE)
 
 # COPY statement regex patterns supporting IBM Enterprise COBOL syntax
 # Matches: COPY member, COPY "member", COPY member IN/OF library, COPY member SUPPRESS, COPY member REPLACING
@@ -48,45 +48,45 @@ COMMENT_LINE_PATTERN = re.compile(r'^.{6}[*\/]', re.MULTILINE)
 
 # Helper pattern for REPLACING operands (pseudo-text, identifier, literal, or numeric)
 _REPLACING_OPERAND = (
-    r'(?:'
-        r'==(?:[^=]|=[^=])*=='  # Pseudo-text ==...==
-        r'|'
-        r':(?:[^:])*:'  # Alternate pseudo-text :...:
-        r'|'
-        r'"[^"]*"'  # Double-quoted literal
-        r'|'
-        r"'[^']*'"  # Single-quoted literal
-        r'|'
-        r'[+-]?[0-9]+(?:\.[0-9]+)?'  # Numeric literal with optional sign and decimal
-        r'|'
-        r'[A-Za-z0-9][-A-Za-z0-9]*(?:\s+(?:IN|OF)\s+[A-Za-z0-9][-A-Za-z0-9]*)*(?:\s*\([^)]+\))?'  # Qualified identifier with optional subscript
-    r')'
+    r"(?:"
+    r"==(?:[^=]|=[^=])*=="  # Pseudo-text ==...==
+    r"|"
+    r":(?:[^:])*:"  # Alternate pseudo-text :...:
+    r"|"
+    r'"[^"]*"'  # Double-quoted literal
+    r"|"
+    r"'[^']*'"  # Single-quoted literal
+    r"|"
+    r"[+-]?[0-9]+(?:\.[0-9]+)?"  # Numeric literal with optional sign and decimal
+    r"|"
+    r"[A-Za-z0-9][-A-Za-z0-9]*(?:\s+(?:IN|OF)\s+[A-Za-z0-9][-A-Za-z0-9]*)*(?:\s*\([^)]+\))?"  # Qualified identifier with optional subscript
+    r")"
 )
 
 COPY_PATTERN = re.compile(
-    r'\bCOPY\s+'  # COPY keyword
-    r'(?:'  # Member name (quoted or unquoted)
-        r'"([^"]+)"'  # Quoted member name (group 1)
-        r'|'
-        r"'([^']+)'"  # Single-quoted member name (group 2)
-        r'|'
-        r'([A-Za-z0-9_.-]+)'  # Unquoted member name (group 3) - allow dots for extensions like .CPY
-    r')'
-    r'(?:\s+(?:IN|OF)\s+([A-Za-z0-9_-]+))?'  # Optional library qualifier (group 4)
-    r'(?:\s+(SUPPRESS)(?:\s+(PRINTING))?)?'  # Optional SUPPRESS [PRINTING] clause (groups 5, 6)
-    r'(?:\s+REPLACING\s+'  # Optional REPLACING clause start
-        r'('  # Capture the entire REPLACING content (group 7)
-            r'(?:'
-                r'(?:LEADING\s+|TRAILING\s+)?'  # Optional LEADING/TRAILING modifier
-                + _REPLACING_OPERAND +  # Find operand
-                r'\s+BY\s+'
-                + _REPLACING_OPERAND +  # Replace operand
-                r'\s*'
-            r')+'
-        r')'
-    r')?'
-    r'\s*\.',  # Terminating period (NOT inside pseudo-text)
-    re.IGNORECASE | re.DOTALL
+    r"\bCOPY\s+"  # COPY keyword
+    r"(?:"  # Member name (quoted or unquoted)
+    r'"([^"]+)"'  # Quoted member name (group 1)
+    r"|"
+    r"'([^']+)'"  # Single-quoted member name (group 2)
+    r"|"
+    r"([A-Za-z0-9_.-]+)"  # Unquoted member name (group 3) - allow dots for extensions like .CPY
+    r")"
+    r"(?:\s+(?:IN|OF)\s+([A-Za-z0-9_-]+))?"  # Optional library qualifier (group 4)
+    r"(?:\s+(SUPPRESS)(?:\s+(PRINTING))?)?"  # Optional SUPPRESS [PRINTING] clause (groups 5, 6)
+    r"(?:\s+REPLACING\s+"  # Optional REPLACING clause start
+    r"("  # Capture the entire REPLACING content (group 7)
+    r"(?:"
+    r"(?:LEADING\s+|TRAILING\s+)?"  # Optional LEADING/TRAILING modifier
+    + _REPLACING_OPERAND  # Find operand
+    + r"\s+BY\s+"
+    + _REPLACING_OPERAND  # Replace operand
+    + r"\s*"
+    r")+"
+    r")"
+    r")?"
+    r"\s*\.",  # Terminating period (NOT inside pseudo-text)
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -117,7 +117,7 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
         >>> normalize_continuation_lines(source)
         "       COPY EMPLOYEE REPLACING ==OLD== BY ==NEW==."
     """
-    lines = source.split('\n')
+    lines = source.split("\n")
     result: list[str] = []
 
     # Text starts after the indicator column
@@ -125,7 +125,7 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
 
     for _i, line in enumerate(lines):
         # Check if this is a continuation line (indicator is '-')
-        if len(line) > indicator_position and line[indicator_position] == '-':
+        if len(line) > indicator_position and line[indicator_position] == "-":
             # This is a continuation line
             if result:
                 # Get the continuation text (after the indicator)
@@ -166,7 +166,7 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
         else:
             result.append(line)
 
-    return '\n'.join(result)
+    return "\n".join(result)
 
 
 def _count_unmatched_quotes(text: str, quote_char: str) -> int:
@@ -223,7 +223,7 @@ def strip_sequence_area(source: str) -> str:
         >>> strip_sequence_area(line)
         "     COPY                                                    KP001"
     """
-    lines = source.split('\n')
+    lines = source.split("\n")
     result = []
 
     # Define column boundaries (0-indexed)
@@ -245,7 +245,7 @@ def strip_sequence_area(source: str) -> str:
 
             result.append(line[start_idx:end_idx])
 
-    return '\n'.join(result)
+    return "\n".join(result)
 
 
 def is_comment_line(line: str) -> bool:
@@ -272,7 +272,7 @@ def is_comment_line(line: str) -> bool:
     if len(line) < 7:
         return False
     indicator = line[6]
-    return indicator in ('*', '/', 'D', 'd')
+    return indicator in ("*", "/", "D", "d")
 
 
 def is_within_string_literal(source: str, match_start: int, match_end: int) -> bool:
@@ -296,7 +296,7 @@ def is_within_string_literal(source: str, match_start: int, match_end: int) -> b
         True
     """
     # Get the text before the match on the same line
-    line_start = source.rfind('\n', 0, match_start) + 1
+    line_start = source.rfind("\n", 0, match_start) + 1
     text_before_match = source[line_start:match_start]
 
     # Count unescaped quotes before the match
@@ -338,7 +338,7 @@ def remove_comment_lines(source: str) -> str:
     Returns:
         Source with comment lines blanked out so line positions remain stable
     """
-    lines = source.split('\n')
+    lines = source.split("\n")
     result = []
 
     for line in lines:
@@ -347,7 +347,7 @@ def remove_comment_lines(source: str) -> str:
         else:
             result.append(line)
 
-    return '\n'.join(result)
+    return "\n".join(result)
 
 
 class CopyStatementLexer:
@@ -375,7 +375,7 @@ class CopyStatementLexer:
         """Skip whitespace and COBOL separators (comma, semicolon)."""
         while not self._is_at_end():
             c = self._peek()
-            if c.isspace() or c in (',', ';'):
+            if c.isspace() or c in (",", ";"):
                 self._advance()
             else:
                 break
@@ -384,10 +384,10 @@ class CopyStatementLexer:
         """Check for a keyword and advance if matched, skipping leading separators."""
         start_pos = self.pos
         self._skip_separators()
-        if self.source[self.pos:self.pos+len(keyword)].upper() == keyword.upper():
+        if self.source[self.pos : self.pos + len(keyword)].upper() == keyword.upper():
             # Check for word boundary
             next_char = self._peek(len(keyword))
-            if not next_char or not (next_char.isalnum() or next_char in ('-', '_')):
+            if not next_char or not (next_char.isalnum() or next_char in ("-", "_")):
                 self._advance(len(keyword))
                 return True
 
@@ -405,11 +405,11 @@ class CopyStatementLexer:
         char = self._peek()
 
         # 1. Pseudo-text ==...==
-        if char == '=' and self._peek(1) == '=':
+        if char == "=" and self._peek(1) == "=":
             self._advance(2)
             while not self._is_at_end():
-                if self._peek() == '=' and self._peek(1) == '=':
-                    text = self.source[start_pos+2:self.pos]
+                if self._peek() == "=" and self._peek(1) == "=":
+                    text = self.source[start_pos + 2 : self.pos]
                     self._advance(2)
                     return text
                 self._advance()
@@ -424,7 +424,9 @@ class CopyStatementLexer:
                     self._advance(2)
                 elif self._peek() == quote:
                     self._advance()
-                    return self.source[start_pos+1:self.pos-1].replace(quote*2, quote)
+                    return self.source[start_pos + 1 : self.pos - 1].replace(
+                        quote * 2, quote
+                    )
                 else:
                     self._advance()
             return None
@@ -432,26 +434,26 @@ class CopyStatementLexer:
         # 3. Identifier or qualified identifier
         while not self._is_at_end():
             c = self._peek()
-            if c.isspace() or c in (',', ';', '=', '(', ')'):
-                if c == '(' : # Handle MEMBER(QUAL)
-                   while not self._is_at_end() and self._peek() != ')':
-                       self._advance()
-                   if not self._is_at_end():
-                       self._advance()
-                   continue
+            if c.isspace() or c in (",", ";", "=", "(", ")"):
+                if c == "(":  # Handle MEMBER(QUAL)
+                    while not self._is_at_end() and self._peek() != ")":
+                        self._advance()
+                    if not self._is_at_end():
+                        self._advance()
+                    continue
                 break
             # Allow dot inside identifier only when followed by alphanumeric
             # (e.g. "CUSTDATA.CPY" — the .CPY is a file extension)
             # Stop at dot if followed by space or another non-alnum (statement terminator)
-            if c == '.':
+            if c == ".":
                 next_c = self._peek(1)
-                if next_c and (next_c.isalnum() or next_c == '_'):
+                if next_c and (next_c.isalnum() or next_c == "_"):
                     self._advance()
                     continue
                 break
             self._advance()
 
-        return self.source[start_pos:self.pos] if self.pos > start_pos else None
+        return self.source[start_pos : self.pos] if self.pos > start_pos else None
 
     def tokenize_copy_statements(self) -> list[CopyStatement]:
         statements = []
@@ -485,22 +487,28 @@ class CopyStatementLexer:
                 self._skip_separators()
 
                 # End of statement
-                if self._peek() == '.' and not self._peek(1).isalnum():
+                if self._peek() == "." and not self._peek(1).isalnum():
                     self._advance()
                     text_so_far = self.source[:match_start]
-                    line_num = text_so_far.count('\n') + 1
-                    col_num = match_start - text_so_far.rfind('\n')
+                    line_num = text_so_far.count("\n") + 1
+                    col_num = match_start - text_so_far.rfind("\n")
 
-                    statements.append(CopyStatement(
-                        member_name=member_name.strip(),
-                        library_qualifier=library_qualifier.strip() if library_qualifier else None,
-                        replacing_clauses=replacing_clauses if replacing_clauses else None,
-                        suppress_clause=suppress_clause,
-                        source_location=(self.source_file, line_num, col_num),
-                        original_text=self.source[match_start:self.pos],
-                        start_index=match_start,
-                        end_index=self.pos
-                    ))
+                    statements.append(
+                        CopyStatement(
+                            member_name=member_name.strip(),
+                            library_qualifier=(
+                                library_qualifier.strip() if library_qualifier else None
+                            ),
+                            replacing_clauses=(
+                                replacing_clauses if replacing_clauses else None
+                            ),
+                            suppress_clause=suppress_clause,
+                            source_location=(self.source_file, line_num, col_num),
+                            original_text=self.source[match_start : self.pos],
+                            start_index=match_start,
+                            end_index=self.pos,
+                        )
+                    )
                     break
 
                 # IN/OF
@@ -518,12 +526,16 @@ class CopyStatementLexer:
                 if self._match_keyword("REPLACING"):
                     while True:
                         self._skip_separators()
-                        if self._is_at_end() or self._peek() == '.':
+                        if self._is_at_end() or self._peek() == ".":
                             break
 
                         # Peek for next major clause
                         curr_before_peek = self.pos
-                        if self._match_keyword("IN") or self._match_keyword("OF") or self._match_keyword("SUPPRESS"):
+                        if (
+                            self._match_keyword("IN")
+                            or self._match_keyword("OF")
+                            or self._match_keyword("SUPPRESS")
+                        ):
                             self.pos = curr_before_peek
                             break
 
@@ -549,11 +561,11 @@ class CopyStatementLexer:
                         if replace is None:
                             break
 
-                        replacing_clauses.append(ReplacingClause(
-                            find_text=search,
-                            replace_text=replace,
-                            mode=mode
-                        ))
+                        replacing_clauses.append(
+                            ReplacingClause(
+                                find_text=search, replace_text=replace, mode=mode
+                            )
+                        )
                     continue
 
                 # Next COPY or unexpected token
@@ -567,8 +579,9 @@ class CopyStatementLexer:
         return statements
 
 
-
-def extract_copy_statements(source_code: str, source_file: str = "<main>") -> list[CopyStatement]:
+def extract_copy_statements(
+    source_code: str, source_file: str = "<main>"
+) -> list[CopyStatement]:
     """
     Extract all COPY statements from COBOL source code using a robust shallow lexer.
 
@@ -592,7 +605,9 @@ def extract_copy_statements(source_code: str, source_file: str = "<main>") -> li
     source_stripped = strip_sequence_area(source_without_comments)
 
     # Step 3: Normalize continuation lines
-    normalized_source = normalize_continuation_lines(source_stripped, indicator_position=0)
+    normalized_source = normalize_continuation_lines(
+        source_stripped, indicator_position=0
+    )
 
     # Step 4: Use CopyStatementLexer for extraction
     lexer = CopyStatementLexer(normalized_source, source_file)
@@ -634,7 +649,7 @@ def parse_suppress_clause(suppress_text: str | None) -> SuppressClause:
     single_lines = []
 
     # Pattern for "N THRU M" or "N THROUGH M"
-    range_pattern = re.compile(r'(\d+)\s+(?:THRU|THROUGH)\s+(\d+)', re.IGNORECASE)
+    range_pattern = re.compile(r"(\d+)\s+(?:THRU|THROUGH)\s+(\d+)", re.IGNORECASE)
 
     # Find all ranges
     for match in range_pattern.finditer(suppress_text):
@@ -643,16 +658,14 @@ def parse_suppress_clause(suppress_text: str | None) -> SuppressClause:
         line_ranges.append((start, end))
 
     # Remove ranges from text to find standalone numbers
-    remaining = range_pattern.sub('', suppress_text)
+    remaining = range_pattern.sub("", suppress_text)
 
     # Find standalone line numbers
-    for num_match in re.finditer(r'\b(\d+)\b', remaining):
+    for num_match in re.finditer(r"\b(\d+)\b", remaining):
         single_lines.append(int(num_match.group(1)))
 
     return SuppressClause(
-        suppress_all=False,
-        line_ranges=line_ranges,
-        single_lines=single_lines
+        suppress_all=False, line_ranges=line_ranges, single_lines=single_lines
     )
 
 
@@ -688,11 +701,11 @@ def parse_replacing_clause(replacing_text: str) -> list[ReplacingClause]:
     # Enhanced pattern with LEADING/TRAILING support
     # Supports both == and : delimiters, and allows empty replacement text
     pattern = re.compile(
-        r'(LEADING|TRAILING)?\s*'  # Optional modifier (group 1)
-        r'(?:==([^=]+)==|:([^:]+):)'  # Find text (groups 2, 3)
-        r'\s+BY\s+'
-        r'(?:==([^=]*)==|:([^:]*):)',  # Replace text (groups 4, 5) - allow empty
-        re.IGNORECASE | re.DOTALL
+        r"(LEADING|TRAILING)?\s*"  # Optional modifier (group 1)
+        r"(?:==([^=]+)==|:([^:]+):)"  # Find text (groups 2, 3)
+        r"\s+BY\s+"
+        r"(?:==([^=]*)==|:([^:]*):)",  # Replace text (groups 4, 5) - allow empty
+        re.IGNORECASE | re.DOTALL,
     )
 
     for match in pattern.finditer(replacing_text):
@@ -705,11 +718,13 @@ def parse_replacing_clause(replacing_text: str) -> list[ReplacingClause]:
 
         mode = modifier.upper() if modifier else "ALL"
 
-        clauses.append(ReplacingClause(
-            find_text=find_text.strip(),
-            replace_text=replace_text.strip(),
-            mode=mode
-        ))
+        clauses.append(
+            ReplacingClause(
+                find_text=find_text.strip(),
+                replace_text=replace_text.strip(),
+                mode=mode,
+            )
+        )
 
     return clauses
 
@@ -729,30 +744,38 @@ def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str
         # So we define a custom boundary: not followed/preceded by [A-Za-z0-9-]
         # Determine boundaries based on whether the search text starts/ends with word chars
         # If text starts/ends with special char (like :), don't enforce word boundary on that side
-        is_start_word = clause.find_text and (clause.find_text[0].isalnum() or clause.find_text[0] == '-')
-        is_end_word = clause.find_text and (clause.find_text[-1].isalnum() or clause.find_text[-1] == '-')
+        is_start_word = clause.find_text and (
+            clause.find_text[0].isalnum() or clause.find_text[0] == "-"
+        )
+        is_end_word = clause.find_text and (
+            clause.find_text[-1].isalnum() or clause.find_text[-1] == "-"
+        )
 
-        start_boundary = r'(?<![A-Za-z0-9-])' if is_start_word else r''
-        end_boundary = r'(?![A-Za-z0-9-])' if is_end_word else r''
+        start_boundary = r"(?<![A-Za-z0-9-])" if is_start_word else r""
+        end_boundary = r"(?![A-Za-z0-9-])" if is_end_word else r""
 
         if clause.mode == "ALL":
             pattern = re.compile(
                 start_boundary + re.escape(clause.find_text) + end_boundary,
-                re.IGNORECASE
+                re.IGNORECASE,
             )
             result = pattern.sub(clause.replace_text, result)
 
         elif clause.mode == "LEADING":
             pattern = re.compile(
-                start_boundary + re.escape(clause.find_text) + (r'(?=[A-Za-z0-9-])' if is_end_word else r''),
-                re.IGNORECASE
+                start_boundary
+                + re.escape(clause.find_text)
+                + (r"(?=[A-Za-z0-9-])" if is_end_word else r""),
+                re.IGNORECASE,
             )
             result = pattern.sub(clause.replace_text, result)
 
         elif clause.mode == "TRAILING":
             pattern = re.compile(
-                (r'(?<=[A-Za-z0-9-])' if is_start_word else r'') + re.escape(clause.find_text) + end_boundary,
-                re.IGNORECASE
+                (r"(?<=[A-Za-z0-9-])" if is_start_word else r"")
+                + re.escape(clause.find_text)
+                + end_boundary,
+                re.IGNORECASE,
             )
             result = pattern.sub(clause.replace_text, result)
 
@@ -760,9 +783,7 @@ def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str
 
 
 def track_source_location(
-    line_number: int,
-    source_file: str,
-    original_line: int
+    line_number: int, source_file: str, original_line: int
 ) -> tuple[int, tuple[str, int]]:
     """
     Create a source location mapping entry.
@@ -779,16 +800,16 @@ def track_source_location(
 
 
 __all__ = [
-    'extract_copy_statements',
-    'parse_replacing_clause',
-    'parse_suppress_clause',
-    'apply_replacing_clauses',
-    'normalize_continuation_lines',
-    'strip_sequence_area',
-    'track_source_location',
-    'is_comment_line',
-    'is_within_string_literal',
-    'remove_comment_lines',
-    'COPY_PATTERN',
-    'FIXED_FORMAT_CODE_END_COLUMN',
+    "extract_copy_statements",
+    "parse_replacing_clause",
+    "parse_suppress_clause",
+    "apply_replacing_clauses",
+    "normalize_continuation_lines",
+    "strip_sequence_area",
+    "track_source_location",
+    "is_comment_line",
+    "is_within_string_literal",
+    "remove_comment_lines",
+    "COPY_PATTERN",
+    "FIXED_FORMAT_CODE_END_COLUMN",
 ]

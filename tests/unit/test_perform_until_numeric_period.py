@@ -1,5 +1,6 @@
 from cobolparser import CobolParser, ErrorRecoveryMode
 
+
 def test_perform_until_numeric_literal_with_period():
     src = (
         "IDENTIFICATION DIVISION.\n"
@@ -16,4 +17,6 @@ def test_perform_until_numeric_literal_with_period():
     )
     parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
     result = parser.parse(src)
-    assert not [e for e in result.errors if 'ASSIGN' in str(e) or 'DISPLAY' in str(e)], result.errors
+    assert not [
+        e for e in result.errors if "ASSIGN" in str(e) or "DISPLAY" in str(e)
+    ], result.errors

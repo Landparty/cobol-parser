@@ -50,7 +50,15 @@ class ExecSQLStatement(CobolStatement):
 
         # Determine SQL type
         first_word = sql_text.strip().split()[0].upper() if sql_text.strip() else ""
-        if first_word in ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER"]:
+        if first_word in [
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "CREATE",
+            "DROP",
+            "ALTER",
+        ]:
             self._sql_type = first_word
         else:
             self._sql_type = "UNKNOWN"
@@ -63,11 +71,13 @@ class ExecSQLStatement(CobolStatement):
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
-        result.update({
-            "sql_text": self.sql_text,
-            "sql_type": self.sql_type,
-            "host_variables": self.host_variables
-        })
+        result.update(
+            {
+                "sql_text": self.sql_text,
+                "sql_type": self.sql_type,
+                "host_variables": self.host_variables,
+            }
+        )
         return result
 
 
@@ -95,10 +105,9 @@ class ExecCICSStatement(CobolStatement):
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
-        result.update({
-            "cics_command": self.cics_command,
-            "cics_options": self.cics_options
-        })
+        result.update(
+            {"cics_command": self.cics_command, "cics_options": self.cics_options}
+        )
         return result
 
 
@@ -130,11 +139,13 @@ class ExecIMSStatement(CobolStatement):
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
-        result.update({
-            "ims_command": self.ims_command,
-            "ims_call_type": self.ims_call_type,
-            "ims_options": self.ims_options
-        })
+        result.update(
+            {
+                "ims_command": self.ims_command,
+                "ims_call_type": self.ims_call_type,
+                "ims_options": self.ims_options,
+            }
+        )
         return result
 
 
@@ -199,14 +210,16 @@ class IBMDataItem(CobolDataItem):
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with IBM extensions."""
         result = super().to_dict()
-        result.update({
-            "ibm_usage": self.ibm_usage.value if self.ibm_usage else None,
-            "sign_clause": self.sign_clause,
-            "synchronized": self.synchronized,
-            "justified": self.justified,
-            "blank_when_zero": self.blank_when_zero,
-            "storage_size": self.calculate_storage_size()
-        })
+        result.update(
+            {
+                "ibm_usage": self.ibm_usage.value if self.ibm_usage else None,
+                "sign_clause": self.sign_clause,
+                "synchronized": self.synchronized,
+                "justified": self.justified,
+                "blank_when_zero": self.blank_when_zero,
+                "storage_size": self.calculate_storage_size(),
+            }
+        )
         return result
 
 
@@ -224,46 +237,134 @@ class IBMEnterpriseCobol:
 
     # IBM Enterprise COBOL reserved words
     IBM_RESERVED_WORDS = {
-        "COMP-3", "COMP-4", "COMP-5",
-        "PACKED-DECIMAL", "BINARY",
-        "POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER",
-        "OBJECT", "REFERENCE",
-        "EXEC", "SQL", "CICS", "END-EXEC",
-        "SQLCA", "SQLDA",
-        "DFHCOMMAREA", "DFHEIBLK",
-        "CBL", "PROCESS",
+        "COMP-3",
+        "COMP-4",
+        "COMP-5",
+        "PACKED-DECIMAL",
+        "BINARY",
+        "POINTER",
+        "PROCEDURE-POINTER",
+        "FUNCTION-POINTER",
+        "OBJECT",
+        "REFERENCE",
+        "EXEC",
+        "SQL",
+        "CICS",
+        "END-EXEC",
+        "SQLCA",
+        "SQLDA",
+        "DFHCOMMAREA",
+        "DFHEIBLK",
+        "CBL",
+        "PROCESS",
     }
 
     # IBM intrinsic functions
     IBM_INTRINSIC_FUNCTIONS = {
-        "ACOS", "ANNUITY", "ASIN", "ATAN", "CHAR", "COS", "CURRENT-DATE",
-        "DATE-OF-INTEGER", "DATE-TO-YYYYMMDD", "DAY-OF-INTEGER", "DAY-TO-YYYYDDD",
-        "FACTORIAL", "INTEGER", "INTEGER-OF-DATE", "INTEGER-OF-DAY",
-        "LENGTH", "LOG", "LOG10", "LOWER-CASE", "MAX", "MEAN", "MEDIAN", "MIDRANGE",
-        "MIN", "MOD", "NUMVAL", "NUMVAL-C", "ORD", "ORD-MAX", "ORD-MIN",
-        "PRESENT-VALUE", "RANDOM", "RANGE", "REM", "REVERSE", "SIN", "SQRT",
-        "STANDARD-DEVIATION", "SUM", "TAN", "UPPER-CASE", "VARIANCE", "WHEN-COMPILED",
-        "YEAR-TO-YYYY"
+        "ACOS",
+        "ANNUITY",
+        "ASIN",
+        "ATAN",
+        "CHAR",
+        "COS",
+        "CURRENT-DATE",
+        "DATE-OF-INTEGER",
+        "DATE-TO-YYYYMMDD",
+        "DAY-OF-INTEGER",
+        "DAY-TO-YYYYDDD",
+        "FACTORIAL",
+        "INTEGER",
+        "INTEGER-OF-DATE",
+        "INTEGER-OF-DAY",
+        "LENGTH",
+        "LOG",
+        "LOG10",
+        "LOWER-CASE",
+        "MAX",
+        "MEAN",
+        "MEDIAN",
+        "MIDRANGE",
+        "MIN",
+        "MOD",
+        "NUMVAL",
+        "NUMVAL-C",
+        "ORD",
+        "ORD-MAX",
+        "ORD-MIN",
+        "PRESENT-VALUE",
+        "RANDOM",
+        "RANGE",
+        "REM",
+        "REVERSE",
+        "SIN",
+        "SQRT",
+        "STANDARD-DEVIATION",
+        "SUM",
+        "TAN",
+        "UPPER-CASE",
+        "VARIANCE",
+        "WHEN-COMPILED",
+        "YEAR-TO-YYYY",
     }
 
     # CICS commands
     CICS_COMMANDS = {
-        "RECEIVE", "SEND", "RETURN", "XCTL", "LINK", "LOAD", "RELEASE",
-        "GETMAIN", "FREEMAIN", "READ", "WRITE", "REWRITE", "DELETE", "UNLOCK",
-        "STARTBR", "READNEXT", "READPREV", "RESETBR", "ENDBR",
-        "PUSH", "POP", "PUT", "GET", "PURGE", "RETRIEVE",
-        "START", "CANCEL", "SUSPEND", "RESUME", "DELAY",
-        "ASKTIME", "FORMATTIME", "CONVERTTIME",
-        "ENTER", "HANDLE", "IGNORE", "NOHANDLE"
+        "RECEIVE",
+        "SEND",
+        "RETURN",
+        "XCTL",
+        "LINK",
+        "LOAD",
+        "RELEASE",
+        "GETMAIN",
+        "FREEMAIN",
+        "READ",
+        "WRITE",
+        "REWRITE",
+        "DELETE",
+        "UNLOCK",
+        "STARTBR",
+        "READNEXT",
+        "READPREV",
+        "RESETBR",
+        "ENDBR",
+        "PUSH",
+        "POP",
+        "PUT",
+        "GET",
+        "PURGE",
+        "RETRIEVE",
+        "START",
+        "CANCEL",
+        "SUSPEND",
+        "RESUME",
+        "DELAY",
+        "ASKTIME",
+        "FORMATTIME",
+        "CONVERTTIME",
+        "ENTER",
+        "HANDLE",
+        "IGNORE",
+        "NOHANDLE",
     }
 
     # IMS commands (DL/I call types)
     IMS_COMMANDS = {
-        "GU", "GN", "GNP",  # Get Unique, Get Next, Get Next in Parent
-        "ISRT", "REPL", "DLET",  # Insert, Replace, Delete
-        "CHKP", "ROLLB", "TERM",  # Checkpoint, Rollback, Terminate
-        "ENQUEUE", "DEQUEUE", "PURG",  # Queue operations
-        "XRST", "XDLT", "XRPL"  # Extended operations
+        "GU",
+        "GN",
+        "GNP",  # Get Unique, Get Next, Get Next in Parent
+        "ISRT",
+        "REPL",
+        "DLET",  # Insert, Replace, Delete
+        "CHKP",
+        "ROLLB",
+        "TERM",  # Checkpoint, Rollback, Terminate
+        "ENQUEUE",
+        "DEQUEUE",
+        "PURG",  # Queue operations
+        "XRST",
+        "XDLT",
+        "XRPL",  # Extended operations
     }
 
     def __init__(self) -> None:
@@ -277,7 +378,7 @@ class IBMEnterpriseCobol:
             "ibm_intrinsic_functions",
             "pointer_data_types",
             "object_oriented_cobol",
-            "zos_file_handling"
+            "zos_file_handling",
         }
 
     def validate_data_item(self, data_item: CobolDataItem) -> list[str]:
@@ -288,7 +389,7 @@ class IBMEnterpriseCobol:
         if data_item.usage == "COMP-3":
             if not data_item.picture_clause:
                 warnings.append("COMP-3 items should have PICTURE clause")
-            elif not data_item.picture_clause.pattern.startswith('9'):
+            elif not data_item.picture_clause.pattern.startswith("9"):
                 warnings.append("COMP-3 items should have numeric PICTURE")
 
         # Check level number restrictions
@@ -297,27 +398,34 @@ class IBMEnterpriseCobol:
 
         return warnings
 
-    def create_comp3_data_item(self, name: str, picture: str, location: SourceLocation) -> IBMDataItem:
+    def create_comp3_data_item(
+        self, name: str, picture: str, location: SourceLocation
+    ) -> IBMDataItem:
         """Create a COMP-3 packed decimal data item."""
         item = IBMDataItem(name, 1, location)
         item.picture_clause = PictureClause(picture, location)
         item.set_ibm_usage(IBMDataType.COMP_3)
         return item
 
-    def parse_exec_sql(self, sql_text: str, location: SourceLocation) -> ExecSQLStatement:
+    def parse_exec_sql(
+        self, sql_text: str, location: SourceLocation
+    ) -> ExecSQLStatement:
         """Parse EXEC SQL statement."""
         stmt = ExecSQLStatement(location)
         stmt.set_sql_text(sql_text)
 
         # Extract host variables (simplified - look for :variable pattern)
         import re
-        host_vars = re.findall(r':([A-Za-z][A-Za-z0-9-]*)', sql_text)
+
+        host_vars = re.findall(r":([A-Za-z][A-Za-z0-9-]*)", sql_text)
         for var in host_vars:
             stmt.add_host_variable(var)
 
         return stmt
 
-    def parse_exec_cics(self, cics_text: str, location: SourceLocation) -> ExecCICSStatement:
+    def parse_exec_cics(
+        self, cics_text: str, location: SourceLocation
+    ) -> ExecCICSStatement:
         """Parse EXEC CICS statement."""
         stmt = ExecCICSStatement(location)
 
@@ -328,16 +436,18 @@ class IBMEnterpriseCobol:
 
             # Parse options (simplified)
             for part in parts[1:]:
-                if '(' in part:
-                    option, value = part.split('(', 1)
-                    value = value.rstrip(')')
+                if "(" in part:
+                    option, value = part.split("(", 1)
+                    value = value.rstrip(")")
                     stmt.add_option(option, value)
                 else:
                     stmt.add_option(part)
 
         return stmt
 
-    def parse_exec_ims(self, ims_text: str, location: SourceLocation) -> ExecIMSStatement:
+    def parse_exec_ims(
+        self, ims_text: str, location: SourceLocation
+    ) -> ExecIMSStatement:
         """Parse EXEC IMS statement."""
         stmt = ExecIMSStatement(location)
 
@@ -348,9 +458,9 @@ class IBMEnterpriseCobol:
 
             # Parse options (simplified)
             for part in parts[1:]:
-                if '(' in part:
-                    option, value = part.split('(', 1)
-                    value = value.rstrip(')')
+                if "(" in part:
+                    option, value = part.split("(", 1)
+                    value = value.rstrip(")")
                     stmt.add_option(option, value)
                 else:
                     stmt.add_option(part)
@@ -371,39 +481,43 @@ class IBMEnterpriseCobol:
         data_division = program.get_division("DATA")
         if data_division:
             if not data_division.has_section("WORKING-STORAGE"):
-                warnings.append("Consider adding WORKING-STORAGE SECTION for local variables")
+                warnings.append(
+                    "Consider adding WORKING-STORAGE SECTION for local variables"
+                )
 
         return warnings
 
-    def get_intrinsic_function_signature(self, function_name: str) -> dict[str, Any] | None:
+    def get_intrinsic_function_signature(
+        self, function_name: str
+    ) -> dict[str, Any] | None:
         """Get signature information for IBM intrinsic functions."""
         function_signatures: dict[str, dict[str, Any]] = {
             "CURRENT-DATE": {
                 "return_type": "alphanumeric",
                 "length": 21,
                 "parameters": [],
-                "description": "Returns current date and time"
+                "description": "Returns current date and time",
             },
             "LENGTH": {
                 "return_type": "numeric",
                 "parameters": ["string"],
-                "description": "Returns length of string argument"
+                "description": "Returns length of string argument",
             },
             "NUMVAL": {
                 "return_type": "numeric",
                 "parameters": ["alphanumeric"],
-                "description": "Convert alphanumeric to numeric"
+                "description": "Convert alphanumeric to numeric",
             },
             "UPPER-CASE": {
                 "return_type": "alphanumeric",
                 "parameters": ["alphanumeric"],
-                "description": "Convert to uppercase"
+                "description": "Convert to uppercase",
             },
             "LOWER-CASE": {
                 "return_type": "alphanumeric",
                 "parameters": ["alphanumeric"],
-                "description": "Convert to lowercase"
-            }
+                "description": "Convert to lowercase",
+            },
         }
 
         return function_signatures.get(function_name.upper())
@@ -434,5 +548,5 @@ class IBMEnterpriseCobol:
             "reserved_words": len(self.IBM_RESERVED_WORDS),
             "intrinsic_functions": len(self.IBM_INTRINSIC_FUNCTIONS),
             "cics_commands": len(self.CICS_COMMANDS),
-            "ims_commands": len(self.IMS_COMMANDS)
+            "ims_commands": len(self.IMS_COMMANDS),
         }

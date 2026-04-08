@@ -35,7 +35,9 @@ class EntryStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> EntryStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> EntryStatement:
         """Parse an ENTRY statement.
 
         Handles:
@@ -55,7 +57,9 @@ class EntryStatementParser(IStatementParser):
 
         # Create statement with location
         stmt = EntryStatement(
-            start_token.location if hasattr(start_token, 'location') else SourceLocation(0, 0)
+            start_token.location
+            if hasattr(start_token, "location")
+            else SourceLocation(0, 0)
         )
 
         # Parse entry name (must be a string literal)
@@ -95,7 +99,9 @@ class EntryStatementParser(IStatementParser):
 
         return stmt
 
-    def _parse_using_clause(self, token_stream: ITokenStream, stmt: EntryStatement) -> None:
+    def _parse_using_clause(
+        self, token_stream: ITokenStream, stmt: EntryStatement
+    ) -> None:
         """Parse the optional USING clause of an ENTRY statement.
 
         Args:
@@ -118,8 +124,10 @@ class EntryStatementParser(IStatementParser):
             # Skip whitespace tokens (including newlines)
             while not token_stream.is_empty():
                 next_token = token_stream.peek()
-                if not next_token or (hasattr(next_token, 'type') and
-                                      next_token.type.name not in ('WHITESPACE', 'COMMENT', 'NEWLINE')):
+                if not next_token or (
+                    hasattr(next_token, "type")
+                    and next_token.type.name not in ("WHITESPACE", "COMMENT", "NEWLINE")
+                ):
                     break
                 token_stream.consume()
 

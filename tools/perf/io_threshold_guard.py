@@ -13,7 +13,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Tuple
 
 # Thresholds per spec.md SC-002
 RUNTIME_THRESHOLD_SECONDS = 90
@@ -22,7 +21,7 @@ MEMORY_THRESHOLD_MB = 256
 
 def check_thresholds(
     runtime_seconds: float, memory_mb: float, fail_on_breach: bool = False
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Validate runtime and memory against thresholds.
 
@@ -43,7 +42,9 @@ def check_thresholds(
             f"❌ RUNTIME BREACH: {runtime_seconds:.2f}s > {RUNTIME_THRESHOLD_SECONDS}s limit"
         )
     else:
-        messages.append(f"✅ Runtime OK: {runtime_seconds:.2f}s ≤ {RUNTIME_THRESHOLD_SECONDS}s")
+        messages.append(
+            f"✅ Runtime OK: {runtime_seconds:.2f}s ≤ {RUNTIME_THRESHOLD_SECONDS}s"
+        )
 
     if memory_mb > MEMORY_THRESHOLD_MB:
         passed = False
@@ -64,7 +65,9 @@ def check_thresholds(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime", type=float, required=True, help="Runtime in seconds")
+    parser.add_argument(
+        "--runtime", type=float, required=True, help="Runtime in seconds"
+    )
     parser.add_argument("--memory", type=float, required=True, help="Peak memory in MB")
     parser.add_argument(
         "--fail-on-breach",

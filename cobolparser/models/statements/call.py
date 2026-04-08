@@ -44,7 +44,9 @@ class CallStatement(CobolStatement):
         if program_name not in self.operands:
             self.add_operand(program_name)
 
-    def add_using_parameter(self, param_name: str, passing_mode: str = "REFERENCE") -> None:
+    def add_using_parameter(
+        self, param_name: str, passing_mode: str = "REFERENCE"
+    ) -> None:
         """Add a parameter to the USING clause."""
         param = CallParameter(param_name, passing_mode)
         self.using_parameters.append(param)

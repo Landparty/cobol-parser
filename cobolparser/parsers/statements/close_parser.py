@@ -26,7 +26,9 @@ class CloseStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IOCloseStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IOCloseStatement:
         """Parse a CLOSE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
@@ -81,7 +83,12 @@ class CloseStatementParser(IStatementParser):
                             token_stream.consume()
                             skip_whitespace(token_stream)
                             token = token_stream.peek()
-                            if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "REWIND":
+                            if (
+                                token
+                                and token.type == TokenType.IDENTIFIER
+                                and token.value
+                                and token.value.upper() == "REWIND"
+                            ):
                                 token_stream.consume()
                                 skip_whitespace(token_stream)
                             no_rewind = True

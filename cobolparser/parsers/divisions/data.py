@@ -71,9 +71,13 @@ class DataDivisionParser(BaseDivisionParser):
             if token_value == "FILE":
                 sections["file"] = self._parse_section(token_stream, "FILE")
             elif token_value == "WORKING-STORAGE":
-                sections["working_storage"] = self._parse_section(token_stream, "WORKING-STORAGE")
+                sections["working_storage"] = self._parse_section(
+                    token_stream, "WORKING-STORAGE"
+                )
             elif token_value == "LOCAL-STORAGE":
-                sections["local_storage"] = self._parse_section(token_stream, "LOCAL-STORAGE")
+                sections["local_storage"] = self._parse_section(
+                    token_stream, "LOCAL-STORAGE"
+                )
             elif token_value == "LINKAGE":
                 sections["linkage"] = self._parse_section(token_stream, "LINKAGE")
             else:
@@ -82,7 +86,9 @@ class DataDivisionParser(BaseDivisionParser):
 
         return sections
 
-    def _parse_section(self, token_stream: ITokenStream, section_name: str) -> dict[str, Any]:
+    def _parse_section(
+        self, token_stream: ITokenStream, section_name: str
+    ) -> dict[str, Any]:
         """Parse a data section.
 
         Format: SECTION-NAME SECTION. [data-items]
@@ -109,10 +115,23 @@ class DataDivisionParser(BaseDivisionParser):
 
         # Parse data items until we reach next section or division
         data_items: list[ConditionNameItem | RenamesItem | CobolDataItem] = []
-        section_keywords = {"SECTION", "FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE",
-                           "DATA", "PROCEDURE", "ENVIRONMENT", "IDENTIFICATION"}
-        division_token_types = {TokenType.IDENTIFICATION_DIVISION, TokenType.ENVIRONMENT_DIVISION,
-                               TokenType.DATA_DIVISION, TokenType.PROCEDURE_DIVISION}
+        section_keywords = {
+            "SECTION",
+            "FILE",
+            "WORKING-STORAGE",
+            "LOCAL-STORAGE",
+            "LINKAGE",
+            "DATA",
+            "PROCEDURE",
+            "ENVIRONMENT",
+            "IDENTIFICATION",
+        }
+        division_token_types = {
+            TokenType.IDENTIFICATION_DIVISION,
+            TokenType.ENVIRONMENT_DIVISION,
+            TokenType.DATA_DIVISION,
+            TokenType.PROCEDURE_DIVISION,
+        }
         paren_depth = 0  # Track nesting depth of parentheses
 
         while not token_stream.is_empty():
@@ -125,13 +144,26 @@ class DataDivisionParser(BaseDivisionParser):
                 break
 
             # Stop when we encounter the next section header or division header.
-            if token.value and token.value.upper() in {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"}:
+            if token.value and token.value.upper() in {
+                "FILE",
+                "WORKING-STORAGE",
+                "LOCAL-STORAGE",
+                "LINKAGE",
+            }:
                 next_token = token_stream.peek(1)
-                if next_token and next_token.value and next_token.value.upper() == "SECTION":
+                if (
+                    next_token
+                    and next_token.value
+                    and next_token.value.upper() == "SECTION"
+                ):
                     break
 
             # Also check for section keywords that appear as identifiers
-            if token.value and token.value.upper() in section_keywords and token.type != TokenType.IDENTIFIER:
+            if (
+                token.value
+                and token.value.upper() in section_keywords
+                and token.type != TokenType.IDENTIFIER
+            ):
                 break
 
             # Track parentheses depth to avoid treating numbers inside parens as level numbers
@@ -172,8 +204,9 @@ class DataDivisionParser(BaseDivisionParser):
 
         return {
             "type": section_name.lower().replace("-", "_"),
-            "data_items": hierarchical_items
+            "data_items": hierarchical_items,
         }
+
     def _build_data_hierarchy(self, data_items: list) -> list:
         """Build hierarchical structure from flat list of data items.
 
@@ -226,6 +259,7 @@ class DataDivisionParser(BaseDivisionParser):
             stack.append((current_level, item))
 
         return top_level_items
+
     def _parse_data_item(self, token_stream: ITokenStream) -> CobolDataItem | None:
         """Parse a single data item definition.
 
@@ -261,7 +295,11 @@ class DataDivisionParser(BaseDivisionParser):
             token_stream.consume()
         else:
             # Anonymous data item
-            name = f"ANONYMOUS-{level}-{location.line}" if hasattr(location, 'line') else f"ANONYMOUS-{level}"
+            name = (
+                f"ANONYMOUS-{level}-{location.line}"
+                if hasattr(location, "line")
+                else f"ANONYMOUS-{level}"
+            )
 
         # Create data item
         data_item = CobolDataItem(name, level, location)
@@ -282,8 +320,12 @@ class DataDivisionParser(BaseDivisionParser):
                 break
 
             # Division tokens end this data item (don't consume them)
-            if token.type in (TokenType.IDENTIFICATION_DIVISION, TokenType.ENVIRONMENT_DIVISION,
-                             TokenType.DATA_DIVISION, TokenType.PROCEDURE_DIVISION):
+            if token.type in (
+                TokenType.IDENTIFICATION_DIVISION,
+                TokenType.ENVIRONMENT_DIVISION,
+                TokenType.DATA_DIVISION,
+                TokenType.PROCEDURE_DIVISION,
+            ):
                 break
 
             #  PICTURE/PIC clause
@@ -291,7 +333,9 @@ class DataDivisionParser(BaseDivisionParser):
                 token_stream.consume()  # Consume PIC keyword
                 picture_pattern = self._parse_picture_clause(token_stream)
                 if picture_pattern:
-                    data_item.set_picture_clause(PictureClause(picture_pattern, location))
+                    data_item.set_picture_clause(
+                        PictureClause(picture_pattern, location)
+                    )
 
             # VALUE clause
             elif token.value and token.value.upper() == "VALUE":
@@ -309,15 +353,29 @@ class DataDivisionParser(BaseDivisionParser):
 
             # COMP, COMP-3, etc. without USAGE keyword
             elif token.value and token.value.upper() in [
-                "COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5",
-                "COMPUTATIONAL", "COMPUTATIONAL-1", "COMPUTATIONAL-2", "COMPUTATIONAL-3",
+                "COMP",
+                "COMP-1",
+                "COMP-2",
+                "COMP-3",
+                "COMP-4",
+                "COMP-5",
+                "COMPUTATIONAL",
+                "COMPUTATIONAL-1",
+                "COMPUTATIONAL-2",
+                "COMPUTATIONAL-3",
                 "BINARY",
             ]:
                 data_item.set_usage(token.value.upper())
                 token_stream.consume()
 
             # Also check for COMP token types (COMP_1, COMP_2, COMP_3, etc.)
-            elif token.type in [TokenType.COMP_1, TokenType.COMP_2, TokenType.COMP_3, TokenType.COMP_4, TokenType.COMP_5]:
+            elif token.type in [
+                TokenType.COMP_1,
+                TokenType.COMP_2,
+                TokenType.COMP_3,
+                TokenType.COMP_4,
+                TokenType.COMP_5,
+            ]:
                 data_item.set_usage(token.value.upper())
                 token_stream.consume()
 
@@ -338,7 +396,10 @@ class DataDivisionParser(BaseDivisionParser):
                 min_count = 0
                 max_count = 0
                 count_token = token_stream.peek()
-                if count_token and count_token.type in [TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER]:
+                if count_token and count_token.type in [
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.LEVEL_NUMBER,
+                ]:
                     try:
                         min_count = int(count_token.value)
                         max_count = min_count
@@ -351,7 +412,10 @@ class DataDivisionParser(BaseDivisionParser):
                 if nxt and nxt.value and nxt.value.upper() == "TO":
                     token_stream.consume()  # consume TO
                     max_token = token_stream.peek()
-                    if max_token and max_token.type in [TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER]:
+                    if max_token and max_token.type in [
+                        TokenType.NUMERIC_LITERAL,
+                        TokenType.LEVEL_NUMBER,
+                    ]:
                         try:
                             max_count = int(max_token.value)
                         except (TypeError, ValueError):
@@ -403,8 +467,12 @@ class DataDivisionParser(BaseDivisionParser):
                 # Skip unknown tokens/clauses
                 if token.type == TokenType.NEWLINE:
                     token_stream.consume()
-                elif token.type in (TokenType.IDENTIFICATION_DIVISION, TokenType.ENVIRONMENT_DIVISION,
-                                   TokenType.DATA_DIVISION, TokenType.PROCEDURE_DIVISION):
+                elif token.type in (
+                    TokenType.IDENTIFICATION_DIVISION,
+                    TokenType.ENVIRONMENT_DIVISION,
+                    TokenType.DATA_DIVISION,
+                    TokenType.PROCEDURE_DIVISION,
+                ):
                     # Never consume division tokens
                     break
                 elif token.type not in [TokenType.PERIOD, TokenType.LEVEL_NUMBER]:
@@ -414,7 +482,9 @@ class DataDivisionParser(BaseDivisionParser):
 
         return data_item
 
-    def _parse_condition_name_item(self, token_stream: ITokenStream) -> ConditionNameItem | None:
+    def _parse_condition_name_item(
+        self, token_stream: ITokenStream
+    ) -> ConditionNameItem | None:
         """Parse a level-88 condition name item.
 
         Format: 88 condition-name VALUE [IS] literal {literal | THROUGH literal}...
@@ -423,6 +493,7 @@ class DataDivisionParser(BaseDivisionParser):
         location = getattr(level_token, "location", None)
         if location is None:
             from cobolparser.models.ast_base import SourceLocation
+
             location = SourceLocation(0, 0)
 
         name_token = token_stream.peek()
@@ -456,7 +527,11 @@ class DataDivisionParser(BaseDivisionParser):
                 break
             if t.type == TokenType.PERIOD or t.type == TokenType.LEVEL_NUMBER:
                 break
-            if t.type in (TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL, TokenType.FIGURATIVE_CONSTANT):
+            if t.type in (
+                TokenType.STRING_LITERAL,
+                TokenType.NUMERIC_LITERAL,
+                TokenType.FIGURATIVE_CONSTANT,
+            ):
                 item.add_value(t.value)
                 token_stream.consume()
             elif t.value == ",":
@@ -466,7 +541,10 @@ class DataDivisionParser(BaseDivisionParser):
             elif t.value and t.value.upper() in ("THROUGH", "THRU"):
                 token_stream.consume()
                 end_token = token_stream.peek()
-                if end_token and end_token.type in (TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL):
+                if end_token and end_token.type in (
+                    TokenType.STRING_LITERAL,
+                    TokenType.NUMERIC_LITERAL,
+                ):
                     item.add_value(f"THROUGH:{end_token.value}")
                     token_stream.consume()
             else:
@@ -489,6 +567,7 @@ class DataDivisionParser(BaseDivisionParser):
         location = getattr(level_token, "location", None)
         if location is None:
             from cobolparser.models.ast_base import SourceLocation
+
             location = SourceLocation(0, 0)
 
         name_token = token_stream.peek()
@@ -499,7 +578,11 @@ class DataDivisionParser(BaseDivisionParser):
 
         # Expect RENAMES keyword
         renames_kw = token_stream.peek()
-        if not renames_kw or not renames_kw.value or renames_kw.value.upper() != "RENAMES":
+        if (
+            not renames_kw
+            or not renames_kw.value
+            or renames_kw.value.upper() != "RENAMES"
+        ):
             # Not a valid RENAMES — skip to period
             while not token_stream.is_empty():
                 t = token_stream.peek()
@@ -561,21 +644,43 @@ class DataDivisionParser(BaseDivisionParser):
                     break
                 # Stop at keywords that follow picture clause
                 if token.value and token.value.upper() in [
-                    "VALUE", "USAGE", "OCCURS", "REDEFINES",
-                    "COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5",
-                    "COMPUTATIONAL", "COMPUTATIONAL-1", "COMPUTATIONAL-2", "COMPUTATIONAL-3",
+                    "VALUE",
+                    "USAGE",
+                    "OCCURS",
+                    "REDEFINES",
+                    "COMP",
+                    "COMP-1",
+                    "COMP-2",
+                    "COMP-3",
+                    "COMP-4",
+                    "COMP-5",
+                    "COMPUTATIONAL",
+                    "COMPUTATIONAL-1",
+                    "COMPUTATIONAL-2",
+                    "COMPUTATIONAL-3",
                     "BINARY",
                 ]:
                     break
                 # Also stop at COMP token types
-                if token.type in [TokenType.COMP_1, TokenType.COMP_2, TokenType.COMP_3, TokenType.COMP_4, TokenType.COMP_5]:
+                if token.type in [
+                    TokenType.COMP_1,
+                    TokenType.COMP_2,
+                    TokenType.COMP_3,
+                    TokenType.COMP_4,
+                    TokenType.COMP_5,
+                ]:
                     break
 
             # Collect picture pattern tokens
-            if token.type in [TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL, TokenType.LEVEL_NUMBER]:
+            if token.type in [
+                TokenType.IDENTIFIER,
+                TokenType.NUMERIC_LITERAL,
+                TokenType.STRING_LITERAL,
+                TokenType.LEVEL_NUMBER,
+            ]:
                 # All these token types can be part of a picture pattern
                 token_value = token.value
-                if paren_depth == 0 and token_value.endswith('.'):
+                if paren_depth == 0 and token_value.endswith("."):
                     pattern_parts.append(token_value[:-1])
                     token_stream.consume()
                     break
@@ -609,8 +714,16 @@ class DataDivisionParser(BaseDivisionParser):
         if not token:
             return None
 
-        if token.type in [TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL, TokenType.FIGURATIVE_CONSTANT]:
-            value = f'"{token.value}"' if token.type == TokenType.STRING_LITERAL else token.value
+        if token.type in [
+            TokenType.STRING_LITERAL,
+            TokenType.NUMERIC_LITERAL,
+            TokenType.FIGURATIVE_CONSTANT,
+        ]:
+            value = (
+                f'"{token.value}"'
+                if token.type == TokenType.STRING_LITERAL
+                else token.value
+            )
             token_stream.consume()
             return value
         elif token.type == TokenType.IDENTIFIER:
@@ -630,7 +743,13 @@ class DataDivisionParser(BaseDivisionParser):
             return None
 
         # Check for COMP token types first (COMP_1, COMP_2, etc.)
-        if token.type in [TokenType.COMP_1, TokenType.COMP_2, TokenType.COMP_3, TokenType.COMP_4, TokenType.COMP_5]:
+        if token.type in [
+            TokenType.COMP_1,
+            TokenType.COMP_2,
+            TokenType.COMP_3,
+            TokenType.COMP_4,
+            TokenType.COMP_5,
+        ]:
             usage = token.value.upper()
             token_stream.consume()
             return usage
@@ -643,8 +762,16 @@ class DataDivisionParser(BaseDivisionParser):
 
         # Check for COMP variations that are tokenized differently
         if token.value and token.value.upper() in [
-            "COMP", "COMP-1", "COMP-2", "COMP-3", "COMP-4", "COMP-5",
-            "COMPUTATIONAL", "COMPUTATIONAL-1", "COMPUTATIONAL-2", "COMPUTATIONAL-3",
+            "COMP",
+            "COMP-1",
+            "COMP-2",
+            "COMP-3",
+            "COMP-4",
+            "COMP-5",
+            "COMPUTATIONAL",
+            "COMPUTATIONAL-1",
+            "COMPUTATIONAL-2",
+            "COMPUTATIONAL-3",
             "BINARY",
         ]:
             usage = token.value.upper()
@@ -657,7 +784,7 @@ class DataDivisionParser(BaseDivisionParser):
         self,
         division_token: Any,
         division_content: dict[str, Any],
-        start_location: SourceLocation
+        start_location: SourceLocation,
     ) -> ASTNode:
         """Create AST node for Data Division.
 
@@ -679,7 +806,7 @@ class DataDivisionParser(BaseDivisionParser):
             "file": "FILE",
             "working_storage": "WORKING-STORAGE",
             "local_storage": "LOCAL-STORAGE",
-            "linkage": "LINKAGE"
+            "linkage": "LINKAGE",
         }
 
         for key, section_name in section_map.items():
@@ -687,7 +814,10 @@ class DataDivisionParser(BaseDivisionParser):
                 section = CobolSection(section_name, start_location)
 
                 # Add parsed data items to section
-                if isinstance(division_content[key], dict) and "data_items" in division_content[key]:
+                if (
+                    isinstance(division_content[key], dict)
+                    and "data_items" in division_content[key]
+                ):
                     for data_item in division_content[key]["data_items"]:
                         if isinstance(data_item, CobolDataItem):
                             section.add_data_item(data_item)
@@ -698,12 +828,13 @@ class DataDivisionParser(BaseDivisionParser):
                 division_node.add_section(section)
 
         # Store metadata
-        division_node.metadata.update({
-            "has_file": "file" in division_content,
-            "has_working_storage": "working_storage" in division_content,
-            "has_local_storage": "local_storage" in division_content,
-            "has_linkage": "linkage" in division_content,
-        })
+        division_node.metadata.update(
+            {
+                "has_file": "file" in division_content,
+                "has_working_storage": "working_storage" in division_content,
+                "has_local_storage": "local_storage" in division_content,
+                "has_linkage": "linkage" in division_content,
+            }
+        )
 
         return division_node
-

@@ -5,10 +5,8 @@ generation from coverage artifacts.
 """
 
 import json
-import os
+
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch
 
 from tools.io_coverage.render_markdown import CoverageRenderer
 

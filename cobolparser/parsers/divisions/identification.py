@@ -83,9 +83,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
             _div_keywords = ("ENVIRONMENT", "DATA", "PROCEDURE")
             if token_value in _div_keywords:
                 break
-            if any(
-                token_value == f"{kw} DIVISION" for kw in _div_keywords
-            ):
+            if any(token_value == f"{kw} DIVISION" for kw in _div_keywords):
                 break
 
             # Parse specific clauses
@@ -109,9 +107,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
 
         # Validate mandatory PROGRAM-ID
         if not content["program_id"]:
-            raise ParseError(
-                "PROGRAM-ID is mandatory in IDENTIFICATION DIVISION"
-            )
+            raise ParseError("PROGRAM-ID is mandatory in IDENTIFICATION DIVISION")
 
         return content
 
@@ -145,7 +141,11 @@ class IdentificationDivisionParser(BaseDivisionParser):
             _t147 = token_stream.peek(0)
             raise ParseError(
                 "Expected '.' after PROGRAM-ID keyword",
-                line_number=(_t147.location.line if _t147 is not None else 1) if not token_stream.is_empty() else 1,
+                line_number=(
+                    (_t147.location.line if _t147 is not None else 1)
+                    if not token_stream.is_empty()
+                    else 1
+                ),
             ) from e
 
         # Skip newlines and whitespace after the period (for fixed-format COBOL)
@@ -219,7 +219,11 @@ class IdentificationDivisionParser(BaseDivisionParser):
             _t220 = token_stream.peek(0)
             raise ParseError(
                 "Expected '.' after clause keyword",
-                line_number=(_t220.location.line if _t220 is not None else 1) if not token_stream.is_empty() else 1,
+                line_number=(
+                    (_t220.location.line if _t220 is not None else 1)
+                    if not token_stream.is_empty()
+                    else 1
+                ),
             ) from e
 
         # Collect value tokens until period
@@ -251,7 +255,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
         self,
         division_token: Any,
         division_content: dict[str, Any],
-        start_location: SourceLocation
+        start_location: SourceLocation,
     ) -> ASTNode:
         """Create AST node for Identification Division.
 
@@ -269,14 +273,16 @@ class IdentificationDivisionParser(BaseDivisionParser):
         division_node = CobolDivision("IDENTIFICATION", start_location)
 
         # Store identification metadata in division metadata
-        division_node.metadata.update({
-            "program_id": division_content.get("program_id"),
-            "author": division_content.get("author"),
-            "installation": division_content.get("installation"),
-            "date_written": division_content.get("date_written"),
-            "date_compiled": division_content.get("date_compiled"),
-            "remarks": division_content.get("remarks"),
-            "security": division_content.get("security"),
-        })
+        division_node.metadata.update(
+            {
+                "program_id": division_content.get("program_id"),
+                "author": division_content.get("author"),
+                "installation": division_content.get("installation"),
+                "date_written": division_content.get("date_written"),
+                "date_compiled": division_content.get("date_compiled"),
+                "remarks": division_content.get("remarks"),
+                "security": division_content.get("security"),
+            }
+        )
 
         return division_node

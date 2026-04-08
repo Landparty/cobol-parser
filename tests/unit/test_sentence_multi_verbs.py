@@ -1,14 +1,17 @@
-from cobolparser import parse_cobol, ErrorRecoveryMode
+from cobolparser import ErrorRecoveryMode, parse_cobol
+
 
 def extract_statements(ast_root):
     out = []
-    if not ast_root: return out
-    for div in getattr(ast_root, 'divisions', []):
-        for sec in getattr(div, 'sections', []):
-            for child in getattr(sec, 'children', []):
-                if getattr(child, 'node_type', '') == 'Statement':
+    if not ast_root:
+        return out
+    for div in getattr(ast_root, "divisions", []):
+        for sec in getattr(div, "sections", []):
+            for child in getattr(sec, "children", []):
+                if getattr(child, "node_type", "") == "Statement":
                     out.append(child)
     return out
+
 
 def test_multi_verbs_one_sentence():
     src = """000100 IDENTIFICATION DIVISION.
@@ -19,7 +22,9 @@ def test_multi_verbs_one_sentence():
 000600 PARA-2.
 000700     MOVE X TO Y.
 """
-    result = parse_cobol(src, filename='<mem>', error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+    result = parse_cobol(
+        src, filename="<mem>", error_recovery=ErrorRecoveryMode.COLLECT_ALL
+    )
     stmts = extract_statements(result.ast)
     kinds = [s.statement_type for s in stmts]
-    assert 'MOVE' in kinds and 'PERFORM' in kinds and 'WRITE' in kinds
+    assert "MOVE" in kinds and "PERFORM" in kinds and "WRITE" in kinds

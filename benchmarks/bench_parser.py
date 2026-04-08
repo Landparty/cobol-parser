@@ -23,7 +23,6 @@ Usage:
 import argparse
 import cProfile
 import io
-import os
 import pstats
 import sys
 import time
@@ -34,14 +33,17 @@ from statistics import mean, median, stdev
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from cobolparser.lexer import CobolLexer, TokenType
-from cobolparser.parser import CobolParser, _detect_fixed_format, parse_cobol
-from cobolparser.preprocess import normalize_fixed_format
-from cobolparser.models.data_items import PictureClause
-from cobolparser.models.ast_base import SourceLocation
-from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
-from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
-
+from cobolparser.lexer import CobolLexer  # noqa: E402
+from cobolparser.models.ast_base import SourceLocation  # noqa: E402
+from cobolparser.models.data_items import PictureClause  # noqa: E402
+from cobolparser.models.sql_statements import parse_exec_sql  # noqa: E402
+from cobolparser.parser import (  # noqa: E402
+    CobolParser,
+    _detect_fixed_format,
+    parse_cobol,
+)
+from cobolparser.plugins.core import ErrorRecoveryMode  # noqa: E402
+from cobolparser.preprocess import normalize_fixed_format  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -83,17 +85,19 @@ def _generate_large_cobol(n_records: int = 200, n_statements: int = 500) -> str:
         idx = ((i - 1) % n_records) + 1
         kind = i % 6
         if kind == 0:
-            lines.append(f"           MOVE WS-FIELD-A-{idx:04d} TO WS-FIELD-C-{idx:04d}")
+            lines.append(
+                f"           MOVE WS-FIELD-A-{idx:04d} TO WS-FIELD-C-{idx:04d}"
+            )
         elif kind == 1:
             lines.append(f"           DISPLAY WS-FIELD-A-{idx:04d}")
         elif kind == 2:
             lines.append(f"           ADD 1 TO WS-FIELD-C-{idx:04d}")
         elif kind == 3:
             lines.append(f"           IF WS-FIELD-C-{idx:04d} > 0")
-            lines.append(f"               DISPLAY 'POSITIVE'")
-            lines.append(f"           END-IF")
+            lines.append("               DISPLAY 'POSITIVE'")
+            lines.append("           END-IF")
         elif kind == 4:
-            lines.append(f"           PERFORM MAIN-PARA")
+            lines.append("           PERFORM MAIN-PARA")
         else:
             lines.append(f"           COMPUTE WS-FIELD-B-{idx:04d} =")
             lines.append(f"               WS-FIELD-C-{idx:04d} * 1.5")
@@ -148,6 +152,7 @@ def _print_stats(label: str, times_ms: list[float], indent: int = 2) -> None:
 # Benchmark functions
 # ---------------------------------------------------------------------------
 
+
 def bench_fixed_format_detection(source: str, iterations: int) -> list[float]:
     """Benchmark fixed-format detection."""
     return _run_timed(lambda: _detect_fixed_format(source), iterations)
@@ -161,32 +166,46 @@ def bench_normalize(source: str, iterations: int) -> list[float]:
 
 def bench_lexer(source: str, iterations: int, free_form: bool = True) -> list[float]:
     """Benchmark lexer tokenization."""
+
     def run():
         lexer = CobolLexer(source, "<bench>", free_form=free_form)
         lexer.tokenize()
+
     return _run_timed(run, iterations)
 
 
 def bench_parser(source: str, iterations: int) -> list[float]:
     """Benchmark full parser (tokenize + parse)."""
+
     def run():
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         parser.parse(source, "<bench>")
+
     return _run_timed(run, iterations)
 
 
 def bench_parse_cobol(source: str, iterations: int) -> list[float]:
     """Benchmark the convenience parse_cobol() end-to-end function."""
+
     def run():
         parse_cobol(source, "<bench>", error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+
     return _run_timed(run, iterations)
 
 
 def bench_picture_clause(iterations: int) -> list[float]:
     """Benchmark PictureClause pattern parsing."""
     patterns = [
-        "X(20)", "9(7)V99", "S9(5)", "A(10)", "9999",
-        "S9(7)V9(2)", "-9(5).99", "X", "9(3)V99", "S999V999",
+        "X(20)",
+        "9(7)V99",
+        "S9(5)",
+        "A(10)",
+        "9999",
+        "S9(7)V9(2)",
+        "-9(5).99",
+        "X",
+        "9(3)V99",
+        "S999V999",
     ]
     loc = SourceLocation(1, 1)
 
@@ -219,19 +238,22 @@ def bench_sql_parsing(iterations: int) -> list[float]:
 
 def bench_statement_registry(source: str, iterations: int) -> list[float]:
     """Benchmark statement registry dispatch (parser initialization + lookup)."""
-    from cobolparser.core.token_stream import TokenStream
-    from cobolparser.core.registry import StatementParserRegistry
-    from cobolparser.parsers.display_parser import DisplayStatementParser
-    from cobolparser.parsers.move_parser import MoveStatementParser
-    from cobolparser.parsers.call_parser import CallStatementParser
-    from cobolparser.parsers.if_parser import IfStatementParser
-    from cobolparser.parsers.perform_parser import PerformStatementParser
-    from cobolparser.parsers.evaluate_parser import EvaluateStatementParser
     from cobolparser.parsers.arithmetic_parsers import (
-        AddStatementParser, SubtractStatementParser,
-        MultiplyStatementParser, DivideStatementParser,
+        AddStatementParser,
         ComputeStatementParser,
+        DivideStatementParser,
+        MultiplyStatementParser,
+        SubtractStatementParser,
     )
+    from cobolparser.parsers.call_parser import CallStatementParser
+    from cobolparser.parsers.display_parser import DisplayStatementParser
+    from cobolparser.parsers.evaluate_parser import EvaluateStatementParser
+    from cobolparser.parsers.if_parser import IfStatementParser
+    from cobolparser.parsers.move_parser import MoveStatementParser
+    from cobolparser.parsers.perform_parser import PerformStatementParser
+
+    from cobolparser.core.registry import StatementParserRegistry
+    from cobolparser.core.token_stream import TokenStream
 
     # Pre-tokenize
     lexer = CobolLexer(source, "<bench>", free_form=True)
@@ -254,7 +276,7 @@ def bench_statement_registry(source: str, iterations: int) -> list[float]:
         stream = TokenStream(tokens)
         lookups = 0
         while not stream.is_empty():
-            parser = registry.find_parser(stream)
+            registry.find_parser(stream)
             lookups += 1
             stream.consume()
 
@@ -264,6 +286,7 @@ def bench_statement_registry(source: str, iterations: int) -> list[float]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
     """Execute all benchmarks and print results."""
@@ -293,8 +316,12 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
     # Generate a large synthetic program
     large_source = _generate_large_cobol(200, 500)
 
-    print(f"Medium sample  : {medium_name} ({len(medium_source):,} chars, {len(medium_source.splitlines()):,} lines)")
-    print(f"Large synthetic: <generated> ({len(large_source):,} chars, {len(large_source.splitlines()):,} lines)")
+    print(
+        f"Medium sample  : {medium_name} ({len(medium_source):,} chars, {len(medium_source.splitlines()):,} lines)"
+    )
+    print(
+        f"Large synthetic: <generated> ({len(large_source):,} chars, {len(large_source.splitlines()):,} lines)"
+    )
     print(f"Iterations     : {iterations}")
     print()
 
@@ -304,23 +331,28 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
     print(separator)
     print()
 
-    _print_stats("1. Fixed-format detection",
-                 bench_fixed_format_detection(medium_source, iterations))
+    _print_stats(
+        "1. Fixed-format detection",
+        bench_fixed_format_detection(medium_source, iterations),
+    )
 
-    _print_stats("2. Normalization (fixed -> free-form)",
-                 bench_normalize(medium_source, iterations))
+    _print_stats(
+        "2. Normalization (fixed -> free-form)",
+        bench_normalize(medium_source, iterations),
+    )
 
     # Normalize once for lexer/parser stages
     normalized_medium = normalize_fixed_format(medium_source.splitlines())
 
-    _print_stats("3. Lexer (tokenization)",
-                 bench_lexer(normalized_medium, iterations))
+    _print_stats("3. Lexer (tokenization)", bench_lexer(normalized_medium, iterations))
 
-    _print_stats("4. Full parser (tokenize + parse)",
-                 bench_parser(normalized_medium, iterations))
+    _print_stats(
+        "4. Full parser (tokenize + parse)", bench_parser(normalized_medium, iterations)
+    )
 
-    _print_stats("5. End-to-end parse_cobol()",
-                 bench_parse_cobol(medium_source, iterations))
+    _print_stats(
+        "5. End-to-end parse_cobol()", bench_parse_cobol(medium_source, iterations)
+    )
 
     # ---- Stage benchmarks (large synthetic) ----
     print(separator)
@@ -328,22 +360,24 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
     print(separator)
     print()
 
-    _print_stats("1. Fixed-format detection",
-                 bench_fixed_format_detection(large_source, iterations))
+    _print_stats(
+        "1. Fixed-format detection",
+        bench_fixed_format_detection(large_source, iterations),
+    )
 
-    _print_stats("2. Normalization",
-                 bench_normalize(large_source, iterations))
+    _print_stats("2. Normalization", bench_normalize(large_source, iterations))
 
     normalized_large = normalize_fixed_format(large_source.splitlines())
 
-    _print_stats("3. Lexer (tokenization)",
-                 bench_lexer(normalized_large, iterations))
+    _print_stats("3. Lexer (tokenization)", bench_lexer(normalized_large, iterations))
 
-    _print_stats("4. Full parser (tokenize + parse)",
-                 bench_parser(normalized_large, iterations))
+    _print_stats(
+        "4. Full parser (tokenize + parse)", bench_parser(normalized_large, iterations)
+    )
 
-    _print_stats("5. End-to-end parse_cobol()",
-                 bench_parse_cobol(large_source, iterations))
+    _print_stats(
+        "5. End-to-end parse_cobol()", bench_parse_cobol(large_source, iterations)
+    )
 
     # ---- Component benchmarks ----
     print(separator)
@@ -353,14 +387,19 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
 
     component_iters = iterations * 10
 
-    _print_stats("PictureClause pattern parsing (10 patterns x N)",
-                 bench_picture_clause(component_iters))
+    _print_stats(
+        "PictureClause pattern parsing (10 patterns x N)",
+        bench_picture_clause(component_iters),
+    )
 
-    _print_stats("SQL statement parsing (7 statements x N)",
-                 bench_sql_parsing(component_iters))
+    _print_stats(
+        "SQL statement parsing (7 statements x N)", bench_sql_parsing(component_iters)
+    )
 
-    _print_stats("Statement registry dispatch (full token stream scan)",
-                 bench_statement_registry(normalized_medium, iterations))
+    _print_stats(
+        "Statement registry dispatch (full token stream scan)",
+        bench_statement_registry(normalized_medium, iterations),
+    )
 
     # ---- Across all sample files ----
     print(separator)
@@ -372,7 +411,9 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
     for fpath in sample_files:
         src = _read_file(fpath)
         t = _run_timed(
-            lambda s=src: parse_cobol(s, str(fpath), error_recovery=ErrorRecoveryMode.COLLECT_ALL),
+            lambda s=src, fp=fpath: parse_cobol(
+                s, str(fp), error_recovery=ErrorRecoveryMode.COLLECT_ALL
+            ),
             1,
         )
         n_lines = len(src.splitlines())
@@ -401,7 +442,9 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
 
         profiler = cProfile.Profile()
         profiler.enable()
-        parse_cobol(large_source, "<profile>", error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        parse_cobol(
+            large_source, "<profile>", error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         profiler.disable()
 
         stream = io.StringIO()
@@ -417,10 +460,19 @@ def run_benchmarks(iterations: int = 10, do_profile: bool = False) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="COBOL parser benchmarks")
-    parser.add_argument("--iterations", "-n", type=int, default=10,
-                        help="Number of iterations per benchmark (default: 10)")
-    parser.add_argument("--profile", "-p", action="store_true",
-                        help="Run cProfile on large synthetic program")
+    parser.add_argument(
+        "--iterations",
+        "-n",
+        type=int,
+        default=10,
+        help="Number of iterations per benchmark (default: 10)",
+    )
+    parser.add_argument(
+        "--profile",
+        "-p",
+        action="store_true",
+        help="Run cProfile on large synthetic program",
+    )
     args = parser.parse_args()
 
     run_benchmarks(iterations=args.iterations, do_profile=args.profile)

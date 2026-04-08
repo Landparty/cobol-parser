@@ -12,8 +12,13 @@ from ...models.statements import IOStartStatement
 
 # Key conditions recognized as IDENTIFIER tokens
 _KEY_CONDITIONS = {
-    "EQUAL", "EQUALS", "GREATER", "LESS", "NOT",
-    "FIRST", "LAST",
+    "EQUAL",
+    "EQUALS",
+    "GREATER",
+    "LESS",
+    "NOT",
+    "FIRST",
+    "LAST",
 }
 
 # Comparison operator identifiers
@@ -35,7 +40,9 @@ class StartStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IOStartStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IOStartStatement:
         """Parse a START statement."""
         start_token = token_stream.consume()
         factory = get_factory()
@@ -71,7 +78,12 @@ class StartStatementParser(IStatementParser):
                 if nxt and nxt.type == TokenType.IS:
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                elif nxt and nxt.type == TokenType.IDENTIFIER and nxt.value and nxt.value.upper() == "IS":
+                elif (
+                    nxt
+                    and nxt.type == TokenType.IDENTIFIER
+                    and nxt.value
+                    and nxt.value.upper() == "IS"
+                ):
                     token_stream.consume()
                     skip_whitespace(token_stream)
 
@@ -92,17 +104,32 @@ class StartStatementParser(IStatementParser):
                     skip_whitespace(token_stream)
                     # Parse THAN or TO
                     token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("THAN", "TO"):
+                    if (
+                        token
+                        and token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() in ("THAN", "TO")
+                    ):
                         condition_parts.append(token.value.upper())
                         token_stream.consume()
                         skip_whitespace(token_stream)
                         # Optional OR EQUAL
                         token = token_stream.peek()
-                        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "OR":
+                        if (
+                            token
+                            and token.type == TokenType.IDENTIFIER
+                            and token.value
+                            and token.value.upper() == "OR"
+                        ):
                             token_stream.consume()
                             skip_whitespace(token_stream)
                             token = token_stream.peek()
-                            if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() in ("EQUAL", "EQUALS"):
+                            if (
+                                token
+                                and token.type == TokenType.IDENTIFIER
+                                and token.value
+                                and token.value.upper() in ("EQUAL", "EQUALS")
+                            ):
                                 condition_parts.append("OR EQUAL")
                                 token_stream.consume()
                                 skip_whitespace(token_stream)
@@ -119,9 +146,7 @@ class StartStatementParser(IStatementParser):
             if token and token.type == TokenType.KEY:
                 token_stream.consume()
                 skip_whitespace(token_stream)
-            clause_stmts = collect_clause_stmts(
-                token_stream, {"END-START"}
-            )
+            clause_stmts = collect_clause_stmts(token_stream, {"END-START"})
             stmt.set_invalid_key_clause(clause_stmts)
 
         # Optional NOT INVALID KEY clause
@@ -137,15 +162,18 @@ class StartStatementParser(IStatementParser):
                 if token and token.type == TokenType.KEY:
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                clause_stmts = collect_clause_stmts(
-                    token_stream, {"END-START"}
-                )
+                clause_stmts = collect_clause_stmts(token_stream, {"END-START"})
                 stmt.set_not_invalid_key_clause(clause_stmts)
 
         # Consume END-START or PERIOD
         skip_whitespace(token_stream)
         token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-START":
+        if (
+            token
+            and token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "END-START"
+        ):
             token_stream.consume()
             skip_whitespace(token_stream)
         token = token_stream.peek()

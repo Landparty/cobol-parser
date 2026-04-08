@@ -1,7 +1,4 @@
-import pytest
-
 from cobolparser import CobolParser
-from cobolparser.models.program import CobolProgram
 from cobolparser.models.statements import EvaluateStatement
 
 
@@ -16,13 +13,13 @@ def _parse(source: str) -> EvaluateStatement:
     assert result.ast is not None
     proc = result.ast.get_division("PROCEDURE")
     assert proc is not None
-    
+
     # Check paragraphs first
     for paragraph in proc.paragraphs:
         for stmt in paragraph.statements:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
-    
+
     # Check sections
     for section in proc.sections:
         # Check section statements directly
@@ -30,12 +27,12 @@ def _parse(source: str) -> EvaluateStatement:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
         # Check section paragraphs
-        if hasattr(section, 'paragraphs'):
+        if hasattr(section, "paragraphs"):
             for paragraph in section.paragraphs:
                 for stmt in paragraph.statements:
                     if isinstance(stmt, EvaluateStatement):
                         return stmt
-                
+
     raise ValueError("EVALUATE statement not found in AST")
 
 
@@ -56,12 +53,13 @@ def test_evaluate_to_dict_structure():
     """
     ev = _parse(source)
     data = ev.to_dict()
-    
+
     assert data["subjects"][0] == "WS-GRADE"
     assert len(data["when_clauses"]) == 1
     assert data["when_clauses"][0]["selectors"][0]["value"] == "1"
     assert data["default_when"] is not None
     assert data["location"]["line"] > 0
+
 
 if __name__ == "__main__":
     test_evaluate_to_dict_structure()

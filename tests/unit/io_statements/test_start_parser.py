@@ -12,13 +12,12 @@ START is registered in ProcedureDivisionParser but is absent from _is_statement_
 parse_cobol() never dispatches to StartStatementParser.  All tests therefore invoke the parser
 directly with hand-crafted Token streams.
 """
-import pytest
+
 from cobolparser import CobolParser, ErrorRecoveryMode
-from cobolparser.lexer import Token, TokenType
 from cobolparser.core.token_stream import TokenStream
+from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.parsers.statements.start_parser import StartStatementParser
-
 
 _LOC = SourceLocation(1, 1)
 
@@ -157,14 +156,12 @@ class TestStartParserCoverage:
     def test_start_missing_file_name_recovers(self):
         """START followed by non-identifier covers early return (line 56)."""
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
-        result = parser.parse(
-            """
+        result = parser.parse("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        PROCEDURE DIVISION.
            START.
            STOP RUN.
-            """
-        )
+            """)
         # Should not crash
         assert result is not None

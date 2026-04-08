@@ -16,6 +16,7 @@ from cobolparser.models.ast_base import ASTNode
 
 class DivisionType(Enum):
     """Enumeration of COBOL division types."""
+
     IDENTIFICATION = "IDENTIFICATION"
     ENVIRONMENT = "ENVIRONMENT"
     DATA = "DATA"
@@ -45,7 +46,7 @@ class DivisionParserFactory:
         self,
         division_type: DivisionType,
         parser_class: type[IDivisionParser],
-        instantiate: bool = True
+        instantiate: bool = True,
     ) -> None:
         """Register a division parser for a specific division type.
 
@@ -130,17 +131,14 @@ class DivisionParserFactory:
         """
         if token_stream.is_empty():
             raise DivisionNotFoundError(
-                "Cannot parse division: token stream is empty",
-                None
+                "Cannot parse division: token stream is empty", None
             )
 
         parser = self.find_parser(token_stream)
         if parser is None:
             first_token = token_stream.peek(0)
             token_value = first_token.value if first_token else "EOF"
-            raise DivisionNotFoundError(
-                f"Unknown division type: {token_value}"
-            )
+            raise DivisionNotFoundError(f"Unknown division type: {token_value}")
 
         return parser.parse(token_stream)
 

@@ -6,7 +6,7 @@ Targets uncovered branches in ibm_exec_statements.py:
   - ExecSqlStatementParser.matches with IDENTIFIER-based EXEC token
   - Host-variable colon-prefix path in SQL content (lines 81-88)
 """
-import pytest
+
 from cobolparser import parse_cobol
 
 

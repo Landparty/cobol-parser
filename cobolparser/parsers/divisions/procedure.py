@@ -167,7 +167,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
             # Check for END PROGRAM or END DIVISION
             if token_value == "END":
                 next_token = token_stream.peek(1)
-                if next_token and next_token.value and next_token.value.upper() in ("PROGRAM", "DIVISION"):
+                if (
+                    next_token
+                    and next_token.value
+                    and next_token.value.upper() in ("PROGRAM", "DIVISION")
+                ):
                     break
 
             # Skip stray control markers so following statements can be recovered.
@@ -182,7 +186,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
                 # Skip to SECTION keyword
                 _ps = token_stream.peek(0)
-                while not token_stream.is_empty() and _ps and _ps.value and _ps.value.upper() != "SECTION":
+                while (
+                    not token_stream.is_empty()
+                    and _ps
+                    and _ps.value
+                    and _ps.value.upper() != "SECTION"
+                ):
                     token_stream.consume()
                     _ps = token_stream.peek(0)
 
@@ -196,7 +205,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 section_dict = {
                     "type": "section",
                     "name": section_name,
-                    "paragraphs": []
+                    "paragraphs": [],
                 }
                 sections[section_name] = section_dict
 
@@ -208,9 +217,13 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     para_dict = {
                         "type": "paragraph",
                         "name": "",  # Implicit paragraph has empty name
-                        "location": token.location if hasattr(token, 'location') else SourceLocation(0, 0),
+                        "location": (
+                            token.location
+                            if hasattr(token, "location")
+                            else SourceLocation(0, 0)
+                        ),
                         "statements": [],
-                        "_is_implicit_paragraph": True
+                        "_is_implicit_paragraph": True,
                     }
                     paragraphs.append(para_dict)
 
@@ -219,7 +232,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 if parser:
                     try:
                         # Attach registry to stream for nested statement parsing
-                        if not hasattr(token_stream, '_registry'):
+                        if not hasattr(token_stream, "_registry"):
                             token_stream._registry = self._statement_registry  # type: ignore[attr-defined]
 
                         # Attach context to stream for error reporting
@@ -228,11 +241,13 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         token_stream._context = context  # type: ignore[attr-defined]
 
                         statement = parser.parse(token_stream)
-                        paragraphs[-1]["statements"].append({
-                            "type": "statement",
-                            "node_type": type(statement).__name__,
-                            "statement": statement
-                        })
+                        paragraphs[-1]["statements"].append(
+                            {
+                                "type": "statement",
+                                "node_type": type(statement).__name__,
+                                "statement": statement,
+                            }
+                        )
                     except Exception:
                         # Skip to next statement on error
                         self._skip_to_next_statement(token_stream)
@@ -240,10 +255,22 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     # No parser found, skip the statement
                     self._skip_to_next_statement(token_stream)
 
-            elif token_value not in ("SECTION", "IDENTIFICATION", "ENVIRONMENT", "DATA", "END", "PROGRAM", "DIVISION"):
+            elif token_value not in (
+                "SECTION",
+                "IDENTIFICATION",
+                "ENVIRONMENT",
+                "DATA",
+                "END",
+                "PROGRAM",
+                "DIVISION",
+            ):
                 # Treat as paragraph name (only if not a keyword)
                 para_name = token_value
-                para_location = token.location if hasattr(token, 'location') else SourceLocation(0, 0)
+                para_location = (
+                    token.location
+                    if hasattr(token, "location")
+                    else SourceLocation(0, 0)
+                )
                 token_stream.consume()  # consume paragraph name
 
                 # Skip period after paragraph name if present
@@ -259,21 +286,27 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "name": para_name,
                     "location": para_location,
                     "statements": statements,
-                    "_is_implicit_paragraph": False
+                    "_is_implicit_paragraph": False,
                 }
                 paragraphs.append(para_dict)
             else:
                 token_stream.consume()
 
         # Clean up: remove empty implicit paragraphs at the end
-        while paragraphs and paragraphs[-1].get("_is_implicit_paragraph") and not paragraphs[-1].get("statements"):
+        while (
+            paragraphs
+            and paragraphs[-1].get("_is_implicit_paragraph")
+            and not paragraphs[-1].get("statements")
+        ):
             paragraphs.pop()
 
         procedures["paragraphs"] = paragraphs
         procedures["sections"] = sections
         return procedures
 
-    def _parse_paragraph_statements(self, token_stream: ITokenStream) -> list[dict[str, Any]]:
+    def _parse_paragraph_statements(
+        self, token_stream: ITokenStream
+    ) -> list[dict[str, Any]]:
         """Parse all statements within a paragraph until next paragraph/section.
 
         Uses StatementParserRegistry to dispatch to appropriate statement parser.
@@ -306,24 +339,37 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 break
 
             # Check for division end marker
-            if token.value and token.value.upper() in ("END", "IDENTIFICATION", "ENVIRONMENT", "DATA"):
+            if token.value and token.value.upper() in (
+                "END",
+                "IDENTIFICATION",
+                "ENVIRONMENT",
+                "DATA",
+            ):
                 break
 
             # Debug: Show what we're about to parse
             _DEBUG = False
             if _DEBUG:
                 import sys
-                print(f"DEBUG PROC: Looking for parser for token: {token.type.name} = {repr(token.value)}", file=sys.stderr)
+
+                print(
+                    f"DEBUG PROC: Looking for parser for token: {token.type.name} = {repr(token.value)}",
+                    file=sys.stderr,
+                )
 
             # Try to find and use statement parser
             parser = self._statement_registry.find_parser(token_stream)
             if parser:
                 if _DEBUG:
                     import sys
-                    print(f"DEBUG PROC: Found parser: {type(parser).__name__}", file=sys.stderr)
+
+                    print(
+                        f"DEBUG PROC: Found parser: {type(parser).__name__}",
+                        file=sys.stderr,
+                    )
                 try:
                     # Attach registry to stream for nested statement parsing
-                    if not hasattr(token_stream, '_registry'):
+                    if not hasattr(token_stream, "_registry"):
                         token_stream._registry = self._statement_registry  # type: ignore[attr-defined]
 
                     # Attach context to stream for error reporting
@@ -332,11 +378,13 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     token_stream._context = context  # type: ignore[attr-defined]
 
                     statement = parser.parse(token_stream)
-                    statements.append({
-                        "type": "statement",
-                        "node_type": type(statement).__name__,
-                        "statement": statement
-                    })
+                    statements.append(
+                        {
+                            "type": "statement",
+                            "node_type": type(statement).__name__,
+                            "statement": statement,
+                        }
+                    )
                 except Exception:
                     # If parsing fails, skip statement and continue
                     self._skip_to_next_statement(token_stream)
@@ -346,7 +394,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
             else:
                 if _DEBUG:
                     import sys
-                    print(f"DEBUG PROC: No parser found for {token.type.name} = {repr(token.value)}", file=sys.stderr)
+
+                    print(
+                        f"DEBUG PROC: No parser found for {token.type.name} = {repr(token.value)}",
+                        file=sys.stderr,
+                    )
                 # No parser found for this statement - skip it
                 self._skip_to_next_statement(token_stream)
 
@@ -399,7 +451,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
                             next_next_idx += 1
                             continue
                         # Check for SECTION or period after identifier
-                        if next_next_token.value == "." or (next_next_token.value and next_next_token.value.upper() == "SECTION"):
+                        if next_next_token.value == "." or (
+                            next_next_token.value
+                            and next_next_token.value.upper() == "SECTION"
+                        ):
                             return True
                         break
                     return False
@@ -407,7 +462,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             return False
 
         # Case 2: Original logic - current token is an IDENTIFIER
-        if token.type.name != 'IDENTIFIER':
+        if token.type.name != "IDENTIFIER":
             return False
 
         # Look ahead for SECTION or period
@@ -491,11 +546,34 @@ class ProcedureDivisionParser(BaseDivisionParser):
             True if word is a statement keyword
         """
         keywords = {
-            "DISPLAY", "MOVE", "IF", "PERFORM", "EVALUATE",
-            "CALL", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE",
-            "ACCEPT", "STOP", "EXIT", "GO", "GOBACK",
-            "RETURN", "OPEN", "CLOSE", "READ", "WRITE", "DELETE",
-            "SEARCH", "STRING", "UNSTRING", "INSPECT", "EXECUTE", "ENTRY"
+            "DISPLAY",
+            "MOVE",
+            "IF",
+            "PERFORM",
+            "EVALUATE",
+            "CALL",
+            "ADD",
+            "SUBTRACT",
+            "MULTIPLY",
+            "DIVIDE",
+            "COMPUTE",
+            "ACCEPT",
+            "STOP",
+            "EXIT",
+            "GO",
+            "GOBACK",
+            "RETURN",
+            "OPEN",
+            "CLOSE",
+            "READ",
+            "WRITE",
+            "DELETE",
+            "SEARCH",
+            "STRING",
+            "UNSTRING",
+            "INSPECT",
+            "EXECUTE",
+            "ENTRY",
         }
         return word.upper() in keywords
 
@@ -503,7 +581,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         self,
         division_token: Any,
         division_content: dict[str, Any],
-        start_location: SourceLocation
+        start_location: SourceLocation,
     ) -> ASTNode:
         """Create AST node for Procedure Division.
 
@@ -522,8 +600,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
         # Add paragraphs with their statements
         for para_info in division_content.get("paragraphs", []):
-            para = CobolParagraph(para_info.get("name", ""),
-                                 para_info.get("location", start_location))
+            para = CobolParagraph(
+                para_info.get("name", ""), para_info.get("location", start_location)
+            )
 
             # Add statements to paragraph
             for stmt_info in para_info.get("statements", []):
@@ -538,13 +617,15 @@ class ProcedureDivisionParser(BaseDivisionParser):
             division_node.add_section(section)
 
         # Store metadata
-        division_node.metadata.update({
-            "paragraph_count": len(division_content.get("paragraphs", [])),
-            "section_count": len(division_content.get("sections", {})),
-            "statement_count": sum(
-                len(p.get("statements", [])) for p in division_content.get("paragraphs", [])
-            ),
-        })
+        division_node.metadata.update(
+            {
+                "paragraph_count": len(division_content.get("paragraphs", [])),
+                "section_count": len(division_content.get("sections", {})),
+                "statement_count": sum(
+                    len(p.get("statements", []))
+                    for p in division_content.get("paragraphs", [])
+                ),
+            }
+        )
 
         return division_node
-

@@ -19,10 +19,10 @@ from .models.ast_base import SourceLocation
 from .plugins.core import DialectType, ParseError
 
 # Fixed-format COBOL column layout (0-based indices)
-_FF_SEQ_END = 6       # columns 1-6: sequence number area (indices 0-5)
-_FF_INDICATOR = 6     # column 7: indicator (* / - space) — index 6
-_FF_AREA_A = 7        # column 8: Area A start — index 7
-_FF_LINE_END = 72     # column 73+: identification area (ignored) — index 72
+_FF_SEQ_END = 6  # columns 1-6: sequence number area (indices 0-5)
+_FF_INDICATOR = 6  # column 7: indicator (* / - space) — index 6
+_FF_AREA_A = 7  # column 8: Area A start — index 7
+_FF_LINE_END = 72  # column 73+: identification area (ignored) — index 72
 
 _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 
@@ -610,9 +610,9 @@ class CobolLexer:
     IDENTIFICATION_END = 80
 
     # Indicator characters
-    CONTINUATION_INDICATOR = '-'
-    COMMENT_INDICATORS = ('*', '/')
-    DEBUG_INDICATOR = 'D'
+    CONTINUATION_INDICATOR = "-"
+    COMMENT_INDICATORS = ("*", "/")
+    DEBUG_INDICATOR = "D"
 
     def __init__(
         self,
@@ -820,7 +820,11 @@ class CobolLexer:
 
         if indicator == "*":
             # Comment line
-            comment_text = line[_FF_INDICATOR:_FF_LINE_END].rstrip() if len(line) > _FF_INDICATOR else ""
+            comment_text = (
+                line[_FF_INDICATOR:_FF_LINE_END].rstrip()
+                if len(line) > _FF_INDICATOR
+                else ""
+            )
             location = SourceLocation(line_num + 1, 7, 1)
             line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
             return line_tokens
@@ -867,7 +871,10 @@ class CobolLexer:
                         # Check if next line is continuation
                         if line_num + 1 < len(self.lines):
                             next_line = self.lines[line_num + 1]
-                            if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
+                            if (
+                                len(next_line) > _FF_INDICATOR
+                                and next_line[_FF_INDICATOR] == "-"
+                            ):
                                 # This is a VALUE with unterminated string - start multi-line mode
                                 self._open_string_quote = '"'
                                 self._open_string_location = SourceLocation(
@@ -938,7 +945,11 @@ class CobolLexer:
                 self._open_string_value = []
                 self._open_string_location = None
                 # Process as normal comment line
-                comment_text = line[_FF_INDICATOR:_FF_LINE_END].rstrip() if len(line) > _FF_INDICATOR else ""
+                comment_text = (
+                    line[_FF_INDICATOR:_FF_LINE_END].rstrip()
+                    if len(line) > _FF_INDICATOR
+                    else ""
+                )
                 location = SourceLocation(line_num + 1, 7, 1)
                 line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
                 return line_tokens
@@ -1027,7 +1038,10 @@ class CobolLexer:
                         # Check if next line has continuation marker
                         if next_line_index < len(self.lines):
                             next_line = self.lines[next_line_index]
-                            if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
+                            if (
+                                len(next_line) > _FF_INDICATOR
+                                and next_line[_FF_INDICATOR] == "-"
+                            ):
                                 start_continuation = True
 
                         # Also check if current line is a continuation of a VALUE clause
@@ -1319,7 +1333,7 @@ class CobolLexer:
         if found_closing_quote:
             # Found closing quote - add accumulated content
             if content_chars:
-                self._open_string_value.append(''.join(content_chars))
+                self._open_string_value.append("".join(content_chars))
 
             token = Token(
                 TokenType.STRING_LITERAL,
@@ -1339,14 +1353,16 @@ class CobolLexer:
                 quote_offset = 1 if stripped_text.startswith(quote) else 0
                 remainder_tokens.extend(
                     self.tokenize_program_text(
-                        remainder_text, line_num, 8 + whitespace_len + quote_offset + pos
+                        remainder_text,
+                        line_num,
+                        8 + whitespace_len + quote_offset + pos,
                     )
                 )
             return True, remainder_tokens
 
         # No closing quote found - append entire content as continuation
         if content_chars:
-            self._open_string_value.append(''.join(content_chars))
+            self._open_string_value.append("".join(content_chars))
 
         # Validate that this physical line is actually marked as a continuation ('-' in column 7)
         if not self.free_form:

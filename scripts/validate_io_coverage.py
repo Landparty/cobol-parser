@@ -18,7 +18,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 
 class CoverageSchemaValidator:
@@ -103,8 +102,8 @@ class CoverageSchemaValidator:
     def __init__(self, artifact_path: str):
         """Initialize validator with artifact path."""
         self.artifact_path = Path(artifact_path)
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     def validate(self) -> bool:
         """Run full validation and return success status."""
@@ -114,7 +113,7 @@ class CoverageSchemaValidator:
             return False
 
         try:
-            with open(self.artifact_path, "r", encoding="utf-8") as f:
+            with open(self.artifact_path, encoding="utf-8") as f:
                 self.artifact = json.load(f)
         except json.JSONDecodeError as e:
             self.errors.append(f"Invalid JSON: {e}")

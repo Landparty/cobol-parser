@@ -58,16 +58,22 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
             # Parse specific sections
             if token_value == "CONFIGURATION":
-                sections["configuration"] = self._parse_configuration_section(token_stream)
+                sections["configuration"] = self._parse_configuration_section(
+                    token_stream
+                )
             elif token_value == "INPUT-OUTPUT":
-                sections["input_output"] = self._parse_input_output_section(token_stream)
+                sections["input_output"] = self._parse_input_output_section(
+                    token_stream
+                )
             else:
                 # Unknown section - skip it for error recovery
                 token_stream.consume()
 
         return sections
 
-    def _parse_configuration_section(self, token_stream: ITokenStream) -> dict[str, Any]:
+    def _parse_configuration_section(
+        self, token_stream: ITokenStream
+    ) -> dict[str, Any]:
         """Parse CONFIGURATION SECTION.
 
         Format: CONFIGURATION SECTION. [configuration-content]
@@ -82,13 +88,21 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         token_stream.consume()
 
         # Skip remaining tokens until next SECTION or division
-        section_keywords = {"SECTION", "INPUT-OUTPUT", "DATA", "PROCEDURE", "IDENTIFICATION"}
+        section_keywords = {
+            "SECTION",
+            "INPUT-OUTPUT",
+            "DATA",
+            "PROCEDURE",
+            "IDENTIFICATION",
+        }
         _stop_div = ("DATA", "PROCEDURE", "IDENTIFICATION")
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if token and token.value.upper() in section_keywords:
                 break
-            if token and any(token.value.upper() == f"{kw} DIVISION" for kw in _stop_div):
+            if token and any(
+                token.value.upper() == f"{kw} DIVISION" for kw in _stop_div
+            ):
                 break
             token_stream.consume()
 
@@ -133,7 +147,10 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             _stop = ("CONFIGURATION", "DATA", "PROCEDURE", "IDENTIFICATION")
             if token_value in _stop:
                 break
-            if any(token_value == f"{kw} DIVISION" for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")):
+            if any(
+                token_value == f"{kw} DIVISION"
+                for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")
+            ):
                 break
 
             # Parse FILE-CONTROL paragraph (may appear as "NTROL" due to tokenizer)
@@ -144,12 +161,11 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 # Skip other content
                 token_stream.consume()
 
-        return {
-            "type": "input_output",
-            "select_statements": select_statements
-        }
+        return {"type": "input_output", "select_statements": select_statements}
 
-    def _parse_file_control_paragraph(self, token_stream: ITokenStream) -> dict[str, Any]:
+    def _parse_file_control_paragraph(
+        self, token_stream: ITokenStream
+    ) -> dict[str, Any]:
         """Parse FILE-CONTROL paragraph with SELECT statements.
 
         Format: FILE-CONTROL. [SELECT statements]
@@ -181,10 +197,19 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             token_value = token.value.upper()
 
             # Check for end of FILE-CONTROL (next section/division or paragraph)
-            section_keywords = {"CONFIGURATION", "DATA", "PROCEDURE", "IDENTIFICATION", "FILE-CONTROL"}
+            section_keywords = {
+                "CONFIGURATION",
+                "DATA",
+                "PROCEDURE",
+                "IDENTIFICATION",
+                "FILE-CONTROL",
+            }
             if token_value in section_keywords:
                 break
-            if any(token_value == f"{kw} DIVISION" for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")):
+            if any(
+                token_value == f"{kw} DIVISION"
+                for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")
+            ):
                 break
 
             # Parse SELECT statement (may appear as "ECT" due to tokenizer)
@@ -198,7 +223,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
         return {"selects": select_statements}
 
-    def _parse_select_statement(self, token_stream: ITokenStream) -> dict[str, Any] | None:
+    def _parse_select_statement(
+        self, token_stream: ITokenStream
+    ) -> dict[str, Any] | None:
         """Parse SELECT statement with comprehensive clause support.
 
         Supports:
@@ -218,7 +245,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         """
         # Consume SELECT keyword (may appear as "ECT" due to tokenizer)
         token = token_stream.peek(0)
-        if not token or (token.value.upper() != "SELECT" and not token.value.upper().endswith("ECT")):
+        if not token or (
+            token.value.upper() != "SELECT" and not token.value.upper().endswith("ECT")
+        ):
             return None
 
         location = token.location
@@ -257,7 +286,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             "type": "SELECT",
             "file_name": file_name,
             "is_optional": is_optional,
-            "location": location
+            "location": location,
         }
 
         # Parse clauses until period
@@ -308,7 +337,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
         return select_data
 
-    def _parse_select_assign_clause(self, token_stream: ITokenStream, select_data: dict[str, Any]) -> None:
+    def _parse_select_assign_clause(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
         """Parse ASSIGN TO clause."""
         # Skip ASSIGN
         token_stream.consume()
@@ -337,7 +368,15 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
             # Check for next clause or end
             upper_val = token.value.upper()
-            if upper_val in ("ORGANIZATION", "ACCESS", "RECORD", "RELATIVE", "FILE", "SELECT", ".") or upper_val in ("CONFIGURATION", "DATA", "PROCEDURE"):
+            if upper_val in (
+                "ORGANIZATION",
+                "ACCESS",
+                "RECORD",
+                "RELATIVE",
+                "FILE",
+                "SELECT",
+                ".",
+            ) or upper_val in ("CONFIGURATION", "DATA", "PROCEDURE"):
                 break
 
             # Handle string literals - need to reconstruct quotes
@@ -352,7 +391,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             assign_to = " ".join(assign_to_parts)
             select_data["assign_to"] = assign_to
 
-    def _parse_select_organization_clause(self, token_stream: ITokenStream, select_data: dict[str, Any]) -> None:
+    def _parse_select_organization_clause(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
         """Parse ORGANIZATION IS clause."""
         # Skip ORGANIZATION
         token_stream.consume()
@@ -384,7 +425,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             elif org_val in ("SEQUENTIAL", "INDEXED", "RELATIVE"):
                 select_data["organization"] = org_val
 
-    def _parse_select_access_mode_clause(self, token_stream: ITokenStream, select_data: dict[str, Any]) -> None:
+    def _parse_select_access_mode_clause(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
         """Parse ACCESS MODE IS clause."""
         # Skip ACCESS
         token_stream.consume()
@@ -412,7 +455,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 select_data["access_mode"] = access_val
                 token_stream.consume()
 
-    def _parse_select_record_key_clause(self, token_stream: ITokenStream, select_data: dict[str, Any]) -> None:
+    def _parse_select_record_key_clause(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
         """Parse RECORD KEY IS clause."""
         # Skip RECORD
         token_stream.consume()
@@ -438,7 +483,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             select_data["record_key"] = token.value
             token_stream.consume()
 
-    def _parse_select_relative_key_clause(self, token_stream: ITokenStream, select_data: dict[str, Any]) -> None:
+    def _parse_select_relative_key_clause(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
         """Parse RELATIVE KEY IS clause."""
         # Skip RELATIVE
         token_stream.consume()
@@ -464,7 +511,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             select_data["relative_key"] = token.value
             token_stream.consume()
 
-    def _parse_select_file_status_clause(self, token_stream: ITokenStream, select_data: dict[str, Any]) -> None:
+    def _parse_select_file_status_clause(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
         """Parse FILE STATUS IS clause."""
         # Skip FILE
         token_stream.consume()
@@ -494,7 +543,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         self,
         division_token: Any,
         division_content: dict[str, Any],
-        start_location: SourceLocation
+        start_location: SourceLocation,
     ) -> ASTNode:
         """Create AST node for Environment Division.
 
@@ -513,10 +562,12 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         division_node = CobolDivision("ENVIRONMENT", start_location)
 
         # Store environment metadata
-        division_node.metadata.update({
-            "has_configuration": "configuration" in division_content,
-            "has_input_output": "input_output" in division_content,
-        })
+        division_node.metadata.update(
+            {
+                "has_configuration": "configuration" in division_content,
+                "has_input_output": "input_output" in division_content,
+            }
+        )
 
         # Create CONFIGURATION SECTION if present
         if "configuration" in division_content:
@@ -528,7 +579,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             io_section = CobolSection("INPUT-OUTPUT", start_location)
 
             # Add FILE-CONTROL paragraph with SELECT statements
-            select_statements = division_content.get("input_output", {}).get("select_statements", [])
+            select_statements = division_content.get("input_output", {}).get(
+                "select_statements", []
+            )
             if select_statements:
                 file_control_para = CobolParagraph("FILE-CONTROL", start_location)
 
@@ -543,7 +596,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
         return division_node
 
-    def _create_select_statement_node(self, select_data: dict[str, Any]) -> SelectStatement:
+    def _create_select_statement_node(
+        self, select_data: dict[str, Any]
+    ) -> SelectStatement:
         """Create a SelectStatement AST node from parsed data.
 
         Args:
@@ -593,4 +648,3 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             select_stmt.file_status = file_status
 
         return select_stmt
-

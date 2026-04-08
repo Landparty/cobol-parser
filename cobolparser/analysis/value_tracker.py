@@ -6,7 +6,6 @@ variables used in dynamic CALL statements by analyzing MOVE statements
 and initial VALUE clauses in data definitions.
 """
 
-
 from ..models.ast_base import ASTNode
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
@@ -73,11 +72,11 @@ class DynamicCallAnalyzer:
                     if var_name not in self._variable_values:
                         self._variable_values[var_name] = set()
                     # Store the value (remove quotes if present)
-                    value = str(node.value_clause).strip('"\'')
+                    value = str(node.value_clause).strip("\"'")
                     self._variable_values[var_name].add(value)
 
         # Recursively process children
-        if hasattr(node, 'children'):
+        if hasattr(node, "children"):
             for child in node.children:
                 self._collect_initial_values(child)
 
@@ -113,7 +112,7 @@ class DynamicCallAnalyzer:
                             self._variable_values[target_name].add(source_value)
 
         # Recursively process children
-        if hasattr(node, 'children'):
+        if hasattr(node, "children"):
             for child in node.children:
                 self._track_move_statements(child)
 
@@ -129,7 +128,7 @@ class DynamicCallAnalyzer:
                     node.set_possible_values(values)
 
         # Recursively process children
-        if hasattr(node, 'children'):
+        if hasattr(node, "children"):
             for child in node.children:
                 self._populate_dynamic_calls(child)
 
@@ -148,30 +147,31 @@ class DynamicCallAnalyzer:
         source = source.strip()
 
         # Check for string literals (quoted)
-        if (source.startswith('"') and source.endswith('"')) or \
-           (source.startswith("'") and source.endswith("'")):
+        if (source.startswith('"') and source.endswith('"')) or (
+            source.startswith("'") and source.endswith("'")
+        ):
             return source[1:-1]
 
         # Check for numeric literals
-        if source.replace('-', '').replace('+', '').replace('.', '').isdigit():
+        if source.replace("-", "").replace("+", "").replace(".", "").isdigit():
             return source
 
         # Check for ZERO/ZEROS/ZEROES, SPACE/SPACES
         upper_source = source.upper()
-        if upper_source in ('ZERO', 'ZEROS', 'ZEROES'):
-            return '0'
-        if upper_source in ('SPACE', 'SPACES'):
-            return ' '
-        if upper_source in ('LOW-VALUE', 'LOW-VALUES'):
-            return '\x00'
-        if upper_source in ('HIGH-VALUE', 'HIGH-VALUES'):
-            return '\xff'
+        if upper_source in ("ZERO", "ZEROS", "ZEROES"):
+            return "0"
+        if upper_source in ("SPACE", "SPACES"):
+            return " "
+        if upper_source in ("LOW-VALUE", "LOW-VALUES"):
+            return "\x00"
+        if upper_source in ("HIGH-VALUE", "HIGH-VALUES"):
+            return "\xff"
 
         # If the source contains a hyphen and doesn't match a known figurative constant,
         # it's likely an unquoted string literal (parser strips quotes from STRING_LITERAL tokens)
         # Examples: PROGRAM-A, SUB-PROG, MY-VALUE
         # We treat any alphanumeric string with hyphens as a potential literal value
-        if '-' in source or source.replace('-', '').isalnum():
+        if "-" in source or source.replace("-", "").isalnum():
             # Only treat it as a literal if it's not already tracked as a variable
             # (this check happens in the caller)
             return source

@@ -11,10 +11,7 @@ Diagnostic Record Structure (per Data Model):
 - severity: Error severity (ERROR, WARNING, INFO)
 """
 
-import pytest
-
-from cobolparser import CobolParser, ParseResult, ParseError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser import CobolParser
 
 
 def _fixed_source(body: str) -> str:
@@ -86,7 +83,11 @@ class TestIfMissingCondition:
         """
         diagnostics = _get_if_diagnostics(source)
         # Should have at least one error for missing condition
-        if_errors = [d for d in diagnostics if "IF" in str(d).upper() or "condition" in str(d).lower()]
+        if_errors = [
+            d
+            for d in diagnostics
+            if "IF" in str(d).upper() or "condition" in str(d).lower()
+        ]
         assert len(if_errors) >= 1 or len(diagnostics) >= 1
 
     def test_missing_condition_message_contains_keyword(self):
@@ -100,7 +101,9 @@ class TestIfMissingCondition:
         diagnostics = _get_if_diagnostics(source)
         if diagnostics:
             error_text = str(diagnostics[0]).upper()
-            assert "IF" in error_text or "CONDITION" in error_text or len(error_text) > 5
+            assert (
+                "IF" in error_text or "CONDITION" in error_text or len(error_text) > 5
+            )
 
 
 class TestIfValidConditions:
@@ -118,7 +121,11 @@ class TestIfValidConditions:
         """
         diagnostics = _get_if_diagnostics(source)
         # Should parse successfully with no IF-related errors
-        if_errors = [d for d in diagnostics if "IF" in str(d).upper() and "condition" in str(d).lower()]
+        if_errors = [
+            d
+            for d in diagnostics
+            if "IF" in str(d).upper() and "condition" in str(d).lower()
+        ]
         assert len(if_errors) == 0
 
     def test_if_with_complex_condition(self):

@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 class ErrorRecoveryMode(Enum):
     """Error recovery behavior modes for COBOL parsing."""
 
-    FAIL_FAST = "fail_fast"     # Stop on first error
-    COLLECT_ALL = "collect_all" # Collect all errors, continue parsing
+    FAIL_FAST = "fail_fast"  # Stop on first error
+    COLLECT_ALL = "collect_all"  # Collect all errors, continue parsing
 
 
 class DialectType(Enum):
@@ -74,11 +74,13 @@ from cobolparser._errors import ParseError  # noqa: E402, F401
 
 class LexerError(ParseError):
     """Exception raised during lexical analysis."""
+
     pass
 
 
 class UnterminatedStringError(LexerError):
     """Exception for unterminated string literals."""
+
     pass
 
 
@@ -122,12 +124,14 @@ class ParseStatistics:
     def start_timing(self) -> None:
         """Start timing the parsing operation."""
         import time
+
         self._start_time = time.time()
 
     def end_timing(self) -> None:
         """End timing and calculate total time."""
         if self._start_time is not None:
             import time
+
             end_time = time.time()
             self.parse_time_seconds = end_time - self._start_time
             self.total_time_ms = self.parse_time_seconds * 1000.0
@@ -142,7 +146,7 @@ class ParseStatistics:
             "parse_time_seconds": self.parse_time_seconds,
             "total_time_ms": self.total_time_ms,
             "error_count": self.error_count,
-            "warning_count": self.warning_count
+            "warning_count": self.warning_count,
         }
 
 
@@ -155,7 +159,7 @@ class PluginManager:
 
     def register_plugin(self, plugin: object) -> bool:
         """Register a new plugin with the parser."""
-        plugin_name = getattr(plugin, 'name', plugin.__class__.__name__)
+        plugin_name = getattr(plugin, "name", plugin.__class__.__name__)
 
         if plugin_name in self._plugins:
             return False  # Plugin already registered

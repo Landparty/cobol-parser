@@ -11,10 +11,7 @@ Diagnostic Record Structure (per Data Model):
 - severity: Error severity (ERROR, WARNING, INFO)
 """
 
-import pytest
-
-from cobolparser import CobolParser, ParseResult, ParseError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser import CobolParser
 
 
 def _fixed_source(body: str) -> str:
@@ -86,7 +83,11 @@ class TestStopValidCases:
         """
         diagnostics = _get_stop_diagnostics(source)
         # Should parse successfully
-        stop_errors = [d for d in diagnostics if "STOP" in str(d).upper() and "error" in str(d).lower()]
+        stop_errors = [
+            d
+            for d in diagnostics
+            if "STOP" in str(d).upper() and "error" in str(d).lower()
+        ]
         assert len(stop_errors) == 0 or len(diagnostics) == 0
 
     def test_stop_with_return_code(self):
@@ -144,7 +145,7 @@ class TestStopWithBranching:
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST.
         PROCEDURE DIVISION.
-            PERFORM 
+            PERFORM
                 STOP RUN
             END-PERFORM.
         """
@@ -184,4 +185,7 @@ class TestStopDiagnosticSeverity:
         """
         diagnostics = _get_stop_diagnostics(source)
         # STOP RUN is valid and should have no errors
-        assert len(diagnostics) == 0 or all("STOP" not in str(d).upper() or "error" not in str(d).lower() for d in diagnostics)
+        assert len(diagnostics) == 0 or all(
+            "STOP" not in str(d).upper() or "error" not in str(d).lower()
+            for d in diagnostics
+        )

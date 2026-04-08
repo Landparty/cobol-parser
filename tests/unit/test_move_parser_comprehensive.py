@@ -10,12 +10,13 @@ This module systematically tests MOVE statement variants including:
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
 class TestMoveBasic:
     """Test basic MOVE statement functionality."""
-    
+
     def test_move_simple(self):
         """Test simple MOVE variable to variable."""
         source = """
@@ -32,10 +33,10 @@ class TestMoveBasic:
         result = parse_cobol(source)
         assert result.success
         assert result.ast is not None
-        
+
         moves = result.ast.find_statements("MOVE")
         assert len(moves) >= 1
-    
+
     def test_move_literal_to_variable(self):
         """Test MOVE literal value to variable."""
         source = """
@@ -52,7 +53,7 @@ class TestMoveBasic:
         assert result.success
         moves = result.ast.find_statements("MOVE")
         assert len(moves) >= 1
-    
+
     def test_move_numeric_literal(self):
         """Test MOVE numeric literal."""
         source = """
@@ -67,7 +68,7 @@ class TestMoveBasic:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_figurative_constant(self):
         """Test MOVE with figurative constants (ZERO, SPACE, etc)."""
         source = """
@@ -89,7 +90,7 @@ class TestMoveBasic:
 
 class TestMoveMultipleTargets:
     """Test MOVE with multiple target variables."""
-    
+
     def test_move_to_one_target(self):
         """Test MOVE to single target."""
         source = """
@@ -104,7 +105,7 @@ class TestMoveMultipleTargets:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_to_multiple_targets(self):
         """Test MOVE with multiple targets."""
         source = """
@@ -123,7 +124,7 @@ class TestMoveMultipleTargets:
         assert result.success
         moves = result.ast.find_statements("MOVE")
         assert len(moves) >= 1
-    
+
     def test_move_multiple_targets_grouped(self):
         """Test MOVE to multiple targets with grouping."""
         source = """
@@ -145,7 +146,7 @@ class TestMoveMultipleTargets:
 
 class TestMoveCorresponding:
     """Test MOVE CORRESPONDING (structure-to-structure)."""
-    
+
     def test_move_corresponding_simple(self):
         """Test MOVE CORRESPONDING with matched fields."""
         source = """
@@ -167,7 +168,7 @@ class TestMoveCorresponding:
         assert result.success
         moves = result.ast.find_statements("MOVE")
         assert len(moves) >= 1
-    
+
     def test_move_corresponding_partial_match(self):
         """Test MOVE CORRESPONDING with partial field match."""
         source = """
@@ -192,7 +193,7 @@ class TestMoveCorresponding:
 
 class TestMoveDataConversion:
     """Test MOVE with data type conversions."""
-    
+
     def test_move_numeric_to_string(self):
         """Test MOVE numeric to alphanumeric."""
         source = """
@@ -208,7 +209,7 @@ class TestMoveDataConversion:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_string_to_numeric(self):
         """Test MOVE alphanumeric to numeric."""
         source = """
@@ -224,7 +225,7 @@ class TestMoveDataConversion:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_between_picture_clauses(self):
         """Test MOVE with different picture clause lengths."""
         source = """
@@ -247,7 +248,7 @@ class TestMoveDataConversion:
 
 class TestMovePictureClauseInteraction:
     """Test MOVE interactions with picture clause."""
-    
+
     def test_move_with_signed_numeric(self):
         """Test MOVE with signed numeric."""
         source = """
@@ -263,7 +264,7 @@ class TestMovePictureClauseInteraction:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_with_decimal(self):
         """Test MOVE with decimal numbers."""
         source = """
@@ -279,7 +280,7 @@ class TestMovePictureClauseInteraction:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_with_comp_usage(self):
         """Test MOVE to/from COMP (binary) variables."""
         source = """
@@ -300,7 +301,7 @@ class TestMovePictureClauseInteraction:
 
 class TestMoveSerialization:
     """Test MOVE statement serialization."""
-    
+
     def test_move_to_dict(self):
         """Test MOVE statement to_dict() serialization."""
         source = """
@@ -316,10 +317,10 @@ class TestMoveSerialization:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         moves = result.ast.find_statements("MOVE")
         assert len(moves) >= 1
-        
+
         move_dict = moves[0].to_dict()
         assert move_dict is not None
         assert isinstance(move_dict, dict)
@@ -327,7 +328,7 @@ class TestMoveSerialization:
 
 class TestMoveEdgeCases:
     """Test MOVE edge cases."""
-    
+
     def test_move_self_to_self(self):
         """Test MOVE variable to itself (edge case)."""
         source = """
@@ -342,7 +343,7 @@ class TestMoveEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_with_perform(self):
         """Test MOVE inside PERFORM loop."""
         source = """
@@ -361,7 +362,7 @@ class TestMoveEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_move_inside_if(self):
         """Test MOVE inside IF statement."""
         source = """
@@ -381,7 +382,7 @@ class TestMoveEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_multiple_moves_in_sequence(self):
         """Test multiple consecutive MOVE statements."""
         source = """
@@ -406,7 +407,7 @@ class TestMoveEdgeCases:
 
 class TestMoveGetAllStatements:
     """Test get_all_statements with MOVE."""
-    
+
     def test_get_all_statements_includes_moves(self):
         """Test that get_all_statements includes MOVE statements."""
         source = """
@@ -423,11 +424,14 @@ class TestMoveGetAllStatements:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        if hasattr(result.ast, 'get_all_statements'):
+
+        if hasattr(result.ast, "get_all_statements"):
             all_stmts = result.ast.get_all_statements()
-            move_stmts = [s for s in all_stmts if hasattr(s, 'statement_type') 
-                         and s.statement_type == "MOVE"]
+            move_stmts = [
+                s
+                for s in all_stmts
+                if hasattr(s, "statement_type") and s.statement_type == "MOVE"
+            ]
             assert len(move_stmts) >= 1
 
 

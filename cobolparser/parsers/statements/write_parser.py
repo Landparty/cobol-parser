@@ -32,11 +32,19 @@ class WriteStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IOWriteStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IOWriteStatement:
         """Parse a WRITE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = cast(IOWriteStatement, factory.create(IOWriteStatement, start_token.location if start_token else SourceLocation(0, 0)))
+        stmt = cast(
+            IOWriteStatement,
+            factory.create(
+                IOWriteStatement,
+                start_token.location if start_token else SourceLocation(0, 0),
+            ),
+        )
 
         # Skip whitespace
         skip_whitespace(token_stream)
@@ -55,7 +63,12 @@ class WriteStatementParser(IStatementParser):
 
         # Check for FROM clause
         token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "FROM":
+        if (
+            token
+            and token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "FROM"
+        ):
             token_stream.consume()
             skip_whitespace(token_stream)
 
@@ -79,7 +92,12 @@ class WriteStatementParser(IStatementParser):
 
                 # Expect ADVANCING keyword
                 token = token_stream.peek()
-                if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "ADVANCING":
+                if (
+                    token
+                    and token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "ADVANCING"
+                ):
                     token_stream.consume()
                     skip_whitespace(token_stream)
 

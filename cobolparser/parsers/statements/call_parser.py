@@ -32,7 +32,9 @@ class CallStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> CallStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> CallStatement:
         """Parse a CALL statement.
 
         Supports:
@@ -44,13 +46,19 @@ class CallStatementParser(IStatementParser):
         """
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = cast(CallStatement, factory.create(CallStatement, start_token.location if start_token else SourceLocation(0, 0)))
+        stmt = cast(
+            CallStatement,
+            factory.create(
+                CallStatement,
+                start_token.location if start_token else SourceLocation(0, 0),
+            ),
+        )
 
         # Get context for error reporting if available
         parse_ctx: ParseContext | None = token_stream.context
         if parse_ctx is None:
-            parse_ctx = getattr(token_stream, '_context', None)
-        if parse_ctx is None and hasattr(token_stream, 'context'):
+            parse_ctx = getattr(token_stream, "_context", None)
+        if parse_ctx is None and hasattr(token_stream, "context"):
             parse_ctx = token_stream.context
 
         try:
@@ -62,7 +70,7 @@ class CallStatementParser(IStatementParser):
                 if parse_ctx:
                     parse_ctx.error(
                         "CALL statement requires a program name (literal or variable)",
-                        start_token.location if start_token else SourceLocation(0, 0)
+                        start_token.location if start_token else SourceLocation(0, 0),
                     )
                 return stmt
 
@@ -82,13 +90,16 @@ class CallStatementParser(IStatementParser):
                 if parse_ctx:
                     parse_ctx.error(
                         f"Expected program name (literal or identifier), found {token.type.name if hasattr(token.type, 'name') else str(token.type)}",
-                        token.location if hasattr(token, 'location') else SourceLocation(0, 0)
+                        (
+                            token.location
+                            if hasattr(token, "location")
+                            else SourceLocation(0, 0)
+                        ),
                     )
                 token_stream.consume()
                 return stmt
 
             # Parse optional USING and RETURNING clauses
-
 
             while not token_stream.is_empty():
                 skip_whitespace(token_stream)
@@ -107,60 +118,100 @@ class CallStatementParser(IStatementParser):
                     break
 
                 if token.type == TokenType.IDENTIFIER and token.value:
-                    if token.value.upper() in STATEMENT_KEYWORDS and token.value.upper() not in ("RETURNING", "GIVING"):
+                    if (
+                        token.value.upper() in STATEMENT_KEYWORDS
+                        and token.value.upper() not in ("RETURNING", "GIVING")
+                    ):
                         # This is a new statement, not part of CALL
                         break
 
                 # Parse USING clause
-                if token.type == TokenType.USING or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "USING"):
+                if token.type == TokenType.USING or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "USING"
+                ):
                     token_stream.consume()
                     # Parse parameter list until RETURNING or GIVING or PERIOD
                     self._parse_using_clause(token_stream, stmt)
                     continue
-                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "RETURNING":
+                elif (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "RETURNING"
+                ):
                     token_stream.consume()
                     skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_returning_parameter(token.value)
                         token_stream.consume()
-                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "GIVING":
+                elif (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "GIVING"
+                ):
                     token_stream.consume()
                     skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_giving_parameter(token.value)
                         token_stream.consume()
-                elif (token.type == TokenType.ON or
-                      (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "ON")):
+                elif token.type == TokenType.ON or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "ON"
+                ):
                     next_tok = token_stream.peek(1)
-                    next_val = next_tok.value.upper() if next_tok and next_tok.value else ""
+                    next_val = (
+                        next_tok.value.upper() if next_tok and next_tok.value else ""
+                    )
                     if next_val == "EXCEPTION":
                         token_stream.consume()  # ON
                         token_stream.consume()  # EXCEPTION
-                        nested = self._parse_nested_stmts(token_stream, stop_at={"NOT", "END-CALL"})
+                        nested = self._parse_nested_stmts(
+                            token_stream, stop_at={"NOT", "END-CALL"}
+                        )
                         stmt.on_exception = nested if nested else None
                     elif next_val == "OVERFLOW":
                         token_stream.consume()  # ON
                         token_stream.consume()  # OVERFLOW
-                        nested = self._parse_nested_stmts(token_stream, stop_at={"END-CALL"})
+                        nested = self._parse_nested_stmts(
+                            token_stream, stop_at={"END-CALL"}
+                        )
                         stmt.on_overflow = nested if nested else []
                     else:
                         break
-                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "NOT":
+                elif (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "NOT"
+                ):
                     # NOT ON EXCEPTION clause
                     t1 = token_stream.peek(1)
                     t2 = token_stream.peek(2)
-                    if (t1 and t1.value and t1.value.upper() == "ON" and
-                            t2 and t2.value and t2.value.upper() == "EXCEPTION"):
+                    if (
+                        t1
+                        and t1.value
+                        and t1.value.upper() == "ON"
+                        and t2
+                        and t2.value
+                        and t2.value.upper() == "EXCEPTION"
+                    ):
                         token_stream.consume()  # NOT
                         token_stream.consume()  # ON
                         token_stream.consume()  # EXCEPTION
-                        nested = self._parse_nested_stmts(token_stream, stop_at={"END-CALL"})
+                        nested = self._parse_nested_stmts(
+                            token_stream, stop_at={"END-CALL"}
+                        )
                         stmt.not_on_exception = nested if nested else None
                     else:
                         break
-                elif token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-CALL":
+                elif (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "END-CALL"
+                ):
                     token_stream.consume()  # consume END-CALL
                     break
                 else:
@@ -178,7 +229,7 @@ class CallStatementParser(IStatementParser):
         Returns list of CobolStatement objects.
         """
         stmts = []
-        registry = getattr(token_stream, '_registry', None)
+        registry = getattr(token_stream, "_registry", None)
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
             token = token_stream.peek()
@@ -201,10 +252,10 @@ class CallStatementParser(IStatementParser):
                 token_stream.consume()
         return stmts
 
-    def _parse_using_clause(self, token_stream: ITokenStream, stmt: CallStatement) -> None:
+    def _parse_using_clause(
+        self, token_stream: ITokenStream, stmt: CallStatement
+    ) -> None:
         """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""
-
-
 
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
@@ -225,18 +276,29 @@ class CallStatementParser(IStatementParser):
             elif token.type in STATEMENT_TOKEN_TYPES:
                 break
             # Check for non-parameter tokens (like NUMERIC_LITERAL), end of USING clause
-            elif token.type not in (TokenType.BY, TokenType.USING) and \
-                 token.type not in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.VALUE):
+            elif token.type not in (
+                TokenType.BY,
+                TokenType.USING,
+            ) and token.type not in (
+                TokenType.IDENTIFIER,
+                TokenType.STRING_LITERAL,
+                TokenType.VALUE,
+            ):
                 break
 
             # Check for BY [REFERENCE|CONTENT|VALUE]
             passing_mode = "REFERENCE"  # Default
-            if token.type == TokenType.BY or (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "BY"):
+            if token.type == TokenType.BY or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "BY"
+            ):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
-                if token and (token.type == TokenType.IDENTIFIER or
-                              token.type == TokenType.VALUE):
+                if token and (
+                    token.type == TokenType.IDENTIFIER or token.type == TokenType.VALUE
+                ):
                     mode_val = token.value.upper() if token.value else ""
                     if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
                         passing_mode = mode_val
@@ -252,5 +314,3 @@ class CallStatementParser(IStatementParser):
             else:
                 # No parameter found, end of USING clause
                 break
-
-

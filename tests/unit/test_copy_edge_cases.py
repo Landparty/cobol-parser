@@ -10,78 +10,72 @@ Tests cover:
 - Conditional compilation preprocessing
 - Level number validation
 """
+
 import tempfile
-import os
 from pathlib import Path
+
 import pytest
 
 from cobolparser.preprocess import (
-    expand_copybooks,
     CircularReferenceError,
     CopybookNotFoundError,
-    NestingDepthError,
-    CopybookSizeExceededError,
-    TotalExpansionSizeExceededError,
     CopybookSyntaxError,
-    LevelNumberMismatchWarning,
+    expand_copybooks,
+    preprocess_conditional_compilation,
     validate_copybook_content,
     validate_level_numbers,
-    preprocess_conditional_compilation,
-)
-from cobolparser.preprocess.models import (
-    CopyStatement,
-    CopybookExpansion,
-    CopybookSearchPath,
-    ReplacingClause,
-    SuppressClause,
 )
 from cobolparser.preprocess.copy_statement_parser import (
+    apply_replacing_clauses,
     extract_copy_statements,
+    is_comment_line,
+    is_within_string_literal,
     normalize_continuation_lines,
     parse_replacing_clause,
     parse_suppress_clause,
-    apply_replacing_clauses,
-    is_comment_line,
-    is_within_string_literal,
     remove_comment_lines,
+)
+from cobolparser.preprocess.models import (
+    CopybookSearchPath,
+    ReplacingClause,
 )
 from cobolparser.preprocess.path_resolver import suggest_similar_copybooks
 
 
 class TestCommentLineDetection:
     """Test detection of comment lines in fixed-format COBOL."""
-    
+
     def test_asterisk_in_column_7_is_comment(self):
         """Test that asterisk in column 7 marks a comment line."""
         # Column 7 is index 6
         line = "      * This is a comment line"
         assert is_comment_line(line) is True
-        
+
     def test_slash_in_column_7_is_comment(self):
         """Test that slash in column 7 marks a page break comment."""
         line = "      / This is a page break comment"
         assert is_comment_line(line) is True
-        
+
     def test_debug_line_d_is_comment(self):
         """Test that 'D' in column 7 marks a debug line (treated as comment)."""
         line = "      D DISPLAY 'DEBUG INFO'."
         assert is_comment_line(line) is True
-        
+
     def test_debug_line_lowercase_d_is_comment(self):
         """Test that lowercase 'd' in column 7 marks a debug line."""
         line = "      d DISPLAY 'DEBUG INFO'."
         assert is_comment_line(line) is True
-        
+
     def test_normal_code_line_not_comment(self):
         """Test that normal code line is not detected as comment."""
         line = "       MOVE A TO B."
         assert is_comment_line(line) is False
-        
+
     def test_short_line_not_comment(self):
         """Test that lines shorter than 7 characters are not comments."""
         line = "123"
         assert is_comment_line(line) is False
-        
+
     def test_continuation_line_not_comment(self):
         """Test that continuation lines (hyphen in column 7) are not comments."""
         line = "      -    CONTINUATION TEXT"
@@ -90,32 +84,32 @@ class TestCommentLineDetection:
 
 class TestStringLiteralDetection:
     """Test detection of content within string literals."""
-    
+
     def test_copy_within_double_quoted_string(self):
         """Test COPY keyword inside double-quoted string is detected."""
         source = '       DISPLAY "COPY EMPLOYEE TO FILE".'
         # Position of "COPY" is around index 17
         copy_pos = source.find("COPY")
         assert is_within_string_literal(source, copy_pos, copy_pos + 4) is True
-        
+
     def test_copy_within_single_quoted_string(self):
         """Test COPY keyword inside single-quoted string is detected."""
         source = "       DISPLAY 'COPY EMPLOYEE TO FILE'."
         copy_pos = source.find("COPY")
         assert is_within_string_literal(source, copy_pos, copy_pos + 4) is True
-        
+
     def test_copy_outside_string(self):
         """Test COPY keyword outside string is not falsely detected."""
         source = "       COPY EMPLOYEE."
         copy_pos = source.find("COPY")
         assert is_within_string_literal(source, copy_pos, copy_pos + 4) is False
-        
+
     def test_copy_after_string(self):
         """Test COPY after a complete string is correctly identified."""
         source = '       DISPLAY "HEADER". COPY EMPLOYEE.'
         copy_pos = source.rfind("COPY")  # Second COPY
         assert is_within_string_literal(source, copy_pos, copy_pos + 4) is False
-        
+
     def test_escaped_quotes_handled(self):
         """Test that doubled quotes (COBOL escape) are handled correctly."""
         source = '       DISPLAY "SAY ""HELLO""". COPY EMPLOYEE.'
@@ -125,19 +119,19 @@ class TestStringLiteralDetection:
 
 class TestRemoveCommentLines:
     """Test removal of comment lines from source."""
-    
+
     def test_comment_lines_blanked(self):
         """Test that comment lines are blanked out."""
         source = """\
       * This is a comment
        COPY EMPLOYEE."""
         result = remove_comment_lines(source)
-        lines = result.split('\n')
+        lines = result.split("\n")
         # First line should be blanked (indicator preserved)
         assert "This is a comment" not in lines[0]
         # Second line preserved
         assert "COPY EMPLOYEE" in lines[1]
-        
+
     def test_line_count_preserved(self):
         """Test that line count is preserved after removing comments."""
         source = """\
@@ -145,12 +139,12 @@ class TestRemoveCommentLines:
       * COMMENT LINE
        LINE 3."""
         result = remove_comment_lines(source)
-        assert result.count('\n') == source.count('\n')
+        assert result.count("\n") == source.count("\n")
 
 
 class TestCopyStatementExtractionWithComments:
     """Test that COPY statements in comments are properly ignored."""
-    
+
     def test_copy_in_comment_ignored(self):
         """Test that COPY statement in comment line is not extracted."""
         source = """\
@@ -159,7 +153,7 @@ class TestCopyStatementExtractionWithComments:
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].member_name == "VALID-COPYBOOK"
-        
+
     def test_multiple_commented_copies_ignored(self):
         """Test multiple commented COPY statements are all ignored."""
         source = """\
@@ -169,7 +163,7 @@ class TestCopyStatementExtractionWithComments:
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].member_name == "REAL-COPYBOOK"
-        
+
     def test_mix_of_valid_and_commented_copies(self):
         """Test mix of valid and commented COPY statements."""
         source = """\
@@ -180,7 +174,7 @@ class TestCopyStatementExtractionWithComments:
         assert len(statements) == 2
         assert statements[0].member_name == "FIRST-VALID"
         assert statements[1].member_name == "SECOND-VALID"
-        
+
     def test_page_break_comment_copy_ignored(self):
         """Test COPY in page break comment (/) is ignored."""
         source = """\
@@ -193,14 +187,14 @@ class TestCopyStatementExtractionWithComments:
 
 class TestCopyStatementExtractionWithStrings:
     """Test that COPY keywords in strings are properly ignored."""
-    
+
     def test_copy_in_display_string_ignored(self):
         """Test COPY in DISPLAY string is not extracted."""
         source = '       DISPLAY "USE COPY COMMAND".\n       COPY ACTUAL-COPYBOOK.'
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].member_name == "ACTUAL-COPYBOOK"
-        
+
     def test_copy_in_move_string_ignored(self):
         """Test COPY in MOVE string literal is not extracted."""
         source = """\
@@ -209,7 +203,7 @@ class TestCopyStatementExtractionWithStrings:
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].member_name == "REAL-DATA"
-        
+
     def test_single_quoted_copy_ignored(self):
         """Test COPY in single-quoted string is not extracted."""
         source = """\
@@ -218,7 +212,7 @@ class TestCopyStatementExtractionWithStrings:
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].member_name == "VALID-COPY"
-        
+
     def test_continuation_in_string_with_copy(self):
         """Test COPY in multi-line string continuation is ignored."""
         source = """\
@@ -232,7 +226,7 @@ class TestCopyStatementExtractionWithStrings:
 
 class TestK6SCACopybook:
     """Test cases based on the K6SCA.CPY file example from the user."""
-    
+
     def test_k6sca_style_continuation_with_message(self):
         """Test K6SCA-style continuation line with COPY in message text."""
         source = """\
@@ -244,7 +238,7 @@ class TestK6SCACopybook:
         # This should NOT extract any COPY statements because "COPY" is in a string
         statements = extract_copy_statements(source)
         assert len(statements) == 0
-        
+
     def test_valid_copy_after_string_with_copy_text(self):
         """Test valid COPY after a string containing 'COPY' text."""
         source = """\
@@ -257,7 +251,7 @@ class TestK6SCACopybook:
 
 class TestMultiLineContinuation:
     """Test multi-line continuation handling."""
-    
+
     def test_continuation_lines_normalized(self):
         """Test that continuation lines with hyphen in column 7 are joined."""
         source = """\
@@ -267,7 +261,7 @@ class TestMultiLineContinuation:
         assert "COPY EMPLOYEE" in normalized
         assert "REPLACING" in normalized
         # Should be on single logical line now
-        
+
     def test_continuation_preserves_content(self):
         """Test that continuation joining preserves content."""
         source = """\
@@ -278,7 +272,7 @@ class TestMultiLineContinuation:
         assert "VERY-LONG-COPYBOOK" in normalized
         assert "OLD-VALUE" in normalized
         assert "NEW-VALUE" in normalized
-        
+
     def test_orphan_continuation_handled(self):
         """Test that orphan continuation line at start is handled gracefully."""
         source = """\
@@ -291,7 +285,7 @@ class TestMultiLineContinuation:
 
 class TestSuppressClause:
     """Test SUPPRESS clause parsing."""
-    
+
     def test_simple_suppress(self):
         """Test basic SUPPRESS clause parsing."""
         source = "           COPY EMPLOYEE SUPPRESS."
@@ -299,27 +293,27 @@ class TestSuppressClause:
         assert len(statements) == 1
         assert statements[0].suppress_clause is not None
         assert statements[0].suppress_clause.suppress_all is True
-        
+
     def test_suppress_printing(self):
         """Test SUPPRESS PRINTING variant."""
         source = "           COPY EMPLOYEE SUPPRESS PRINTING."
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].suppress_clause is not None
-        
+
     def test_no_suppress(self):
         """Test that suppress defaults to None."""
         source = "           COPY EMPLOYEE."
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         assert statements[0].suppress_clause is None
-        
+
     def test_parse_suppress_with_line_ranges(self):
         """Test parsing SUPPRESS with line ranges."""
         clause = parse_suppress_clause("1 THRU 5")
         assert clause.suppress_all is False
         assert (1, 5) in clause.line_ranges
-        
+
     def test_parse_suppress_with_single_lines(self):
         """Test parsing SUPPRESS with single line numbers."""
         clause = parse_suppress_clause("10")
@@ -329,7 +323,7 @@ class TestSuppressClause:
 
 class TestLeadingTrailingReplacing:
     """Test LEADING/TRAILING REPLACING modes."""
-    
+
     def test_leading_replacing(self):
         """Test LEADING replacing mode parsing."""
         clauses = parse_replacing_clause("LEADING ==WS-== BY ==LS-==")
@@ -337,7 +331,7 @@ class TestLeadingTrailingReplacing:
         assert clauses[0].find_text == "WS-"
         assert clauses[0].replace_text == "LS-"
         assert clauses[0].mode == "LEADING"
-        
+
     def test_trailing_replacing(self):
         """Test TRAILING replacing mode parsing."""
         clauses = parse_replacing_clause("TRAILING ==-REC== BY ==-DATA==")
@@ -345,7 +339,7 @@ class TestLeadingTrailingReplacing:
         assert clauses[0].find_text == "-REC"
         assert clauses[0].replace_text == "-DATA"
         assert clauses[0].mode == "TRAILING"
-        
+
     def test_normal_replacing(self):
         """Test normal (ALL) replacing mode."""
         clauses = parse_replacing_clause("==OLD-VALUE== BY ==NEW-VALUE==")
@@ -353,7 +347,7 @@ class TestLeadingTrailingReplacing:
         assert clauses[0].find_text == "OLD-VALUE"
         assert clauses[0].replace_text == "NEW-VALUE"
         assert clauses[0].mode == "ALL"
-        
+
     def test_multiple_replacements(self):
         """Test multiple replacement pairs."""
         clauses = parse_replacing_clause("==A== BY ==B== ==C== BY ==D==")
@@ -362,7 +356,7 @@ class TestLeadingTrailingReplacing:
         assert clauses[0].replace_text == "B"
         assert clauses[1].find_text == "C"
         assert clauses[1].replace_text == "D"
-        
+
     def test_colon_delimiter(self):
         """Test colon-delimited replacements (alternative syntax)."""
         clauses = parse_replacing_clause(":TAG: BY :PREFIX:")
@@ -373,7 +367,7 @@ class TestLeadingTrailingReplacing:
 
 class TestApplyReplacing:
     """Test applying REPLACING clauses to content."""
-    
+
     def test_apply_simple_replacement(self):
         """Test simple text replacement."""
         content = "       01 :TAG:-FIELD PIC X(10)."
@@ -381,7 +375,7 @@ class TestApplyReplacing:
         result = apply_replacing_clauses(content, clauses)
         assert "EMP-FIELD" in result
         assert ":TAG:" not in result
-        
+
     def test_apply_leading_replacement(self):
         """Test LEADING mode replacement."""
         content = "       01 WS-FIELD PIC X(10).\n       01 WS-DATA PIC 9(5)."
@@ -389,11 +383,13 @@ class TestApplyReplacing:
         result = apply_replacing_clauses(content, clauses)
         assert "LS-FIELD" in result
         assert "LS-DATA" in result
-        
+
     def test_apply_trailing_replacement(self):
         """Test TRAILING mode replacement."""
         content = "       01 FIELD-REC PIC X(10).\n       01 DATA-REC PIC 9(5)."
-        clauses = [ReplacingClause(find_text="-REC", replace_text="-DATA", mode="TRAILING")]
+        clauses = [
+            ReplacingClause(find_text="-REC", replace_text="-DATA", mode="TRAILING")
+        ]
         result = apply_replacing_clauses(content, clauses)
         assert "FIELD-DATA" in result
         assert "DATA-DATA" in result
@@ -401,7 +397,7 @@ class TestApplyReplacing:
 
 class TestFuzzyMatching:
     """Test fuzzy matching for copybook suggestions."""
-    
+
     def test_similar_name_suggestion(self):
         """Test that similar names are suggested."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -409,31 +405,27 @@ class TestFuzzyMatching:
             (Path(tmpdir) / "EMPLOYEE.cpy").write_text("01 REC.")
             (Path(tmpdir) / "EMPLOYER.cpy").write_text("01 REC.")
             (Path(tmpdir) / "EMPDATA.cpy").write_text("01 REC.")
-            
-            config = CopybookSearchPath(
-                directories=[tmpdir],
-                extensions=[".cpy"]
-            )
+
+            config = CopybookSearchPath(directories=[tmpdir], extensions=[".cpy"])
             suggestions = suggest_similar_copybooks("EMPLOYE", config)
             assert "EMPLOYEE" in suggestions or "EMPLOYER" in suggestions
-            
+
     def test_case_insensitive_matching(self):
         """Test case insensitive fuzzy matching."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "EMPLOYEE.cpy").write_text("01 REC.")
-            
-            config = CopybookSearchPath(
-                directories=[tmpdir],
-                extensions=[".cpy"]
-            )
+
+            config = CopybookSearchPath(directories=[tmpdir], extensions=[".cpy"])
             suggestions = suggest_similar_copybooks("employe", config)
             # Should find EMPLOYEE despite case difference
-            assert isinstance(suggestions, list)  # May or may not find depending on threshold
+            assert isinstance(
+                suggestions, list
+            )  # May or may not find depending on threshold
 
 
 class TestConditionalCompilation:
     """Test conditional compilation preprocessing."""
-    
+
     def test_define_and_if_true(self):
         """Test >>DEFINE and >>IF when condition is true."""
         source = """\
@@ -445,7 +437,7 @@ class TestConditionalCompilation:
         result = preprocess_conditional_compilation(source, {})
         assert "DISPLAY 'NORMAL CODE'" in result
         assert "DISPLAY 'DEBUG MODE'" in result
-        
+
     def test_if_false_condition(self):
         """Test >>IF when condition is false."""
         source = """\
@@ -456,7 +448,7 @@ class TestConditionalCompilation:
         result = preprocess_conditional_compilation(source, {})
         assert "DISPLAY 'NORMAL CODE'" in result
         assert "DISPLAY 'PRODUCTION MODE'" not in result
-        
+
     def test_predefined_symbols(self):
         """Test using predefined symbols."""
         source = """\
@@ -465,7 +457,7 @@ class TestConditionalCompilation:
        >>END-IF"""
         result = preprocess_conditional_compilation(source, {"DEBUG": "TRUE"})
         assert "DISPLAY 'DEBUG'" in result
-        
+
     def test_nested_conditionals(self):
         """Test nested >>IF blocks."""
         source = """\
@@ -483,7 +475,7 @@ class TestConditionalCompilation:
 
 class TestLevelNumberValidation:
     """Test level number validation in copybooks."""
-    
+
     def test_valid_level_structure(self):
         """Test validation of valid level structure."""
         pre_context = "       01  MAIN-RECORD."
@@ -492,16 +484,16 @@ class TestLevelNumberValidation:
            05  EMP-ID       PIC 9(5)."""
         errors = validate_level_numbers(pre_context, content, "TEST.cpy")
         assert len(errors) == 0
-        
+
     def test_level_mismatch_warning(self):
         """Test warning for level number mismatch."""
         pre_context = "       01  MAIN-RECORD.\n           05  FIELD-A PIC X."
         content = """\
            03  ORPHAN-FIELD  PIC X(10)."""
-        errors = validate_level_numbers(pre_context, content, "TEST.cpy")
+        validate_level_numbers(pre_context, content, "TEST.cpy")
         # Level 03 after 05 may generate warning about hierarchy
         # Actual behavior depends on implementation
-        
+
     def test_01_level_always_valid(self):
         """Test that 01 level is always valid as start of new record."""
         pre_context = "       01  MAIN-RECORD.\n           05  FIELD-A PIC X."
@@ -511,7 +503,7 @@ class TestLevelNumberValidation:
         errors = validate_level_numbers(pre_context, content, "TEST.cpy")
         # 01 can start anywhere
         assert len(errors) == 0
-        
+
     def test_77_level_standalone(self):
         """Test that 77 level is allowed as standalone."""
         pre_context = "       01  MAIN-RECORD."
@@ -524,37 +516,35 @@ class TestLevelNumberValidation:
 
 class TestSizeLimits:
     """Test copybook size limit enforcement."""
-    
+
     def test_small_copybook_allowed(self):
         """Test that small copybooks are allowed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             copybook_path = Path(tmpdir) / "SMALL.cpy"
             copybook_path.write_text("       01  SMALL-REC PIC X(10).")
-            
+
             source = "       COPY SMALL."
             result = expand_copybooks(
-                source,
-                copybook_paths=[tmpdir],
-                max_file_size=1024  # 1KB limit
+                source, copybook_paths=[tmpdir], max_file_size=1024  # 1KB limit
             )
             assert "SMALL-REC" in result.expanded_source
-            
+
     def test_size_limit_tracking(self):
         """Test that expansion tracks total size."""
         with tempfile.TemporaryDirectory() as tmpdir:
             copybook_path = Path(tmpdir) / "COPY1.cpy"
             copybook_path.write_text("       01  REC PIC X(100).")
-            
+
             source = "       COPY COPY1."
             result = expand_copybooks(source, copybook_paths=[tmpdir])
-            
+
             # Statistics should track size
             assert result.statistics is not None
 
 
 class TestContentValidation:
     """Test copybook content validation."""
-    
+
     def test_valid_cobol_content(self):
         """Test validation of valid COBOL content."""
         content = """\
@@ -562,10 +552,10 @@ class TestContentValidation:
            05  FIELD-A  PIC X(10).
            05  FIELD-B  PIC 9(5).
        END-RECORD."""  # Proper termination
-        errors = validate_copybook_content(content, "TEST.cpy")
+        validate_copybook_content(content, "TEST.cpy")
         # May return warnings for non-period lines, but not errors
         # Just verify it doesn't raise an exception
-        
+
     def test_binary_content_detection(self):
         """Test detection of binary/non-text content."""
         content = "\x00\x01\x02\x03"  # Binary content
@@ -575,7 +565,7 @@ class TestContentValidation:
 
 class TestIntegrationEnhancedFeatures:
     """Integration tests for enhanced features working together."""
-    
+
     def test_suppress_with_replacing(self):
         """Test SUPPRESS and REPLACING together."""
         source = "       COPY EMPLOYEE SUPPRESS REPLACING ==:TAG:== BY ==WS==."
@@ -584,7 +574,7 @@ class TestIntegrationEnhancedFeatures:
         stmt = statements[0]
         assert stmt.suppress_clause is not None
         assert stmt.replacing_clauses is not None
-        
+
     def test_library_with_suppress(self):
         """Test library qualifier with SUPPRESS."""
         source = "       COPY EMPLOYEE IN MYLIB SUPPRESS."
@@ -592,10 +582,12 @@ class TestIntegrationEnhancedFeatures:
         assert len(statements) == 1
         assert statements[0].library_qualifier == "MYLIB"
         assert statements[0].suppress_clause is not None
-        
+
     def test_full_syntax_variant(self):
         """Test full COPY syntax with all options."""
-        source = "       COPY EMPLOYEE OF PRODLIB SUPPRESS REPLACING ==OLD== BY ==NEW==."
+        source = (
+            "       COPY EMPLOYEE OF PRODLIB SUPPRESS REPLACING ==OLD== BY ==NEW==."
+        )
         statements = extract_copy_statements(source)
         assert len(statements) == 1
         stmt = statements[0]
@@ -607,41 +599,41 @@ class TestIntegrationEnhancedFeatures:
 
 class TestExpansionStatistics:
     """Test expansion statistics tracking."""
-    
+
     def test_statistics_tracking(self):
         """Test that expansion statistics are tracked."""
         with tempfile.TemporaryDirectory() as tmpdir:
             copybook_path = Path(tmpdir) / "EMPLOYEE.cpy"
             copybook_path.write_text("       01  EMP-REC PIC X(10).")
-            
+
             source = "       COPY EMPLOYEE."
             result = expand_copybooks(source, copybook_paths=[tmpdir])
-            
+
             assert result.statistics is not None
             assert result.statistics.file_count >= 1
             assert result.statistics.total_lines > 0
-            
+
     def test_multiple_copybooks_tracked(self):
         """Test statistics with multiple copybooks."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "COPY1.cpy").write_text("01 REC1.")
             (Path(tmpdir) / "COPY2.cpy").write_text("01 REC2.")
-            
+
             source = "       COPY COPY1.\n       COPY COPY2."
             result = expand_copybooks(source, copybook_paths=[tmpdir])
-            
+
             assert result.statistics.file_count >= 2
 
 
 class TestNestedExpansionWithEnhancements:
     """Test nested expansion with new features."""
-    
+
     def test_conditional_compilation_in_main_source(self):
         """Test conditional compilation in main source with copybooks."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create copybook
             (Path(tmpdir) / "EMPLOYEE.cpy").write_text("       01  EMP-REC PIC X(10).")
-            
+
             # Main source with conditional
             source = """\
        >>DEFINE USE_EMPLOYEE
@@ -649,33 +641,29 @@ class TestNestedExpansionWithEnhancements:
        COPY EMPLOYEE.
        >>END-IF
        01  OTHER-REC PIC X(10)."""
-            
+
             result = expand_copybooks(
-                source, 
-                copybook_paths=[tmpdir],
-                process_conditionals=True
+                source, copybook_paths=[tmpdir], process_conditionals=True
             )
-            
+
             assert "EMP-REC" in result.expanded_source
             assert "OTHER-REC" in result.expanded_source
-            
+
     def test_conditional_excludes_copy(self):
         """Test conditional compilation excludes COPY statement."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "DEBUG.cpy").write_text("       01  DEBUG-REC PIC X(10).")
-            
+
             source = """\
        >>IF DEBUG_MODE IS DEFINED
        COPY DEBUG.
        >>END-IF
        01  NORMAL-REC PIC X(10)."""
-            
+
             result = expand_copybooks(
-                source, 
-                copybook_paths=[tmpdir],
-                process_conditionals=True
+                source, copybook_paths=[tmpdir], process_conditionals=True
             )
-            
+
             # DEBUG not defined, so COPY DEBUG should not be included
             assert "DEBUG-REC" not in result.expanded_source
             assert "NORMAL-REC" in result.expanded_source
@@ -683,7 +671,7 @@ class TestNestedExpansionWithEnhancements:
 
 class TestErrorMessages:
     """Test that error messages are helpful and include suggestions."""
-    
+
     def test_not_found_error_message(self):
         """Test that CopybookNotFoundError has helpful message."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -694,13 +682,13 @@ class TestErrorMessages:
             except CopybookNotFoundError as e:
                 error_msg = str(e)
                 assert "NONEXISTENT" in error_msg
-                
+
     def test_circular_reference_error_chain(self):
         """Test that circular reference error includes dependency chain."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "A.cpy").write_text("       COPY B.")
             (Path(tmpdir) / "B.cpy").write_text("       COPY A.")
-            
+
             source = "       COPY A."
             try:
                 expand_copybooks(source, copybook_paths=[tmpdir])

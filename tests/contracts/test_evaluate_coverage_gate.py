@@ -11,12 +11,10 @@ Usage:
     pytest tests/contract/test_evaluate_coverage_gate.py -v
 """
 
-import pytest
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Dict, Any, Set
-import inspect
-import re
+from typing import Any
 
 
 class VariantCategory(Enum):
@@ -51,10 +49,10 @@ class EvaluateVariant:
     description: str
     test_scope: str  # e.g., "tests/unit/test_evaluate_variants.py"
     test_name: str  # e.g., "test_single_subject_literals_and_ranges"
-    features: List[str] = field(default_factory=list)
-    notes: Optional[str] = None
+    features: list[str] = field(default_factory=list)
+    notes: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "variant_id": self.variant_id,
             "category": self.category.value,
@@ -67,7 +65,7 @@ class EvaluateVariant:
 
 
 # Positive variant catalog - all EVALUATE variants that should parse successfully
-EVALUATE_VARIANT_CATALOG: List[EvaluateVariant] = [
+EVALUATE_VARIANT_CATALOG: list[EvaluateVariant] = [
     # Single subject variants
     EvaluateVariant(
         variant_id="EV-SS-001",
@@ -231,7 +229,7 @@ EVALUATE_VARIANT_CATALOG: List[EvaluateVariant] = [
 
 
 # Negative variant catalog - malformed EVALUATE scenarios that should produce diagnostics
-NEGATIVE_VARIANT_CATALOG: List[EvaluateVariant] = [
+NEGATIVE_VARIANT_CATALOG: list[EvaluateVariant] = [
     EvaluateVariant(
         variant_id="EV-NG-001",
         category=VariantCategory.SINGLE_SUBJECT,
@@ -331,22 +329,22 @@ NEGATIVE_VARIANT_CATALOG: List[EvaluateVariant] = [
 ]
 
 
-def get_catalog_variant_ids() -> Set[str]:
+def get_catalog_variant_ids() -> set[str]:
     """Get all variant IDs from positive catalog."""
     return {v.variant_id for v in EVALUATE_VARIANT_CATALOG}
 
 
-def get_negative_variant_ids() -> Set[str]:
+def get_negative_variant_ids() -> set[str]:
     """Get all variant IDs from negative catalog."""
     return {v.variant_id for v in NEGATIVE_VARIANT_CATALOG}
 
 
-def get_all_variant_ids() -> Set[str]:
+def get_all_variant_ids() -> set[str]:
     """Get all variant IDs from both catalogs."""
     return get_catalog_variant_ids() | get_negative_variant_ids()
 
 
-def get_variant_by_id(variant_id: str) -> Optional[EvaluateVariant]:
+def get_variant_by_id(variant_id: str) -> EvaluateVariant | None:
     """Look up a variant by its ID."""
     for variant in EVALUATE_VARIANT_CATALOG:
         if variant.variant_id == variant_id:
@@ -357,7 +355,7 @@ def get_variant_by_id(variant_id: str) -> Optional[EvaluateVariant]:
     return None
 
 
-def get_variants_by_category(category: VariantCategory) -> List[EvaluateVariant]:
+def get_variants_by_category(category: VariantCategory) -> list[EvaluateVariant]:
     """Get all variants of a specific category."""
     return [v for v in EVALUATE_VARIANT_CATALOG if v.category == category]
 
@@ -366,16 +364,16 @@ class CoverageReport:
     """Represents the coverage analysis for EVALUATE variants."""
 
     def __init__(self):
-        self.tested_variants: Set[str] = set()
-        self.untested_variants: List[EvaluateVariant] = []
-        self.failed_tests: List[Dict[str, Any]] = []
-        self.missing_negative_coverage: List[EvaluateVariant] = []
+        self.tested_variants: set[str] = set()
+        self.untested_variants: list[EvaluateVariant] = []
+        self.failed_tests: list[dict[str, Any]] = []
+        self.missing_negative_coverage: list[EvaluateVariant] = []
 
     def add_tested_variant(self, variant_id: str) -> None:
         """Mark a variant as tested."""
         self.tested_variants.add(variant_id)
 
-    def add_failed_test(self, test_info: Dict[str, Any]) -> None:
+    def add_failed_test(self, test_info: dict[str, Any]) -> None:
         """Record a failed test."""
         self.failed_tests.append(test_info)
 
@@ -406,7 +404,7 @@ class CoverageReport:
 
         return True
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Get a summary of coverage status."""
         all_variants = get_all_variant_ids()
         tested_count = len(self.tested_variants)
@@ -416,18 +414,18 @@ class CoverageReport:
             "total_variants": total_count,
             "tested_variants": tested_count,
             "untested_count": total_count - tested_count,
-            "coverage_percent": (tested_count / total_count * 100)
-            if total_count > 0
-            else 100.0,
+            "coverage_percent": (
+                (tested_count / total_count * 100) if total_count > 0 else 100.0
+            ),
             "failed_tests": len(self.failed_tests),
             "untested_variants": [v.variant_id for v in self.untested_variants],
             "is_complete": self.is_complete(),
         }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary for serialization."""
         return {
-            "tested_variants": sorted(list(self.tested_variants)),
+            "tested_variants": sorted(self.tested_variants),
             "untested_variants": [v.to_dict() for v in self.untested_variants],
             "failed_tests": self.failed_tests,
             "missing_negative_coverage": [
@@ -524,10 +522,9 @@ class TestEvaluateCoverageGate:
     def test_coverage_gate_exists(self):
         """Coverage gate module should be importable."""
         from tests.contracts.test_evaluate_coverage_gate import (
-            run_coverage_gate,
-            CoverageReport,
             EVALUATE_VARIANT_CATALOG,
             NEGATIVE_VARIANT_CATALOG,
+            run_coverage_gate,
         )
 
         assert EVALUATE_VARIANT_CATALOG is not None
@@ -618,8 +615,8 @@ class TestEvaluateCoverageGate:
     def test_variant_lookup_function(self):
         """Variant lookup by ID should work."""
         from tests.contracts.test_evaluate_coverage_gate import (
-            get_variant_by_id,
             EVALUATE_VARIANT_CATALOG,
+            get_variant_by_id,
         )
 
         first_variant = EVALUATE_VARIANT_CATALOG[0]
@@ -659,8 +656,6 @@ class TestEvaluateCoverageGate:
     def test_gate_fails_when_variants_missing(self):
         """Gate should report incomplete when variants untested."""
         from tests.contracts.test_evaluate_coverage_gate import (
-            EVALUATE_VARIANT_CATALOG,
-            NEGATIVE_VARIANT_CATALOG,
             CoverageReport,
         )
 
@@ -680,12 +675,12 @@ class TestEvaluateVariantDocumentation:
         from tests.contracts.test_evaluate_coverage_gate import EVALUATE_VARIANT_CATALOG
 
         for variant in EVALUATE_VARIANT_CATALOG:
-            assert variant.description, (
-                f"Variant {variant.variant_id} missing description"
-            )
-            assert len(variant.description) > 10, (
-                f"Variant {variant.variant_id} description too short"
-            )
+            assert (
+                variant.description
+            ), f"Variant {variant.variant_id} missing description"
+            assert (
+                len(variant.description) > 10
+            ), f"Variant {variant.variant_id} description too short"
 
     def test_catalog_has_features(self):
         """All variants should have feature tags."""
@@ -693,9 +688,9 @@ class TestEvaluateVariantDocumentation:
 
         for variant in EVALUATE_VARIANT_CATALOG:
             assert variant.features, f"Variant {variant.variant_id} missing features"
-            assert len(variant.features) > 0, (
-                f"Variant {variant.variant_id} has no features"
-            )
+            assert (
+                len(variant.features) > 0
+            ), f"Variant {variant.variant_id} has no features"
 
     def test_variant_ids_are_unique(self):
         """All variant IDs should be unique."""
@@ -721,6 +716,6 @@ class TestEvaluateVariantDocumentation:
         pattern = re.compile(r"^EV-[A-Z]{2}-\d{3}$")
 
         for variant in EVALUATE_VARIANT_CATALOG + NEGATIVE_VARIANT_CATALOG:
-            assert pattern.match(variant.variant_id), (
-                f"Variant {variant.variant_id} doesn't match pattern EV-XX-000"
-            )
+            assert pattern.match(
+                variant.variant_id
+            ), f"Variant {variant.variant_id} doesn't match pattern EV-XX-000"

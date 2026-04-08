@@ -29,13 +29,20 @@ class AddStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return bool(token.type == TokenType.ADD or
-                    (token.type == TokenType.IDENTIFIER and token.value and
-                     token.value.upper() == "ADD"))
+            return bool(
+                token.type == TokenType.ADD
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "ADD"
+                )
+            )
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> AddStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> AddStatement:
         """Parse an ADD statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -122,7 +129,11 @@ class AddStatementParser(IStatementParser):
                         token_stream.consume()
                         next_token = token_stream.peek()
 
-                    if next_token and next_token.value and next_token.value.upper() == "SIZE":
+                    if (
+                        next_token
+                        and next_token.value
+                        and next_token.value.upper() == "SIZE"
+                    ):
                         token_stream.consume()
                         next_token = token_stream.peek()
                         # Skip NEWLINEs before ERROR
@@ -130,9 +141,15 @@ class AddStatementParser(IStatementParser):
                             token_stream.consume()
                             next_token = token_stream.peek()
 
-                        if next_token and next_token.value and next_token.value.upper() == "ERROR":
+                        if (
+                            next_token
+                            and next_token.value
+                            and next_token.value.upper() == "ERROR"
+                        ):
                             token_stream.consume()
-                            nested = AddStatementParser._parse_nested_statements(token_stream)
+                            nested = AddStatementParser._parse_nested_statements(
+                                token_stream
+                            )
                             stmt.set_on_size_error_clause(nested)
                 elif token_upper == "NOT":
                     token_stream.consume()
@@ -142,7 +159,11 @@ class AddStatementParser(IStatementParser):
                         token_stream.consume()
                         next_token = token_stream.peek()
 
-                    if next_token and next_token.value and next_token.value.upper() == "ON":
+                    if (
+                        next_token
+                        and next_token.value
+                        and next_token.value.upper() == "ON"
+                    ):
                         token_stream.consume()
                         next_token = token_stream.peek()
                         # Skip NEWLINEs before SIZE
@@ -150,7 +171,11 @@ class AddStatementParser(IStatementParser):
                             token_stream.consume()
                             next_token = token_stream.peek()
 
-                        if next_token and next_token.value and next_token.value.upper() == "SIZE":
+                        if (
+                            next_token
+                            and next_token.value
+                            and next_token.value.upper() == "SIZE"
+                        ):
                             token_stream.consume()
                             next_token = token_stream.peek()
                             # Skip NEWLINEs before ERROR
@@ -158,9 +183,15 @@ class AddStatementParser(IStatementParser):
                                 token_stream.consume()
                                 next_token = token_stream.peek()
 
-                            if next_token and next_token.value and next_token.value.upper() == "ERROR":
+                            if (
+                                next_token
+                                and next_token.value
+                                and next_token.value.upper() == "ERROR"
+                            ):
                                 token_stream.consume()
-                                nested = AddStatementParser._parse_nested_statements(token_stream)
+                                nested = AddStatementParser._parse_nested_statements(
+                                    token_stream
+                                )
                                 stmt.set_not_on_size_error_clause(nested)
                 else:
                     break
@@ -199,9 +230,15 @@ class AddStatementParser(IStatementParser):
                         if t.type == TokenType.NEWLINE:
                             token_stream.consume()
                             continue
-                        if t.type == TokenType.PERIOD or (t.value and t.value.upper() in ("MOVE", "DISPLAY")):
+                        if t.type == TokenType.PERIOD or (
+                            t.value and t.value.upper() in ("MOVE", "DISPLAY")
+                        ):
                             break
-                        if t.type in (TokenType.STRING_LITERAL, TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                        if t.type in (
+                            TokenType.STRING_LITERAL,
+                            TokenType.IDENTIFIER,
+                            TokenType.NUMERIC_LITERAL,
+                        ):
                             display_stmt.add_display_item(t.value)
                         token_stream.consume()
                     nested.append(display_stmt)
@@ -224,15 +261,24 @@ class AddStatementParser(IStatementParser):
                             token_stream.consume()
                             target_token = token_stream.peek()
                             # Skip NEWLINEs before target
-                            while target_token and target_token.type == TokenType.NEWLINE:
+                            while (
+                                target_token and target_token.type == TokenType.NEWLINE
+                            ):
                                 token_stream.consume()
                                 target_token = token_stream.peek()
 
-                            if target_token and target_token.type == TokenType.IDENTIFIER:
+                            if (
+                                target_token
+                                and target_token.type == TokenType.IDENTIFIER
+                            ):
                                 move_stmt.add_target(target_token.value)
                                 token_stream.consume()
                             break
-                        if t.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.STRING_LITERAL):
+                        if t.type in (
+                            TokenType.IDENTIFIER,
+                            TokenType.NUMERIC_LITERAL,
+                            TokenType.STRING_LITERAL,
+                        ):
                             move_stmt.add_operand(t.value)
                         token_stream.consume()
                     nested.append(move_stmt)
@@ -253,13 +299,20 @@ class SubtractStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return bool(token.type == TokenType.SUBTRACT or
-                    (token.type == TokenType.IDENTIFIER and token.value and
-                     token.value.upper() == "SUBTRACT"))
+            return bool(
+                token.type == TokenType.SUBTRACT
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "SUBTRACT"
+                )
+            )
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> SubtractStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> SubtractStatement:
         """Parse a SUBTRACT statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -321,13 +374,20 @@ class MultiplyStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return bool(token.type == TokenType.MULTIPLY or
-                    (token.type == TokenType.IDENTIFIER and token.value and
-                     token.value.upper() == "MULTIPLY"))
+            return bool(
+                token.type == TokenType.MULTIPLY
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "MULTIPLY"
+                )
+            )
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> MultiplyStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> MultiplyStatement:
         """Parse a MULTIPLY statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -344,7 +404,10 @@ class MultiplyStatementParser(IStatementParser):
         if token and token.value and token.value.upper() == "BY":
             token_stream.consume()  # Skip BY
             token = token_stream.peek()
-            if token and token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+            if token and token.type in (
+                TokenType.IDENTIFIER,
+                TokenType.NUMERIC_LITERAL,
+            ):
                 stmt.add_operand(token.value)
                 token_stream.consume()
 
@@ -381,13 +444,20 @@ class DivideStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return bool(token.type == TokenType.DIVIDE or
-                    (token.type == TokenType.IDENTIFIER and token.value and
-                     token.value.upper() == "DIVIDE"))
+            return bool(
+                token.type == TokenType.DIVIDE
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "DIVIDE"
+                )
+            )
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> DivideStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> DivideStatement:
         """Parse a DIVIDE statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)
@@ -406,7 +476,10 @@ class DivideStatementParser(IStatementParser):
             if token_val_upper in ("BY", "INTO"):
                 token_stream.consume()  # Skip BY/INTO
                 token = token_stream.peek()
-                if token and token.type in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL):
+                if token and token.type in (
+                    TokenType.IDENTIFIER,
+                    TokenType.NUMERIC_LITERAL,
+                ):
                     stmt.add_operand(token.value)
                     token_stream.consume()
 
@@ -443,13 +516,20 @@ class ComputeStatementParser(IStatementParser):
             token = token_stream.peek()
             if not token:
                 return False
-            return bool(token.type == TokenType.COMPUTE or
-                    (token.type == TokenType.IDENTIFIER and token.value and
-                     token.value.upper() == "COMPUTE"))
+            return bool(
+                token.type == TokenType.COMPUTE
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "COMPUTE"
+                )
+            )
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> ComputeStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> ComputeStatement:
         """Parse a COMPUTE statement."""
         start_token = token_stream.consume()
         start_loc = start_token.location if start_token else SourceLocation(0, 0)

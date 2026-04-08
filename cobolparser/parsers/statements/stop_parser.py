@@ -20,17 +20,21 @@ class StopStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> StopStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> StopStatement:
         """Parse a STOP statement."""
         start_token = token_stream.consume()
         if not start_token:
             # Return empty statement if no token
             from ...models.ast_base import SourceLocation
+
             return StopStatement(SourceLocation(0, 0))
 
         # Create statement
         from ...models.ast_base import SourceLocation
-        location = getattr(start_token, 'location', None) or SourceLocation(0, 0)
+
+        location = getattr(start_token, "location", None) or SourceLocation(0, 0)
         stmt = StopStatement(location)
 
         # Parse STOP type: STOP RUN or STOP "literal"

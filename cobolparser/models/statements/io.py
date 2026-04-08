@@ -139,7 +139,6 @@ class IOReadStatement(CobolStatement):
         return result
 
 
-
 class IOWriteStatement(CobolStatement):
     """AST node for WRITE statements with comprehensive IBM Enterprise COBOL variation support.
 
@@ -161,7 +160,9 @@ class IOWriteStatement(CobolStatement):
         self.file_name: str | None = None  # Contract field (added)
         self.record_name: str | None = None
         self.from_clause: str | None = None
-        self.advancing_clause: dict[str, Any] | None = None  # {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"}
+        self.advancing_clause: dict[str, Any] | None = (
+            None  # {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"}
+        )
         self.delete_record: bool = False  # For VSAM DELETE
         self.at_eop_clause: list[CobolStatement] | None = None  # AT END-OF-PAGE
         self.invalid_key_clause: list[CobolStatement] | None = None
@@ -261,7 +262,6 @@ class IOWriteStatement(CobolStatement):
         return result
 
 
-
 class IOOpenStatement(CobolStatement):
     """AST node for OPEN statements with comprehensive IO variation support.
 
@@ -313,7 +313,6 @@ class IOOpenStatement(CobolStatement):
             }
         )
         return result
-
 
 
 class IOCloseStatement(CobolStatement):
@@ -370,7 +369,6 @@ class IOCloseStatement(CobolStatement):
         return result
 
 
-
 class IOAcceptStatement(CobolStatement):
     """AST node for ACCEPT statements with comprehensive IO variation support.
 
@@ -418,9 +416,7 @@ class IOAcceptStatement(CobolStatement):
         self.environment_name = name
         self.metadata["has_environment_name"] = True
 
-    def set_position(
-        self, line: int | None = None, column: int | None = None
-    ) -> None:
+    def set_position(self, line: int | None = None, column: int | None = None) -> None:
         """Set the position (AT LINE/COLUMN)."""
         self.at_line = line
         self.at_column = column
@@ -460,7 +456,6 @@ class IOAcceptStatement(CobolStatement):
             }
         )
         return result
-
 
 
 class IORewriteStatement(CobolStatement):
@@ -525,7 +520,6 @@ class IORewriteStatement(CobolStatement):
         return result
 
 
-
 class IODeleteStatement(CobolStatement):
     """IBM Enterprise COBOL DELETE statement AST node."""
 
@@ -578,7 +572,6 @@ class IODeleteStatement(CobolStatement):
             }
         )
         return result
-
 
 
 class IOStartStatement(CobolStatement):
@@ -634,7 +627,6 @@ class IOStartStatement(CobolStatement):
         return result
 
 
-
 class IOUnlockStatement(CobolStatement):
     """IBM Enterprise COBOL UNLOCK statement AST node."""
 
@@ -665,4 +657,3 @@ class IOUnlockStatement(CobolStatement):
             }
         )
         return result
-

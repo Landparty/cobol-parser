@@ -27,17 +27,29 @@ class MoveStatementParser(IStatementParser):
                 return False
             if token.type == TokenType.MOVE:
                 return True
-            if token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "MOVE":
+            if (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "MOVE"
+            ):
                 return True
             return False
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> MoveStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> MoveStatement:
         """Parse a MOVE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
-        stmt = cast(MoveStatement, factory.create(MoveStatement, start_token.location if start_token else SourceLocation(0, 0)))
+        stmt = cast(
+            MoveStatement,
+            factory.create(
+                MoveStatement,
+                start_token.location if start_token else SourceLocation(0, 0),
+            ),
+        )
 
         # Skip whitespace
         skip_whitespace(token_stream)
@@ -58,8 +70,14 @@ class MoveStatementParser(IStatementParser):
 
         # Expect TO keyword
         token = token_stream.peek()
-        if token and (token.type == TokenType.TO or
-                     (token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "TO")):
+        if token and (
+            token.type == TokenType.TO
+            or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "TO"
+            )
+        ):
             token_stream.consume()
         else:
             # Missing TO, but continue parsing
@@ -72,9 +90,26 @@ class MoveStatementParser(IStatementParser):
 
         # Build set of stop token types (only include types that exist)
         stop_token_types = set()
-        for token_type_name in ['MOVE', 'DISPLAY', 'CALL', 'ADD', 'SUBTRACT', 'MULTIPLY',
-                               'DIVIDE', 'IF', 'PERFORM', 'EVALUATE', 'STOP', 'EXIT',
-                               'GO', 'ELSE', 'WHEN', 'END_IF', 'END_EVALUATE', 'END_PERFORM']:
+        for token_type_name in [
+            "MOVE",
+            "DISPLAY",
+            "CALL",
+            "ADD",
+            "SUBTRACT",
+            "MULTIPLY",
+            "DIVIDE",
+            "IF",
+            "PERFORM",
+            "EVALUATE",
+            "STOP",
+            "EXIT",
+            "GO",
+            "ELSE",
+            "WHEN",
+            "END_IF",
+            "END_EVALUATE",
+            "END_PERFORM",
+        ]:
             if hasattr(TokenType, token_type_name):
                 stop_token_types.add(getattr(TokenType, token_type_name))
 
@@ -95,9 +130,26 @@ class MoveStatementParser(IStatementParser):
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
                 if val_upper in (
-                    "MOVE", "DISPLAY", "CALL", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE",
-                    "IF", "PERFORM", "EVALUATE", "STOP", "GO", "ENTRY",
-                    "END-MOVE", "ON", "RETURNING", "GIVING", "END-IF", "ELSE", "THEN",
+                    "MOVE",
+                    "DISPLAY",
+                    "CALL",
+                    "ADD",
+                    "SUBTRACT",
+                    "MULTIPLY",
+                    "DIVIDE",
+                    "IF",
+                    "PERFORM",
+                    "EVALUATE",
+                    "STOP",
+                    "GO",
+                    "ENTRY",
+                    "END-MOVE",
+                    "ON",
+                    "RETURNING",
+                    "GIVING",
+                    "END-IF",
+                    "ELSE",
+                    "THEN",
                 ):
                     break
 
@@ -129,8 +181,10 @@ class MoveStatementParser(IStatementParser):
             # Check for TO keyword (only if not in parens)
             if paren_depth == 0:
                 if token.type == TokenType.TO or (
-                    token.type == TokenType.IDENTIFIER and token.value and
-                    token.value.upper() == "TO"):
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "TO"
+                ):
                     break
 
             # Handle parentheses

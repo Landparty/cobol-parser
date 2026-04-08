@@ -75,7 +75,7 @@ def validate_path_within_directory(file_path: str, base_directory: str) -> bool:
             # Path is not relative to base directory
             raise PathTraversalError(
                 file_path,
-                f"Resolved path '{resolved_file}' is outside search directory '{resolved_base}'"
+                f"Resolved path '{resolved_file}' is outside search directory '{resolved_base}'",
             ) from e
     except Exception as e:
         if isinstance(e, PathTraversalError):
@@ -123,7 +123,7 @@ def suggest_similar_copybooks(
     member_name: str,
     search_config: CopybookSearchPath,
     max_suggestions: int = 3,
-    cutoff: float = 0.6
+    cutoff: float = 0.6,
 ) -> list[str]:
     """
     Find similarly-named copybooks for typo detection.
@@ -149,18 +149,13 @@ def suggest_similar_copybooks(
     # Normalize to uppercase for comparison
     member_upper = member_name.upper()
 
-    return get_close_matches(
-        member_upper,
-        available,
-        n=max_suggestions,
-        cutoff=cutoff
-    )
+    return get_close_matches(member_upper, available, n=max_suggestions, cutoff=cutoff)
 
 
 def find_copybook_file(
     member_name: str,
     search_config: CopybookSearchPath,
-    library_qualifier: str | None = None
+    library_qualifier: str | None = None,
 ) -> str:
     """
     Locate a copybook file in the configured search paths.
@@ -201,7 +196,7 @@ def find_copybook_file(
         case_variants = [
             member_name.upper(),
             member_name.lower(),
-            member_name.capitalize()
+            member_name.capitalize(),
         ]
         for variant in case_variants:
             if variant not in possible_names:
@@ -236,9 +231,7 @@ def find_copybook_file(
                 file_size = os.path.getsize(file_path)
                 if file_size > search_config.max_file_size:
                     raise CopybookSizeExceededError(
-                        file_path,
-                        file_size,
-                        search_config.max_file_size
+                        file_path, file_size, search_config.max_file_size
                     )
 
                 return os.path.abspath(file_path)
@@ -337,10 +330,10 @@ class PathResolver:
 
 
 __all__ = [
-    'normalize_path',
-    'validate_path_within_directory',
-    'find_copybook_file',
-    'get_available_copybooks',
-    'suggest_similar_copybooks',
-    'PathResolver',
+    "normalize_path",
+    "validate_path_within_directory",
+    "find_copybook_file",
+    "get_available_copybooks",
+    "suggest_similar_copybooks",
+    "PathResolver",
 ]

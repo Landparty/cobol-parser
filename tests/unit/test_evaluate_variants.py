@@ -1,10 +1,5 @@
-import pytest
-
-from cobolparser import CobolParser
+from cobolparser import CobolParser, ParseResult
 from cobolparser.models.program import CobolProgram
-from cobolparser.models.statements import CobolStatement
-from cobolparser.models.statements import PerformStatement
-from cobolparser import ParseResult
 from cobolparser.models.statements import EvaluateStatement
 
 
@@ -23,26 +18,26 @@ def _parse_and_get_program(source: str) -> CobolProgram:
 def _first_evaluate(program: CobolProgram):
     proc = program.get_division("PROCEDURE")
     assert proc is not None, "Procedure division missing"
-    
+
     # Search in direct paragraphs (new architecture)
     for paragraph in proc.paragraphs:
         for stmt in paragraph.statements:
             if isinstance(stmt, EvaluateStatement):
                 return stmt
-    
+
     # Search in sections -> paragraphs -> statements (current architecture)
     for section in proc.sections:
         for paragraph in section.paragraphs:
             for stmt in paragraph.statements:
                 if isinstance(stmt, EvaluateStatement):
                     return stmt
-    
+
     # Fallback: search all children (legacy)
     for section in proc.sections:
         for child in section.children:
             if isinstance(child, EvaluateStatement):
                 return child
-    
+
     raise AssertionError("No EVALUATE statement found")
 
 
@@ -66,7 +61,7 @@ def test_single_subject_literals_and_ranges():
     program = _parse_and_get_program(_fixed_source(source))
     ev = _first_evaluate(program)
     assert ev.statement_type == "EVALUATE"
-    subjects = [s for s in ev.subjects]
+    subjects = list(ev.subjects)
     assert subjects == ["WS-GRADE"]
     assert len(ev.when_clauses) == 2
     selectors_first = ev.when_clauses[0].selectors

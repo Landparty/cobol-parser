@@ -18,12 +18,12 @@ def get_default_case_sensitivity() -> bool:
         True for case-sensitive filesystems (Linux/Unix),
         False for case-insensitive filesystems (Windows, macOS)
     """
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         return False  # Windows is case-insensitive
-    elif sys.platform == 'darwin':
+    elif sys.platform == "darwin":
         return False  # macOS is case-insensitive by default
     else:
-        return True   # Linux/Unix is case-sensitive
+        return True  # Linux/Unix is case-sensitive
 
 
 # Size limits for copybook processing
@@ -41,6 +41,7 @@ class ReplacingClause:
         replace_text: Text to replace with
         mode: Replacement mode - 'ALL' (default), 'LEADING', or 'TRAILING'
     """
+
     find_text: str
     replace_text: str
     mode: str = "ALL"  # ALL, LEADING, TRAILING
@@ -64,6 +65,7 @@ class SuppressClause:
         line_ranges: List of (start, end) tuples for specific line suppression
         single_lines: List of individual lines to suppress
     """
+
     suppress_all: bool = False
     line_ranges: list[tuple[int, int]] = field(default_factory=list)
     single_lines: list[int] = field(default_factory=list)
@@ -102,6 +104,7 @@ class ExpansionStatistics:
         warnings: List of non-fatal warnings encountered during expansion
         total_bytes_processed: Total bytes processed across all copybooks
     """
+
     parse_time_ms: float = 0.0
     file_count: int = 0
     total_lines: int = 0
@@ -135,6 +138,7 @@ class CopybookExpansion:
         source_location_map: Optional mapping of expanded line numbers to (source_file, original_line)
         statistics: Performance metrics for the expansion operation
     """
+
     expanded_source: str
     included_copybooks: list[str] = field(default_factory=list)
     max_depth_reached: int = 0
@@ -171,6 +175,7 @@ class CopyStatement:
         source_location: Location in source where COPY statement appears (file, line, column)
         original_text: The original COPY statement text from source
     """
+
     member_name: str
     library_qualifier: str | None = None
     replacing_clauses: list[ReplacingClause] | None = None
@@ -199,7 +204,9 @@ class CopyStatement:
         if self.library_qualifier:
             result["library_qualifier"] = self.library_qualifier
         if self.replacing_clauses:
-            result["replacing_clauses"] = [rc.to_dict() for rc in self.replacing_clauses]
+            result["replacing_clauses"] = [
+                rc.to_dict() for rc in self.replacing_clauses
+            ]
         if self.suppress_clause:
             result["suppress_clause"] = self.suppress_clause.to_dict()
         if self.source_location:
@@ -221,8 +228,11 @@ class CopybookSearchPath:
         max_file_size: Maximum size in bytes for a single copybook file
         max_total_size: Maximum total size in bytes for all expanded content
     """
+
     directories: list[str] = field(default_factory=list)
-    extensions: list[str] = field(default_factory=lambda: [".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB", ""])
+    extensions: list[str] = field(
+        default_factory=lambda: [".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB", ""]
+    )
     case_sensitive: bool = field(default_factory=get_default_case_sensitivity)
     max_nesting_depth: int = 100
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES
@@ -256,6 +266,7 @@ class ExpansionContext:
         total_bytes: Running total of bytes processed
         defined_symbols: Symbols defined via >>DEFINE for conditional compilation
     """
+
     current_file: str = ""
     expansion_stack: list[str] = field(default_factory=list)
     source_maps: dict[int, tuple[str, int]] = field(default_factory=dict)
@@ -292,11 +303,16 @@ class ExpansionContext:
         self.content_cache[key] = value
         self.cache_order.append(key)
 
-    def get_cache_key(self, copybook_path: str, replacing_clauses: list | None = None) -> str:
+    def get_cache_key(
+        self, copybook_path: str, replacing_clauses: list | None = None
+    ) -> str:
         """Generate cache key for a copybook with specific replacements."""
         if replacing_clauses:
-            replace_str = str(sorted((rc.find_text, rc.replace_text, rc.mode)
-                                     for rc in replacing_clauses))
+            replace_str = str(
+                sorted(
+                    (rc.find_text, rc.replace_text, rc.mode) for rc in replacing_clauses
+                )
+            )
             return f"{copybook_path}::{replace_str}"
         return copybook_path
 
@@ -318,15 +334,15 @@ SourceLocationMap = dict[int, tuple[str, int]]
 
 
 __all__ = [
-    'CopybookExpansion',
-    'CopyStatement',
-    'CopybookSearchPath',
-    'ExpansionContext',
-    'ExpansionStatistics',
-    'ReplacingClause',
-    'SuppressClause',
-    'SourceLocationMap',
-    'get_default_case_sensitivity',
-    'MAX_COPYBOOK_SIZE_BYTES',
-    'MAX_TOTAL_EXPANSION_BYTES',
+    "CopybookExpansion",
+    "CopyStatement",
+    "CopybookSearchPath",
+    "ExpansionContext",
+    "ExpansionStatistics",
+    "ReplacingClause",
+    "SuppressClause",
+    "SourceLocationMap",
+    "get_default_case_sensitivity",
+    "MAX_COPYBOOK_SIZE_BYTES",
+    "MAX_TOTAL_EXPANSION_BYTES",
 ]

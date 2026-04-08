@@ -74,6 +74,7 @@ class DisplayStatement(CobolStatement):
 
 class StringStatement(CobolStatement):
     """AST node for STRING statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("STRING", location)
         self.on_overflow: list[CobolStatement] | None = None
@@ -128,6 +129,7 @@ class StringStatement(CobolStatement):
 
 class UnstringStatement(CobolStatement):
     """AST node for UNSTRING statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("UNSTRING", location)
         self.on_overflow: list[CobolStatement] | None = None
@@ -145,12 +147,17 @@ class UnstringStatement(CobolStatement):
         """Add a DELIMITED BY delimiter."""
         self.delimiters.append(delimiter)
 
-    def add_into_target(self, target: str, delimiter_var: str | None = None, count_var: str | None = None) -> None:
+    def add_into_target(
+        self,
+        target: str,
+        delimiter_var: str | None = None,
+        count_var: str | None = None,
+    ) -> None:
         """Add an INTO target with optional DELIMITER IN and COUNT IN variables."""
         into_info = {
             "target": target,
             "delimiter_var": delimiter_var,
-            "count_var": count_var
+            "count_var": count_var,
         }
         self.into_targets.append(into_info)
 

@@ -5,14 +5,15 @@ statements parse correctly for VSAM indexed file programs.
 """
 
 import pytest
-from cobolparser import parse_cobol, ErrorRecoveryMode
+
+from cobolparser import ErrorRecoveryMode, parse_cobol
 from cobolparser.models.statements import (
+    IOCloseStatement,
+    IODeleteStatement,
     IOOpenStatement,
     IOReadStatement,
-    IOStartStatement,
     IORewriteStatement,
-    IODeleteStatement,
-    IOCloseStatement,
+    IOStartStatement,
 )
 
 pytestmark = pytest.mark.integration

@@ -1,12 +1,13 @@
 """Test suite for CALL statement parsing - Phase 2 Implementation.
 
-This module implements test coverage for CALL statement RETURNING/GIVING 
+This module implements test coverage for CALL statement RETURNING/GIVING
 mutual exclusivity (FR-006a) - the critical blocking issue resolved in T014.
 
 Tests use the parse_cobol API following modern test patterns.
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
@@ -24,10 +25,10 @@ class TestCallReturningGiving:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert call_stmt.returning_parameter == "WS-RESULT"
         assert call_stmt.giving_parameter is None
@@ -43,13 +44,13 @@ class TestCallReturningGiving:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert call_stmt.giving_parameter == "WS-OUTPUT"
-        
+
         assert call_stmt is not None
         assert call_stmt.giving_parameter == "WS-OUTPUT"
         assert call_stmt.returning_parameter is None
@@ -65,10 +66,10 @@ class TestCallReturningGiving:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert call_stmt.returning_parameter is None
         assert call_stmt.giving_parameter is None
@@ -88,10 +89,10 @@ class TestCallReturningGiving:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_stmt = calls[0]
         assert len(call_stmt.using_parameters) >= 1
         assert call_stmt.returning_parameter == "WS-RESULT"

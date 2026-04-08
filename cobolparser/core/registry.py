@@ -11,7 +11,6 @@ and searches them using first-match strategy - the first parser whose
 matches() method returns True is used to parse the statement.
 """
 
-
 from .interfaces import IStatementParser, ITokenStream
 
 
@@ -53,7 +52,7 @@ class StatementParserRegistry:
         Raises:
             TypeError: If parser doesn't implement IStatementParser
         """
-        if not hasattr(parser, 'parse') or not hasattr(parser, 'matches'):
+        if not hasattr(parser, "parse") or not hasattr(parser, "matches"):
             raise TypeError("Parser must implement IStatementParser interface")
 
         if position is not None:
@@ -79,6 +78,7 @@ class StatementParserRegistry:
                     return parser
             except Exception as e:
                 import warnings
+
                 warnings.warn(
                     f"Parser {parser.__class__.__name__}.matches() raised "
                     f"{type(e).__name__}: {e}",

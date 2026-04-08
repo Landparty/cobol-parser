@@ -40,7 +40,9 @@ class GoStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> GoStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> GoStatement:
         """Parse a GO statement.
 
         Handles:
@@ -60,29 +62,39 @@ class GoStatementParser(IStatementParser):
         context = get_parse_context(token_stream)
 
         stmt = GoStatement(
-            start_token.location if hasattr(start_token, 'location') else SourceLocation(0, 0)
+            start_token.location
+            if hasattr(start_token, "location")
+            else SourceLocation(0, 0)
         )
 
         # Expect TO keyword
         if token_stream.is_empty():
-            report_parse_error(context, "GO statement requires TO keyword", stmt.location)
+            report_parse_error(
+                context, "GO statement requires TO keyword", stmt.location
+            )
             return stmt
 
         next_token = token_stream.peek()
         if not next_token or not next_token.value or next_token.value.upper() != "TO":
-            report_parse_error(context, "GO statement requires TO keyword", stmt.location)
+            report_parse_error(
+                context, "GO statement requires TO keyword", stmt.location
+            )
             return stmt
 
         token_stream.consume()  # consume TO
 
         # Parse target paragraph name
         if token_stream.is_empty():
-            report_parse_error(context, "GO TO statement requires a target paragraph", stmt.location)
+            report_parse_error(
+                context, "GO TO statement requires a target paragraph", stmt.location
+            )
             return stmt
 
         next_token = token_stream.peek()
         if not next_token or not next_token.value:
-            report_parse_error(context, "GO TO statement requires a target paragraph", stmt.location)
+            report_parse_error(
+                context, "GO TO statement requires a target paragraph", stmt.location
+            )
             return stmt
 
         target_name = next_token.value
@@ -100,7 +112,9 @@ class GoStatementParser(IStatementParser):
 
         return stmt
 
-    def _parse_depending_on_clause(self, token_stream: ITokenStream, stmt: GoStatement) -> None:
+    def _parse_depending_on_clause(
+        self, token_stream: ITokenStream, stmt: GoStatement
+    ) -> None:
         """Parse the optional DEPENDING ON clause of a GO statement.
 
         Args:

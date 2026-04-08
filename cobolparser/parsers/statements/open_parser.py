@@ -31,7 +31,9 @@ class OpenStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Any | None = None) -> IOOpenStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IOOpenStatement:
         """Parse an OPEN statement."""
         start_token = token_stream.consume()
         factory = get_factory()
@@ -81,11 +83,21 @@ class OpenStatementParser(IStatementParser):
 
         # Optional WITH REPOSITION
         token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "WITH":
+        if (
+            token
+            and token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "WITH"
+        ):
             token_stream.consume()
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "REPOSITION":
+            if (
+                token
+                and token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "REPOSITION"
+            ):
                 token_stream.consume()
                 stmt.set_reposition(True)
                 skip_whitespace(token_stream)

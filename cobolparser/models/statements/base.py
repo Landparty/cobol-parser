@@ -181,12 +181,12 @@ class LogicalExpression(CobolExpression):
         result.update(
             {
                 "operator": self.operator,
-                "left_condition": self.left_condition.to_dict()
-                if self.left_condition
-                else None,
-                "right_condition": self.right_condition.to_dict()
-                if self.right_condition
-                else None,
+                "left_condition": (
+                    self.left_condition.to_dict() if self.left_condition else None
+                ),
+                "right_condition": (
+                    self.right_condition.to_dict() if self.right_condition else None
+                ),
             }
         )
         return result

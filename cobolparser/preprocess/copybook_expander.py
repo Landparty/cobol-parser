@@ -60,32 +60,32 @@ def detect_encoding(file_path: str) -> str:
         'utf-8'
     """
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             raw_bytes = f.read()
 
         # Check for UTF-8 BOM
-        if raw_bytes.startswith(b'\xef\xbb\xbf'):
-            return 'utf-8-sig'
+        if raw_bytes.startswith(b"\xef\xbb\xbf"):
+            return "utf-8-sig"
 
         # Try UTF-8 decode
         try:
-            raw_bytes.decode('utf-8', errors='strict')
-            return 'utf-8'
+            raw_bytes.decode("utf-8", errors="strict")
+            return "utf-8"
         except UnicodeDecodeError:
             pass
 
         # Check for EBCDIC indicators
         # EBCDIC uses 0x40 for space, while ASCII uses 0x20
         # Count occurrences to detect EBCDIC
-        space_ebcdic = raw_bytes.count(b'\x40')
-        space_ascii = raw_bytes.count(b'\x20')
+        space_ebcdic = raw_bytes.count(b"\x40")
+        space_ascii = raw_bytes.count(b"\x20")
 
         if space_ebcdic > space_ascii and space_ebcdic > len(raw_bytes) * 0.05:
             # Likely EBCDIC (CP037 is common IBM mainframe encoding)
-            return 'cp037'
+            return "cp037"
 
         # Fallback to ASCII
-        return 'ascii'
+        return "ascii"
 
     except (OSError, ValueError) as e:
         raise EncodingError(file_path, f"Failed to detect encoding: {str(e)}") from e
@@ -107,16 +107,15 @@ def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
     """
     try:
         # Decode using detected encoding
-        text = content.decode(detected_encoding, errors='replace')
+        text = content.decode(detected_encoding, errors="replace")
         return text
     except Exception:
         # Fallback to ASCII with replacement
         try:
-            return content.decode('ascii', errors='replace')
+            return content.decode("ascii", errors="replace")
         except Exception as e2:
             raise EncodingError(
-                "<content>",
-                f"Failed to convert from {detected_encoding}: {str(e2)}"
+                "<content>", f"Failed to convert from {detected_encoding}: {str(e2)}"
             ) from e2
 
 
@@ -142,7 +141,7 @@ def read_file_with_encoding(file_path: str) -> str:
     encoding = detect_encoding(file_path)
 
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             raw_content = f.read()
 
         return convert_to_utf8(raw_content, encoding)
@@ -211,8 +210,7 @@ def expand_copybooks(
     # Pre-process conditional compilation if requested
     if process_conditionals:
         source_code = preprocess_conditional_compilation(
-            source_code,
-            defined_symbols or {}
+            source_code, defined_symbols or {}
         )
 
     # Create search configuration
@@ -240,7 +238,7 @@ def expand_copybooks(
     # Initialize statistics
     stats = ExpansionStatistics()
     stats.file_count = 1  # Count main program
-    stats.total_bytes_processed = len(source_code.encode('utf-8'))
+    stats.total_bytes_processed = len(source_code.encode("utf-8"))
 
     # Track included copybooks
     included_copybooks: list[str] = []
@@ -289,7 +287,7 @@ def expand_copybooks(
         included_copybooks=included_copybooks,
         max_depth_reached=max_depth,
         source_location_map=context.source_maps if preserve_source_locations else None,
-        statistics=stats
+        statistics=stats,
     )
 
 
@@ -333,8 +331,7 @@ def _expand_source_recursive(
     # Check nesting depth
     if context.current_depth > path_resolver.search_config.max_nesting_depth:
         raise NestingDepthError(
-            context.current_depth,
-            path_resolver.search_config.max_nesting_depth
+            context.current_depth, path_resolver.search_config.max_nesting_depth
         )
 
     # Check for circular reference
@@ -348,7 +345,9 @@ def _expand_source_recursive(
     source_no_comments = remove_comment_lines(source_code)
     source_stripped = strip_sequence_area(source_no_comments)
     # We must merge continuation lines to find statements split across lines
-    normalized_source = normalize_continuation_lines(source_stripped, indicator_position=0)
+    normalized_source = normalize_continuation_lines(
+        source_stripped, indicator_position=0
+    )
 
     # Extract COPY statements using the robust lexer on normalized source
     lexer = CopyStatementLexer(normalized_source, source_file)
@@ -357,7 +356,6 @@ def _expand_source_recursive(
     # If no COPY statements, return source unchanged to preserve full fidelity
     if not copy_statements:
         return source_code, context.current_depth, False
-
 
     # Push current file onto stack
 
@@ -369,20 +367,18 @@ def _expand_source_recursive(
     expanded_source = normalized_source
     for statement in reversed(copy_statements):
         # Check cache first (for diamond dependency optimization)
-        context.get_cache_key(
-            statement.member_name,
-            statement.replacing_clauses
-        )
+        context.get_cache_key(statement.member_name, statement.replacing_clauses)
 
         # Find copybook file
         copybook_path = path_resolver.resolve(
-            statement.member_name,
-            statement.library_qualifier
+            statement.member_name, statement.library_qualifier
         )
 
         # Check if we have a cached expansion (without nested COPY processing)
         # Note: We can only use cache for the same file + same replacements
-        full_cache_key = context.get_cache_key(copybook_path, statement.replacing_clauses)
+        full_cache_key = context.get_cache_key(
+            copybook_path, statement.replacing_clauses
+        )
 
         expanded_copybook = context.cache_get(full_cache_key)
         if expanded_copybook is not None:
@@ -392,15 +388,14 @@ def _expand_source_recursive(
             copybook_content = read_file_with_encoding(copybook_path)
 
             # Update total bytes and check limit
-            content_size = len(copybook_content.encode('utf-8'))
+            content_size = len(copybook_content.encode("utf-8"))
             context.total_bytes += content_size
             if stats:
                 stats.total_bytes_processed = context.total_bytes
 
             if context.total_bytes > path_resolver.search_config.max_total_size:
                 raise TotalExpansionSizeExceededError(
-                    context.total_bytes,
-                    path_resolver.search_config.max_total_size
+                    context.total_bytes, path_resolver.search_config.max_total_size
                 )
 
             # Validate copybook content if requested
@@ -416,9 +411,7 @@ def _expand_source_recursive(
                 if statement_start != -1:
                     pre_context = expanded_source[:statement_start]
                     level_warnings = validate_level_numbers(
-                        pre_context,
-                        copybook_content,
-                        copybook_path
+                        pre_context, copybook_content, copybook_path
                     )
                     if stats and level_warnings:
                         stats.warnings.extend(level_warnings)
@@ -426,8 +419,7 @@ def _expand_source_recursive(
             # Process conditional compilation directives if requested
             if process_conditionals:
                 copybook_content = preprocess_conditional_compilation(
-                    copybook_content,
-                    context.defined_symbols
+                    copybook_content, context.defined_symbols
                 )
 
             # Track this copybook
@@ -437,8 +429,7 @@ def _expand_source_recursive(
             # Apply REPLACING clause if present (using enhanced function)
             if statement.replacing_clauses:
                 copybook_content = apply_replacing_clauses(
-                    copybook_content,
-                    statement.replacing_clauses
+                    copybook_content, statement.replacing_clauses
                 )
 
             # Handle SUPPRESS clause (for listing control - we still include the content)
@@ -449,17 +440,19 @@ def _expand_source_recursive(
             context.current_depth += 1
             context.current_file = copybook_path
 
-            expanded_copybook, nested_depth, nested_normalized = _expand_source_recursive(
-                copybook_content,
-                copybook_path,
-                path_resolver,
-                context,
-                preserve_locations,
-                included_copybooks,
-                validate_content,
-                validate_levels,
-                process_conditionals,
-                stats,
+            expanded_copybook, nested_depth, nested_normalized = (
+                _expand_source_recursive(
+                    copybook_content,
+                    copybook_path,
+                    path_resolver,
+                    context,
+                    preserve_locations,
+                    included_copybooks,
+                    validate_content,
+                    validate_levels,
+                    process_conditionals,
+                    stats,
+                )
             )
 
             # If the nested content is NOT normalized (i.e. it had no COPY statements and was returned as-is),
@@ -468,8 +461,9 @@ def _expand_source_recursive(
             if not nested_normalized:
                 nested_no_comments = remove_comment_lines(expanded_copybook)
                 nested_stripped = strip_sequence_area(nested_no_comments)
-                expanded_copybook = normalize_continuation_lines(nested_stripped, indicator_position=0)
-
+                expanded_copybook = normalize_continuation_lines(
+                    nested_stripped, indicator_position=0
+                )
 
             context.current_depth -= 1
             context.current_file = source_file
@@ -495,9 +489,9 @@ def _expand_source_recursive(
             pass
 
         expanded_source = (
-            expanded_source[:statement_start] +
-            expanded_copybook +
-            expanded_source[statement_end:]
+            expanded_source[:statement_start]
+            + expanded_copybook
+            + expanded_source[statement_end:]
         )
 
     # Pop current file from stack
@@ -509,11 +503,11 @@ def _expand_source_recursive(
 
 
 __all__ = [
-    'detect_encoding',
-    'convert_to_utf8',
-    'read_file_with_encoding',
-    'expand_copybooks',
-    'parse_cobol_with_expansion',
+    "detect_encoding",
+    "convert_to_utf8",
+    "read_file_with_encoding",
+    "expand_copybooks",
+    "parse_cobol_with_expansion",
 ]
 
 
@@ -562,14 +556,12 @@ def parse_cobol_with_expansion(
         source_code=source_code,
         copybook_paths=copybook_paths,
         max_nesting_depth=max_nesting_depth,
-        preserve_source_locations=False  # Parser will track its own locations
+        preserve_source_locations=False,  # Parser will track its own locations
     )
 
     # Parse the expanded source
     parse_result = parse_cobol(
-        source=expansion.expanded_source,
-        filename=filename,
-        **parser_kwargs
+        source=expansion.expanded_source, filename=filename, **parser_kwargs
     )
 
     return parse_result

@@ -9,12 +9,13 @@ This module systematically tests EVALUATE statement variants including:
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
 class TestEvaluateSingleSubject:
     """Test EVALUATE with single subject."""
-    
+
     def test_evaluate_single_subject_literal(self):
         """Test EVALUATE with literal subject."""
         source = """
@@ -32,10 +33,10 @@ class TestEvaluateSingleSubject:
         result = parse_cobol(source)
         assert result.success
         assert result.ast is not None
-        
+
         evaluates = result.ast.find_statements("EVALUATE")
         assert len(evaluates) >= 1
-    
+
     def test_evaluate_single_subject_variable(self):
         """Test EVALUATE with variable subject."""
         source = """
@@ -57,7 +58,7 @@ class TestEvaluateSingleSubject:
         assert result.success
         evaluates = result.ast.find_statements("EVALUATE")
         assert len(evaluates) >= 1
-    
+
     def test_evaluate_numeric_subject(self):
         """Test EVALUATE with numeric subject."""
         source = """
@@ -83,7 +84,7 @@ class TestEvaluateSingleSubject:
 
 class TestEvaluateMultipleSubjects:
     """Test EVALUATE with multiple subjects (ALSO)."""
-    
+
     def test_evaluate_two_subjects(self):
         """Test EVALUATE with two subjects (ALSO)."""
         source = """
@@ -102,7 +103,7 @@ class TestEvaluateMultipleSubjects:
         assert result.success
         evaluates = result.ast.find_statements("EVALUATE")
         assert len(evaluates) >= 1
-    
+
     def test_evaluate_three_subjects(self):
         """Test EVALUATE with three subjects."""
         source = """
@@ -121,7 +122,7 @@ class TestEvaluateMultipleSubjects:
 
 class TestEvaluateWhenClause:
     """Test various WHEN clause conditions."""
-    
+
     def test_when_literal_values(self):
         """Test WHEN with literal values."""
         source = """
@@ -140,7 +141,7 @@ class TestEvaluateWhenClause:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_when_range_thru(self):
         """Test WHEN with THRU range."""
         source = """
@@ -157,7 +158,7 @@ class TestEvaluateWhenClause:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_when_true_false(self):
         """Test WHEN TRUE/FALSE."""
         source = """
@@ -174,7 +175,7 @@ class TestEvaluateWhenClause:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_when_any(self):
         """Test WHEN ANY (matches anything)."""
         source = """
@@ -193,7 +194,7 @@ class TestEvaluateWhenClause:
 
 class TestEvaluateWhenOther:
     """Test WHEN OTHER (default case)."""
-    
+
     def test_when_other_alone(self):
         """Test WHEN OTHER as default."""
         source = """
@@ -210,7 +211,7 @@ class TestEvaluateWhenOther:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_when_other_placement(self):
         """Test WHEN OTHER must be last."""
         source = """
@@ -233,7 +234,7 @@ class TestEvaluateWhenOther:
 
 class TestEvaluateMultipleWhenConditions:
     """Test WHEN with multiple alternative conditions."""
-    
+
     def test_when_with_also_multiple_selectors(self):
         """Test multiple WHEN ALSO conditions."""
         source = """
@@ -256,7 +257,7 @@ class TestEvaluateMultipleWhenConditions:
 
 class TestEvaluateComplexSelectors:
     """Test EVALUATE with complex selectors."""
-    
+
     def test_evaluate_with_conditions(self):
         """Test EVALUATE using conditions instead of values."""
         source = """
@@ -278,7 +279,7 @@ class TestEvaluateComplexSelectors:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_evaluate_with_logical_conditions(self):
         """Test EVALUATE with AND/OR conditions."""
         source = """
@@ -299,7 +300,7 @@ class TestEvaluateComplexSelectors:
 
 class TestEvaluateSerialization:
     """Test EVALUATE statement serialization."""
-    
+
     def test_evaluate_to_dict(self):
         """Test EVALUATE statement to_dict()."""
         source = """
@@ -316,10 +317,10 @@ class TestEvaluateSerialization:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         evaluates = result.ast.find_statements("EVALUATE")
         assert len(evaluates) >= 1
-        
+
         eval_dict = evaluates[0].to_dict()
         assert eval_dict is not None
         assert isinstance(eval_dict, dict)
@@ -327,7 +328,7 @@ class TestEvaluateSerialization:
 
 class TestEvaluateEdgeCases:
     """Test EVALUATE edge cases."""
-    
+
     def test_evaluate_empty_when(self):
         """Test EVALUATE with empty WHEN clause (edge case)."""
         source = """
@@ -344,7 +345,7 @@ class TestEvaluateEdgeCases:
         result = parse_cobol(source)
         # May succeed or fail depending on parser strictness
         assert result is not None
-    
+
     def test_nested_evaluate(self):
         """Test nested EVALUATE statements."""
         source = """
@@ -365,7 +366,7 @@ class TestEvaluateEdgeCases:
         evaluates = result.ast.find_statements("EVALUATE")
         # Should have 2 EVALUATE statements
         assert len(evaluates) >= 2
-    
+
     def test_evaluate_with_statements_in_when(self):
         """Test EVALUATE with multiple statements in WHEN."""
         source = """
@@ -388,7 +389,7 @@ class TestEvaluateEdgeCases:
 
 class TestEvaluateGetAllStatements:
     """Test get_all_statements with EVALUATE."""
-    
+
     def test_get_all_statements_includes_evaluate(self):
         """Test get_all_statements includes EVALUATE."""
         source = """
@@ -403,8 +404,8 @@ class TestEvaluateGetAllStatements:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        if hasattr(result.ast, 'get_all_statements'):
+
+        if hasattr(result.ast, "get_all_statements"):
             all_stmts = result.ast.get_all_statements()
             assert len(all_stmts) >= 1
 
