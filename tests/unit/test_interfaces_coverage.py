@@ -133,16 +133,21 @@ class TestITokenStreamContextProperty:
 
     def test_context_getter_returns_none(self):
         """Default ITokenStream.context returns None."""
+
         # We need a concrete subclass to test the default implementation
         class DummyStream(ITokenStream):
             def peek(self, offset=0):
                 return None
+
             def consume(self):
                 raise StopIteration
+
             def expect(self, value):
                 raise StopIteration
+
             def is_empty(self):
                 return True
+
             def skip_whitespace_and_comments(self):
                 pass
 
@@ -151,15 +156,20 @@ class TestITokenStreamContextProperty:
 
     def test_context_setter_is_noop(self):
         """Default ITokenStream.context setter does nothing."""
+
         class DummyStream(ITokenStream):
             def peek(self, offset=0):
                 return None
+
             def consume(self):
                 raise StopIteration
+
             def expect(self, value):
                 raise StopIteration
+
             def is_empty(self):
                 return True
+
             def skip_whitespace_and_comments(self):
                 pass
 

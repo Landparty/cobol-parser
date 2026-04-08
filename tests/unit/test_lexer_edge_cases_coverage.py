@@ -187,5 +187,9 @@ class TestSkipWhitespace:
     def test_whitespace_skipped_between_tokens(self):
         lexer = CobolLexer("MOVE     WS-A   TO   WS-B.", free_form=True)
         tokens = lexer.tokenize()
-        identifiers = [t for t in tokens if t.type == TokenType.IDENTIFIER or t.type in (TokenType.MOVE,)]
+        identifiers = [
+            t
+            for t in tokens
+            if t.type == TokenType.IDENTIFIER or t.type in (TokenType.MOVE,)
+        ]
         assert len(identifiers) >= 1

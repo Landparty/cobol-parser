@@ -43,9 +43,7 @@ class TestGetAvailableCopybooks:
         d.mkdir()
         (d / "MYMEMBER").write_text("01 MY-REC.")
 
-        config = CopybookSearchPath(
-            directories=[str(d)], extensions=[""]
-        )
+        config = CopybookSearchPath(directories=[str(d)], extensions=[""])
         result = get_available_copybooks(config)
         assert "MYMEMBER" in result
 
@@ -63,9 +61,7 @@ class TestFindCopybookFileCaseInsensitive:
         d.mkdir()
         (d / "EMPLOYEE.cpy").write_text("01 EMP.")
 
-        config = CopybookSearchPath(
-            directories=[str(d)], case_sensitive=False
-        )
+        config = CopybookSearchPath(directories=[str(d)], case_sensitive=False)
         path = find_copybook_file("employee", config)
         assert os.path.isfile(path)
 
@@ -74,9 +70,7 @@ class TestFindCopybookFileCaseInsensitive:
         d.mkdir()
         (d / "employee.cpy").write_text("01 EMP.")
 
-        config = CopybookSearchPath(
-            directories=[str(d)], case_sensitive=False
-        )
+        config = CopybookSearchPath(directories=[str(d)], case_sensitive=False)
         path = find_copybook_file("EMPLOYEE", config)
         assert os.path.isfile(path)
 
