@@ -10,12 +10,13 @@ This module systematically tests all PERFORM variants including:
 """
 
 import pytest
-from cobolparser import parse_cobol, ErrorRecoveryMode
+
+from cobolparser import parse_cobol
 
 
 class TestPerformUntilBasic:
     """Test basic PERFORM UNTIL functionality."""
-    
+
     def test_perform_until_simple(self):
         """Test simple PERFORM UNTIL loop."""
         source = """
@@ -34,14 +35,14 @@ class TestPerformUntilBasic:
         result = parse_cobol(source)
         assert result.success
         assert result.ast is not None
-        
+
         # Find the PERFORM statement
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-        
+
         perform = performs[0]
-        assert hasattr(perform, 'condition') or hasattr(perform, 'until_condition')
-    
+        assert hasattr(perform, "condition") or hasattr(perform, "until_condition")
+
     def test_perform_until_with_test_before(self):
         """Test PERFORM UNTIL WITH TEST BEFORE (default)."""
         source = """
@@ -57,7 +58,7 @@ class TestPerformUntilBasic:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_until_with_test_after(self):
         """Test PERFORM UNTIL WITH TEST AFTER."""
         source = """
@@ -77,7 +78,7 @@ class TestPerformUntilBasic:
 
 class TestPerformTimes:
     """Test PERFORM n TIMES functionality."""
-    
+
     def test_perform_times_numeric_literal(self):
         """Test PERFORM ... TIMES with numeric literal."""
         source = """
@@ -93,7 +94,7 @@ class TestPerformTimes:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_times_variable(self):
         """Test PERFORM ... TIMES with variable."""
         source = """
@@ -112,7 +113,7 @@ class TestPerformTimes:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_times_to_dict(self):
         """Test PERFORM TIMES serialization to dictionary."""
         source = """
@@ -128,7 +129,7 @@ class TestPerformTimes:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-        
+
         perform_dict = performs[0].to_dict()
         assert perform_dict is not None
         assert isinstance(perform_dict, dict)
@@ -136,7 +137,7 @@ class TestPerformTimes:
 
 class TestPerformVarying:
     """Test PERFORM VARYING (loop with index modification)."""
-    
+
     def test_perform_varying_simple(self):
         """Test PERFORM VARYING with simple range."""
         source = """
@@ -156,7 +157,7 @@ class TestPerformVarying:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_varying_with_test_before(self):
         """Test PERFORM VARYING WITH TEST BEFORE."""
         source = """
@@ -177,7 +178,7 @@ class TestPerformVarying:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_varying_with_test_after(self):
         """Test PERFORM VARYING WITH TEST AFTER."""
         source = """
@@ -202,7 +203,7 @@ class TestPerformVarying:
 
 class TestPerformThru:
     """Test PERFORM paragraph-name THRU paragraph-name."""
-    
+
     def test_perform_thru_simple(self):
         """Test PERFORM paragraph THRU paragraph."""
         source = """
@@ -224,7 +225,7 @@ class TestPerformThru:
         # Should have one PERFORM THRU
         assert len(performs) >= 1
         assert any(p.thru_paragraph is not None for p in performs)
-    
+
     def test_perform_thru_with_times(self):
         """Test PERFORM paragraph THRU paragraph n TIMES."""
         source = """
@@ -244,7 +245,7 @@ class TestPerformThru:
 
 class TestPerformNested:
     """Test nested PERFORM statements."""
-    
+
     def test_nested_perform_until(self):
         """Test PERFORM UNTIL containing another PERFORM."""
         source = """
@@ -262,7 +263,7 @@ class TestPerformNested:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 2
-    
+
     def test_deeply_nested_perform(self):
         """Test deeply nested PERFORM statements."""
         source = """
@@ -286,7 +287,7 @@ class TestPerformNested:
 
 class TestPerformEdgeCases:
     """Test edge cases and error conditions."""
-    
+
     def test_perform_without_end_perform(self):
         """Test PERFORM at paragraph level (without END-PERFORM)."""
         source = """
@@ -302,7 +303,7 @@ class TestPerformEdgeCases:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_get_all_statements(self):
         """Test get_all_statements includes nested PERFORM statements."""
         source = """
@@ -319,10 +320,14 @@ class TestPerformEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        all_stmts = result.ast.get_all_statements() if hasattr(result.ast, 'get_all_statements') else []
+
+        all_stmts = (
+            result.ast.get_all_statements()
+            if hasattr(result.ast, "get_all_statements")
+            else []
+        )
         assert len(all_stmts) >= 2  # At least the nested performs
-    
+
     def test_perform_serialization(self):
         """Test PERFORM statement JSON serialization."""
         source = """
@@ -336,10 +341,10 @@ class TestPerformEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-        
+
         # Should be able to serialize to dict
         perform_dict = performs[0].to_dict()
         assert perform_dict is not None
@@ -347,7 +352,7 @@ class TestPerformEdgeCases:
 
 class TestPerformWithCallStatements:
     """Test PERFORM combined with CALL statements."""
-    
+
     def test_perform_with_call_inside(self):
         """Test PERFORM containing CALL statement."""
         source = """
@@ -361,12 +366,12 @@ class TestPerformWithCallStatements:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         performs = result.ast.find_statements("PERFORM")
         calls = result.ast.find_statements("CALL")
         assert len(performs) >= 1
         assert len(calls) >= 1
-    
+
     def test_perform_and_call_interaction(self):
         """Test interaction between PERFORM and CALL."""
         source = """
@@ -384,7 +389,7 @@ class TestPerformWithCallStatements:
 
 class TestPerformBackwardCompatibility:
     """Test backward compatibility with older PERFORM syntax."""
-    
+
     def test_perform_simple_paragraph_only(self):
         """Test legacy PERFORM with just paragraph name."""
         source = """
@@ -400,7 +405,7 @@ class TestPerformBackwardCompatibility:
         assert result.success
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-    
+
     def test_perform_inline_end_perform(self):
         """Test inline PERFORM with END-PERFORM."""
         source = """
@@ -417,7 +422,7 @@ class TestPerformBackwardCompatibility:
 
 class TestPerformConditions:
     """Test various UNTIL condition types."""
-    
+
     def test_perform_until_true_false(self):
         """Test PERFORM UNTIL TRUE/FALSE."""
         source = """
@@ -430,7 +435,7 @@ class TestPerformConditions:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_perform_until_complex_condition(self):
         """Test PERFORM UNTIL with complex condition."""
         source = """

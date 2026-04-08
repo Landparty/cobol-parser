@@ -59,61 +59,71 @@ Error Recovery:
 """
 
 # Import implemented modules
-from .plugins.core import (
-    MemoryConfiguration,
-    SerializationConfig,
-    ErrorRecoveryMode,
-    DialectType,
-    PluginManager,
-    ParseError,
-    ParseStatistics,
+# Analysis utilities
+from .analysis import (
+    DynamicCallAnalyzer,
 )
-from .models.ast_base import (
-    SourceLocation,
-    ASTNode,
+from .batch import (
+    BatchResult,
+    parse_files,
 )
-from .models.program import (
-    CobolProgram,
-    CobolDivision,
-    CobolSection,
-)
-from .models.statements import (
-    CobolStatement,
-    CobolExpression,
-    MoveStatement,
-    DisplayStatement,
-    PerformStatement,
-    EvaluateStatement,
-    WhenClause,
-)
-from .models.data_items import (
-    CobolDataItem,
-    PictureClause,
-    OccursClause,
+from .dialects import (
+    IBMEnterpriseCobol,
 )
 from .lexer import (
     CobolLexer,
+    LexerError,
     Token,
     TokenType,
-    LexerError,
     tokenize_cobol,
 )
-
+from .models.ast_base import (
+    ASTNode,
+    SourceLocation,
+)
+from .models.data_items import (
+    CobolDataItem,
+    OccursClause,
+    PictureClause,
+)
+from .models.program import (
+    CobolDivision,
+    CobolProgram,
+    CobolSection,
+)
+from .models.statements import (
+    CobolExpression,
+    CobolStatement,
+    DisplayStatement,
+    EvaluateStatement,
+    MoveStatement,
+    PerformStatement,
+    WhenClause,
+)
 from .parser import (
     CobolParser,
     ParseResult,
     parse_cobol,
 )
-from .batch import (
-    parse_files,
-    BatchResult,
+from .plugins.core import (
+    DialectType,
+    ErrorRecoveryMode,
+    MemoryConfiguration,
+    ParseError,
+    ParseStatistics,
+    PluginManager,
+    SerializationConfig,
 )
 
 # Import normalize_fixed_format from the preprocess package
-from .preprocess import normalize_fixed_format
-
-from .dialects import (
-    IBMEnterpriseCobol,
+from .preprocess import (
+    CircularReferenceError,
+    CopybookNotFoundError,
+    EncodingError,
+    NestingDepthError,
+    PathTraversalError,
+    PreprocessingError,
+    normalize_fixed_format,
 )
 
 # Copybook expansion (preprocessing)
@@ -123,22 +133,9 @@ from .preprocess.copybook_expander import (
 )
 from .preprocess.models import (
     CopybookExpansion,
-    CopyStatement,
     CopybookSearchPath,
+    CopyStatement,
     ExpansionStatistics,
-)
-from .preprocess import (
-    PreprocessingError,
-    CircularReferenceError,
-    CopybookNotFoundError,
-    PathTraversalError,
-    EncodingError,
-    NestingDepthError,
-)
-
-# Analysis utilities
-from .analysis import (
-    DynamicCallAnalyzer,
 )
 
 # Other dialects will be added when implemented

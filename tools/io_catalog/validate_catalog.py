@@ -17,16 +17,35 @@ import csv
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple, Set
 
 # Valid verbs per IBM reference
-VALID_VERBS = {"OPEN", "CLOSE", "READ", "WRITE", "REWRITE", "DELETE", "START", "ACCEPT", "DISPLAY", "UNLOCK"}
+VALID_VERBS = {
+    "OPEN",
+    "CLOSE",
+    "READ",
+    "WRITE",
+    "REWRITE",
+    "DELETE",
+    "START",
+    "ACCEPT",
+    "DISPLAY",
+    "UNLOCK",
+}
 
 # Valid file organizations
 VALID_FILE_ORGS = {"SEQUENTIAL", "INDEXED", "RELATIVE", "VSAM", "N/A"}
 
 # Valid access modes
-VALID_ACCESS_MODES = {"INPUT", "OUTPUT", "I-O", "EXTEND", "SEQUENTIAL", "RANDOM", "DYNAMIC", "N/A"}
+VALID_ACCESS_MODES = {
+    "INPUT",
+    "OUTPUT",
+    "I-O",
+    "EXTEND",
+    "SEQUENTIAL",
+    "RANDOM",
+    "DYNAMIC",
+    "N/A",
+}
 
 # Verb-to-org constraints (simplified)
 VERB_ORG_RULES = {
@@ -43,7 +62,7 @@ VERB_ORG_RULES = {
 }
 
 
-def validate_row(row: Dict[str, str], row_num: int, errors: List[str]) -> bool:
+def validate_row(row: dict[str, str], row_num: int, errors: list[str]) -> bool:
     """Validate a single catalog row. Returns True if valid."""
     valid = True
 
@@ -61,7 +80,9 @@ def validate_row(row: Dict[str, str], row_num: int, errors: List[str]) -> bool:
     # Check file_organization is valid
     org = row.get("file_organization", "").strip().upper()
     if org not in VALID_FILE_ORGS:
-        errors.append(f"Row {row_num} ({row.get('id')}): Invalid file_organization '{org}'")
+        errors.append(
+            f"Row {row_num} ({row.get('id')}): Invalid file_organization '{org}'"
+        )
         valid = False
 
     # Check verb-org combination
@@ -101,15 +122,24 @@ def validate_row(row: Dict[str, str], row_num: int, errors: List[str]) -> bool:
     return valid
 
 
-def validate_catalog(catalog_path: Path, strict: bool = False) -> Tuple[bool, List[str], Dict[str, int]]:
+def validate_catalog(
+    catalog_path: Path, strict: bool = False
+) -> tuple[bool, list[str], dict[str, int]]:
     """
     Validate catalog CSV file.
 
     Returns:
         (all_valid, errors, stats) tuple
     """
-    errors: List[str] = []
-    stats = {"total_rows": 0, "valid_rows": 0, "invalid_rows": 0, "verbs": {}, "orgs": {}, "statuses": {}}
+    errors: list[str] = []
+    stats = {
+        "total_rows": 0,
+        "valid_rows": 0,
+        "invalid_rows": 0,
+        "verbs": {},
+        "orgs": {},
+        "statuses": {},
+    }
 
     if not catalog_path.exists():
         errors.append(f"Catalog file not found: {catalog_path}")
@@ -122,13 +152,22 @@ def validate_catalog(catalog_path: Path, strict: bool = False) -> Tuple[bool, Li
                 errors.append("Catalog file is empty or has no header")
                 return False, errors, stats
 
-            required_fields = {"id", "verb", "file_organization", "access_mode", "status", "ibm_reference"}
+            required_fields = {
+                "id",
+                "verb",
+                "file_organization",
+                "access_mode",
+                "status",
+                "ibm_reference",
+            }
             if not required_fields.issubset(set(reader.fieldnames)):
                 missing = required_fields - set(reader.fieldnames)
                 errors.append(f"Missing required columns: {missing}")
                 return False, errors, stats
 
-            for row_num, row in enumerate(reader, start=2):  # Start at 2 because of header
+            for row_num, row in enumerate(
+                reader, start=2
+            ):  # Start at 2 because of header
                 stats["total_rows"] += 1
 
                 is_valid = validate_row(row, row_num, errors)
@@ -163,9 +202,13 @@ def validate_catalog(catalog_path: Path, strict: bool = False) -> Tuple[bool, Li
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--catalog", type=Path, required=True, help="Path to IO variation catalog CSV")
+    parser.add_argument(
+        "--catalog", type=Path, required=True, help="Path to IO variation catalog CSV"
+    )
     parser.add_argument("--output", type=Path, help="Write report to JSON file")
-    parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
+    parser.add_argument(
+        "--strict", action="store_true", help="Treat warnings as errors"
+    )
 
     args = parser.parse_args()
 

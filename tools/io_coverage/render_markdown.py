@@ -15,9 +15,6 @@ import csv
 import json
 import os
 import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 
 class CoverageRenderer:
@@ -25,7 +22,7 @@ class CoverageRenderer:
 
     def __init__(self, artifact_path: str):
         """Initialize renderer with artifact path."""
-        with open(artifact_path, "r", encoding="utf-8") as f:
+        with open(artifact_path, encoding="utf-8") as f:
             self.artifact = json.load(f)
 
         self.variations = self.artifact.get("variations", [])
@@ -105,7 +102,7 @@ class CoverageRenderer:
         lines.append("## Test References\n")
         lines.append("This section lists tests that cover each variation.\n")
 
-        for verb in sorted(set(v.get("verb") for v in self.variations)):
+        for verb in sorted({v.get("verb") for v in self.variations}):
             verb_variations = [v for v in self.variations if v.get("verb") == verb]
 
             if any(v.get("tests") for v in verb_variations):

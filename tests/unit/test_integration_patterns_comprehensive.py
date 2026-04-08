@@ -10,12 +10,13 @@ This module tests realistic COBOL programs with:
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
 class TestCrossStatementPatterns:
     """Test patterns where statements contain other statements."""
-    
+
     def test_call_inside_perform_inside_if(self):
         """Test CALL statement nested in PERFORM inside IF."""
         source = """
@@ -36,17 +37,17 @@ class TestCrossStatementPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         # Verify all statement types are present
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 1
-        
+
         performs = result.ast.find_statements("PERFORM")
         assert len(performs) >= 1
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-    
+
     def test_evaluate_with_move_and_call(self):
         """Test EVALUATE with MOVE and CALL in WHEN clauses."""
         source = """
@@ -71,10 +72,10 @@ class TestCrossStatementPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         evaluates = result.ast.find_statements("EVALUATE")
         assert len(evaluates) >= 1
-    
+
     def test_perform_varying_with_nested_if_and_call(self):
         """Test PERFORM VARYING with nested IF and CALL."""
         source = """
@@ -98,7 +99,7 @@ class TestCrossStatementPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_nested_if_with_perform_and_evaluate(self):
         """Test nested IF containing both PERFORM and EVALUATE."""
         source = """
@@ -123,7 +124,7 @@ class TestCrossStatementPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_multiple_statements_in_perform_until(self):
         """Test PERFORM UNTIL with multiple statement types."""
         source = """
@@ -155,7 +156,7 @@ class TestCrossStatementPatterns:
 
 class TestCrossDivisionPatterns:
     """Test patterns spanning multiple divisions."""
-    
+
     def test_data_division_with_redefines_used_in_procedure(self):
         """Test REDEFINES in DATA division used in PROCEDURE division."""
         source = """
@@ -174,7 +175,7 @@ class TestCrossDivisionPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_file_definitions_with_read_write(self):
         """Test FILE SECTION definitions with READ/WRITE in PROCEDURE."""
         source = """
@@ -205,7 +206,7 @@ class TestCrossDivisionPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_working_storage_with_complex_usage(self):
         """Test WORKING-STORAGE items with COMP/COMP-3 used in statements."""
         source = """
@@ -232,7 +233,7 @@ class TestCrossDivisionPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_local_storage_used_in_nested_scope(self):
         """Test LOCAL-STORAGE SECTION with nested control structures."""
         source = """
@@ -262,7 +263,7 @@ class TestCrossDivisionPatterns:
 
 class TestRealWorldPatterns:
     """Test realistic COBOL program patterns."""
-    
+
     def test_data_validation_pattern(self):
         """Test realistic data validation pattern."""
         source = """
@@ -284,7 +285,7 @@ class TestRealWorldPatterns:
                 STOP RUN
             END-IF.
             STOP RUN.
-            
+
             VALIDATE-CUSTOMER.
                 IF WS-CUSTOMER-ID = 0
                     MOVE "N" TO WS-VALIDATION-RESULT
@@ -295,14 +296,14 @@ class TestRealWorldPatterns:
                     EXIT PARAGRAPH
                 END-IF.
                 MOVE "Y" TO WS-VALIDATION-RESULT.
-            
+
             PROCESS-TRANSACTION.
                 MOVE "PROCESSING" TO WS-STATUS.
                 CALL "POST-TRANSACTION" USING WS-INPUT-DATA.
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_table_processing_pattern(self):
         """Test realistic table/array processing pattern."""
         source = """
@@ -324,7 +325,7 @@ class TestRealWorldPatterns:
                 END-IF
             END-PERFORM.
             STOP RUN.
-            
+
             PROCESS-ITEM.
                 MOVE "Y" TO WS-PROCESSED(WS-INDEX).
                 CALL "ITEM-HANDLER"
@@ -333,7 +334,7 @@ class TestRealWorldPatterns:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_error_handling_with_call_and_evaluate(self):
         """Test error handling with CALLs and EVALUATE."""
         source = """
@@ -367,7 +368,7 @@ class TestRealWorldPatterns:
 
 class TestComplexNesting:
     """Test deeply nested control structures."""
-    
+
     def test_triple_nested_if_statements(self):
         """Test deeply nested IF statements."""
         source = """
@@ -396,10 +397,10 @@ class TestComplexNesting:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 3
-    
+
     def test_perform_with_nested_if_and_evaluate(self):
         """Test PERFORM containing nested IF and EVALUATE."""
         source = """
@@ -431,7 +432,7 @@ class TestComplexNesting:
 
 class TestMixedStatementSequences:
     """Test sequences of different statement types."""
-    
+
     def test_mixed_statement_sequence(self):
         """Test realistic mix of MOVE, IF, EVALUATE, PERFORM, CALL."""
         source = """
@@ -444,7 +445,7 @@ class TestMixedStatementSequences:
         01 WS-TOTAL PIC 9(5) VALUE 0.
         PROCEDURE DIVISION.
             MOVE 5 TO WS-COUNTER.
-            
+
             IF WS-MODE = 1
                 EVALUATE WS-COUNTER
                     WHEN 5
@@ -458,12 +459,12 @@ class TestMixedStatementSequences:
             ELSE
                 DISPLAY "MODE NOT SET"
             END-IF.
-            
+
             STOP RUN.
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_paragraph_with_multiple_statement_types(self):
         """Test paragraph containing various statement types."""
         source = """
@@ -475,7 +476,7 @@ class TestMixedStatementSequences:
         PROCEDURE DIVISION.
             PERFORM MAIN-PARAGRAPH.
             STOP RUN.
-            
+
             MAIN-PARAGRAPH.
                 MOVE 5 TO WS-X.
                 IF WS-X > 0
@@ -494,7 +495,7 @@ class TestMixedStatementSequences:
 
 class TestSerializationAcrossDivisions:
     """Test serialization of complex multi-division programs."""
-    
+
     def test_complete_program_to_dict(self):
         """Test complete program serialization to dict."""
         source = """
@@ -513,11 +514,11 @@ class TestSerializationAcrossDivisions:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        if hasattr(result.ast, 'to_dict'):
+
+        if hasattr(result.ast, "to_dict"):
             ast_dict = result.ast.to_dict()
             assert isinstance(ast_dict, dict)
-    
+
     def test_get_all_statements_across_complex_program(self):
         """Test get_all_statements on complex multi-statement program."""
         source = """
@@ -540,8 +541,8 @@ class TestSerializationAcrossDivisions:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        if hasattr(result.ast, 'get_all_statements'):
+
+        if hasattr(result.ast, "get_all_statements"):
             stmts = result.ast.get_all_statements()
             # Should have multiple statement types
             assert len(stmts) >= 4
@@ -549,7 +550,7 @@ class TestSerializationAcrossDivisions:
 
 class TestLargeFragments:
     """Test parsing of larger program fragments."""
-    
+
     def test_large_procedure_with_many_paragraphs(self):
         """Test large procedure division with multiple paragraphs."""
         source = """
@@ -563,11 +564,11 @@ class TestLargeFragments:
             PERFORM PARA-TWO.
             PERFORM PARA-THREE.
             STOP RUN.
-            
+
             PARA-ONE.
                 MOVE 1 TO WS-COUNTER.
                 DISPLAY "PARA-ONE".
-            
+
             PARA-TWO.
                 PERFORM VARYING WS-COUNTER FROM 1 BY 1
                     UNTIL WS-COUNTER > 5
@@ -575,7 +576,7 @@ class TestLargeFragments:
                         CALL "HANDLER"
                     END-IF
                 END-PERFORM.
-            
+
             PARA-THREE.
                 EVALUATE WS-COUNTER
                     WHEN 5
@@ -584,7 +585,7 @@ class TestLargeFragments:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_large_data_division_with_complex_structures(self):
         """Test large DATA division with complex nested structures."""
         source = """
@@ -610,7 +611,7 @@ class TestLargeFragments:
             MOVE "ACTIVE" TO WS-STATUS.
             PERFORM CHECK-STRUCTURE.
             STOP RUN.
-            
+
             CHECK-STRUCTURE.
                 IF WS-VERSION = 1
                     DISPLAY "VERSION OK"
@@ -622,7 +623,7 @@ class TestLargeFragments:
 
 class TestIntegrationEdgeCases:
     """Test edge cases in integration scenarios."""
-    
+
     def test_multiple_calls_in_sequence(self):
         """Test multiple CALL statements in sequence."""
         source = """
@@ -643,7 +644,7 @@ class TestIntegrationEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_perform_with_call_returning(self):
         """Test PERFORM containing CALL with RETURNING."""
         source = """

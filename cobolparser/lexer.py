@@ -12,18 +12,17 @@ This module provides comprehensive tokenization of COBOL source code including:
 
 import re
 import sys
-from enum import Enum, auto
-from typing import List, Optional, Iterator, NamedTuple
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from .models.ast_base import SourceLocation
-from .plugins.core import ParseError, DialectType
+from .plugins.core import DialectType, ParseError
 
 # Fixed-format COBOL column layout (0-based indices)
-_FF_SEQ_END = 6       # columns 1-6: sequence number area (indices 0-5)
-_FF_INDICATOR = 6     # column 7: indicator (* / - space) — index 6
-_FF_AREA_A = 7        # column 8: Area A start — index 7
-_FF_LINE_END = 72     # column 73+: identification area (ignored) — index 72
+_FF_SEQ_END = 6  # columns 1-6: sequence number area (indices 0-5)
+_FF_INDICATOR = 6  # column 7: indicator (* / - space) — index 6
+_FF_AREA_A = 7  # column 8: Area A start — index 7
+_FF_LINE_END = 72  # column 73+: identification area (ignored) — index 72
 
 _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 
@@ -317,7 +316,7 @@ class Token:
     type: TokenType
     value: str
     location: SourceLocation
-    raw_value: Optional[str] = None  # Original source text if different from value
+    raw_value: str | None = None  # Original source text if different from value
 
     def __str__(self) -> str:
         return f"{self.type.name}({self.value})"
@@ -330,7 +329,7 @@ class LexerError(ParseError):
     """Error during lexical analysis."""
 
     def __init__(self, message: str, location: SourceLocation, token_value: str = ""):
-        super().__init__(message, location.line, location.column)
+        super().__init__(message, line_number=location.line, column=location.column)
         self.location = location
         self.token_value = token_value
 
@@ -541,13 +540,10 @@ class CobolLexer:
         "ACCEPT": TokenType.ACCEPT,
         # IO Clause Keywords (additional for IBM Enterprise COBOL)
         "INVALID": TokenType.INVALID,
-        "KEY": TokenType.KEY,
         "KEY IS": TokenType.KEY_IS,
         "END-OF-PAGE": TokenType.END_OF_PAGE,
         "EOP": TokenType.END_OF_PAGE,
-        "WITH": TokenType.WITH,
         "WITH LOCK": TokenType.WITH_LOCK,
-        "NO": TokenType.NO,
         "NO REWIND": TokenType.NO_REWIND,
         "REWIND": TokenType.NO_REWIND,
         "REEL": TokenType.REEL,
@@ -603,7 +599,7 @@ class CobolLexer:
         "QUOTES",
         "ALL",
     }
-    
+
     # COBOL Fixed-Format Column Constants
     SEQUENCE_AREA_START = 0
     SEQUENCE_AREA_END = 6
@@ -612,11 +608,11 @@ class CobolLexer:
     PROGRAM_TEXT_END = 72
     IDENTIFICATION_START = 72
     IDENTIFICATION_END = 80
-    
+
     # Indicator characters
-    CONTINUATION_INDICATOR = '-'
-    COMMENT_INDICATORS = ('*', '/')
-    DEBUG_INDICATOR = 'D'
+    CONTINUATION_INDICATOR = "-"
+    COMMENT_INDICATORS = ("*", "/")
+    DEBUG_INDICATOR = "D"
 
     def __init__(
         self,
@@ -639,20 +635,20 @@ class CobolLexer:
         self.current_line = 0
         self.current_column = 0
         self.current_pos = 0
-        self.tokens: List[Token] = []
-        self.errors: List[LexerError] = []
+        self.tokens: list[Token] = []
+        self.errors: list[LexerError] = []
         self.free_form = free_form
         # Multi-line string continuation state
-        self._open_string_quote: Optional[str] = None
-        self._open_string_value: List[str] = []
-        self._open_string_location: Optional[SourceLocation] = None
+        self._open_string_quote: str | None = None
+        self._open_string_value: list[str] = []
+        self._open_string_location: SourceLocation | None = None
 
     def _is_figurative_constant(self, word: str) -> bool:
         """Check if word is a COBOL figurative constant.
-        
+
         Args:
             word: The word to check (will be uppercased)
-            
+
         Returns:
             True if word is a figurative constant, False otherwise
         """
@@ -662,14 +658,14 @@ class CobolLexer:
         """Get current source location."""
         return SourceLocation(self.current_line + 1, self.current_column + 1, 1)
 
-    def peek_char(self, offset: int = 0) -> Optional[str]:
+    def peek_char(self, offset: int = 0) -> str | None:
         """Peek at character at current position + offset."""
         pos = self.current_pos + offset
         if pos >= len(self.source):
             return None
         return self.source[pos]
 
-    def advance_char(self) -> Optional[str]:
+    def advance_char(self) -> str | None:
         """Advance to next character and return it."""
         if self.current_pos >= len(self.source):
             return None
@@ -805,7 +801,7 @@ class CobolLexer:
 
         return Token(TokenType.COMMENT, "".join(chars), start_location)
 
-    def handle_cobol_line_format(self, line: str, line_num: int) -> List[Token]:
+    def handle_cobol_line_format(self, line: str, line_num: int) -> list[Token]:
         """Handle COBOL fixed-format line structure.
 
         COBOL lines have specific column meanings:
@@ -814,7 +810,7 @@ class CobolLexer:
         - Columns 8-72: Program text
         - Columns 73-80: Identification (ignored)
         """
-        line_tokens: List[Token] = []
+        line_tokens: list[Token] = []
 
         if len(line) < 7:
             return line_tokens
@@ -824,7 +820,11 @@ class CobolLexer:
 
         if indicator == "*":
             # Comment line
-            comment_text = line[_FF_INDICATOR:_FF_LINE_END].rstrip() if len(line) > _FF_INDICATOR else ""
+            comment_text = (
+                line[_FF_INDICATOR:_FF_LINE_END].rstrip()
+                if len(line) > _FF_INDICATOR
+                else ""
+            )
             location = SourceLocation(line_num + 1, 7, 1)
             line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
             return line_tokens
@@ -858,7 +858,7 @@ class CobolLexer:
                 # Skip "IS" if present
                 if after_value.upper().startswith("IS"):  # short string, cheap
                     after_value = after_value[2:].strip()
-                
+
                 # Check if VALUE is followed by a figurative constant - if so, skip string mode
                 first_word = after_value.split()[0] if after_value.split() else ""
                 if self._is_figurative_constant(first_word):
@@ -871,7 +871,10 @@ class CobolLexer:
                         # Check if next line is continuation
                         if line_num + 1 < len(self.lines):
                             next_line = self.lines[line_num + 1]
-                            if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
+                            if (
+                                len(next_line) > _FF_INDICATOR
+                                and next_line[_FF_INDICATOR] == "-"
+                            ):
                                 # This is a VALUE with unterminated string - start multi-line mode
                                 self._open_string_quote = '"'
                                 self._open_string_location = SourceLocation(
@@ -942,11 +945,15 @@ class CobolLexer:
                 self._open_string_value = []
                 self._open_string_location = None
                 # Process as normal comment line
-                comment_text = line[_FF_INDICATOR:_FF_LINE_END].rstrip() if len(line) > _FF_INDICATOR else ""
+                comment_text = (
+                    line[_FF_INDICATOR:_FF_LINE_END].rstrip()
+                    if len(line) > _FF_INDICATOR
+                    else ""
+                )
                 location = SourceLocation(line_num + 1, 7, 1)
                 line_tokens.append(Token(TokenType.COMMENT, comment_text, location))
                 return line_tokens
-            
+
             # Not a comment - continue with multi-line string processing
             closed, remainder_tokens = self._continue_multiline_string(
                 program_text, line_num
@@ -996,9 +1003,9 @@ class CobolLexer:
 
     def tokenize_program_text(
         self, text: str, line_num: int, start_col: int
-    ) -> List[Token]:
+    ) -> list[Token]:
         """Tokenize COBOL program text from a line."""
-        tokens: List[Token] = []
+        tokens: list[Token] = []
         pos = 0
 
         while pos < len(text):
@@ -1031,7 +1038,10 @@ class CobolLexer:
                         # Check if next line has continuation marker
                         if next_line_index < len(self.lines):
                             next_line = self.lines[next_line_index]
-                            if len(next_line) > _FF_INDICATOR and next_line[_FF_INDICATOR] == "-":
+                            if (
+                                len(next_line) > _FF_INDICATOR
+                                and next_line[_FF_INDICATOR] == "-"
+                            ):
                                 start_continuation = True
 
                         # Also check if current line is a continuation of a VALUE clause
@@ -1071,7 +1081,7 @@ class CobolLexer:
                         # This is clearly an unterminated string.
                         # However, for free-form COBOL, an isolated quote in a comment
                         # (e.g., COMPILER"S) should not cause the entire lexing to fail.
-                        # We emit it as a loose string token but don't add a LexerError 
+                        # We emit it as a loose string token but don't add a LexerError
                         # if free_form is true, to make the parser more robust.
                         partial_value = (
                             text[pos + 1 : new_pos] if new_pos > pos + 1 else ""
@@ -1218,7 +1228,7 @@ class CobolLexer:
 
     def _try_single_line_string(
         self, text: str, start_pos: int, line_num: int, start_col: int
-    ) -> tuple[Optional[Token], int, bool]:
+    ) -> tuple[Token | None, int, bool]:
         """Attempt to read a single-line string, detecting unterminated case without error.
         Returns (token_or_None, new_pos, unterminated_flag)."""
         quote = text[start_pos]
@@ -1278,9 +1288,9 @@ class CobolLexer:
 
     def _continue_multiline_string(
         self, program_text: str, line_num: int
-    ) -> tuple[bool, List[Token]]:
+    ) -> tuple[bool, list[Token]]:
         """Continue scanning a multi-line string; return (closed, remainder_tokens)."""
-        remainder_tokens: List[Token] = []
+        remainder_tokens: list[Token] = []
         quote = self._open_string_quote
         assert quote is not None
 
@@ -1290,21 +1300,19 @@ class CobolLexer:
         # For continuation lines starting with quotes, skip the opening quote first
         # before looking for the closing quote
         search_text = stripped_text
-        content_before_search = ""
         if stripped_text.startswith(quote):
             # This is a continuation line that starts with the same quote character
             # Skip it and search for the closing quote in the rest of the line
             search_text = stripped_text[1:]
-            content_before_search = ""
-        
+
         # Scan character by character to find the closing quote, handling doubled quotes
         pos = 0
         content_chars = []
         found_closing_quote = False
-        
+
         while pos < len(search_text):
             char = search_text[pos]
-            
+
             if char == quote:
                 # Check if this is a doubled quote (escape sequence)
                 if pos + 1 < len(search_text) and search_text[pos + 1] == quote:
@@ -1321,12 +1329,12 @@ class CobolLexer:
                 # Regular character
                 content_chars.append(char)
                 pos += 1
-        
+
         if found_closing_quote:
             # Found closing quote - add accumulated content
             if content_chars:
-                self._open_string_value.append(''.join(content_chars))
-            
+                self._open_string_value.append("".join(content_chars))
+
             token = Token(
                 TokenType.STRING_LITERAL,
                 "".join(self._open_string_value),
@@ -1345,14 +1353,16 @@ class CobolLexer:
                 quote_offset = 1 if stripped_text.startswith(quote) else 0
                 remainder_tokens.extend(
                     self.tokenize_program_text(
-                        remainder_text, line_num, 8 + whitespace_len + quote_offset + pos
+                        remainder_text,
+                        line_num,
+                        8 + whitespace_len + quote_offset + pos,
                     )
                 )
             return True, remainder_tokens
 
         # No closing quote found - append entire content as continuation
         if content_chars:
-            self._open_string_value.append(''.join(content_chars))
+            self._open_string_value.append("".join(content_chars))
 
         # Validate that this physical line is actually marked as a continuation ('-' in column 7)
         if not self.free_form:
@@ -1486,7 +1496,7 @@ class CobolLexer:
 
         return Token(token_type, value, location), pos
 
-    def tokenize(self) -> List[Token]:
+    def tokenize(self) -> list[Token]:
         """Tokenize the entire COBOL source code."""
         self.tokens = []
         self.errors = []
@@ -1514,13 +1524,13 @@ class CobolLexer:
 
         return self.tokens
 
-    def get_tokens(self) -> List[Token]:
+    def get_tokens(self) -> list[Token]:
         """Get the list of tokens (tokenize if not already done)."""
         if not self.tokens:
             self.tokenize()
         return self.tokens
 
-    def get_errors(self) -> List[LexerError]:
+    def get_errors(self) -> list[LexerError]:
         """Get lexer errors encountered during tokenization."""
         return self.errors
 
@@ -1533,7 +1543,7 @@ def tokenize_cobol(
     source: str,
     filename: str = "<string>",
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
-) -> List[Token]:
+) -> list[Token]:
     """Convenience function to tokenize COBOL source code.
 
     Args:

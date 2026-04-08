@@ -8,8 +8,10 @@ Covers:
 5. IF condition expression tree
 6. GO TO ValueError -> parse error
 """
+
 import pytest
-from cobolparser import parse_cobol, ErrorRecoveryMode
+
+from cobolparser import ErrorRecoveryMode, parse_cobol
 
 
 class TestLevel88ConditionNames:
@@ -27,26 +29,35 @@ class TestLevel88ConditionNames:
 """
 
     def test_88_items_parsed(self):
-        from cobolparser.models.data_items import ConditionNameItem
-        result = parse_cobol(self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         all_nodes = result.ast.find_all_by_type("ConditionNameItem")
-        assert len(all_nodes) == 2, f"Expected 2 ConditionNameItems, got {len(all_nodes)}"
+        assert (
+            len(all_nodes) == 2
+        ), f"Expected 2 ConditionNameItems, got {len(all_nodes)}"
 
     def test_88_item_name(self):
-        result = parse_cobol(self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("ConditionNameItem")
         names = {n.name for n in nodes}
         assert "STATUS-OPEN" in names
         assert "STATUS-CLOSED" in names
 
     def test_88_item_single_value(self):
-        result = parse_cobol(self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("ConditionNameItem")
         open_node = next(n for n in nodes if n.name == "STATUS-OPEN")
         assert "O" in open_node.values
 
     def test_88_multi_value(self):
-        result = parse_cobol(self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("ConditionNameItem")
         closed_node = next(n for n in nodes if n.name == "STATUS-CLOSED")
         assert len(closed_node.values) == 2
@@ -55,15 +66,24 @@ class TestLevel88ConditionNames:
 
     def test_88_attached_to_parent(self):
         from cobolparser.models.data_items import ConditionNameItem
-        result = parse_cobol(self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+
+        result = parse_cobol(
+            self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         ws_items = result.ast.find_all_by_type("DataItem")
-        ws_status = next((i for i in ws_items if getattr(i, "name", "") == "WS-STATUS"), None)
+        ws_status = next(
+            (i for i in ws_items if getattr(i, "name", "") == "WS-STATUS"), None
+        )
         assert ws_status is not None
-        cond_children = [c for c in ws_status.children if isinstance(c, ConditionNameItem)]
+        cond_children = [
+            c for c in ws_status.children if isinstance(c, ConditionNameItem)
+        ]
         assert len(cond_children) == 2
 
     def test_88_to_dict(self):
-        result = parse_cobol(self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_88, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("ConditionNameItem")
         d = nodes[0].to_dict()
         assert d["node_type"] == "ConditionNameItem"
@@ -88,34 +108,43 @@ class TestLevel66Renames:
 """
 
     def test_66_items_parsed(self):
-        from cobolparser.models.data_items import RenamesItem
-        result = parse_cobol(self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("RenamesItem")
         assert len(nodes) == 2
 
     def test_66_item_name(self):
-        result = parse_cobol(self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("RenamesItem")
         names = {n.name for n in nodes}
         assert "WS-ALIAS" in names
         assert "WS-RANGE" in names
 
     def test_66_renames_target(self):
-        result = parse_cobol(self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("RenamesItem")
         alias = next(n for n in nodes if n.name == "WS-ALIAS")
         assert alias.renames_from == "WS-FIRST"
         assert alias.renames_through is None
 
     def test_66_renames_range(self):
-        result = parse_cobol(self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("RenamesItem")
         rng = next(n for n in nodes if n.name == "WS-RANGE")
         assert rng.renames_from == "WS-FIRST"
         assert rng.renames_through == "WS-SECOND"
 
     def test_66_to_dict(self):
-        result = parse_cobol(self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_66, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         nodes = result.ast.find_all_by_type("RenamesItem")
         d = nodes[0].to_dict()
         assert d["node_type"] == "RenamesItem"
@@ -140,7 +169,9 @@ class TestOccursDependingOn:
 """
 
     def test_variable_occurs_min_max(self):
-        result = parse_cobol(self.COBOL_ODO, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_ODO, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         items = result.ast.find_all_by_type("DataItem")
         entry = next((i for i in items if getattr(i, "name", "") == "WS-ENTRY"), None)
         assert entry is not None
@@ -149,13 +180,17 @@ class TestOccursDependingOn:
         assert entry.occurs_clause.max_times == 50
 
     def test_variable_occurs_depending_on(self):
-        result = parse_cobol(self.COBOL_ODO, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_ODO, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         items = result.ast.find_all_by_type("DataItem")
         entry = next(i for i in items if getattr(i, "name", "") == "WS-ENTRY")
         assert entry.occurs_clause.depending_on == "WS-TABLE-SIZE"
 
     def test_variable_occurs_indexed_by(self):
-        result = parse_cobol(self.COBOL_ODO, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.COBOL_ODO, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         items = result.ast.find_all_by_type("DataItem")
         entry = next(i for i in items if getattr(i, "name", "") == "WS-ENTRY")
         assert entry.occurs_clause.indexed_by == "WS-IDX"
@@ -183,6 +218,7 @@ class TestOccursDependingOn:
 class TestUnterminatedStringAtEOF:
     def test_unterminated_string_raises(self):
         from cobolparser.preprocess import normalize_fixed_format
+
         lines = [
             "000100 WORKING-STORAGE SECTION.",
             '000200 01 WS-VAR PIC X(10) VALUE "HELLO',
@@ -194,6 +230,7 @@ class TestUnterminatedStringAtEOF:
 
     def test_valid_multiline_string_does_not_raise(self):
         from cobolparser.preprocess import normalize_fixed_format
+
         lines = [
             '000100 01 WS-VAR PIC X(10) VALUE "HELL',
             '000200-       O".',
@@ -203,6 +240,7 @@ class TestUnterminatedStringAtEOF:
 
     def test_normal_source_unaffected(self):
         from cobolparser.preprocess import normalize_fixed_format
+
         lines = [
             "000100 IDENTIFICATION DIVISION.",
             "000200 PROGRAM-ID. TEST.",
@@ -243,6 +281,7 @@ class TestIfConditionTree:
 
     def _get_if_stmt(self, cobol_src):
         from cobolparser.models.statements import IfStatement
+
         result = parse_cobol(cobol_src, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         stmts = result.ast.find_statements("IF")
         return next((s for s in stmts if isinstance(s, IfStatement)), None)
@@ -254,6 +293,7 @@ class TestIfConditionTree:
 
     def test_simple_condition_type(self):
         from cobolparser.models.statements.base import ConditionalExpression
+
         stmt = self._get_if_stmt(self.SIMPLE_IF)
         assert isinstance(stmt.condition, ConditionalExpression)
 
@@ -268,6 +308,7 @@ class TestIfConditionTree:
 
     def test_compound_and_condition(self):
         from cobolparser.models.statements.base import LogicalExpression
+
         stmt = self._get_if_stmt(self.AND_IF)
         assert isinstance(stmt.condition, LogicalExpression)
         assert stmt.condition.operator == "AND"
@@ -294,16 +335,22 @@ class TestGoToParseError:
 """
 
     def test_missing_to_does_not_crash(self):
-        result = parse_cobol(self.MISSING_TO, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.MISSING_TO, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         assert result is not None
         assert result.ast is not None
 
     def test_missing_to_reports_error(self):
-        result = parse_cobol(self.MISSING_TO, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.MISSING_TO, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         assert result is not None
 
     def test_missing_target_does_not_crash(self):
-        result = parse_cobol(self.MISSING_TARGET, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            self.MISSING_TARGET, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         assert result is not None
         assert result.ast is not None
 

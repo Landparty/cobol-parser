@@ -2,7 +2,8 @@
 Data manipulation statement AST nodes (MOVE, DISPLAY, STRING, UNSTRING).
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from ..ast_base import SourceLocation
 from .base import CobolStatement
 
@@ -12,8 +13,8 @@ class MoveStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("MOVE", location)
-        self.source: Optional[str] = None
-        self.targets: List[str] = []
+        self.source: str | None = None
+        self.targets: list[str] = []
         self.is_corresponding: bool = False
 
     def set_source(self, source: str) -> None:
@@ -32,7 +33,7 @@ class MoveStatement(CobolStatement):
         """Set whether this is a MOVE CORRESPONDING statement."""
         self.is_corresponding = is_corresponding
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert MOVE statement to dictionary representation."""
         result = super().to_dict()
         result.update(
@@ -50,8 +51,8 @@ class DisplayStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("DISPLAY", location)
-        self.display_items: List[str] = []
-        self.output_device: Optional[str] = None
+        self.display_items: list[str] = []
+        self.output_device: str | None = None
 
     def add_display_item(self, item: str) -> None:
         """Add an item to display."""
@@ -62,7 +63,7 @@ class DisplayStatement(CobolStatement):
         """Set the output device (UPON clause)."""
         self.output_device = device
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert DISPLAY statement to dictionary representation."""
         result = super().to_dict()
         result.update(
@@ -73,14 +74,15 @@ class DisplayStatement(CobolStatement):
 
 class StringStatement(CobolStatement):
     """AST node for STRING statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("STRING", location)
-        self.on_overflow: Optional[List["CobolStatement"]] = None
-        self.not_on_overflow: Optional[List["CobolStatement"]] = None
-        self.operands: List[str] = []
-        self.into_target: Optional[str] = None
-        self.pointer_variable: Optional[str] = None
-        self.delimiters: List[str] = []
+        self.on_overflow: list[CobolStatement] | None = None
+        self.not_on_overflow: list[CobolStatement] | None = None
+        self.operands: list[str] = []
+        self.into_target: str | None = None
+        self.pointer_variable: str | None = None
+        self.delimiters: list[str] = []
 
     def add_operand(self, operand: str) -> None:
         """Add a STRING operand."""
@@ -98,17 +100,17 @@ class StringStatement(CobolStatement):
         """Add a DELIMITED BY delimiter."""
         self.delimiters.append(delimiter)
 
-    def set_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
         self.on_overflow = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def set_not_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_not_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
         self.not_on_overflow = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         if self.operands:
             result["operands"] = self.operands
@@ -127,14 +129,15 @@ class StringStatement(CobolStatement):
 
 class UnstringStatement(CobolStatement):
     """AST node for UNSTRING statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("UNSTRING", location)
-        self.on_overflow: Optional[List["CobolStatement"]] = None
-        self.not_on_overflow: Optional[List["CobolStatement"]] = None
-        self.source_operand: Optional[str] = None
-        self.delimiters: List[str] = []
-        self.into_targets: List[Dict[str, Any]] = []
-        self.pointer_variable: Optional[str] = None
+        self.on_overflow: list[CobolStatement] | None = None
+        self.not_on_overflow: list[CobolStatement] | None = None
+        self.source_operand: str | None = None
+        self.delimiters: list[str] = []
+        self.into_targets: list[dict[str, Any]] = []
+        self.pointer_variable: str | None = None
 
     def set_source(self, source: str) -> None:
         """Set the UNSTRING source operand."""
@@ -144,12 +147,17 @@ class UnstringStatement(CobolStatement):
         """Add a DELIMITED BY delimiter."""
         self.delimiters.append(delimiter)
 
-    def add_into_target(self, target: str, delimiter_var: Optional[str] = None, count_var: Optional[str] = None) -> None:
+    def add_into_target(
+        self,
+        target: str,
+        delimiter_var: str | None = None,
+        count_var: str | None = None,
+    ) -> None:
         """Add an INTO target with optional DELIMITER IN and COUNT IN variables."""
         into_info = {
             "target": target,
             "delimiter_var": delimiter_var,
-            "count_var": count_var
+            "count_var": count_var,
         }
         self.into_targets.append(into_info)
 
@@ -157,17 +165,17 @@ class UnstringStatement(CobolStatement):
         """Set the WITH POINTER variable."""
         self.pointer_variable = variable
 
-    def set_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
         self.on_overflow = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def set_not_on_overflow_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_not_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
         self.not_on_overflow = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         if self.source_operand:
             result["source_operand"] = self.source_operand

@@ -11,14 +11,13 @@ The WITH REPOSITION and WITH [NO] LOCK branches check for TokenType.IDENTIFIER w
 "WITH", but the lexer emits WITH as TokenType.WITH.  Those three tests use direct parser
 invocation with crafted IDENTIFIER tokens to exercise the branches.
 """
-import pytest
+
 from cobolparser import parse_cobol
-from cobolparser.lexer import Token, TokenType
 from cobolparser.core.token_stream import TokenStream
+from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.parsers.statements.open_parser import OpenStatementParser
 from cobolparser.parsers.statements.read_parser import ReadStatementParser
-
 
 _LOC = SourceLocation(1, 1)
 

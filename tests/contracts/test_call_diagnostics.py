@@ -11,10 +11,7 @@ Diagnostic Record Structure (per Data Model):
 - severity: Error severity (ERROR, WARNING, INFO)
 """
 
-import pytest
-
-from cobolparser import CobolParser, ParseResult, ParseError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser import CobolParser
 
 
 def _fixed_source(body: str) -> str:
@@ -44,9 +41,9 @@ class TestCallDiagnosticStructure:
         diagnostics = _get_call_diagnostics(source)
         if diagnostics:
             for d in diagnostics:
-                assert hasattr(d, "line") or hasattr(d, "location")
-                if hasattr(d, "line"):
-                    assert d.line > 0
+                assert hasattr(d, "line_number") or hasattr(d, "location")
+                if hasattr(d, "line_number"):
+                    assert d.line_number > 0
                 if hasattr(d, "location"):
                     assert d.location.line > 0
 
@@ -111,7 +108,11 @@ class TestCallMissingProgram:
         diagnostics = _get_call_diagnostics(source)
         if diagnostics:
             error_text = str(diagnostics[0]).upper()
-            assert "program" in error_text.lower() or "CALL" in error_text or len(error_text) > 5
+            assert (
+                "program" in error_text.lower()
+                or "CALL" in error_text
+                or len(error_text) > 5
+            )
 
 
 class TestCallUsingClause:

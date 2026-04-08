@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel", "mypy>=1.5.0"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "cobolparser"
 version = "1.0.0"
 description = "A comprehensive COBOL parser for Python with IBM Enterprise COBOL focus"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [
     {name = "Samuel Dion"},
@@ -16,6 +16,8 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Software Development :: Compilers",
@@ -53,7 +55,6 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
-    "--disable-warnings",
     "--cov=cobolparser",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
@@ -72,7 +73,6 @@ branch = true
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "cobolparser/reproduce_infinite_loop.py",
 ]
 
 [tool.coverage.report]
@@ -91,7 +91,7 @@ exclude_lines = [
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py311"
 line-length = 88
 
 [tool.ruff.lint]
@@ -114,7 +114,7 @@ ignore = [
 "__init__.py" = ["F401"]  # Unused imports in __init__.py files
 
 [tool.black]
-target-version = ["py313"]
+target-version = ["py311"]
 line-length = 88
 include = '\.pyi?$'
 extend-exclude = '''
@@ -134,7 +134,7 @@ extend-exclude = '''
 '''
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -149,6 +149,6 @@ warn_unreachable = true
 strict_equality = true
 
 [[tool.mypy.overrides]]
-module = ["tests.*"]
+module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false

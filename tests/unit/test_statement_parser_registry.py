@@ -7,18 +7,19 @@ Tests cover:
 - Edge cases (empty registry, no match, multiple matches)
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
-from cobolparser.core import StatementParserRegistry, IStatementParser, ITokenStream
+import pytest
+
+from cobolparser.core import ITokenStream, StatementParserRegistry
 
 
 class MockStatementParser:
     """Mock statement parser for testing."""
-    
+
     def __init__(self, name: str, should_match: bool = False, parse_result=None):
         """Initialize mock parser.
-        
+
         Args:
             name: Name for this parser
             should_match: Whether matches() should return True
@@ -29,30 +30,30 @@ class MockStatementParser:
         self.parse_result = parse_result or Mock()
         self.matches_called = False
         self.parse_called = False
-    
+
     def matches(self, token_stream: ITokenStream) -> bool:
         """Mock matches method."""
         self.matches_called = True
         return self.should_match
-    
+
     def parse(self, token_stream: ITokenStream) -> object:
         """Mock parse method."""
         self.parse_called = True
         return self.parse_result
-    
+
     def __repr__(self) -> str:
         return f"MockParser({self.name})"
 
 
 class TestStatementParserRegistryInitialization:
     """Test StatementParserRegistry initialization."""
-    
+
     def test_empty_registry_on_creation(self):
         """Test that a new registry is empty."""
         registry = StatementParserRegistry()
         assert len(registry) == 0
         assert registry.get_all_parsers() == []
-    
+
     def test_registry_str_representation(self):
         """Test string representation of empty registry."""
         registry = StatementParserRegistry()
@@ -63,98 +64,102 @@ class TestStatementParserRegistryInitialization:
 
 class TestStatementParserRegistryRegistration:
     """Test parser registration functionality."""
-    
+
     def test_register_single_parser(self):
         """Test registering a single parser."""
         registry = StatementParserRegistry()
         parser = MockStatementParser("display_parser")
-        
+
         registry.register(parser)
-        
+
         assert len(registry) == 1
         assert parser in registry.get_all_parsers()
-    
+
     def test_register_multiple_parsers(self):
         """Test registering multiple parsers."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1")
         parser2 = MockStatementParser("parser2")
         parser3 = MockStatementParser("parser3")
-        
+
         registry.register(parser1)
         registry.register(parser2)
         registry.register(parser3)
-        
+
         assert len(registry) == 3
         parsers = registry.get_all_parsers()
         assert parser1 in parsers
         assert parser2 in parsers
         assert parser3 in parsers
-    
+
     def test_register_preserves_order(self):
         """Test that parser order is preserved on registration."""
         registry = StatementParserRegistry()
         parsers = [MockStatementParser(f"parser{i}") for i in range(5)]
-        
+
         for parser in parsers:
             registry.register(parser)
-        
+
         registered = registry.get_all_parsers()
         assert registered == parsers
-    
+
     def test_register_with_position(self):
         """Test inserting parser at specific position."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1")
         parser2 = MockStatementParser("parser2")
         parser3 = MockStatementParser("parser3")
-        
+
         registry.register(parser1)
         registry.register(parser3)
         registry.register(parser2, position=1)  # Insert between 1 and 3
-        
+
         registered = registry.get_all_parsers()
         assert registered == [parser1, parser2, parser3]
-    
+
     def test_register_invalid_parser_raises_type_error(self):
         """Test that registering invalid parser raises TypeError."""
         registry = StatementParserRegistry()
+
         # Create object without spec - no methods at all
         class InvalidParser:
             pass
+
         invalid_parser = InvalidParser()
-        
+
         with pytest.raises(TypeError, match="implement IStatementParser"):
             registry.register(invalid_parser)
-    
+
     def test_register_parser_without_matches_raises_type_error(self):
         """Test that parser must have parse and matches methods."""
         registry = StatementParserRegistry()
+
         # Object with only parse method, missing matches
         class PartialParser:
             def parse(self, stream):
                 pass
+
         partial_parser = PartialParser()
-        
+
         with pytest.raises(TypeError):
             registry.register(partial_parser)
 
 
 class TestStatementParserRegistryDispatch:
     """Test parser finding and dispatch (first-match strategy)."""
-    
+
     def test_find_parser_single_match(self):
         """Test finding parser when only one matches."""
         registry = StatementParserRegistry()
         parser = MockStatementParser("display", should_match=True)
         registry.register(parser)
-        
+
         mock_stream = Mock(spec=ITokenStream)
         found = registry.find_parser(mock_stream)
-        
+
         assert found is parser
         assert parser.matches_called
-    
+
     def test_find_parser_no_match_returns_none(self):
         """Test find_parser returns None when no parser matches."""
         registry = StatementParserRegistry()
@@ -162,173 +167,173 @@ class TestStatementParserRegistryDispatch:
         parser2 = MockStatementParser("parser2", should_match=False)
         registry.register(parser1)
         registry.register(parser2)
-        
+
         mock_stream = Mock(spec=ITokenStream)
         found = registry.find_parser(mock_stream)
-        
+
         assert found is None
         assert parser1.matches_called
         assert parser2.matches_called
-    
+
     def test_find_parser_first_match_strategy(self):
         """Test that first matching parser is returned (first-match strategy)."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1", should_match=True)
         parser2 = MockStatementParser("parser2", should_match=True)
         parser3 = MockStatementParser("parser3", should_match=True)
-        
+
         registry.register(parser1)
         registry.register(parser2)
         registry.register(parser3)
-        
+
         mock_stream = Mock(spec=ITokenStream)
         found = registry.find_parser(mock_stream)
-        
+
         # First-match strategy: should return parser1
         assert found is parser1
         assert parser1.matches_called
         # Parser2 and parser3 should not be called due to first-match
         assert not parser2.matches_called
         assert not parser3.matches_called
-    
+
     def test_find_parser_skips_non_matching_parsers(self):
         """Test that non-matching parsers are skipped until match found."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1", should_match=False)
         parser2 = MockStatementParser("parser2", should_match=False)
         parser3 = MockStatementParser("parser3", should_match=True)
-        
+
         registry.register(parser1)
         registry.register(parser2)
         registry.register(parser3)
-        
+
         mock_stream = Mock(spec=ITokenStream)
         found = registry.find_parser(mock_stream)
-        
+
         assert found is parser3
         assert parser1.matches_called
         assert parser2.matches_called
         assert parser3.matches_called
-    
+
     def test_find_parser_empty_registry(self):
         """Test finding parser in empty registry returns None."""
         registry = StatementParserRegistry()
         mock_stream = Mock(spec=ITokenStream)
-        
+
         found = registry.find_parser(mock_stream)
-        
+
         assert found is None
-    
+
     def test_find_parser_handles_exception_in_matches(self):
         """Test that exceptions in matches() are handled gracefully."""
         registry = StatementParserRegistry()
-        
+
         # Parser that raises exception in matches()
         bad_parser = Mock()
         bad_parser.matches = Mock(side_effect=Exception("Error in matches"))
         bad_parser.parse = Mock()
-        
+
         # Good parser that matches
         good_parser = MockStatementParser("good", should_match=True)
-        
+
         registry.register(bad_parser)
         registry.register(good_parser)
-        
+
         mock_stream = Mock(spec=ITokenStream)
         found = registry.find_parser(mock_stream)
-        
+
         # Should skip the bad parser and return the good one
         assert found is good_parser
 
 
 class TestStatementParserRegistryUnregister:
     """Test parser unregistration."""
-    
+
     def test_unregister_existing_parser(self):
         """Test unregistering an existing parser."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1")
         parser2 = MockStatementParser("parser2")
-        
+
         registry.register(parser1)
         registry.register(parser2)
         assert len(registry) == 2
-        
+
         result = registry.unregister(parser1)
-        
+
         assert result is True
         assert len(registry) == 1
         assert parser1 not in registry.get_all_parsers()
         assert parser2 in registry.get_all_parsers()
-    
+
     def test_unregister_non_existing_parser(self):
         """Test unregistering a parser that's not in registry."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1")
         parser2 = MockStatementParser("parser2")
-        
+
         registry.register(parser1)
-        
+
         result = registry.unregister(parser2)
-        
+
         assert result is False
         assert len(registry) == 1
 
 
 class TestStatementParserRegistryClear:
     """Test clearing the registry."""
-    
+
     def test_clear_removes_all_parsers(self):
         """Test that clear removes all parsers."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1")
         parser2 = MockStatementParser("parser2")
         parser3 = MockStatementParser("parser3")
-        
+
         registry.register(parser1)
         registry.register(parser2)
         registry.register(parser3)
         assert len(registry) == 3
-        
+
         registry.clear()
-        
+
         assert len(registry) == 0
         assert registry.get_all_parsers() == []
-    
+
     def test_clear_empty_registry(self):
         """Test clearing an already empty registry."""
         registry = StatementParserRegistry()
-        
+
         registry.clear()
-        
+
         assert len(registry) == 0
 
 
 class TestStatementParserRegistryIntrospection:
     """Test registry introspection methods."""
-    
+
     def test_len_returns_parser_count(self):
         """Test that len() returns parser count."""
         registry = StatementParserRegistry()
         assert len(registry) == 0
-        
+
         for i in range(5):
             registry.register(MockStatementParser(f"parser{i}"))
-        
+
         assert len(registry) == 5
-    
+
     def test_get_all_parsers_returns_copy(self):
         """Test that get_all_parsers returns independent list."""
         registry = StatementParserRegistry()
         parser1 = MockStatementParser("parser1")
         parser2 = MockStatementParser("parser2")
-        
+
         registry.register(parser1)
         registry.register(parser2)
-        
+
         parsers = registry.get_all_parsers()
         parsers.append(MockStatementParser("extra"))  # Modify returned list
-        
+
         # Registry should still have only 2 parsers
         assert len(registry) == 2
         assert len(registry.get_all_parsers()) == 2
@@ -336,48 +341,48 @@ class TestStatementParserRegistryIntrospection:
 
 class TestStatementParserRegistryIntegration:
     """Integration tests for realistic usage patterns."""
-    
+
     def test_register_and_dispatch_flow(self):
         """Test realistic register-then-dispatch workflow."""
         registry = StatementParserRegistry()
-        
+
         # Register parsers in priority order
         display_parser = MockStatementParser("DISPLAY", should_match=False)
         move_parser = MockStatementParser("MOVE", should_match=False)
         perform_parser = MockStatementParser("PERFORM", should_match=True)
-        
+
         registry.register(display_parser)
         registry.register(move_parser)
         registry.register(perform_parser)
-        
+
         # Dispatch
         mock_stream = Mock(spec=ITokenStream)
         found = registry.find_parser(mock_stream)
-        
+
         assert found is perform_parser
         assert not display_parser.parse_called
         assert not move_parser.parse_called
         assert not perform_parser.parse_called
-        
+
         # Parse
-        result = found.parse(mock_stream)
+        found.parse(mock_stream)
         assert perform_parser.parse_called
-    
+
     def test_multiple_dispatch_calls(self):
         """Test multiple dispatch calls use same registry state."""
         registry = StatementParserRegistry()
         parser = MockStatementParser("test", should_match=True)
         registry.register(parser)
-        
+
         mock_stream = Mock(spec=ITokenStream)
-        
+
         # First call
         found1 = registry.find_parser(mock_stream)
         assert found1 is parser
-        
+
         # Reset call tracking
         parser.matches_called = False
-        
+
         # Second call should work the same way
         found2 = registry.find_parser(mock_stream)
         assert found2 is parser

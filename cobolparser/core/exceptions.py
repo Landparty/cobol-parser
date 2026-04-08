@@ -1,7 +1,5 @@
 """Structured error types for COBOL parser with detailed context."""
 
-from typing import Optional
-
 # Single canonical ParseError lives in cobolparser._errors to avoid circular
 # imports between cobolparser.plugins.core and cobolparser.core.
 from cobolparser._errors import ParseError  # noqa: F401
@@ -20,16 +18,18 @@ class TokenMismatch(ParseError):
         self,
         expected: str,
         actual: str,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
-        token_value: Optional[str] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
+        token_value: str | None = None,
     ):
         self.expected = expected
         self.actual = actual
         self.token_value = token_value if token_value is not None else actual
         message = f"Expected '{expected}', got '{actual}'"
-        super().__init__(message, file_path, line_number, column)
+        super().__init__(
+            message, file_path=file_path, line_number=line_number, column=column
+        )
 
 
 class UnexpectedEndOfInput(ParseError):
@@ -37,14 +37,14 @@ class UnexpectedEndOfInput(ParseError):
 
     def __init__(
         self,
-        expected: Optional[str] = None,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
+        expected: str | None = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
     ):
         message = "Unexpected end of input"
         if expected:
             message += f" (expected: {expected})"
-        super().__init__(message, file_path, line_number)
+        super().__init__(message, file_path=file_path, line_number=line_number)
 
 
 class DivisionNotFoundError(ParseError):
@@ -53,13 +53,15 @@ class DivisionNotFoundError(ParseError):
     def __init__(
         self,
         division_name: str,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
     ):
         self.division_name = division_name
         message = f"Unknown division: {division_name}"
-        super().__init__(message, file_path, line_number, column)
+        super().__init__(
+            message, file_path=file_path, line_number=line_number, column=column
+        )
 
 
 class UnknownStatementError(ParseError):
@@ -67,16 +69,18 @@ class UnknownStatementError(ParseError):
 
     def __init__(
         self,
-        token_value: Optional[str] = None,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
+        token_value: str | None = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
     ):
         self.token_value = token_value
         message = "Unknown or unrecognized statement"
         if token_value:
             message += f": {token_value}"
-        super().__init__(message, file_path, line_number, column)
+        super().__init__(
+            message, file_path=file_path, line_number=line_number, column=column
+        )
 
 
 class ValidationError(ParseError):
@@ -86,11 +90,13 @@ class ValidationError(ParseError):
         self,
         node_type: str,
         issue: str,
-        file_path: Optional[str] = None,
-        line_number: Optional[int] = None,
-        column: Optional[int] = None,
+        file_path: str | None = None,
+        line_number: int | None = None,
+        column: int | None = None,
     ):
         self.node_type = node_type
         self.issue = issue
         message = f"Validation error in {node_type}: {issue}"
-        super().__init__(message, file_path, line_number, column)
+        super().__init__(
+            message, file_path=file_path, line_number=line_number, column=column
+        )

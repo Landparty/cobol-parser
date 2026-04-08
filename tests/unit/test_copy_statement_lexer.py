@@ -1,5 +1,5 @@
-import pytest
 from cobolparser.preprocess.copy_statement_parser import extract_copy_statements
+
 
 def test_extract_simple_copy():
     source = "       COPY EMPLOYEE."
@@ -7,10 +7,13 @@ def test_extract_simple_copy():
     assert len(statements) == 1
     assert statements[0].member_name == "EMPLOYEE"
 
+
 def test_extract_copy_with_replacing():
-    source = "       COPY EMPLOYEE\n" \
-             "           REPLACING ==OLD== BY ==NEW==\n" \
-             "                     LEADING ==PREFIX== BY ==EMP-==."
+    source = (
+        "       COPY EMPLOYEE\n"
+        "           REPLACING ==OLD== BY ==NEW==\n"
+        "                     LEADING ==PREFIX== BY ==EMP-==."
+    )
     statements = extract_copy_statements(source)
     assert len(statements) == 1
     assert statements[0].member_name == "EMPLOYEE"
@@ -22,6 +25,7 @@ def test_extract_copy_with_replacing():
     assert statements[0].replacing_clauses[1].replace_text == "EMP-"
     assert statements[0].replacing_clauses[1].mode == "LEADING"
 
+
 def test_extract_copy_with_in_library():
     source = "       COPY EMP IN LIBA."
     statements = extract_copy_statements(source)
@@ -29,12 +33,14 @@ def test_extract_copy_with_in_library():
     assert statements[0].member_name == "EMP"
     assert statements[0].library_qualifier == "LIBA"
 
+
 def test_extract_copy_with_suppress():
     source = "       COPY EMP SUPPRESS PRINTING."
     statements = extract_copy_statements(source)
     assert len(statements) == 1
     assert statements[0].member_name == "EMP"
     assert statements[0].is_suppressed is True
+
 
 def test_nested_pseudo_text_with_period():
     # A period inside pseudo-text should not terminate the COPY statement
@@ -45,10 +51,12 @@ def test_nested_pseudo_text_with_period():
     assert statements[0].replacing_clauses[0].find_text == "A.B"
     assert statements[0].replacing_clauses[0].replace_text == "C.D"
 
+
 def test_copy_in_literal_ignored():
     source = '       DISPLAY "COPY EMPLOYEE.".'
     statements = extract_copy_statements(source)
     assert len(statements) == 0
+
 
 def test_copy_in_comment_ignored():
     source = """
@@ -58,10 +66,12 @@ def test_copy_in_comment_ignored():
     statements = extract_copy_statements(source)
     assert len(statements) == 0
 
+
 def test_malformed_copy_incomplete():
     source = "       COPY EMPLOYEE"  # Missing period
     statements = extract_copy_statements(source)
     assert len(statements) == 0
+
 
 def test_multiple_copy_statements():
     source = """
@@ -72,6 +82,7 @@ def test_multiple_copy_statements():
     assert len(statements) == 2
     assert statements[0].member_name == "M1"
     assert statements[1].member_name == "M2"
+
 
 def test_very_long_replacing_clause():
     # Test for performance/robustness without hitting column 72 limit
@@ -85,6 +96,7 @@ def test_very_long_replacing_clause():
     assert statements[0].member_name == "LONGBOOK"
     assert len(statements[0].replacing_clauses) == 100
 
+
 def test_malformed_replacing_missing_by():
     # Malformed REPLACING should probably not be extracted as a valid statement
     source = "       COPY MYCOPY REPLACING ==A== ==B==."
@@ -92,6 +104,7 @@ def test_malformed_replacing_missing_by():
     # Depending on implementation, it might fail to match or match partially.
     # A robust lexer should handle this gracefully.
     assert len(statements) == 0
+
 
 def test_copy_with_continuation_and_quotes():
     # Copy statement continued with '-' in column 7

@@ -1,13 +1,17 @@
-
-import pytest
-from cobolparser.parser import CobolParser
 from cobolparser.models.statements import (
-    AddStatement, SubtractStatement, MultiplyStatement, DivideStatement, ComputeStatement
+    AddStatement,
+    ComputeStatement,
+    DivideStatement,
+    MultiplyStatement,
+    SubtractStatement,
 )
+from cobolparser.parser import CobolParser
+
 
 def parse_cobol(code):
     parser = CobolParser()
     return parser.parse(code)
+
 
 def get_procedure_statements(proc_div):
     """Get statements from procedure division, handling both architectures."""
@@ -16,11 +20,16 @@ def get_procedure_statements(proc_div):
         return proc_div.paragraphs[0].statements
     # Otherwise get from first section (old architecture)
     elif proc_div.sections:
-        return proc_div.sections[0].paragraphs[0].statements if proc_div.sections[0].paragraphs else []
+        return (
+            proc_div.sections[0].paragraphs[0].statements
+            if proc_div.sections[0].paragraphs
+            else []
+        )
     return []
 
+
 class TestArithmeticMigration:
-    
+
     def test_add_statement(self):
         src = """
        IDENTIFICATION DIVISION.
@@ -33,15 +42,15 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 4
-        
+
         assert isinstance(stmts[0], AddStatement)
         assert isinstance(stmts[1], AddStatement)
         assert isinstance(stmts[2], AddStatement)
         assert isinstance(stmts[3], AddStatement)
-        
+
     def test_subtract_statement(self):
         src = """
        IDENTIFICATION DIVISION.
@@ -52,7 +61,7 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 2
         assert isinstance(stmts[0], SubtractStatement)
@@ -68,7 +77,7 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 2
         assert isinstance(stmts[0], MultiplyStatement)
@@ -84,7 +93,7 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 2
         assert isinstance(stmts[0], DivideStatement)
@@ -101,12 +110,12 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 3
         assert isinstance(stmts[0], ComputeStatement)
         assert "A" in stmts[0].targets
-        
+
     def test_size_error_clause(self):
         src = """
        IDENTIFICATION DIVISION.
@@ -119,12 +128,12 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 1
         stmt = stmts[0]
         assert isinstance(stmt, AddStatement)
-        
+
         # Check on_size_error
         nested = stmt.on_size_error
         assert nested is not None
@@ -143,12 +152,12 @@ class TestArithmeticMigration:
         """
         result = parse_cobol(src)
         assert result.errors == []
-        
+
         stmts = get_procedure_statements(result.ast.procedure_division)
         assert len(stmts) == 1
         stmt = stmts[0]
         assert isinstance(stmt, ComputeStatement)
-        
+
         # Check not_on_size_error
         nested = stmt.not_on_size_error
         assert nested is not None

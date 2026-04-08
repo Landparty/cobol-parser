@@ -4,14 +4,13 @@ These tests target specific uncovered code paths in parser.py to achieve
 near-total test coverage. Each test uses realistic COBOL code examples.
 """
 
-import pytest
-from cobolparser.parser import CobolParser, ParseResult, parse_cobol
-from cobolparser.plugins.core import ErrorRecoveryMode, DialectType
+from cobolparser.parser import CobolParser, parse_cobol
+from cobolparser.plugins.core import ErrorRecoveryMode
 
 
 class TestProgramIDClauses:
     """Test PROGRAM-ID with optional clauses (IS INITIAL, IS COMMON)."""
-    
+
     def test_program_id_with_is_initial(self):
         """Test PROGRAM-ID with IS INITIAL clause."""
         source = """
@@ -24,7 +23,7 @@ class TestProgramIDClauses:
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
         assert result.ast.program_name == "TESTPROG"
-    
+
     def test_program_id_with_is_common(self):
         """Test PROGRAM-ID with IS COMMON clause."""
         source = """
@@ -36,7 +35,7 @@ class TestProgramIDClauses:
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
         assert result.ast.program_name == "COMMONPG"
-    
+
     def test_program_id_with_multiple_clauses(self):
         """Test PROGRAM-ID with multiple IS clauses."""
         source = """
@@ -52,7 +51,7 @@ class TestProgramIDClauses:
 
 class TestEnvironmentDivisionEdgeCases:
     """Test edge cases in ENVIRONMENT DIVISION parsing."""
-    
+
     def test_environment_division_with_configuration_section(self):
         """Test ENVIRONMENT DIVISION with CONFIGURATION SECTION."""
         source = """
@@ -75,7 +74,7 @@ class TestEnvironmentDivisionEdgeCases:
         assert result.ast is not None
         env_div = result.ast.get_division("ENVIRONMENT")
         assert env_div is not None
-    
+
     def test_environment_division_missing_division_keyword(self):
         """Test ENVIRONMENT token not followed by DIVISION."""
         source = """
@@ -95,7 +94,7 @@ class TestEnvironmentDivisionEdgeCases:
 
 class TestSelectStatementClauses:
     """Test comprehensive SELECT statement clause parsing."""
-    
+
     def test_select_with_optional_file(self):
         """Test SELECT OPTIONAL file."""
         source = """
@@ -117,7 +116,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_indexed_organization(self):
         """Test SELECT with INDEXED organization and keys."""
         source = """
@@ -141,7 +140,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_relative_organization(self):
         """Test SELECT with RELATIVE organization."""
         source = """
@@ -165,7 +164,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_line_sequential(self):
         """Test SELECT with LINE SEQUENTIAL organization."""
         source = """
@@ -185,7 +184,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_reserve_clause(self):
         """Test SELECT with RESERVE clause."""
         source = """
@@ -206,7 +205,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_padding_character(self):
         """Test SELECT with PADDING CHARACTER clause."""
         source = """
@@ -226,7 +225,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_record_delimiter(self):
         """Test SELECT with RECORD DELIMITER clause."""
         source = """
@@ -246,7 +245,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_password(self):
         """Test SELECT with PASSWORD clause."""
         source = """
@@ -266,7 +265,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_lock_mode(self):
         """Test SELECT with LOCK MODE clause."""
         source = """
@@ -287,7 +286,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_sharing(self):
         """Test SELECT with SHARING clause."""
         source = """
@@ -307,7 +306,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_sharing_no_other(self):
         """Test SELECT with SHARING NO OTHER clause."""
         source = """
@@ -327,7 +326,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_sharing_read_only(self):
         """Test SELECT with SHARING READ ONLY clause."""
         source = """
@@ -347,7 +346,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_device_type(self):
         """Test SELECT with device type ASSIGN."""
         source = """
@@ -366,7 +365,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_alternate_key_password(self):
         """Test SELECT with ALTERNATE KEY and PASSWORD."""
         source = """
@@ -392,7 +391,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_vsam_file_status(self):
         """Test SELECT with two FILE STATUS variables (VSAM)."""
         source = """
@@ -414,7 +413,7 @@ class TestSelectStatementClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_select_with_record_key_source(self):
         """Test SELECT with RECORD KEY SOURCE clause (IBM extension)."""
         source = """
@@ -440,7 +439,7 @@ class TestSelectStatementClauses:
 
 class TestFDRecordClauses:
     """Test comprehensive FD/SD record clause parsing."""
-    
+
     def test_fd_with_block_contains_range(self):
         """Test FD with BLOCK CONTAINS range."""
         source = """
@@ -460,7 +459,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_record_contains_variable(self):
         """Test FD with RECORD CONTAINS variable length."""
         source = """
@@ -484,7 +483,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_record_is_varying(self):
         """Test FD with RECORD IS VARYING clause."""
         source = """
@@ -508,7 +507,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_label_records_standard(self):
         """Test FD with LABEL RECORDS STANDARD."""
         source = """
@@ -528,7 +527,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_label_records_omitted(self):
         """Test FD with LABEL RECORDS OMITTED."""
         source = """
@@ -548,7 +547,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_value_of(self):
         """Test FD with VALUE OF clause."""
         source = """
@@ -568,7 +567,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_data_records(self):
         """Test FD with DATA RECORDS clause."""
         source = """
@@ -589,7 +588,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_linage(self):
         """Test FD with LINAGE clause."""
         source = """
@@ -612,7 +611,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_code_set(self):
         """Test FD with CODE-SET clause."""
         source = """
@@ -632,7 +631,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_recording_mode(self):
         """Test FD with RECORDING MODE clause."""
         source = """
@@ -652,7 +651,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_report_clause(self):
         """Test FD with REPORT IS clause."""
         source = """
@@ -672,7 +671,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_fd_with_external_global(self):
         """Test FD with EXTERNAL and GLOBAL attributes."""
         source = """
@@ -694,7 +693,7 @@ class TestFDRecordClauses:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_sd_sort_description(self):
         """Test SD (Sort Description) record."""
         source = """
@@ -719,7 +718,7 @@ class TestFDRecordClauses:
 
 class TestExecStatements:
     """Test EXEC SQL, EXEC CICS, and EXEC IMS parsing."""
-    
+
     def test_exec_sql_select(self):
         """Test EXEC SQL SELECT statement."""
         source = """
@@ -739,7 +738,7 @@ class TestExecStatements:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_exec_sql_insert(self):
         """Test EXEC SQL INSERT statement."""
         source = """
@@ -758,7 +757,7 @@ class TestExecStatements:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_exec_cics_send(self):
         """Test EXEC CICS SEND statement."""
         source = """
@@ -776,7 +775,7 @@ class TestExecStatements:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_exec_cics_receive(self):
         """Test EXEC CICS RECEIVE statement."""
         source = """
@@ -795,7 +794,7 @@ class TestExecStatements:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_exec_ims_statement(self):
         """Test EXEC IMS statement."""
         source = """
@@ -816,7 +815,7 @@ class TestExecStatements:
 
 class TestDataItemEdgeCases:
     """Test edge cases in data item parsing."""
-    
+
     def test_data_item_with_sync(self):
         """Test data item with SYNC/SYNCHRONIZED clause."""
         source = """
@@ -832,7 +831,7 @@ class TestDataItemEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_data_item_anonymous(self):
         """Test anonymous data items (level with FILLER implied)."""
         source = """
@@ -849,7 +848,7 @@ class TestDataItemEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_data_item_with_redefines(self):
         """Test data item with REDEFINES clause."""
         source = """
@@ -868,7 +867,7 @@ class TestDataItemEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_data_item_with_occurs_depending(self):
         """Test data item with OCCURS DEPENDING ON."""
         source = """
@@ -885,7 +884,7 @@ class TestDataItemEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_data_item_usage_is_form(self):
         """Test data item with USAGE IS form."""
         source = """
@@ -906,7 +905,7 @@ class TestDataItemEdgeCases:
 
 class TestProcedureStatementEdgeCases:
     """Test edge cases in procedure division statement parsing."""
-    
+
     def test_goto_depending_on(self):
         """Test GO TO ... DEPENDING ON statement."""
         source = """
@@ -928,7 +927,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_if_else_statement(self):
         """Test IF/ELSE statement parsing."""
         source = """
@@ -946,7 +945,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_call_with_returning(self):
         """Test CALL statement with RETURNING clause."""
         source = """
@@ -963,7 +962,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_call_with_by_value(self):
         """Test CALL statement with BY VALUE."""
         source = """
@@ -978,7 +977,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_call_with_by_content(self):
         """Test CALL statement with BY CONTENT."""
         source = """
@@ -993,7 +992,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_sort_statement(self):
         """Test SORT statement with procedures."""
         source = """
@@ -1022,7 +1021,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_move_with_decimal_literal(self):
         """Test MOVE with decimal literal starting with period."""
         source = """
@@ -1037,7 +1036,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_move_with_signed_decimal(self):
         """Test MOVE with signed decimal literal."""
         source = """
@@ -1053,7 +1052,7 @@ class TestProcedureStatementEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_procedure_division_using(self):
         """Test PROCEDURE DIVISION USING clause."""
         source = """
@@ -1073,7 +1072,7 @@ class TestProcedureStatementEdgeCases:
 
 class TestLocalAndLinkageSections:
     """Test LOCAL-STORAGE and LINKAGE SECTION parsing."""
-    
+
     def test_local_storage_section(self):
         """Test LOCAL-STORAGE SECTION parsing."""
         source = """
@@ -1089,7 +1088,7 @@ class TestLocalAndLinkageSections:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_linkage_section(self):
         """Test LINKAGE SECTION parsing."""
         source = """
@@ -1110,7 +1109,7 @@ class TestLocalAndLinkageSections:
 
 class TestPeriodHandlingEdgeCases:
     """Test period handling edge cases to cover lines 248-251."""
-    
+
     def test_period_after_newline_in_data_division(self):
         """Test period that appears after newline in DATA DIVISION."""
         source = """
@@ -1126,7 +1125,7 @@ class TestPeriodHandlingEdgeCases:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_period_in_numeric_edited_picture(self):
         """Test period within numeric edited picture."""
         source = """
@@ -1145,7 +1144,7 @@ class TestPeriodHandlingEdgeCases:
 
 class TestSectionAndParagraphParsing:
     """Test section and paragraph parsing in PROCEDURE DIVISION."""
-    
+
     def test_named_section(self):
         """Test named sections in PROCEDURE DIVISION."""
         source = """
@@ -1171,7 +1170,7 @@ class TestSectionAndParagraphParsing:
 
 class TestErrorRecoveryModes:
     """Test different error recovery modes."""
-    
+
     def test_collect_all_mode_with_errors(self):
         """Test COLLECT_ALL mode collects all errors."""
         source = """
@@ -1186,7 +1185,7 @@ class TestErrorRecoveryModes:
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         # Should continue parsing despite errors
         assert result.ast is not None or len(result.errors) > 0
-    
+
     def test_fail_fast_mode_with_errors(self):
         """Test FAIL_FAST mode stops on first error."""
         source = """
@@ -1201,14 +1200,14 @@ class TestErrorRecoveryModes:
 
 class TestParseFileMethod:
     """Test the parse_file method."""
-    
+
     def test_parse_nonexistent_file(self, tmp_path):
         """Test parsing a file that doesn't exist."""
         parser = CobolParser()
         result = parser.parse_file(str(tmp_path / "nonexistent.cob"))
         assert result.ast is None
         assert len(result.errors) > 0
-    
+
     def test_parse_existing_file(self, tmp_path):
         """Test parsing an existing file."""
         source = """       IDENTIFICATION DIVISION.
@@ -1218,7 +1217,7 @@ class TestParseFileMethod:
         """
         test_file = tmp_path / "test.cob"
         test_file.write_text(source)
-        
+
         parser = CobolParser()
         result = parser.parse_file(str(test_file))
         assert result.ast is not None
@@ -1226,7 +1225,7 @@ class TestParseFileMethod:
 
 class TestParseResultProperties:
     """Test ParseResult properties."""
-    
+
     def test_success_property_true(self):
         """Test success property when parsing succeeds."""
         source = """
@@ -1237,7 +1236,7 @@ class TestParseResultProperties:
         """
         result = parse_cobol(source)
         assert result.success is True
-    
+
     def test_has_warnings_property(self):
         """Test has_warnings property."""
         source = """
@@ -1253,7 +1252,7 @@ class TestParseResultProperties:
 
 class TestConvenienceParseFunction:
     """Test the convenience parse_cobol function."""
-    
+
     def test_parse_cobol_with_preprocessing(self):
         """Test parse_cobol with preprocess_fixed option."""
         source = """       IDENTIFICATION DIVISION.
@@ -1262,7 +1261,7 @@ class TestConvenienceParseFunction:
            STOP RUN."""
         result = parse_cobol(source, preprocess_fixed=True)
         assert result.ast is not None
-    
+
     def test_parse_cobol_free_form(self):
         """Test parse_cobol with free_form option."""
         source = """IDENTIFICATION DIVISION.
@@ -1275,7 +1274,7 @@ STOP RUN."""
 
 class TestLockModeAdvanced:
     """Test advanced LOCK MODE clause variations."""
-    
+
     def test_lock_mode_with_rollback(self):
         """Test LOCK MODE with ROLLBACK clause."""
         source = """
@@ -1296,7 +1295,7 @@ class TestLockModeAdvanced:
         """
         result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         assert result.ast is not None
-    
+
     def test_lock_mode_with_lock_on_multiple_records(self):
         """Test LOCK MODE with LOCK ON MULTIPLE RECORDS."""
         source = """

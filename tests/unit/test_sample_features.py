@@ -2,70 +2,70 @@
 Unit tests for specific COBOL language features found in sample programs.
 Tests lexer tokenization and parser AST node creation.
 """
-import pytest
-from pathlib import Path
-from cobolparser.lexer import CobolLexer, TokenType
-from cobolparser import CobolParser
 
+from pathlib import Path
+
+from cobolparser import CobolParser
+from cobolparser.lexer import CobolLexer, TokenType
 
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
 
 
 class TestFigurativeConstants:
     """Test tokenization and parsing of figurative constants."""
-    
+
     def test_all_figurative_constant_tokenization(self):
         """Test that ALL is tokenized as FIGURATIVE_CONSTANT."""
         source = "MOVE ALL 'X' TO WS-FIELD."
         lexer = CobolLexer(source, free_form=True)
-        
+
         tokens = list(lexer.tokenize())
-        
+
         # Find ALL token
-        all_token = next((t for t in tokens if t.value == 'ALL'), None)
+        all_token = next((t for t in tokens if t.value == "ALL"), None)
         assert all_token is not None
         assert all_token.type == TokenType.FIGURATIVE_CONSTANT
-        
+
     def test_zero_figurative_constant(self):
         """Test ZERO/ZEROS/ZEROES tokenization."""
-        for variant in ['ZERO', 'ZEROS', 'ZEROES']:
+        for variant in ["ZERO", "ZEROS", "ZEROES"]:
             source = f"MOVE {variant} TO WS-FIELD."
             lexer = CobolLexer(source, free_form=True)
             tokens = list(lexer.tokenize())
-            
+
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
             assert token.type == TokenType.FIGURATIVE_CONSTANT
-            
+
     def test_space_figurative_constant(self):
         """Test SPACE/SPACES tokenization."""
-        for variant in ['SPACE', 'SPACES']:
+        for variant in ["SPACE", "SPACES"]:
             source = f"MOVE {variant} TO WS-FIELD."
             lexer = CobolLexer(source, free_form=True)
             tokens = list(lexer.tokenize())
-            
+
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
             assert token.type == TokenType.FIGURATIVE_CONSTANT
-            
+
     def test_quote_figurative_constant(self):
         """Test QUOTE/QUOTES tokenization."""
-        for variant in ['QUOTE', 'QUOTES']:
+        for variant in ["QUOTE", "QUOTES"]:
             source = f"MOVE {variant} TO WS-FIELD."
             lexer = CobolLexer(source, free_form=True)
             tokens = list(lexer.tokenize())
-            
+
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
             assert token.type == TokenType.FIGURATIVE_CONSTANT
-            
+
     def test_high_low_value_constants(self):
         """Test HIGH-VALUE and LOW-VALUE tokenization."""
-        for variant in ['HIGH-VALUE', 'HIGH-VALUES', 'LOW-VALUE', 'LOW-VALUES']:
+        for variant in ["HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES"]:
             source = f"MOVE {variant} TO WS-FIELD."
             lexer = CobolLexer(source, free_form=True)
             tokens = list(lexer.tokenize())
-            
+
             token = next((t for t in tokens if t.value == variant), None)
             assert token is not None
             assert token.type == TokenType.FIGURATIVE_CONSTANT
@@ -73,7 +73,7 @@ class TestFigurativeConstants:
 
 class TestPictureClausesParsing:
     """Test parsing of various PICTURE clause formats."""
-    
+
     def test_simple_numeric_picture(self):
         """Test simple numeric PICTURE clause parsing."""
         parser = CobolParser()
@@ -84,10 +84,10 @@ class TestPictureClausesParsing:
         WORKING-STORAGE SECTION.
         01  WS-NUM  PIC 9(5).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_signed_picture(self):
         """Test signed PICTURE clause parsing."""
         parser = CobolParser()
@@ -98,10 +98,10 @@ class TestPictureClausesParsing:
         WORKING-STORAGE SECTION.
         01  WS-SIGNED  PIC S9(5).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_decimal_picture(self):
         """Test decimal PICTURE clause parsing."""
         parser = CobolParser()
@@ -112,10 +112,10 @@ class TestPictureClausesParsing:
         WORKING-STORAGE SECTION.
         01  WS-DECIMAL  PIC 9(5)V99.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_edited_picture(self):
         """Test edited PICTURE clause parsing."""
         parser = CobolParser()
@@ -126,14 +126,14 @@ class TestPictureClausesParsing:
         WORKING-STORAGE SECTION.
         01  WS-EDITED  PIC $$$,$$9.99.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestOccursClause:
     """Test OCCURS clause parsing."""
-    
+
     def test_fixed_occurs(self):
         """Test fixed OCCURS clause."""
         parser = CobolParser()
@@ -145,10 +145,10 @@ class TestOccursClause:
         01  WS-ARRAY.
             05  WS-ITEM OCCURS 10 TIMES PIC X(5).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_occurs_depending_on(self):
         """Test OCCURS DEPENDING ON clause."""
         parser = CobolParser()
@@ -162,10 +162,10 @@ class TestOccursClause:
             05  WS-ITEM OCCURS 1 TO 100 TIMES
                 DEPENDING ON WS-COUNT PIC X(5).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_occurs_indexed_by(self):
         """Test OCCURS INDEXED BY clause."""
         parser = CobolParser()
@@ -178,14 +178,14 @@ class TestOccursClause:
             05  WS-ITEM OCCURS 10 TIMES
                 INDEXED BY WS-IDX PIC X(5).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestRedefinesClause:
     """Test REDEFINES clause parsing."""
-    
+
     def test_simple_redefines(self):
         """Test simple REDEFINES clause."""
         parser = CobolParser()
@@ -197,10 +197,10 @@ class TestRedefinesClause:
         01  WS-FIELD-A  PIC X(10).
         01  WS-FIELD-B  REDEFINES WS-FIELD-A PIC 9(10).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_nested_redefines(self):
         """Test nested REDEFINES structures."""
         parser = CobolParser()
@@ -216,14 +216,14 @@ class TestRedefinesClause:
                 10  WS-MONTH PIC X(2).
                 10  WS-DAY   PIC X(2).
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestFileControlParsing:
     """Test FILE-CONTROL section parsing."""
-    
+
     def test_sequential_file_select(self):
         """Test sequential file SELECT statement."""
         parser = CobolParser()
@@ -236,10 +236,10 @@ class TestFileControlParsing:
             SELECT INPUT-FILE ASSIGN TO 'INPUT.DAT'
                 ORGANIZATION IS SEQUENTIAL.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_indexed_file_select(self):
         """Test indexed file SELECT statement."""
         parser = CobolParser()
@@ -254,10 +254,10 @@ class TestFileControlParsing:
                 ACCESS MODE IS DYNAMIC
                 RECORD KEY IS REC-KEY.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_relative_file_select(self):
         """Test relative file SELECT statement."""
         parser = CobolParser()
@@ -272,14 +272,14 @@ class TestFileControlParsing:
                 ACCESS MODE IS RANDOM
                 RELATIVE KEY IS REL-KEY.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestArithmeticStatements:
     """Test arithmetic statement parsing."""
-    
+
     def test_add_statement(self):
         """Test ADD statement variations."""
         parser = CobolParser()
@@ -296,10 +296,10 @@ class TestArithmeticStatements:
             ADD WS-A WS-B GIVING WS-C.
             ADD WS-A TO WS-B ROUNDED.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_subtract_statement(self):
         """Test SUBTRACT statement."""
         parser = CobolParser()
@@ -313,10 +313,10 @@ class TestArithmeticStatements:
         PROCEDURE DIVISION.
             SUBTRACT WS-A FROM WS-B.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_multiply_statement(self):
         """Test MULTIPLY statement."""
         parser = CobolParser()
@@ -330,10 +330,10 @@ class TestArithmeticStatements:
         PROCEDURE DIVISION.
             MULTIPLY WS-A BY WS-B.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_divide_statement(self):
         """Test DIVIDE statement."""
         parser = CobolParser()
@@ -348,10 +348,10 @@ class TestArithmeticStatements:
         PROCEDURE DIVISION.
             DIVIDE WS-A BY WS-B GIVING WS-C.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_compute_statement(self):
         """Test COMPUTE statement."""
         parser = CobolParser()
@@ -366,14 +366,14 @@ class TestArithmeticStatements:
         PROCEDURE DIVISION.
             COMPUTE WS-C = WS-A + WS-B.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestStringStatements:
     """Test string manipulation statement parsing."""
-    
+
     def test_string_statement(self):
         """Test STRING statement."""
         parser = CobolParser()
@@ -388,10 +388,10 @@ class TestStringStatements:
         PROCEDURE DIVISION.
             STRING WS-A WS-B DELIMITED BY SIZE INTO WS-C.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_unstring_statement(self):
         """Test UNSTRING statement."""
         parser = CobolParser()
@@ -407,10 +407,10 @@ class TestStringStatements:
             UNSTRING WS-SOURCE DELIMITED BY SPACE
                 INTO WS-A WS-B.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_inspect_statement(self):
         """Test INSPECT statement."""
         parser = CobolParser()
@@ -423,14 +423,14 @@ class TestStringStatements:
         PROCEDURE DIVISION.
             INSPECT WS-FIELD REPLACING ALL 'A' BY 'B'.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestControlFlowStatements:
     """Test control flow statement parsing."""
-    
+
     def test_if_statement(self):
         """Test IF statement."""
         parser = CobolParser()
@@ -447,10 +447,10 @@ class TestControlFlowStatements:
                 DISPLAY 'Less'
             END-IF.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_evaluate_statement(self):
         """Test EVALUATE statement."""
         parser = CobolParser()
@@ -470,10 +470,10 @@ class TestControlFlowStatements:
                     DISPLAY 'Other'
             END-EVALUATE.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_perform_statement(self):
         """Test PERFORM statement variations."""
         parser = CobolParser()
@@ -492,14 +492,14 @@ class TestControlFlowStatements:
         100-PARA.
             DISPLAY 'Paragraph'.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestIBMExtensionsParsing:
     """Test IBM Enterprise COBOL extension parsing."""
-    
+
     def test_comp3_usage(self):
         """Test COMP-3 (packed decimal) usage."""
         parser = CobolParser()
@@ -510,10 +510,10 @@ class TestIBMExtensionsParsing:
         WORKING-STORAGE SECTION.
         01  WS-PACKED PIC S9(7)V99 COMP-3.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_exec_sql_block(self):
         """Test EXEC SQL embedded SQL."""
         parser = CobolParser()
@@ -530,10 +530,10 @@ class TestIBMExtensionsParsing:
                 WHERE EMPNO = 123
             END-EXEC.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_exec_cics_block(self):
         """Test EXEC CICS transaction command."""
         parser = CobolParser()
@@ -550,14 +550,14 @@ class TestIBMExtensionsParsing:
                 RIDFLD(WS-KEY)
             END-EXEC.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
 
 
 class TestSpecialFeatures:
     """Test special COBOL features parsing."""
-    
+
     def test_accept_from_date(self):
         """Test ACCEPT FROM DATE."""
         parser = CobolParser()
@@ -570,10 +570,10 @@ class TestSpecialFeatures:
         PROCEDURE DIVISION.
             ACCEPT WS-DATE FROM DATE YYYYMMDD.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_display_upon_console(self):
         """Test DISPLAY UPON CONSOLE."""
         parser = CobolParser()
@@ -583,10 +583,10 @@ class TestSpecialFeatures:
         PROCEDURE DIVISION.
             DISPLAY 'Message' UPON CONSOLE.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None
-        
+
     def test_sort_statement(self):
         """Test SORT statement."""
         parser = CobolParser()
@@ -615,6 +615,6 @@ class TestSpecialFeatures:
                 USING INPUT-FILE
                 GIVING OUTPUT-FILE.
         """
-        
+
         result = parser.parse(source)
         assert result.ast is not None

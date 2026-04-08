@@ -1,4 +1,5 @@
-from cobolparser import parse_cobol, ErrorRecoveryMode
+from cobolparser import ErrorRecoveryMode, parse_cobol
+
 
 def test_move_missing_to_does_not_block_perform():
     src = """000100 IDENTIFICATION DIVISION.
@@ -10,7 +11,9 @@ def test_move_missing_to_does_not_block_perform():
 000700 PARA-TWO.
 000800     MOVE A TO B.
 """
-    result = parse_cobol(src, filename='<mem>', error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+    result = parse_cobol(
+        src, filename="<mem>", error_recovery=ErrorRecoveryMode.COLLECT_ALL
+    )
     # Based on integration test behavior, the parser handles malformed MOVE gracefully
     # and doesn't necessarily generate errors for missing TO keywords
     # The key is that parsing continues and the AST is created

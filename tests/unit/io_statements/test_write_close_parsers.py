@@ -12,14 +12,13 @@ therefore unreachable through a full parse_cobol() round-trip.  The tests for th
 branches use direct parser invocation with hand-crafted Token objects (IDENTIFIER type, matching
 value) so the branch coverage is exercised as proper parser-level unit tests.
 """
-import pytest
-from cobolparser import parse_cobol
-from cobolparser.lexer import Token, TokenType
-from cobolparser.core.token_stream import TokenStream
-from cobolparser.models.ast_base import SourceLocation
-from cobolparser.parsers.statements.write_parser import WriteStatementParser
-from cobolparser.parsers.statements.close_parser import CloseStatementParser
 
+from cobolparser import parse_cobol
+from cobolparser.core.token_stream import TokenStream
+from cobolparser.lexer import Token, TokenType
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.parsers.statements.close_parser import CloseStatementParser
+from cobolparser.parsers.statements.write_parser import WriteStatementParser
 
 _LOC = SourceLocation(1, 1)
 

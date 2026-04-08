@@ -16,62 +16,56 @@ Family modules:
     misc        — SelectStatement, CopyStatement
 """
 
-from .base import (
-    CobolStatement,
-    CobolExpression,
-    ArithmeticExpression,
-    ConditionalExpression,
-    LogicalExpression,
-    FunctionCall,
-)
-
 from .arithmetic import (
-    ArithmeticStatement,
     AddStatement,
-    SubtractStatement,
-    MultiplyStatement,
-    DivideStatement,
+    ArithmeticStatement,
     ComputeStatement,
+    DivideStatement,
+    MultiplyStatement,
+    SubtractStatement,
 )
-
-from .control import (
-    WhenClause,
-    EvaluateStatement,
-    IfStatement,
-    PerformStatement,
-    GoStatement,
-    StopStatement,
-    SearchStatement,
+from .base import (
+    ArithmeticExpression,
+    CobolExpression,
+    CobolStatement,
+    ConditionalExpression,
+    FunctionCall,
+    LogicalExpression,
 )
-
-from .data import (
-    MoveStatement,
-    DisplayStatement,
-    StringStatement,
-    UnstringStatement,
-)
-
-from .io import (
-    IOReadStatement,
-    IOWriteStatement,
-    IOOpenStatement,
-    IOCloseStatement,
-    IOAcceptStatement,
-    IORewriteStatement,
-    IODeleteStatement,
-    IOStartStatement,
-    IOUnlockStatement,
-)
-
 from .call import (
     CallParameter,
     CallStatement,
     EntryStatement,
 )
-
+from .control import (
+    EvaluateStatement,
+    GoStatement,
+    IfStatement,
+    PerformStatement,
+    SearchStatement,
+    StopStatement,
+    WhenClause,
+)
+from .data import (
+    DisplayStatement,
+    MoveStatement,
+    StringStatement,
+    UnstringStatement,
+)
+from .io import (
+    IOAcceptStatement,
+    IOCloseStatement,
+    IODeleteStatement,
+    IOOpenStatement,
+    IOReadStatement,
+    IORewriteStatement,
+    IOStartStatement,
+    IOUnlockStatement,
+    IOWriteStatement,
+)
 from .misc import (
-    SelectStatement,
     CopyStatement,
+    SelectStatement,
 )
 
 # Module exports — preserved from original statements.py

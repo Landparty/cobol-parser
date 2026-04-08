@@ -11,10 +11,7 @@ Diagnostic Record Structure (per Data Model):
 - severity: Error severity (ERROR, WARNING, INFO)
 """
 
-import pytest
-
-from cobolparser import CobolParser, ParseResult, ParseError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser import CobolParser
 
 
 def _fixed_source(body: str) -> str:
@@ -53,9 +50,9 @@ class TestEvaluateDiagnosticStructure:
         selector_error = [d for d in diagnostics if "selector" in str(d).lower()]
         if selector_error:
             for d in selector_error:
-                assert hasattr(d, "line") or hasattr(d, "location")
-                if hasattr(d, "line"):
-                    assert d.line > 0
+                assert hasattr(d, "line_number") or hasattr(d, "location")
+                if hasattr(d, "line_number"):
+                    assert d.line_number > 0
                 if hasattr(d, "location"):
                     assert d.location.line > 0
 

@@ -12,6 +12,7 @@ Contract: VALUE with figurative constants (SPACE, SPACES, ZERO, etc.) should:
 """
 
 import pytest
+
 from cobolparser import CobolParser
 from cobolparser.plugins.core import ErrorRecoveryMode
 
@@ -24,28 +25,30 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-SPACE.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR              PIC X(48) VALUE SPACE.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         # Contract: Should parse successfully
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
         assert result.ast.program_name == "TEST-VALUE-SPACE"
-        
+
         # Contract: Working storage should contain the data item
         assert result.ast.data_division is not None
-        working_storage = result.ast.data_division.get_section_by_name("WORKING-STORAGE")
+        working_storage = result.ast.data_division.get_section_by_name(
+            "WORKING-STORAGE"
+        )
         assert working_storage is not None
-        
+
         # Contract: AST structure preserved
         ast_dict = result.ast.to_dict()
         assert "node_type" in ast_dict
@@ -58,18 +61,18 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-SPACES.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 ANSI-REFERENCE        PIC X(48) VALUE SPACES.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
         assert result.ast.program_name == "TEST-VALUE-SPACES"
@@ -79,19 +82,19 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-ZERO.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 COUNTER               PIC 9(5) VALUE ZERO.
         01 FLAGS                 PIC 9(3) VALUE ZEROS.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
 
@@ -100,19 +103,19 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-HIGH.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR1             PIC X(10) VALUE HIGH-VALUE.
         01 TEST-VAR2             PIC X(10) VALUE HIGH-VALUES.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
 
@@ -121,19 +124,19 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-LOW.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR1             PIC X(10) VALUE LOW-VALUE.
         01 TEST-VAR2             PIC X(10) VALUE LOW-VALUES.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
 
@@ -142,28 +145,30 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-QUOTE.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR1             PIC X VALUE QUOTE.
         01 TEST-VAR2             PIC X VALUE QUOTES.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
 
-    def test_backward_compatibility_multiple_value_clauses_with_figurative_constants(self):
+    def test_backward_compatibility_multiple_value_clauses_with_figurative_constants(
+        self,
+    ):
         """Baseline: Multiple VALUE clauses with mixed figurative constants."""
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-MULTIPLE-VALUES.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-RESULTS.
@@ -176,14 +181,14 @@ class TestValueClauseFigurativeConstantsContract:
              03 FILLER           PIC X(19)  VALUE SPACE.
              03 PARDOT-X         PIC X      VALUE SPACE.
              03 DOTVALUE         PIC 99     VALUE ZERO.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         # Contract: All VALUE clauses with figurative constants should parse
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
@@ -194,20 +199,20 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-VALUE-COMMENT.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR              PIC X(48) VALUE SPACE.
       * THIS IS A COMMENT LINE WITH "QUOTES"
         01 NEXT-VAR              PIC X(10) VALUE SPACE.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         # Contract: Comment should not interfere with VALUE SPACE parsing
         assert result.success, f"Parse failed: {result.errors}"
         assert result.ast is not None
@@ -217,34 +222,34 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-API.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR              PIC X(10) VALUE SPACE.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
-        
+
         # Contract: AST must be serializable to dict
         ast_dict = result.ast.to_dict()
         assert isinstance(ast_dict, dict)
-        
+
         # Contract: Required fields in AST dict
         required_fields = ["node_type", "program_name", "divisions"]
         for field in required_fields:
             assert field in ast_dict, f"Missing required field: {field}"
-            
+
         divisions = ast_dict["divisions"]
         assert "IDENTIFICATION" in divisions
         assert "DATA" in divisions
         assert "PROCEDURE" in divisions
-        
+
         # Contract: Data division must be structured
         data_div = divisions["DATA"]
         assert data_div is not None
@@ -257,27 +262,28 @@ class TestValueClauseFigurativeConstantsContract:
         cobol_source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST-JSON.
-        
+
         DATA DIVISION.
         WORKING-STORAGE SECTION.
         01 TEST-VAR1             PIC X(10) VALUE SPACE.
         01 TEST-VAR2             PIC 9(5)  VALUE ZERO.
-        
+
         PROCEDURE DIVISION.
         STOP RUN.
         """
-        
+
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse(cobol_source)
-        
+
         assert result.success, f"Parse failed: {result.errors}"
-        
+
         # Contract: Must be JSON-serializable
         import json
+
         try:
             json_output = result.ast.to_json()
             assert json_output is not None
-            
+
             # Contract: JSON should be parseable
             parsed_json = json.loads(json_output)
             assert isinstance(parsed_json, dict)

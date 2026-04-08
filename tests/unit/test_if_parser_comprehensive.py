@@ -10,12 +10,13 @@ This module systematically tests all IF variants including:
 """
 
 import pytest
-from cobolparser import parse_cobol, ErrorRecoveryMode
+
+from cobolparser import parse_cobol
 
 
 class TestIfBasic:
     """Test basic IF statement functionality."""
-    
+
     def test_if_simple(self):
         """Test simple IF with THEN."""
         source = """
@@ -33,10 +34,10 @@ class TestIfBasic:
         result = parse_cobol(source)
         assert result.success
         assert result.ast is not None
-        
+
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 1
-    
+
     def test_if_without_then(self):
         """Test IF without explicit THEN (default)."""
         source = """
@@ -52,7 +53,7 @@ class TestIfBasic:
         assert result.success
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 1
-    
+
     def test_if_with_end_if(self):
         """Test IF ... END-IF structure."""
         source = """
@@ -70,7 +71,7 @@ class TestIfBasic:
 
 class TestIfElse:
     """Test IF ... ELSE ... END-IF structures."""
-    
+
     def test_if_else_basic(self):
         """Test IF ... ELSE ... END-IF."""
         source = """
@@ -88,7 +89,7 @@ class TestIfElse:
         assert result.success
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 1
-    
+
     def test_if_else_if_chain(self):
         """Test IF ... ELSE IF ... ELSE ... END-IF chain."""
         source = """
@@ -117,7 +118,7 @@ class TestIfElse:
 
 class TestNestedIf:
     """Test nested IF statements."""
-    
+
     def test_nested_if_simple(self):
         """Test simple nested IF."""
         source = """
@@ -135,7 +136,7 @@ class TestNestedIf:
         assert result.success
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 2
-    
+
     def test_deeply_nested_if(self):
         """Test deeply nested IF statements."""
         source = """
@@ -155,7 +156,7 @@ class TestNestedIf:
         assert result.success
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 3
-    
+
     def test_nested_if_with_else(self):
         """Test nested IF with ELSE branches."""
         source = """
@@ -166,7 +167,7 @@ class TestNestedIf:
                 IF FALSE
                     DISPLAY "INNER TRUE"
                 ELSE
-                    DISPLAY "INNER ELSE" 
+                    DISPLAY "INNER ELSE"
                 END-IF
             ELSE
                 DISPLAY "OUTER ELSE"
@@ -179,7 +180,7 @@ class TestNestedIf:
 
 class TestIfConditions:
     """Test various IF condition types."""
-    
+
     def test_if_numeric_comparison(self):
         """Test IF with numeric comparison."""
         source = """
@@ -196,7 +197,7 @@ class TestIfConditions:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_string_comparison(self):
         """Test IF with string comparison."""
         source = """
@@ -213,7 +214,7 @@ class TestIfConditions:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_complex_condition_and(self):
         """Test IF with AND condition."""
         source = """
@@ -227,7 +228,7 @@ class TestIfConditions:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_complex_condition_or(self):
         """Test IF with OR condition."""
         source = """
@@ -241,7 +242,7 @@ class TestIfConditions:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_complex_condition_mixed(self):
         """Test IF with mixed AND/OR conditions."""
         source = """
@@ -255,7 +256,7 @@ class TestIfConditions:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_negation(self):
         """Test IF with NOT condition."""
         source = """
@@ -273,7 +274,7 @@ class TestIfConditions:
 
 class TestIfInline:
     """Test inline IF statements (one-liner COBOL style)."""
-    
+
     def test_if_inline_single_statement(self):
         """Test inline IF with single statement."""
         source = """
@@ -285,7 +286,7 @@ class TestIfInline:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_inline_with_period(self):
         """Test inline IF ending with period."""
         source = """
@@ -301,7 +302,7 @@ class TestIfInline:
 
 class TestIfWithStatements:
     """Test IF combined with various statements."""
-    
+
     def test_if_with_display(self):
         """Test IF containing DISPLAY."""
         source = """
@@ -319,7 +320,7 @@ class TestIfWithStatements:
         displays = result.ast.find_statements("DISPLAY")
         assert len(ifs) >= 1
         assert len(displays) >= 1
-    
+
     def test_if_with_move(self):
         """Test IF containing MOVE."""
         source = """
@@ -336,7 +337,7 @@ class TestIfWithStatements:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_with_perform(self):
         """Test IF containing PERFORM."""
         source = """
@@ -352,7 +353,7 @@ class TestIfWithStatements:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_with_call(self):
         """Test IF containing CALL."""
         source = """
@@ -370,7 +371,7 @@ class TestIfWithStatements:
 
 class TestIfSerialization:
     """Test IF statement serialization."""
-    
+
     def test_if_to_dict(self):
         """Test IF statement to_dict() serialization."""
         source = """
@@ -384,14 +385,14 @@ class TestIfSerialization:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         ifs = result.ast.find_statements("IF")
         assert len(ifs) >= 1
-        
+
         if_dict = ifs[0].to_dict()
         assert if_dict is not None
         assert isinstance(if_dict, dict)
-    
+
     def test_if_json_serialization(self):
         """Test IF statement to JSON compatibility."""
         source = """
@@ -411,7 +412,7 @@ class TestIfSerialization:
 
 class TestIfGetAllStatements:
     """Test get_all_statements with IF statements."""
-    
+
     def test_get_all_statements_includes_if(self):
         """Test that get_all_statements includes IF statements."""
         source = """
@@ -425,11 +426,11 @@ class TestIfGetAllStatements:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        if hasattr(result.ast, 'get_all_statements'):
+
+        if hasattr(result.ast, "get_all_statements"):
             all_stmts = result.ast.get_all_statements()
             assert len(all_stmts) >= 1
-    
+
     def test_get_all_statements_includes_nested_if(self):
         """Test get_all_statements with nested IF."""
         source = """
@@ -445,8 +446,8 @@ class TestIfGetAllStatements:
         """
         result = parse_cobol(source)
         assert result.success
-        
-        if hasattr(result.ast, 'get_all_statements'):
+
+        if hasattr(result.ast, "get_all_statements"):
             all_stmts = result.ast.get_all_statements()
             # Should have both IF statements
             assert len(all_stmts) >= 2
@@ -454,7 +455,7 @@ class TestIfGetAllStatements:
 
 class TestIfEdgeCases:
     """Test IF edge cases."""
-    
+
     def test_if_multiple_statements_in_branch(self):
         """Test IF with multiple statements in branch."""
         source = """
@@ -470,7 +471,7 @@ class TestIfEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_if_true_false_keywords(self):
         """Test IF with TRUE/FALSE keywords."""
         source = """

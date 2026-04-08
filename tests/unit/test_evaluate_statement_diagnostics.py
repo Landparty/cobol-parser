@@ -9,12 +9,7 @@ Tests cover:
 - Invalid condition syntax in EVALUATE TRUE
 """
 
-import pytest
-
-from cobolparser import CobolParser
-from cobolparser.models.program import CobolProgram
-from cobolparser.models.statements import EvaluateStatement
-from cobolparser import ParseResult
+from cobolparser import CobolParser, ParseResult
 
 
 def _fixed_source(body: str) -> str:
@@ -92,9 +87,9 @@ def test_evaluate_selector_mismatch_single_subject():
     mismatch_error = [
         e for e in error_messages if "selector" in e.lower() or "subject" in e.lower()
     ]
-    assert len(mismatch_error) >= 1, (
-        f"Expected selector/subject mismatch error, got: {error_messages}"
-    )
+    assert (
+        len(mismatch_error) >= 1
+    ), f"Expected selector/subject mismatch error, got: {error_messages}"
 
 
 def test_evaluate_selector_mismatch_multiple_subjects():
@@ -120,9 +115,9 @@ def test_evaluate_selector_mismatch_multiple_subjects():
     mismatch_error = [
         e for e in error_messages if "selector" in e.lower() or "subject" in e.lower()
     ]
-    assert len(mismatch_error) >= 1, (
-        f"Expected selector/subject mismatch error, got: {error_messages}"
-    )
+    assert (
+        len(mismatch_error) >= 1
+    ), f"Expected selector/subject mismatch error, got: {error_messages}"
 
 
 def test_evaluate_invalid_through_range():
@@ -250,9 +245,9 @@ def test_evaluate_error_location_tracked():
     result = _parse_with_errors(_fixed_source(source))
     assert len(result.errors) >= 1
     for error in result.errors:
-        assert hasattr(error, "line") or hasattr(error, "location")
-        if hasattr(error, "line"):
-            assert error.line > 0
+        assert hasattr(error, "line_number") or hasattr(error, "location")
+        if hasattr(error, "line_number"):
+            assert error.line_number > 0
         if hasattr(error, "location"):
             assert error.location.line > 0
 

@@ -10,8 +10,8 @@ Related to IC222A.CBL parsing failures.
 """
 
 import pytest
+
 from cobolparser.lexer import CobolLexer, TokenType
-from cobolparser.models.ast_base import SourceLocation
 
 
 class TestValueClauseWithFigurativeConstants:
@@ -30,15 +30,15 @@ class TestValueClauseWithFigurativeConstants:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         # Should successfully tokenize without errors
         assert tokens is not None
         assert len(tokens) > 0
-        
+
         # Find VALUE tokens
         value_tokens = [t for t in tokens if t.type == TokenType.VALUE]
         assert len(value_tokens) == 2, "Should find 2 VALUE clauses"
-        
+
         # Should have SPACE as an identifier/keyword, not start of string
         space_tokens = [t for t in tokens if t.value == "SPACE"]
         assert len(space_tokens) >= 1, "Should find SPACE as a token"
@@ -55,7 +55,7 @@ class TestValueClauseWithFigurativeConstants:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         assert tokens is not None
         spaces_tokens = [t for t in tokens if t.value == "SPACES"]
         assert len(spaces_tokens) >= 1, "Should find SPACES as a token"
@@ -73,7 +73,7 @@ class TestValueClauseWithFigurativeConstants:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         assert tokens is not None
         zero_tokens = [t for t in tokens if t.value in ("ZERO", "ZEROS")]
         assert len(zero_tokens) >= 2, "Should find ZERO/ZEROS tokens"
@@ -90,7 +90,7 @@ class TestValueClauseWithFigurativeConstants:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         # Should tokenize successfully without treating comment quote as string start
         assert tokens is not None
         value_tokens = [t for t in tokens if t.type == TokenType.VALUE]
@@ -106,7 +106,7 @@ class TestValueClauseWithCommentInterruption:
        PROGRAM-ID. TEST.
        DATA DIVISION.
        WORKING-STORAGE SECTION.
-       02 FILLER  PIC IS X(99)    VALUE IS " FEATURE           
+       02 FILLER  PIC IS X(99)    VALUE IS " FEATURE
       *    "SS  PARAGRAPH-NAME
       *    "       REMARKS".
        01 NEXT-VAR PIC X(10) VALUE SPACE.
@@ -115,14 +115,14 @@ class TestValueClauseWithCommentInterruption:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         # Should successfully tokenize
         assert tokens is not None
-        
+
         # Comment lines should be tokenized as COMMENT, not as string continuation
         comment_tokens = [t for t in tokens if t.type == TokenType.COMMENT]
         assert len(comment_tokens) >= 2, "Should find comment lines"
-        
+
         # Should still process NEXT-VAR correctly after comments
         next_var_tokens = [t for t in tokens if t.value == "NEXT-VAR"]
         assert len(next_var_tokens) >= 1, "Should find NEXT-VAR after comments"
@@ -143,13 +143,13 @@ class TestValueClauseWithCommentInterruption:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         assert tokens is not None
-        
+
         # Comment should be separate token
         comment_tokens = [t for t in tokens if t.type == TokenType.COMMENT]
         assert len(comment_tokens) >= 1
-        
+
         # Should have 3 VALUE clauses (not merged with comment)
         value_tokens = [t for t in tokens if t.type == TokenType.VALUE]
         assert len(value_tokens) == 3
@@ -167,9 +167,9 @@ class TestValueClauseWithCommentInterruption:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         assert tokens is not None
-        
+
         # Should have a string literal token
         string_tokens = [t for t in tokens if t.type == TokenType.STRING_LITERAL]
         assert len(string_tokens) >= 1, "Should find the continued string"
@@ -190,7 +190,7 @@ class TestValueClauseComplexScenarios:
 """
         lexer = CobolLexer(cobol_source)
         tokens = lexer.tokenize()
-        
+
         # The ".2" at end of comment should not be treated as continuation
         assert tokens is not None
         value_tokens = [t for t in tokens if t.type == TokenType.VALUE]
@@ -210,16 +210,16 @@ class TestValueClauseComplexScenarios:
        STOP RUN.
 """
         lexer = CobolLexer(cobol_source)
-        
+
         # This should not raise an exception
         try:
             tokens = lexer.tokenize()
             assert tokens is not None
-            
+
             # Should have comment tokens, not string continuation
             comment_tokens = [t for t in tokens if t.type == TokenType.COMMENT]
             assert len(comment_tokens) >= 2, "Should have at least 2 comment lines"
-            
+
             # Should still parse the second FILLER with VALUE SPACE
             value_tokens = [t for t in tokens if t.type == TokenType.VALUE]
             assert len(value_tokens) == 2, "Should have 2 VALUE clauses"

@@ -11,10 +11,7 @@ Diagnostic Record Structure (per Data Model):
 - severity: Error severity (ERROR, WARNING, INFO)
 """
 
-import pytest
-
-from cobolparser import CobolParser, ParseResult, ParseError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser import CobolParser
 
 
 def _fixed_source(body: str) -> str:
@@ -47,7 +44,7 @@ class TestMoveDiagnosticStructure:
         diagnostics = _get_move_diagnostics(source)
         if diagnostics:
             for d in diagnostics:
-                assert hasattr(d, "line") or hasattr(d, "location")
+                assert hasattr(d, "line_number") or hasattr(d, "location")
 
     def test_diagnostic_has_column_number(self):
         """Each diagnostic must include a valid column number."""
@@ -98,7 +95,11 @@ class TestMoveMissingSource:
         """
         diagnostics = _get_move_diagnostics(source)
         # Should have at least one error for missing source
-        move_errors = [d for d in diagnostics if "MOVE" in str(d).upper() or "source" in str(d).lower()]
+        move_errors = [
+            d
+            for d in diagnostics
+            if "MOVE" in str(d).upper() or "source" in str(d).lower()
+        ]
         assert len(move_errors) >= 1 or len(diagnostics) >= 1 or True  # Lenient
 
     def test_moving_nothing_valid_with_to(self):
@@ -130,7 +131,11 @@ class TestMoveMissingTarget:
         """
         diagnostics = _get_move_diagnostics(source)
         # Should have error for missing target
-        target_errors = [d for d in diagnostics if "target" in str(d).lower() or "TO" in str(d).upper()]
+        target_errors = [
+            d
+            for d in diagnostics
+            if "target" in str(d).lower() or "TO" in str(d).upper()
+        ]
         assert len(target_errors) >= 1 or len(diagnostics) >= 1 or True  # Lenient
 
 
@@ -151,7 +156,11 @@ class TestMoveValidCases:
         """
         diagnostics = _get_move_diagnostics(source)
         # Should parse successfully
-        move_errors = [d for d in diagnostics if "MOVE" in str(d).upper() and "error" not in str(d).lower()]
+        move_errors = [
+            d
+            for d in diagnostics
+            if "MOVE" in str(d).upper() and "error" not in str(d).lower()
+        ]
         assert len(move_errors) == 0 or len(diagnostics) == 0
 
     def test_move_with_literal(self):

@@ -2,58 +2,60 @@
 Regression tests for PERFORM statement backward compatibility.
 
 These tests validate that all existing PERFORM variants continue to work
-correctly after the Phase 2 parser enhancements (WITH TEST support, 
+correctly after the Phase 2 parser enhancements (WITH TEST support,
 variable TIMES support).
 """
 
-import pytest
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements import PerformStatement
 
 
 class TestPerformBackwardCompatibilityRegression:
     """Test backward compatibility of all PERFORM variants."""
-    
+
     def _parse_cobol(self, cobol_text):
         """Helper to parse COBOL code."""
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         return parser.parse(cobol_text)
-    
+
     def _find_perform_statements(self, ast, perform_type=None):
         """Find PERFORM statements in AST by type."""
         if not ast:
             return []
-        
-        proc_div = ast.get_division('PROCEDURE')
+
+        proc_div = ast.get_division("PROCEDURE")
         if not proc_div:
             return []
-        
+
         performs = []
         for section in proc_div.sections:
             # Check direct children (old architecture)
-            if hasattr(section, 'children'):
+            if hasattr(section, "children"):
                 for child in section.children:
                     if isinstance(child, PerformStatement):
                         if perform_type is None or child.perform_type == perform_type:
                             performs.append(child)
-            
+
             # Check statements in paragraphs (new architecture)
             # Handle both CobolSection (has .paragraphs) and CobolParagraph (has .statements directly)
-            if hasattr(section, 'paragraphs'):
+            if hasattr(section, "paragraphs"):
                 for para in section.paragraphs:
                     for stmt in para.statements:
                         if isinstance(stmt, PerformStatement):
-                            if perform_type is None or stmt.perform_type == perform_type:
+                            if (
+                                perform_type is None
+                                or stmt.perform_type == perform_type
+                            ):
                                 performs.append(stmt)
-            elif hasattr(section, 'statements'):
+            elif hasattr(section, "statements"):
                 # If section is a CobolParagraph, statements are directly on it
                 for stmt in section.statements:
                     if isinstance(stmt, PerformStatement):
                         if perform_type is None or stmt.perform_type == perform_type:
                             performs.append(stmt)
-        
+
         return performs
-    
+
     def test_perform_simple_paragraph_only(self):
         """Test PERFORM paragraph-name (simple, no options)."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -66,18 +68,18 @@ class TestPerformBackwardCompatibilityRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast, "SIMPLE")
         assert len(performs) >= 1
         perf = performs[0]
-        
+
         # Verify target paragraph is set
         assert perf.target_paragraph == "CALCULATE-TOTAL"
         # Verify no THRU clause
         assert perf.thru_paragraph is None
         # Verify test_timing defaults to BEFORE
         assert perf.test_timing == "BEFORE"
-    
+
     def test_perform_paragraph_thru_paragraph(self):
         """Test PERFORM paragraph-name THRU paragraph-name."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -92,15 +94,15 @@ class TestPerformBackwardCompatibilityRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast, "SIMPLE")
         assert len(performs) >= 1
         perf = performs[0]
-        
+
         # Verify both paragraphs are set
         assert perf.target_paragraph == "PROCESS-RECORDS"
         assert perf.thru_paragraph == "END-PROCESS"
-    
+
     def test_perform_until_condition(self):
         """Test PERFORM paragraph UNTIL condition."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -113,16 +115,16 @@ class TestPerformBackwardCompatibilityRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast, "UNTIL")
         assert len(performs) >= 1
         perf = performs[0]
-        
+
         # Verify until_condition is set
         assert perf.until_condition is not None
         # Verify perform_type is UNTIL
         assert perf.perform_type == "UNTIL"
-    
+
     def test_perform_varying_until_inline(self):
         """Test PERFORM VARYING ... UNTIL (inline END-PERFORM)."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -138,18 +140,18 @@ class TestPerformBackwardCompatibilityRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast, "VARYING")
         assert len(performs) >= 1
         perf = performs[0]
-        
+
         # Verify it's a VARYING statement
         assert perf.perform_type == "VARYING"
         # Verify varying_clause is set
         assert perf.varying_clause is not None
         # Verify until_condition is set
         assert perf.until_condition is not None
-    
+
     def test_perform_backward_compat_test_timing_not_breaking(self):
         """Verify that adding WITH TEST support doesn't break existing PERFORM."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -162,18 +164,18 @@ class TestPerformBackwardCompatibilityRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast, "SIMPLE")
         assert len(performs) >= 1
         perf = performs[0]
-        
+
         # Verify test_timing still defaults to BEFORE even for old-style PERFORM
         assert perf.test_timing == "BEFORE"
         # Verify to_dict() includes test_timing
         perf_dict = perf.to_dict()
         assert "test_timing" in perf_dict
         assert perf_dict["test_timing"] == "BEFORE"
-    
+
     def test_perform_variable_times_count_not_breaking(self):
         """Verify that adding variable TIMES support doesn't break numeric TIMES."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -188,7 +190,7 @@ class TestPerformBackwardCompatibilityRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast)
         # Should find at least one perform statement
         assert len(performs) >= 1
@@ -196,47 +198,50 @@ class TestPerformBackwardCompatibilityRegression:
 
 class TestPerformEdgeCasesRegression:
     """Test edge cases and error conditions in PERFORM statements."""
-    
+
     def _parse_cobol(self, cobol_text):
         """Helper to parse COBOL code."""
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         return parser.parse(cobol_text)
-    
+
     def _find_perform_statements(self, ast, perform_type=None):
         """Find PERFORM statements in AST by type."""
         if not ast:
             return []
-        
-        proc_div = ast.get_division('PROCEDURE')
+
+        proc_div = ast.get_division("PROCEDURE")
         if not proc_div:
             return []
-        
+
         performs = []
         for section in proc_div.sections:
             # Check direct children (old architecture)
-            if hasattr(section, 'children'):
+            if hasattr(section, "children"):
                 for child in section.children:
                     if isinstance(child, PerformStatement):
                         if perform_type is None or child.perform_type == perform_type:
                             performs.append(child)
-            
+
             # Check statements in paragraphs (new architecture)
             # Handle both CobolSection (has .paragraphs) and CobolParagraph (has .statements directly)
-            if hasattr(section, 'paragraphs'):
+            if hasattr(section, "paragraphs"):
                 for para in section.paragraphs:
                     for stmt in para.statements:
                         if isinstance(stmt, PerformStatement):
-                            if perform_type is None or stmt.perform_type == perform_type:
+                            if (
+                                perform_type is None
+                                or stmt.perform_type == perform_type
+                            ):
                                 performs.append(stmt)
-            elif hasattr(section, 'statements'):
+            elif hasattr(section, "statements"):
                 # If section is a CobolParagraph, statements are directly on it
                 for stmt in section.statements:
                     if isinstance(stmt, PerformStatement):
                         if perform_type is None or stmt.perform_type == perform_type:
                             performs.append(stmt)
-        
+
         return performs
-    
+
     def test_perform_serialization_preserves_attributes(self):
         """Test that to_dict() preserves all PERFORM attributes."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -251,18 +256,18 @@ class TestPerformEdgeCasesRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         performs = self._find_perform_statements(result.ast, "SIMPLE")
         assert len(performs) >= 1
         perf = performs[0]
-        
+
         # Serialize and verify structure
         perf_dict = perf.to_dict()
         assert perf_dict["node_type"] == "Statement"
         assert perf_dict["target_paragraph"] == "MY-PARA"
         assert perf_dict["thru_paragraph"] == "END-PARA"
         assert perf_dict["test_timing"] == "BEFORE"  # Default value
-    
+
     def test_perform_two_in_sequence(self):
         """Test two PERFORM statements in sequence."""
         cobol = """       IDENTIFICATION DIVISION.
@@ -280,11 +285,13 @@ class TestPerformEdgeCasesRegression:
        """
         result = self._parse_cobol(cobol)
         assert result.ast is not None
-        
+
         # Should find both PERFORM statements
         all_performs = self._find_perform_statements(result.ast)
         assert len(all_performs) >= 2
-        
+
         # Verify types
         simple_performs = self._find_perform_statements(result.ast, "SIMPLE")
-        assert len(simple_performs) >= 2  # Both PERFORM statements should be SIMPLE type
+        assert (
+            len(simple_performs) >= 2
+        )  # Both PERFORM statements should be SIMPLE type

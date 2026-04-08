@@ -1,12 +1,14 @@
 """Rewrite statement parser implementing IStatementParser interface."""
 
-from typing import Any, Optional, cast
-from ...core.interfaces import IStatementParser, ITokenStream
+from typing import Any, cast
+
+from cobolparser.parsers.statements._utils import collect_clause_stmts, skip_whitespace
+
 from ...core.ast_factory import get_factory
-from ...models.statements import IORewriteStatement
-from ...models.ast_base import SourceLocation
+from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from cobolparser.parsers.statements._utils import skip_whitespace, collect_clause_stmts
+from ...models.ast_base import SourceLocation
+from ...models.statements import IORewriteStatement
 
 
 class RewriteStatementParser(IStatementParser):
@@ -25,7 +27,9 @@ class RewriteStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IORewriteStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IORewriteStatement:
         """Parse a REWRITE statement."""
         start_token = token_stream.consume()
         factory = get_factory()
@@ -68,9 +72,7 @@ class RewriteStatementParser(IStatementParser):
             if token and token.type == TokenType.KEY:
                 token_stream.consume()
                 skip_whitespace(token_stream)
-            clause_stmts = collect_clause_stmts(
-                token_stream, {"END-REWRITE"}
-            )
+            clause_stmts = collect_clause_stmts(token_stream, {"END-REWRITE"})
             stmt.set_invalid_key_clause(clause_stmts)
 
         # Optional NOT INVALID KEY clause
@@ -86,15 +88,18 @@ class RewriteStatementParser(IStatementParser):
                 if token and token.type == TokenType.KEY:
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                clause_stmts = collect_clause_stmts(
-                    token_stream, {"END-REWRITE"}
-                )
+                clause_stmts = collect_clause_stmts(token_stream, {"END-REWRITE"})
                 stmt.set_not_invalid_key_clause(clause_stmts)
 
         # Consume END-REWRITE or PERIOD
         skip_whitespace(token_stream)
         token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "END-REWRITE":
+        if (
+            token
+            and token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "END-REWRITE"
+        ):
             token_stream.consume()
             skip_whitespace(token_stream)
         token = token_stream.peek()

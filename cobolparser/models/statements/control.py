@@ -2,9 +2,10 @@
 Control flow statement AST nodes (IF, EVALUATE, PERFORM, GO TO, STOP, SEARCH).
 """
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Any, Union
+
 from ..ast_base import ASTNode, SourceLocation
-from .base import CobolStatement, CobolExpression
+from .base import CobolExpression, CobolStatement
 
 
 class WhenClause(ASTNode):
@@ -62,13 +63,13 @@ class WhenClause(ASTNode):
     def __init__(self, selectors: list, location: SourceLocation):
         super().__init__("WhenClause", location)
         self.selectors: list = selectors  # List of selector dicts
-        self.statements: List["CobolStatement"] = []
+        self.statements: list[CobolStatement] = []
 
     def add_statement(self, statement: "CobolStatement") -> None:
         self.statements.append(statement)
         self.add_child(statement)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "node_type": self.node_type,
             "selectors": self.selectors,
@@ -147,9 +148,9 @@ class EvaluateStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("EVALUATE", location)
-        self.subjects: List[Union[str, "CobolExpression"]] = []
-        self.when_clauses: List[WhenClause] = []
-        self.default_when: Optional[WhenClause] = None
+        self.subjects: list[str | CobolExpression] = []
+        self.when_clauses: list[WhenClause] = []
+        self.default_when: WhenClause | None = None
 
     def add_subject(self, subject: Union[str, "CobolExpression"]) -> None:
         self.subjects.append(subject)
@@ -166,9 +167,9 @@ class EvaluateStatement(CobolStatement):
         self.default_when = clause
         self.add_child(clause)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
-        subjects_serialized: List[Any] = []
+        subjects_serialized: list[Any] = []
         for subj in self.subjects:
             if isinstance(subj, CobolExpression):
                 subjects_serialized.append(subj.to_dict())
@@ -179,9 +180,9 @@ class EvaluateStatement(CobolStatement):
             {
                 "subjects": subjects_serialized,
                 "when_clauses": [wc.to_dict() for wc in self.when_clauses],
-                "default_when": self.default_when.to_dict()
-                if self.default_when
-                else None,
+                "default_when": (
+                    self.default_when.to_dict() if self.default_when else None
+                ),
             }
         )
         return result
@@ -192,9 +193,9 @@ class IfStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("IF", location)
-        self.condition: Optional["CobolExpression"] = None
-        self.then_statements: List["CobolStatement"] = []
-        self.else_statements: List["CobolStatement"] = []
+        self.condition: CobolExpression | None = None
+        self.then_statements: list[CobolStatement] = []
+        self.else_statements: list[CobolStatement] = []
 
     def set_condition(self, condition: "CobolExpression") -> None:
         """Set the IF condition."""
@@ -211,7 +212,7 @@ class IfStatement(CobolStatement):
         self.else_statements.append(statement)
         self.add_child(statement)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert IF statement to dictionary representation."""
         result = super().to_dict()
         result.update(
@@ -229,16 +230,14 @@ class PerformStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("PERFORM", location)
-        self.target_paragraph: Optional[str] = None
-        self.thru_paragraph: Optional[str] = None  # Ending paragraph for PERFORM THRU
+        self.target_paragraph: str | None = None
+        self.thru_paragraph: str | None = None  # Ending paragraph for PERFORM THRU
         self.perform_type: str = "SIMPLE"  # SIMPLE, TIMES, UNTIL, VARYING
-        self.times_count: Optional[Union[int, str]] = (
-            None  # Can be int literal or variable name
-        )
-        self.until_condition: Optional["CobolExpression"] = None
+        self.times_count: int | str | None = None  # Can be int literal or variable name
+        self.until_condition: CobolExpression | None = None
         self.test_timing: str = "BEFORE"  # BEFORE or AFTER for WITH TEST clause
-        self.varying_clause: Optional[Dict[str, Any]] = None
-        self.inline_statements: List["CobolStatement"] = []
+        self.varying_clause: dict[str, Any] | None = None
+        self.inline_statements: list[CobolStatement] = []
 
     def set_target_paragraph(self, paragraph: str) -> None:
         """Set the target paragraph to perform."""
@@ -252,7 +251,7 @@ class PerformStatement(CobolStatement):
         if paragraph not in self.operands:
             self.operands.append(paragraph)
 
-    def set_times_clause(self, count: Union[int, str]) -> None:
+    def set_times_clause(self, count: int | str) -> None:
         """Set TIMES clause for the PERFORM."""
         self.perform_type = "TIMES"
         self.times_count = count
@@ -292,7 +291,7 @@ class PerformStatement(CobolStatement):
         self.inline_statements.append(statement)
         self.add_child(statement)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert PERFORM statement to dictionary representation."""
         result = super().to_dict()
         result.update(
@@ -301,9 +300,9 @@ class PerformStatement(CobolStatement):
                 "thru_paragraph": self.thru_paragraph,
                 "perform_type": self.perform_type,
                 "times_count": self.times_count,
-                "until_condition": self.until_condition.to_dict()
-                if self.until_condition
-                else None,
+                "until_condition": (
+                    self.until_condition.to_dict() if self.until_condition else None
+                ),
                 "test_timing": self.test_timing,
                 "varying_clause": self.varying_clause,
                 "inline_statements": [
@@ -327,8 +326,8 @@ class GoStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("GOTO", location)
-        self.target_paragraph: Optional[str] = None
-        self.depending_on_variable: Optional[str] = None
+        self.target_paragraph: str | None = None
+        self.depending_on_variable: str | None = None
 
     def set_target_paragraph(self, name: str) -> None:
         """Set the target paragraph name."""
@@ -342,7 +341,7 @@ class GoStatement(CobolStatement):
         if var_name not in self.operands:
             self.add_operand(var_name)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         base = super().to_dict()
         base.update(
@@ -361,7 +360,7 @@ class StopStatement(CobolStatement):
         super().__init__("STOP", location)
         self.stop_type: str = "RUN"  # RUN or literal
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert STOP statement to dictionary representation."""
         result = super().to_dict()
         result.update({"stop_type": self.stop_type})
@@ -370,12 +369,13 @@ class StopStatement(CobolStatement):
 
 class SearchStatement(CobolStatement):
     """AST node for SEARCH statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("SEARCH", location)
-        self.at_end_clause: Optional[List["CobolStatement"]] = None
-        self.table_name: Optional[str] = None
-        self.varying_variable: Optional[str] = None
-        self.when_clauses: List[Dict[str, Any]] = []
+        self.at_end_clause: list[CobolStatement] | None = None
+        self.table_name: str | None = None
+        self.varying_variable: str | None = None
+        self.when_clauses: list[dict[str, Any]] = []
 
     def set_table_name(self, name: str) -> None:
         """Set the table name being searched."""
@@ -385,22 +385,21 @@ class SearchStatement(CobolStatement):
         """Set the VARYING variable."""
         self.varying_variable = variable
 
-    def add_when_clause(self, condition: str, statements: List["CobolStatement"]) -> None:
+    def add_when_clause(
+        self, condition: str, statements: list["CobolStatement"]
+    ) -> None:
         """Add a WHEN clause with condition and statements."""
-        clause = {
-            "condition": condition,
-            "statements": statements
-        }
+        clause = {"condition": condition, "statements": statements}
         self.when_clauses.append(clause)
         for stmt in statements:
             self.add_child(stmt)
 
-    def set_at_end_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_at_end_clause(self, statements: list["CobolStatement"]) -> None:
         self.at_end_clause = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         if self.table_name:
             result["table_name"] = self.table_name
@@ -410,7 +409,7 @@ class SearchStatement(CobolStatement):
             result["when_clauses"] = [
                 {
                     "condition": clause["condition"],
-                    "statements": [s.to_dict() for s in clause["statements"]]
+                    "statements": [s.to_dict() for s in clause["statements"]],
                 }
                 for clause in self.when_clauses
             ]

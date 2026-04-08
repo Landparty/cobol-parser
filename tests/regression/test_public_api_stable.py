@@ -6,21 +6,21 @@ and that core parse functions return objects with the expected shape.
 Any accidental removal of a public symbol will be caught here.
 """
 
-import importlib
 import pytest
+
 import cobolparser
 
-
 # ── Importability ──────────────────────────────────────────────────────────────
+
 
 class TestAllExportsImportable:
     """Every name in __all__ must be importable from cobolparser."""
 
     @pytest.mark.parametrize("name", cobolparser.__all__)
     def test_symbol_is_accessible(self, name):
-        assert hasattr(cobolparser, name), (
-            f"cobolparser.{name} is in __all__ but cannot be accessed"
-        )
+        assert hasattr(
+            cobolparser, name
+        ), f"cobolparser.{name} is in __all__ but cannot be accessed"
 
     def test_star_import_matches_all(self):
         """Importing * from cobolparser should expose every __all__ name."""
@@ -94,6 +94,7 @@ class TestParseResultContract:
 
 # ── Exception hierarchy ────────────────────────────────────────────────────────
 
+
 class TestExceptionHierarchy:
     """Public exceptions must be catchable as their documented base types."""
 
@@ -119,9 +120,7 @@ class TestExceptionHierarchy:
         assert issubclass(cobolparser.EncodingError, cobolparser.PreprocessingError)
 
     def test_nesting_depth_error_is_preprocessing_error(self):
-        assert issubclass(
-            cobolparser.NestingDepthError, cobolparser.PreprocessingError
-        )
+        assert issubclass(cobolparser.NestingDepthError, cobolparser.PreprocessingError)
 
     def test_parse_error_is_exception(self):
         assert issubclass(cobolparser.ParseError, Exception)

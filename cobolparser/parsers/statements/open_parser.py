@@ -1,12 +1,14 @@
 """Open statement parser implementing IStatementParser interface."""
 
-from typing import Any, Optional, cast
-from ...core.interfaces import IStatementParser, ITokenStream
-from ...core.ast_factory import get_factory
-from ...models.statements import IOOpenStatement
-from ...models.ast_base import SourceLocation
-from ...lexer import TokenType
+from typing import Any, cast
+
 from cobolparser.parsers.statements._utils import skip_whitespace
+
+from ...core.ast_factory import get_factory
+from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
+from ...models.ast_base import SourceLocation
+from ...models.statements import IOOpenStatement
 
 # Open modes recognized as IDENTIFIER tokens with these values
 _OPEN_MODES = {"INPUT", "OUTPUT", "EXTEND"}
@@ -29,7 +31,9 @@ class OpenStatementParser(IStatementParser):
         except Exception:
             return False
 
-    def parse(self, token_stream: ITokenStream, context: Optional[Any] = None) -> IOOpenStatement:
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> IOOpenStatement:
         """Parse an OPEN statement."""
         start_token = token_stream.consume()
         factory = get_factory()
@@ -79,11 +83,21 @@ class OpenStatementParser(IStatementParser):
 
         # Optional WITH REPOSITION
         token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "WITH":
+        if (
+            token
+            and token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "WITH"
+        ):
             token_stream.consume()
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            if token and token.type == TokenType.IDENTIFIER and token.value and token.value.upper() == "REPOSITION":
+            if (
+                token
+                and token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "REPOSITION"
+            ):
                 token_stream.consume()
                 stmt.set_reposition(True)
                 skip_whitespace(token_stream)

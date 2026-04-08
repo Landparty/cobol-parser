@@ -5,17 +5,15 @@ logic and artifact generation per the coverage schema.
 """
 
 import json
-import os
+
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
 
 from cobolparser.analysis.io_coverage_reporter import (
-    IOCoverageReporter,
-    IoCoverageArtifact,
     CoverageStatus,
-    TestType,
+    IoCoverageArtifact,
+    IOCoverageReporter,
     IoVariationCoverage,
+    TestType,
 )
 
 

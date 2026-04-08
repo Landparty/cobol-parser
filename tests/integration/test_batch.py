@@ -1,12 +1,13 @@
 """Integration tests for the batch parsing API."""
-import pytest
+
 from pathlib import Path
 from unittest.mock import patch
 
-from cobolparser import parse_cobol
-from cobolparser.batch import BatchResult, parse_files, _parse_one
-from cobolparser.plugins.core import ErrorRecoveryMode, DialectType
+import pytest
 
+from cobolparser import parse_cobol
+from cobolparser.batch import BatchResult, _parse_one, parse_files
+from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
 
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
 
@@ -20,12 +21,15 @@ class TestBatchResult:
 
     def test_fields_error(self, tmp_path):
         p = tmp_path / "missing.cbl"
-        br = BatchResult(path=p, result=None, read_error="FileNotFoundError: no such file")
+        br = BatchResult(
+            path=p, result=None, read_error="FileNotFoundError: no such file"
+        )
         assert br.result is None
         assert isinstance(br.read_error, str)
 
     def test_importable_from_package(self):
-        from cobolparser import parse_files as pf, BatchResult as BR  # noqa: F401
+        from cobolparser import parse_files as pf  # noqa: F401
+
 
 pytestmark = pytest.mark.integration
 
@@ -49,7 +53,9 @@ class TestParseFilesCorrectness:
                 error_recovery=ErrorRecoveryMode.COLLECT_ALL,
             )
 
-        batch = parse_files(files, workers=2, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        batch = parse_files(
+            files, workers=2, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
 
         assert len(batch) == len(files)
         for br in batch:
@@ -59,15 +65,19 @@ class TestParseFilesCorrectness:
                 assert br.result.ast is None, f"{br.path}: AST mismatch (expected None)"
             else:
                 assert br.result.ast is not None, f"{br.path}: unexpected None AST"
-                assert br.result.ast.to_dict() == ref.ast.to_dict(), f"{br.path}: AST mismatch"
-            assert len(br.result.errors) == len(ref.errors), f"{br.path}: error count mismatch"
+                assert (
+                    br.result.ast.to_dict() == ref.ast.to_dict()
+                ), f"{br.path}: AST mismatch"
+            assert len(br.result.errors) == len(
+                ref.errors
+            ), f"{br.path}: error count mismatch"
 
     def test_results_in_input_order(self):
         files = sorted(SAMPLES_DIR.glob("*.cbl"))[:8]
         if len(files) < 2:
             pytest.skip("Need at least 2 sample files")
         results = parse_files(files, workers=min(4, len(files)))
-        for br, f in zip(results, files):
+        for br, f in zip(results, files, strict=False):
             assert br.path == f
 
 
@@ -114,7 +124,7 @@ class TestParseFilesWorkersParity:
         r4 = parse_files(files, workers=min(4, len(files)))
 
         assert len(r1) == len(r4)
-        for a, b in zip(r1, r4):
+        for a, b in zip(r1, r4, strict=False):
             assert a.path == b.path
             assert (a.result is None) == (b.result is None)
             if a.result is not None:
@@ -131,7 +141,7 @@ class TestParseFilesWorkersParity:
         results = parse_files(files, workers=workers)
 
         assert len(results) == len(baseline)
-        for a, b in zip(results, baseline):
+        for a, b in zip(results, baseline, strict=False):
             assert a.path == b.path
             assert (a.result is None) == (b.result is None)
             if a.result is not None:
@@ -170,9 +180,14 @@ class TestParseOneInternal:
         cobl = tmp_path / "boom.cbl"
         cobl.write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. BOOM.\n")
 
-        with patch("cobolparser.batch.parse_cobol", side_effect=RuntimeError("unexpected")):
+        with patch(
+            "cobolparser.batch.parse_cobol", side_effect=RuntimeError("unexpected")
+        ):
             with pytest.raises(RuntimeError, match="unexpected"):
                 _parse_one(
-                    str(cobl), "utf-8", "replace",
-                    ErrorRecoveryMode.COLLECT_ALL, DialectType.IBM_ENTERPRISE,
+                    str(cobl),
+                    "utf-8",
+                    "replace",
+                    ErrorRecoveryMode.COLLECT_ALL,
+                    DialectType.IBM_ENTERPRISE,
                 )

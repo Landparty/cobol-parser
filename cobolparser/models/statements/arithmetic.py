@@ -2,9 +2,10 @@
 Arithmetic statement AST nodes (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE).
 """
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Any, Union
+
 from ..ast_base import ASTNode, SourceLocation
-from .base import CobolStatement, CobolExpression
+from .base import CobolExpression, CobolStatement
 
 
 class ArithmeticStatement(CobolStatement):
@@ -12,10 +13,10 @@ class ArithmeticStatement(CobolStatement):
 
     def __init__(self, statement_type: str, location: SourceLocation):
         super().__init__(statement_type, location)
-        self.on_size_error: Optional[List["CobolStatement"]] = None
-        self.not_on_size_error: Optional[List["CobolStatement"]] = None
-        self.target: Optional[str] = None  # For TO clause
-        self.giving: Optional[str] = None  # For GIVING clause
+        self.on_size_error: list[CobolStatement] | None = None
+        self.not_on_size_error: list[CobolStatement] | None = None
+        self.target: str | None = None  # For TO clause
+        self.giving: str | None = None  # For GIVING clause
 
     def set_target(self, target: str) -> None:
         """Set target for TO clause (result stored in target)."""
@@ -29,17 +30,17 @@ class ArithmeticStatement(CobolStatement):
         if giving not in self.operands:
             self.operands.append(giving)
 
-    def set_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self.on_size_error = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def set_not_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_not_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self.not_on_size_error = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         if self.target:
             result["target"] = self.target
@@ -54,24 +55,28 @@ class ArithmeticStatement(CobolStatement):
 
 class AddStatement(ArithmeticStatement):
     """AST node for ADD statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("ADD", location)
 
 
 class SubtractStatement(ArithmeticStatement):
     """AST node for SUBTRACT statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("SUBTRACT", location)
 
 
 class MultiplyStatement(ArithmeticStatement):
     """AST node for MULTIPLY statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("MULTIPLY", location)
 
 
 class DivideStatement(ArithmeticStatement):
     """AST node for DIVIDE statements."""
+
     def __init__(self, location: SourceLocation):
         super().__init__("DIVIDE", location)
 
@@ -81,10 +86,10 @@ class ComputeStatement(CobolStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("COMPUTE", location)
-        self.targets: List[str] = []
-        self.expression: Optional[Union[str, "CobolExpression"]] = None
-        self.on_size_error: Optional[List["CobolStatement"]] = None
-        self.not_on_size_error: Optional[List["CobolStatement"]] = None
+        self.targets: list[str] = []
+        self.expression: str | CobolExpression | None = None
+        self.on_size_error: list[CobolStatement] | None = None
+        self.not_on_size_error: list[CobolStatement] | None = None
 
     def add_target(self, target: str) -> None:
         """Add a target variable for the computation."""
@@ -103,22 +108,22 @@ class ComputeStatement(CobolStatement):
         if isinstance(expression, ASTNode):
             self.add_child(expression)
 
-    def set_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self.on_size_error = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def set_not_on_size_error_clause(self, statements: List["CobolStatement"]) -> None:
+    def set_not_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self.not_on_size_error = statements
         for stmt in statements:
             self.add_child(stmt)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert COMPUTE statement to dictionary representation."""
         result = super().to_dict()
 
         # Handle expression which can be string or ASTNode
-        expression_dict: Optional[Union[Dict[str, Any], str]] = None
+        expression_dict: dict[str, Any] | str | None = None
         if self.expression:
             if isinstance(self.expression, ASTNode):
                 expression_dict = self.expression.to_dict()

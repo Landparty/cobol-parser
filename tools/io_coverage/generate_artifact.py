@@ -57,10 +57,10 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 
-def find_catalog() -> Optional[Path]:
+def find_catalog() -> Path | None:
     """Find the IO variation catalog CSV file."""
     search_paths = [
         Path(__file__).parent.parent
@@ -79,7 +79,7 @@ def find_catalog() -> Optional[Path]:
     return None
 
 
-def parse_catalog(catalog_path: Path) -> Dict[str, Dict[str, str]]:
+def parse_catalog(catalog_path: Path) -> dict[str, dict[str, str]]:
     """Parse the IO variation catalog CSV.
 
     Returns a dictionary mapping variation_id -> variation_data
@@ -92,7 +92,7 @@ def parse_catalog(catalog_path: Path) -> Dict[str, Dict[str, str]]:
 
     import csv
 
-    with open(catalog_path, "r", encoding="utf-8") as f:
+    with open(catalog_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             var_id = row.get("id", "")
@@ -110,8 +110,8 @@ def parse_catalog(catalog_path: Path) -> Dict[str, Dict[str, str]]:
 
 
 def extract_variation_id(
-    test_id: str, catalog_variations: Dict[str, Dict]
-) -> Optional[str]:
+    test_id: str, catalog_variations: dict[str, dict]
+) -> str | None:
     """Extract IO variation ID from a test ID or name."""
     import re
 
@@ -142,25 +142,25 @@ def determine_test_type(test_id: str) -> str:
     return "unit"
 
 
-def load_pytest_results(results_path: str) -> Dict[str, Any]:
+def load_pytest_results(results_path: str) -> dict[str, Any]:
     """Load pytest results from JSON file."""
     if not os.path.exists(results_path):
         print(f"Error: Pytest results not found: {results_path}")
         sys.exit(1)
 
-    with open(results_path, "r", encoding="utf-8") as f:
+    with open(results_path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def generate_coverage_artifact(
-    pytest_results: Dict[str, Any],
-    catalog_variations: Dict[str, Dict[str, str]],
+    pytest_results: dict[str, Any],
+    catalog_variations: dict[str, dict[str, str]],
     parser_version: str = "unknown",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate the IO coverage artifact from pytest results."""
 
     # Track which variations have tests
-    variation_tests: Dict[str, List[Dict[str, Any]]] = {}
+    variation_tests: dict[str, list[dict[str, Any]]] = {}
 
     for test in pytest_results.get("tests", []):
         test_id = test.get("id", test.get("nodeid", ""))
@@ -250,7 +250,7 @@ def generate_coverage_artifact(
     return artifact
 
 
-def validate_artifact(artifact: Dict[str, Any]) -> List[str]:
+def validate_artifact(artifact: dict[str, Any]) -> list[str]:
     """Validate the artifact against the coverage schema."""
     errors = []
 
@@ -314,7 +314,7 @@ def main():
             print(f"Error: Artifact not found: {args.output}")
             return 1
 
-        with open(args.output, "r") as f:
+        with open(args.output) as f:
             artifact = json.load(f)
 
         errors = validate_artifact(artifact)
@@ -339,7 +339,7 @@ def main():
             catalog_path = str(catalog_path)
 
     if not catalog_path or not os.path.exists(catalog_path):
-        print(f"Error: Catalog not found. Please specify with --catalog")
+        print("Error: Catalog not found. Please specify with --catalog")
         return 1
 
     print(f"Using catalog: {catalog_path}")

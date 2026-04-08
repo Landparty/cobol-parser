@@ -3,43 +3,69 @@
 analysis/io_diagnostics.py is at 0% coverage because it is never imported.
 These tests exercise all enum values and all three static methods.
 """
-import pytest
-from cobolparser.analysis.io_diagnostics import IOErrorCode, IODiagnosticHelper
+
 from cobolparser._errors import ParseError
+from cobolparser.analysis.io_diagnostics import IODiagnosticHelper, IOErrorCode
 
 
 class TestIOErrorCodeEnum:
     """Verify all IOErrorCode enum members are accessible and have non-empty values."""
 
     def test_read_error_codes_exist(self):
-        assert IOErrorCode.IO_READ_INVALID_KEY_ORDER.value == "IO_READ_INVALID_KEY_ORDER"
-        assert IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL.value == "IO_READ_LOCK_ON_SEQUENTIAL"
-        assert IOErrorCode.IO_READ_AT_END_WITHOUT_FILE.value == "IO_READ_AT_END_WITHOUT_FILE"
+        assert (
+            IOErrorCode.IO_READ_INVALID_KEY_ORDER.value == "IO_READ_INVALID_KEY_ORDER"
+        )
+        assert (
+            IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL.value == "IO_READ_LOCK_ON_SEQUENTIAL"
+        )
+        assert (
+            IOErrorCode.IO_READ_AT_END_WITHOUT_FILE.value
+            == "IO_READ_AT_END_WITHOUT_FILE"
+        )
 
     def test_write_error_codes_exist(self):
-        assert IOErrorCode.IO_WRITE_ADVANCING_INVALID_UNIT.value == "IO_WRITE_ADVANCING_INVALID_UNIT"
-        assert IOErrorCode.IO_WRITE_DELETE_INVALID_ORG.value == "IO_WRITE_DELETE_INVALID_ORG"
+        assert (
+            IOErrorCode.IO_WRITE_ADVANCING_INVALID_UNIT.value
+            == "IO_WRITE_ADVANCING_INVALID_UNIT"
+        )
+        assert (
+            IOErrorCode.IO_WRITE_DELETE_INVALID_ORG.value
+            == "IO_WRITE_DELETE_INVALID_ORG"
+        )
 
     def test_open_error_codes_exist(self):
         assert IOErrorCode.IO_OPEN_INVALID_MODE.value == "IO_OPEN_INVALID_MODE"
         assert IOErrorCode.IO_OPEN_REEL_ON_DISK.value == "IO_OPEN_REEL_ON_DISK"
 
     def test_close_error_codes_exist(self):
-        assert IOErrorCode.IO_CLOSE_NO_REWIND_INVALID.value == "IO_CLOSE_NO_REWIND_INVALID"
-        assert IOErrorCode.IO_CLOSE_WITH_LOCK_INVALID.value == "IO_CLOSE_WITH_LOCK_INVALID"
+        assert (
+            IOErrorCode.IO_CLOSE_NO_REWIND_INVALID.value == "IO_CLOSE_NO_REWIND_INVALID"
+        )
+        assert (
+            IOErrorCode.IO_CLOSE_WITH_LOCK_INVALID.value == "IO_CLOSE_WITH_LOCK_INVALID"
+        )
 
     def test_rewrite_error_codes_exist(self):
         assert IOErrorCode.IO_REWRITE_INVALID_ORG.value == "IO_REWRITE_INVALID_ORG"
-        assert IOErrorCode.IO_REWRITE_INVALID_KEY_ORDER.value == "IO_REWRITE_INVALID_KEY_ORDER"
+        assert (
+            IOErrorCode.IO_REWRITE_INVALID_KEY_ORDER.value
+            == "IO_REWRITE_INVALID_KEY_ORDER"
+        )
 
     def test_delete_error_codes_exist(self):
         assert IOErrorCode.IO_DELETE_INVALID_ORG.value == "IO_DELETE_INVALID_ORG"
-        assert IOErrorCode.IO_DELETE_INVALID_KEY_ORDER.value == "IO_DELETE_INVALID_KEY_ORDER"
+        assert (
+            IOErrorCode.IO_DELETE_INVALID_KEY_ORDER.value
+            == "IO_DELETE_INVALID_KEY_ORDER"
+        )
 
     def test_start_error_codes_exist(self):
         assert IOErrorCode.IO_START_INVALID_ORG.value == "IO_START_INVALID_ORG"
         assert IOErrorCode.IO_START_MISSING_KEY.value == "IO_START_MISSING_KEY"
-        assert IOErrorCode.IO_START_INVALID_KEY_CONDITION.value == "IO_START_INVALID_KEY_CONDITION"
+        assert (
+            IOErrorCode.IO_START_INVALID_KEY_CONDITION.value
+            == "IO_START_INVALID_KEY_CONDITION"
+        )
 
     def test_accept_display_error_codes_exist(self):
         assert IOErrorCode.IO_ACCEPT_INVALID_FROM.value == "IO_ACCEPT_INVALID_FROM"
@@ -51,7 +77,9 @@ class TestIOErrorCodeEnum:
     def test_generic_error_codes_exist(self):
         assert IOErrorCode.IO_INVALID_LOCK.value == "IO_INVALID_LOCK"
         assert IOErrorCode.IO_INVALID_FILE_ORG.value == "IO_INVALID_FILE_ORG"
-        assert IOErrorCode.IO_MISSING_REQUIRED_CLAUSE.value == "IO_MISSING_REQUIRED_CLAUSE"
+        assert (
+            IOErrorCode.IO_MISSING_REQUIRED_CLAUSE.value == "IO_MISSING_REQUIRED_CLAUSE"
+        )
 
     def test_all_codes_are_nonempty_strings(self):
         """Every IOErrorCode value is a non-empty string."""
@@ -68,7 +96,9 @@ class TestIODiagnosticHelperGetMessage:
     """Tests for IODiagnosticHelper.get_error_message()."""
 
     def test_known_code_returns_string(self):
-        msg = IODiagnosticHelper.get_error_message(IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL)
+        msg = IODiagnosticHelper.get_error_message(
+            IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL
+        )
         assert isinstance(msg, str)
         assert len(msg) > 0
 
@@ -83,16 +113,20 @@ class TestIODiagnosticHelperGetMessage:
         msg = IODiagnosticHelper.get_error_message(IOErrorCode.IO_START_INVALID_ORG)
         # Should mention indexed, relative, or sequential
         lower = msg.lower()
-        assert any(word in lower for word in ("indexed", "relative", "sequential")), (
-            f"Message should mention file org types: {msg}"
-        )
+        assert any(
+            word in lower for word in ("indexed", "relative", "sequential")
+        ), f"Message should mention file org types: {msg}"
 
     def test_read_lock_message_mentions_sequential(self):
-        msg = IODiagnosticHelper.get_error_message(IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL)
+        msg = IODiagnosticHelper.get_error_message(
+            IOErrorCode.IO_READ_LOCK_ON_SEQUENTIAL
+        )
         assert "sequential" in msg.lower()
 
     def test_close_no_rewind_message_mentions_tape(self):
-        msg = IODiagnosticHelper.get_error_message(IOErrorCode.IO_CLOSE_NO_REWIND_INVALID)
+        msg = IODiagnosticHelper.get_error_message(
+            IOErrorCode.IO_CLOSE_NO_REWIND_INVALID
+        )
         assert "tape" in msg.lower() or "rewind" in msg.lower()
 
 
@@ -116,8 +150,7 @@ class TestIODiagnosticHelperCreateError:
 
     def test_error_with_context_appended(self):
         err = IODiagnosticHelper.create_io_error(
-            IOErrorCode.IO_START_INVALID_ORG,
-            context="CLOSE TAPEFILE WITH NO REWIND"
+            IOErrorCode.IO_START_INVALID_ORG, context="CLOSE TAPEFILE WITH NO REWIND"
         )
         assert "CLOSE TAPEFILE WITH NO REWIND" in err.message
 
@@ -125,7 +158,7 @@ class TestIODiagnosticHelperCreateError:
         err = IODiagnosticHelper.create_io_error(
             IOErrorCode.IO_DELETE_INVALID_ORG, line=42, column=8
         )
-        assert err.line == 42
+        assert err.line_number == 42
 
     def test_error_with_column(self):
         err = IODiagnosticHelper.create_io_error(

@@ -8,6 +8,7 @@ Per TDD, these tests are expected to fail until error recovery is implemented.
 """
 
 import pytest
+
 from cobolparser import CobolParser, ErrorRecoveryMode
 
 

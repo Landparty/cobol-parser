@@ -3,10 +3,9 @@
 These models exist in models/statements/data.py but have no parser,
 so they are tested via direct instantiation (currently at 38% coverage).
 """
-import pytest
-from cobolparser.models.statements.data import StringStatement, UnstringStatement
-from cobolparser.models.ast_base import SourceLocation
 
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.statements.data import StringStatement, UnstringStatement
 
 LOC = SourceLocation(line=1, column=1)
 

@@ -8,12 +8,13 @@ This module systematically tests Division-level parsing including:
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
 class TestIdentificationDivision:
     """Test Identification Division parsing."""
-    
+
     def test_identification_division_minimal(self):
         """Test minimal Identification Division."""
         source = """
@@ -25,7 +26,7 @@ class TestIdentificationDivision:
         result = parse_cobol(source)
         assert result.success
         assert result.ast is not None
-    
+
     def test_identification_division_with_author(self):
         """Test Identification Division with AUTHOR."""
         source = """
@@ -37,7 +38,7 @@ class TestIdentificationDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_identification_division_with_date_written(self):
         """Test Identification Division with DATE-WRITTEN."""
         source = """
@@ -49,7 +50,7 @@ class TestIdentificationDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_identification_division_with_multiple_clauses(self):
         """Test Identification Division with multiple clauses."""
         source = """
@@ -64,7 +65,7 @@ class TestIdentificationDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_program_id_with_is_initial(self):
         """Test PROGRAM-ID with IS INITIAL clause."""
         source = """
@@ -75,7 +76,7 @@ class TestIdentificationDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_program_id_with_is_common(self):
         """Test PROGRAM-ID with IS COMMON clause."""
         source = """
@@ -86,7 +87,7 @@ class TestIdentificationDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_identification_division_serialization(self):
         """Test Identification Division serialization."""
         source = """
@@ -98,14 +99,14 @@ class TestIdentificationDivision:
         """
         result = parse_cobol(source)
         assert result.success
-        if hasattr(result.ast, 'to_dict'):
+        if hasattr(result.ast, "to_dict"):
             ast_dict = result.ast.to_dict()
             assert isinstance(ast_dict, dict)
 
 
 class TestEnvironmentDivision:
     """Test Environment Division parsing."""
-    
+
     def test_environment_division_minimal(self):
         """Test minimal Environment Division."""
         source = """
@@ -117,7 +118,7 @@ class TestEnvironmentDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_configuration_section(self):
         """Test CONFIGURATION SECTION."""
         source = """
@@ -130,7 +131,7 @@ class TestEnvironmentDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_input_output_section(self):
         """Test INPUT-OUTPUT SECTION."""
         source = """
@@ -144,7 +145,7 @@ class TestEnvironmentDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_select_clause(self):
         """Test SELECT clause in INPUT-OUTPUT."""
         source = """
@@ -160,7 +161,7 @@ class TestEnvironmentDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_environment_division_serialization(self):
         """Test Environment Division serialization."""
         source = """
@@ -178,7 +179,7 @@ class TestEnvironmentDivision:
 
 class TestDataDivision:
     """Test Data Division parsing."""
-    
+
     def test_data_division_minimal(self):
         """Test minimal Data Division."""
         source = """
@@ -190,7 +191,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_file_section(self):
         """Test FILE SECTION."""
         source = """
@@ -210,7 +211,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_working_storage_section(self):
         """Test WORKING-STORAGE SECTION."""
         source = """
@@ -224,7 +225,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_working_storage_with_multiple_items(self):
         """Test WORKING-STORAGE with multiple items."""
         source = """
@@ -241,7 +242,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_local_storage_section(self):
         """Test LOCAL-STORAGE SECTION."""
         source = """
@@ -255,7 +256,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_data_division_with_redefines(self):
         """Test Data Division with REDEFINES clause."""
         source = """
@@ -270,7 +271,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_data_division_with_occurs(self):
         """Test Data Division with OCCURS clause."""
         source = """
@@ -285,7 +286,7 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_data_division_serialization(self):
         """Test Data Division serialization."""
         source = """
@@ -299,14 +300,14 @@ class TestDataDivision:
         """
         result = parse_cobol(source)
         assert result.success
-        if hasattr(result.ast, 'to_dict'):
+        if hasattr(result.ast, "to_dict"):
             ast_dict = result.ast.to_dict()
             assert isinstance(ast_dict, dict)
 
 
 class TestProcedureDivision:
     """Test Procedure Division parsing."""
-    
+
     def test_procedure_division_minimal(self):
         """Test minimal Procedure Division."""
         source = """
@@ -317,7 +318,7 @@ class TestProcedureDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_procedure_division_with_paragraphs(self):
         """Test Procedure Division with paragraphs."""
         source = """
@@ -333,7 +334,7 @@ class TestProcedureDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_procedure_division_with_sections(self):
         """Test Procedure Division with sections."""
         source = """
@@ -346,7 +347,7 @@ class TestProcedureDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_procedure_division_with_statements(self):
         """Test Procedure Division with various statements."""
         source = """
@@ -368,7 +369,7 @@ class TestProcedureDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_procedure_division_with_perform(self):
         """Test Procedure Division with PERFORM."""
         source = """
@@ -382,7 +383,7 @@ class TestProcedureDivision:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_procedure_division_serialization(self):
         """Test Procedure Division serialization."""
         source = """
@@ -394,14 +395,14 @@ class TestProcedureDivision:
         """
         result = parse_cobol(source)
         assert result.success
-        if hasattr(result.ast, 'to_dict'):
+        if hasattr(result.ast, "to_dict"):
             ast_dict = result.ast.to_dict()
             assert isinstance(ast_dict, dict)
 
 
 class TestAllDivisionsTogether:
     """Test all divisions together."""
-    
+
     def test_complete_cobol_program(self):
         """Test complete COBOL program with all divisions."""
         source = """
@@ -409,17 +410,17 @@ class TestAllDivisionsTogether:
         PROGRAM-ID. COMPLETE-PROGRAM.
         AUTHOR. TEST AUTHOR.
         DATE-WRITTEN. 2024-01-01.
-        
+
         ENVIRONMENT DIVISION.
         CONFIGURATION SECTION.
         INPUT-OUTPUT SECTION.
         FILE-CONTROL.
-        
+
         DATA DIVISION.
         FILE SECTION.
         WORKING-STORAGE SECTION.
         01 WS-FIELD PIC X(10) VALUE "TEST".
-        
+
         PROCEDURE DIVISION.
             MAIN-PARA.
                 DISPLAY "START".
@@ -431,7 +432,7 @@ class TestAllDivisionsTogether:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_get_all_statements_across_divisions(self):
         """Test get_all_statements includes statements from all divisions."""
         source = """
@@ -449,10 +450,10 @@ class TestAllDivisionsTogether:
         """
         result = parse_cobol(source)
         assert result.success
-        if hasattr(result.ast, 'get_all_statements'):
+        if hasattr(result.ast, "get_all_statements"):
             stmts = result.ast.get_all_statements()
             assert len(stmts) >= 3
-    
+
     def test_complete_program_serialization(self):
         """Test complete program serialization."""
         source = """
@@ -466,14 +467,14 @@ class TestAllDivisionsTogether:
         """
         result = parse_cobol(source)
         assert result.success
-        if hasattr(result.ast, 'to_dict'):
+        if hasattr(result.ast, "to_dict"):
             ast_dict = result.ast.to_dict()
             assert isinstance(ast_dict, dict)
 
 
 class TestDivisionErrorCases:
     """Test error cases in Division parsing."""
-    
+
     def test_missing_identification_division(self):
         """Test program without IDENTIFICATION DIVISION."""
         source = """
@@ -483,7 +484,7 @@ class TestDivisionErrorCases:
         result = parse_cobol(source)
         # May succeed or fail depending on parser strictness
         assert result is not None
-    
+
     def test_duplicate_working_storage_sections(self):
         """Test multiple WORKING-STORAGE sections (edge case)."""
         source = """
@@ -500,7 +501,7 @@ class TestDivisionErrorCases:
         result = parse_cobol(source)
         # May succeed or fail depending on parser strictness
         assert result is not None
-    
+
     def test_statements_outside_procedure_division(self):
         """Test statements outside Procedure Division."""
         source = """

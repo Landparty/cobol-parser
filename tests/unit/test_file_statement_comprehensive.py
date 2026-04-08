@@ -5,10 +5,10 @@ Tests cover all clause variations from COBOL 85/2002/2014 standards:
 - FD/SD descriptor variations (BLOCK CONTAINS, RECORD CONTAINS, LINAGE, etc.)
 - Dialect-specific variations (IBM, Micro Focus, GnuCOBOL, ACUCOBOL)
 """
-import pytest
-from cobolparser import CobolParser, parse_cobol, ErrorRecoveryMode
-from cobolparser.models.statements import SelectStatement
+
+from cobolparser import CobolParser, ErrorRecoveryMode, parse_cobol
 from cobolparser.models.program import CobolFileDescription
+from cobolparser.models.statements import SelectStatement
 
 
 def parse(source: str):
@@ -34,7 +34,7 @@ class TestSelectAssignClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ASSIGN' in str(e) for e in result.errors)
+        assert result.success or not any("ASSIGN" in str(e) for e in result.errors)
 
     def test_assign_to_string_literal(self):
         """Test ASSIGN TO with string literal."""
@@ -50,7 +50,7 @@ class TestSelectAssignClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ASSIGN' in str(e) for e in result.errors)
+        assert result.success or not any("ASSIGN" in str(e) for e in result.errors)
 
     def test_assign_to_device_type_printer(self):
         """Test ASSIGN TO PRINTER (device name is assignment target)."""
@@ -74,7 +74,11 @@ class TestSelectAssignClause:
             if io_section:
                 file_control = io_section.get_paragraph_by_name("FILE-CONTROL")
                 if file_control:
-                    select_stmts = [s for s in file_control.statements if isinstance(s, SelectStatement)]
+                    select_stmts = [
+                        s
+                        for s in file_control.statements
+                        if isinstance(s, SelectStatement)
+                    ]
                     if select_stmts:
                         assert select_stmts[0].assign_to == "PRINTER"
 
@@ -109,7 +113,7 @@ class TestSelectAssignClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ASSIGN' in str(e) for e in result.errors)
+        assert result.success or not any("ASSIGN" in str(e) for e in result.errors)
 
 
 class TestSelectOrganizationClause:
@@ -130,7 +134,9 @@ class TestSelectOrganizationClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ORGANIZATION' in str(e) for e in result.errors)
+        assert result.success or not any(
+            "ORGANIZATION" in str(e) for e in result.errors
+        )
 
     def test_organization_indexed(self):
         """Test ORGANIZATION IS INDEXED."""
@@ -147,7 +153,9 @@ class TestSelectOrganizationClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ORGANIZATION' in str(e) for e in result.errors)
+        assert result.success or not any(
+            "ORGANIZATION" in str(e) for e in result.errors
+        )
 
     def test_organization_relative(self):
         """Test ORGANIZATION IS RELATIVE."""
@@ -164,7 +172,9 @@ class TestSelectOrganizationClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ORGANIZATION' in str(e) for e in result.errors)
+        assert result.success or not any(
+            "ORGANIZATION" in str(e) for e in result.errors
+        )
 
     def test_organization_line_sequential(self):
         """Test ORGANIZATION IS LINE SEQUENTIAL (text files)."""
@@ -181,7 +191,9 @@ class TestSelectOrganizationClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ORGANIZATION' in str(e) for e in result.errors)
+        assert result.success or not any(
+            "ORGANIZATION" in str(e) for e in result.errors
+        )
 
     def test_organization_without_is(self):
         """Test ORGANIZATION SEQUENTIAL (without IS keyword)."""
@@ -198,7 +210,9 @@ class TestSelectOrganizationClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ORGANIZATION' in str(e) for e in result.errors)
+        assert result.success or not any(
+            "ORGANIZATION" in str(e) for e in result.errors
+        )
 
 
 class TestSelectAccessModeClause:
@@ -219,7 +233,7 @@ class TestSelectAccessModeClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ACCESS' in str(e) for e in result.errors)
+        assert result.success or not any("ACCESS" in str(e) for e in result.errors)
 
     def test_access_mode_random(self):
         """Test ACCESS MODE IS RANDOM."""
@@ -237,7 +251,7 @@ class TestSelectAccessModeClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ACCESS' in str(e) for e in result.errors)
+        assert result.success or not any("ACCESS" in str(e) for e in result.errors)
 
     def test_access_mode_dynamic(self):
         """Test ACCESS MODE IS DYNAMIC."""
@@ -255,7 +269,7 @@ class TestSelectAccessModeClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ACCESS' in str(e) for e in result.errors)
+        assert result.success or not any("ACCESS" in str(e) for e in result.errors)
 
     def test_access_without_mode(self):
         """Test ACCESS RANDOM (without MODE keyword)."""
@@ -272,7 +286,7 @@ class TestSelectAccessModeClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('ACCESS' in str(e) for e in result.errors)
+        assert result.success or not any("ACCESS" in str(e) for e in result.errors)
 
 
 class TestSelectRecordKeyClause:
@@ -294,7 +308,7 @@ class TestSelectRecordKeyClause:
             STOP RUN.
         """
         result = parse(src)
-        assert result.success or not any('RECORD KEY' in str(e) for e in result.errors)
+        assert result.success or not any("RECORD KEY" in str(e) for e in result.errors)
 
     def test_record_key_with_source(self):
         """Test RECORD KEY with SOURCE IS clause."""
@@ -465,9 +479,13 @@ class TestSelectOptionalClause:
             if io_section:
                 file_control = io_section.get_paragraph_by_name("FILE-CONTROL")
                 if file_control:
-                    select_stmts = [s for s in file_control.statements if isinstance(s, SelectStatement)]
+                    select_stmts = [
+                        s
+                        for s in file_control.statements
+                        if isinstance(s, SelectStatement)
+                    ]
                     if select_stmts:
-                        assert select_stmts[0].is_optional == True
+                        assert select_stmts[0].is_optional
 
 
 class TestSelectReserveClause:
@@ -657,7 +675,11 @@ class TestSelectCombinedClauses:
             if io_section:
                 file_control = io_section.get_paragraph_by_name("FILE-CONTROL")
                 if file_control:
-                    select_stmts = [s for s in file_control.statements if isinstance(s, SelectStatement)]
+                    select_stmts = [
+                        s
+                        for s in file_control.statements
+                        if isinstance(s, SelectStatement)
+                    ]
                     assert len(select_stmts) >= 3
 
 
@@ -1003,10 +1025,10 @@ class TestSelectStatementModel:
     def test_select_statement_creation(self):
         """Test creating SelectStatement directly."""
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1, None)
         stmt = SelectStatement(location)
-        
+
         assert stmt.statement_type == "SELECT"
         assert stmt.file_name is None
         assert stmt.assign_to is None
@@ -1016,24 +1038,24 @@ class TestSelectStatementModel:
     def test_select_statement_setters(self):
         """Test SelectStatement setter methods."""
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1, None)
         stmt = SelectStatement(location)
-        
+
         stmt.set_file_name("MYFILE", is_optional=True)
         assert stmt.file_name == "MYFILE"
-        assert stmt.is_optional == True
-        
+        assert stmt.is_optional
+
         stmt.set_assign_to("DATAFILE", device_type="DISK")
         assert stmt.assign_to == "DATAFILE"
         assert stmt.assign_device_type == "DISK"
-        
+
         stmt.set_organization("INDEXED")
         assert stmt.organization == "INDEXED"
-        
+
         stmt.set_access_mode("DYNAMIC")
         assert stmt.access_mode == "DYNAMIC"
-        
+
         stmt.set_file_status("WS-STATUS", "WS-VSAM")
         assert stmt.file_status == "WS-STATUS"
         assert stmt.file_status_vsam == "WS-VSAM"
@@ -1041,18 +1063,18 @@ class TestSelectStatementModel:
     def test_select_statement_to_dict(self):
         """Test SelectStatement to_dict serialization."""
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1, None)
         stmt = SelectStatement(location)
-        
+
         stmt.set_file_name("TESTFILE", is_optional=False)
         stmt.set_assign_to("DATA1", device_type="TAPE")
         stmt.set_organization("SEQUENTIAL")
         stmt.set_access_mode("SEQUENTIAL")
         stmt.set_file_status("STATUS-VAR")
-        
+
         d = stmt.to_dict()
-        
+
         assert d["statement_type"] == "SELECT"
         assert d["file_name"] == "TESTFILE"
         assert d["assign_to"] == "DATA1"
@@ -1068,67 +1090,67 @@ class TestFileDescriptionModel:
     def test_file_description_creation(self):
         """Test creating CobolFileDescription directly."""
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1, None)
         fd = CobolFileDescription("MYFILE", location)
-        
+
         assert fd.file_name == "MYFILE"
         assert fd.record_type == "FD"  # Default
-        assert fd.is_external == False
-        assert fd.is_global == False
+        assert not fd.is_external
+        assert not fd.is_global
 
     def test_file_description_setters(self):
         """Test CobolFileDescription setter methods."""
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1, None)
         fd = CobolFileDescription("TESTFILE", location)
-        
+
         # record_type is set directly, not through a setter
         fd.record_type = "SD"
         assert fd.record_type == "SD"
-        
+
         fd.set_block_contains(count=10, unit="RECORDS")
         assert fd.block_contains == 10
         assert fd.block_contains_unit == "RECORDS"
-        
+
         fd.set_record_contains(count=80)
         # Note: record_contains uses count parameter
-        
+
         fd.set_label_records("STANDARD")
         assert fd.label_records == "STANDARD"
-        
+
         fd.set_linage(60)
         assert fd.linage_value == 60
-        
+
         fd.set_code_set("ASCII")
         assert fd.code_set == "ASCII"
-        
+
         fd.set_recording_mode("V")
         assert fd.recording_mode == "V"
-        
+
         fd.set_external(True)
-        assert fd.is_external == True
-        
+        assert fd.is_external
+
         fd.set_global(True)
-        assert fd.is_global == True
+        assert fd.is_global
 
     def test_file_description_to_dict(self):
         """Test CobolFileDescription to_dict serialization."""
         from cobolparser.models.ast_base import SourceLocation
-        
+
         location = SourceLocation(1, 1, None)
         fd = CobolFileDescription("TESTFILE", location)
-        
+
         fd.record_type = "FD"
         fd.set_block_contains(count=5, unit="RECORDS")
         fd.set_record_contains(count=100)
         fd.set_label_records("STANDARD")
         fd.set_recording_mode("F")
         fd.set_external(True)
-        
+
         d = fd.to_dict()
-        
+
         assert d["file_name"] == "TESTFILE"
         assert d["record_type"] == "FD"
         # block_contains may be serialized as dict with count/unit or as separate fields
@@ -1139,7 +1161,7 @@ class TestFileDescriptionModel:
             assert d.get("block_contains") == 5 or d.get("block_contains_min") == 5
         assert d["label_records"] == "STANDARD"
         assert d["recording_mode"] == "F"
-        assert d["is_external"] == True
+        assert d["is_external"]
 
 
 # Test to verify integration with parse_cobol convenience function
@@ -1172,5 +1194,5 @@ def test_parse_cobol_with_file_statements():
     result = parse_cobol(src, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
     assert result.ast is not None
     # Should have parsed without fatal errors
-    assert not any('SELECT' in str(e) for e in result.errors)
-    assert not any('FD' in str(e) for e in result.errors)
+    assert not any("SELECT" in str(e) for e in result.errors)
+    assert not any("FD" in str(e) for e in result.errors)

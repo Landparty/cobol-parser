@@ -10,12 +10,13 @@ This module systematically tests CALL statement variants including:
 """
 
 import pytest
+
 from cobolparser import parse_cobol
 
 
 class TestCallBasic:
     """Test basic CALL statement functionality."""
-    
+
     def test_call_with_literal_program_name(self):
         """Test CALL with literal program name (static CALL)."""
         source = """
@@ -28,10 +29,10 @@ class TestCallBasic:
         result = parse_cobol(source)
         assert result.success
         assert result.ast is not None
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-    
+
     def test_call_with_variable_program_name(self):
         """Test CALL with variable program name (dynamic CALL)."""
         source = """
@@ -48,7 +49,7 @@ class TestCallBasic:
         assert result.success
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-    
+
     def test_call_with_no_parameters(self):
         """Test CALL without any USING clause."""
         source = """
@@ -64,7 +65,7 @@ class TestCallBasic:
 
 class TestCallUsing:
     """Test CALL with USING clause (parameter passing)."""
-    
+
     def test_call_with_single_parameter(self):
         """Test CALL with single parameter in USING."""
         source = """
@@ -81,7 +82,7 @@ class TestCallUsing:
         assert result.success
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-    
+
     def test_call_with_multiple_parameters(self):
         """Test CALL with multiple parameters."""
         source = """
@@ -98,7 +99,7 @@ class TestCallUsing:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_call_using_by_reference(self):
         """Test CALL USING BY REFERENCE (default)."""
         source = """
@@ -114,7 +115,7 @@ class TestCallUsing:
         result = parse_cobol(source)
         # May or may not support explicit BY REFERENCE
         assert result is not None
-    
+
     def test_call_using_by_value(self):
         """Test CALL USING BY VALUE."""
         source = """
@@ -133,7 +134,7 @@ class TestCallUsing:
 
 class TestCallReturning:
     """Test CALL with RETURNING clause."""
-    
+
     def test_call_with_returning(self):
         """Test CALL with RETURNING clause."""
         source = """
@@ -150,7 +151,7 @@ class TestCallReturning:
         assert result.success
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-    
+
     def test_call_using_and_returning(self):
         """Test CALL with both USING and RETURNING."""
         source = """
@@ -170,7 +171,7 @@ class TestCallReturning:
 
 class TestCallStaticDynamic:
     """Test static vs dynamic CALL detection."""
-    
+
     def test_static_call_with_literal(self):
         """Test static CALL detection with literal."""
         source = """
@@ -184,12 +185,12 @@ class TestCallStaticDynamic:
         assert result.success
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call = calls[0]
         # Check if parser tracks is_dynamic
-        if hasattr(call, 'is_dynamic'):
-            assert call.is_dynamic == False
-    
+        if hasattr(call, "is_dynamic"):
+            assert not call.is_dynamic
+
     def test_dynamic_call_with_variable(self):
         """Test dynamic CALL detection with variable."""
         source = """
@@ -206,16 +207,16 @@ class TestCallStaticDynamic:
         assert result.success
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call = calls[0]
         # Check if parser tracks is_dynamic
-        if hasattr(call, 'is_dynamic'):
-            assert call.is_dynamic == True
+        if hasattr(call, "is_dynamic"):
+            assert call.is_dynamic
 
 
 class TestCallSerialization:
     """Test CALL statement serialization."""
-    
+
     def test_call_to_dict(self):
         """Test CALL statement to_dict() serialization."""
         source = """
@@ -227,14 +228,14 @@ class TestCallSerialization:
         """
         result = parse_cobol(source)
         assert result.success
-        
+
         calls = result.ast.find_statements("CALL")
         assert len(calls) >= 1
-        
+
         call_dict = calls[0].to_dict()
         assert call_dict is not None
         assert isinstance(call_dict, dict)
-    
+
     def test_call_serialization_with_parameters(self):
         """Test CALL with parameters serialization."""
         source = """
@@ -254,7 +255,7 @@ class TestCallSerialization:
 
 class TestCallEdgeCases:
     """Test CALL edge cases and error conditions."""
-    
+
     def test_call_with_quoted_program_name(self):
         """Test CALL with quoted program name."""
         source = """
@@ -266,7 +267,7 @@ class TestCallEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_call_in_perform_loop(self):
         """Test CALL inside PERFORM loop."""
         source = """
@@ -284,7 +285,7 @@ class TestCallEdgeCases:
         performs = result.ast.find_statements("PERFORM")
         assert len(calls) >= 1
         assert len(performs) >= 1
-    
+
     def test_call_in_if_statement(self):
         """Test CALL inside IF statement."""
         source = """
@@ -298,7 +299,7 @@ class TestCallEdgeCases:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_multiple_calls_in_sequence(self):
         """Test multiple CALL statements in sequence."""
         source = """
@@ -318,7 +319,7 @@ class TestCallEdgeCases:
 
 class TestCallParameterPassing:
     """Test parameter passing mechanisms."""
-    
+
     def test_call_parameter_names_as_literals(self):
         """Test CALL with literal string parameters."""
         source = """
@@ -330,7 +331,7 @@ class TestCallParameterPassing:
         """
         result = parse_cobol(source)
         assert result.success
-    
+
     def test_call_parameter_numeric_values(self):
         """Test CALL with numeric parameters."""
         source = """
@@ -347,7 +348,7 @@ class TestCallParameterPassing:
 
 class TestCallErrorCases:
     """Test error cases and diagnostics."""
-    
+
     def test_call_returning_and_giving_mutually_exclusive(self):
         """Test that RETURNING and GIVING are mutually exclusive."""
         # This is a potential error condition - both should not be allowed

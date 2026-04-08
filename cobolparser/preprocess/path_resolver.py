@@ -9,26 +9,26 @@ and providing fuzzy matching suggestions for misspelled copybook names.
 
 import os
 import sys
-from pathlib import Path
-from typing import Optional
 from difflib import get_close_matches
+from pathlib import Path
+
+from . import CopybookNotFoundError, CopybookSizeExceededError, PathTraversalError
 from .models import CopybookSearchPath
-from . import PathTraversalError, CopybookNotFoundError, CopybookSizeExceededError
 
 
 def normalize_path(path: str) -> str:
     """
     Normalize file path to OS-native separator format.
-    
+
     Converts forward slashes to backslashes on Windows,
     and ensures consistent path representation across platforms.
-    
+
     Args:
         path: Input path with any separator style
-        
+
     Returns:
         Normalized path with OS-native separators
-        
+
     Example:
         >>> normalize_path("copybooks/employee.cpy")  # On Windows
         'copybooks\\employee.cpy'
@@ -40,20 +40,20 @@ def normalize_path(path: str) -> str:
 def validate_path_within_directory(file_path: str, base_directory: str) -> bool:
     """
     Validate that a resolved path remains within the base directory.
-    
+
     Prevents path traversal attacks by rejecting paths containing ".."
     or those that resolve outside the configured search directories.
-    
+
     Args:
         file_path: The file path to validate
         base_directory: The base directory that must contain the file
-        
+
     Returns:
         True if path is valid and within base directory
-        
+
     Raises:
         PathTraversalError: If path attempts to escape base directory
-        
+
     Example:
         >>> validate_path_within_directory("../etc/passwd", "/home/user/copybooks")
         PathTraversalError: Path traversal attempt detected
@@ -61,49 +61,49 @@ def validate_path_within_directory(file_path: str, base_directory: str) -> bool:
     # Check for obvious traversal patterns
     if ".." in file_path:
         raise PathTraversalError(file_path)
-    
+
     # Resolve both paths to absolute form
     try:
         resolved_file = Path(file_path).resolve()
         resolved_base = Path(base_directory).resolve()
-        
+
         # Check if file path is within base directory
         try:
             resolved_file.relative_to(resolved_base)
             return True
-        except ValueError:
+        except ValueError as e:
             # Path is not relative to base directory
             raise PathTraversalError(
                 file_path,
-                f"Resolved path '{resolved_file}' is outside search directory '{resolved_base}'"
-            )
+                f"Resolved path '{resolved_file}' is outside search directory '{resolved_base}'",
+            ) from e
     except Exception as e:
         if isinstance(e, PathTraversalError):
             raise
-        raise PathTraversalError(file_path, f"Path validation failed: {str(e)}")
+        raise PathTraversalError(file_path, f"Path validation failed: {str(e)}") from e
 
 
 def get_available_copybooks(search_config: CopybookSearchPath) -> list[str]:
     """
     Get list of all available copybook names in search directories.
-    
+
     Args:
         search_config: Search configuration with directories and extensions
-        
+
     Returns:
         List of copybook member names (without extensions)
-        
+
     Example:
         >>> config = CopybookSearchPath(directories=["/copybooks"])
         >>> get_available_copybooks(config)
         ['EMPLOYEE', 'CUSTOMER', 'ADDRESS']
     """
     available = set()
-    
+
     for search_dir in search_config.directories:
         if not os.path.isdir(search_dir):
             continue
-        
+
         for ext in search_config.extensions:
             if ext:
                 pattern = f"*{ext}"
@@ -115,73 +115,68 @@ def get_available_copybooks(search_config: CopybookSearchPath) -> list[str]:
                 for path in Path(search_dir).iterdir():
                     if path.is_file():
                         available.add(path.stem.upper())
-    
+
     return sorted(available)
 
 
 def suggest_similar_copybooks(
-    member_name: str, 
+    member_name: str,
     search_config: CopybookSearchPath,
     max_suggestions: int = 3,
-    cutoff: float = 0.6
+    cutoff: float = 0.6,
 ) -> list[str]:
     """
     Find similarly-named copybooks for typo detection.
-    
+
     Uses fuzzy string matching to suggest alternatives when a
     copybook is not found.
-    
+
     Args:
         member_name: The copybook name that was not found
         search_config: Search configuration
         max_suggestions: Maximum number of suggestions to return
         cutoff: Minimum similarity ratio (0.0 to 1.0)
-        
+
     Returns:
         List of similar copybook names
-        
+
     Example:
         >>> suggest_similar_copybooks("EMPLOYE", config)
         ['EMPLOYEE']
     """
     available = get_available_copybooks(search_config)
-    
+
     # Normalize to uppercase for comparison
     member_upper = member_name.upper()
-    
-    return get_close_matches(
-        member_upper, 
-        available, 
-        n=max_suggestions, 
-        cutoff=cutoff
-    )
+
+    return get_close_matches(member_upper, available, n=max_suggestions, cutoff=cutoff)
 
 
 def find_copybook_file(
     member_name: str,
     search_config: CopybookSearchPath,
-    library_qualifier: Optional[str] = None
+    library_qualifier: str | None = None,
 ) -> str:
     """
     Locate a copybook file in the configured search paths.
-    
+
     Searches for the member name with various extensions (.cpy, .CPY, .cbl, etc.)
     in the configured search directories. If library_qualifier is provided,
     searches in subdirectories matching the library name.
-    
+
     Args:
         member_name: Name of the copybook member to find
         search_config: Search configuration with directories and extensions
         library_qualifier: Optional library name for subdirectory search
-        
+
     Returns:
         Absolute path to the found copybook file
-        
+
     Raises:
         CopybookNotFoundError: If copybook cannot be found in any search path
         PathTraversalError: If path validation fails
         CopybookSizeExceededError: If file exceeds size limit
-        
+
     Example:
         >>> config = CopybookSearchPath(directories=["/copybooks"])
         >>> find_copybook_file("EMPLOYEE", config)
@@ -189,19 +184,19 @@ def find_copybook_file(
     """
     search_dirs = search_config.directories
     extensions = search_config.extensions
-    
+
     # Build list of possible filenames
     possible_names = [member_name]  # Try exact name first
     for ext in extensions:
         if ext:  # Skip empty extension (already added as exact name)
             possible_names.append(f"{member_name}{ext}")
-    
+
     # If not case-sensitive, also try case variations
     if not search_config.case_sensitive:
         case_variants = [
             member_name.upper(),
             member_name.lower(),
-            member_name.capitalize()
+            member_name.capitalize(),
         ]
         for variant in case_variants:
             if variant not in possible_names:
@@ -211,38 +206,36 @@ def find_copybook_file(
                     name_with_ext = f"{variant}{ext}"
                     if name_with_ext not in possible_names:
                         possible_names.append(name_with_ext)
-    
+
     # Search in each directory
     for search_dir in search_dirs:
         actual_search_dir = search_dir
-        
+
         # If library qualifier provided, add it as a subdirectory
         if library_qualifier:
             actual_search_dir = os.path.join(search_dir, library_qualifier)
-        
+
         # Try each possible filename
         for filename in possible_names:
             file_path = os.path.join(actual_search_dir, filename)
-            
+
             # Normalize path
             file_path = normalize_path(file_path)
-            
+
             # Check if file exists
             if os.path.isfile(file_path):
                 # Validate path is within search directory
                 validate_path_within_directory(file_path, search_dir)
-                
+
                 # Check file size
                 file_size = os.path.getsize(file_path)
                 if file_size > search_config.max_file_size:
                     raise CopybookSizeExceededError(
-                        file_path,
-                        file_size,
-                        search_config.max_file_size
+                        file_path, file_size, search_config.max_file_size
                     )
-                
+
                 return os.path.abspath(file_path)
-    
+
     # Copybook not found - get suggestions
     suggestions = suggest_similar_copybooks(member_name, search_config)
     raise CopybookNotFoundError(member_name, search_dirs, suggestions)
@@ -251,85 +244,85 @@ def find_copybook_file(
 class PathResolver:
     """
     Wrapper class for path resolution functionality.
-    
+
     Provides a unified interface for resolving copybook file paths
     with integrated validation, size checking, and fuzzy matching.
-    
+
     Attributes:
         search_config: Configuration for copybook search paths and extensions
     """
-    
+
     def __init__(self, search_config: CopybookSearchPath):
         """
         Initialize path resolver with search configuration.
-        
+
         Args:
             search_config: Search path configuration
         """
         self.search_config = search_config
-    
-    def resolve(self, member_name: str, library_qualifier: Optional[str] = None) -> str:
+
+    def resolve(self, member_name: str, library_qualifier: str | None = None) -> str:
         """
         Resolve a copybook member name to an absolute file path.
-        
+
         Args:
             member_name: Copybook member name
             library_qualifier: Optional library name
-            
+
         Returns:
             Absolute path to copybook file
-            
+
         Raises:
             CopybookNotFoundError: If copybook not found (with suggestions)
             PathTraversalError: If path validation fails
             CopybookSizeExceededError: If file exceeds size limit
         """
         return find_copybook_file(member_name, self.search_config, library_qualifier)
-    
+
     def normalize(self, path: str) -> str:
         """
         Normalize a file path to OS-native format.
-        
+
         Args:
             path: Input path
-            
+
         Returns:
             Normalized path
         """
         return normalize_path(path)
-    
+
     def validate(self, file_path: str, base_directory: str) -> bool:
         """
         Validate that a file path is within a base directory.
-        
+
         Args:
             file_path: Path to validate
             base_directory: Base directory
-            
+
         Returns:
             True if valid
-            
+
         Raises:
             PathTraversalError: If validation fails
         """
         return validate_path_within_directory(file_path, base_directory)
-    
+
     def get_suggestions(self, member_name: str) -> list[str]:
         """
         Get suggestions for a possibly misspelled copybook name.
-        
+
         Args:
             member_name: The copybook name to find suggestions for
-            
+
         Returns:
             List of similar copybook names
         """
         return suggest_similar_copybooks(member_name, self.search_config)
-    
+
     def list_available(self) -> list[str]:
         """
         List all available copybook names.
-        
+
         Returns:
             List of copybook member names
         """
@@ -337,10 +330,10 @@ class PathResolver:
 
 
 __all__ = [
-    'normalize_path',
-    'validate_path_within_directory',
-    'find_copybook_file',
-    'get_available_copybooks',
-    'suggest_similar_copybooks',
-    'PathResolver',
+    "normalize_path",
+    "validate_path_within_directory",
+    "find_copybook_file",
+    "get_available_copybooks",
+    "suggest_similar_copybooks",
+    "PathResolver",
 ]

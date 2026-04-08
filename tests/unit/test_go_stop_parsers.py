@@ -4,9 +4,8 @@ Targets uncovered branches in:
   - go_parser.py: DEPENDING ON clause, missing TO keyword error path
   - stop_parser.py: STOP with string literal, STOP RUN variants
 """
-import pytest
-from cobolparser import parse_cobol
-from cobolparser import CobolParser, ErrorRecoveryMode
+
+from cobolparser import CobolParser, ErrorRecoveryMode, parse_cobol
 
 
 def _prog(procedure_stmts: str) -> str:
@@ -43,9 +42,7 @@ class TestGoParserCoverage:
 
     def test_goto_depending_on_target_stored(self):
         """DEPENDING ON variable and target paragraph both set correctly."""
-        result = parse_cobol(
-            _prog("           GO TO EXIT-PARA DEPENDING ON IDX.")
-        )
+        result = parse_cobol(_prog("           GO TO EXIT-PARA DEPENDING ON IDX."))
         assert result.ast is not None
         stmts = result.ast.find_statements("GOTO")
         assert len(stmts) >= 1
@@ -56,29 +53,25 @@ class TestGoParserCoverage:
     def test_goto_missing_to_recovers(self):
         """GO without TO in error-recovery mode covers error report path (lines 65-72)."""
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
-        result = parser.parse(
-            """
+        result = parser.parse("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        PROCEDURE DIVISION.
            GO PARA-1.
            STOP RUN.
-            """
-        )
+            """)
         # Parser should not crash
         assert result is not None
 
     def test_goto_no_period(self):
         """GO TO without trailing period — parser still returns a statement."""
-        result = parse_cobol(
-            """
+        result = parse_cobol("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        PROCEDURE DIVISION.
            GO TO PARA-1
            STOP RUN.
-            """
-        )
+            """)
         assert result.ast is not None
 
 
@@ -87,14 +80,12 @@ class TestStopParserCoverage:
 
     def test_stop_run(self):
         """STOP RUN — stop_type should be 'RUN'."""
-        result = parse_cobol(
-            """
+        result = parse_cobol("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        PROCEDURE DIVISION.
            STOP RUN.
-            """
-        )
+            """)
         assert result.ast is not None
         stmts = result.ast.find_statements("STOP")
         assert len(stmts) >= 1
@@ -102,14 +93,12 @@ class TestStopParserCoverage:
 
     def test_stop_with_string_literal(self):
         """STOP 'message' covers string literal branch (lines 41-43)."""
-        result = parse_cobol(
-            """
+        result = parse_cobol("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        PROCEDURE DIVISION.
            STOP 'HALTED'.
-            """
-        )
+            """)
         assert result.ast is not None
         stmts = result.ast.find_statements("STOP")
         assert len(stmts) >= 1
@@ -119,14 +108,12 @@ class TestStopParserCoverage:
 
     def test_stop_run_uppercase_variants(self):
         """STOP RUN is parsed regardless of case variations."""
-        result = parse_cobol(
-            """
+        result = parse_cobol("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        PROCEDURE DIVISION.
            STOP RUN.
-            """
-        )
+            """)
         assert result.ast is not None
         stmts = result.ast.find_statements("STOP")
         assert len(stmts) >= 1

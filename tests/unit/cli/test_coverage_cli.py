@@ -4,17 +4,15 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cobolparser.cli.coverage import (
-    cmd_status,
     cmd_generate,
-    cmd_render,
+    cmd_status,
     create_parser,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -22,15 +20,38 @@ from cobolparser.cli.coverage import (
 
 SAMPLE_ARTIFACT = {
     "variations": [
-        {"id": "READ-SEQ-001", "verb": "READ", "status": "covered", "tests": ["t1"], "notes": ""},
-        {"id": "OPEN-INPUT-001", "verb": "OPEN", "status": "gap", "tests": [], "notes": ""},
-        {"id": "WRITE-001", "verb": "WRITE", "status": "partial", "tests": ["t2"], "notes": "long note here"},
+        {
+            "id": "READ-SEQ-001",
+            "verb": "READ",
+            "status": "covered",
+            "tests": ["t1"],
+            "notes": "",
+        },
+        {
+            "id": "OPEN-INPUT-001",
+            "verb": "OPEN",
+            "status": "gap",
+            "tests": [],
+            "notes": "",
+        },
+        {
+            "id": "WRITE-001",
+            "verb": "WRITE",
+            "status": "partial",
+            "tests": ["t2"],
+            "notes": "long note here",
+        },
     ]
 }
 
 
 def make_status_args(**kwargs):
-    defaults = dict(artifact="io-coverage.json", verb=None, qualifier=None, format="table")
+    defaults = {
+        "artifact": "io-coverage.json",
+        "verb": None,
+        "qualifier": None,
+        "format": "table",
+    }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
 
@@ -84,8 +105,20 @@ class TestCmdStatus:
         """--qualifier filters by qualifier substring."""
         artifact_data = {
             "variations": [
-                {"id": "READ-AT-END", "verb": "READ", "qualifiers": "AT END", "status": "covered", "tests": []},
-                {"id": "READ-KEY", "verb": "READ", "qualifiers": "INVALID KEY", "status": "gap", "tests": []},
+                {
+                    "id": "READ-AT-END",
+                    "verb": "READ",
+                    "qualifiers": "AT END",
+                    "status": "covered",
+                    "tests": [],
+                },
+                {
+                    "id": "READ-KEY",
+                    "verb": "READ",
+                    "qualifiers": "INVALID KEY",
+                    "status": "gap",
+                    "tests": [],
+                },
             ]
         }
         artifact = tmp_path / "io-coverage.json"
@@ -149,7 +182,9 @@ class TestCmdGenerate:
             "gap_variations": 5,
         }
 
-        with patch("cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter):
+        with patch(
+            "cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter
+        ):
             result = cmd_generate(args)
 
         assert result == 0
@@ -171,7 +206,9 @@ class TestCmdGenerate:
             "validation_errors": ["Schema mismatch", "Missing field"],
         }
 
-        with patch("cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter):
+        with patch(
+            "cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter
+        ):
             result = cmd_generate(args)
 
         assert result == 1
@@ -187,9 +224,13 @@ class TestCmdGenerate:
             schema=None,
         )
         mock_reporter = MagicMock()
-        mock_reporter.generate_report.side_effect = FileNotFoundError("missing.json not found")
+        mock_reporter.generate_report.side_effect = FileNotFoundError(
+            "missing.json not found"
+        )
 
-        with patch("cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter):
+        with patch(
+            "cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter
+        ):
             result = cmd_generate(args)
 
         assert result == 1
@@ -203,7 +244,9 @@ class TestCmdGenerate:
 
 
 class TestCmdRender:
-    def _make_render_args(self, fmt="markdown", output=None, input_file="coverage.json"):
+    def _make_render_args(
+        self, fmt="markdown", output=None, input_file="coverage.json"
+    ):
         return argparse.Namespace(input=input_file, output=output, format=fmt)
 
     def _mock_renderer(self, md="# Report", csv_data="a,b", summary="Summary"):
@@ -218,9 +261,19 @@ class TestCmdRender:
         renderer = self._mock_renderer()
         args = self._make_render_args(fmt="markdown")
 
-        with patch("cobolparser.cli.coverage.sys.path"), \
-             patch.dict(sys.modules, {"render_markdown": MagicMock(CoverageRenderer=MagicMock(return_value=renderer))}):
+        with (
+            patch("cobolparser.cli.coverage.sys.path"),
+            patch.dict(
+                sys.modules,
+                {
+                    "render_markdown": MagicMock(
+                        CoverageRenderer=MagicMock(return_value=renderer)
+                    )
+                },
+            ),
+        ):
             from cobolparser.cli.coverage import cmd_render as _cr
+
             # Re-import to pick up patched module
             result = _cr(args)
 
@@ -231,9 +284,19 @@ class TestCmdRender:
         renderer = self._mock_renderer()
         args = self._make_render_args(fmt="csv")
 
-        with patch("cobolparser.cli.coverage.sys.path"), \
-             patch.dict(sys.modules, {"render_markdown": MagicMock(CoverageRenderer=MagicMock(return_value=renderer))}):
+        with (
+            patch("cobolparser.cli.coverage.sys.path"),
+            patch.dict(
+                sys.modules,
+                {
+                    "render_markdown": MagicMock(
+                        CoverageRenderer=MagicMock(return_value=renderer)
+                    )
+                },
+            ),
+        ):
             from cobolparser.cli.coverage import cmd_render as _cr
+
             result = _cr(args)
 
         assert result == 0
@@ -243,9 +306,15 @@ class TestCmdRender:
         mock_renderer_cls = MagicMock(side_effect=FileNotFoundError("not found"))
         args = self._make_render_args()
 
-        with patch("cobolparser.cli.coverage.sys.path"), \
-             patch.dict(sys.modules, {"render_markdown": MagicMock(CoverageRenderer=mock_renderer_cls)}):
+        with (
+            patch("cobolparser.cli.coverage.sys.path"),
+            patch.dict(
+                sys.modules,
+                {"render_markdown": MagicMock(CoverageRenderer=mock_renderer_cls)},
+            ),
+        ):
             from cobolparser.cli.coverage import cmd_render as _cr
+
             result = _cr(args)
 
         assert result == 1
@@ -257,9 +326,15 @@ class TestCmdRender:
         mock_renderer_cls = MagicMock(side_effect=json.JSONDecodeError("err", "", 0))
         args = self._make_render_args()
 
-        with patch("cobolparser.cli.coverage.sys.path"), \
-             patch.dict(sys.modules, {"render_markdown": MagicMock(CoverageRenderer=mock_renderer_cls)}):
+        with (
+            patch("cobolparser.cli.coverage.sys.path"),
+            patch.dict(
+                sys.modules,
+                {"render_markdown": MagicMock(CoverageRenderer=mock_renderer_cls)},
+            ),
+        ):
             from cobolparser.cli.coverage import cmd_render as _cr
+
             result = _cr(args)
 
         assert result == 1
@@ -272,9 +347,19 @@ class TestCmdRender:
         renderer = self._mock_renderer(md="# Generated Report")
         args = self._make_render_args(fmt="markdown", output=output_file)
 
-        with patch("cobolparser.cli.coverage.sys.path"), \
-             patch.dict(sys.modules, {"render_markdown": MagicMock(CoverageRenderer=MagicMock(return_value=renderer))}):
+        with (
+            patch("cobolparser.cli.coverage.sys.path"),
+            patch.dict(
+                sys.modules,
+                {
+                    "render_markdown": MagicMock(
+                        CoverageRenderer=MagicMock(return_value=renderer)
+                    )
+                },
+            ),
+        ):
             from cobolparser.cli.coverage import cmd_render as _cr
+
             result = _cr(args)
 
         assert result == 0
@@ -290,6 +375,7 @@ class TestCreateParser:
     def test_parser_no_command_exits(self):
         """Parser with no subcommand prints help and calling main returns 1."""
         from cobolparser.cli.coverage import main
+
         with patch("sys.argv", ["coverage"]):
             result = main()
         assert result == 1
