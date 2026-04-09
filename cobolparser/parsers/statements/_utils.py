@@ -57,6 +57,19 @@ STATEMENT_TOKEN_TYPES: frozenset = frozenset(
     }
 )
 
+CONTROL_FLOW_BOUNDARIES: frozenset = frozenset(
+    {
+        "ELSE",
+        "END-IF",
+        "END-PERFORM",
+        "END-EVALUATE",
+        "END-SEARCH",
+        "END-STRING",
+        "END-UNSTRING",
+        "WHEN",
+    }
+)
+
 STATEMENT_KEYWORDS: frozenset = frozenset(
     {
         "ACCEPT",

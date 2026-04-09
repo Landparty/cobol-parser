@@ -60,24 +60,12 @@ class AcceptStatementParser(IStatementParser):
                 token_stream.consume()
                 stmt.set_from(src.value or "")
 
-        # Consume remaining tokens until period
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token:
-                break
-            if token.type == TokenType.PERIOD:
+        skip_whitespace(token_stream)
+
+        # Consume period if present
+        if not token_stream.is_empty():
+            p = token_stream.peek()
+            if p and p.type == TokenType.PERIOD:
                 token_stream.consume()
-                break
-            # Stop at next statement keyword
-            if token.value and token.value.upper() in (
-                "DISPLAY",
-                "MOVE",
-                "PERFORM",
-                "IF",
-                "STOP",
-            ):
-                break
-            token_stream.consume()
-            skip_whitespace(token_stream)
 
         return stmt

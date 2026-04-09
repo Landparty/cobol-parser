@@ -560,3 +560,130 @@ class TestSerialization:
         assert "ACCEPT" in json_str
         assert "CANCEL" in json_str
         assert "GENERATE" in json_str
+
+
+# ── Embedded / nested statement edge cases ────────────────────────
+
+
+class TestEmbeddedStatements:
+    """Verify new statements work when nested inside IF, PERFORM, EVALUATE."""
+
+    def test_initialize_in_if(self):
+        result = parse_cobol(
+            _prog(
+                "           IF WS-FLAG = 1\n"
+                "               INITIALIZE WS-VAR\n"
+                "           END-IF."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("INITIALIZE")
+        assert len(stmts) >= 1
+
+    def test_goback_in_if(self):
+        result = parse_cobol(
+            _prog(
+                "           IF WS-FLAG = 1\n"
+                "               GOBACK\n"
+                "           END-IF."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("GOBACK")
+        assert len(stmts) >= 1
+
+    def test_set_in_if(self):
+        result = parse_cobol(
+            _prog(
+                "           IF WS-FLAG = 1\n"
+                "               SET WS-IDX TO 1\n"
+                "           END-IF."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("SET")
+        assert len(stmts) >= 1
+
+    def test_exit_in_if(self):
+        result = parse_cobol(
+            _prog(
+                "           IF WS-FLAG = 1\n"
+                "               EXIT PROGRAM\n"
+                "           END-IF."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("EXIT")
+        assert len(stmts) >= 1
+        assert stmts[0].exit_type == "PROGRAM"
+
+    def test_cancel_in_if(self):
+        result = parse_cobol(
+            _prog(
+                "           IF WS-FLAG = 1\n"
+                "               CANCEL 'SUBPROG'\n"
+                "           END-IF."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("CANCEL")
+        assert len(stmts) >= 1
+
+    def test_set_in_perform(self):
+        result = parse_cobol(
+            _prog(
+                "           PERFORM UNTIL WS-FLAG = 0\n"
+                "               SET WS-IDX UP BY 1\n"
+                "           END-PERFORM."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("SET")
+        assert len(stmts) >= 1
+        assert stmts[0].set_type == "UP_BY"
+
+    def test_initialize_in_evaluate(self):
+        result = parse_cobol(
+            _prog(
+                "           EVALUATE WS-FLAG\n"
+                "               WHEN 1\n"
+                "                   INITIALIZE WS-VAR\n"
+                "               WHEN 2\n"
+                "                   GOBACK\n"
+                "           END-EVALUATE."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("INITIALIZE")
+        assert len(stmts) >= 1
+
+    def test_accept_in_if_else(self):
+        result = parse_cobol(
+            _prog(
+                "           IF WS-FLAG = 1\n"
+                "               ACCEPT WS-VAR\n"
+                "           ELSE\n"
+                "               INITIALIZE WS-VAR\n"
+                "           END-IF."
+            )
+        )
+        assert result.ast is not None
+        stmts_accept = result.ast.find_statements("ACCEPT")
+        stmts_init = result.ast.find_statements("INITIALIZE")
+        assert len(stmts_accept) >= 1
+        assert len(stmts_init) >= 1
+
+    def test_continue_in_evaluate(self):
+        result = parse_cobol(
+            _prog(
+                "           EVALUATE WS-FLAG\n"
+                "               WHEN 1\n"
+                "                   CONTINUE\n"
+                "               WHEN 2\n"
+                "                   EXIT PROGRAM\n"
+                "           END-EVALUATE."
+            )
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("CONTINUE")
+        assert len(stmts) >= 1

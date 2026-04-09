@@ -20,7 +20,7 @@ from ...models.statements import (
     ReturnStatement,
     UseStatement,
 )
-from ._utils import skip_whitespace
+from ._utils import CONTROL_FLOW_BOUNDARIES, STATEMENT_KEYWORDS, skip_whitespace
 
 
 def _token_value_upper(token: Any) -> str:
@@ -395,6 +395,9 @@ class ReturnStatementParser(IStatementParser):
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
                 break
+            val = _token_value_upper(token)
+            if val in CONTROL_FLOW_BOUNDARIES or val in STATEMENT_KEYWORDS:
+                break
             token_stream.consume()
 
         return stmt
@@ -440,6 +443,8 @@ class UseStatementParser(IStatementParser):
                 token_stream.consume()
                 break
             val = _token_value_upper(token)
+            if val in CONTROL_FLOW_BOUNDARIES or val in STATEMENT_KEYWORDS:
+                break
             if val in ("EXCEPTION", "ERROR"):
                 stmt.set_use_type(val)
             elif val == "DEBUGGING":

@@ -3,6 +3,7 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    STATEMENT_KEYWORDS,
     get_parse_context,
     report_parse_error,
     try_parse_nested_statement,
@@ -322,28 +323,4 @@ class EvaluateStatementParser(IStatementParser):
     @staticmethod
     def _is_statement_keyword(word: str) -> bool:
         """Check if word is a known statement keyword."""
-        keywords = {
-            "DISPLAY",
-            "MOVE",
-            "IF",
-            "PERFORM",
-            "EVALUATE",
-            "CALL",
-            "ADD",
-            "SUBTRACT",
-            "MULTIPLY",
-            "DIVIDE",
-            "COMPUTE",
-            "ACCEPT",
-            "STOP",
-            "EXIT",
-            "GO",
-            "GOBACK",
-            "RETURN",
-            "OPEN",
-            "CLOSE",
-            "READ",
-            "WRITE",
-            "DELETE",
-        }
-        return word.upper() in keywords
+        return word.upper() in STATEMENT_KEYWORDS

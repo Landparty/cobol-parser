@@ -3,6 +3,7 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    STATEMENT_KEYWORDS,
     get_parse_context,
     report_parse_error,
     skip_whitespace,
@@ -316,42 +317,7 @@ class IfStatementParser(IStatementParser):
 
     def _is_statement_keyword(self, token_upper: str) -> bool:
         """Check if token is a COBOL statement keyword."""
-        statement_keywords = {
-            "MOVE",
-            "DISPLAY",
-            "CALL",
-            "PERFORM",
-            "IF",
-            "EVALUATE",
-            "ADD",
-            "SUBTRACT",
-            "MULTIPLY",
-            "DIVIDE",
-            "COMPUTE",
-            "ACCEPT",
-            "READ",
-            "WRITE",
-            "OPEN",
-            "CLOSE",
-            "STOP",
-            "GO",
-            "ENTRY",
-            "EXEC",
-            "EXIT",
-            "SEARCH",
-            "STRING",
-            "UNSTRING",
-            "INSPECT",
-            "ALTER",
-            "CONTINUE",
-            "INITIATE",
-            "TERMINATE",
-            "MERGE",
-            "SORT",
-            "RELEASE",
-            "RETURN",
-        }
-        return token_upper in statement_keywords
+        return token_upper in STATEMENT_KEYWORDS
 
     def _try_consume_period(self, stream: ITokenStream) -> None:
         """Try to consume a period if present."""
