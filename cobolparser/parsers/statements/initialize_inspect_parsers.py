@@ -78,6 +78,17 @@ class InitializeStatementParser(IStatementParser):
                 break
             skip_whitespace(token_stream)
 
+        # Optional WITH FILLER clause
+        token = token_stream.peek()
+        if token and _val(token) == "WITH":
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            nxt = token_stream.peek()
+            if nxt and _val(nxt) == "FILLER":
+                token_stream.consume()
+                stmt.with_filler = True
+                skip_whitespace(token_stream)
+
         # Optional REPLACING clauses
         token = token_stream.peek()
         if token and _val(token) == "REPLACING":

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
@@ -31,9 +32,11 @@ class UnlockStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOUnlockStatement:
         start = token_stream.consume()
-        stmt = IOUnlockStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        loc = start.location if hasattr(start, "location") else SourceLocation(0, 0)
+        factory = get_factory()
+        stmt = factory.create(IOUnlockStatement, loc)
+        if not isinstance(stmt, IOUnlockStatement):
+            stmt = IOUnlockStatement(loc)
         skip_whitespace(token_stream)
 
         # File name

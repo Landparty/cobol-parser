@@ -6,7 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import StringStatement, UnstringStatement
-from ._utils import skip_whitespace
+from ._utils import STATEMENT_KEYWORDS, skip_whitespace, try_parse_nested_statement
 
 
 def _val(token: Any) -> str:
@@ -18,6 +18,32 @@ def _consume_period(token_stream: ITokenStream) -> None:
         t = token_stream.peek()
         if t and t.type == TokenType.PERIOD:
             token_stream.consume()
+
+
+def _parse_overflow_stmts(token_stream: ITokenStream) -> list:
+    """Parse imperative statements in an ON OVERFLOW / NOT ON OVERFLOW clause."""
+    stmts: list = []
+    while not token_stream.is_empty():
+        skip_whitespace(token_stream)
+        token = token_stream.peek()
+        if not token:
+            break
+        val = _val(token)
+        if token.type == TokenType.PERIOD or val in (
+            "END-STRING",
+            "END-UNSTRING",
+            "NOT",
+        ):
+            break
+        if val in STATEMENT_KEYWORDS:
+            nested = try_parse_nested_statement(token_stream)
+            if nested:
+                stmts.append(nested)
+            else:
+                break
+        else:
+            break
+    return stmts
 
 
 class StringStatementParser(IStatementParser):
@@ -92,9 +118,37 @@ class StringStatementParser(IStatementParser):
                     if pv and pv.type != TokenType.PERIOD:
                         token_stream.consume()
                         stmt.set_pointer_variable(pv.value or "")
-            elif val in ("ON", "NOT", "OVERFLOW"):
-                # Skip overflow clauses
+            elif val == "ON":
                 token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "OVERFLOW":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    overflow_stmts = _parse_overflow_stmts(token_stream)
+                    if overflow_stmts:
+                        stmt.set_on_overflow_clause(overflow_stmts)
+            elif val == "NOT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "ON":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "OVERFLOW":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    overflow_stmts = _parse_overflow_stmts(token_stream)
+                    if overflow_stmts:
+                        stmt.set_not_on_overflow_clause(overflow_stmts)
+            elif val == "OVERFLOW":
+                # Standalone OVERFLOW (without ON prefix)
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                overflow_stmts = _parse_overflow_stmts(token_stream)
+                if overflow_stmts:
+                    stmt.set_on_overflow_clause(overflow_stmts)
             elif token.type in (
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
@@ -180,48 +234,7 @@ class UnstringStatementParser(IStatementParser):
             elif val == "INTO":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                # Collect INTO targets
-                while not token_stream.is_empty():
-                    tgt = token_stream.peek()
-                    if not tgt:
-                        break
-                    tval = _val(tgt)
-                    if tgt.type == TokenType.PERIOD or tval in (
-                        "WITH",
-                        "TALLYING",
-                        "ON",
-                        "NOT",
-                        "END-UNSTRING",
-                    ):
-                        break
-                    if tval == "DELIMITER":
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                        # Skip IN keyword
-                        n = token_stream.peek()
-                        if n and _val(n) == "IN":
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                        # Skip delimiter var
-                        n = token_stream.peek()
-                        if n and n.type != TokenType.PERIOD:
-                            token_stream.consume()
-                    elif tval == "COUNT":
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                        n = token_stream.peek()
-                        if n and _val(n) == "IN":
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                        n = token_stream.peek()
-                        if n and n.type != TokenType.PERIOD:
-                            token_stream.consume()
-                    elif tgt.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
-                        token_stream.consume()
-                        stmt.add_into_target(tgt.value or "")
-                    else:
-                        break
-                    skip_whitespace(token_stream)
+                self._parse_into_targets(token_stream, stmt)
             elif val == "WITH":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -233,9 +246,95 @@ class UnstringStatementParser(IStatementParser):
                     if pv and pv.type != TokenType.PERIOD:
                         token_stream.consume()
                         stmt.set_pointer_variable(pv.value or "")
+            elif val == "ON":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "OVERFLOW":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    overflow_stmts = _parse_overflow_stmts(token_stream)
+                    if overflow_stmts:
+                        stmt.set_on_overflow_clause(overflow_stmts)
+            elif val == "NOT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "ON":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "OVERFLOW":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    overflow_stmts = _parse_overflow_stmts(token_stream)
+                    if overflow_stmts:
+                        stmt.set_not_on_overflow_clause(overflow_stmts)
             else:
                 token_stream.consume()
 
             skip_whitespace(token_stream)
 
         return stmt
+
+    @staticmethod
+    def _parse_into_targets(
+        token_stream: ITokenStream, stmt: UnstringStatement
+    ) -> None:
+        """Parse INTO target-1 [DELIMITER IN d1] [COUNT IN c1] ..."""
+        current_target: str | None = None
+        current_delim_var: str | None = None
+        current_count_var: str | None = None
+
+        while not token_stream.is_empty():
+            tgt = token_stream.peek()
+            if not tgt:
+                break
+            tval = _val(tgt)
+            if tgt.type == TokenType.PERIOD or tval in (
+                "WITH",
+                "TALLYING",
+                "ON",
+                "NOT",
+                "END-UNSTRING",
+            ):
+                break
+            if tval == "DELIMITER":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                n = token_stream.peek()
+                if n and _val(n) == "IN":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                n = token_stream.peek()
+                if n and n.type != TokenType.PERIOD:
+                    token_stream.consume()
+                    current_delim_var = n.value or ""
+            elif tval == "COUNT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                n = token_stream.peek()
+                if n and _val(n) == "IN":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                n = token_stream.peek()
+                if n and n.type != TokenType.PERIOD:
+                    token_stream.consume()
+                    current_count_var = n.value or ""
+            elif tgt.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
+                # Flush previous target if any
+                if current_target is not None:
+                    stmt.add_into_target(
+                        current_target, current_delim_var, current_count_var
+                    )
+                    current_delim_var = None
+                    current_count_var = None
+                token_stream.consume()
+                current_target = tgt.value or ""
+            else:
+                break
+            skip_whitespace(token_stream)
+
+        # Flush last target
+        if current_target is not None:
+            stmt.add_into_target(current_target, current_delim_var, current_count_var)

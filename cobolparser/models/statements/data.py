@@ -243,6 +243,8 @@ class SetStatement(CobolStatement):
 
     def set_value(self, value: str) -> None:
         self.value = value
+        if value not in self.operands:
+            self.operands.append(value)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()

@@ -20,7 +20,12 @@ from ...models.statements import (
     ReturnStatement,
     UseStatement,
 )
-from ._utils import CONTROL_FLOW_BOUNDARIES, STATEMENT_KEYWORDS, skip_whitespace
+from ._utils import (
+    CONTROL_FLOW_BOUNDARIES,
+    STATEMENT_KEYWORDS,
+    skip_whitespace,
+    try_parse_nested_statement,
+)
 
 
 def _token_value_upper(token: Any) -> str:
@@ -387,7 +392,9 @@ class ReturnStatementParser(IStatementParser):
                 token_stream.consume()
                 stmt.set_into_target(tgt.value or "")
 
-        # Skip to period (AT END clause handling is basic)
+        skip_whitespace(token_stream)
+
+        # Parse AT END / NOT AT END clauses
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -396,11 +403,66 @@ class ReturnStatementParser(IStatementParser):
                 token_stream.consume()
                 break
             val = _token_value_upper(token)
-            if val in CONTROL_FLOW_BOUNDARIES or val in STATEMENT_KEYWORDS:
+            if val in CONTROL_FLOW_BOUNDARIES:
                 break
-            token_stream.consume()
+            if val == "AT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _token_value_upper(nxt) == "END":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    at_end_stmts = self._parse_clause_stmts(token_stream)
+                    if at_end_stmts:
+                        stmt.set_at_end_clause(at_end_stmts)
+            elif val == "NOT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _token_value_upper(nxt) == "AT":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _token_value_upper(nxt) == "END":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    not_at_end_stmts = self._parse_clause_stmts(token_stream)
+                    if not_at_end_stmts:
+                        stmt.set_not_at_end_clause(not_at_end_stmts)
+            elif val in STATEMENT_KEYWORDS:
+                break
+            else:
+                token_stream.consume()
+            skip_whitespace(token_stream)
 
         return stmt
+
+    @staticmethod
+    def _parse_clause_stmts(token_stream: ITokenStream) -> list:
+        """Parse imperative statements in an AT END / NOT AT END clause."""
+        stmts: list = []
+        while not token_stream.is_empty():
+            skip_whitespace(token_stream)
+            token = token_stream.peek()
+            if not token:
+                break
+            val = _token_value_upper(token)
+            if (
+                token.type == TokenType.PERIOD
+                or val
+                in (
+                    "NOT",
+                    "END-RETURN",
+                )
+                or val in CONTROL_FLOW_BOUNDARIES
+            ):
+                break
+            nested = try_parse_nested_statement(token_stream)
+            if nested:
+                stmts.append(nested)
+            else:
+                break
+        return stmts
 
 
 class UseStatementParser(IStatementParser):

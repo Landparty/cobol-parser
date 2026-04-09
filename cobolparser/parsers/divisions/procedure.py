@@ -55,7 +55,7 @@ from cobolparser.parsers.statements import (
     UnstringStatementParser,
     UseStatementParser,
 )
-from cobolparser.parsers.statements._utils import skip_whitespace
+from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS, skip_whitespace
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
 from cobolparser.parsers.statements.write_parser import WriteStatementParser
 
@@ -591,50 +591,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         Returns:
             True if word is a statement keyword
         """
-        keywords = {
-            "ACCEPT",
-            "ADD",
-            "ALTER",
-            "CALL",
-            "CANCEL",
-            "CLOSE",
-            "COMPUTE",
-            "CONTINUE",
-            "DELETE",
-            "DISPLAY",
-            "DIVIDE",
-            "ENTRY",
-            "EVALUATE",
-            "EXECUTE",
-            "EXIT",
-            "GENERATE",
-            "GO",
-            "GOBACK",
-            "IF",
-            "INITIALIZE",
-            "INSPECT",
-            "MERGE",
-            "MOVE",
-            "MULTIPLY",
-            "OPEN",
-            "PERFORM",
-            "READ",
-            "RELEASE",
-            "RETURN",
-            "REWRITE",
-            "SEARCH",
-            "SET",
-            "SORT",
-            "START",
-            "STOP",
-            "STRING",
-            "SUBTRACT",
-            "UNLOCK",
-            "UNSTRING",
-            "USE",
-            "WRITE",
-        }
-        return word.upper() in keywords
+        return word.upper() in STATEMENT_KEYWORDS
 
     def _create_ast_node(
         self,

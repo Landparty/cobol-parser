@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
@@ -33,9 +34,11 @@ class AcceptStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOAcceptStatement:
         start = token_stream.consume()
-        stmt = IOAcceptStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        loc = start.location if hasattr(start, "location") else SourceLocation(0, 0)
+        factory = get_factory()
+        stmt = factory.create(IOAcceptStatement, loc)
+        if not isinstance(stmt, IOAcceptStatement):
+            stmt = IOAcceptStatement(loc)
         skip_whitespace(token_stream)
 
         # Target identifier
