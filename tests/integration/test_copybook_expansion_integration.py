@@ -408,7 +408,7 @@ class TestNestedProcedureDivisionCopybooks:
         ]
 
         # --- Verify statements from the main program ---
-        # At least 4 DISPLAYs: main before, outer start, inner, outer end, main after
+        # At least 5 DISPLAYs: main before, outer start, inner, outer end, main after
         display_count = statement_types.count("DISPLAY")
         assert display_count >= 5, (
             f"Expected at least 5 DISPLAY statements "
@@ -434,6 +434,16 @@ class TestNestedProcedureDivisionCopybooks:
         assert any(
             s and "INNER-DONE" in s for s in move_sources
         ), f"MOVE from inner copybook not found. Sources: {move_sources}"
+
+        # Check MOVE targets include WS-STATUS
+        move_targets = [
+            target
+            for stmt in move_stmts
+            for target in getattr(stmt, "targets", [])
+        ]
+        assert any(
+            "WS-STATUS" in t for t in move_targets
+        ), f"Expected WS-STATUS in MOVE targets. Targets: {move_targets}"
 
         # --- Verify ADD from inner copybook ---
         add_count = statement_types.count("ADD")
