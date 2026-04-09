@@ -25,6 +25,7 @@ Example:
     parser = registry.find_parser(token_stream)  # Finds matching parser
 """
 
+from .accept_parser import AcceptStatementParser
 from .arithmetic_parsers import (
     AddStatementParser,
     ComputeStatementParser,
@@ -44,12 +45,35 @@ from .ibm_exec_statements import (
     ExecSqlStatementParser,
 )
 from .if_parser import IfStatementParser
+from .initialize_inspect_parsers import (
+    InitializeStatementParser,
+    InspectStatementParser,
+)
 from .move_parser import MoveStatementParser
 from .open_parser import OpenStatementParser
 from .perform_parser import PerformStatementParser
 from .read_parser import ReadStatementParser
 from .rewrite_parser import RewriteStatementParser
+from .search_parser import SearchStatementParser
+from .set_parser import SetStatementParser
+from .simple_statement_parsers import (
+    AlterStatementParser,
+    CancelStatementParser,
+    ContinueStatementParser,
+    ExitStatementParser,
+    GenerateStatementParser,
+    GobackStatementParser,
+    ReleaseStatementParser,
+    ReturnStatementParser,
+    UseStatementParser,
+)
+from .sort_merge_parsers import MergeStatementParser, SortStatementParser
 from .start_parser import StartStatementParser
+from .string_unstring_parsers import (
+    StringStatementParser,
+    UnstringStatementParser,
+)
+from .unlock_parser import UnlockStatementParser
 
 __all__ = [
     "DisplayStatementParser",
@@ -73,4 +97,24 @@ __all__ = [
     "RewriteStatementParser",
     "DeleteStatementParser",
     "StartStatementParser",
+    # New parsers
+    "AcceptStatementParser",
+    "ContinueStatementParser",
+    "ExitStatementParser",
+    "GobackStatementParser",
+    "CancelStatementParser",
+    "AlterStatementParser",
+    "GenerateStatementParser",
+    "ReleaseStatementParser",
+    "ReturnStatementParser",
+    "UseStatementParser",
+    "SearchStatementParser",
+    "StringStatementParser",
+    "UnstringStatementParser",
+    "InitializeStatementParser",
+    "InspectStatementParser",
+    "SetStatementParser",
+    "SortStatementParser",
+    "MergeStatementParser",
+    "UnlockStatementParser",
 ]

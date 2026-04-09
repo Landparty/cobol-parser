@@ -14,10 +14,14 @@ from cobolparser.core.registry import StatementParserRegistry
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
 from cobolparser.parsers.statements import (
+    AcceptStatementParser,
     AddStatementParser,
+    AlterStatementParser,
     CallStatementParser,
+    CancelStatementParser,
     CloseStatementParser,
     ComputeStatementParser,
+    ContinueStatementParser,
     DeleteStatementParser,
     DisplayStatementParser,
     DivideStatementParser,
@@ -25,18 +29,33 @@ from cobolparser.parsers.statements import (
     EvaluateStatementParser,
     ExecCicsStatementParser,
     ExecSqlStatementParser,
+    ExitStatementParser,
+    GenerateStatementParser,
+    GobackStatementParser,
     GoStatementParser,
     IfStatementParser,
+    InitializeStatementParser,
+    InspectStatementParser,
+    MergeStatementParser,
     MoveStatementParser,
     MultiplyStatementParser,
     OpenStatementParser,
     PerformStatementParser,
     ReadStatementParser,
+    ReleaseStatementParser,
+    ReturnStatementParser,
     RewriteStatementParser,
+    SearchStatementParser,
+    SetStatementParser,
+    SortStatementParser,
     StartStatementParser,
+    StringStatementParser,
     SubtractStatementParser,
+    UnlockStatementParser,
+    UnstringStatementParser,
+    UseStatementParser,
 )
-from cobolparser.parsers.statements._utils import skip_whitespace
+from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS, skip_whitespace
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
 from cobolparser.parsers.statements.write_parser import WriteStatementParser
 
@@ -103,8 +122,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(StopStatementParser())
         registry.register(EntryStatementParser())
         registry.register(GoStatementParser())
+        registry.register(ExitStatementParser())
+        registry.register(ContinueStatementParser())
+        registry.register(GobackStatementParser())
 
         # IO statements
+        registry.register(AcceptStatementParser())
         registry.register(ReadStatementParser())
         registry.register(OpenStatementParser())
         registry.register(CloseStatementParser())
@@ -112,6 +135,23 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(DeleteStatementParser())
         registry.register(StartStatementParser())
         registry.register(WriteStatementParser())
+        registry.register(UnlockStatementParser())
+
+        # Data manipulation
+        registry.register(InitializeStatementParser())
+        registry.register(SetStatementParser())
+        registry.register(StringStatementParser())
+        registry.register(UnstringStatementParser())
+        registry.register(InspectStatementParser())
+
+        # Search
+        registry.register(SearchStatementParser())
+
+        # Sort/Merge family
+        registry.register(SortStatementParser())
+        registry.register(MergeStatementParser())
+        registry.register(ReleaseStatementParser())
+        registry.register(ReturnStatementParser())
 
         # Arithmetic statements
         registry.register(ComputeStatementParser())
@@ -119,6 +159,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(SubtractStatementParser())
         registry.register(MultiplyStatementParser())
         registry.register(DivideStatementParser())
+
+        # Minimal/rare verbs
+        registry.register(AlterStatementParser())
+        registry.register(CancelStatementParser())
+        registry.register(GenerateStatementParser())
+        registry.register(UseStatementParser())
 
         return registry
 
@@ -574,37 +620,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         Returns:
             True if word is a statement keyword
         """
-        keywords = {
-            "DISPLAY",
-            "MOVE",
-            "IF",
-            "PERFORM",
-            "EVALUATE",
-            "CALL",
-            "ADD",
-            "SUBTRACT",
-            "MULTIPLY",
-            "DIVIDE",
-            "COMPUTE",
-            "ACCEPT",
-            "STOP",
-            "EXIT",
-            "GO",
-            "GOBACK",
-            "RETURN",
-            "OPEN",
-            "CLOSE",
-            "READ",
-            "WRITE",
-            "DELETE",
-            "SEARCH",
-            "STRING",
-            "UNSTRING",
-            "INSPECT",
-            "EXECUTE",
-            "ENTRY",
-        }
-        return word.upper() in keywords
+        return word.upper() in STATEMENT_KEYWORDS
 
     def _create_ast_node(
         self,

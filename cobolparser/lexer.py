@@ -207,6 +207,7 @@ class TokenType(Enum):
     TRANSFORM = auto()
     UNLOCK = auto()
     UNSTRING = auto()
+    USE = auto()
 
     # Keywords - I/O
     SELECT = auto()
@@ -531,6 +532,7 @@ class CobolLexer:
         "TRANSFORM": TokenType.TRANSFORM,
         "UNLOCK": TokenType.UNLOCK,
         "UNSTRING": TokenType.UNSTRING,
+        "USE": TokenType.USE,
         # I/O
         "SELECT": TokenType.SELECT,
         "READ": TokenType.READ,

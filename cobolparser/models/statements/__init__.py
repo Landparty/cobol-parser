@@ -48,7 +48,10 @@ from .control import (
 )
 from .data import (
     DisplayStatement,
+    InitializeStatement,
+    InspectStatement,
     MoveStatement,
+    SetStatement,
     StringStatement,
     UnstringStatement,
 )
@@ -64,8 +67,19 @@ from .io import (
     IOWriteStatement,
 )
 from .misc import (
+    AlterStatement,
+    CancelStatement,
+    ContinueStatement,
     CopyStatement,
+    ExitStatement,
+    GenerateStatement,
+    GobackStatement,
+    MergeStatement,
+    ReleaseStatement,
+    ReturnStatement,
     SelectStatement,
+    SortStatement,
+    UseStatement,
 )
 
 # Module exports — preserved from original statements.py
@@ -91,6 +105,21 @@ __all__ = [
     "IODeleteStatement",
     "IOStartStatement",
     "IOUnlockStatement",
+    # New statement types
+    "ContinueStatement",
+    "ExitStatement",
+    "GobackStatement",
+    "CancelStatement",
+    "AlterStatement",
+    "GenerateStatement",
+    "ReleaseStatement",
+    "ReturnStatement",
+    "UseStatement",
+    "InitializeStatement",
+    "SetStatement",
+    "InspectStatement",
+    "SortStatement",
+    "MergeStatement",
     # Other exports
     "CobolExpression",
     "ArithmeticExpression",

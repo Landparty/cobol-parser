@@ -1,0 +1,152 @@
+"""SEARCH statement parser implementing IStatementParser interface."""
+
+from typing import Any
+
+from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
+from ...models.ast_base import SourceLocation
+from ...models.statements import SearchStatement
+from ._utils import STATEMENT_KEYWORDS, skip_whitespace, try_parse_nested_statement
+
+
+def _val(token: Any) -> str:
+    return token.value.upper() if token and token.value else ""
+
+
+class SearchStatementParser(IStatementParser):
+    """Parser for SEARCH statements.
+
+    Syntax:
+        SEARCH table-name [VARYING identifier]
+            [AT END imperative-statement]
+            WHEN condition imperative-statement
+            ...
+        END-SEARCH
+
+        SEARCH ALL table-name
+            [AT END imperative-statement]
+            WHEN condition imperative-statement
+        END-SEARCH
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        token = token_stream.peek()
+        if not token:
+            return False
+        if token.type == TokenType.SEARCH:
+            return True
+        return token.type == TokenType.IDENTIFIER and _val(token) == "SEARCH"
+
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> SearchStatement:
+        start = token_stream.consume()
+        stmt = SearchStatement(
+            start.location if hasattr(start, "location") else SourceLocation(0, 0)
+        )
+        skip_whitespace(token_stream)
+
+        # Check for ALL
+        token = token_stream.peek()
+        if token and _val(token) == "ALL":
+            token_stream.consume()
+            stmt.set_metadata("is_search_all", True)
+            skip_whitespace(token_stream)
+
+        # Table name
+        token = token_stream.peek()
+        if token and token.type != TokenType.PERIOD:
+            token_stream.consume()
+            stmt.set_table_name(token.value or "")
+        skip_whitespace(token_stream)
+
+        # Optional VARYING
+        token = token_stream.peek()
+        if token and _val(token) == "VARYING":
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            var_token = token_stream.peek()
+            if var_token and var_token.type != TokenType.PERIOD:
+                token_stream.consume()
+                stmt.set_varying_variable(var_token.value or "")
+            skip_whitespace(token_stream)
+
+        # Parse AT END and WHEN clauses
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+            if token.type == TokenType.PERIOD:
+                token_stream.consume()
+                break
+            val = _val(token)
+            if val == "END-SEARCH":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                p = token_stream.peek()
+                if p and p.type == TokenType.PERIOD:
+                    token_stream.consume()
+                break
+            if val == "AT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "END":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    # Parse AT END nested statements
+                    at_end_stmts = self._parse_nested_statements(token_stream)
+                    if at_end_stmts:
+                        stmt.set_at_end_clause(at_end_stmts)
+            elif val == "WHEN":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                # Collect condition text until statement keyword
+                cond_parts: list[str] = []
+                while not token_stream.is_empty():
+                    t = token_stream.peek()
+                    if not t:
+                        break
+                    tv = _val(t)
+                    if t.type == TokenType.PERIOD or tv in (
+                        "WHEN",
+                        "END-SEARCH",
+                        "AT",
+                    ):
+                        break
+                    if tv in STATEMENT_KEYWORDS:
+                        break
+                    token_stream.consume()
+                    cond_parts.append(t.value or "")
+                    skip_whitespace(token_stream)
+                # Parse nested statements after condition
+                when_stmts = self._parse_nested_statements(token_stream)
+                stmt.add_when_clause(" ".join(cond_parts), when_stmts)
+            else:
+                token_stream.consume()
+            skip_whitespace(token_stream)
+
+        return stmt
+
+    @staticmethod
+    def _parse_nested_statements(token_stream: ITokenStream) -> list:
+        """Parse nested imperative statements until a WHEN/END-SEARCH/period boundary."""
+        stmts: list = []
+        while not token_stream.is_empty():
+            skip_whitespace(token_stream)
+            token = token_stream.peek()
+            if not token:
+                break
+            val = _val(token)
+            if token.type == TokenType.PERIOD or val in (
+                "WHEN",
+                "END-SEARCH",
+                "AT",
+            ):
+                break
+            nested = try_parse_nested_statement(token_stream)
+            if nested:
+                stmts.append(nested)
+            else:
+                break
+        return stmts

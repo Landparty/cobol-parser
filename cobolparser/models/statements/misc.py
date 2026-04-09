@@ -1,5 +1,6 @@
 """
-Miscellaneous statement AST nodes (SELECT, COPY).
+Miscellaneous statement AST nodes (SELECT, COPY, CONTINUE, EXIT, GOBACK,
+CANCEL, ALTER, GENERATE, RELEASE, RETURN, USE, SORT, MERGE).
 """
 
 from typing import Any
@@ -226,6 +227,298 @@ class CopyStatement(CobolStatement):
                 "library_name": self.library_name,
                 "suppressions": self.suppressions,
                 "replacements": self.replacements,
+            }
+        )
+        return result
+
+
+class ContinueStatement(CobolStatement):
+    """AST node for CONTINUE statements (no-op)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("CONTINUE", location)
+
+    def to_dict(self) -> dict[str, Any]:
+        return super().to_dict()
+
+
+class ExitStatement(CobolStatement):
+    """AST node for EXIT statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("EXIT", location)
+        self.exit_type: str | None = None  # PROGRAM, SECTION, PARAGRAPH, PERFORM
+
+    def set_exit_type(self, exit_type: str) -> None:
+        self.exit_type = exit_type.upper()
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["exit_type"] = self.exit_type
+        return result
+
+
+class GobackStatement(CobolStatement):
+    """AST node for GOBACK statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("GOBACK", location)
+        self.returning_value: str | None = None
+
+    def set_returning_value(self, value: str) -> None:
+        self.returning_value = value
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["returning_value"] = self.returning_value
+        return result
+
+
+class CancelStatement(CobolStatement):
+    """AST node for CANCEL statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("CANCEL", location)
+        self.program_names: list[str] = []
+
+    def add_program_name(self, name: str) -> None:
+        self.program_names.append(name)
+        if name not in self.operands:
+            self.operands.append(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["program_names"] = self.program_names
+        return result
+
+
+class AlterStatement(CobolStatement):
+    """AST node for ALTER statements (obsolete)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("ALTER", location)
+        self.alterations: list[dict[str, str]] = []
+
+    def add_alteration(self, from_paragraph: str, to_paragraph: str) -> None:
+        self.alterations.append(
+            {"from_paragraph": from_paragraph, "to_paragraph": to_paragraph}
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["alterations"] = self.alterations
+        return result
+
+
+class GenerateStatement(CobolStatement):
+    """AST node for GENERATE statements (Report Writer)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("GENERATE", location)
+        self.report_name: str | None = None
+
+    def set_report_name(self, name: str) -> None:
+        self.report_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["report_name"] = self.report_name
+        return result
+
+
+class ReleaseStatement(CobolStatement):
+    """AST node for RELEASE statements (sort input)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("RELEASE", location)
+        self.record_name: str | None = None
+        self.from_source: str | None = None
+
+    def set_record_name(self, name: str) -> None:
+        self.record_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+
+    def set_from_source(self, source: str) -> None:
+        self.from_source = source
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {"record_name": self.record_name, "from_source": self.from_source}
+        )
+        return result
+
+
+class ReturnStatement(CobolStatement):
+    """AST node for RETURN statements (sort output)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("RETURN", location)
+        self.file_name: str | None = None
+        self.into_target: str | None = None
+        self.at_end_clause: list[CobolStatement] | None = None
+        self.not_at_end_clause: list[CobolStatement] | None = None
+
+    def set_file_name(self, name: str) -> None:
+        self.file_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+
+    def set_into_target(self, target: str) -> None:
+        self.into_target = target
+
+    def set_at_end_clause(self, statements: list["CobolStatement"]) -> None:
+        self.at_end_clause = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def set_not_at_end_clause(self, statements: list["CobolStatement"]) -> None:
+        self.not_at_end_clause = statements
+        for stmt in statements:
+            self.add_child(stmt)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update({"file_name": self.file_name, "into_target": self.into_target})
+        if self.at_end_clause:
+            result["at_end_clause"] = [s.to_dict() for s in self.at_end_clause]
+        if self.not_at_end_clause:
+            result["not_at_end_clause"] = [s.to_dict() for s in self.not_at_end_clause]
+        return result
+
+
+class UseStatement(CobolStatement):
+    """AST node for USE statements (declaratives)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("USE", location)
+        self.use_type: str | None = None  # EXCEPTION, ERROR, DEBUGGING, REPORTING
+        self.is_global: bool = False
+        self.file_names: list[str] = []
+
+    def set_use_type(self, use_type: str) -> None:
+        self.use_type = use_type.upper()
+
+    def set_global(self, is_global: bool = True) -> None:
+        self.is_global = is_global
+
+    def add_file_name(self, name: str) -> None:
+        self.file_names.append(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "use_type": self.use_type,
+                "is_global": self.is_global,
+                "file_names": self.file_names,
+            }
+        )
+        return result
+
+
+class SortStatement(CobolStatement):
+    """AST node for SORT statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("SORT", location)
+        self.file_name: str | None = None
+        self.keys: list[dict[str, str]] = []  # [{"field": str, "order": str}]
+        self.duplicates_in_order: bool = False
+        self.collating_sequence: str | None = None
+        self.input_procedure: str | None = None
+        self.input_procedure_thru: str | None = None
+        self.output_procedure: str | None = None
+        self.output_procedure_thru: str | None = None
+        self.using_files: list[str] = []
+        self.giving_files: list[str] = []
+
+    def set_file_name(self, name: str) -> None:
+        self.file_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+
+    def add_key(self, field: str, order: str = "ASCENDING") -> None:
+        self.keys.append({"field": field, "order": order.upper()})
+
+    def set_input_procedure(self, name: str, thru: str | None = None) -> None:
+        self.input_procedure = name
+        self.input_procedure_thru = thru
+
+    def set_output_procedure(self, name: str, thru: str | None = None) -> None:
+        self.output_procedure = name
+        self.output_procedure_thru = thru
+
+    def add_using_file(self, name: str) -> None:
+        self.using_files.append(name)
+
+    def add_giving_file(self, name: str) -> None:
+        self.giving_files.append(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "file_name": self.file_name,
+                "keys": self.keys,
+                "duplicates_in_order": self.duplicates_in_order,
+                "collating_sequence": self.collating_sequence,
+                "input_procedure": self.input_procedure,
+                "input_procedure_thru": self.input_procedure_thru,
+                "output_procedure": self.output_procedure,
+                "output_procedure_thru": self.output_procedure_thru,
+                "using_files": self.using_files,
+                "giving_files": self.giving_files,
+            }
+        )
+        return result
+
+
+class MergeStatement(CobolStatement):
+    """AST node for MERGE statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("MERGE", location)
+        self.file_name: str | None = None
+        self.keys: list[dict[str, str]] = []
+        self.collating_sequence: str | None = None
+        self.output_procedure: str | None = None
+        self.output_procedure_thru: str | None = None
+        self.using_files: list[str] = []
+        self.giving_files: list[str] = []
+
+    def set_file_name(self, name: str) -> None:
+        self.file_name = name
+        if name not in self.operands:
+            self.operands.append(name)
+
+    def add_key(self, field: str, order: str = "ASCENDING") -> None:
+        self.keys.append({"field": field, "order": order.upper()})
+
+    def set_output_procedure(self, name: str, thru: str | None = None) -> None:
+        self.output_procedure = name
+        self.output_procedure_thru = thru
+
+    def add_using_file(self, name: str) -> None:
+        self.using_files.append(name)
+
+    def add_giving_file(self, name: str) -> None:
+        self.giving_files.append(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "file_name": self.file_name,
+                "keys": self.keys,
+                "collating_sequence": self.collating_sequence,
+                "output_procedure": self.output_procedure,
+                "output_procedure_thru": self.output_procedure_thru,
+                "using_files": self.using_files,
+                "giving_files": self.giving_files,
             }
         )
         return result

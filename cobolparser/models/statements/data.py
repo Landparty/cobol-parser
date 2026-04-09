@@ -1,5 +1,6 @@
 """
-Data manipulation statement AST nodes (MOVE, DISPLAY, STRING, UNSTRING).
+Data manipulation statement AST nodes (MOVE, DISPLAY, STRING, UNSTRING,
+INITIALIZE, SET, INSPECT).
 """
 
 from typing import Any
@@ -189,4 +190,147 @@ class UnstringStatement(CobolStatement):
             result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
         if self.not_on_overflow:
             result["not_on_overflow"] = [s.to_dict() for s in self.not_on_overflow]
+        return result
+
+
+class InitializeStatement(CobolStatement):
+    """AST node for INITIALIZE statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("INITIALIZE", location)
+        self.targets: list[str] = []
+        self.replacing_clauses: list[dict[str, str]] = []
+        self.with_filler: bool = False
+
+    def add_target(self, target: str) -> None:
+        self.targets.append(target)
+        if target not in self.operands:
+            self.operands.append(target)
+
+    def add_replacing_clause(self, category: str, by_value: str) -> None:
+        self.replacing_clauses.append(
+            {"category": category.upper(), "by_value": by_value}
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "targets": self.targets,
+                "replacing_clauses": self.replacing_clauses,
+                "with_filler": self.with_filler,
+            }
+        )
+        return result
+
+
+class SetStatement(CobolStatement):
+    """AST node for SET statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("SET", location)
+        self.set_type: str | None = None  # TO, UP_BY, DOWN_BY, TRUE, FALSE
+        self.targets: list[str] = []
+        self.value: str | None = None
+
+    def set_set_type(self, set_type: str) -> None:
+        self.set_type = set_type.upper()
+
+    def add_target(self, target: str) -> None:
+        self.targets.append(target)
+        if target not in self.operands:
+            self.operands.append(target)
+
+    def set_value(self, value: str) -> None:
+        self.value = value
+        if value not in self.operands:
+            self.operands.append(value)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "set_type": self.set_type,
+                "targets": self.targets,
+                "value": self.value,
+            }
+        )
+        return result
+
+
+class InspectStatement(CobolStatement):
+    """AST node for INSPECT statements."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("INSPECT", location)
+        self.target: str | None = None
+        self.inspect_type: str | None = None  # TALLYING, REPLACING, CONVERTING
+        self.tallying_clauses: list[dict[str, Any]] = []
+        self.replacing_clauses: list[dict[str, Any]] = []
+        self.converting_from: str | None = None
+        self.converting_to: str | None = None
+
+    def set_target(self, target: str) -> None:
+        self.target = target
+        if target not in self.operands:
+            self.operands.append(target)
+
+    def set_inspect_type(self, inspect_type: str) -> None:
+        self.inspect_type = inspect_type.upper()
+
+    def add_tallying_clause(
+        self,
+        counter: str,
+        for_type: str,
+        value: str | None = None,
+        before: str | None = None,
+        after: str | None = None,
+    ) -> None:
+        self.tallying_clauses.append(
+            {
+                "counter": counter,
+                "for_type": for_type.upper(),
+                "value": value,
+                "before": before,
+                "after": after,
+            }
+        )
+
+    def add_replacing_clause(
+        self,
+        replace_type: str,
+        from_value: str,
+        to_value: str,
+        before: str | None = None,
+        after: str | None = None,
+    ) -> None:
+        self.replacing_clauses.append(
+            {
+                "replace_type": replace_type.upper(),
+                "from_value": from_value,
+                "to_value": to_value,
+                "before": before,
+                "after": after,
+            }
+        )
+
+    def set_converting(self, from_value: str, to_value: str) -> None:
+        self.converting_from = from_value
+        self.converting_to = to_value
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "target": self.target,
+                "inspect_type": self.inspect_type,
+            }
+        )
+        if self.tallying_clauses:
+            result["tallying_clauses"] = self.tallying_clauses
+        if self.replacing_clauses:
+            result["replacing_clauses"] = self.replacing_clauses
+        if self.converting_from:
+            result["converting_from"] = self.converting_from
+            result["converting_to"] = self.converting_to
         return result
