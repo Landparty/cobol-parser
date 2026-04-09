@@ -98,21 +98,33 @@ class IOLogReport:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
+        direction_counts: dict[str, int] = {
+            "INPUT": 0,
+            "OUTPUT": 0,
+            "BIDIRECTIONAL": 0,
+        }
+        category_counts: dict[str, int] = {
+            "CALL": 0,
+            "ENTRY": 0,
+            "SQL": 0,
+            "FILE-IO": 0,
+            "CONSOLE-IO": 0,
+        }
+        for op in self.operations:
+            if op.direction in direction_counts:
+                direction_counts[op.direction] += 1
+            if op.category in category_counts:
+                category_counts[op.category] += 1
+
         return {
             "program_name": self.program_name,
             "operations": [op.to_dict() for op in self.operations],
             "summary": {
                 "total": len(self.operations),
-                "inputs": len(self.inputs),
-                "outputs": len(self.outputs),
-                "bidirectional": len(self.bidirectional),
-                "by_category": {
-                    "CALL": len([o for o in self.operations if o.category == "CALL"]),
-                    "ENTRY": len([o for o in self.operations if o.category == "ENTRY"]),
-                    "SQL": len(self.sql_operations),
-                    "FILE-IO": len(self.file_operations),
-                    "CONSOLE-IO": len(self.console_operations),
-                },
+                "inputs": direction_counts["INPUT"],
+                "outputs": direction_counts["OUTPUT"],
+                "bidirectional": direction_counts["BIDIRECTIONAL"],
+                "by_category": category_counts,
             },
         }
 
@@ -208,7 +220,9 @@ class IOLogger:
                 details["possible_values"] = stmt.possible_values
 
             # Each USING parameter becomes an operation
+            has_params = False
             for param in stmt.using_parameters:
+                has_params = True
                 direction = _PASSING_MODE_DIRECTION.get(
                     param.passing_mode, "BIDIRECTIONAL"
                 )
@@ -226,6 +240,7 @@ class IOLogger:
 
             # RETURNING parameter
             if stmt.returning_parameter:
+                has_params = True
                 self._operations.append(
                     IOOperation(
                         category="CALL",
@@ -240,6 +255,7 @@ class IOLogger:
 
             # GIVING parameter
             if stmt.giving_parameter:
+                has_params = True
                 self._operations.append(
                     IOOperation(
                         category="CALL",
@@ -252,6 +268,20 @@ class IOLogger:
                     )
                 )
 
+            # Record parameterless CALLs so they still appear in the report
+            if not has_params:
+                self._operations.append(
+                    IOOperation(
+                        category="CALL",
+                        operation=op_label,
+                        direction="BIDIRECTIONAL",
+                        variables=[],
+                        target=program,
+                        line=line,
+                        details=details,
+                    )
+                )
+
     def _collect_entry_operations(self, statements: list) -> None:
         """Extract I/O from ENTRY statements."""
         for stmt in statements:
@@ -260,6 +290,20 @@ class IOLogger:
 
             line = stmt.location.line if stmt.location else None
             entry_name = stmt.entry_name or "UNKNOWN"
+
+            if not stmt.using_parameters:
+                self._operations.append(
+                    IOOperation(
+                        category="ENTRY",
+                        operation=f"ENTRY {entry_name}",
+                        direction="BIDIRECTIONAL",
+                        variables=[],
+                        target=entry_name,
+                        line=line,
+                        details={},
+                    )
+                )
+                continue
 
             for param in stmt.using_parameters:
                 self._operations.append(

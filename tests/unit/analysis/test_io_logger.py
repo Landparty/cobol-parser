@@ -241,9 +241,47 @@ class TestIOLoggerCallStatements:
         assert report.calls[0].target == "MY-SUBPROG"
         assert "CALL MY-SUBPROG" in report.calls[0].operation
 
+    def test_call_no_parameters(self):
+        """A CALL with no USING or RETURNING still appears in the report."""
+        result = parse_cobol("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTCALL.
+       PROCEDURE DIVISION.
+           CALL 'CLEANUP'.
+           STOP RUN.
+        """)
+        assert result.ast is not None
+        logger = IOLogger()
+        report = logger.analyze(result.ast)
+
+        call_ops = [o for o in report.calls if o.category == "CALL"]
+        assert len(call_ops) >= 1
+        assert call_ops[0].target == "CLEANUP"
+        assert call_ops[0].direction == "BIDIRECTIONAL"
+        assert call_ops[0].variables == []
+
 
 class TestIOLoggerEntryStatements:
     """Tests for ENTRY statement I/O extraction."""
+
+    def test_entry_no_parameters(self):
+        """An ENTRY with no USING still appears in the report."""
+        result = parse_cobol("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTENTRY.
+       PROCEDURE DIVISION.
+           ENTRY 'ALTENTRY'.
+           STOP RUN.
+        """)
+        assert result.ast is not None
+        logger = IOLogger()
+        report = logger.analyze(result.ast)
+
+        entry_ops = [o for o in report.calls if o.category == "ENTRY"]
+        assert len(entry_ops) >= 1
+        assert entry_ops[0].target == "ALTENTRY"
+        assert entry_ops[0].direction == "BIDIRECTIONAL"
+        assert entry_ops[0].variables == []
 
     def test_entry_parameters_bidirectional(self):
         """ENTRY parameters are BIDIRECTIONAL (linkage section)."""
