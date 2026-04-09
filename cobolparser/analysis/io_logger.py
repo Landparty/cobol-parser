@@ -177,20 +177,23 @@ class IOLogger:
         """
         self._operations = []
 
-        self._collect_call_operations(ast)
-        self._collect_entry_operations(ast)
-        self._collect_sql_operations(ast)
-        self._collect_file_io_operations(ast)
-        self._collect_console_io_operations(ast)
+        # Collect all statements once to avoid repeated AST traversal
+        all_statements = ast.get_all_statements()
+
+        self._collect_call_operations(all_statements)
+        self._collect_entry_operations(all_statements)
+        self._collect_sql_operations(all_statements)
+        self._collect_file_io_operations(all_statements)
+        self._collect_console_io_operations(all_statements)
 
         return IOLogReport(
             program_name=ast.program_name,
             operations=list(self._operations),
         )
 
-    def _collect_call_operations(self, ast: CobolProgram) -> None:
+    def _collect_call_operations(self, statements: list) -> None:
         """Extract I/O from CALL statements."""
-        for stmt in ast.get_all_statements():
+        for stmt in statements:
             if not isinstance(stmt, CallStatement):
                 continue
 
@@ -249,9 +252,9 @@ class IOLogger:
                     )
                 )
 
-    def _collect_entry_operations(self, ast: CobolProgram) -> None:
+    def _collect_entry_operations(self, statements: list) -> None:
         """Extract I/O from ENTRY statements."""
-        for stmt in ast.get_all_statements():
+        for stmt in statements:
             if not isinstance(stmt, EntryStatement):
                 continue
 
@@ -271,9 +274,9 @@ class IOLogger:
                     )
                 )
 
-    def _collect_sql_operations(self, ast: CobolProgram) -> None:
+    def _collect_sql_operations(self, statements: list) -> None:
         """Extract I/O from EXEC SQL statements."""
-        for stmt in ast.get_all_statements():
+        for stmt in statements:
             if not isinstance(stmt, ExecSQLStatement):
                 continue
 
@@ -348,9 +351,9 @@ class IOLogger:
                     )
                 )
 
-    def _collect_file_io_operations(self, ast: CobolProgram) -> None:
+    def _collect_file_io_operations(self, statements: list) -> None:
         """Extract I/O from file operations."""
-        for stmt in ast.get_all_statements():
+        for stmt in statements:
             line = stmt.location.line if stmt.location else None
 
             if isinstance(stmt, IOReadStatement):
@@ -479,9 +482,9 @@ class IOLogger:
                     )
                 )
 
-    def _collect_console_io_operations(self, ast: CobolProgram) -> None:
+    def _collect_console_io_operations(self, statements: list) -> None:
         """Extract I/O from ACCEPT and DISPLAY statements."""
-        for stmt in ast.get_all_statements():
+        for stmt in statements:
             line = stmt.location.line if stmt.location else None
 
             if isinstance(stmt, IOAcceptStatement):
