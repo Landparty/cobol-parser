@@ -141,6 +141,19 @@ class ProcedureDivisionParser(BaseDivisionParser):
         procedures: dict[str, Any] = {}
         paragraphs: list[dict[str, Any]] = []
         sections: dict[str, Any] = {}
+        # Track ordered list of section names for AST creation
+        section_order: list[str] = []
+        # Track the current section so paragraphs are associated correctly
+        current_section: dict[str, Any] | None = None
+
+        # Helper: get the paragraph list that new paragraphs should be added to.
+        # If we're inside a section, add to that section's paragraphs; otherwise
+        # add to the top-level paragraphs list.
+        def _active_paragraphs() -> list[dict[str, Any]]:
+            if current_section is not None:
+                paras: list[dict[str, Any]] = current_section["paragraphs"]
+                return paras
+            return paragraphs
 
         # Skip initial whitespace and comments
         skip_whitespace(token_stream)
@@ -181,7 +194,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
             # Check for SECTION keyword
             if self._is_section_marker(token_stream):
-                section_name = token.value or ""
+                section_name = token_value  # Normalize to uppercase (like paragraphs)
+                section_location = (
+                    token.location
+                    if hasattr(token, "location")
+                    else SourceLocation(0, 0)
+                )
                 token_stream.consume()  # consume section name
 
                 # Skip to SECTION keyword
@@ -205,14 +223,19 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 section_dict = {
                     "type": "section",
                     "name": section_name,
+                    "location": section_location,
                     "paragraphs": [],
                 }
+                if section_name not in section_order:
+                    section_order.append(section_name)
                 sections[section_name] = section_dict
+                current_section = section_dict
 
             elif self._is_statement_keyword(token_value):
                 # This is a statement keyword without an explicit paragraph
+                active = _active_paragraphs()
                 # Create implicit paragraph if needed (only if no paragraphs or last is named)
-                if not paragraphs or not paragraphs[-1].get("_is_implicit_paragraph"):
+                if not active or not active[-1].get("_is_implicit_paragraph"):
                     # Create new implicit paragraph
                     para_dict = {
                         "type": "paragraph",
@@ -225,7 +248,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         "statements": [],
                         "_is_implicit_paragraph": True,
                     }
-                    paragraphs.append(para_dict)
+                    active.append(para_dict)
 
                 # Try to parse the statement
                 parser = self._statement_registry.find_parser(token_stream)
@@ -241,7 +264,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         token_stream._context = context  # type: ignore[attr-defined]
 
                         statement = parser.parse(token_stream)
-                        paragraphs[-1]["statements"].append(
+                        active[-1]["statements"].append(
                             {
                                 "type": "statement",
                                 "node_type": type(statement).__name__,
@@ -288,20 +311,26 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "statements": statements,
                     "_is_implicit_paragraph": False,
                 }
-                paragraphs.append(para_dict)
+                _active_paragraphs().append(para_dict)
             else:
                 token_stream.consume()
 
-        # Clean up: remove empty implicit paragraphs at the end
-        while (
-            paragraphs
-            and paragraphs[-1].get("_is_implicit_paragraph")
-            and not paragraphs[-1].get("statements")
-        ):
-            paragraphs.pop()
+        # Clean up: remove empty implicit paragraphs from top-level and sections
+        def _clean_implicit(para_list: list[dict[str, Any]]) -> None:
+            while (
+                para_list
+                and para_list[-1].get("_is_implicit_paragraph")
+                and not para_list[-1].get("statements")
+            ):
+                para_list.pop()
+
+        _clean_implicit(paragraphs)
+        for sec in sections.values():
+            _clean_implicit(sec["paragraphs"])
 
         procedures["paragraphs"] = paragraphs
         procedures["sections"] = sections
+        procedures["section_order"] = section_order
         return procedures
 
     def _parse_paragraph_statements(
@@ -598,7 +627,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         # Create division node
         division_node = CobolDivision("PROCEDURE", start_location)
 
-        # Add paragraphs with their statements
+        # Add top-level paragraphs (those not inside any section)
         for para_info in division_content.get("paragraphs", []):
             para = CobolParagraph(
                 para_info.get("name", ""), para_info.get("location", start_location)
@@ -611,20 +640,46 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
             division_node.add_paragraph(para)
 
-        # Add sections with their paragraphs
-        for section_name, _section_info in division_content.get("sections", {}).items():
-            section = CobolSection(section_name, start_location)
+        # Add sections in parse order, each with their paragraphs
+        section_order = division_content.get("section_order", [])
+        sections_data = division_content.get("sections", {})
+        # Fall back to dict key order if section_order not present
+        ordered_names = section_order if section_order else list(sections_data.keys())
+
+        for section_name in ordered_names:
+            section_info = sections_data.get(section_name, {})
+            section_location = section_info.get("location", start_location)
+            section = CobolSection(section_name, section_location)
+
+            # Add paragraphs belonging to this section
+            for para_info in section_info.get("paragraphs", []):
+                para = CobolParagraph(
+                    para_info.get("name", ""),
+                    para_info.get("location", section_location),
+                )
+                for stmt_info in para_info.get("statements", []):
+                    if stmt_info.get("statement"):
+                        para.add_statement(stmt_info["statement"])
+                section.add_paragraph(para)
+
             division_node.add_section(section)
+
+        # Count all statements across top-level paragraphs and section paragraphs
+        total_paragraphs = len(division_content.get("paragraphs", []))
+        total_statements = sum(
+            len(p.get("statements", [])) for p in division_content.get("paragraphs", [])
+        )
+        for sec_info in sections_data.values():
+            sec_paras = sec_info.get("paragraphs", [])
+            total_paragraphs += len(sec_paras)
+            total_statements += sum(len(p.get("statements", [])) for p in sec_paras)
 
         # Store metadata
         division_node.metadata.update(
             {
-                "paragraph_count": len(division_content.get("paragraphs", [])),
-                "section_count": len(division_content.get("sections", {})),
-                "statement_count": sum(
-                    len(p.get("statements", []))
-                    for p in division_content.get("paragraphs", [])
-                ),
+                "paragraph_count": total_paragraphs,
+                "section_count": len(sections_data),
+                "statement_count": total_statements,
             }
         )
 
