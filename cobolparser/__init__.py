@@ -62,6 +62,9 @@ Error Recovery:
 # Analysis utilities
 from .analysis import (
     DynamicCallAnalyzer,
+    IOLogger,
+    IOLogReport,
+    IOOperation,
 )
 from .batch import (
     BatchResult,
@@ -211,6 +214,9 @@ __all__ = [
     "NestingDepthError",
     # Analysis utilities
     "DynamicCallAnalyzer",
+    "IOLogger",
+    "IOLogReport",
+    "IOOperation",
     # Will be added when implemented:
     # "ANSICobol",
     # "MicroFocusCobol",
