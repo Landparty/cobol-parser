@@ -8,6 +8,11 @@ Covers:
 - matches() returning False on empty/wrong token
 """
 
+import pytest
+
+from cobolparser.core.token_stream import TokenStream
+from cobolparser.lexer import Token, TokenType
+from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements import (
     AddStatement,
     ComputeStatement,
@@ -16,203 +21,172 @@ from cobolparser.models.statements import (
     SubtractStatement,
 )
 from cobolparser.parser import CobolParser
+from cobolparser.parsers.statements.arithmetic_parsers import (
+    ComputeStatementParser,
+    DivideStatementParser,
+    MultiplyStatementParser,
+)
 
 
 def parse_procedure(code):
     """Parse COBOL and return procedure division statements."""
-    src = f"""
-       IDENTIFICATION DIVISION.
-       PROGRAM-ID. TEST-ARITH.
-       PROCEDURE DIVISION.
-{code}
-    """
+    src = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. TEST-ARITH.\n"
+        "       PROCEDURE DIVISION.\n"
+        f"{code}\n"
+    )
     result = CobolParser().parse(src)
     proc = result.ast.procedure_division
     if proc.paragraphs:
         return proc.paragraphs[0].statements, result
-    if proc.sections:
-        sec = proc.sections[0]
-        if sec.paragraphs:
-            return sec.paragraphs[0].statements, result
+    if proc.sections and proc.sections[0].paragraphs:
+        return proc.sections[0].paragraphs[0].statements, result
     return [], result
 
 
+def _find_stmt(stmts, stmt_type):
+    """Find and return the first statement of a given type, or fail."""
+    for s in stmts:
+        if isinstance(s, stmt_type):
+            return s
+    pytest.fail(f"No {stmt_type.__name__} found in {stmts}")
+
+
 class TestSubtractGiving:
-    """Tests for SUBTRACT ... GIVING path (line 346-351)."""
+    """Tests for SUBTRACT ... GIVING path (lines 346-351)."""
 
     def test_subtract_giving(self):
-        stmts, result = parse_procedure(
-            "           SUBTRACT A FROM B GIVING C."
-        )
-        assert any(isinstance(s, SubtractStatement) for s in stmts)
+        stmts, _ = parse_procedure("           SUBTRACT A FROM B GIVING C.")
+        _find_stmt(stmts, SubtractStatement)
 
-    def test_subtract_multiple_operands_giving(self):
-        stmts, result = parse_procedure(
-            "           SUBTRACT A B FROM C GIVING D."
-        )
-        assert any(isinstance(s, SubtractStatement) for s in stmts)
+    def test_subtract_multiple_operands(self):
+        stmts, _ = parse_procedure("           SUBTRACT A B FROM C GIVING D.")
+        stmt = _find_stmt(stmts, SubtractStatement)
+        assert len(stmt.operands) >= 2
+
+    def test_subtract_with_trailing_tokens_triggers_skip_to_period(self):
+        """SUBTRACT with ROUNDED after target exercises _skip_to_period."""
+        stmts, _ = parse_procedure("           SUBTRACT A FROM B ROUNDED.")
+        _find_stmt(stmts, SubtractStatement)
 
 
 class TestMultiplyGiving:
     """Tests for MULTIPLY ... GIVING path (lines 416-421)."""
 
-    def test_multiply_giving(self):
-        stmts, result = parse_procedure(
-            "           MULTIPLY A BY B GIVING C."
-        )
-        assert any(isinstance(s, MultiplyStatement) for s in stmts)
-
-    def test_multiply_matches_false_empty(self):
-        """matches() should return False on empty stream."""
-        from cobolparser.core.token_stream import TokenStream
-        from cobolparser.parsers.statements.arithmetic_parsers import (
-            MultiplyStatementParser,
-        )
-
-        parser = MultiplyStatementParser()
-        stream = TokenStream([])
-        assert parser.matches(stream) is False
-
-    def test_multiply_matches_false_wrong_token(self):
-        """matches() should return False for non-MULTIPLY token."""
-        from cobolparser.core.token_stream import TokenStream
-        from cobolparser.lexer import Token, TokenType
-        from cobolparser.models.ast_base import SourceLocation
-        from cobolparser.parsers.statements.arithmetic_parsers import (
-            MultiplyStatementParser,
-        )
-
-        parser = MultiplyStatementParser()
-        tok = Token(TokenType.IDENTIFIER, "FOO", SourceLocation(1, 1))
-        stream = TokenStream([tok])
-        assert parser.matches(stream) is False
+    def test_multiply_giving_sets_giving_target(self):
+        stmts, _ = parse_procedure("           MULTIPLY A BY B GIVING C.")
+        stmt = _find_stmt(stmts, MultiplyStatement)
+        d = stmt.to_dict()
+        assert d["giving"] == "C"
 
 
 class TestDivideGiving:
-    """Tests for DIVIDE ... BY ... GIVING path (lines 486-493)."""
+    """Tests for DIVIDE ... BY/INTO ... GIVING path (lines 476-493)."""
 
     def test_divide_by_giving(self):
-        stmts, result = parse_procedure(
-            "           DIVIDE A BY B GIVING C."
-        )
-        assert any(isinstance(s, DivideStatement) for s in stmts)
+        stmts, _ = parse_procedure("           DIVIDE A BY B GIVING C.")
+        stmt = _find_stmt(stmts, DivideStatement)
+        d = stmt.to_dict()
+        assert d["giving"] == "C"
 
     def test_divide_into(self):
-        stmts, result = parse_procedure(
-            "           DIVIDE A INTO B."
-        )
-        assert any(isinstance(s, DivideStatement) for s in stmts)
-
-    def test_divide_matches_false_empty(self):
-        from cobolparser.core.token_stream import TokenStream
-        from cobolparser.parsers.statements.arithmetic_parsers import (
-            DivideStatementParser,
-        )
-
-        parser = DivideStatementParser()
-        stream = TokenStream([])
-        assert parser.matches(stream) is False
+        stmts, _ = parse_procedure("           DIVIDE A INTO B.")
+        stmt = _find_stmt(stmts, DivideStatement)
+        assert len(stmt.operands) >= 2
 
 
 class TestComputeExpressions:
-    """Tests for COMPUTE expression parsing (lines 557-595)."""
+    """Tests for COMPUTE expression parsing (lines 530-595)."""
 
     def test_compute_with_parenthesized_expression(self):
-        stmts, result = parse_procedure(
-            "           COMPUTE A = (B + C) * (D - E)."
-        )
-        assert any(isinstance(s, ComputeStatement) for s in stmts)
-        compute = next(s for s in stmts if isinstance(s, ComputeStatement))
+        stmts, _ = parse_procedure("           COMPUTE A = (B + C) * (D - E).")
+        compute = _find_stmt(stmts, ComputeStatement)
         assert compute.expression is not None
+        assert "B" in compute.expression and "D" in compute.expression
 
     def test_compute_with_end_compute(self):
-        stmts, result = parse_procedure(
+        stmts, _ = parse_procedure(
             "           COMPUTE A = B + C\n               END-COMPUTE."
         )
-        assert any(isinstance(s, ComputeStatement) for s in stmts)
+        compute = _find_stmt(stmts, ComputeStatement)
+        assert compute.expression is not None
 
     def test_compute_with_on_size_error(self):
-        stmts, result = parse_procedure(
+        stmts, _ = parse_procedure(
             "           COMPUTE A = B / C\n"
             "               ON SIZE ERROR\n"
-            "                   DISPLAY \"Overflow\"."
+            '                   DISPLAY "Overflow".'
         )
-        assert any(isinstance(s, ComputeStatement) for s in stmts)
-        compute = next(s for s in stmts if isinstance(s, ComputeStatement))
+        compute = _find_stmt(stmts, ComputeStatement)
         assert compute.on_size_error is not None
+        assert len(compute.on_size_error) >= 1
 
     def test_compute_with_not_on_size_error(self):
-        stmts, result = parse_procedure(
+        stmts, _ = parse_procedure(
             "           COMPUTE A = B + 1\n"
             "               NOT ON SIZE ERROR\n"
-            "                   DISPLAY \"OK\"."
+            '                   DISPLAY "OK".'
         )
-        assert any(isinstance(s, ComputeStatement) for s in stmts)
-        compute = next(s for s in stmts if isinstance(s, ComputeStatement))
+        compute = _find_stmt(stmts, ComputeStatement)
         assert compute.not_on_size_error is not None
-
-    def test_compute_matches_false(self):
-        from cobolparser.core.token_stream import TokenStream
-        from cobolparser.parsers.statements.arithmetic_parsers import (
-            ComputeStatementParser,
-        )
-
-        parser = ComputeStatementParser()
-        stream = TokenStream([])
-        assert parser.matches(stream) is False
+        assert len(compute.not_on_size_error) >= 1
 
     def test_compute_rounded(self):
-        stmts, result = parse_procedure(
-            "           COMPUTE A ROUNDED = B + C."
-        )
-        assert any(isinstance(s, ComputeStatement) for s in stmts)
+        stmts, _ = parse_procedure("           COMPUTE A ROUNDED = B + C.")
+        compute = _find_stmt(stmts, ComputeStatement)
+        assert "A" in compute.targets
 
 
-class TestAddSizeErrorNestedMove:
-    """Tests for nested MOVE parsing within ON SIZE ERROR (lines 246-284)."""
+class TestAddSizeErrorNested:
+    """Tests for nested DISPLAY/MOVE within ON SIZE ERROR (lines 201-290)."""
 
     def test_add_on_size_error_with_move(self):
-        stmts, result = parse_procedure(
+        stmts, _ = parse_procedure(
             "           ADD A TO B\n"
             "               ON SIZE ERROR\n"
             "                   MOVE 0 TO C."
         )
-        assert any(isinstance(s, AddStatement) for s in stmts)
-        add_stmt = next(s for s in stmts if isinstance(s, AddStatement))
+        add_stmt = _find_stmt(stmts, AddStatement)
         assert add_stmt.on_size_error is not None
-        assert len(add_stmt.on_size_error) >= 1
+        assert any(s.statement_type == "MOVE" for s in add_stmt.on_size_error)
 
     def test_add_not_on_size_error_with_display_and_move(self):
-        stmts, result = parse_procedure(
+        stmts, _ = parse_procedure(
             "           ADD A TO B\n"
             "               NOT ON SIZE ERROR\n"
-            "                   DISPLAY \"OK\"\n"
+            '                   DISPLAY "OK"\n'
             "                   MOVE 1 TO C."
         )
-        assert any(isinstance(s, AddStatement) for s in stmts)
-        add_stmt = next(s for s in stmts if isinstance(s, AddStatement))
+        add_stmt = _find_stmt(stmts, AddStatement)
         assert add_stmt.not_on_size_error is not None
+        types = [s.statement_type for s in add_stmt.not_on_size_error]
+        assert "DISPLAY" in types
+        assert "MOVE" in types
 
     def test_add_both_size_error_clauses(self):
-        stmts, result = parse_procedure(
+        stmts, _ = parse_procedure(
             "           ADD A TO B\n"
             "               ON SIZE ERROR\n"
-            "                   DISPLAY \"Error\"\n"
+            '                   DISPLAY "Error"\n'
             "               NOT ON SIZE ERROR\n"
-            "                   DISPLAY \"OK\"."
+            '                   DISPLAY "OK".'
         )
-        assert any(isinstance(s, AddStatement) for s in stmts)
-        add_stmt = next(s for s in stmts if isinstance(s, AddStatement))
-        # The parser collects both DISPLAY statements — at minimum on_size_error is set
+        add_stmt = _find_stmt(stmts, AddStatement)
         assert add_stmt.on_size_error is not None
 
 
-class TestSubtractSkipToPeriod:
-    """Exercises _skip_to_period in SubtractStatementParser (lines 357-365)."""
+@pytest.mark.parametrize(
+    "parser_cls",
+    [MultiplyStatementParser, DivideStatementParser, ComputeStatementParser],
+    ids=["multiply", "divide", "compute"],
+)
+class TestMatchesFalse:
+    """matches() returns False on empty stream or wrong token type."""
 
-    def test_subtract_with_trailing_tokens(self):
-        """SUBTRACT with extra tokens before period triggers _skip_to_period."""
-        stmts, result = parse_procedure(
-            "           SUBTRACT A FROM B ROUNDED."
-        )
-        assert any(isinstance(s, SubtractStatement) for s in stmts)
+    def test_matches_empty_stream(self, parser_cls):
+        assert parser_cls().matches(TokenStream([])) is False
+
+    def test_matches_wrong_token(self, parser_cls):
+        tok = Token(TokenType.IDENTIFIER, "FOO", SourceLocation(1, 1))
+        assert parser_cls().matches(TokenStream([tok])) is False
