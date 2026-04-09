@@ -28,7 +28,7 @@ def _proc_div(result) -> CobolDivision:
 
 def _get_sections(div: CobolDivision) -> list[CobolSection]:
     """Get only CobolSection objects from a division (not paragraphs)."""
-    return [s for s in div._sections.values() if isinstance(s, CobolSection)]
+    return [s for s in div.sections if isinstance(s, CobolSection)]
 
 
 def _get_all_stmt_types(result) -> list[str]:

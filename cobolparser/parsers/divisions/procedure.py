@@ -193,7 +193,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
             # Check for SECTION keyword
             if self._is_section_marker(token_stream):
-                section_name = token.value or ""
+                section_name = token_value  # Normalize to uppercase (like paragraphs)
                 section_location = (
                     token.location
                     if hasattr(token, "location")
@@ -225,8 +225,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "location": section_location,
                     "paragraphs": [],
                 }
+                if section_name not in section_order:
+                    section_order.append(section_name)
                 sections[section_name] = section_dict
-                section_order.append(section_name)
                 current_section = section_dict
 
             elif self._is_statement_keyword(token_value):
