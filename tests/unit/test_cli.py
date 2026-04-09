@@ -295,12 +295,6 @@ class TestCLIParseNewFlags:
         output = _run_cli_json(SAMPLE_FILE, "--error-recovery", "collect-all")
         assert output["node_type"] == "Program"
 
-    def test_max_memory_flag(self):
-        # --max-memory is accepted but only used with CobolParser directly;
-        # parse_cobol doesn't pass it through, so just verify it's accepted
-        output = _run_cli_json("parse", SAMPLE_FILE, "--max-memory", "512")
-        assert output["node_type"] == "Program"
-
     def test_find_type_display(self):
         output = _run_cli_json(SAMPLE_FILE, "--find-type", "DisplayStatement")
         assert isinstance(output, list)

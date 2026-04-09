@@ -144,23 +144,6 @@ def _build_parse_parser(
         help="Include parse statistics in output",
     )
     p.add_argument(
-        "--max-memory",
-        type=int,
-        default=None,
-        metavar="MB",
-        help="Maximum memory limit in MB (64-8192)",
-    )
-    p.add_argument(
-        "--no-metadata",
-        action="store_true",
-        help="Exclude metadata from serialized output",
-    )
-    p.add_argument(
-        "--no-locations",
-        action="store_true",
-        help="Exclude source locations from serialized output",
-    )
-    p.add_argument(
         "--find-type",
         default=None,
         metavar="NODE_TYPE",
@@ -205,44 +188,37 @@ def _do_parse(args: argparse.Namespace) -> Any:
 
 
 def _cmd_parse(args: argparse.Namespace) -> None:
-    from ..parser import ParseResult
-
     result = _do_parse(args)
 
-    if isinstance(result, ParseResult):
-        parse_result = result
-    else:
-        parse_result = result
-
-    if parse_result.ast is None:
-        error_lines = [str(e) for e in parse_result.errors]
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
         _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
 
     # --find-type: query AST by node type
     if args.find_type:
-        matched = parse_result.ast.find_all_by_type(args.find_type)
+        matched = result.ast.find_all_by_type(args.find_type)
         output: Any = [n.to_dict() for n in matched]
         _json_out(output, args.compact)
         return
 
     # Resolve path or output full AST
     if args.path:
-        output = _resolve_path(parse_result.ast, args.path)
+        output = _resolve_path(result.ast, args.path)
     else:
-        output = parse_result.ast.to_dict()
+        output = result.ast.to_dict()
 
     # Wrap with errors/stats if requested
     if args.errors or args.stats:
         wrapper: dict[str, Any] = {"ast": output}
         if args.errors:
-            wrapper["errors"] = [str(e) for e in parse_result.errors]
-            wrapper["warnings"] = parse_result.warnings
+            wrapper["errors"] = [str(e) for e in result.errors]
+            wrapper["warnings"] = result.warnings
         if args.stats:
             wrapper["statistics"] = {
-                "lines_processed": parse_result.statistics.lines_processed,
-                "tokens_processed": parse_result.statistics.tokens_processed,
-                "parse_time_seconds": parse_result.statistics.parse_time_seconds,
-                "memory_peak_mb": parse_result.statistics.memory_peak_mb,
+                "lines_processed": result.statistics.lines_processed,
+                "tokens_processed": result.statistics.tokens_processed,
+                "parse_time_seconds": result.statistics.parse_time_seconds,
+                "memory_peak_mb": result.statistics.memory_peak_mb,
             }
         output = wrapper
 
@@ -283,7 +259,6 @@ def _build_batch_parser(
         help="Include parse statistics per file",
     )
     p.set_defaults(func=_cmd_batch)
-    return
 
 
 def _cmd_batch(args: argparse.Namespace) -> None:
@@ -336,7 +311,6 @@ def _build_tokenize_parser(
     _add_free_form_arg(p)
     _add_dialect_arg(p)
     p.set_defaults(func=_cmd_tokenize)
-    return
 
 
 def _cmd_tokenize(args: argparse.Namespace) -> None:
@@ -379,7 +353,6 @@ def _build_preprocess_parser(
         help="Strip PROCESS/CBL compiler directives before normalizing",
     )
     p.set_defaults(func=_cmd_preprocess)
-    return
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> None:
@@ -423,7 +396,6 @@ def _build_expand_parser(
     )
     _add_define_args(p)
     p.set_defaults(func=_cmd_expand)
-    return
 
 
 def _cmd_expand(args: argparse.Namespace) -> None:
@@ -464,7 +436,6 @@ def _build_analyze_parser(
     _add_copybook_args(p)
     _add_define_args(p)
     p.set_defaults(func=_cmd_analyze)
-    return
 
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
@@ -482,13 +453,12 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
     # Collect dynamic call information
     calls = []
     for stmt in result.ast.find_all_by_type("CallStatement"):
-        entry: dict[str, Any] = {"called_program": stmt.to_dict().get("called_program")}
-        if hasattr(stmt, "is_dynamic") and stmt.is_dynamic:
-            entry["is_dynamic"] = True
-            if hasattr(stmt, "possible_values"):
-                entry["possible_values"] = list(stmt.possible_values)
-        else:
-            entry["is_dynamic"] = False
+        entry: dict[str, Any] = {
+            "called_program": stmt.called_program,
+            "is_dynamic": stmt.is_dynamic,
+        }
+        if stmt.is_dynamic:
+            entry["possible_values"] = stmt.possible_values
         calls.append(entry)
 
     _json_out({"calls": calls}, args.compact)
