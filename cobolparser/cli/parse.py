@@ -61,11 +61,16 @@ def _resolve_path(
     Path forms:
       division                          -> division dict
       division.section_or_paragraph     -> section/paragraph dict
+      division.section.paragraph        -> paragraph within a section
       division.paragraph.statement_type -> filtered statement list
     """
-    parts = path.split(".")
+    parts = [p.strip() for p in path.split(".")]
+    # Drop empty components from leading/trailing dots
+    parts = [p for p in parts if p]
+    if not parts:
+        _fail("Empty path")
     if len(parts) > 3:
-        _fail(f"Path too deep: {path!r} (max 3 components: division.paragraph.statement)")
+        _fail(f"Path too deep: {path!r} (max 3 components: division.section.paragraph)")
 
     # --- Level 1: division ---
     div_name = parts[0].upper()
@@ -93,8 +98,18 @@ def _resolve_path(
     if len(parts) == 2:
         return node.to_dict()
 
-    # --- Level 3: statement type filter ---
-    stmt_type = parts[2].upper()
+    # --- Level 3: paragraph within section, OR statement type filter ---
+    level3 = parts[2].upper()
+
+    # If level 2 resolved to a section, try paragraph name first
+    if isinstance(node, CobolSection):
+        paragraph = node.get_paragraph_by_name(level3)
+        if paragraph is not None:
+            return paragraph.to_dict()
+        # Fall through to statement type filter across all section paragraphs
+
+    # Statement type filter
+    stmt_type = level3
     statements: list[Any] = []
     if isinstance(node, CobolParagraph):
         statements = node.statements
@@ -105,9 +120,16 @@ def _resolve_path(
     matched = [s for s in statements if s.statement_type.upper() == stmt_type]
     if not matched:
         available_types = sorted({s.statement_type for s in statements})
+        hints: list[str] = []
+        if available_types:
+            hints.append(f"statement types: {', '.join(available_types)}")
+        if isinstance(node, CobolSection) and node.paragraphs:
+            para_names = [p.paragraph_name for p in node.paragraphs]
+            hints.append(f"paragraphs: {', '.join(para_names)}")
+        hint_str = "; ".join(hints) if hints else "(none)"
         _fail(
-            f"No {parts[2]!r} statements found in {parts[1]!r}. "
-            f"Available types: {', '.join(available_types) if available_types else '(none)'}"
+            f"No {parts[2]!r} found in {parts[1]!r}. "
+            f"Available: {hint_str}"
         )
     return [s.to_dict() for s in matched]
 
@@ -136,6 +158,8 @@ def main() -> None:
             source = f.read()
     except FileNotFoundError:
         _fail(f"File not found: {args.file}")
+    except UnicodeDecodeError:
+        _fail(f"Cannot read file (not valid UTF-8): {args.file}")
     except OSError as e:
         _fail(f"Cannot read file: {e}")
 
