@@ -47,46 +47,42 @@ class TestStartKeyConditions:
     """Cover KEY condition parsing (lines 76-137)."""
 
     def test_start_key_equal(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS EQUAL TO CUST-KEY."
-        ))
+        result = parse_cobol(
+            _prog("           START CUST-FILE KEY IS EQUAL TO CUST-KEY.")
+        )
         assert result.ast is not None
 
     def test_start_key_greater_than(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS GREATER THAN CUST-KEY."
-        ))
+        result = parse_cobol(
+            _prog("           START CUST-FILE KEY IS GREATER THAN CUST-KEY.")
+        )
         assert result.ast is not None
 
     def test_start_key_not_less_than(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS NOT LESS THAN CUST-KEY."
-        ))
+        result = parse_cobol(
+            _prog("           START CUST-FILE KEY IS NOT LESS THAN CUST-KEY.")
+        )
         assert result.ast is not None
 
     def test_start_key_greater_than_or_equal(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS GREATER THAN OR EQUAL CUST-KEY."
-        ))
+        result = parse_cobol(
+            _prog("           START CUST-FILE KEY IS GREATER THAN OR EQUAL CUST-KEY.")
+        )
         assert result.ast is not None
 
     def test_start_key_less(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS LESS CUST-KEY."
-        ))
+        result = parse_cobol(_prog("           START CUST-FILE KEY IS LESS CUST-KEY."))
         assert result.ast is not None
 
     def test_start_key_equals(self):
         """EQUALS (with S) variant."""
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS EQUALS CUST-KEY."
-        ))
+        result = parse_cobol(
+            _prog("           START CUST-FILE KEY IS EQUALS CUST-KEY.")
+        )
         assert result.ast is not None
 
     def test_start_basic_no_key(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE."
-        ))
+        result = parse_cobol(_prog("           START CUST-FILE."))
         assert result.ast is not None
 
 
@@ -94,25 +90,31 @@ class TestStartInvalidKey:
     """Cover INVALID KEY / NOT INVALID KEY clauses (lines 140-166)."""
 
     def test_start_invalid_key(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
-            "               INVALID KEY DISPLAY 'NOT FOUND'."
-        ))
+        result = parse_cobol(
+            _prog(
+                "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
+                "               INVALID KEY DISPLAY 'NOT FOUND'."
+            )
+        )
         assert result.ast is not None
 
     def test_start_not_invalid_key(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
-            "               NOT INVALID KEY DISPLAY 'FOUND'."
-        ))
+        result = parse_cobol(
+            _prog(
+                "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
+                "               NOT INVALID KEY DISPLAY 'FOUND'."
+            )
+        )
         assert result.ast is not None
 
     def test_start_both_invalid_key_clauses(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
-            "               INVALID KEY DISPLAY 'ERR'\n"
-            "               NOT INVALID KEY DISPLAY 'OK'."
-        ))
+        result = parse_cobol(
+            _prog(
+                "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
+                "               INVALID KEY DISPLAY 'ERR'\n"
+                "               NOT INVALID KEY DISPLAY 'OK'."
+            )
+        )
         assert result.ast is not None
 
 
@@ -120,10 +122,12 @@ class TestStartEndStart:
     """Cover END-START and period consumption (lines 168-182)."""
 
     def test_start_with_end_start(self):
-        result = parse_cobol(_prog(
-            "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
-            "           END-START."
-        ))
+        result = parse_cobol(
+            _prog(
+                "           START CUST-FILE KEY IS EQUAL TO CUST-KEY\n"
+                "           END-START."
+            )
+        )
         assert result.ast is not None
 
 
@@ -133,6 +137,7 @@ class TestStartParserDirect:
     def test_matches_exception(self):
         """matches() returns False on exception."""
         from unittest.mock import MagicMock
+
         mock_stream = MagicMock()
         mock_stream.peek = MagicMock(side_effect=RuntimeError("fail"))
         parser = StartStatementParser()

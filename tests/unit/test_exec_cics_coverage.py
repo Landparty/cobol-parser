@@ -6,7 +6,7 @@ Targets uncovered lines in parsers/statements/ibm_exec_statements.py (63.16%):
   - Exception handling in matches() methods
 """
 
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 from cobolparser import parse_cobol
 from cobolparser.core.token_stream import TokenStream

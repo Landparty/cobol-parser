@@ -6,7 +6,7 @@ Targets uncovered lines in parsers/statements/_utils.py (80.95%):
   - try_parse_nested_statement dispatch (lines 155-174)
 """
 
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 from cobolparser.core.token_stream import TokenStream
 from cobolparser.lexer import Token, TokenType

@@ -14,9 +14,19 @@ class TestLexerRegressions:
 
     def test_figurative_constants_tokenized(self):
         """All figurative constants should be recognized (free-form mode)."""
-        for word in ["SPACE", "SPACES", "ZERO", "ZEROS", "ZEROES",
-                     "HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES",
-                     "QUOTE", "QUOTES"]:
+        for word in [
+            "SPACE",
+            "SPACES",
+            "ZERO",
+            "ZEROS",
+            "ZEROES",
+            "HIGH-VALUE",
+            "HIGH-VALUES",
+            "LOW-VALUE",
+            "LOW-VALUES",
+            "QUOTE",
+            "QUOTES",
+        ]:
             lexer = CobolLexer(f"MOVE {word} TO X", free_form=True)
             tokens = lexer.tokenize()
             figs = [t for t in tokens if t.type == TokenType.FIGURATIVE_CONSTANT]
@@ -57,9 +67,11 @@ class TestLexerRegressions:
         """Empty source produces only EOF token."""
         lexer = CobolLexer("", free_form=True)
         tokens = lexer.tokenize()
-        meaningful = [t for t in tokens if t.type not in (
-            TokenType.NEWLINE, TokenType.WHITESPACE, TokenType.EOF
-        )]
+        meaningful = [
+            t
+            for t in tokens
+            if t.type not in (TokenType.NEWLINE, TokenType.WHITESPACE, TokenType.EOF)
+        ]
         assert len(meaningful) == 0
 
 

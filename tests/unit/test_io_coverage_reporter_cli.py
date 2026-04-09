@@ -12,9 +12,8 @@ import tempfile
 from unittest.mock import patch
 
 from cobolparser.analysis.io_coverage_reporter import (
-    CoverageStatus,
-    IOCoverageReporter,
     IoCoverageArtifact,
+    IOCoverageReporter,
     IoVariationCoverage,
     main,
 )
@@ -163,7 +162,14 @@ class TestMainCli:
         """--validate-only with missing file returns 1."""
         with patch(
             "sys.argv",
-            ["prog", "--pytest-results", "x.json", "--output", "/tmp/nonexistent_artifact.json", "--validate-only"],
+            [
+                "prog",
+                "--pytest-results",
+                "x.json",
+                "--output",
+                "/tmp/nonexistent_artifact.json",
+                "--validate-only",
+            ],
         ):
             result = main()
         assert result == 1
@@ -190,7 +196,14 @@ class TestMainCli:
         try:
             with patch(
                 "sys.argv",
-                ["prog", "--pytest-results", "x.json", "--output", tmppath, "--validate-only"],
+                [
+                    "prog",
+                    "--pytest-results",
+                    "x.json",
+                    "--output",
+                    tmppath,
+                    "--validate-only",
+                ],
             ):
                 result = main()
             assert result == 0
@@ -219,7 +232,14 @@ class TestMainCli:
         try:
             with patch(
                 "sys.argv",
-                ["prog", "--pytest-results", "x.json", "--output", tmppath, "--validate-only"],
+                [
+                    "prog",
+                    "--pytest-results",
+                    "x.json",
+                    "--output",
+                    tmppath,
+                    "--validate-only",
+                ],
             ):
                 result = main()
             assert result == 1
@@ -232,7 +252,9 @@ class TestMainCli:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".csv", delete=False
         ) as cat_f:
-            cat_f.write("id,verb,file_organization,access_mode,qualifiers,status,requires_fd_clauses,ibm_reference,notes\n")
+            cat_f.write(
+                "id,verb,file_organization,access_mode,qualifiers,status,requires_fd_clauses,ibm_reference,notes\n"
+            )
             cat_f.write("READ-SEQ,READ,SEQUENTIAL,SEQUENTIAL,,PENDING,true,,test\n")
             catalog_path = cat_f.name
 
@@ -243,9 +265,7 @@ class TestMainCli:
             json.dump({"tests": []}, res_f)
             results_path = res_f.name
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".json", delete=False
-        ) as out_f:
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as out_f:
             output_path = out_f.name
 
         try:
@@ -253,9 +273,12 @@ class TestMainCli:
                 "sys.argv",
                 [
                     "prog",
-                    "--pytest-results", results_path,
-                    "--output", output_path,
-                    "--catalog", catalog_path,
+                    "--pytest-results",
+                    results_path,
+                    "--output",
+                    output_path,
+                    "--catalog",
+                    catalog_path,
                 ],
             ):
                 result = main()

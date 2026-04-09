@@ -10,8 +10,7 @@ Targets uncovered lines in lexer.py (81.56%):
 """
 
 from cobolparser import parse_cobol
-from cobolparser.lexer import CobolLexer, Token, TokenType
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser.lexer import CobolLexer, TokenType
 from cobolparser.preprocess import normalize_fixed_format
 
 

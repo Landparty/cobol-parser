@@ -25,7 +25,6 @@ from cobolparser.models.statements.io import (
     IOWriteStatement,
 )
 
-
 LOC = SourceLocation(1, 1)
 
 
