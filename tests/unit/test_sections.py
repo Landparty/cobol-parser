@@ -19,6 +19,7 @@ def parse(src: str):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _proc_div(result) -> CobolDivision:
     """Extract the PROCEDURE division from a parse result."""
     div = result.ast.procedure_division
@@ -40,6 +41,7 @@ def _get_all_stmt_types(result) -> list[str]:
 # ---------------------------------------------------------------------------
 # Basic section parsing
 # ---------------------------------------------------------------------------
+
 
 class TestBasicSectionParsing:
     """Test that sections are recognized and created in the AST."""
@@ -118,6 +120,7 @@ class TestBasicSectionParsing:
 # ---------------------------------------------------------------------------
 # Multiple sections
 # ---------------------------------------------------------------------------
+
 
 class TestMultipleSections:
     """Test programs with multiple sections."""
@@ -199,6 +202,7 @@ class TestMultipleSections:
 # Mixed: top-level paragraphs before sections
 # ---------------------------------------------------------------------------
 
+
 class TestMixedParagraphsAndSections:
     """Test programs that have top-level paragraphs followed by sections."""
 
@@ -246,6 +250,7 @@ class TestMixedParagraphsAndSections:
 # ---------------------------------------------------------------------------
 # Section with multiple statement types
 # ---------------------------------------------------------------------------
+
 
 class TestSectionWithVariousStatements:
     """Test sections with different statement types."""
@@ -301,6 +306,7 @@ class TestSectionWithVariousStatements:
 # ---------------------------------------------------------------------------
 # AST structure and API tests
 # ---------------------------------------------------------------------------
+
 
 class TestSectionASTStructure:
     """Test the AST structure for sections."""
@@ -368,9 +374,7 @@ class TestSectionASTStructure:
         )
         result = parse(src)
         procs = result.ast.find_procedures(proc_type="PARAGRAPH")
-        para_names = [
-            p.paragraph_name for p in procs if isinstance(p, CobolParagraph)
-        ]
+        para_names = [p.paragraph_name for p in procs if isinstance(p, CobolParagraph)]
         assert "INNER-PARA" in para_names
 
     def test_get_section_by_name(self):
@@ -422,6 +426,7 @@ class TestSectionASTStructure:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestSectionEdgeCases:
     """Test edge cases for section handling."""

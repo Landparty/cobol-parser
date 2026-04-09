@@ -151,7 +151,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
         # add to the top-level paragraphs list.
         def _active_paragraphs() -> list[dict[str, Any]]:
             if current_section is not None:
-                return current_section["paragraphs"]
+                paras: list[dict[str, Any]] = current_section["paragraphs"]
+                return paras
             return paragraphs
 
         # Skip initial whitespace and comments
@@ -666,15 +667,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         # Count all statements across top-level paragraphs and section paragraphs
         total_paragraphs = len(division_content.get("paragraphs", []))
         total_statements = sum(
-            len(p.get("statements", []))
-            for p in division_content.get("paragraphs", [])
+            len(p.get("statements", [])) for p in division_content.get("paragraphs", [])
         )
         for sec_info in sections_data.values():
             sec_paras = sec_info.get("paragraphs", [])
             total_paragraphs += len(sec_paras)
-            total_statements += sum(
-                len(p.get("statements", [])) for p in sec_paras
-            )
+            total_statements += sum(len(p.get("statements", [])) for p in sec_paras)
 
         # Store metadata
         division_node.metadata.update(
