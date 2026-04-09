@@ -6,19 +6,8 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import InitializeStatement, InspectStatement
-from ._utils import skip_whitespace
-
-
-def _val(token: Any) -> str:
-    return token.value.upper() if token and token.value else ""
-
-
-def _consume_period(ts: ITokenStream) -> None:
-    if not ts.is_empty():
-        t = ts.peek()
-        if t and t.type == TokenType.PERIOD:
-            ts.consume()
-
+from ._utils import consume_period, skip_whitespace
+from ._utils import token_value_upper as _val
 
 _REPLACING_CATEGORIES = frozenset(
     {
@@ -96,7 +85,7 @@ class InitializeStatementParser(IStatementParser):
             skip_whitespace(token_stream)
             self._parse_replacing(token_stream, stmt)
 
-        _consume_period(token_stream)
+        consume_period(token_stream)
         return stmt
 
     def _parse_replacing(self, ts: ITokenStream, stmt: InitializeStatement) -> None:

@@ -6,18 +6,15 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import StringStatement, UnstringStatement
-from ._utils import STATEMENT_KEYWORDS, skip_whitespace, try_parse_nested_statement
-
-
-def _val(token: Any) -> str:
-    return token.value.upper() if token and token.value else ""
-
-
-def _consume_period(token_stream: ITokenStream) -> None:
-    if not token_stream.is_empty():
-        t = token_stream.peek()
-        if t and t.type == TokenType.PERIOD:
-            token_stream.consume()
+from ._utils import (
+    STATEMENT_KEYWORDS,
+    consume_period,
+    skip_whitespace,
+    try_parse_nested_statement,
+)
+from ._utils import (
+    token_value_upper as _val,
+)
 
 
 def _parse_overflow_stmts(token_stream: ITokenStream) -> list:
@@ -87,7 +84,7 @@ class StringStatementParser(IStatementParser):
             if val == "END-STRING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                _consume_period(token_stream)
+                consume_period(token_stream)
                 break
             if val == "DELIMITED":
                 token_stream.consume()
@@ -213,7 +210,7 @@ class UnstringStatementParser(IStatementParser):
             if val == "END-UNSTRING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                _consume_period(token_stream)
+                consume_period(token_stream)
                 break
             if val == "DELIMITED":
                 token_stream.consume()

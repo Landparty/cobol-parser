@@ -31,14 +31,10 @@ class ArithmeticStatement(CobolStatement):
             self.operands.append(giving)
 
     def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
-        self.on_size_error = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("on_size_error", statements)
 
     def set_not_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
-        self.not_on_size_error = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("not_on_size_error", statements)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -109,14 +105,10 @@ class ComputeStatement(CobolStatement):
             self.add_child(expression)
 
     def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
-        self.on_size_error = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("on_size_error", statements)
 
     def set_not_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
-        self.not_on_size_error = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("not_on_size_error", statements)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert COMPUTE statement to dictionary representation."""

@@ -7,10 +7,7 @@ from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import SetStatement
 from ._utils import skip_whitespace
-
-
-def _val(token: Any) -> str:
-    return token.value.upper() if token and token.value else ""
+from ._utils import token_value_upper as _val
 
 
 def _strip_period(value: str) -> str:

@@ -6,11 +6,14 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import SearchStatement
-from ._utils import STATEMENT_KEYWORDS, skip_whitespace, try_parse_nested_statement
-
-
-def _val(token: Any) -> str:
-    return token.value.upper() if token and token.value else ""
+from ._utils import (
+    STATEMENT_KEYWORDS,
+    skip_whitespace,
+    try_parse_nested_statement,
+)
+from ._utils import (
+    token_value_upper as _val,
+)
 
 
 class SearchStatementParser(IStatementParser):

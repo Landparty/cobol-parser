@@ -2,7 +2,11 @@
 
 from typing import Any, cast
 
-from cobolparser.parsers.statements._utils import collect_clause_stmts, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    consume_end_keyword_and_period,
+    parse_invalid_key_clauses,
+    skip_whitespace,
+)
 
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -58,47 +62,7 @@ class DeleteStatementParser(IStatementParser):
             token_stream.consume()
             skip_whitespace(token_stream)
 
-        # Optional INVALID KEY clause
-        token = token_stream.peek()
-        if token and token.type == TokenType.INVALID:
-            token_stream.consume()
-            skip_whitespace(token_stream)
-            token = token_stream.peek()
-            if token and token.type == TokenType.KEY:
-                token_stream.consume()
-                skip_whitespace(token_stream)
-            clause_stmts = collect_clause_stmts(token_stream, {"END-DELETE"})
-            stmt.set_invalid_key_clause(clause_stmts)
-
-        # Optional NOT INVALID KEY clause
-        token = token_stream.peek()
-        if token and token.type == TokenType.NOT:
-            token_stream.consume()
-            skip_whitespace(token_stream)
-            token = token_stream.peek()
-            if token and token.type == TokenType.INVALID:
-                token_stream.consume()
-                skip_whitespace(token_stream)
-                token = token_stream.peek()
-                if token and token.type == TokenType.KEY:
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                clause_stmts = collect_clause_stmts(token_stream, {"END-DELETE"})
-                stmt.set_not_invalid_key_clause(clause_stmts)
-
-        # Consume END-DELETE or PERIOD
-        skip_whitespace(token_stream)
-        token = token_stream.peek()
-        if (
-            token
-            and token.type == TokenType.IDENTIFIER
-            and token.value
-            and token.value.upper() == "END-DELETE"
-        ):
-            token_stream.consume()
-            skip_whitespace(token_stream)
-        token = token_stream.peek()
-        if token and token.type == TokenType.PERIOD:
-            token_stream.consume()
+        parse_invalid_key_clauses(token_stream, stmt, "END-DELETE")
+        consume_end_keyword_and_period(token_stream, "END-DELETE")
 
         return stmt

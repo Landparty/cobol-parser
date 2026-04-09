@@ -18,6 +18,7 @@ from ...models.statements import (
     MultiplyStatement,
     SubtractStatement,
 )
+from ._utils import skip_to_period
 
 
 class AddStatementParser(IStatementParser):
@@ -92,17 +93,6 @@ class AddStatementParser(IStatementParser):
         AddStatementParser._parse_size_error_clauses(token_stream, stmt)
 
         return stmt
-
-    @staticmethod
-    def _skip_to_period(token_stream: ITokenStream) -> None:
-        """Skip tokens until period."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type == TokenType.PERIOD:
-                if token:
-                    token_stream.consume()
-                break
-            token_stream.consume()
 
     @staticmethod
     def _parse_size_error_clauses(token_stream: ITokenStream, stmt: Any) -> None:
@@ -350,19 +340,8 @@ class SubtractStatementParser(IStatementParser):
                     stmt.set_giving(token.value)
                     token_stream.consume()
 
-        self._skip_to_period(token_stream)
+        skip_to_period(token_stream)
         return stmt
-
-    @staticmethod
-    def _skip_to_period(token_stream: ITokenStream) -> None:
-        """Skip tokens until period."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type == TokenType.PERIOD:
-                if token:
-                    token_stream.consume()
-                break
-            token_stream.consume()
 
 
 class MultiplyStatementParser(IStatementParser):
@@ -420,19 +399,8 @@ class MultiplyStatementParser(IStatementParser):
                 stmt.set_giving(token.value)
                 token_stream.consume()
 
-        self._skip_to_period(token_stream)
+        skip_to_period(token_stream)
         return stmt
-
-    @staticmethod
-    def _skip_to_period(token_stream: ITokenStream) -> None:
-        """Skip tokens until period."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type == TokenType.PERIOD:
-                if token:
-                    token_stream.consume()
-                break
-            token_stream.consume()
 
 
 class DivideStatementParser(IStatementParser):
@@ -492,19 +460,8 @@ class DivideStatementParser(IStatementParser):
                 stmt.set_giving(token.value)
                 token_stream.consume()
 
-        self._skip_to_period(token_stream)
+        skip_to_period(token_stream)
         return stmt
-
-    @staticmethod
-    def _skip_to_period(token_stream: ITokenStream) -> None:
-        """Skip tokens until period."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type == TokenType.PERIOD:
-                if token:
-                    token_stream.consume()
-                break
-            token_stream.consume()
 
 
 class ComputeStatementParser(IStatementParser):
@@ -582,14 +539,3 @@ class ComputeStatementParser(IStatementParser):
 
         AddStatementParser._parse_size_error_clauses(token_stream, stmt)
         return stmt
-
-    @staticmethod
-    def _skip_to_period(token_stream: ITokenStream) -> None:
-        """Skip tokens until period."""
-        while not token_stream.is_empty():
-            token = token_stream.peek()
-            if not token or token.type == TokenType.PERIOD:
-                if token:
-                    token_stream.consume()
-                break
-            token_stream.consume()

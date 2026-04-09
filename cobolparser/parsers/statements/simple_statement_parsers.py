@@ -23,20 +23,13 @@ from ...models.statements import (
 from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
     STATEMENT_KEYWORDS,
+    consume_period,
     skip_whitespace,
     try_parse_nested_statement,
 )
-
-
-def _token_value_upper(token: Any) -> str:
-    return token.value.upper() if token and token.value else ""
-
-
-def _consume_period(token_stream: ITokenStream) -> None:
-    if not token_stream.is_empty():
-        t = token_stream.peek()
-        if t and t.type == TokenType.PERIOD:
-            token_stream.consume()
+from ._utils import (
+    token_value_upper as _token_value_upper,
+)
 
 
 class ContinueStatementParser(IStatementParser):
@@ -61,7 +54,7 @@ class ContinueStatementParser(IStatementParser):
             start.location if hasattr(start, "location") else SourceLocation(0, 0)
         )
         skip_whitespace(token_stream)
-        _consume_period(token_stream)
+        consume_period(token_stream)
         return stmt
 
 
@@ -105,7 +98,7 @@ class ExitStatementParser(IStatementParser):
                 stmt.set_exit_type(exit_type)
 
         skip_whitespace(token_stream)
-        _consume_period(token_stream)
+        consume_period(token_stream)
         return stmt
 
 
@@ -145,7 +138,7 @@ class GobackStatementParser(IStatementParser):
                     stmt.set_returning_value(val_token.value or "")
 
         skip_whitespace(token_stream)
-        _consume_period(token_stream)
+        consume_period(token_stream)
         return stmt
 
 
@@ -219,7 +212,7 @@ class AlterStatementParser(IStatementParser):
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token or token.type == TokenType.PERIOD:
-                _consume_period(token_stream)
+                consume_period(token_stream)
                 break
 
             # Read from-paragraph
@@ -290,7 +283,7 @@ class GenerateStatementParser(IStatementParser):
             stmt.set_report_name(token.value or "")
 
         skip_whitespace(token_stream)
-        _consume_period(token_stream)
+        consume_period(token_stream)
         return stmt
 
 
@@ -339,7 +332,7 @@ class ReleaseStatementParser(IStatementParser):
                 stmt.set_from_source(src.value or "")
 
         skip_whitespace(token_stream)
-        _consume_period(token_stream)
+        consume_period(token_stream)
         return stmt
 
 

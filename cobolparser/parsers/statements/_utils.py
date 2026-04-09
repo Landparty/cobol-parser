@@ -124,7 +124,17 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Whitespace helpers
+# Token value helpers
+# ---------------------------------------------------------------------------
+
+
+def token_value_upper(token: Any) -> str:
+    """Return the upper-cased value of *token*, or ``""`` if unavailable."""
+    return token.value.upper() if token and token.value else ""
+
+
+# ---------------------------------------------------------------------------
+# Whitespace / period helpers
 # ---------------------------------------------------------------------------
 
 
@@ -138,6 +148,25 @@ def skip_whitespace(stream: ITokenStream) -> None:
             TokenType.NEWLINE,
             TokenType.CONTINUATION,
         ):
+            break
+        stream.consume()
+
+
+def consume_period(stream: ITokenStream) -> None:
+    """Consume a period token if it is the next non-empty token."""
+    if not stream.is_empty():
+        t = stream.peek()
+        if t and t.type == TokenType.PERIOD:
+            stream.consume()
+
+
+def skip_to_period(stream: ITokenStream) -> None:
+    """Skip (consume) tokens until a period is found, then consume it."""
+    while not stream.is_empty():
+        token = stream.peek()
+        if not token or token.type == TokenType.PERIOD:
+            if token:
+                stream.consume()
             break
         stream.consume()
 
@@ -171,6 +200,66 @@ def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
             break
         stream.consume()
     return []
+
+
+def parse_invalid_key_clauses(
+    stream: ITokenStream,
+    stmt: Any,
+    end_keyword: str,
+) -> None:
+    """Parse optional INVALID KEY / NOT INVALID KEY clauses.
+
+    Sets ``stmt.set_invalid_key_clause(...)`` and
+    ``stmt.set_not_invalid_key_clause(...)`` when the corresponding clauses
+    are present.  *end_keyword* is the scope terminator (e.g. ``"END-DELETE"``).
+    """
+    # INVALID KEY
+    token = stream.peek()
+    if token and token.type == TokenType.INVALID:
+        stream.consume()
+        skip_whitespace(stream)
+        token = stream.peek()
+        if token and token.type == TokenType.KEY:
+            stream.consume()
+            skip_whitespace(stream)
+        clause_stmts = collect_clause_stmts(stream, {end_keyword})
+        stmt.set_invalid_key_clause(clause_stmts)
+
+    # NOT INVALID KEY
+    token = stream.peek()
+    if token and token.type == TokenType.NOT:
+        stream.consume()
+        skip_whitespace(stream)
+        token = stream.peek()
+        if token and token.type == TokenType.INVALID:
+            stream.consume()
+            skip_whitespace(stream)
+            token = stream.peek()
+            if token and token.type == TokenType.KEY:
+                stream.consume()
+                skip_whitespace(stream)
+            clause_stmts = collect_clause_stmts(stream, {end_keyword})
+            stmt.set_not_invalid_key_clause(clause_stmts)
+
+
+def consume_end_keyword_and_period(
+    stream: ITokenStream,
+    end_keyword: str,
+) -> None:
+    """Consume an optional END-xxx scope terminator followed by a period."""
+    skip_whitespace(stream)
+    token = stream.peek()
+    if (
+        token
+        and token.type == TokenType.IDENTIFIER
+        and token.value
+        and token.value.upper() == end_keyword
+    ):
+        stream.consume()
+        skip_whitespace(stream)
+    token = stream.peek()
+    if token and token.type == TokenType.PERIOD:
+        stream.consume()
 
 
 # ---------------------------------------------------------------------------
