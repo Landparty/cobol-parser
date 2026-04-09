@@ -160,9 +160,7 @@ class TestCLIErrorHandling:
                 os.unlink(f.name)
 
     def test_empty_file(self):
-        with tempfile.NamedTemporaryFile(
-            suffix=".cbl", mode="w", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
             f.write("")
             f.flush()
             try:
@@ -250,9 +248,7 @@ class TestCLISectionNavigation:
         assert output["paragraph_name"] == "IF-TESTS"
 
     def test_statement_filter_on_paragraph(self):
-        output = _run_cli_json(
-            CONTROL_FLOW_FILE, "procedure.GOTO-TARGET.display"
-        )
+        output = _run_cli_json(CONTROL_FLOW_FILE, "procedure.GOTO-TARGET.display")
         assert isinstance(output, list)
         assert len(output) > 0
         for stmt in output:

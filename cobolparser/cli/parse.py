@@ -77,10 +77,7 @@ def _resolve_path(
     division = program.get_division(div_name)
     if division is None:
         available = [d.division_name for d in program.divisions]
-        _fail(
-            f"Division {parts[0]!r} not found. "
-            f"Available: {', '.join(available)}"
-        )
+        _fail(f"Division {parts[0]!r} not found. " f"Available: {', '.join(available)}")
 
     if len(parts) == 1:
         return division.to_dict()
@@ -127,10 +124,7 @@ def _resolve_path(
             para_names = [p.paragraph_name for p in node.paragraphs]
             hints.append(f"paragraphs: {', '.join(para_names)}")
         hint_str = "; ".join(hints) if hints else "(none)"
-        _fail(
-            f"No {parts[2]!r} found in {parts[1]!r}. "
-            f"Available: {hint_str}"
-        )
+        _fail(f"No {parts[2]!r} found in {parts[1]!r}. " f"Available: {hint_str}")
     return [s.to_dict() for s in matched]
 
 
@@ -178,9 +172,7 @@ def main() -> None:
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
-        _fail(
-            f"Parse failed for {args.file}\n" + "\n".join(error_lines)
-        )
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
 
     # Resolve path or output full AST
     if args.path:
