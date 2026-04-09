@@ -14,6 +14,10 @@ SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "..", "samples")
 SAMPLE_FILE = os.path.join(SAMPLE_DIR, "simple_calculation.cbl")
 DECLARATIVES_FILE = os.path.join(SAMPLE_DIR, "declaratives_section.cbl")
 CONTROL_FLOW_FILE = os.path.join(SAMPLE_DIR, "control_flow.cbl")
+COPYBOOK_PROGRAM_FILE = os.path.abspath(
+    os.path.join(SAMPLE_DIR, "copybook_programs", "basic_copy.cbl")
+)
+COPYBOOK_DIR = os.path.abspath(os.path.join(SAMPLE_DIR, "copybooks"))
 
 
 def _run_cli(*args: str) -> str:
@@ -253,3 +257,330 @@ class TestCLISectionNavigation:
         assert len(output) > 0
         for stmt in output:
             assert stmt["statement_type"] == "DISPLAY"
+
+
+class TestCLISubcommandDispatch:
+    """Test backward compatibility and explicit subcommand dispatch."""
+
+    def test_implicit_parse_backward_compat(self):
+        """No subcommand given → should still parse."""
+        output = _run_cli_json(SAMPLE_FILE)
+        assert output["node_type"] == "Program"
+
+    def test_explicit_parse_subcommand(self):
+        """Explicit 'parse' subcommand produces same output."""
+        output = _run_cli_json("parse", SAMPLE_FILE)
+        assert output["node_type"] == "Program"
+        assert output["program_name"] == "CALC-DEMO"
+
+    def test_explicit_parse_with_path(self):
+        output = _run_cli_json("parse", SAMPLE_FILE, "procedure")
+        assert output["division_name"] == "PROCEDURE"
+
+    def test_explicit_parse_with_flags(self):
+        output = _run_cli_json("parse", SAMPLE_FILE, "--errors", "--stats")
+        assert "ast" in output
+        assert "errors" in output
+        assert "statistics" in output
+
+
+class TestCLIParseNewFlags:
+    """Test new flags on the parse subcommand."""
+
+    def test_error_recovery_fail_fast(self):
+        output = _run_cli_json(SAMPLE_FILE, "--error-recovery", "fail-fast")
+        assert output["node_type"] == "Program"
+
+    def test_error_recovery_collect_all(self):
+        output = _run_cli_json(SAMPLE_FILE, "--error-recovery", "collect-all")
+        assert output["node_type"] == "Program"
+
+    def test_find_type_display(self):
+        output = _run_cli_json(SAMPLE_FILE, "--find-type", "DisplayStatement")
+        assert isinstance(output, list)
+        for node in output:
+            assert node["statement_type"] == "DISPLAY"
+
+    def test_find_type_no_matches(self):
+        output = _run_cli_json(SAMPLE_FILE, "--find-type", "NonexistentType")
+        assert isinstance(output, list)
+        assert len(output) == 0
+
+    def test_find_type_with_compact(self):
+        raw = _run_cli(
+            "parse", SAMPLE_FILE, "--find-type", "DisplayStatement", "--compact"
+        ).strip()
+        assert "\n" not in raw
+        output = json.loads(raw)
+        assert isinstance(output, list)
+
+    def test_copybook_path_flag(self):
+        output = _run_cli_json(
+            "parse",
+            COPYBOOK_PROGRAM_FILE,
+            "--copybook-path",
+            COPYBOOK_DIR,
+        )
+        assert output["node_type"] == "Program"
+
+    def test_define_flag(self):
+        with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
+            f.write(
+                "       IDENTIFICATION DIVISION.\n"
+                "       PROGRAM-ID. TESTDEF.\n"
+                "       PROCEDURE DIVISION.\n"
+                "       MAIN-LOGIC.\n"
+                ">>IF DEBUG IS DEFINED\n"
+                "           DISPLAY 'DEBUG MODE'.\n"
+                ">>END-IF\n"
+                "           STOP RUN.\n"
+            )
+            f.flush()
+            try:
+                output = _run_cli_json("parse", f.name, "--define", "DEBUG")
+                assert output["node_type"] == "Program"
+            finally:
+                os.unlink(f.name)
+
+    def test_define_with_value(self):
+        with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
+            f.write(
+                "       IDENTIFICATION DIVISION.\n"
+                "       PROGRAM-ID. TESTDEF.\n"
+                "       PROCEDURE DIVISION.\n"
+                "       MAIN-LOGIC.\n"
+                "           STOP RUN.\n"
+            )
+            f.flush()
+            try:
+                output = _run_cli_json("parse", f.name, "--define", "ENV=PROD")
+                assert output["node_type"] == "Program"
+            finally:
+                os.unlink(f.name)
+
+
+class TestCLIBatch:
+    """Test the batch subcommand."""
+
+    def test_batch_two_files(self):
+        output = _run_cli_json("batch", SAMPLE_FILE, CONTROL_FLOW_FILE)
+        assert isinstance(output, list)
+        assert len(output) == 2
+        assert output[0]["path"].endswith("simple_calculation.cbl")
+        assert output[1]["path"].endswith("control_flow.cbl")
+        assert output[0]["success"] is True
+        assert output[1]["success"] is True
+
+    def test_batch_with_ast(self):
+        output = _run_cli_json("batch", SAMPLE_FILE)
+        assert len(output) == 1
+        assert "ast" in output[0]
+        assert output[0]["ast"]["node_type"] == "Program"
+
+    def test_batch_compact(self):
+        raw = _run_cli("batch", SAMPLE_FILE, "--compact").strip()
+        assert "\n" not in raw
+        output = json.loads(raw)
+        assert isinstance(output, list)
+
+    def test_batch_with_errors_flag(self):
+        output = _run_cli_json("batch", SAMPLE_FILE, "--errors")
+        assert "errors" in output[0]
+        assert "warnings" in output[0]
+
+    def test_batch_with_stats_flag(self):
+        output = _run_cli_json("batch", SAMPLE_FILE, "--stats")
+        assert "statistics" in output[0]
+        assert "lines_processed" in output[0]["statistics"]
+
+    def test_batch_with_workers(self):
+        output = _run_cli_json(
+            "batch", SAMPLE_FILE, CONTROL_FLOW_FILE, "--workers", "1"
+        )
+        assert len(output) == 2
+
+    def test_batch_nonexistent_file(self):
+        output = _run_cli_json("batch", "/nonexistent/file.cbl")
+        assert len(output) == 1
+        assert "read_error" in output[0]
+
+    def test_batch_error_recovery_flag(self):
+        output = _run_cli_json("batch", SAMPLE_FILE, "--error-recovery", "fail-fast")
+        assert isinstance(output, list)
+
+
+class TestCLITokenize:
+    """Test the tokenize subcommand."""
+
+    def test_tokenize_outputs_json_array(self):
+        output = _run_cli_json("tokenize", SAMPLE_FILE)
+        assert isinstance(output, list)
+        assert len(output) > 0
+
+    def test_tokenize_token_structure(self):
+        output = _run_cli_json("tokenize", SAMPLE_FILE)
+        token = output[0]
+        assert "type" in token
+        assert "value" in token
+        assert "line" in token
+        assert "column" in token
+
+    def test_tokenize_compact(self):
+        raw = _run_cli("tokenize", SAMPLE_FILE, "--compact").strip()
+        assert "\n" not in raw
+        output = json.loads(raw)
+        assert isinstance(output, list)
+
+    def test_tokenize_free_form(self):
+        output = _run_cli_json("tokenize", SAMPLE_FILE, "--free-form")
+        assert isinstance(output, list)
+
+    def test_tokenize_file_not_found(self):
+        assert _run_cli_expect_fail("tokenize", "/nonexistent/file.cbl") == 1
+
+    def test_tokenize_has_expected_types(self):
+        output = _run_cli_json("tokenize", SAMPLE_FILE)
+        types = {t["type"] for t in output}
+        # Should have at least identifiers and periods
+        assert "IDENTIFIER" in types or "PERIOD" in types
+
+
+class TestCLIPreprocess:
+    """Test the preprocess subcommand."""
+
+    def test_preprocess_fixed_format(self):
+        raw = _run_cli("preprocess", SAMPLE_FILE)
+        assert "IDENTIFICATION DIVISION" in raw
+        assert "PROGRAM-ID" in raw
+
+    def test_preprocess_free_form_passthrough(self):
+        raw = _run_cli("preprocess", SAMPLE_FILE, "--free-form")
+        # With --free-form, no normalization is applied
+        assert len(raw) > 0
+
+    def test_preprocess_strip_directives(self):
+        with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
+            f.write(
+                "       PROCESS APOST\n"
+                "       IDENTIFICATION DIVISION.\n"
+                "       PROGRAM-ID. TESTPROG.\n"
+            )
+            f.flush()
+            try:
+                raw = _run_cli("preprocess", f.name, "--strip-directives")
+                assert "PROCESS" not in raw
+                assert "IDENTIFICATION" in raw
+            finally:
+                os.unlink(f.name)
+
+    def test_preprocess_with_define(self):
+        with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
+            f.write(
+                ">>DEFINE TESTVAR\n"
+                ">>IF TESTVAR IS DEFINED\n"
+                "       IDENTIFICATION DIVISION.\n"
+                ">>END-IF\n"
+                "       PROGRAM-ID. CONDPROG.\n"
+            )
+            f.flush()
+            try:
+                raw = _run_cli("preprocess", f.name, "--free-form")
+                assert "IDENTIFICATION" in raw
+            finally:
+                os.unlink(f.name)
+
+    def test_preprocess_with_external_define(self):
+        with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
+            f.write(
+                ">>IF MYVAR IS DEFINED\n"
+                "       IDENTIFICATION DIVISION.\n"
+                ">>END-IF\n"
+                "       PROGRAM-ID. CONDPROG.\n"
+            )
+            f.flush()
+            try:
+                raw = _run_cli("preprocess", f.name, "--define", "MYVAR", "--free-form")
+                assert "IDENTIFICATION" in raw
+            finally:
+                os.unlink(f.name)
+
+    def test_preprocess_file_not_found(self):
+        assert _run_cli_expect_fail("preprocess", "/nonexistent/file.cbl") == 1
+
+
+class TestCLIExpand:
+    """Test the expand subcommand."""
+
+    def test_expand_basic(self):
+        output = _run_cli_json(
+            "expand",
+            COPYBOOK_PROGRAM_FILE,
+            "--copybook-path",
+            COPYBOOK_DIR,
+        )
+        assert "expanded_source" in output
+        assert "included_copybooks" in output
+        assert "statistics" in output
+
+    def test_expand_includes_copybooks(self):
+        output = _run_cli_json(
+            "expand",
+            COPYBOOK_PROGRAM_FILE,
+            "--copybook-path",
+            COPYBOOK_DIR,
+        )
+        assert len(output["included_copybooks"]) > 0
+
+    def test_expand_compact(self):
+        raw = _run_cli(
+            "expand",
+            COPYBOOK_PROGRAM_FILE,
+            "--copybook-path",
+            COPYBOOK_DIR,
+            "--compact",
+        ).strip()
+        assert "\n" not in raw
+        output = json.loads(raw)
+        assert "expanded_source" in output
+
+    def test_expand_max_depth(self):
+        output = _run_cli_json(
+            "expand",
+            COPYBOOK_PROGRAM_FILE,
+            "--copybook-path",
+            COPYBOOK_DIR,
+            "--max-depth",
+            "50",
+        )
+        assert "expanded_source" in output
+
+    def test_expand_no_copybook_path_on_file_without_copy(self):
+        # Without --copybook-path, expand works on files without COPY statements
+        output = _run_cli_json("expand", SAMPLE_FILE)
+        assert "expanded_source" in output
+
+    def test_expand_file_not_found(self):
+        assert _run_cli_expect_fail("expand", "/nonexistent/file.cbl") == 1
+
+
+class TestCLIAnalyze:
+    """Test the analyze subcommand."""
+
+    def test_analyze_basic(self):
+        output = _run_cli_json("analyze", SAMPLE_FILE)
+        assert "calls" in output
+        assert isinstance(output["calls"], list)
+
+    def test_analyze_compact(self):
+        raw = _run_cli("analyze", SAMPLE_FILE, "--compact").strip()
+        assert "\n" not in raw
+        output = json.loads(raw)
+        assert "calls" in output
+
+    def test_analyze_with_call_statements(self):
+        # Use control_flow.cbl which may have CALL statements
+        output = _run_cli_json("analyze", CONTROL_FLOW_FILE)
+        assert "calls" in output
+
+    def test_analyze_file_not_found(self):
+        assert _run_cli_expect_fail("analyze", "/nonexistent/file.cbl") == 1
