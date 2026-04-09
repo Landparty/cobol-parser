@@ -350,9 +350,7 @@ class TestNestedProcedureDivisionCopybooks:
         assert "Outer copybook end" in result.expanded_source
 
         # Both copybooks must appear in included list
-        included_names = [
-            Path(p).stem for p in result.included_copybooks
-        ]
+        included_names = [Path(p).stem for p in result.included_copybooks]
         assert "PROC-NESTED-OUTER" in included_names
         assert "PROC-NESTED-INNER" in included_names
 
@@ -417,7 +415,8 @@ class TestNestedProcedureDivisionCopybooks:
 
         # --- Verify MOVE from outer copybook ---
         move_stmts = [
-            stmt for stmt in all_statements
+            stmt
+            for stmt in all_statements
             if getattr(stmt, "statement_type", None) == "MOVE"
         ]
         assert len(move_stmts) >= 2, (
@@ -425,9 +424,7 @@ class TestNestedProcedureDivisionCopybooks:
             f"(outer + inner), found {len(move_stmts)}"
         )
         # Check specific MOVE sources if available
-        move_sources = [
-            getattr(stmt, "source", None) for stmt in move_stmts
-        ]
+        move_sources = [getattr(stmt, "source", None) for stmt in move_stmts]
         assert any(
             s and "OUTER-START" in s for s in move_sources
         ), f"MOVE from outer copybook not found. Sources: {move_sources}"
@@ -437,9 +434,7 @@ class TestNestedProcedureDivisionCopybooks:
 
         # Check MOVE targets include WS-STATUS
         move_targets = [
-            target
-            for stmt in move_stmts
-            for target in getattr(stmt, "targets", [])
+            target for stmt in move_stmts for target in getattr(stmt, "targets", [])
         ]
         assert any(
             "WS-STATUS" in t for t in move_targets
@@ -447,14 +442,14 @@ class TestNestedProcedureDivisionCopybooks:
 
         # --- Verify ADD from inner copybook ---
         add_count = statement_types.count("ADD")
-        assert add_count >= 1, (
-            f"Expected at least 1 ADD statement from inner copybook, found {add_count}"
-        )
+        assert (
+            add_count >= 1
+        ), f"Expected at least 1 ADD statement from inner copybook, found {add_count}"
 
         # --- Verify STOP RUN is still present ---
-        assert "STOP" in statement_types, (
-            f"STOP RUN missing from AST. Found types: {statement_types}"
-        )
+        assert (
+            "STOP" in statement_types
+        ), f"STOP RUN missing from AST. Found types: {statement_types}"
 
     def test_three_level_nested_procedure_copybook(self):
         """Test 3-level deep nested COPY in PROCEDURE DIVISION.
@@ -483,17 +478,13 @@ class TestNestedProcedureDivisionCopybooks:
         assert "Level 3 reached" in exp_result.expanded_source
         assert exp_result.max_depth_reached >= 3
 
-        included_names = [
-            Path(p).stem for p in exp_result.included_copybooks
-        ]
+        included_names = [Path(p).stem for p in exp_result.included_copybooks]
         assert "PROC-DEEP-L1" in included_names
         assert "PROC-DEEP-L2" in included_names
         assert "PROC-DEEP-L3" in included_names
 
         # Now verify parsing
-        result = parse_cobol_with_expansion(
-            source, "deep_proc.cbl", [str(samples_dir)]
-        )
+        result = parse_cobol_with_expansion(source, "deep_proc.cbl", [str(samples_dir)])
         assert result is not None
         assert result.success, f"Parsing failed: {result.errors}"
 
@@ -513,16 +504,15 @@ class TestNestedProcedureDivisionCopybooks:
 
         # MOVEs from L1 and L3
         move_stmts = [
-            stmt for stmt in all_statements
+            stmt
+            for stmt in all_statements
             if getattr(stmt, "statement_type", None) == "MOVE"
         ]
         assert len(move_stmts) >= 2, (
             f"Expected at least 2 MOVE statements from L1 and L3, "
             f"found {len(move_stmts)}"
         )
-        move_sources = [
-            getattr(stmt, "source", None) for stmt in move_stmts
-        ]
+        move_sources = [getattr(stmt, "source", None) for stmt in move_stmts]
         assert any(
             s and "L1-COMPLETE" in s for s in move_sources
         ), f"MOVE from L1 not found. Sources: {move_sources}"
@@ -531,9 +521,9 @@ class TestNestedProcedureDivisionCopybooks:
         ), f"MOVE from L3 not found. Sources: {move_sources}"
 
         # ADD from L2
-        assert "ADD" in statement_types, (
-            f"ADD statement from L2 not found. Types: {statement_types}"
-        )
+        assert (
+            "ADD" in statement_types
+        ), f"ADD statement from L2 not found. Types: {statement_types}"
 
     def test_nested_procedure_copybook_with_data_copybook(self):
         """Test nested COPY in PROCEDURE DIVISION alongside DATA DIVISION COPY."""
@@ -575,14 +565,14 @@ class TestNestedProcedureDivisionCopybooks:
         ]
 
         # Inner copybook's ADD must be present
-        assert "ADD" in statement_types, (
-            f"ADD from inner copybook not found. Types: {statement_types}"
-        )
+        assert (
+            "ADD" in statement_types
+        ), f"ADD from inner copybook not found. Types: {statement_types}"
         # Both copybooks' MOVEs must be present
         move_count = statement_types.count("MOVE")
-        assert move_count >= 2, (
-            f"Expected at least 2 MOVE from nested copybooks, found {move_count}"
-        )
+        assert (
+            move_count >= 2
+        ), f"Expected at least 2 MOVE from nested copybooks, found {move_count}"
 
     def test_procedure_copybook_preserves_statement_order(self):
         """Verify expanded copybook statements appear in correct order in AST."""
@@ -619,26 +609,23 @@ class TestNestedProcedureDivisionCopybooks:
                     display_items.append(items[0])
 
         # Verify ordering: FIRST, then outer-start, then inner, then outer-end, then LAST
-        assert len(display_items) >= 5, (
-            f"Expected at least 5 DISPLAY items, got {len(display_items)}: {display_items}"
-        )
+        assert (
+            len(display_items) >= 5
+        ), f"Expected at least 5 DISPLAY items, got {len(display_items)}: {display_items}"
 
         # Find positions of key markers
-        first_idx = next(
-            (i for i, d in enumerate(display_items) if "FIRST" in d), -1
-        )
+        first_idx = next((i for i, d in enumerate(display_items) if "FIRST" in d), -1)
         outer_start_idx = next(
             (i for i, d in enumerate(display_items) if "Outer copybook start" in d), -1
         )
         inner_idx = next(
-            (i for i, d in enumerate(display_items) if "Inner copybook executed" in d), -1
+            (i for i, d in enumerate(display_items) if "Inner copybook executed" in d),
+            -1,
         )
         outer_end_idx = next(
             (i for i, d in enumerate(display_items) if "Outer copybook end" in d), -1
         )
-        last_idx = next(
-            (i for i, d in enumerate(display_items) if "LAST" in d), -1
-        )
+        last_idx = next((i for i, d in enumerate(display_items) if "LAST" in d), -1)
 
         assert first_idx != -1, f"FIRST not found in displays: {display_items}"
         assert outer_start_idx != -1, f"Outer start not found: {display_items}"
