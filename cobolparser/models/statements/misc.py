@@ -371,14 +371,10 @@ class ReturnStatement(CobolStatement):
         self.into_target = target
 
     def set_at_end_clause(self, statements: list["CobolStatement"]) -> None:
-        self.at_end_clause = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("at_end_clause", statements)
 
     def set_not_at_end_clause(self, statements: list["CobolStatement"]) -> None:
-        self.not_at_end_clause = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("not_at_end_clause", statements)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()

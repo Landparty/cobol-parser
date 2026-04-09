@@ -102,14 +102,10 @@ class StringStatement(CobolStatement):
         self.delimiters.append(delimiter)
 
     def set_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
-        self.on_overflow = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("on_overflow", statements)
 
     def set_not_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
-        self.not_on_overflow = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("not_on_overflow", statements)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -167,14 +163,10 @@ class UnstringStatement(CobolStatement):
         self.pointer_variable = variable
 
     def set_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
-        self.on_overflow = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("on_overflow", statements)
 
     def set_not_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
-        self.not_on_overflow = statements
-        for stmt in statements:
-            self.add_child(stmt)
+        self._set_clause("not_on_overflow", statements)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()

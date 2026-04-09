@@ -23,6 +23,35 @@ from cobolparser.models.program import CobolDivision, CobolSection
 
 from .base import BaseDivisionParser
 
+# Constants for COMP/COMPUTATIONAL usage keywords and token types.
+# These appear in multiple parsing methods; keeping them in one place avoids
+# duplication and makes adding new variants trivial.
+_COMP_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "COMP",
+        "COMP-1",
+        "COMP-2",
+        "COMP-3",
+        "COMP-4",
+        "COMP-5",
+        "COMPUTATIONAL",
+        "COMPUTATIONAL-1",
+        "COMPUTATIONAL-2",
+        "COMPUTATIONAL-3",
+        "BINARY",
+    }
+)
+
+_COMP_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.COMP_1,
+        TokenType.COMP_2,
+        TokenType.COMP_3,
+        TokenType.COMP_4,
+        TokenType.COMP_5,
+    }
+)
+
 
 class DataDivisionParser(BaseDivisionParser):
     """Parser for COBOL Data Division.
@@ -352,30 +381,12 @@ class DataDivisionParser(BaseDivisionParser):
                     data_item.set_usage(usage)
 
             # COMP, COMP-3, etc. without USAGE keyword
-            elif token.value and token.value.upper() in [
-                "COMP",
-                "COMP-1",
-                "COMP-2",
-                "COMP-3",
-                "COMP-4",
-                "COMP-5",
-                "COMPUTATIONAL",
-                "COMPUTATIONAL-1",
-                "COMPUTATIONAL-2",
-                "COMPUTATIONAL-3",
-                "BINARY",
-            ]:
+            elif token.value and token.value.upper() in _COMP_KEYWORDS:
                 data_item.set_usage(token.value.upper())
                 token_stream.consume()
 
             # Also check for COMP token types (COMP_1, COMP_2, COMP_3, etc.)
-            elif token.type in [
-                TokenType.COMP_1,
-                TokenType.COMP_2,
-                TokenType.COMP_3,
-                TokenType.COMP_4,
-                TokenType.COMP_5,
-            ]:
+            elif token.type in _COMP_TOKEN_TYPES:
                 data_item.set_usage(token.value.upper())
                 token_stream.consume()
 
@@ -643,32 +654,12 @@ class DataDivisionParser(BaseDivisionParser):
                 if token.type == TokenType.PERIOD:
                     break
                 # Stop at keywords that follow picture clause
-                if token.value and token.value.upper() in [
-                    "VALUE",
-                    "USAGE",
-                    "OCCURS",
-                    "REDEFINES",
-                    "COMP",
-                    "COMP-1",
-                    "COMP-2",
-                    "COMP-3",
-                    "COMP-4",
-                    "COMP-5",
-                    "COMPUTATIONAL",
-                    "COMPUTATIONAL-1",
-                    "COMPUTATIONAL-2",
-                    "COMPUTATIONAL-3",
-                    "BINARY",
-                ]:
+                if token.value and token.value.upper() in (
+                    _COMP_KEYWORDS | {"VALUE", "USAGE", "OCCURS", "REDEFINES"}
+                ):
                     break
                 # Also stop at COMP token types
-                if token.type in [
-                    TokenType.COMP_1,
-                    TokenType.COMP_2,
-                    TokenType.COMP_3,
-                    TokenType.COMP_4,
-                    TokenType.COMP_5,
-                ]:
+                if token.type in _COMP_TOKEN_TYPES:
                     break
 
             # Collect picture pattern tokens
@@ -743,13 +734,7 @@ class DataDivisionParser(BaseDivisionParser):
             return None
 
         # Check for COMP token types first (COMP_1, COMP_2, etc.)
-        if token.type in [
-            TokenType.COMP_1,
-            TokenType.COMP_2,
-            TokenType.COMP_3,
-            TokenType.COMP_4,
-            TokenType.COMP_5,
-        ]:
+        if token.type in _COMP_TOKEN_TYPES:
             usage = token.value.upper()
             token_stream.consume()
             return usage
@@ -761,19 +746,7 @@ class DataDivisionParser(BaseDivisionParser):
             return usage
 
         # Check for COMP variations that are tokenized differently
-        if token.value and token.value.upper() in [
-            "COMP",
-            "COMP-1",
-            "COMP-2",
-            "COMP-3",
-            "COMP-4",
-            "COMP-5",
-            "COMPUTATIONAL",
-            "COMPUTATIONAL-1",
-            "COMPUTATIONAL-2",
-            "COMPUTATIONAL-3",
-            "BINARY",
-        ]:
+        if token.value and token.value.upper() in _COMP_KEYWORDS:
             usage = token.value.upper()
             token_stream.consume()
             return usage

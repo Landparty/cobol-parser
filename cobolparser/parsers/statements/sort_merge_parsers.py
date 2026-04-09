@@ -7,17 +7,7 @@ from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import MergeStatement, SortStatement
 from ._utils import skip_whitespace
-
-
-def _val(token: Any) -> str:
-    return token.value.upper() if token and token.value else ""
-
-
-def _consume_period(ts: ITokenStream) -> None:
-    if not ts.is_empty():
-        t = ts.peek()
-        if t and t.type == TokenType.PERIOD:
-            ts.consume()
+from ._utils import token_value_upper as _val
 
 
 def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:

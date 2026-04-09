@@ -34,6 +34,12 @@ class CobolStatement(ASTNode):
         """Add an operand to the statement."""
         self.operands.append(operand)
 
+    def _set_clause(self, attr: str, statements: list["CobolStatement"]) -> None:
+        """Set a clause attribute and register its statements as children."""
+        setattr(self, attr, statements)
+        for stmt in statements:
+            self.add_child(stmt)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert statement to dictionary representation."""
         return {
