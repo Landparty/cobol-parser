@@ -3,8 +3,6 @@
 Targets missing branch coverage across both parser modules.
 """
 
-import pytest
-
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements.data import StringStatement, UnstringStatement
 from cobolparser.models.statements.misc import (
@@ -668,9 +666,7 @@ class TestUseStatementParser:
 
     def test_use_after_exception_on_file(self):
         """USE AFTER EXCEPTION PROCEDURE ON file-name."""
-        src = _make_source(
-            "           USE AFTER EXCEPTION PROCEDURE ON WS-TARGET.\n"
-        )
+        src = _make_source("           USE AFTER EXCEPTION PROCEDURE ON WS-TARGET.\n")
         result = _parse(src)
         stmt = _find_stmt(result, UseStatement)
         assert stmt is not None
@@ -680,9 +676,7 @@ class TestUseStatementParser:
 
     def test_use_after_error(self):
         """USE AFTER ERROR PROCEDURE ON OUTPUT."""
-        src = _make_source(
-            "           USE AFTER ERROR PROCEDURE ON OUTPUT.\n"
-        )
+        src = _make_source("           USE AFTER ERROR PROCEDURE ON OUTPUT.\n")
         result = _parse(src)
         stmt = _find_stmt(result, UseStatement)
         assert stmt is not None
@@ -691,9 +685,7 @@ class TestUseStatementParser:
 
     def test_use_debugging(self):
         """USE AFTER DEBUGGING ON identifier."""
-        src = _make_source(
-            "           USE AFTER DEBUGGING ON WS-TARGET.\n"
-        )
+        src = _make_source("           USE AFTER DEBUGGING ON WS-TARGET.\n")
         result = _parse(src)
         stmt = _find_stmt(result, UseStatement)
         assert stmt is not None
@@ -701,9 +693,7 @@ class TestUseStatementParser:
 
     def test_use_after_exception_on_io(self):
         """USE AFTER EXCEPTION PROCEDURE ON I-O."""
-        src = _make_source(
-            "           USE AFTER EXCEPTION PROCEDURE ON I-O.\n"
-        )
+        src = _make_source("           USE AFTER EXCEPTION PROCEDURE ON I-O.\n")
         result = _parse(src)
         stmt = _find_stmt(result, UseStatement)
         assert stmt is not None
@@ -712,9 +702,7 @@ class TestUseStatementParser:
 
     def test_use_after_exception_on_extend(self):
         """USE AFTER EXCEPTION PROCEDURE ON EXTEND."""
-        src = _make_source(
-            "           USE AFTER EXCEPTION PROCEDURE ON EXTEND.\n"
-        )
+        src = _make_source("           USE AFTER EXCEPTION PROCEDURE ON EXTEND.\n")
         result = _parse(src)
         stmt = _find_stmt(result, UseStatement)
         assert stmt is not None
