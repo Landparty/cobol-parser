@@ -73,7 +73,6 @@ from .analysis import (
     TestPlan,
     TestPlanGenerator,
 )
-from .generators import CobolCheckGenerator
 from .batch import (
     BatchResult,
     parse_files,
@@ -81,6 +80,7 @@ from .batch import (
 from .dialects import (
     IBMEnterpriseCobol,
 )
+from .generators import CobolCheckGenerator
 from .lexer import (
     CobolLexer,
     LexerError,
@@ -179,10 +179,13 @@ def generate_cobolcheck_tests(
         errors = "; ".join(str(e) for e in result.errors)
         raise ValueError(f"Failed to parse COBOL source: {errors}")
 
-    analyzer = CoverageAnalyzer()  # type: ignore[operator]
+    from .analysis.coverage_analyzer import CoverageAnalyzer as _CoverageAnalyzer
+    from .analysis.test_plan import TestPlanGenerator as _TestPlanGenerator
+
+    analyzer = _CoverageAnalyzer()
     coverage_map = analyzer.analyze(result.ast)
 
-    planner = TestPlanGenerator(strategies=strategies)  # type: ignore[operator]
+    planner = _TestPlanGenerator(strategies=strategies)
     test_plan = planner.generate(coverage_map)
 
     generator = CobolCheckGenerator()

@@ -68,7 +68,7 @@ class BranchType(StrEnum):
 class BranchPoint:
     """A single branch within a statement that needs testing."""
 
-    branch_type: str
+    branch_type: BranchType
     parent_statement_type: str
     paragraph_name: str
     condition_text: str | None = None
@@ -494,15 +494,17 @@ class CoverageAnalyzer:
         reads: set[str] = set()
 
         if isinstance(statement, MoveStatement):
-            if statement.source:
+            if statement.source and self._is_variable_name(statement.source):
                 reads.add(statement.source.upper())
         elif isinstance(statement, DisplayStatement):
             for item in statement.display_items:
-                reads.add(item.upper())
+                if self._is_variable_name(item):
+                    reads.add(item.upper())
         elif isinstance(statement, (ArithmeticStatement, ComputeStatement)):
             # Operands minus last one (which is typically the target)
             for op in statement.operands:
-                reads.add(op.upper())
+                if self._is_variable_name(op):
+                    reads.add(op.upper())
         elif isinstance(statement, CallStatement):
             for param in statement.using_parameters:
                 reads.add(param.name.upper())
@@ -522,6 +524,27 @@ class CoverageAnalyzer:
                 reads.add(op.upper())
 
         return reads
+
+    @staticmethod
+    def _is_variable_name(value: str) -> bool:
+        """Return True if the value looks like a COBOL variable name.
+
+        Filters out quoted string literals and numeric literals so they
+        don't pollute the reads_variables set.
+        """
+        stripped = value.strip()
+        if not stripped:
+            return False
+        # Quoted strings
+        if (stripped.startswith('"') and stripped.endswith('"')) or (
+            stripped.startswith("'") and stripped.endswith("'")
+        ):
+            return False
+        # Numeric literals (with optional sign and decimal point)
+        numeric = stripped.lstrip("+-")
+        if numeric and numeric.replace(".", "", 1).isdigit():
+            return False
+        return True
 
     def _collect_variable_writes(self, statement: ASTNode) -> set[str]:
         """Collect variables written by a statement (best-effort)."""

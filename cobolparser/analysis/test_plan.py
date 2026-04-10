@@ -368,9 +368,7 @@ class TestPlanGenerator:
             BranchType.STRING_NOT_ON_OVERFLOW: "NOT ON OVERFLOW",
             BranchType.PERFORM_BODY: "PERFORM body",
         }
-        label = type_labels.get(
-            bp.branch_type, bp.branch_type  # type: ignore[call-overload]
-        )
+        label = type_labels.get(bp.branch_type, bp.branch_type.value)
         name = f"Should take {label} in {bp.paragraph_name}"
         return self._sanitize_test_name(name)
 

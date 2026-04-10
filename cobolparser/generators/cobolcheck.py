@@ -14,8 +14,9 @@ from ..analysis.test_plan import (
     TestSuite,
 )
 
-# Figurative constants that should not be quoted
-_FIGURATIVE_CONSTANTS = frozenset(
+# Values that should not be quoted in MOVE/EXPECT statements.
+# Includes COBOL figurative constants and CobolCheck keywords like NUMERIC.
+_UNQUOTED_VALUES = frozenset(
     {
         "ZERO",
         "ZEROS",
@@ -131,8 +132,8 @@ class CobolCheckGenerator:
         """Format a value for use in COBOL MOVE/EXPECT statements."""
         upper = value.upper().strip()
 
-        # Figurative constants pass through unquoted
-        if upper in _FIGURATIVE_CONSTANTS:
+        # Figurative constants and keywords pass through unquoted
+        if upper in _UNQUOTED_VALUES:
             return upper
 
         # Numeric literals pass through unquoted
