@@ -123,13 +123,15 @@ class WriteStatementParser(IStatementParser):
                     skip_whitespace(token_stream)
 
                 # Consume optional LINES / LINE / PAGE
+                # Lexer emits TokenType.LINES for "LINES" and TokenType.LINE for "LINE";
+                # PAGE has no dedicated token type so it arrives as IDENTIFIER.
                 token = token_stream.peek()
                 if token and (
-                    token.type == TokenType.LINES
+                    token.type in (TokenType.LINES, TokenType.LINE)
                     or (
                         token.type == TokenType.IDENTIFIER
                         and token.value
-                        and token.value.upper() in ("LINE", "PAGE")
+                        and token.value.upper() == "PAGE"
                     )
                 ):
                     token_stream.consume()

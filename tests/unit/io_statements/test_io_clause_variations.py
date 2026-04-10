@@ -184,7 +184,7 @@ class TestIOClauseVariations:
         assert stmts[0].advancing_mode == "BEFORE"
 
     def test_write_advancing_before(self) -> None:
-        """WRITE BEFORE ADVANCING (no count) sets advancing_mode to BEFORE."""
+        """WRITE BEFORE ADVANCING 1 LINES sets advancing_mode to BEFORE."""
         result = parse_cobol(
             _prog("           WRITE SEQ-REC BEFORE ADVANCING 1 LINES.")
         )
@@ -202,6 +202,19 @@ class TestIOClauseVariations:
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
         assert stmts[0].advancing_mode == "AFTER"
+
+    def test_write_advancing_singular_line(self) -> None:
+        """WRITE AFTER ADVANCING 1 LINE (singular) correctly consumes TokenType.LINE."""
+        result = parse_cobol(
+            _prog("           WRITE SEQ-REC AFTER ADVANCING 1 LINE.")
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("WRITE")
+        assert len(stmts) >= 1
+        assert stmts[0].advancing_mode == "AFTER"
+        # Verify the period was consumed — no trailing junk in the statement stream
+        stop_stmts = result.ast.find_statements("STOP")
+        assert len(stop_stmts) >= 1
 
     def test_write_from_clause(self) -> None:
         """WRITE SEQ-REC FROM WS-BUF captures from_clause on the AST node."""
