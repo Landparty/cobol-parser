@@ -31,8 +31,11 @@ class StatementParserRegistry:
     Uses first-match strategy: The first parser whose matches() method
     returns True is used to parse the statement. Parser order matters.
 
-    Dispatch is accelerated by a result cache keyed on the first token's
-    (type, normalized_value) pair.  The cache is invalidated automatically
+    Dispatch is accelerated by a result cache keyed on the first two tokens'
+    (type, normalized_value) pairs — a 4-tuple of the form
+    (tok0_type, tok0_val, tok1_type, tok1_val).  Using two tokens ensures
+    parsers that inspect peek(1) (e.g. EXEC SQL vs EXEC CICS) are always
+    dispatched to the correct handler.  The cache is invalidated automatically
     on every register() / unregister() / clear() call, so it is always
     consistent with the current parser list.
 
@@ -50,8 +53,13 @@ class StatementParserRegistry:
     def __init__(self) -> None:
         """Initialize the statement parser registry."""
         self._parsers: list[IStatementParser] = []
-        # Cache: (token_type, token_value_upper | None) -> matched parser | None
-        self._dispatch_cache: dict[tuple, Optional[IStatementParser]] = {}
+        # Cache: (tok0_type, tok0_val, tok1_type, tok1_val) -> matched parser | None
+        # tok*_val entries are uppercased str or None; tok1_* entries are None when
+        # the stream has fewer than two tokens remaining.
+        self._dispatch_cache: dict[
+            tuple[object, str | None, object | None, str | None],
+            Optional[IStatementParser],
+        ] = {}
 
     def register(self, parser: IStatementParser, position: int | None = None) -> None:
         """Register a statement parser.

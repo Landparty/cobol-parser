@@ -74,9 +74,8 @@ def detect_encoding(file_path: str) -> str:
         except UnicodeDecodeError:
             pass
 
-        # Check for EBCDIC indicators
+        # Check for EBCDIC indicators.
         # EBCDIC uses 0x40 for space, while ASCII uses 0x20.
-        # Try common EBCDIC variants in order of prevalence.
         space_ebcdic = raw_bytes.count(b"\x40")
         space_ascii = raw_bytes.count(b"\x20")
 

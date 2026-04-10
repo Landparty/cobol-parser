@@ -374,12 +374,24 @@ class TestStatementParserRegistryIntegration:
         The registry caches results by (tok0, tok1) key. On a cache hit,
         matches() must NOT be called again — only the first lookup consults
         the parsers in order.
+
+        peek() is configured with explicit stable token objects so the cache
+        key is deterministic across repeated calls.
         """
         registry = StatementParserRegistry()
         parser = MockStatementParser("test", should_match=True)
         registry.register(parser)
 
+        # Build stable token mocks so the 2-token cache key is identical
+        # on every call to find_parser().
+        tok0 = Mock()
+        tok0.type = "MOVE_TYPE"
+        tok0.value = "MOVE"
+        tok1 = Mock()
+        tok1.type = "ID_TYPE"
+        tok1.value = "SRC"
         mock_stream = Mock(spec=ITokenStream)
+        mock_stream.peek.side_effect = lambda offset=0: tok0 if offset == 0 else tok1
 
         # First call — cache miss, matches() is consulted
         parser.matches_called = False

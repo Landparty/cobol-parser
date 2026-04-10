@@ -42,7 +42,7 @@ class EvaluateStatementParser(IStatementParser):
         try:
             start_token = token_stream.consume()
             if not start_token:
-                raise UnexpectedEndOfInput("Expected EVALUATE keyword")
+                raise UnexpectedEndOfInput("EVALUATE keyword")
 
             start_location = (
                 start_token.location
