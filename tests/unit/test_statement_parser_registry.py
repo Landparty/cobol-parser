@@ -369,21 +369,23 @@ class TestStatementParserRegistryIntegration:
         assert perform_parser.parse_called
 
     def test_multiple_dispatch_calls(self):
-        """Test multiple dispatch calls use same registry state."""
+        """Test multiple dispatch calls use same registry state.
+
+        The registry caches dispatch results by first-token identity, so
+        matches() need not be invoked on every call — only the correct
+        parser must be returned each time.
+        """
         registry = StatementParserRegistry()
         parser = MockStatementParser("test", should_match=True)
         registry.register(parser)
 
         mock_stream = Mock(spec=ITokenStream)
 
-        # First call
+        # First call — cache miss, matches() is consulted
         found1 = registry.find_parser(mock_stream)
         assert found1 is parser
 
-        # Reset call tracking
-        parser.matches_called = False
-
-        # Second call should work the same way
+        # Second call — may be a cache hit; the returned parser must still
+        # be correct regardless of whether matches() was called again
         found2 = registry.find_parser(mock_stream)
         assert found2 is parser
-        assert parser.matches_called

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cobolparser.core.exceptions import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation

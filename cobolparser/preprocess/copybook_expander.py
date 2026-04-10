@@ -75,13 +75,22 @@ def detect_encoding(file_path: str) -> str:
             pass
 
         # Check for EBCDIC indicators
-        # EBCDIC uses 0x40 for space, while ASCII uses 0x20
-        # Count occurrences to detect EBCDIC
+        # EBCDIC uses 0x40 for space, while ASCII uses 0x20.
+        # Try common EBCDIC variants in order of prevalence.
         space_ebcdic = raw_bytes.count(b"\x40")
         space_ascii = raw_bytes.count(b"\x20")
 
         if space_ebcdic > space_ascii and space_ebcdic > len(raw_bytes) * 0.05:
-            # Likely EBCDIC (CP037 is common IBM mainframe encoding)
+            # Likely EBCDIC — probe common variants to find the best fit.
+            # cp037: US/Canada, cp1047: Open Systems (Linux on z), cp500: International,
+            # cp273: Germany/Austria, cp1140: US (Euro sign variant of cp037)
+            for ebcdic_codec in ("cp037", "cp1047", "cp500", "cp273", "cp1140"):
+                try:
+                    raw_bytes.decode(ebcdic_codec, errors="strict")
+                    return ebcdic_codec
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            # All variants failed strict decode — default to cp037 with replacement
             return "cp037"
 
         # Fallback to ASCII
@@ -109,11 +118,11 @@ def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
         # Decode using detected encoding
         text = content.decode(detected_encoding, errors="replace")
         return text
-    except Exception:
+    except (UnicodeDecodeError, LookupError):
         # Fallback to ASCII with replacement
         try:
             return content.decode("ascii", errors="replace")
-        except Exception as e2:
+        except (UnicodeDecodeError, LookupError) as e2:
             raise EncodingError(
                 "<content>", f"Failed to convert from {detected_encoding}: {str(e2)}"
             ) from e2

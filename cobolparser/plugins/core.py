@@ -35,10 +35,12 @@ class MemoryConfiguration:
     MINIMUM_MEMORY_MB = 64
     MAXIMUM_MEMORY_MB = 8192
     DEFAULT_MEMORY_MB = 256
+    DEFAULT_MAX_ERRORS = 1000
 
     max_memory_mb: int = DEFAULT_MEMORY_MB
     enable_streaming: bool = False
     chunk_size_kb: int = 512
+    max_error_count: int = DEFAULT_MAX_ERRORS
 
     def __post_init__(self) -> None:
         """Validate memory configuration parameters."""
@@ -50,6 +52,11 @@ class MemoryConfiguration:
 
         if self.chunk_size_kb <= 0:
             raise ValueError(f"Chunk size must be positive, got {self.chunk_size_kb}KB")
+
+        if self.max_error_count <= 0:
+            raise ValueError(
+                f"max_error_count must be positive, got {self.max_error_count}"
+            )
 
 
 @dataclass

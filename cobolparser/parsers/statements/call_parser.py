@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
 )
 
 from ...core.ast_factory import get_factory
+from ...core.exceptions import ParseError
 from ...core.interfaces import IStatementParser, ITokenStream, ParseContext
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
@@ -217,7 +218,7 @@ class CallStatementParser(IStatementParser):
                 else:
                     # Skip unknown tokens or end of CALL statement
                     break
-        except Exception:
+        except ParseError:
             pass
 
         return stmt
@@ -244,7 +245,7 @@ class CallStatementParser(IStatementParser):
                     try:
                         nested_stmt = parser.parse(token_stream)
                         stmts.append(nested_stmt)
-                    except Exception:
+                    except ParseError:
                         token_stream.consume()
                 else:
                     token_stream.consume()

@@ -9,7 +9,12 @@ This module provides registration and lookup of statement parsers to support:
 The StatementParserRegistry maintains an ordered list of statement parsers
 and searches them using first-match strategy - the first parser whose
 matches() method returns True is used to parse the statement.
+
+Dispatch is accelerated by a (token_type, token_value) result cache that is
+invalidated whenever parsers are registered or unregistered.
 """
+
+from typing import Optional
 
 from .interfaces import IStatementParser, ITokenStream
 
@@ -23,6 +28,11 @@ class StatementParserRegistry:
 
     Uses first-match strategy: The first parser whose matches() method
     returns True is used to parse the statement. Parser order matters.
+
+    Dispatch is accelerated by a result cache keyed on the first token's
+    (type, normalized_value) pair.  The cache is invalidated automatically
+    on every register() / unregister() / clear() call, so it is always
+    consistent with the current parser list.
 
     Example:
         registry = StatementParserRegistry()
@@ -38,6 +48,8 @@ class StatementParserRegistry:
     def __init__(self) -> None:
         """Initialize the statement parser registry."""
         self._parsers: list[IStatementParser] = []
+        # Cache: (token_type, token_value_upper | None) -> matched parser | None
+        self._dispatch_cache: dict[tuple, Optional[IStatementParser]] = {}
 
     def register(self, parser: IStatementParser, position: int | None = None) -> None:
         """Register a statement parser.
@@ -59,12 +71,15 @@ class StatementParserRegistry:
             self._parsers.insert(position, parser)
         else:
             self._parsers.append(parser)
+        self._dispatch_cache.clear()
 
     def find_parser(self, token_stream: ITokenStream) -> IStatementParser | None:
         """Find a parser for the current token stream position.
 
         Uses first-match strategy: Returns the first registered parser
         whose matches() method returns True for the current token stream.
+        Results are cached by the first token's (type, value) pair to
+        avoid redundant linear scans on hot paths.
 
         Args:
             token_stream: The token stream to find a parser for
@@ -72,10 +87,23 @@ class StatementParserRegistry:
         Returns:
             First matching parser, or None if no parser matches
         """
+        first_token = token_stream.peek()
+        if first_token is None:
+            return None
+
+        # Build cache key from the first token
+        token_val = first_token.value.upper() if first_token.value else None
+        cache_key = (first_token.type, token_val)
+
+        if cache_key in self._dispatch_cache:
+            return self._dispatch_cache[cache_key]
+
+        matched: IStatementParser | None = None
         for parser in self._parsers:
             try:
                 if parser.matches(token_stream):
-                    return parser
+                    matched = parser
+                    break
             except Exception as e:
                 import warnings
 
@@ -86,7 +114,9 @@ class StatementParserRegistry:
                     stacklevel=2,
                 )
                 continue
-        return None
+
+        self._dispatch_cache[cache_key] = matched
+        return matched
 
     def unregister(self, parser: IStatementParser) -> bool:
         """Remove a registered parser.
@@ -99,6 +129,7 @@ class StatementParserRegistry:
         """
         try:
             self._parsers.remove(parser)
+            self._dispatch_cache.clear()
             return True
         except ValueError:
             return False
@@ -120,6 +151,7 @@ class StatementParserRegistry:
         Warning: This removes all parsers from the registry. Use with care.
         """
         self._parsers.clear()
+        self._dispatch_cache.clear()
 
     def __len__(self) -> int:
         """Return the number of registered parsers."""
