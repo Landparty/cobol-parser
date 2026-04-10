@@ -97,6 +97,8 @@ class DeadCodeAnalyzer:
         self._ordered_procedures: list[str] = []
         # Maps section name -> list of paragraph names within that section
         self._section_paragraphs: dict[str, list[str]] = {}
+        # Maps paragraph name -> parent section name (if any)
+        self._paragraph_section: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> DeadCodeReport:
         """Analyze a COBOL program for dead code.
@@ -111,6 +113,7 @@ class DeadCodeAnalyzer:
         self._referenced_names = set()
         self._ordered_procedures = []
         self._section_paragraphs = {}
+        self._paragraph_section = {}
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -158,7 +161,9 @@ class DeadCodeAnalyzer:
                     self._procedure_names[upper_pname] = ("PARAGRAPH", para.location)
                     self._ordered_procedures.append(upper_pname)
                     if name:
-                        self._section_paragraphs[name.upper()].append(upper_pname)
+                        sec_upper = name.upper()
+                        self._section_paragraphs[sec_upper].append(upper_pname)
+                        self._paragraph_section[upper_pname] = sec_upper
 
         # Collect top-level paragraphs (not inside sections)
         for para in proc_division.paragraphs:
@@ -170,7 +175,20 @@ class DeadCodeAnalyzer:
                     self._ordered_procedures.append(upper_pname)
 
     def _propagate_section_references(self) -> None:
-        """When a section is referenced, mark all its paragraphs as referenced."""
+        """Propagate section references in both directions.
+
+        - Section → paragraphs: when a section is referenced, all its child
+          paragraphs are reachable (PERFORM section-name executes all of them).
+        - Paragraph → section: when any paragraph inside a section is referenced,
+          the section itself is also considered referenced so it is not falsely
+          reported as dead code.
+        """
+        # Upward: paragraph referenced -> parent section is referenced
+        for para_name, sec_name in self._paragraph_section.items():
+            if para_name in self._referenced_names:
+                self._referenced_names.add(sec_name)
+
+        # Downward: section referenced -> all child paragraphs are referenced
         for sec_name, para_names in self._section_paragraphs.items():
             if sec_name in self._referenced_names:
                 for pname in para_names:
@@ -253,17 +271,23 @@ class DeadCodeAnalyzer:
             self._referenced_names.add(name.upper())
 
     def _mark_thru_range(self, start: str | None, end: str | None) -> None:
-        """Mark all procedures between start and end (inclusive) as referenced."""
+        """Mark all procedures between start and end (inclusive) as referenced.
+
+        Uses index-based lookup so that a missing or inverted range does not
+        accidentally mark procedures all the way to the end of the list.
+        """
         if not start or not end:
             return
         upper_start = start.upper()
         upper_end = end.upper()
+        try:
+            start_index = self._ordered_procedures.index(upper_start)
+            end_index = self._ordered_procedures.index(upper_end)
+        except ValueError:
+            return
 
-        in_range = False
-        for name in self._ordered_procedures:
-            if name == upper_start:
-                in_range = True
-            if in_range:
-                self._referenced_names.add(name)
-            if name == upper_end:
-                break
+        if start_index > end_index:
+            return
+
+        for name in self._ordered_procedures[start_index : end_index + 1]:
+            self._referenced_names.add(name)

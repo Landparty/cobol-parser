@@ -315,8 +315,10 @@ class TestDeadCodeAnalyzer:
         # MAIN-SECTION is the entry point
         assert "MAIN-SECTION" not in dead_names
         assert "MAIN-PARA" not in dead_names  # first para in first section
-        # HELPER-PARA is PERFORMed
+        # HELPER-PARA is PERFORMed, so USED-SECTION must also not be dead
+        # (paragraph referenced -> parent section is considered referenced)
         assert "HELPER-PARA" not in dead_names
+        assert "USED-SECTION" not in dead_names
         # UNUSED-SECTION and DEAD-PARA are unreferenced
         assert "UNUSED-SECTION" in dead_names
         assert "DEAD-PARA" in dead_names

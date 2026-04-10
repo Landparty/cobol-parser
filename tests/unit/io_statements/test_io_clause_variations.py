@@ -121,9 +121,7 @@ class TestIOClauseVariations:
 
     def test_read_with_lock(self) -> None:
         """READ IDX-FILE WITH LOCK sets with_lock on the AST node."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE WITH LOCK.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE WITH LOCK."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -131,9 +129,7 @@ class TestIOClauseVariations:
 
     def test_read_with_no_lock(self) -> None:
         """READ IDX-FILE WITH NO LOCK sets with_nowait on the AST node."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE WITH NO LOCK.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE WITH NO LOCK."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -141,9 +137,7 @@ class TestIOClauseVariations:
 
     def test_read_key_clause(self) -> None:
         """READ IDX-FILE KEY IS WS-KEY captures key_name on the AST node."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE KEY IS WS-KEY.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE KEY IS WS-KEY."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -151,9 +145,7 @@ class TestIOClauseVariations:
 
     def test_read_into_clause(self) -> None:
         """READ SEQ-FILE INTO WS-BUF captures into_target on the AST node."""
-        result = parse_cobol(
-            _prog("           READ SEQ-FILE INTO WS-BUF.")
-        )
+        result = parse_cobol(_prog("           READ SEQ-FILE INTO WS-BUF."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -165,9 +157,7 @@ class TestIOClauseVariations:
 
     def test_write_advancing_lines(self) -> None:
         """WRITE AFTER ADVANCING n LINES sets advancing_mode to AFTER."""
-        result = parse_cobol(
-            _prog("           WRITE SEQ-REC AFTER ADVANCING 2 LINES.")
-        )
+        result = parse_cobol(_prog("           WRITE SEQ-REC AFTER ADVANCING 2 LINES."))
         assert result.ast is not None
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
@@ -175,9 +165,7 @@ class TestIOClauseVariations:
 
     def test_write_advancing_page(self) -> None:
         """WRITE BEFORE ADVANCING PAGE sets advancing_mode to BEFORE."""
-        result = parse_cobol(
-            _prog("           WRITE SEQ-REC BEFORE ADVANCING PAGE.")
-        )
+        result = parse_cobol(_prog("           WRITE SEQ-REC BEFORE ADVANCING PAGE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
@@ -195,9 +183,7 @@ class TestIOClauseVariations:
 
     def test_write_advancing_after_no_count(self) -> None:
         """WRITE AFTER ADVANCING (no count, no unit) sets advancing_mode to AFTER."""
-        result = parse_cobol(
-            _prog("           WRITE SEQ-REC AFTER ADVANCING.")
-        )
+        result = parse_cobol(_prog("           WRITE SEQ-REC AFTER ADVANCING."))
         assert result.ast is not None
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
@@ -207,9 +193,7 @@ class TestIOClauseVariations:
 
     def test_write_advancing_singular_line(self) -> None:
         """WRITE AFTER ADVANCING 1 LINE (singular) correctly consumes TokenType.LINE."""
-        result = parse_cobol(
-            _prog("           WRITE SEQ-REC AFTER ADVANCING 1 LINE.")
-        )
+        result = parse_cobol(_prog("           WRITE SEQ-REC AFTER ADVANCING 1 LINE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
@@ -220,9 +204,7 @@ class TestIOClauseVariations:
 
     def test_write_from_clause(self) -> None:
         """WRITE SEQ-REC FROM WS-BUF captures from_clause on the AST node."""
-        result = parse_cobol(
-            _prog("           WRITE SEQ-REC FROM WS-BUF.")
-        )
+        result = parse_cobol(_prog("           WRITE SEQ-REC FROM WS-BUF."))
         assert result.ast is not None
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
@@ -245,9 +227,7 @@ class TestIOClauseVariations:
 
     def test_start_key_equal(self) -> None:
         """START IDX-FILE KEY EQUAL TO WS-KEY parses without error."""
-        result = parse_cobol(
-            _prog("           START IDX-FILE KEY EQUAL TO WS-KEY.")
-        )
+        result = parse_cobol(_prog("           START IDX-FILE KEY EQUAL TO WS-KEY."))
         assert result.ast is not None
         stmts = result.ast.find_statements("START_STATEMENT")
         assert len(stmts) >= 1
@@ -315,9 +295,7 @@ class TestIOClauseVariations:
 
     def test_rewrite_from_clause(self) -> None:
         """REWRITE IDX-REC FROM WS-BUF parses without error and captures record_name."""
-        result = parse_cobol(
-            _prog("           REWRITE IDX-REC FROM WS-BUF.")
-        )
+        result = parse_cobol(_prog("           REWRITE IDX-REC FROM WS-BUF."))
         assert result.ast is not None
         stmts = result.ast.find_statements("REWRITE_STATEMENT")
         assert len(stmts) >= 1
@@ -338,9 +316,7 @@ class TestIOClauseVariations:
 
     def test_accept_from_console(self) -> None:
         """ACCEPT WS-BUF FROM CONSOLE parses without error."""
-        result = parse_cobol(
-            _prog("           ACCEPT WS-BUF FROM CONSOLE.")
-        )
+        result = parse_cobol(_prog("           ACCEPT WS-BUF FROM CONSOLE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("ACCEPT")
         assert len(stmts) >= 1
@@ -351,27 +327,21 @@ class TestIOClauseVariations:
 
     def test_display_upon_console(self) -> None:
         """DISPLAY 'Hello' UPON CONSOLE parses without error."""
-        result = parse_cobol(
-            _prog("           DISPLAY 'Hello' UPON CONSOLE.")
-        )
+        result = parse_cobol(_prog("           DISPLAY 'Hello' UPON CONSOLE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("DISPLAY")
         assert len(stmts) >= 1
 
     def test_display_with_advancing(self) -> None:
         """DISPLAY 'Hello' WITH ADVANCING parses without error."""
-        result = parse_cobol(
-            _prog("           DISPLAY 'Hello' WITH ADVANCING.")
-        )
+        result = parse_cobol(_prog("           DISPLAY 'Hello' WITH ADVANCING."))
         assert result.ast is not None
         stmts = result.ast.find_statements("DISPLAY")
         assert len(stmts) >= 1
 
     def test_display_no_advancing(self) -> None:
         """DISPLAY 'Hello' NO ADVANCING parses without error."""
-        result = parse_cobol(
-            _prog("           DISPLAY 'Hello' NO ADVANCING.")
-        )
+        result = parse_cobol(_prog("           DISPLAY 'Hello' NO ADVANCING."))
         assert result.ast is not None
         stmts = result.ast.find_statements("DISPLAY")
         assert len(stmts) >= 1
@@ -382,9 +352,7 @@ class TestIOClauseVariations:
 
     def test_close_with_rewind(self) -> None:
         """CLOSE SEQ-FILE REEL sets reel option on the close statement."""
-        result = parse_cobol(
-            _prog("           CLOSE SEQ-FILE REEL.")
-        )
+        result = parse_cobol(_prog("           CLOSE SEQ-FILE REEL."))
         assert result.ast is not None
         stmts = result.ast.find_statements("CLOSE")
         assert len(stmts) >= 1
@@ -394,9 +362,7 @@ class TestIOClauseVariations:
 
     def test_close_no_rewind(self) -> None:
         """CLOSE SEQ-FILE WITH NO REWIND sets no_rewind on the close statement."""
-        result = parse_cobol(
-            _prog("           CLOSE SEQ-FILE WITH NO REWIND.")
-        )
+        result = parse_cobol(_prog("           CLOSE SEQ-FILE WITH NO REWIND."))
         assert result.ast is not None
         stmts = result.ast.find_statements("CLOSE")
         assert len(stmts) >= 1
@@ -406,9 +372,7 @@ class TestIOClauseVariations:
 
     def test_close_with_lock(self) -> None:
         """CLOSE IDX-FILE WITH LOCK sets with_lock on the close statement."""
-        result = parse_cobol(
-            _prog("           CLOSE IDX-FILE WITH LOCK.")
-        )
+        result = parse_cobol(_prog("           CLOSE IDX-FILE WITH LOCK."))
         assert result.ast is not None
         stmts = result.ast.find_statements("CLOSE")
         assert len(stmts) >= 1
@@ -422,9 +386,7 @@ class TestIOClauseVariations:
 
     def test_open_extend(self) -> None:
         """OPEN EXTEND SEQ-FILE sets open_mode to EXTEND."""
-        result = parse_cobol(
-            _prog("           OPEN EXTEND SEQ-FILE.")
-        )
+        result = parse_cobol(_prog("           OPEN EXTEND SEQ-FILE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("OPEN")
         assert len(stmts) >= 1
@@ -432,9 +394,7 @@ class TestIOClauseVariations:
 
     def test_open_io_mode(self) -> None:
         """OPEN I-O IDX-FILE sets open_mode to I-O."""
-        result = parse_cobol(
-            _prog("           OPEN I-O IDX-FILE.")
-        )
+        result = parse_cobol(_prog("           OPEN I-O IDX-FILE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("OPEN")
         assert len(stmts) >= 1
@@ -442,9 +402,7 @@ class TestIOClauseVariations:
 
     def test_open_input_mode(self) -> None:
         """OPEN INPUT SEQ-FILE sets open_mode to INPUT."""
-        result = parse_cobol(
-            _prog("           OPEN INPUT SEQ-FILE.")
-        )
+        result = parse_cobol(_prog("           OPEN INPUT SEQ-FILE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("OPEN")
         assert len(stmts) >= 1
@@ -452,9 +410,7 @@ class TestIOClauseVariations:
 
     def test_open_output_mode(self) -> None:
         """OPEN OUTPUT SEQ-FILE sets open_mode to OUTPUT."""
-        result = parse_cobol(
-            _prog("           OPEN OUTPUT SEQ-FILE.")
-        )
+        result = parse_cobol(_prog("           OPEN OUTPUT SEQ-FILE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("OPEN")
         assert len(stmts) >= 1
@@ -462,9 +418,7 @@ class TestIOClauseVariations:
 
     def test_open_with_reposition(self) -> None:
         """OPEN I-O IDX-FILE WITH REPOSITION sets with_reposition on the statement."""
-        result = parse_cobol(
-            _prog("           OPEN I-O IDX-FILE WITH REPOSITION.")
-        )
+        result = parse_cobol(_prog("           OPEN I-O IDX-FILE WITH REPOSITION."))
         assert result.ast is not None
         stmts = result.ast.find_statements("OPEN")
         assert len(stmts) >= 1
@@ -476,9 +430,7 @@ class TestIOClauseVariations:
 
     def test_unlock_basic(self) -> None:
         """UNLOCK IDX-FILE sets file_name on the UNLOCK statement."""
-        result = parse_cobol(
-            _prog("           UNLOCK IDX-FILE.")
-        )
+        result = parse_cobol(_prog("           UNLOCK IDX-FILE."))
         assert result.ast is not None
         stmts = result.ast.find_statements("UNLOCK_STATEMENT")
         assert len(stmts) >= 1
@@ -486,9 +438,7 @@ class TestIOClauseVariations:
 
     def test_unlock_records(self) -> None:
         """UNLOCK IDX-FILE RECORDS sets record_scope."""
-        result = parse_cobol(
-            _prog("           UNLOCK IDX-FILE RECORDS.")
-        )
+        result = parse_cobol(_prog("           UNLOCK IDX-FILE RECORDS."))
         assert result.ast is not None
         stmts = result.ast.find_statements("UNLOCK_STATEMENT")
         assert len(stmts) >= 1
@@ -501,9 +451,7 @@ class TestIOClauseVariations:
 
     def test_read_next_record(self) -> None:
         """READ IDX-FILE NEXT sets access_mode to NEXT."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE NEXT.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE NEXT."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -511,9 +459,7 @@ class TestIOClauseVariations:
 
     def test_read_first_record(self) -> None:
         """READ IDX-FILE FIRST sets access_mode to FIRST."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE FIRST.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE FIRST."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -521,9 +467,7 @@ class TestIOClauseVariations:
 
     def test_read_last_record(self) -> None:
         """READ IDX-FILE LAST sets access_mode to LAST."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE LAST.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE LAST."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
@@ -531,9 +475,7 @@ class TestIOClauseVariations:
 
     def test_read_previous_record(self) -> None:
         """READ IDX-FILE PREVIOUS sets access_mode to PREVIOUS."""
-        result = parse_cobol(
-            _prog("           READ IDX-FILE PREVIOUS.")
-        )
+        result = parse_cobol(_prog("           READ IDX-FILE PREVIOUS."))
         assert result.ast is not None
         stmts = result.ast.find_statements("READ")
         assert len(stmts) >= 1
