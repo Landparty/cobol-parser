@@ -227,6 +227,11 @@ class CopybookSearchPath:
         max_nesting_depth: Maximum allowed nesting depth for copybooks
         max_file_size: Maximum size in bytes for a single copybook file
         max_total_size: Maximum total size in bytes for all expanded content
+        encoding: Optional explicit encoding for all copybook files. When set, skips
+            auto-detection and forces this encoding. Useful for selecting a specific
+            EBCDIC variant (e.g. 'cp1047' for Open Systems, 'cp500' for International
+            EBCDIC, 'cp273' for German) instead of the auto-detected default of cp037.
+            When None, encoding is auto-detected per file.
     """
 
     directories: list[str] = field(default_factory=list)
@@ -238,10 +243,11 @@ class CopybookSearchPath:
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES
     max_cache_entries: int = 100
+    encoding: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert search configuration to dictionary for JSON serialization."""
-        return {
+        result = {
             "directories": self.directories,
             "extensions": self.extensions,
             "case_sensitive": self.case_sensitive,
@@ -250,6 +256,9 @@ class CopybookSearchPath:
             "max_total_size": self.max_total_size,
             "max_cache_entries": self.max_cache_entries,
         }
+        if self.encoding is not None:
+            result["encoding"] = self.encoding
+        return result
 
 
 @dataclass
