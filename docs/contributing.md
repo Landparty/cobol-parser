@@ -28,6 +28,33 @@ python -m black .
 python -m mypy cobolparser/
 ```
 
+## Verifying Your Changes with the CLI
+
+After implementing a feature or fix, verify it works end-to-end via the CLI:
+
+```bash
+# Parse a sample file and inspect the AST
+cobol-parser parse tests/samples/your_test.cbl
+
+# Check that tokenization produces expected tokens
+cobol-parser tokenize tests/samples/your_test.cbl
+
+# Verify preprocessing works correctly
+cobol-parser preprocess tests/samples/your_test.cbl
+
+# Verify copybook expansion
+cobol-parser expand tests/samples/copybook_programs/main.cbl --copybook-path tests/samples/copybooks
+
+# Run dynamic call analysis
+cobol-parser analyze tests/samples/your_test.cbl
+
+# Check for dead code detection
+cobol-parser dead-code tests/samples/your_test.cbl
+
+# Test batch parsing
+cobol-parser batch tests/samples/*.cbl --stats
+```
+
 ## Code Standards
 
 - Python 3.13+ only
@@ -42,6 +69,7 @@ See [architecture.md](architecture.md#adding-a-new-statement-parser).
 ## Pull Request Checklist
 
 - All tests pass
-- Coverage ≥ 81%
+- Coverage >= 81%
 - CHANGELOG.md updated
 - IBM Enterprise COBOL compatibility verified for new language features
+- CLI subcommands tested with sample files (if applicable)

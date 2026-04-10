@@ -1,14 +1,51 @@
 # Copybook Expansion Guide
 
-This guide shows how to use the copybook expansion feature to process COBOL programs that contain COPY statements.
+This guide shows how to use the copybook expansion feature to process COBOL programs that contain COPY statements. Both CLI and Python API examples are provided.
 
 ## Table of Contents
 
-1. [Basic Usage](#basic-usage)
-2. [Nested Copybooks](#nested-copybooks)
-3. [Extracting Information](#extracting-information)
-4. [Error Handling](#error-handling)
-5. [Advanced Features](#advanced-features)
+1. [CLI Usage](#cli-usage)
+2. [Basic Usage](#basic-usage)
+3. [Nested Copybooks](#nested-copybooks)
+4. [Extracting Information](#extracting-information)
+5. [Error Handling](#error-handling)
+6. [Advanced Features](#advanced-features)
+
+---
+
+## CLI Usage
+
+The `cobol-parser expand` subcommand expands COPY statements from the command line:
+
+```bash
+# Expand copybooks from a single directory
+cobol-parser expand program.cbl --copybook-path ./copybooks
+
+# Multiple search directories (searched in order)
+cobol-parser expand program.cbl --copybook-path ./copybooks --copybook-path /shared/includes
+
+# Limit nesting depth (default: 100)
+cobol-parser expand program.cbl --copybook-path ./copybooks --max-depth 10
+
+# Compact JSON output
+cobol-parser expand program.cbl --copybook-path ./copybooks --compact
+
+# With conditional compilation symbols
+cobol-parser expand program.cbl --copybook-path ./copybooks --define DEBUG --define ENV=PROD
+```
+
+You can also parse with copybook expansion in a single step:
+
+```bash
+# Parse a COBOL file with inline copybook expansion
+cobol-parser parse program.cbl --copybook-path ./copybooks
+
+# Analyze dynamic calls across expanded copybooks
+cobol-parser analyze program.cbl --copybook-path ./copybooks
+
+# Detect dead code with copybook expansion
+cobol-parser dead-code program.cbl --copybook-path ./copybooks
+```
 
 ---
 

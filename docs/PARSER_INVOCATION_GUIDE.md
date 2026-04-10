@@ -7,14 +7,15 @@ A comprehensive reference guide for understanding how the COBOL parser is invoke
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Entry Points](#entry-points)
-3. [Parsing Pipeline Overview](#parsing-pipeline-overview)
-4. [Configuration & Initialization](#configuration--initialization)
-5. [Source File Loading](#source-file-loading)
-6. [Parser Invocation Methods](#parser-invocation-methods)
-7. [Real-World Usage Examples](#real-world-usage-examples)
-8. [Advanced Features](#advanced-features)
-9. [File Locations Reference](#file-locations-reference)
+2. [CLI Reference](#cli-reference)
+3. [Entry Points](#entry-points)
+4. [Parsing Pipeline Overview](#parsing-pipeline-overview)
+5. [Configuration & Initialization](#configuration--initialization)
+6. [Source File Loading](#source-file-loading)
+7. [Parser Invocation Methods](#parser-invocation-methods)
+8. [Real-World Usage Examples](#real-world-usage-examples)
+9. [Advanced Features](#advanced-features)
+10. [File Locations Reference](#file-locations-reference)
 
 ---
 
@@ -62,6 +63,128 @@ result = parser.parse(cobol_code, filename="program.cbl")
 
 # Or parse from file directly
 result = parser.parse_file("path/to/program.cbl")
+```
+
+---
+
+## CLI Reference
+
+The `cobol-parser` CLI exposes seven subcommands that cover the full pipeline from preprocessing through analysis.
+
+### parse -- Parse COBOL to AST JSON
+
+```bash
+# Parse a file and output the full AST
+cobol-parser parse program.cbl
+
+# Navigate into the AST with a dot-separated path
+cobol-parser parse program.cbl procedure
+cobol-parser parse program.cbl procedure.MAIN-LOGIC
+cobol-parser parse program.cbl procedure.MAIN-LOGIC.display
+
+# Find all nodes of a specific type
+cobol-parser parse program.cbl --find-type MoveStatement
+cobol-parser parse program.cbl --find-type CallStatement
+
+# Include parse errors, warnings, and statistics
+cobol-parser parse program.cbl --errors --stats
+
+# Compact (single-line) JSON
+cobol-parser parse program.cbl --compact
+
+# Free-form COBOL source
+cobol-parser parse program.cbl --free-form
+
+# Parse with copybook expansion
+cobol-parser parse program.cbl --copybook-path ./copybooks
+
+# Conditional compilation
+cobol-parser parse program.cbl --define DEBUG --define ENV=PRODUCTION
+```
+
+### batch -- Parse multiple files in parallel
+
+```bash
+# Parse multiple files
+cobol-parser batch prog1.cbl prog2.cbl prog3.cbl
+
+# Parse all .cbl files with 4 workers
+cobol-parser batch *.cbl --workers 4
+
+# Include per-file statistics and errors
+cobol-parser batch *.cbl --stats --errors
+
+# Custom encoding
+cobol-parser batch *.cbl --encoding cp1252
+```
+
+### tokenize -- Output token stream
+
+```bash
+# See all tokens for a file
+cobol-parser tokenize program.cbl
+
+# Compact output
+cobol-parser tokenize program.cbl --compact
+
+# Free-form source
+cobol-parser tokenize program.cbl --free-form
+```
+
+### preprocess -- Normalize fixed-format to free-form
+
+```bash
+# Convert fixed-format to free-form text
+cobol-parser preprocess program.cbl
+
+# Strip PROCESS/CBL compiler directives first
+cobol-parser preprocess program.cbl --strip-directives
+
+# Apply conditional compilation
+cobol-parser preprocess program.cbl --define DEBUG
+```
+
+### expand -- Expand COPY statements
+
+```bash
+# Expand copybooks from one directory
+cobol-parser expand program.cbl --copybook-path ./copybooks
+
+# Multiple search directories
+cobol-parser expand program.cbl --copybook-path ./copybooks --copybook-path /shared/includes
+
+# Limit nesting depth
+cobol-parser expand program.cbl --copybook-path ./copybooks --max-depth 10
+```
+
+### analyze -- Dynamic CALL analysis
+
+```bash
+# List all CALL targets with dynamic value tracking
+cobol-parser analyze program.cbl
+
+# With copybook expansion
+cobol-parser analyze program.cbl --copybook-path ./copybooks
+```
+
+### dead-code -- Detect unreferenced paragraphs/sections
+
+```bash
+# Find dead code
+cobol-parser dead-code program.cbl
+
+# With copybook expansion
+cobol-parser dead-code program.cbl --copybook-path ./copybooks
+```
+
+### Legacy syntax
+
+For backward compatibility, `cobol-parser <file>` (without a subcommand) is equivalent to `cobol-parser parse <file>`:
+
+```bash
+# These are equivalent:
+cobol-parser program.cbl
+cobol-parser parse program.cbl
 ```
 
 ---

@@ -3,19 +3,37 @@
 ## Pipeline
 
 ```
-COBOL source
-  → preprocess/__init__.py   normalize_fixed_format(), copybook expansion
-  → lexer.py                 CobolLexer → List[Token]
+COBOL source (.cbl/.cob)
+  → preprocess/__init__.py   normalize_fixed_format(), copybook expansion, conditional compilation
+  → lexer.py                 CobolLexer → List[Token] (235 TokenType values)
   → parser.py                CobolParser → ParseResult
-  → models/                  AST node classes
+  → models/                  AST node classes with to_dict()/to_json()
 ```
 
 1. `normalize_fixed_format(lines)` converts fixed-format COBOL (72-column lines) to free-form text. Comment lines (column 7 `*`/`/`) are silently dropped. Continuation lines (`-`) are merged.
-2. `CobolLexer(text).tokenize()` produces `List[Token]` with 150+ `TokenType` values.
-3. `TokenStream(tokens)` wraps the list with `peek()`, `consume()`, `expect()`.
+2. `CobolLexer(text).tokenize()` produces `List[Token]` with 235 `TokenType` values.
+3. `TokenStream(tokens)` wraps the list with `peek()`, `consume()`, `expect()`, and configurable lookahead.
 4. `CobolParser.parse()` calls `DivisionParserFactory.parse_division()` per division encountered.
-5. Each division parser uses `StatementParserRegistry.get_parser()` to dispatch individual statements.
+5. Each division parser uses `StatementParserRegistry.find_parser()` (first-match dispatch) to route individual statements.
 6. Returns `ParseResult(ast, errors, warnings, statistics)`.
+
+### Seeing the Pipeline in Action (CLI)
+
+Each stage of the pipeline is accessible via the CLI:
+
+```bash
+# Stage 1: Preprocessing — convert fixed-format to free-form
+cobol-parser preprocess program.cbl
+
+# Stage 1b: Copybook expansion — inline COPY statements
+cobol-parser expand program.cbl --copybook-path ./copybooks
+
+# Stage 2: Tokenization — see every token
+cobol-parser tokenize program.cbl
+
+# Stages 2-3: Full parse — get the final AST
+cobol-parser parse program.cbl
+```
 
 ## Fixed-Format Column Layout
 

@@ -2,6 +2,19 @@
 
 This document shows examples of how PERFORM statements are parsed into AST nodes.
 
+## CLI Examples
+
+```bash
+# Find all PERFORM statements in a program
+cobol-parser parse program.cbl --find-type PerformStatement
+
+# View the PROCEDURE division to see all statements including PERFORMs
+cobol-parser parse program.cbl procedure
+
+# Navigate to a specific paragraph
+cobol-parser parse program.cbl procedure.MAIN-PROCESS
+```
+
 ## Simple PERFORM (Subroutine Call)
 
 ### COBOL Source

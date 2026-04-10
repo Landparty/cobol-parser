@@ -10,11 +10,15 @@ A COBOL source code parser for Python 3.13+ that converts COBOL programs into st
 
 ## Features
 
-- **IBM Enterprise COBOL** — COMP-3, EXEC SQL, EXEC CICS, 75+ verbs
-- **Error recovery** — fail-fast or collect-all modes
-- **JSON export** — cross-platform AST serialization with source locations
-- **Memory management** — configurable limits from 64MB to 8GB
-- **Batch parsing** — parallel multi-file processing via `parse_files()`
+- **IBM Enterprise COBOL** — COMP-3, EXEC SQL, EXEC CICS, 75+ verbs, IBM intrinsic functions
+- **Full CLI** — parse, tokenize, preprocess, expand copybooks, analyze dynamic calls, and detect dead code from the terminal
+- **Error recovery** — fail-fast or collect-all modes with detailed diagnostics
+- **JSON export** — cross-platform AST serialization with source locations and metadata
+- **Memory management** — configurable limits from 64MB to 8GB with streaming support for large files
+- **Batch parsing** — parallel multi-file processing via `parse_files()` and `cobol-parser batch`
+- **Copybook expansion** — recursive COPY statement inlining with circular reference detection and REPLACING clause support
+- **Dynamic call analysis** — tracks possible values for variables used in dynamic CALL statements
+- **Dead code detection** — identifies unreferenced paragraphs and sections
 
 ## Installation
 
@@ -30,6 +34,42 @@ pip install -e ".[dev]"
 Requires Python 3.13+.
 
 ## Quick Start
+
+### CLI
+
+```bash
+# Parse a COBOL file and output AST as JSON
+cobol-parser parse program.cbl
+
+# Parse and extract only the PROCEDURE division
+cobol-parser parse program.cbl procedure
+
+# Compact JSON output
+cobol-parser parse program.cbl --compact
+
+# Find all CALL statements in a program
+cobol-parser parse program.cbl --find-type CallStatement
+
+# Tokenize a file (see all tokens)
+cobol-parser tokenize program.cbl
+
+# Preprocess fixed-format to free-form
+cobol-parser preprocess program.cbl
+
+# Expand COPY statements
+cobol-parser expand program.cbl --copybook-path ./copybooks
+
+# Analyze dynamic CALL targets
+cobol-parser analyze program.cbl
+
+# Detect dead code (unreferenced paragraphs)
+cobol-parser dead-code program.cbl
+
+# Batch parse multiple files in parallel
+cobol-parser batch prog1.cbl prog2.cbl prog3.cbl --stats
+```
+
+### Python API
 
 ```python
 from cobolparser import parse_cobol
@@ -55,9 +95,10 @@ See [docs/PARSER_INVOCATION_GUIDE.md](docs/PARSER_INVOCATION_GUIDE.md) for the f
 | Architecture & pipeline | [architecture.md](docs/architecture.md) |
 | Configuration options | [configuration.md](docs/configuration.md) |
 | Performance & optimization | [performance.md](docs/performance.md) |
+| Copybook expansion | [copybook-expansion.md](docs/copybook-expansion.md) |
+| IBM Enterprise COBOL | [ibm-enterprise.md](docs/ibm-enterprise.md) |
 | Troubleshooting | [troubleshooting.md](docs/troubleshooting.md) |
 | Contributing | [contributing.md](docs/contributing.md) |
-| IBM Enterprise COBOL | [ibm-enterprise.md](docs/ibm-enterprise.md) |
 
 ## Testing
 
