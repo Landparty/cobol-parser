@@ -117,21 +117,26 @@ class ReadStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
 
         # Optional WITH [NO] LOCK
+        # Lexer emits TokenType.WITH for "WITH" (not IDENTIFIER).
         token = token_stream.peek()
-        if (
-            token
-            and token.type == TokenType.IDENTIFIER
-            and token.value
-            and token.value.upper() == "WITH"
+        if token and (
+            token.type == TokenType.WITH
+            or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "WITH"
+            )
         ):
             token_stream.consume()
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            if (
-                token
-                and token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "NO"
+            if token and (
+                token.type == TokenType.NO
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "NO"
+                )
             ):
                 token_stream.consume()
                 skip_whitespace(token_stream)
