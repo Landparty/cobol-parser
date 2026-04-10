@@ -103,7 +103,7 @@ class TestIOClauseVariations:
         assert len(stmts) >= 1
         assert stmts[0].not_invalid_key_clause is not None
 
-    def test_read_combined_at_end_invalid_key(self) -> None:
+    def test_read_combined_at_end_not_at_end(self) -> None:
         """READ with both AT END and NOT AT END populates both clauses."""
         result = parse_cobol(
             _prog(
@@ -163,7 +163,7 @@ class TestIOClauseVariations:
     # WRITE clause variations
     # -------------------------------------------------------------------------
 
-    def test_write_advancing_line(self) -> None:
+    def test_write_advancing_lines(self) -> None:
         """WRITE AFTER ADVANCING n LINES sets advancing_mode to AFTER."""
         result = parse_cobol(
             _prog("           WRITE SEQ-REC AFTER ADVANCING 2 LINES.")
@@ -193,15 +193,17 @@ class TestIOClauseVariations:
         assert len(stmts) >= 1
         assert stmts[0].advancing_mode == "BEFORE"
 
-    def test_write_advancing_after(self) -> None:
-        """WRITE AFTER ADVANCING 1 LINES sets advancing_mode to AFTER."""
+    def test_write_advancing_after_no_count(self) -> None:
+        """WRITE AFTER ADVANCING (no count, no unit) sets advancing_mode to AFTER."""
         result = parse_cobol(
-            _prog("           WRITE SEQ-REC AFTER ADVANCING 1 LINES.")
+            _prog("           WRITE SEQ-REC AFTER ADVANCING.")
         )
         assert result.ast is not None
         stmts = result.ast.find_statements("WRITE")
         assert len(stmts) >= 1
         assert stmts[0].advancing_mode == "AFTER"
+        # Period must be consumed so STOP RUN is still reachable
+        assert len(result.ast.find_statements("STOP")) >= 1
 
     def test_write_advancing_singular_line(self) -> None:
         """WRITE AFTER ADVANCING 1 LINE (singular) correctly consumes TokenType.LINE."""
@@ -379,7 +381,7 @@ class TestIOClauseVariations:
     # -------------------------------------------------------------------------
 
     def test_close_with_rewind(self) -> None:
-        """CLOSE TAPE-FILE REEL sets reel option on the close statement."""
+        """CLOSE SEQ-FILE REEL sets reel option on the close statement."""
         result = parse_cobol(
             _prog("           CLOSE SEQ-FILE REEL.")
         )
