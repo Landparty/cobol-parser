@@ -67,39 +67,63 @@ class CloseStatementParser(IStatementParser):
                 reel = True
                 token_stream.consume()
                 skip_whitespace(token_stream)
-            elif token and token.type == TokenType.IDENTIFIER and token.value:
-                val = token.value.upper()
-                if val == "UNIT":
-                    unit = True
+            elif token and (
+                token.type == TokenType.UNIT
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "UNIT"
+                )
+            ):
+                unit = True
+                token_stream.consume()
+                skip_whitespace(token_stream)
+            elif token and (
+                token.type == TokenType.WITH
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "WITH"
+                )
+            ):
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                token = token_stream.peek()
+                if token and (
+                    token.type == TokenType.NO
+                    or (
+                        token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() == "NO"
+                    )
+                ):
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                elif val == "WITH":
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
+                    # Consume REWIND (lexer maps "REWIND" to TokenType.NO_REWIND)
                     token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER and token.value:
-                        inner = token.value.upper()
-                        if inner == "NO":
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                            token = token_stream.peek()
-                            if (
-                                token
-                                and token.type == TokenType.IDENTIFIER
-                                and token.value
-                                and token.value.upper() == "REWIND"
-                            ):
-                                token_stream.consume()
-                                skip_whitespace(token_stream)
-                            no_rewind = True
-                        elif inner == "LOCK":
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                            with_lock = True
-                    elif token and token.type == TokenType.LOCK:
+                    if token and token.type == TokenType.NO_REWIND:
                         token_stream.consume()
                         skip_whitespace(token_stream)
-                        with_lock = True
+                    elif (
+                        token
+                        and token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() == "REWIND"
+                    ):
+                        token_stream.consume()
+                        skip_whitespace(token_stream)
+                    no_rewind = True
+                elif token and (
+                    token.type == TokenType.LOCK
+                    or (
+                        token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() == "LOCK"
+                    )
+                ):
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    with_lock = True
 
             stmt.add_file(
                 file_name,

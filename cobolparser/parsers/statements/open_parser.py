@@ -63,12 +63,15 @@ class OpenStatementParser(IStatementParser):
                 break
             if token.type == TokenType.PERIOD:
                 break
+            # Stop on WITH keyword (lexer emits TokenType.WITH)
+            if token.type == TokenType.WITH:
+                break
             if token.type == TokenType.IDENTIFIER and token.value:
                 val = token.value.upper()
                 # Stop at next open mode or WITH keyword
                 if val in _OPEN_MODES or val == "I-O" or val == "WITH":
                     break
-                # WITH REPOSITION for VSAM
+                # WITH REPOSITION for VSAM (when REPOSITION seen directly)
                 if val == "REPOSITION":
                     token_stream.consume()
                     stmt.set_reposition(True)
@@ -82,12 +85,15 @@ class OpenStatementParser(IStatementParser):
                 break
 
         # Optional WITH REPOSITION
+        # Lexer emits TokenType.WITH for "WITH" (not IDENTIFIER).
         token = token_stream.peek()
-        if (
-            token
-            and token.type == TokenType.IDENTIFIER
-            and token.value
-            and token.value.upper() == "WITH"
+        if token and (
+            token.type == TokenType.WITH
+            or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "WITH"
+            )
         ):
             token_stream.consume()
             skip_whitespace(token_stream)

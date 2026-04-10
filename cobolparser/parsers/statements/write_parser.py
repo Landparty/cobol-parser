@@ -17,7 +17,7 @@ class WriteStatementParser(IStatementParser):
     Supports:
     - WRITE record-name
     - WRITE record-name FROM source-data
-    - WRITE record-name [FROM source] [BEFORE/AFTER ADVANCING]
+    - WRITE record-name [FROM source] [BEFORE/AFTER ADVANCING [n LINES|PAGE]]
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -61,13 +61,15 @@ class WriteStatementParser(IStatementParser):
 
         skip_whitespace(token_stream)
 
-        # Check for FROM clause
+        # Check for FROM clause: lexer emits TokenType.FROM for "FROM"
         token = token_stream.peek()
-        if (
-            token
-            and token.type == TokenType.IDENTIFIER
-            and token.value
-            and token.value.upper() == "FROM"
+        if token and (
+            token.type == TokenType.FROM
+            or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "FROM"
+            )
         ):
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -81,30 +83,57 @@ class WriteStatementParser(IStatementParser):
 
             skip_whitespace(token_stream)
 
-        # Check for ADVANCING clause (BEFORE/AFTER ADVANCING)
+        # Check for ADVANCING clause: BEFORE/AFTER ADVANCING [n] [LINES|LINE|PAGE]
+        # Lexer emits TokenType.BEFORE / TokenType.AFTER for these keywords.
         token = token_stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value:
-            val_upper = token.value.upper()
-            if val_upper in ("BEFORE", "AFTER"):
-                advancing_mode = val_upper
-                token_stream.consume()
-                skip_whitespace(token_stream)
+        is_before_after = token and (
+            token.type in (TokenType.BEFORE, TokenType.AFTER)
+            or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() in ("BEFORE", "AFTER")
+            )
+        )
+        if is_before_after and token is not None:
+            advancing_mode = (token.value or "").upper()
+            token_stream.consume()
+            skip_whitespace(token_stream)
 
-                # Expect ADVANCING keyword
-                token = token_stream.peek()
-                if (
-                    token
-                    and token.type == TokenType.IDENTIFIER
+            # Expect ADVANCING keyword
+            token = token_stream.peek()
+            if token and (
+                token.type == TokenType.ADVANCING
+                or (
+                    token.type == TokenType.IDENTIFIER
                     and token.value
                     and token.value.upper() == "ADVANCING"
+                )
+            ):
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                stmt.advancing_mode = advancing_mode
+
+                # Consume optional count (numeric literal or level number)
+                token = token_stream.peek()
+                if token and token.type in (
+                    TokenType.LEVEL_NUMBER,
+                    TokenType.NUMERIC_LITERAL,
                 ):
                     token_stream.consume()
                     skip_whitespace(token_stream)
 
-                    # The advancing clause may have LINES or LINES n or PAGE or CHANNEL, etc
-                    # For now, just store the mode
-                    if advancing_mode:
-                        stmt.advancing_mode = advancing_mode
+                # Consume optional LINES / LINE / PAGE
+                token = token_stream.peek()
+                if token and (
+                    token.type == TokenType.LINES
+                    or (
+                        token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() in ("LINE", "PAGE")
+                    )
+                ):
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
 
         # Skip whitespace and consume period if present
         skip_whitespace(token_stream)
