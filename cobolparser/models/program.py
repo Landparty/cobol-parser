@@ -14,6 +14,7 @@ from ..plugins import SerializationConfig
 from .ast_base import ASTNode, SourceLocation, ValidationResult
 
 if TYPE_CHECKING:
+    from ..analysis.dead_code import DeadCodeReport
     from .data_items import CobolDataItem
     from .statements import CobolStatement
 
@@ -419,6 +420,17 @@ class CobolProgram(ASTNode):
                     break
 
         return using_variable
+
+    def find_dead_code(self) -> "DeadCodeReport":
+        """Find unreferenced paragraphs and sections (dead code).
+
+        Returns:
+            A DeadCodeReport listing all unreferenced procedures.
+        """
+        from ..analysis.dead_code import DeadCodeAnalyzer
+
+        analyzer = DeadCodeAnalyzer()
+        return analyzer.analyze(self)
 
     def has_sql(self) -> bool:
         """Check if program uses EXEC SQL statements."""

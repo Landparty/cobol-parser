@@ -2,7 +2,8 @@
 Analysis utilities for COBOL AST.
 
 This module provides tools for analyzing COBOL AST structures including
-data flow analysis, call graph analysis, value tracking, and I/O logging.
+data flow analysis, call graph analysis, value tracking, dead code
+detection, and I/O logging.
 """
 
 
@@ -12,6 +13,15 @@ def __getattr__(name: str) -> object:
         from .value_tracker import DynamicCallAnalyzer
 
         return DynamicCallAnalyzer
+    if name in ("DeadCodeAnalyzer", "DeadCodeReport", "DeadCodeItem"):
+        from .dead_code import DeadCodeAnalyzer, DeadCodeItem, DeadCodeReport
+
+        _map = {
+            "DeadCodeAnalyzer": DeadCodeAnalyzer,
+            "DeadCodeReport": DeadCodeReport,
+            "DeadCodeItem": DeadCodeItem,
+        }
+        return _map[name]
     if name in ("IOLogger", "IOLogReport", "IOOperation"):
         from .io_logger import IOLogger, IOLogReport, IOOperation
 
@@ -24,4 +34,12 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["DynamicCallAnalyzer", "IOLogger", "IOLogReport", "IOOperation"]
+__all__ = [
+    "DeadCodeAnalyzer",
+    "DeadCodeReport",
+    "DeadCodeItem",
+    "DynamicCallAnalyzer",
+    "IOLogger",
+    "IOLogReport",
+    "IOOperation",
+]
