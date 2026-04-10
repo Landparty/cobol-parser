@@ -31,10 +31,28 @@ def __getattr__(name: str) -> object:
             "IOOperation": IOOperation,
         }
         return _map[name]
+    if name in ("CoverageAnalyzer", "CoverageMap"):
+        from .coverage_analyzer import CoverageAnalyzer, CoverageMap
+
+        _map = {
+            "CoverageAnalyzer": CoverageAnalyzer,
+            "CoverageMap": CoverageMap,
+        }
+        return _map[name]
+    if name in ("TestPlanGenerator", "TestPlan"):
+        from .test_plan import TestPlan, TestPlanGenerator
+
+        _map = {
+            "TestPlanGenerator": TestPlanGenerator,
+            "TestPlan": TestPlan,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
+    "CoverageAnalyzer",
+    "CoverageMap",
     "DeadCodeAnalyzer",
     "DeadCodeReport",
     "DeadCodeItem",
@@ -42,4 +60,6 @@ __all__ = [
     "IOLogger",
     "IOLogReport",
     "IOOperation",
+    "TestPlan",
+    "TestPlanGenerator",
 ]

@@ -61,6 +61,8 @@ Error Recovery:
 # Import implemented modules
 # Analysis utilities
 from .analysis import (
+    CoverageAnalyzer,
+    CoverageMap,
     DeadCodeAnalyzer,
     DeadCodeItem,
     DeadCodeReport,
@@ -68,7 +70,10 @@ from .analysis import (
     IOLogger,
     IOLogReport,
     IOOperation,
+    TestPlan,
+    TestPlanGenerator,
 )
+from .generators import CobolCheckGenerator
 from .batch import (
     BatchResult,
     parse_files,
@@ -150,6 +155,40 @@ from .preprocess.models import (
 #     MicroFocusCobol,
 # )
 
+
+def generate_cobolcheck_tests(
+    source: str,
+    filename: str = "<string>",
+    strategies: list[str] | None = None,
+) -> str:
+    """Parse COBOL source and generate CobolCheck test content.
+
+    Args:
+        source: COBOL source code string.
+        filename: Source filename for error reporting.
+        strategies: Coverage strategies to use (default: all).
+
+    Returns:
+        String content for a .cut file.
+
+    Raises:
+        ValueError: If the source cannot be parsed.
+    """
+    result = parse_cobol(source, filename=filename)
+    if result.ast is None:
+        errors = "; ".join(str(e) for e in result.errors)
+        raise ValueError(f"Failed to parse COBOL source: {errors}")
+
+    analyzer = CoverageAnalyzer()  # type: ignore[operator]
+    coverage_map = analyzer.analyze(result.ast)
+
+    planner = TestPlanGenerator(strategies=strategies)  # type: ignore[operator]
+    test_plan = planner.generate(coverage_map)
+
+    generator = CobolCheckGenerator()
+    return generator.generate(test_plan)
+
+
 # Version info
 __version__ = "1.0.0"
 __author__ = "Samuel Dion"
@@ -223,6 +262,13 @@ __all__ = [
     "IOLogger",
     "IOLogReport",
     "IOOperation",
+    # Coverage analysis and test generation
+    "CoverageAnalyzer",
+    "CoverageMap",
+    "TestPlanGenerator",
+    "TestPlan",
+    "CobolCheckGenerator",
+    "generate_cobolcheck_tests",
     # Will be added when implemented:
     # "ANSICobol",
     # "MicroFocusCobol",
