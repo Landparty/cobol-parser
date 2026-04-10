@@ -1213,10 +1213,8 @@ class CobolLexer:
                 )  # Recent quotes
             )
 
-            if (
-                is_multi_line_context or len(value) > 10
-            ):  # Substantial content in multi-line context
-                # Be permissive for multi-line strings
+            if is_multi_line_context:
+                # Be permissive: this is a legitimate fixed-format continuation line
                 pass
             else:
                 # Emit error for truly unterminated strings

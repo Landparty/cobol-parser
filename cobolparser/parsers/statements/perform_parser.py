@@ -12,7 +12,7 @@ from cobolparser.parsers.statements._utils import (
 )
 
 from ...core.ast_factory import get_factory
-from ...core.exceptions import TokenMismatch, UnexpectedEndOfInput
+from ...core.exceptions import ParseError, TokenMismatch, UnexpectedEndOfInput
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
@@ -67,7 +67,7 @@ class PerformStatementParser(IStatementParser):
         # Try to get the next meaningful token (peek without consuming)
         try:
             token = token_stream.peek()
-        except Exception:
+        except UnexpectedEndOfInput:
             # End of stream
             return stmt
 
@@ -145,7 +145,7 @@ class PerformStatementParser(IStatementParser):
                     # Parse inline statements until END-PERFORM
                     self._parse_inline_statements(token_stream, stmt)
                     return stmt
-            except Exception:
+            except (ValueError, TokenMismatch, UnexpectedEndOfInput):
                 pass
 
             skip_whitespace(token_stream)
@@ -158,7 +158,7 @@ class PerformStatementParser(IStatementParser):
             try:
                 token_stream.consume()
                 token = token_stream.peek()
-            except Exception:
+            except (TokenMismatch, UnexpectedEndOfInput):
                 token = None
 
             skip_whitespace(token_stream)
@@ -184,7 +184,7 @@ class PerformStatementParser(IStatementParser):
                             "PERFORM THRU requires an ending paragraph name",
                             location,
                         )
-                except Exception:
+                except (TokenMismatch, UnexpectedEndOfInput):
                     pass
 
                 skip_whitespace(token_stream)
@@ -234,7 +234,7 @@ class PerformStatementParser(IStatementParser):
                         token_stream.consume()
                         stmt.set_times_clause(num_times_count)
                         token = token_stream.peek()
-                except Exception:
+                except (ValueError, TokenMismatch, UnexpectedEndOfInput):
                     pass
 
             skip_whitespace(token_stream)
@@ -253,7 +253,7 @@ class PerformStatementParser(IStatementParser):
                             stmt.set_test_timing(val)
                             token_stream.consume()
                             token = token_stream.peek()
-                except Exception:
+                except (TokenMismatch, UnexpectedEndOfInput):
                     pass
 
                 skip_whitespace(token_stream)
@@ -263,7 +263,7 @@ class PerformStatementParser(IStatementParser):
             if token and token.type == TokenType.UNTIL:
                 try:
                     self._parse_until_condition_only(token_stream, stmt)
-                except Exception:
+                except ParseError:
                     pass
 
         # Expect period or END-PERFORM
@@ -278,7 +278,7 @@ class PerformStatementParser(IStatementParser):
                 and token.value.upper() == "END-PERFORM"
             ):
                 token_stream.consume()
-        except Exception:
+        except (TokenMismatch, UnexpectedEndOfInput):
             pass
 
         return stmt
@@ -344,7 +344,7 @@ class PerformStatementParser(IStatementParser):
                             stmt.set_test_timing(val)
                             stream.consume()
                             token = stream.peek()
-                except Exception:
+                except (TokenMismatch, UnexpectedEndOfInput):
                     pass
 
                 skip_whitespace(stream)
@@ -363,7 +363,7 @@ class PerformStatementParser(IStatementParser):
             else:
                 # Parse inline statements without UNTIL
                 self._parse_inline_statements(stream, stmt)
-        except Exception:
+        except ParseError:
             pass
 
     def _collect_until_condition_tokens(
@@ -407,7 +407,7 @@ class PerformStatementParser(IStatementParser):
                 condition_expr.operands = [condition_str]
                 stmt.set_until_clause(condition_expr)
             self._parse_inline_statements(stream, stmt)
-        except Exception:
+        except ParseError:
             pass
 
     def _parse_until_conditional(
@@ -426,7 +426,7 @@ class PerformStatementParser(IStatementParser):
                 condition_expr.operands = [condition_str]
                 stmt.until_condition = condition_expr
             self._parse_inline_statements(stream, stmt)
-        except Exception:
+        except ParseError:
             pass
 
     def _parse_until_condition_only(
@@ -467,7 +467,7 @@ class PerformStatementParser(IStatementParser):
                 condition_expr = CobolExpression("CONDITION", location)
                 condition_expr.operands = [condition_str]
                 stmt.set_until_clause(condition_expr)
-        except Exception:
+        except (TokenMismatch, UnexpectedEndOfInput):
             pass
 
     def _parse_inline_statements(
@@ -508,7 +508,7 @@ class PerformStatementParser(IStatementParser):
                 else:
                     # Can't parse, skip token
                     stream.consume()
-        except Exception:
+        except ParseError:
             pass
 
     def _try_consume_period(self, stream: ITokenStream) -> None:
@@ -517,5 +517,5 @@ class PerformStatementParser(IStatementParser):
             token = stream.peek()
             if token and token.type == TokenType.PERIOD:
                 stream.consume()
-        except Exception:
+        except (TokenMismatch, UnexpectedEndOfInput):
             pass

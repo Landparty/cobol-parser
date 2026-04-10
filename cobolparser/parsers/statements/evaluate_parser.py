@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
     try_parse_nested_statement,
 )
 
+from ...core.exceptions import ParseError, UnexpectedEndOfInput
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
@@ -41,7 +42,7 @@ class EvaluateStatementParser(IStatementParser):
         try:
             start_token = token_stream.consume()
             if not start_token:
-                raise Exception("Expected EVALUATE keyword")
+                raise UnexpectedEndOfInput("EVALUATE keyword")
 
             start_location = (
                 start_token.location
@@ -155,7 +156,7 @@ class EvaluateStatementParser(IStatementParser):
                 )
 
             return stmt
-        except Exception:
+        except ParseError:
             return EvaluateStatement(SourceLocation(0, 0))
 
     def _parse_subjects(

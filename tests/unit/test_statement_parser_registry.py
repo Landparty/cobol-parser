@@ -369,21 +369,99 @@ class TestStatementParserRegistryIntegration:
         assert perform_parser.parse_called
 
     def test_multiple_dispatch_calls(self):
-        """Test multiple dispatch calls use same registry state."""
+        """Test that repeated dispatch on the same token is served from cache.
+
+        The registry caches results by (tok0, tok1) key. On a cache hit,
+        matches() must NOT be called again — only the first lookup consults
+        the parsers in order.
+
+        peek() is configured with explicit stable token objects so the cache
+        key is deterministic across repeated calls.
+        """
         registry = StatementParserRegistry()
         parser = MockStatementParser("test", should_match=True)
         registry.register(parser)
 
+        # Build stable token mocks so the 2-token cache key is identical
+        # on every call to find_parser().
+        tok0 = Mock()
+        tok0.type = "MOVE_TYPE"
+        tok0.value = "MOVE"
+        tok1 = Mock()
+        tok1.type = "ID_TYPE"
+        tok1.value = "SRC"
         mock_stream = Mock(spec=ITokenStream)
+        mock_stream.peek.side_effect = lambda offset=0: tok0 if offset == 0 else tok1
 
-        # First call
+        # First call — cache miss, matches() is consulted
+        parser.matches_called = False
         found1 = registry.find_parser(mock_stream)
         assert found1 is parser
+        assert parser.matches_called, "matches() must be called on cache miss"
 
-        # Reset call tracking
+        # Second call — cache hit, matches() must NOT be called again
         parser.matches_called = False
-
-        # Second call should work the same way
         found2 = registry.find_parser(mock_stream)
         assert found2 is parser
-        assert parser.matches_called
+        assert not parser.matches_called, "matches() must be skipped on cache hit"
+
+    def test_exec_sql_vs_exec_cics_dispatch(self):
+        """Regression: EXEC SQL and EXEC CICS share the same first token.
+
+        The cache key must include the second token so the two parsers are
+        never confused even after one of them is cached.
+        """
+
+        class SecondTokenParser:
+            """Matches only when peek(1).value equals a given keyword."""
+
+            def __init__(self, keyword: str):
+                self.keyword = keyword
+                self.matches_called = False
+
+            def matches(self, stream: ITokenStream) -> bool:
+                self.matches_called = True
+                t1 = stream.peek(1)
+                return t1 is not None and getattr(t1, "value", "") == self.keyword
+
+            def parse(self, stream, context=None):
+                return Mock()
+
+        sql_parser = SecondTokenParser("SQL")
+        cics_parser = SecondTokenParser("CICS")
+
+        registry = StatementParserRegistry()
+        registry.register(sql_parser)
+        registry.register(cics_parser)
+
+        def make_exec_stream(second_kw: str) -> Mock:
+            exec_tok = Mock()
+            exec_tok.type = "EXEC_TYPE"
+            exec_tok.value = "EXEC"
+            second_tok = Mock()
+            second_tok.type = "ID_TYPE"
+            second_tok.value = second_kw
+            stream = Mock(spec=ITokenStream)
+            stream.peek.side_effect = lambda offset=0: (
+                exec_tok if offset == 0 else second_tok if offset == 1 else None
+            )
+            return stream
+
+        sql_stream = make_exec_stream("SQL")
+        cics_stream = make_exec_stream("CICS")
+
+        # First lookup — EXEC SQL
+        found = registry.find_parser(sql_stream)
+        assert found is sql_parser
+
+        # Second lookup — EXEC CICS must NOT return the cached SQL parser
+        found = registry.find_parser(cics_stream)
+        assert found is cics_parser
+
+        # Repeated lookups hit the cache and return the correct parsers
+        sql_parser.matches_called = False
+        cics_parser.matches_called = False
+        assert registry.find_parser(sql_stream) is sql_parser
+        assert registry.find_parser(cics_stream) is cics_parser
+        assert not sql_parser.matches_called, "EXEC SQL should be a cache hit"
+        assert not cics_parser.matches_called, "EXEC CICS should be a cache hit"

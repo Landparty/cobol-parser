@@ -74,14 +74,19 @@ def detect_encoding(file_path: str) -> str:
         except UnicodeDecodeError:
             pass
 
-        # Check for EBCDIC indicators
-        # EBCDIC uses 0x40 for space, while ASCII uses 0x20
-        # Count occurrences to detect EBCDIC
+        # Check for EBCDIC indicators.
+        # EBCDIC uses 0x40 for space, while ASCII uses 0x20.
         space_ebcdic = raw_bytes.count(b"\x40")
         space_ascii = raw_bytes.count(b"\x20")
 
         if space_ebcdic > space_ascii and space_ebcdic > len(raw_bytes) * 0.05:
-            # Likely EBCDIC (CP037 is common IBM mainframe encoding)
+            # Likely EBCDIC. Single-byte EBCDIC codecs (cp037, cp500, etc.) all
+            # decode any byte sequence without error, so a strict-decode probe
+            # cannot distinguish variants. Return cp037 (US/Canada, the most
+            # common IBM mainframe encoding) as the safe default. Callers that
+            # need a specific variant (e.g. cp1047 for Open Systems, cp500 for
+            # International EBCDIC, cp273 for German) should set the
+            # CopybookSearchPath.encoding field to override auto-detection.
             return "cp037"
 
         # Fallback to ASCII
@@ -95,9 +100,17 @@ def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
     """
     Convert file content to UTF-8 string with fallback handling.
 
+    Decodes ``content`` using ``detected_encoding`` (errors replaced, not
+    raised).  If the codec name is unknown a second attempt with ASCII
+    replacement is made.  No multi-codec probe sequence is performed because
+    single-byte EBCDIC codecs (cp037, cp500, cp1047, …) all decode every
+    byte sequence without raising errors, making error-based probing useless.
+    Use ``CopybookSearchPath.encoding`` to supply a specific EBCDIC variant
+    rather than relying on auto-detection.
+
     Args:
         content: Raw bytes from file
-        detected_encoding: Encoding name from detect_encoding()
+        detected_encoding: Encoding name from detect_encoding() or caller override
 
     Returns:
         UTF-8 string content
@@ -109,22 +122,27 @@ def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
         # Decode using detected encoding
         text = content.decode(detected_encoding, errors="replace")
         return text
-    except Exception:
+    except (UnicodeDecodeError, LookupError):
         # Fallback to ASCII with replacement
         try:
             return content.decode("ascii", errors="replace")
-        except Exception as e2:
+        except (UnicodeDecodeError, LookupError) as e2:
             raise EncodingError(
                 "<content>", f"Failed to convert from {detected_encoding}: {str(e2)}"
             ) from e2
 
 
-def read_file_with_encoding(file_path: str) -> str:
+def read_file_with_encoding(
+    file_path: str, encoding_override: str | None = None
+) -> str:
     """
     Read a file with automatic encoding detection and UTF-8 conversion.
 
     Args:
         file_path: Path to file to read
+        encoding_override: When provided, skip auto-detection and use this
+            encoding directly.  Pass via ``CopybookSearchPath.encoding`` to
+            force a specific EBCDIC variant for all copybooks in an expansion.
 
     Returns:
         File content as UTF-8 string
@@ -138,7 +156,7 @@ def read_file_with_encoding(file_path: str) -> str:
         01 EMPLOYEE-RECORD.
            05 EMPLOYEE-ID PIC 9(6).
     """
-    encoding = detect_encoding(file_path)
+    encoding = encoding_override if encoding_override is not None else detect_encoding(file_path)
 
     try:
         with open(file_path, "rb") as f:
@@ -384,8 +402,11 @@ def _expand_source_recursive(
         if expanded_copybook is not None:
             nested_depth = context.current_depth + 1
         else:
-            # Read copybook content with encoding detection
-            copybook_content = read_file_with_encoding(copybook_path)
+            # Read copybook content with encoding detection (or forced override)
+            copybook_content = read_file_with_encoding(
+                copybook_path,
+                encoding_override=path_resolver.search_config.encoding,
+            )
 
             # Update total bytes and check limit
             content_size = len(copybook_content.encode("utf-8"))
