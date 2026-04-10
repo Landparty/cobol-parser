@@ -81,16 +81,13 @@ def detect_encoding(file_path: str) -> str:
         space_ascii = raw_bytes.count(b"\x20")
 
         if space_ebcdic > space_ascii and space_ebcdic > len(raw_bytes) * 0.05:
-            # Likely EBCDIC — probe common variants to find the best fit.
-            # cp037: US/Canada, cp1047: Open Systems (Linux on z), cp500: International,
-            # cp273: Germany/Austria, cp1140: US (Euro sign variant of cp037)
-            for ebcdic_codec in ("cp037", "cp1047", "cp500", "cp273", "cp1140"):
-                try:
-                    raw_bytes.decode(ebcdic_codec, errors="strict")
-                    return ebcdic_codec
-                except (UnicodeDecodeError, LookupError):
-                    continue
-            # All variants failed strict decode — default to cp037 with replacement
+            # Likely EBCDIC. Single-byte EBCDIC codecs (cp037, cp500, etc.) all
+            # decode any byte sequence without error, so a strict-decode probe
+            # cannot distinguish variants. Return cp037 (US/Canada, the most
+            # common IBM mainframe encoding) as the safe default. Callers that
+            # need a specific variant (e.g. cp1047 for Open Systems, cp500 for
+            # International) should pass the encoding explicitly via their
+            # CopybookSearchPath configuration.
             return "cp037"
 
         # Fallback to ASCII

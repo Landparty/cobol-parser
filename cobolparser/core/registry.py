@@ -10,8 +10,10 @@ The StatementParserRegistry maintains an ordered list of statement parsers
 and searches them using first-match strategy - the first parser whose
 matches() method returns True is used to parse the statement.
 
-Dispatch is accelerated by a (token_type, token_value) result cache that is
-invalidated whenever parsers are registered or unregistered.
+Dispatch is accelerated by a two-token (type, value) result cache that is
+invalidated whenever parsers are registered or unregistered. Using two
+tokens ensures parsers that inspect lookahead-1 (e.g. EXEC SQL vs EXEC
+CICS) are always dispatched to the correct handler.
 """
 
 from typing import Optional
@@ -78,8 +80,10 @@ class StatementParserRegistry:
 
         Uses first-match strategy: Returns the first registered parser
         whose matches() method returns True for the current token stream.
-        Results are cached by the first token's (type, value) pair to
-        avoid redundant linear scans on hot paths.
+        Results are cached by the first two tokens' (type, value) pairs to
+        avoid redundant linear scans on hot paths and to correctly
+        disambiguate parsers that inspect the second token (e.g. EXEC SQL
+        vs EXEC CICS).
 
         Args:
             token_stream: The token stream to find a parser for
@@ -91,9 +95,17 @@ class StatementParserRegistry:
         if first_token is None:
             return None
 
-        # Build cache key from the first token
-        token_val = first_token.value.upper() if first_token.value else None
-        cache_key = (first_token.type, token_val)
+        # Build a 2-token cache key so parsers that inspect the second token
+        # (e.g. EXEC SQL vs EXEC CICS) are disambiguated correctly.
+        second_token = token_stream.peek(1)
+        tok0_val = first_token.value.upper() if first_token.value else None
+        tok1_type = second_token.type if second_token is not None else None
+        tok1_val = (
+            second_token.value.upper()
+            if second_token is not None and second_token.value
+            else None
+        )
+        cache_key = (first_token.type, tok0_val, tok1_type, tok1_val)
 
         if cache_key in self._dispatch_cache:
             return self._dispatch_cache[cache_key]

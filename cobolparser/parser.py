@@ -327,11 +327,14 @@ class CobolParser:
         max_errors = self.memory_config.max_error_count
         if self.statistics.error_count >= max_errors:
             self._error_limit_reached = True
+            # Use the triggering error's location so users can see where
+            # suppression began rather than being pointed at line 1.
             self.errors.append(
                 ParseError(
                     f"Error limit reached ({max_errors}); further errors suppressed",
-                    line_number=1,
-                    column=1,
+                    line_number=getattr(error, "line_number", None),
+                    column=getattr(error, "column", None),
+                    file_path=getattr(error, "file_path", None),
                 )
             )
             self.statistics.error_count += 1
