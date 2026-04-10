@@ -4,7 +4,6 @@ Tests the CobolCheck .cut file emitter that takes a TestPlan
 and produces valid CobolCheck syntax.
 """
 
-from cobolparser.analysis.coverage_analyzer import BranchPoint, BranchType
 from cobolparser.analysis.test_plan import (
     DataSetup,
     ExpectedOutcome,
@@ -275,7 +274,7 @@ class TestIndentation:
         gen = CobolCheckGenerator(indent=4)
         output = gen.generate(plan)
         lines = output.splitlines()
-        testsuite_line = [l for l in lines if "TESTSUITE" in l][0]
+        testsuite_line = [ln for ln in lines if "TESTSUITE" in ln][0]
         assert testsuite_line.startswith("    ")
 
     def test_custom_indent(self):
@@ -285,7 +284,7 @@ class TestIndentation:
         gen = CobolCheckGenerator(indent=2)
         output = gen.generate(plan)
         lines = output.splitlines()
-        testsuite_line = [l for l in lines if "TESTSUITE" in l][0]
+        testsuite_line = [ln for ln in lines if "TESTSUITE" in ln][0]
         assert testsuite_line.startswith("  ")
         assert not testsuite_line.startswith("    ")
 
@@ -296,7 +295,7 @@ class TestIndentation:
         gen = CobolCheckGenerator(indent=4)
         output = gen.generate(plan)
         lines = output.splitlines()
-        move_line = [l for l in lines if "MOVE" in l][0]
+        move_line = [ln for ln in lines if "MOVE" in ln][0]
         # Body indent = 2 levels = 8 spaces
         assert move_line.startswith("        ")
 

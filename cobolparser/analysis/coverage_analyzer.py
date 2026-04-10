@@ -318,6 +318,8 @@ class CoverageAnalyzer:
                         location=loc,
                     )
                 )
+                for s in statement.at_end_clause:
+                    points.extend(self._collect_branch_points(s, paragraph_name))
 
         # PERFORM with inline statements
         elif isinstance(statement, PerformStatement):
@@ -336,156 +338,120 @@ class CoverageAnalyzer:
 
         # IO statements with clauses
         elif isinstance(statement, IOReadStatement):
-            if statement.at_end_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_AT_END,
-                        parent_statement_type="READ",
-                        paragraph_name=paragraph_name,
-                        location=loc,
+            for clause_name, branch_type in (
+                ("at_end_clause", BranchType.IO_AT_END),
+                ("not_at_end_clause", BranchType.IO_NOT_AT_END),
+                ("invalid_key_clause", BranchType.IO_INVALID_KEY),
+                ("not_invalid_key_clause", BranchType.IO_NOT_INVALID_KEY),
+            ):
+                clause_stmts = getattr(statement, clause_name, None)
+                if clause_stmts:
+                    points.append(
+                        BranchPoint(
+                            branch_type=branch_type,
+                            parent_statement_type="READ",
+                            paragraph_name=paragraph_name,
+                            location=loc,
+                        )
                     )
-                )
-            if statement.not_at_end_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_NOT_AT_END,
-                        parent_statement_type="READ",
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
-            if statement.invalid_key_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_INVALID_KEY,
-                        parent_statement_type="READ",
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
-            if statement.not_invalid_key_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_NOT_INVALID_KEY,
-                        parent_statement_type="READ",
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
+                    for s in clause_stmts:
+                        points.extend(self._collect_branch_points(s, paragraph_name))
 
         elif isinstance(statement, IOWriteStatement):
-            if statement.at_eop_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_AT_EOP,
-                        parent_statement_type="WRITE",
-                        paragraph_name=paragraph_name,
-                        location=loc,
+            for clause_name, branch_type in (
+                ("at_eop_clause", BranchType.IO_AT_EOP),
+                ("invalid_key_clause", BranchType.IO_INVALID_KEY),
+                ("not_invalid_key_clause", BranchType.IO_NOT_INVALID_KEY),
+            ):
+                clause_stmts = getattr(statement, clause_name, None)
+                if clause_stmts:
+                    points.append(
+                        BranchPoint(
+                            branch_type=branch_type,
+                            parent_statement_type="WRITE",
+                            paragraph_name=paragraph_name,
+                            location=loc,
+                        )
                     )
-                )
-            if statement.invalid_key_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_INVALID_KEY,
-                        parent_statement_type="WRITE",
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
-            if statement.not_invalid_key_clause:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_NOT_INVALID_KEY,
-                        parent_statement_type="WRITE",
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
+                    for s in clause_stmts:
+                        points.extend(self._collect_branch_points(s, paragraph_name))
 
         elif isinstance(
             statement, (IODeleteStatement, IORewriteStatement, IOStartStatement)
         ):
-            if getattr(statement, "invalid_key_clause", None):
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_INVALID_KEY,
-                        parent_statement_type=statement.statement_type,
-                        paragraph_name=paragraph_name,
-                        location=loc,
+            for clause_name, branch_type in (
+                ("invalid_key_clause", BranchType.IO_INVALID_KEY),
+                ("not_invalid_key_clause", BranchType.IO_NOT_INVALID_KEY),
+            ):
+                clause_stmts = getattr(statement, clause_name, None)
+                if clause_stmts:
+                    points.append(
+                        BranchPoint(
+                            branch_type=branch_type,
+                            parent_statement_type=statement.statement_type,
+                            paragraph_name=paragraph_name,
+                            location=loc,
+                        )
                     )
-                )
-            if getattr(statement, "not_invalid_key_clause", None):
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.IO_NOT_INVALID_KEY,
-                        parent_statement_type=statement.statement_type,
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
+                    for s in clause_stmts:
+                        points.extend(self._collect_branch_points(s, paragraph_name))
 
         # Arithmetic size error
         elif isinstance(statement, (ArithmeticStatement, ComputeStatement)):
-            if statement.on_size_error:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.ARITH_SIZE_ERROR,
-                        parent_statement_type=statement.statement_type,
-                        paragraph_name=paragraph_name,
-                        location=loc,
+            for clause_name, branch_type in (
+                ("on_size_error", BranchType.ARITH_SIZE_ERROR),
+                ("not_on_size_error", BranchType.ARITH_NOT_SIZE_ERROR),
+            ):
+                clause_stmts = getattr(statement, clause_name, None)
+                if clause_stmts:
+                    points.append(
+                        BranchPoint(
+                            branch_type=branch_type,
+                            parent_statement_type=statement.statement_type,
+                            paragraph_name=paragraph_name,
+                            location=loc,
+                        )
                     )
-                )
-            if statement.not_on_size_error:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.ARITH_NOT_SIZE_ERROR,
-                        parent_statement_type=statement.statement_type,
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
+                    for s in clause_stmts:
+                        points.extend(self._collect_branch_points(s, paragraph_name))
 
         # CALL exception
         elif isinstance(statement, CallStatement):
-            if statement.on_exception:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.CALL_ON_EXCEPTION,
-                        parent_statement_type="CALL",
-                        paragraph_name=paragraph_name,
-                        location=loc,
+            for clause_name, branch_type in (
+                ("on_exception", BranchType.CALL_ON_EXCEPTION),
+                ("not_on_exception", BranchType.CALL_NOT_ON_EXCEPTION),
+            ):
+                clause_stmts = getattr(statement, clause_name, None)
+                if clause_stmts:
+                    points.append(
+                        BranchPoint(
+                            branch_type=branch_type,
+                            parent_statement_type="CALL",
+                            paragraph_name=paragraph_name,
+                            location=loc,
+                        )
                     )
-                )
-            if statement.not_on_exception:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.CALL_NOT_ON_EXCEPTION,
-                        parent_statement_type="CALL",
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
+                    for s in clause_stmts:
+                        points.extend(self._collect_branch_points(s, paragraph_name))
 
         # STRING / UNSTRING overflow
         elif isinstance(statement, (StringStatement, UnstringStatement)):
-            if statement.on_overflow:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.STRING_ON_OVERFLOW,
-                        parent_statement_type=statement.statement_type,
-                        paragraph_name=paragraph_name,
-                        location=loc,
+            for clause_name, branch_type in (
+                ("on_overflow", BranchType.STRING_ON_OVERFLOW),
+                ("not_on_overflow", BranchType.STRING_NOT_ON_OVERFLOW),
+            ):
+                clause_stmts = getattr(statement, clause_name, None)
+                if clause_stmts:
+                    points.append(
+                        BranchPoint(
+                            branch_type=branch_type,
+                            parent_statement_type=statement.statement_type,
+                            paragraph_name=paragraph_name,
+                            location=loc,
+                        )
                     )
-                )
-            if statement.not_on_overflow:
-                points.append(
-                    BranchPoint(
-                        branch_type=BranchType.STRING_NOT_ON_OVERFLOW,
-                        parent_statement_type=statement.statement_type,
-                        paragraph_name=paragraph_name,
-                        location=loc,
-                    )
-                )
+                    for s in clause_stmts:
+                        points.extend(self._collect_branch_points(s, paragraph_name))
 
         return points
 
@@ -512,16 +478,13 @@ class CoverageAnalyzer:
             if statement.condition and hasattr(statement.condition, "operands"):
                 for op in statement.condition.operands:
                     reads.add(op.upper())
-            for s in statement.then_statements:
-                reads.update(self._collect_variable_reads(s))
-            for s in statement.else_statements:
-                reads.update(self._collect_variable_reads(s))
-        elif isinstance(statement, PerformStatement):
-            for s in statement.inline_statements:
-                reads.update(self._collect_variable_reads(s))
         elif isinstance(statement, SetStatement):
             for op in statement.operands:
                 reads.add(op.upper())
+
+        # Recurse into all nested statement containers
+        for s in self._nested_statements(statement):
+            reads.update(self._collect_variable_reads(s))
 
         return reads
 
@@ -546,6 +509,54 @@ class CoverageAnalyzer:
             return False
         return True
 
+    @staticmethod
+    def _nested_statements(statement: ASTNode) -> list[ASTNode]:
+        """Return all nested statement lists from any container statement."""
+        stmts: list[ASTNode] = []
+
+        if isinstance(statement, IfStatement):
+            stmts.extend(statement.then_statements)
+            stmts.extend(statement.else_statements)
+        elif isinstance(statement, EvaluateStatement):
+            for wc in statement.when_clauses:
+                stmts.extend(wc.statements)
+            if statement.default_when:
+                stmts.extend(statement.default_when.statements)
+        elif isinstance(statement, SearchStatement):
+            for wc in statement.when_clauses:  # type: ignore[assignment]
+                stmts.extend(wc.get("statements", []))  # type: ignore[attr-defined]
+            if statement.at_end_clause:
+                stmts.extend(statement.at_end_clause)
+        elif isinstance(statement, PerformStatement):
+            stmts.extend(statement.inline_statements)
+
+        # IO clause bodies
+        for attr in (
+            "at_end_clause",
+            "not_at_end_clause",
+            "invalid_key_clause",
+            "not_invalid_key_clause",
+            "at_eop_clause",
+        ):
+            clause = getattr(statement, attr, None)
+            if clause and isinstance(clause, list):
+                stmts.extend(clause)
+
+        # Arithmetic / CALL / STRING handler bodies
+        for attr in (
+            "on_size_error",
+            "not_on_size_error",
+            "on_exception",
+            "not_on_exception",
+            "on_overflow",
+            "not_on_overflow",
+        ):
+            clause = getattr(statement, attr, None)
+            if clause and isinstance(clause, list):
+                stmts.extend(clause)
+
+        return stmts
+
     def _collect_variable_writes(self, statement: ASTNode) -> set[str]:
         """Collect variables written by a statement (best-effort)."""
         writes: set[str] = set()
@@ -561,16 +572,13 @@ class CoverageAnalyzer:
         elif isinstance(statement, IOReadStatement):
             if statement.into_target:
                 writes.add(statement.into_target.upper())
-        elif isinstance(statement, IfStatement):
-            for s in statement.then_statements:
-                writes.update(self._collect_variable_writes(s))
-            for s in statement.else_statements:
-                writes.update(self._collect_variable_writes(s))
         elif isinstance(statement, PerformStatement):
-            for s in statement.inline_statements:
-                writes.update(self._collect_variable_writes(s))
             if statement.varying_clause and "variable" in statement.varying_clause:
                 writes.add(statement.varying_clause["variable"].upper())
+
+        # Recurse into all nested statement containers
+        for s in self._nested_statements(statement):
+            writes.update(self._collect_variable_writes(s))
 
         return writes
 

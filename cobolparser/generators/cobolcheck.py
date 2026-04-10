@@ -103,7 +103,7 @@ class CobolCheckGenerator:
         lines.append(f'{indent}TESTCASE "{test_case.name}"')
 
         for setup in test_case.data_setup:
-            lines.append(self._emit_data_setup(setup))
+            lines.extend(self._emit_data_setup(setup))
 
         lines.append(f"{body_indent}PERFORM {test_case.target_paragraph}")
 
@@ -112,10 +112,14 @@ class CobolCheckGenerator:
 
         return lines
 
-    def _emit_data_setup(self, setup: DataSetup) -> str:
-        """Generate a MOVE statement for data setup."""
+    def _emit_data_setup(self, setup: DataSetup) -> list[str]:
+        """Generate a MOVE statement for data setup, with optional comment."""
+        lines: list[str] = []
+        if self._include_comments and setup.comment:
+            lines.append(self._emit_comment(setup.comment))
         value = self._format_cobol_value(setup.value)
-        return f"{self._pad(2)}MOVE {value} TO {setup.target_variable}"
+        lines.append(f"{self._pad(2)}MOVE {value} TO {setup.target_variable}")
+        return lines
 
     def _emit_expected_outcome(self, outcome: ExpectedOutcome) -> str:
         """Generate an EXPECT statement."""

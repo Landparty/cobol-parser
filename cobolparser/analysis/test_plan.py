@@ -193,11 +193,6 @@ class TestPlanGenerator:
         """Generate boundary value tests for numeric data items."""
         suite = TestSuite(name=f"Boundary value tests for {coverage_map.program_name}")
 
-        # Collect all numeric data items that are written by any paragraph
-        written_vars: set[str] = set()
-        for para in coverage_map.paragraphs:
-            written_vars.update(para.writes_variables)
-
         # Find paragraphs that write to numeric items
         tested_items: set[str] = set()
         for para in coverage_map.paragraphs:
