@@ -61,6 +61,9 @@ Error Recovery:
 # Import implemented modules
 # Analysis utilities
 from .analysis import (
+    DeadCodeAnalyzer,
+    DeadCodeItem,
+    DeadCodeReport,
     DynamicCallAnalyzer,
     IOLogger,
     IOLogReport,
@@ -213,6 +216,9 @@ __all__ = [
     "EncodingError",
     "NestingDepthError",
     # Analysis utilities
+    "DeadCodeAnalyzer",
+    "DeadCodeReport",
+    "DeadCodeItem",
     "DynamicCallAnalyzer",
     "IOLogger",
     "IOLogReport",
