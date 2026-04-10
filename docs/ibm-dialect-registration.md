@@ -4,6 +4,22 @@
 
 This document demonstrates how the COBOL parser prioritizes and registers IBM Enterprise COBOL extensions, specifically EXEC SQL and EXEC CICS statements.
 
+### Verifying IBM Extension Support via CLI
+
+```bash
+# Parse a program with EXEC SQL and EXEC CICS (IBM dialect is the default)
+cobol-parser parse program.cbl
+
+# Find all EXEC SQL statements
+cobol-parser parse program.cbl --find-type ExecSQLStatement
+
+# Find all EXEC CICS statements
+cobol-parser parse program.cbl --find-type ExecCICSStatement
+
+# Tokenize to inspect how EXEC SQL/CICS tokens are produced
+cobol-parser tokenize program.cbl
+```
+
 ## IBM Enterprise COBOL Extensions Supported
 
 ### 1. EXEC SQL - Embedded SQL Statements

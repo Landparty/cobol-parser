@@ -2,6 +2,22 @@
 
 This document shows examples of how FILE-CONTROL SELECT statements and file definitions are parsed into AST nodes.
 
+## CLI Examples
+
+```bash
+# View the ENVIRONMENT division (contains FILE-CONTROL)
+cobol-parser parse program.cbl environment
+
+# Find all SELECT/file control entries
+cobol-parser parse program.cbl --find-type FileControlEntry
+
+# Find all file descriptions (FD entries)
+cobol-parser parse program.cbl --find-type FileDescription
+
+# View the full AST with errors for debugging file section issues
+cobol-parser parse program.cbl --errors
+```
+
 ## Supported SELECT Clause Variations
 
 The parser supports comprehensive SELECT statement parsing for FILE-CONTROL:

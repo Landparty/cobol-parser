@@ -2,6 +2,22 @@
 
 This document shows examples of how EXEC CICS statements and IMS interface calls are parsed into AST nodes.
 
+## CLI Examples
+
+```bash
+# Find all EXEC CICS statements
+cobol-parser parse program.cbl --find-type ExecCICSStatement
+
+# Find all EXEC IMS statements
+cobol-parser parse program.cbl --find-type ExecIMSStatement
+
+# Parse with IBM Enterprise dialect (required for EXEC CICS/IMS support)
+cobol-parser parse program.cbl --dialect ibm-enterprise
+
+# Find all CALL statements (includes IMS interface calls like CBLTDLI)
+cobol-parser parse program.cbl --find-type CallStatement
+```
+
 ## EXEC CICS RECEIVE Statement
 
 ### COBOL Source

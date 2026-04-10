@@ -2,6 +2,32 @@
 
 This document shows the complete AST output for a comprehensive COBOL program that demonstrates various language features.
 
+## CLI Examples
+
+```bash
+# Parse the full program and see the complete AST
+cobol-parser parse employee-report.cob
+
+# Navigate to specific divisions
+cobol-parser parse employee-report.cob data
+cobol-parser parse employee-report.cob procedure
+
+# Navigate to specific paragraphs
+cobol-parser parse employee-report.cob procedure.MAIN-PROCESS
+cobol-parser parse employee-report.cob procedure.PROCESS-EMPLOYEES
+
+# Find specific statement types
+cobol-parser parse employee-report.cob --find-type ExecSQLStatement
+cobol-parser parse employee-report.cob --find-type CallStatement
+cobol-parser parse employee-report.cob --find-type PerformStatement
+
+# Include parse statistics
+cobol-parser parse employee-report.cob --stats
+
+# Analyze dynamic call targets
+cobol-parser analyze employee-report.cob
+```
+
 ## Sample COBOL Program
 
 ```cobol

@@ -2,6 +2,22 @@
 
 This document shows examples of how EXEC SQL statements are parsed into AST nodes.
 
+## CLI Examples
+
+```bash
+# Find all EXEC SQL statements in a program
+cobol-parser parse program.cbl --find-type ExecSQLStatement
+
+# Parse with IBM Enterprise dialect (default — includes EXEC SQL support)
+cobol-parser parse program.cbl --dialect ibm-enterprise
+
+# View all SQL statements in compact JSON for scripting
+cobol-parser parse program.cbl --find-type ExecSQLStatement --compact
+
+# Batch-find SQL across multiple files
+cobol-parser batch prog1.cbl prog2.cbl prog3.cbl --compact
+```
+
 ## SELECT Statement
 
 ### COBOL Source

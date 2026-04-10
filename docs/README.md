@@ -32,6 +32,63 @@ This directory contains comprehensive documentation for the COBOL parser, includ
 
 ## 🚀 Getting Started
 
+### CLI Quick Reference
+
+The `cobol-parser` CLI provides seven subcommands for working with COBOL source files:
+
+```bash
+# Parse a COBOL file to AST JSON
+cobol-parser parse program.cbl
+
+# Navigate into the AST with dot-separated paths
+cobol-parser parse program.cbl procedure
+cobol-parser parse program.cbl procedure.MAIN-LOGIC
+cobol-parser parse program.cbl procedure.MAIN-LOGIC.display
+
+# Find all nodes of a specific type
+cobol-parser parse program.cbl --find-type MoveStatement
+cobol-parser parse program.cbl --find-type CallStatement
+
+# Include errors, warnings, and statistics in the output
+cobol-parser parse program.cbl --errors --stats
+
+# Compact (single-line) JSON output
+cobol-parser parse program.cbl --compact
+
+# Tokenize a file (outputs all tokens as JSON)
+cobol-parser tokenize program.cbl
+
+# Preprocess fixed-format COBOL to free-form text
+cobol-parser preprocess program.cbl
+cobol-parser preprocess program.cbl --strip-directives
+
+# Expand COPY statements (inline copybooks)
+cobol-parser expand program.cbl --copybook-path ./copybooks
+cobol-parser expand program.cbl --copybook-path ./copybooks --max-depth 50
+
+# Analyze dynamic CALL targets
+cobol-parser analyze program.cbl
+cobol-parser analyze program.cbl --copybook-path ./copybooks
+
+# Detect dead code (unreferenced paragraphs/sections)
+cobol-parser dead-code program.cbl
+
+# Batch parse multiple files in parallel
+cobol-parser batch prog1.cbl prog2.cbl prog3.cbl
+cobol-parser batch *.cbl --workers 4 --stats --errors
+```
+
+#### Shared CLI Options
+
+| Option | Applies to | Description |
+|--------|-----------|-------------|
+| `--compact` | parse, batch, tokenize, expand, analyze, dead-code | Single-line JSON output |
+| `--free-form` | parse, tokenize, preprocess | Treat source as free-form COBOL |
+| `--dialect ibm-enterprise` | parse, batch, tokenize, analyze, dead-code | COBOL dialect (default: ibm-enterprise) |
+| `--error-recovery fail-fast\|collect-all` | parse, batch, analyze, dead-code | Error handling strategy (default: collect-all) |
+| `--copybook-path DIR` | parse, expand, analyze, dead-code | Copybook search directory (repeatable) |
+| `--define SYMBOL[=VALUE]` | parse, preprocess, expand, analyze, dead-code | Define conditional compilation symbol (repeatable) |
+
 ### Current Coverage Status (2026-03-30)
 
 - **2,975 tests** with 81%+ coverage enforced

@@ -2,6 +2,22 @@
 
 This document shows examples of how CALL statements are parsed into AST nodes, including support for dynamic CALL statements that use variables instead of literal program names, parameter passing modes, exception handling, and fixed-format COBOL support.
 
+## CLI Examples
+
+```bash
+# Find all CALL statements in a program
+cobol-parser parse program.cbl --find-type CallStatement
+
+# Analyze dynamic CALL targets (tracks possible values via MOVE analysis)
+cobol-parser analyze program.cbl
+
+# Analyze with copybook expansion
+cobol-parser analyze program.cbl --copybook-path ./copybooks
+
+# Navigate to a specific paragraph that contains CALLs
+cobol-parser parse program.cbl procedure.CALL-SUBPROGRAM
+```
+
 ## Table of Contents
 - [Static CALL Statements](#static-call-statements)
   - [Basic CALL Statement](#basic-call-statement)

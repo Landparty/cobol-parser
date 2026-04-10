@@ -2,6 +2,25 @@
 
 This document shows examples of how COPY statements (copybook references) are parsed into AST nodes.
 
+## CLI Examples
+
+```bash
+# Expand COPY statements and see the result
+cobol-parser expand program.cbl --copybook-path ./copybooks
+
+# Expand with multiple search directories
+cobol-parser expand program.cbl --copybook-path ./copybooks --copybook-path /shared/includes
+
+# Limit nesting depth for deeply nested copybooks
+cobol-parser expand program.cbl --copybook-path ./copybooks --max-depth 10
+
+# Parse a program with inline copybook expansion
+cobol-parser parse program.cbl --copybook-path ./copybooks
+
+# Find COPY statement nodes in the AST (before expansion)
+cobol-parser parse program.cbl --find-type CopyStatement
+```
+
 ## Basic COPY Statement
 
 ### COBOL Source

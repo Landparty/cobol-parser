@@ -1,10 +1,20 @@
-# COBOL Parser Cookbook 🍳
+# COBOL Parser Cookbook
 
-This cookbook contains practical, "real-world" recipes for using the COBOL parser in various automation and analysis scenarios.
+This cookbook contains practical, "real-world" recipes for using the COBOL parser in various automation and analysis scenarios. Each recipe includes both CLI and Python API examples where applicable.
 
-## 🥘 Recipe 1: The "SQL Extractor"
+## Recipe 1: The "SQL Extractor"
 
 **Problem**: You have a legacy COBOL application littered with embedded SQL, and you need to map out every table and column being accessed to plan a database migration.
+
+**CLI Quick Check**: Before writing code, use `--find-type` to see all SQL statements in a file:
+
+```bash
+# Find all EXEC SQL statements in a single file
+cobol-parser parse program.cbl --find-type ExecSQLStatement --compact
+
+# Batch parse a directory to get all ASTs
+cobol-parser batch legacy_source/*.cbl --compact
+```
 
 **Solution**: Use the parser to walk the AST, find `ExecSQLStatement` nodes, and extract the raw SQL texts.
 
@@ -55,9 +65,16 @@ def extract_sql_from_folder(folder_path):
 #         print(sql)
 ```
 
-## 🥗 Recipe 2: The "File Descriptor Validator"
+## Recipe 2: The "File Descriptor Validator"
 
 **Problem**: You need to ensure that all `FD` (File Description) entries in your COBOL programs match the specifications of your new data lake ingestion process (e.g., specific block sizes or recording modes).
+
+**CLI Quick Check**: Inspect the DATA division to see file definitions:
+
+```bash
+# Navigate directly to the DATA division
+cobol-parser parse program.cbl data
+```
 
 **Solution**: focus your analysis on the `DATA DIVISION` -> `FILE SECTION`.
 
@@ -98,9 +115,22 @@ def validate_file_descriptors(cobol_code):
 # print(validate_file_descriptors(source))
 ```
 
-## 🍰 Recipe 3: The "Call Graph Generator"
+## Recipe 3: The "Call Graph Generator"
 
 **Problem**: You need to visualize how your COBOL programs call each other to understand dependencies (`CALL` 'subprogram').
+
+**CLI Quick Check**: Use the `analyze` subcommand to list all CALL targets (including dynamic calls with possible values):
+
+```bash
+# Analyze dynamic CALL targets
+cobol-parser analyze program.cbl
+
+# With copybook expansion (so CALL targets in copybooks are included)
+cobol-parser analyze program.cbl --copybook-path ./copybooks
+
+# Find all CALL statements directly
+cobol-parser parse program.cbl --find-type CallStatement
+```
 
 **Solution**: Extract `CALL` targets.
 
@@ -136,7 +166,7 @@ def get_dependencies(cobol_code):
     return dependencies
 ```
 
-## 🍲 Recipe 4: Handling Massive Files (Streaming)
+## Recipe 4: Handling Massive Files (Streaming)
 
 **Problem**: You have a 50MB COBOL source file (yes, they exist) and it's crashing your parser with `MemoryError`.
 
@@ -163,7 +193,24 @@ result = parser.parse(huge_string_content, filename="large_program.cbl")
 print(f"Parsed {result.statistics.lines_parsed} lines successfully.")
 ```
 
-## 🍹 Recipe 5: Custom Dialect "Hotfix"
+## Recipe 5: Dead Code Detection
+
+**Problem**: You want to find unreferenced paragraphs and sections in your COBOL programs to clean up legacy code.
+
+**CLI Quick Check**: Use the `dead-code` subcommand:
+
+```bash
+# Detect unreferenced paragraphs/sections
+cobol-parser dead-code program.cbl
+
+# With copybook expansion
+cobol-parser dead-code program.cbl --copybook-path ./copybooks
+
+# Compact output for scripting
+cobol-parser dead-code program.cbl --compact
+```
+
+## Recipe 6: Custom Dialect "Hotfix"
 
 **Problem**: Your vendor uses a non-standard verb `SUPER-COMPUTE` that isn't valid COBOL, causing the parser to choke.
 

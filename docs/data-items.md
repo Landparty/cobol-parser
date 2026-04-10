@@ -2,6 +2,22 @@
 
 This document shows examples of how data item declarations are parsed into AST nodes.
 
+## CLI Examples
+
+```bash
+# View the DATA division to see all data items
+cobol-parser parse program.cbl data
+
+# Navigate to the WORKING-STORAGE section
+cobol-parser parse program.cbl data.WORKING-STORAGE
+
+# Find all DataItem nodes
+cobol-parser parse program.cbl --find-type DataItem
+
+# Compact output for piping to other tools
+cobol-parser parse program.cbl data --compact
+```
+
 ## Basic Data Item (PIC X)
 
 ### COBOL Source

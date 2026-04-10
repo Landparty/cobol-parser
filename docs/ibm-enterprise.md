@@ -1,6 +1,28 @@
 # IBM Enterprise COBOL Features
 
-This document shows examples of IBM Enterprise COBOL dialect features and how they are parsed.
+This document shows examples of IBM Enterprise COBOL dialect features and how they are parsed. The IBM Enterprise dialect is the default, so no special flags are needed.
+
+## CLI Examples
+
+```bash
+# Parse with IBM Enterprise dialect (default)
+cobol-parser parse program.cbl
+
+# Explicitly specify the dialect
+cobol-parser parse program.cbl --dialect ibm-enterprise
+
+# Find all EXEC CICS statements
+cobol-parser parse program.cbl --find-type ExecCICSStatement
+
+# Find all EXEC SQL statements
+cobol-parser parse program.cbl --find-type ExecSQLStatement
+
+# Analyze dynamic CALL targets (useful for CICS LINK/XCTL programs)
+cobol-parser analyze program.cbl
+
+# View the DATA division to see COMP-3 and POINTER data items
+cobol-parser parse program.cbl data
+```
 
 ## EXEC CICS Statements
 
