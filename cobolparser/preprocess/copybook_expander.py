@@ -156,7 +156,11 @@ def read_file_with_encoding(
         01 EMPLOYEE-RECORD.
            05 EMPLOYEE-ID PIC 9(6).
     """
-    encoding = encoding_override if encoding_override is not None else detect_encoding(file_path)
+    encoding = (
+        encoding_override
+        if encoding_override is not None
+        else detect_encoding(file_path)
+    )
 
     try:
         with open(file_path, "rb") as f:

@@ -468,10 +468,21 @@ class CoverageAnalyzer:
             for item in statement.display_items:
                 if self._is_variable_name(item):
                     reads.add(item.upper())
-        elif isinstance(statement, (ArithmeticStatement, ComputeStatement)):
-            # Operands minus last one (which is typically the target)
+        elif isinstance(statement, ArithmeticStatement):
+            # Filter out write targets (target/giving) from operands
+            write_targets: set[str] = set()
+            if statement.target:
+                write_targets.add(statement.target.upper())
+            if statement.giving:
+                write_targets.add(statement.giving.upper())
             for op in statement.operands:
-                if self._is_variable_name(op):
+                if self._is_variable_name(op) and op.upper() not in write_targets:
+                    reads.add(op.upper())
+        elif isinstance(statement, ComputeStatement):
+            # Filter out COMPUTE targets from operands
+            compute_targets = {t.upper() for t in statement.targets}
+            for op in statement.operands:
+                if self._is_variable_name(op) and op.upper() not in compute_targets:
                     reads.add(op.upper())
         elif isinstance(statement, CallStatement):
             for param in statement.using_parameters:
@@ -605,6 +616,11 @@ class CoverageAnalyzer:
                 into_target: str | None = into.get("target")
                 if into_target:
                     writes.add(into_target.upper())
+        elif isinstance(statement, CallStatement):
+            if statement.returning_parameter:
+                writes.add(statement.returning_parameter.upper())
+            if statement.giving_parameter:
+                writes.add(statement.giving_parameter.upper())
         elif isinstance(statement, IOReadStatement):
             if statement.into_target:
                 writes.add(statement.into_target.upper())

@@ -58,6 +58,8 @@ Error Recovery:
     >>> lenient_parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 """
 
+import logging
+
 # Import implemented modules
 # Analysis utilities
 from .analysis import (
@@ -278,7 +280,5 @@ __all__ = [
 ]
 
 # Configure default logging for the package
-import logging
-
 _logger = logging.getLogger(__name__)
 _logger.addHandler(logging.NullHandler())
