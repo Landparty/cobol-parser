@@ -125,6 +125,8 @@ class TestPlanGenerator:
         for para in coverage_map.paragraphs:
             if para.is_empty:
                 continue
+            if not para.paragraph_name.strip():
+                continue
             if (para.has_stop_run or para.has_goback) and para.statement_count == 1:
                 continue
 
@@ -145,10 +147,19 @@ class TestPlanGenerator:
     def _generate_branch_tests(self, coverage_map: CoverageMap) -> TestSuite:
         """Generate test cases targeting each branch point."""
         suite = TestSuite(name=f"Branch coverage for {coverage_map.program_name}")
+        used_names: dict[str, int] = {}
 
         for para in coverage_map.paragraphs:
+            if not para.paragraph_name.strip():
+                continue
             for bp in para.branch_points:
                 name = self._branch_test_name(bp)
+                # Deduplicate: paragraphs with many IFs produce
+                # identical branch names; append a counter.
+                count = used_names.get(name, 0) + 1
+                used_names[name] = count
+                if count > 1:
+                    name = f"{name} {count}"
                 data_setup = self._infer_data_setup(
                     para.paragraph_name, coverage_map, target_branch=bp
                 )
@@ -196,7 +207,7 @@ class TestPlanGenerator:
         # Find paragraphs that write to numeric items
         tested_items: set[str] = set()
         for para in coverage_map.paragraphs:
-            if para.is_empty:
+            if para.is_empty or not para.paragraph_name.strip():
                 continue
             for var_name in para.writes_variables:
                 if var_name in tested_items:
