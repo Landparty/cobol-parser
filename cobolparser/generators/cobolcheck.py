@@ -134,25 +134,27 @@ class CobolCheckGenerator:
 
     def _format_cobol_value(self, value: str) -> str:
         """Format a value for use in COBOL MOVE/EXPECT statements."""
-        upper = value.upper().strip()
+        stripped = value.strip()
+        upper = stripped.upper()
 
         # Figurative constants and keywords pass through unquoted
         if upper in _UNQUOTED_VALUES:
             return upper
 
         # Numeric literals pass through unquoted
-        stripped = value.strip().lstrip("-").lstrip("+")
-        if stripped.replace(".", "", 1).isdigit():
-            return value.strip()
+        numeric = stripped.lstrip("-").lstrip("+")
+        if numeric.replace(".", "", 1).isdigit():
+            return stripped
 
         # Already quoted
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
+        if (stripped.startswith('"') and stripped.endswith('"')) or (
+            stripped.startswith("'") and stripped.endswith("'")
         ):
-            return value
+            return stripped
 
-        # String literals need quoting
-        return f'"{value}"'
+        # String literals need quoting — escape embedded double quotes
+        escaped = stripped.replace('"', '""')
+        return f'"{escaped}"'
 
     def _pad(self, level: int = 1) -> str:
         """Return indentation string for the given nesting level."""

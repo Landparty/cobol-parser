@@ -477,10 +477,12 @@ class CoverageAnalyzer:
         elif isinstance(statement, IfStatement):
             if statement.condition and hasattr(statement.condition, "operands"):
                 for op in statement.condition.operands:
-                    reads.add(op.upper())
+                    if self._is_variable_name(op):
+                        reads.add(op.upper())
         elif isinstance(statement, SetStatement):
             for op in statement.operands:
-                reads.add(op.upper())
+                if self._is_variable_name(op):
+                    reads.add(op.upper())
 
         # Recurse into all nested statement containers
         for s in self._nested_statements(statement):
@@ -488,12 +490,33 @@ class CoverageAnalyzer:
 
         return reads
 
-    @staticmethod
-    def _is_variable_name(value: str) -> bool:
+    _FIGURATIVE_CONSTANTS = frozenset(
+        {
+            "ZERO",
+            "ZEROS",
+            "ZEROES",
+            "SPACE",
+            "SPACES",
+            "HIGH-VALUE",
+            "HIGH-VALUES",
+            "LOW-VALUE",
+            "LOW-VALUES",
+            "QUOTE",
+            "QUOTES",
+            "ALL",
+            "NULL",
+            "NULLS",
+            "TRUE",
+            "FALSE",
+        }
+    )
+
+    @classmethod
+    def _is_variable_name(cls, value: str) -> bool:
         """Return True if the value looks like a COBOL variable name.
 
-        Filters out quoted string literals and numeric literals so they
-        don't pollute the reads_variables set.
+        Filters out quoted string literals, numeric literals, and
+        figurative constants so they don't pollute reads_variables.
         """
         stripped = value.strip()
         if not stripped:
@@ -506,6 +529,9 @@ class CoverageAnalyzer:
         # Numeric literals (with optional sign and decimal point)
         numeric = stripped.lstrip("+-")
         if numeric and numeric.replace(".", "", 1).isdigit():
+            return False
+        # Figurative constants
+        if stripped.upper() in cls._FIGURATIVE_CONSTANTS:
             return False
         return True
 
@@ -564,7 +590,10 @@ class CoverageAnalyzer:
         if isinstance(statement, MoveStatement):
             for target in statement.targets:
                 writes.add(target.upper())
-        elif isinstance(statement, (ArithmeticStatement, ComputeStatement)):
+        elif isinstance(statement, ComputeStatement):
+            for target in statement.targets:
+                writes.add(target.upper())
+        elif isinstance(statement, ArithmeticStatement):
             if hasattr(statement, "target") and statement.target:
                 writes.add(statement.target.upper())
             if hasattr(statement, "giving") and statement.giving:
