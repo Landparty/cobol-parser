@@ -19,6 +19,14 @@ def samples_dir() -> Path:
     return Path(__file__).parent.parent / "samples"
 
 
+def _read_sample(samples_dir: Path, name: str) -> str:
+    """Read a sample COBOL file, skipping if not present."""
+    path = samples_dir / name
+    if not path.exists():
+        pytest.skip(f"Sample {name} not available")
+    return path.read_text()
+
+
 def _validate_cut_syntax(output: str) -> None:
     """Basic syntax validation of CobolCheck .cut output."""
     lines = output.strip().splitlines()
@@ -56,7 +64,7 @@ class TestEndToEndArithmetic:
     """End-to-end tests with arithmetic COBOL programs."""
 
     def test_arithmetic_operations_sample(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         output = generate_cobolcheck_tests(source)
         _validate_cut_syntax(output)
         assert "TESTSUITE" in output
@@ -64,7 +72,7 @@ class TestEndToEndArithmetic:
         assert "PERFORM" in output
 
     def test_arithmetic_has_paragraph_tests(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         output = generate_cobolcheck_tests(source, strategies=["paragraph"])
         # Should generate tests for ADD-TESTS, SUBTRACT-TESTS, etc.
         assert "PERFORM" in output
@@ -75,7 +83,7 @@ class TestEndToEndPipeline:
     """Tests that verify the individual pipeline steps work together."""
 
     def test_full_pipeline_manual(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 
@@ -94,7 +102,7 @@ class TestEndToEndPipeline:
         assert len(output) > 0
 
     def test_pipeline_branch_strategy(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 
@@ -111,7 +119,7 @@ class TestEndToEndPipeline:
             assert "TESTSUITE" in output
 
     def test_pipeline_boundary_strategy(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 
@@ -130,19 +138,13 @@ class TestEndToEndCallPrograms:
     """End-to-end tests with CALL-based COBOL programs."""
 
     def test_call_banking_sample(self, samples_dir: Path):
-        path = samples_dir / "call_banking_system.cbl"
-        if not path.exists():
-            pytest.skip("Sample not available")
-        source = path.read_text()
+        source = _read_sample(samples_dir, "call_banking_system.cbl")
         output = generate_cobolcheck_tests(source)
         _validate_cut_syntax(output)
         assert "TESTSUITE" in output
 
     def test_call_exception_handlers(self, samples_dir: Path):
-        path = samples_dir / "call_exception_handlers_complete.cbl"
-        if not path.exists():
-            pytest.skip("Sample not available")
-        source = path.read_text()
+        source = _read_sample(samples_dir, "call_exception_handlers_complete.cbl")
         output = generate_cobolcheck_tests(source)
         _validate_cut_syntax(output)
 
@@ -151,7 +153,7 @@ class TestEndToEndNoComments:
     """Test generation without comments."""
 
     def test_no_comments_mode(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 
@@ -171,7 +173,7 @@ class TestEndToEndCoverageMap:
     """Integration tests for coverage analysis of real programs."""
 
     def test_arithmetic_data_items_extracted(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 
@@ -184,7 +186,7 @@ class TestEndToEndCoverageMap:
         assert len(numeric_items) > 0
 
     def test_arithmetic_branch_points_detected(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 
@@ -195,7 +197,7 @@ class TestEndToEndCoverageMap:
         assert cmap.total_branch_points > 0
 
     def test_program_name_extracted(self, samples_dir: Path):
-        source = (samples_dir / "arithmetic_operations.cbl").read_text()
+        source = _read_sample(samples_dir, "arithmetic_operations.cbl")
         result = parse_cobol(source)
         assert result.ast is not None
 

@@ -807,3 +807,66 @@ class TestCoverageMapLookup:
     def test_get_data_item_not_found(self):
         cmap = CoverageMap(program_name="TEST")
         assert cmap.get_data_item("MISSING") is None
+
+
+class TestCoverageAnalyzerWriteTrackingExtended:
+    """Tests for UNSTRING and ACCEPT write tracking."""
+
+    def test_unstring_into_targets_written(self):
+        from cobolparser.models.statements.data import UnstringStatement
+
+        prog = _make_program()
+        proc = _add_procedure(prog)
+        para = CobolParagraph("UNSTRING-PARA", LOC)
+
+        unstring = UnstringStatement(LOC)
+        unstring.add_into_target("WS-FIRST")
+        unstring.add_into_target("WS-SECOND", count_var="WS-CNT")
+        para.add_statement(unstring)
+        proc.add_paragraph(para)
+
+        analyzer = CoverageAnalyzer()
+        cmap = analyzer.analyze(prog)
+        pc = cmap.paragraphs[0]
+        assert "WS-FIRST" in pc.writes_variables
+        assert "WS-SECOND" in pc.writes_variables
+
+    def test_accept_target_written(self):
+        from cobolparser.models.statements.io import IOAcceptStatement
+
+        prog = _make_program()
+        proc = _add_procedure(prog)
+        para = CobolParagraph("ACCEPT-PARA", LOC)
+
+        accept = IOAcceptStatement(LOC)
+        accept.set_target("WS-INPUT")
+        para.add_statement(accept)
+        proc.add_paragraph(para)
+
+        analyzer = CoverageAnalyzer()
+        cmap = analyzer.analyze(prog)
+        pc = cmap.paragraphs[0]
+        assert "WS-INPUT" in pc.writes_variables
+
+    def test_alphabetic_pic_not_numeric(self):
+        """PIC A(9) should not be detected as numeric."""
+        prog = _make_program()
+        item = _make_data_item("WS-ALPHA", 1, "A(9)")
+        _add_data_division_with_items(prog, [item])
+        _add_procedure(prog)
+
+        analyzer = CoverageAnalyzer()
+        cmap = analyzer.analyze(prog)
+        assert len(cmap.data_items) == 1
+        assert cmap.data_items[0].is_numeric is False
+
+    def test_alphabetic_pic_a99_not_numeric(self):
+        """PIC A(99) should not be detected as numeric."""
+        prog = _make_program()
+        item = _make_data_item("WS-ALPHA-LONG", 1, "A(99)")
+        _add_data_division_with_items(prog, [item])
+        _add_procedure(prog)
+
+        analyzer = CoverageAnalyzer()
+        cmap = analyzer.analyze(prog)
+        assert cmap.data_items[0].is_numeric is False

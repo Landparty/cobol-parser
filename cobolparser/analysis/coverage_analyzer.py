@@ -8,6 +8,7 @@ needs testing for full coverage.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -32,6 +33,7 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.io import (
+    IOAcceptStatement,
     IODeleteStatement,
     IOReadStatement,
     IORewriteStatement,
@@ -598,9 +600,17 @@ class CoverageAnalyzer:
                 writes.add(statement.target.upper())
             if hasattr(statement, "giving") and statement.giving:
                 writes.add(statement.giving.upper())
+        elif isinstance(statement, UnstringStatement):
+            for into in statement.into_targets:
+                into_target: str | None = into.get("target")
+                if into_target:
+                    writes.add(into_target.upper())
         elif isinstance(statement, IOReadStatement):
             if statement.into_target:
                 writes.add(statement.into_target.upper())
+        elif isinstance(statement, IOAcceptStatement):
+            if statement.target:
+                writes.add(statement.target.upper())
         elif isinstance(statement, PerformStatement):
             if statement.varying_clause and "variable" in statement.varying_clause:
                 writes.add(statement.varying_clause["variable"].upper())
@@ -649,12 +659,15 @@ class CoverageAnalyzer:
             info.is_signed = pic.is_signed
             info.decimal_digits = pic.decimal_digits or 0
             info.integer_digits = pic.integer_digits or 0
-            # Determine if numeric from pattern
+            # Determine if numeric from PIC character types (not repeat
+            # counts).  Strip '(n)' groups first so PIC A(9) doesn't
+            # false-positive on the '9' inside the parentheses.
             if pic.pattern:
-                upper_pat = pic.pattern.upper()
+                stripped_pat = re.sub(r"\(\d+\)", "", pic.pattern.upper())
                 info.is_numeric = (
-                    any(c in upper_pat for c in ("9", "V", "S9", "P"))
-                    and "X" not in upper_pat
+                    any(c in stripped_pat for c in ("9", "V", "P"))
+                    and "X" not in stripped_pat
+                    and "A" not in stripped_pat
                 )
 
         return info
