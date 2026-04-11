@@ -202,10 +202,6 @@ class ProgramFlowAnalyzer:
         self._entry_points: list[str] = []
         self._exit_points: set[str] = set()
         self._external_calls: list[dict[str, Any]] = []
-        # Maps section name -> list of paragraph names within that section
-        self._section_paragraphs: dict[str, list[str]] = {}
-        # Maps paragraph name -> parent section name (if any)
-        self._paragraph_section: dict[str, str] = {}
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
 
@@ -224,8 +220,6 @@ class ProgramFlowAnalyzer:
         self._entry_points = []
         self._exit_points = set()
         self._external_calls = []
-        self._section_paragraphs = {}
-        self._paragraph_section = {}
         self._current_procedure = None
 
         proc_division = ast.procedure_division
@@ -279,7 +273,6 @@ class ProgramFlowAnalyzer:
                     location=section.location,
                 )
                 self._ordered_procedures.append(upper_name)
-                self._section_paragraphs[upper_name] = []
 
             for para in section.paragraphs:
                 pname = para.paragraph_name
@@ -291,10 +284,6 @@ class ProgramFlowAnalyzer:
                         location=para.location,
                     )
                     self._ordered_procedures.append(upper_pname)
-                    if name:
-                        sec_upper = name.upper()
-                        self._section_paragraphs[sec_upper].append(upper_pname)
-                        self._paragraph_section[upper_pname] = sec_upper
 
         # Collect top-level paragraphs
         for para in proc_division.paragraphs:
@@ -508,6 +497,8 @@ class ProgramFlowAnalyzer:
         """Create edges for a CALL statement and record external calls."""
         if stmt.called_program:
             program_name = stmt.called_program.strip("'\"")
+            if not program_name:
+                return
             edge_type = (
                 FlowEdgeType.CALL_DYNAMIC if stmt.is_dynamic else FlowEdgeType.CALL
             )
@@ -580,8 +571,8 @@ class ProgramFlowAnalyzer:
         all_statements = ast.get_all_statements()
         for stmt in all_statements:
             if isinstance(stmt, EntryStatement) and stmt.entry_name:
-                entry_name = stmt.entry_name.strip("'\"").upper()
-                if entry_name not in self._entry_points:
+                entry_name = stmt.entry_name.strip("'\"").strip().upper()
+                if entry_name and entry_name not in self._entry_points:
                     self._entry_points.append(entry_name)
 
     def _build_fall_through_edges(self) -> None:
