@@ -47,6 +47,29 @@ def __getattr__(name: str) -> object:
             "TestPlan": TestPlan,
         }
         return _map[name]
+    if name in (
+        "ProgramFlowAnalyzer",
+        "ProgramFlowReport",
+        "FlowNode",
+        "FlowEdge",
+        "FlowEdgeType",
+    ):
+        from .program_flow import (
+            FlowEdge,
+            FlowEdgeType,
+            FlowNode,
+            ProgramFlowAnalyzer,
+            ProgramFlowReport,
+        )
+
+        _map = {
+            "ProgramFlowAnalyzer": ProgramFlowAnalyzer,
+            "ProgramFlowReport": ProgramFlowReport,
+            "FlowNode": FlowNode,
+            "FlowEdge": FlowEdge,
+            "FlowEdgeType": FlowEdgeType,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -62,4 +85,9 @@ __all__ = [
     "IOOperation",
     "TestPlan",
     "TestPlanGenerator",
+    "ProgramFlowAnalyzer",
+    "ProgramFlowReport",
+    "FlowNode",
+    "FlowEdge",
+    "FlowEdgeType",
 ]

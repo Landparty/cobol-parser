@@ -20,6 +20,7 @@ _SUBCOMMANDS = frozenset(
         "expand",
         "analyze",
         "dead-code",
+        "program-flow",
         "generate-tests",
     }
 )
@@ -507,6 +508,41 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
     _json_out(report.to_dict(), args.compact)
 
 
+# -- Subcommand: program-flow -------------------------------------------------
+
+
+def _build_program_flow_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "program-flow",
+        help="Display program control flow graph (paragraphs, PERFORM, GO TO, CALL)",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    p.set_defaults(func=_cmd_program_flow)
+
+
+def _cmd_program_flow(args: argparse.Namespace) -> None:
+    from ..analysis.program_flow import ProgramFlowAnalyzer
+
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    analyzer = ProgramFlowAnalyzer()
+    report = analyzer.analyze(result.ast)
+
+    _json_out(report.to_dict(), args.compact)
+
+
 # -- Subcommand: generate-tests -----------------------------------------------
 
 
@@ -677,6 +713,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_expand_parser(subparsers)
     _build_analyze_parser(subparsers)
     _build_dead_code_parser(subparsers)
+    _build_program_flow_parser(subparsers)
     _build_generate_tests_parser(subparsers)
 
     return parser
