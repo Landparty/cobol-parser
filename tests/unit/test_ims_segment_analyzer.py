@@ -55,7 +55,9 @@ def _make_loc(line: int = 1, col: int = 1) -> SourceLocation:
     return SourceLocation(line, col)
 
 
-def _make_data_item(name: str, level: int = 5, value: str | None = None) -> CobolDataItem:
+def _make_data_item(
+    name: str, level: int = 5, value: str | None = None
+) -> CobolDataItem:
     item = CobolDataItem(name, level, _make_loc())
     if value is not None:
         item.set_value_clause(value)
@@ -742,7 +744,7 @@ class TestEdgeCasesUnit:
         proc_div = CobolDivision("PROCEDURE", loc)
         para = CobolParagraph("MAIN", loc)
 
-        for src, tgt in (move_stmts or []):
+        for src, tgt in move_stmts or []:
             mv = MoveStatement(loc)
             mv.set_source(src)
             mv.add_target(tgt)
@@ -767,11 +769,11 @@ class TestEdgeCasesUnit:
         field-name child ('EMP-ID  ').
         """
         root = _make_data_item("SSA-EMP-QUAL", level=1)
-        root.add_child(_make_data_item("SSA-SEG",   level=5, value="EMPLOYEE"))
-        root.add_child(_make_data_item("SSA-OPEN",  level=5, value="("))
+        root.add_child(_make_data_item("SSA-SEG", level=5, value="EMPLOYEE"))
+        root.add_child(_make_data_item("SSA-OPEN", level=5, value="("))
         root.add_child(_make_data_item("SSA-FIELD", level=5, value="EMP-ID  "))
-        root.add_child(_make_data_item("SSA-OPER",  level=5, value="= "))
-        root.add_child(_make_data_item("SSA-KEY",   level=5))           # no VALUE
+        root.add_child(_make_data_item("SSA-OPER", level=5, value="= "))
+        root.add_child(_make_data_item("SSA-KEY", level=5))  # no VALUE
         root.add_child(_make_data_item("SSA-CLOSE", level=5, value=")"))
 
         program = self._single_call_program(
@@ -871,7 +873,7 @@ class TestEdgeCasesUnit:
         sub-item with VALUE) is still resolved via recursive data collection.
         """
         group = _make_data_item("DLI-CODES", level=1)
-        group.add_child(_make_data_item("DLI-GU",   level=5, value="GU  "))
+        group.add_child(_make_data_item("DLI-GU", level=5, value="GU  "))
         group.add_child(_make_data_item("DLI-ISRT", level=5, value="ISRT"))
 
         ssa = _make_data_item("SSA-X", level=1)
@@ -883,6 +885,42 @@ class TestEdgeCasesUnit:
         results = IMSSegmentAnalyzer().analyze(program)
         assert results[0].function_code == "GU"
         assert results[0].primary_segment == "CUSTOMER"
+
+    # ── Inline literal func code – CALL parser strips quotes ─────────────
+
+    def test_func_code_inline_literal_quotes_stripped(self):
+        """
+        When COBOL source is ``CALL 'CBLTDLI' USING 'GU  ' ...`` the CALL
+        parser delivers the parameter *without* surrounding quotes (the quotes
+        are removed during parsing, before the analyzer sees it).  Case 2 of
+        ``_resolve_func_code`` must therefore recognise ``"GU  "`` directly
+        as a known IMS verb rather than treating it as an unresolved variable.
+        """
+        ssa = _make_data_item("SSA-X", level=1)
+        ssa.add_child(_make_data_item("N", level=5, value="EMPLOYEE"))
+
+        # Pass "GU  " (no quotes) as the func-code parameter to simulate the
+        # CALL parser having already stripped the surrounding quote characters.
+        program = self._single_call_program(
+            "CBLTDLI", ["GU  ", "P", "I", "SSA-X"], [ssa]
+        )
+        results = IMSSegmentAnalyzer().analyze(program)
+        assert results[0].function_code == "GU"
+        assert results[0].primary_segment == "EMPLOYEE"
+
+    def test_func_code_inline_literal_with_trailing_spaces(self):
+        """All four-char IMS verb literals (e.g. ``'ISRT'``, ``'GNP '``) are
+        correctly resolved after quote-stripping, regardless of trailing spaces.
+        """
+        ssa = _make_data_item("SSA-Y", level=1)
+        ssa.add_child(_make_data_item("N", level=5, value="CUSTOMER"))
+
+        for raw, expected in [("ISRT", "ISRT"), ("GNP ", "GNP"), ("DLET", "DLET")]:
+            program = self._single_call_program(
+                "CBLTDLI", [raw, "P", "I", "SSA-Y"], [ssa]
+            )
+            results = IMSSegmentAnalyzer().analyze(program)
+            assert results[0].function_code == expected, f"failed for {raw!r}"
 
     # ── No USING parameters ───────────────────────────────────────────────
 

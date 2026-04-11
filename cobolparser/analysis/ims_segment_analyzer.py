@@ -192,8 +192,12 @@ class IMSSegmentAnalyzer:
                         src_values
                     )
             else:
-                # Treat source as a literal (may or may not be quoted)
-                literal = _strip_quotes(node.source)
+                # Only propagate when source is a genuine literal (quoted string,
+                # numeric, or figurative constant).  Bare identifiers that are not
+                # yet in _variable_values are unresolved variable references whose
+                # value is unknown; recording their name as a value would cause
+                # false segment-name resolution (e.g. "WS-SEG" → segment "WS-SEG").
+                literal = _extract_literal(node.source)
                 if literal is not None:
                     for tgt in node.targets:
                         self._variable_values.setdefault(tgt.upper(), set()).add(
@@ -215,9 +219,15 @@ class IMSSegmentAnalyzer:
                 continue
 
             params = stmt.using_parameters
-            func_var = params[_PARAM_FUNC_CODE].name if len(params) > _PARAM_FUNC_CODE else None
+            func_var = (
+                params[_PARAM_FUNC_CODE].name
+                if len(params) > _PARAM_FUNC_CODE
+                else None
+            )
             pcb_name = params[_PARAM_PCB].name if len(params) > _PARAM_PCB else None
-            io_area = params[_PARAM_IO_AREA].name if len(params) > _PARAM_IO_AREA else None
+            io_area = (
+                params[_PARAM_IO_AREA].name if len(params) > _PARAM_IO_AREA else None
+            )
             ssa_names = [p.name for p in params[_PARAM_SSA_START:]]
 
             results.append(
@@ -240,13 +250,22 @@ class IMSSegmentAnalyzer:
         """Resolve a function-code variable/literal to an IMS verb like ``"GU"``."""
         if not var_name:
             return None
-        # Quoted inline literal (unusual but valid)
-        lit = _strip_quotes(var_name)
-        if lit != var_name:  # quotes were present
-            return lit.strip().upper() or None
-        var = var_name.upper()
-        if var in self._variable_values:
-            candidates = {v.strip().upper() for v in self._variable_values[var]}
+
+        # Case 1: quoted inline literal (e.g. USING "'GU  '" still with quotes)
+        stripped_of_quotes = _strip_quotes(var_name)
+        if stripped_of_quotes != var_name.strip():  # quotes were present
+            return stripped_of_quotes.strip().upper() or None
+
+        # Case 2: unquoted literal whose quotes the CALL parser already stripped
+        # (e.g. USING 'GU  ' in COBOL arrives here as var_name="GU  ").
+        # Recognise it directly when the normalised value is a known DLI verb.
+        normalized = var_name.strip().upper()
+        if normalized in _IMS_FUNCTION_CODES:
+            return normalized
+
+        # Case 3: variable name – look up its tracked values
+        if normalized in self._variable_values:
+            candidates = {v.strip().upper() for v in self._variable_values[normalized]}
             # Prefer known IMS verbs; fall back to any tracked value
             pool = candidates & _IMS_FUNCTION_CODES or candidates
             if pool:
@@ -281,7 +300,20 @@ class IMSSegmentAnalyzer:
         return None
 
 
-# ── Module-level helper ───────────────────────────────────────────────────────
+# ── Module-level helpers ──────────────────────────────────────────────────────
+
+# Figurative constants and their resolved literal values
+_FIGURATIVE_CONSTANTS: dict[str, str] = {
+    "ZERO": "0",
+    "ZEROS": "0",
+    "ZEROES": "0",
+    "SPACE": " ",
+    "SPACES": " ",
+    "LOW-VALUE": "\x00",
+    "LOW-VALUES": "\x00",
+    "HIGH-VALUE": "\xff",
+    "HIGH-VALUES": "\xff",
+}
 
 
 def _strip_quotes(value: str) -> str:
@@ -296,3 +328,40 @@ def _strip_quotes(value: str) -> str:
     ):
         return s[1:-1]
     return s
+
+
+def _extract_literal(source: str) -> str | None:
+    """Return the literal value for genuine literals only; ``None`` for identifiers.
+
+    Recognises:
+    * Quoted strings (single or double quotes) – the COBOL MOVE parser retains
+      quotes on string literals, so ``MOVE 'X' TO Y`` yields ``source='"X"'``.
+    * Figurative constants (``ZERO``, ``SPACE``, ``LOW-VALUE``, …).
+    * Numeric literals (optionally signed, with optional decimal point).
+
+    Bare identifiers (e.g. ``WS-SEG-NAME``) return ``None`` so that unresolved
+    variable references are never silently recorded as segment-name candidates.
+    """
+    if not source:
+        return None
+    s = source.strip()
+
+    # Quoted string
+    if len(s) >= 2 and (
+        (s.startswith("'") and s.endswith("'"))
+        or (s.startswith('"') and s.endswith('"'))
+    ):
+        return s[1:-1]
+
+    # Figurative constant
+    upper = s.upper()
+    if upper in _FIGURATIVE_CONSTANTS:
+        return _FIGURATIVE_CONSTANTS[upper]
+
+    # Numeric literal  (digits only, optional leading sign, optional decimal)
+    core = s.lstrip("+-")
+    if core.replace(".", "", 1).isdigit():
+        return s
+
+    # Bare identifier – value unknown
+    return None
