@@ -2200,3 +2200,448 @@ class TestProgramFlowStatementsAndDecisions:
         assert error["statement_types"].get("DISPLAY") == 1
         assert error["statement_types"].get("GOBACK") == 1
         assert error["decisions"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: Edge cases and coverage gaps
+# ---------------------------------------------------------------------------
+
+
+class TestProgramFlowEdgeCases:
+    """Tests covering edge cases, defensive guards, and uncovered branches."""
+
+    # -- has_exit_program in to_dict output -----------------------------------
+
+    def test_exit_program_in_to_dict(self) -> None:
+        """FlowNode.to_dict() includes has_exit_program when set."""
+        node = FlowNode(
+            "EXIT-PARA",
+            "PARAGRAPH",
+            SourceLocation(10, 8),
+            has_exit_program=True,
+        )
+        d = node.to_dict()
+        assert d.get("has_exit_program") is True
+
+    def test_exit_program_absent_when_false(self) -> None:
+        """FlowNode.to_dict() omits has_exit_program when False."""
+        node = FlowNode("NORMAL", "PARAGRAPH", SourceLocation(10, 8))
+        d = node.to_dict()
+        assert "has_exit_program" not in d
+
+    # -- period-only paragraph name filtered ----------------------------------
+
+    def test_period_paragraph_filtered(self) -> None:
+        """Synthetic period-only paragraph names are excluded from nodes."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_continue()]),
+                (".", [_continue()]),  # synthetic period paragraph
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        names = [n.name for n in report.nodes]
+        assert "." not in names
+        assert "MAIN-LOGIC" in names
+
+    # -- case insensitive matching -------------------------------------------
+
+    def test_case_insensitive_paragraph_names(self) -> None:
+        """Paragraph names are uppercased for consistent matching."""
+        prog = _make_program(
+            [
+                ("main-logic", [_perform("helper-para")]),
+                ("helper-para", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        names = [n.name for n in report.nodes]
+        assert "MAIN-LOGIC" in names
+        assert "HELPER-PARA" in names
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert perform_edges[0].target == "HELPER-PARA"
+
+    # -- empty CALL program name guard ----------------------------------------
+
+    def test_empty_call_program_name_ignored(self) -> None:
+        """CALL with empty-quote program name produces no edges."""
+        stmt = CallStatement(LOC)
+        stmt.set_called_program("''", is_dynamic=False)
+
+        prog = _make_program([("MAIN-LOGIC", [stmt, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        call_edges = [
+            e
+            for e in report.edges
+            if e.edge_type in (FlowEdgeType.CALL, FlowEdgeType.CALL_DYNAMIC)
+        ]
+        assert len(call_edges) == 0
+        assert len(report.external_calls) == 0
+
+    # -- dynamic call with possible_values ------------------------------------
+
+    def test_dynamic_call_possible_values_in_output(self) -> None:
+        """Dynamic CALL with possible_values includes them in external_calls."""
+        stmt = CallStatement(LOC)
+        stmt.set_called_program("WS-PGM", is_dynamic=True)
+        stmt.set_possible_values(["PROG-A", "PROG-B"])
+
+        prog = _make_program([("MAIN-LOGIC", [stmt, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.external_calls) == 1
+        ext = report.external_calls[0]
+        assert ext["is_dynamic"] is True
+        assert set(ext["possible_values"]) == {"PROG-A", "PROG-B"}
+
+    # -- whitespace entry name filtered (bug fix) ----------------------------
+
+    def test_whitespace_entry_name_filtered(self) -> None:
+        """ENTRY statements with whitespace-only names are excluded."""
+        entry = EntryStatement(LOC)
+        entry.set_entry_name("\n")  # whitespace-only
+
+        prog = _make_program([("MAIN-LOGIC", [entry, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert all(ep.strip() for ep in report.entry_points)
+        assert "\n" not in report.entry_points
+
+    def test_empty_entry_name_filtered(self) -> None:
+        """ENTRY statements with empty string names are excluded."""
+        entry = EntryStatement(LOC)
+        entry.set_entry_name("''")  # empty after quote strip
+
+        prog = _make_program([("MAIN-LOGIC", [entry, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # Only the first procedure entry point should exist
+        for ep in report.entry_points:
+            assert ep.strip()  # no empty entry points
+
+    # -- duplicate paragraph name (top-level already in section) ---------------
+
+    def test_duplicate_paragraph_name_not_doubled(self) -> None:
+        """A paragraph that exists in a section is not duplicated as top-level."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                ("SEC-A", [("PARA-1", [_continue()])]),
+            ],
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        names = [n.name for n in report.nodes]
+        assert names.count("PARA-1") == 1
+
+    # -- inline PERFORM with statements inside --------------------------------
+
+    def test_inline_perform_statements_counted(self) -> None:
+        """Statements inside inline PERFORM blocks are counted."""
+        perf = PerformStatement(LOC)
+        # inline PERFORM (no target paragraph)
+        inner_display = ContinueStatement(LOC)
+        inner_display2 = ContinueStatement(LOC)
+        perf.add_inline_statement(inner_display)
+        perf.add_inline_statement(inner_display2)
+
+        prog = _make_program([("MAIN-LOGIC", [perf, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        main = report.nodes[0]
+        # PERFORM itself + 2 inline + STOP = 4 statements
+        assert main.statement_count == 4
+
+    # -- PERFORM VARYING is detected as loop ----------------------------------
+
+    def test_perform_varying_is_loop(self) -> None:
+        """PERFORM VARYING creates a loop edge."""
+        from cobolparser.models.statements.base import CobolExpression
+
+        stmt = PerformStatement(LOC)
+        stmt.set_target_paragraph("LOOP-PARA")
+        cond = CobolExpression("COMPARISON", LOC)
+        stmt.set_varying_clause("WS-I", "1", "1", cond)
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt, _stop_run()]),
+                ("LOOP-PARA", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert len(perform_edges) == 1
+        assert perform_edges[0].is_loop is True
+        assert perform_edges[0].perform_type == "VARYING"
+
+    # -- EXIT with non-PROGRAM type (SECTION, PARAGRAPH) ----------------------
+
+    def test_exit_section_not_marked_as_exit_point(self) -> None:
+        """EXIT SECTION does not mark the paragraph as a program exit point."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("SECTION")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert not report.nodes[0].is_exit_point
+        assert not report.nodes[0].has_exit_program
+
+    # -- no fall-through after EXIT PROGRAM -----------------------------------
+
+    def test_no_fall_through_after_exit_program(self) -> None:
+        """EXIT PROGRAM prevents fall-through to next paragraph."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_exit_program()]),
+                ("NEXT-PARA", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.FALL_THROUGH]
+        assert len(ft_edges) == 0
+
+    # -- analyzer reuse (calling analyze twice) --------------------------------
+
+    def test_analyzer_reuse_resets_state(self) -> None:
+        """Calling analyze() a second time resets all state."""
+        prog1 = _make_program(
+            [
+                ("PROG1-MAIN", [_perform("PROG1-WORK"), _stop_run()]),
+                ("PROG1-WORK", [_continue()]),
+            ]
+        )
+        prog2 = _make_program(
+            [
+                ("PROG2-MAIN", [_stop_run()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report1 = analyzer.analyze(prog1)
+        report2 = analyzer.analyze(prog2)
+
+        assert report1.node_count == 2
+        assert report2.node_count == 1
+        # Ensure no state leakage from first analysis
+        names2 = [n.name for n in report2.nodes]
+        assert "PROG1-MAIN" not in names2
+        assert "PROG2-MAIN" in names2
+
+    # -- single paragraph (last paragraph has no fall-through) ----------------
+
+    def test_single_paragraph_no_fall_through(self) -> None:
+        """A single paragraph produces no fall-through edges."""
+        prog = _make_program([("ONLY-PARA", [_stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.FALL_THROUGH]
+        assert len(ft_edges) == 0
+
+    # -- SEARCH decision with at_end_clause -----------------------------------
+
+    def test_search_decision_with_at_end(self) -> None:
+        """SEARCH with AT END produces a decision with has_at_end=True."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        search = SearchStatement(LOC)
+        search.set_table_name("WS-TABLE")
+        search.add_when_clause("WS-TABLE(IDX) = TARGET", [_continue()])
+        search.set_at_end_clause([_continue()])
+
+        prog = _make_program([("MAIN-LOGIC", [search, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        decisions = report.nodes[0].decisions
+        search_decs = [d for d in decisions if d["type"] == "SEARCH"]
+        assert len(search_decs) == 1
+        assert search_decs[0]["has_at_end"] is True
+        assert search_decs[0]["table_name"] == "WS-TABLE"
+        assert search_decs[0]["when_count"] == 1
+
+    def test_search_decision_without_at_end(self) -> None:
+        """SEARCH without AT END has has_at_end=False."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        search = SearchStatement(LOC)
+        search.set_table_name("WS-TABLE")
+        search.add_when_clause("condition", [_continue()])
+
+        prog = _make_program([("MAIN-LOGIC", [search, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        search_decs = [d for d in report.nodes[0].decisions if d["type"] == "SEARCH"]
+        assert len(search_decs) == 1
+        assert search_decs[0]["has_at_end"] is False
+
+    # -- IF without condition (defensive) ------------------------------------
+
+    def test_if_without_condition(self) -> None:
+        """IF statement with no condition set still records a decision."""
+        if_stmt = IfStatement(LOC)
+        if_stmt.add_then_statement(_continue())
+
+        prog = _make_program([("MAIN-LOGIC", [if_stmt, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        decisions = report.nodes[0].decisions
+        assert len(decisions) == 1
+        assert decisions[0]["type"] == "IF"
+        assert "condition" not in decisions[0]  # no condition key when None
+
+    # -- EVALUATE with expression subject (to_dict branch) -------------------
+
+    def test_evaluate_expression_subject(self) -> None:
+        """EVALUATE with CobolExpression subject serialises it via to_dict."""
+        from cobolparser.models.statements.base import CobolExpression
+
+        eval_stmt = EvaluateStatement(LOC)
+        expr = CobolExpression("COMPARISON", LOC)
+        eval_stmt.add_subject(expr)
+        wc = WhenClause([{"type": "Literal", "value": "1"}], LOC)
+        wc.add_statement(_continue())
+        eval_stmt.add_when_clause(wc)
+
+        prog = _make_program([("MAIN-LOGIC", [eval_stmt, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        decisions = report.nodes[0].decisions
+        assert len(decisions) == 1
+        # Subject should be serialised dict, not a string
+        assert isinstance(decisions[0]["subjects"][0], dict)
+        assert "expression_type" in decisions[0]["subjects"][0]
+
+    # -- GO TO with no target (defensive) ------------------------------------
+
+    def test_goto_no_target_no_edge(self) -> None:
+        """GO TO with no target_paragraph produces no edges."""
+        goto = GoStatement(LOC)
+        # Don't set target
+
+        prog = _make_program([("MAIN-LOGIC", [goto, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        goto_edges = [
+            e
+            for e in report.edges
+            if e.edge_type in (FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING)
+        ]
+        assert len(goto_edges) == 0
+
+    # -- PERFORM with no target (inline only) ---------------------------------
+
+    def test_perform_no_target_no_edge(self) -> None:
+        """Inline PERFORM (no target_paragraph) produces no PERFORM edge."""
+        perf = PerformStatement(LOC)
+        perf.add_inline_statement(_continue())
+
+        prog = _make_program([("MAIN-LOGIC", [perf, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert len(perform_edges) == 0
+
+    # -- CALL with no called_program (defensive) ------------------------------
+
+    def test_call_no_program_no_edge(self) -> None:
+        """CALL with no called_program produces no edges."""
+        call = CallStatement(LOC)
+        # Don't set called_program
+
+        prog = _make_program([("MAIN-LOGIC", [call, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        call_edges = [
+            e
+            for e in report.edges
+            if e.edge_type in (FlowEdgeType.CALL, FlowEdgeType.CALL_DYNAMIC)
+        ]
+        assert len(call_edges) == 0
+        assert len(report.external_calls) == 0
+
+    # -- FlowEdge to_dict with condition but no loop --------------------------
+
+    def test_edge_condition_without_loop(self) -> None:
+        """FlowEdge.to_dict() includes condition even without is_loop."""
+        edge = FlowEdge(
+            "A",
+            "B",
+            FlowEdgeType.GOTO_DEPENDING,
+            SourceLocation(1, 1),
+            condition="DEPENDING ON WS-VAR",
+        )
+        d = edge.to_dict()
+        assert d["condition"] == "DEPENDING ON WS-VAR"
+        assert "is_loop" not in d
+
+    # -- run against all sample files without crashing -------------------------
+
+    def test_analyze_all_sample_files_no_crash(self) -> None:
+        """ProgramFlowAnalyzer should handle all sample .cbl files without error."""
+        import pathlib
+
+        samples_dir = pathlib.Path(__file__).parent.parent.parent / "samples"
+        if not samples_dir.exists():
+            pytest.skip("samples directory not found")
+
+        cbl_files = sorted(samples_dir.glob("*.cbl"))
+        assert len(cbl_files) > 0, "No .cbl files found"
+
+        analyzer = ProgramFlowAnalyzer()
+        for cbl_file in cbl_files:
+            source = cbl_file.read_text(encoding="utf-8")
+            result = parse_cobol(source, filename=str(cbl_file))
+            if result.ast is not None:
+                report = analyzer.analyze(result.ast)
+                d = report.to_dict()
+                # Basic structural invariants
+                assert d["summary"]["node_count"] == len(d["nodes"])
+                assert d["summary"]["edge_count"] == len(d["edges"])
+                # All entry_points should be non-empty strings
+                for ep in d["entry_points"]:
+                    assert ep.strip(), f"Empty entry point in {cbl_file.name}"
