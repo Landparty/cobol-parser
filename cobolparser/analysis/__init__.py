@@ -70,6 +70,14 @@ def __getattr__(name: str) -> object:
             "FlowEdgeType": FlowEdgeType,
         }
         return _map[name]
+    if name in ("IMSSegmentAnalyzer", "IMSDLICall"):
+        from .ims_segment_analyzer import IMSDLICall, IMSSegmentAnalyzer
+
+        _map = {
+            "IMSSegmentAnalyzer": IMSSegmentAnalyzer,
+            "IMSDLICall": IMSDLICall,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -80,6 +88,8 @@ __all__ = [
     "DeadCodeReport",
     "DeadCodeItem",
     "DynamicCallAnalyzer",
+    "IMSDLICall",
+    "IMSSegmentAnalyzer",
     "IOLogger",
     "IOLogReport",
     "IOOperation",
