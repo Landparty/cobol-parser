@@ -69,6 +69,8 @@ class FlowNode:
     perform_count: int = 0
     goto_count: int = 0
     call_count: int = 0
+    statement_types: dict[str, int] = field(default_factory=dict)
+    decisions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -96,6 +98,8 @@ class FlowNode:
             "goto_count": self.goto_count,
             "call_count": self.call_count,
         }
+        result["statement_types"] = self.statement_types
+        result["decisions"] = self.decisions
         return result
 
 
@@ -336,6 +340,11 @@ class ProgramFlowAnalyzer:
         node = self._nodes[proc_name]
         visited: set[int] = set()
 
+        def _record_type(stmt: Any) -> None:
+            stype = getattr(stmt, "statement_type", None)
+            if stype:
+                node.statement_types[stype] = node.statement_types.get(stype, 0) + 1
+
         def scan(stmt: Any) -> None:
             if not hasattr(stmt, "node_type"):
                 return
@@ -344,6 +353,7 @@ class ProgramFlowAnalyzer:
             visited.add(id(stmt))
 
             node.statement_count += 1
+            _record_type(stmt)
 
             if isinstance(stmt, PerformStatement):
                 node.perform_count += 1
@@ -356,12 +366,37 @@ class ProgramFlowAnalyzer:
                 self._process_call(stmt, proc_name)
             elif isinstance(stmt, IfStatement):
                 node.if_count += 1
+                decision: dict[str, Any] = {
+                    "type": "IF",
+                    "location": stmt.location.to_dict(),
+                    "has_else": len(stmt.else_statements) > 0,
+                }
+                if stmt.condition:
+                    cond_dict = stmt.condition.to_dict()
+                    decision["condition"] = cond_dict.get(
+                        "expression_type", str(cond_dict)
+                    )
+                node.decisions.append(decision)
                 for s in stmt.then_statements:
                     scan(s)
                 for s in stmt.else_statements:
                     scan(s)
             elif isinstance(stmt, EvaluateStatement):
                 node.evaluate_count += 1
+                subjects: list[Any] = []
+                for subj in stmt.subjects:
+                    if hasattr(subj, "to_dict"):
+                        subjects.append(subj.to_dict())
+                    else:
+                        subjects.append(subj)
+                decision = {
+                    "type": "EVALUATE",
+                    "location": stmt.location.to_dict(),
+                    "subjects": subjects,
+                    "when_count": len(stmt.when_clauses),
+                    "has_default": stmt.default_when is not None,
+                }
+                node.decisions.append(decision)
                 for wc in stmt.when_clauses:
                     for s in wc.statements:
                         scan(s)
@@ -369,6 +404,14 @@ class ProgramFlowAnalyzer:
                     for s in stmt.default_when.statements:
                         scan(s)
             elif isinstance(stmt, SearchStatement):
+                decision = {
+                    "type": "SEARCH",
+                    "location": stmt.location.to_dict(),
+                    "table_name": stmt.table_name,
+                    "when_count": len(stmt.when_clauses),
+                    "has_at_end": stmt.at_end_clause is not None,
+                }
+                node.decisions.append(decision)
                 for wc_dict in stmt.when_clauses:
                     for s in wc_dict.get("statements", []):
                         scan(s)

@@ -1,5 +1,7 @@
 """Tests for program flow analysis."""
 
+import pytest
+
 from cobolparser.analysis.program_flow import (
     FlowEdge,
     FlowEdgeType,
@@ -1032,3 +1034,1169 @@ class TestProgramFlowPublicAPI:
             ProgramFlowAnalyzer,
             ProgramFlowReport,
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Full output validation — verifying the flow display is correct
+# ---------------------------------------------------------------------------
+
+
+class TestProgramFlowOutputDisplay:
+    """End-to-end tests that verify the JSON output properly represents
+    program flow.  Each test parses real COBOL, runs the analyzer, converts
+    the report to a dict (the same dict the CLI serialises as JSON), and
+    checks the complete structure for correctness."""
+
+    # -- helper ---------------------------------------------------------------
+
+    @staticmethod
+    def _analyze(source: str) -> dict:
+        """Parse COBOL source and return the flow report dict."""
+        result = parse_cobol(source, filename="<test>")
+        assert result.ast is not None, f"Parse failed: {result.errors}"
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(result.ast)
+        return report.to_dict()
+
+    # -- top-level structure --------------------------------------------------
+
+    def test_output_has_required_top_level_keys(self) -> None:
+        """Output dict must contain all top-level keys."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TOPKEYS.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+"""
+        d = self._analyze(source)
+
+        required_keys = {
+            "program_name",
+            "nodes",
+            "edges",
+            "entry_points",
+            "exit_points",
+            "external_calls",
+            "summary",
+        }
+        assert required_keys.issubset(d.keys())
+
+    def test_output_summary_matches_lists(self) -> None:
+        """Summary counts must agree with the actual lists."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUMTEST.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK-PARA
+           STOP RUN.
+       WORK-PARA.
+           DISPLAY "WORKING".
+"""
+        d = self._analyze(source)
+
+        assert d["summary"]["node_count"] == len(d["nodes"])
+        assert d["summary"]["edge_count"] == len(d["edges"])
+        assert d["summary"]["entry_point_count"] == len(d["entry_points"])
+        assert d["summary"]["exit_point_count"] == len(d["exit_points"])
+        assert d["summary"]["external_call_count"] == len(d["external_calls"])
+
+    def test_program_name_in_output(self) -> None:
+        """Output contains the correct PROGRAM-ID."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MY-APP.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        assert d["program_name"] == "MY-APP"
+
+    # -- node output ----------------------------------------------------------
+
+    def test_node_output_has_required_fields(self) -> None:
+        """Each node in the output must have name, type, location,
+        statement_count, branching, and calls."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NODEFIELDS.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "HELLO"
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        node = d["nodes"][0]
+
+        assert "name" in node
+        assert "type" in node
+        assert "location" in node
+        assert "statement_count" in node
+        assert "branching" in node
+        assert "calls" in node
+        # location must be a dict with line
+        assert "line" in node["location"]
+
+    def test_node_branching_metrics_correct(self) -> None:
+        """IF and EVALUATE counts in output match the source code."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BRANCHOUT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-X = 1
+               DISPLAY "ONE"
+           END-IF
+           IF WS-X = 2
+               DISPLAY "TWO"
+           END-IF
+           EVALUATE WS-X
+               WHEN 1 DISPLAY "A"
+               WHEN 2 DISPLAY "B"
+               WHEN OTHER DISPLAY "C"
+           END-EVALUATE
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+
+        assert main["branching"]["if_count"] == 2
+        assert main["branching"]["evaluate_count"] == 1
+
+    def test_node_call_metrics_correct(self) -> None:
+        """PERFORM, GOTO, and CALL counts in output match the source."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLMETRIC.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK-A
+           PERFORM WORK-B
+           PERFORM WORK-C
+           CALL 'EXTPROG'
+           GO TO DONE.
+       WORK-A.
+           DISPLAY "A".
+       WORK-B.
+           DISPLAY "B".
+       WORK-C.
+           DISPLAY "C".
+       DONE.
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+
+        assert main["calls"]["perform_count"] == 3
+        assert main["calls"]["call_count"] == 1
+        assert main["calls"]["goto_count"] == 1
+
+    def test_entry_point_flagged_on_first_node(self) -> None:
+        """The first paragraph should have is_entry_point = True."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ENTRYPT.
+       PROCEDURE DIVISION.
+       FIRST-PARA.
+           DISPLAY "FIRST".
+       SECOND-PARA.
+           DISPLAY "SECOND".
+"""
+        d = self._analyze(source)
+
+        first_node = d["nodes"][0]
+        assert first_node["name"] == "FIRST-PARA"
+        assert first_node.get("is_entry_point") is True
+
+        # Second node should NOT have is_entry_point
+        second_node = d["nodes"][1]
+        assert "is_entry_point" not in second_node or not second_node["is_entry_point"]
+
+    def test_exit_point_flagged_on_stop_run_node(self) -> None:
+        """Paragraphs with STOP RUN should have is_exit_point = True."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXITPT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK
+           STOP RUN.
+       WORK.
+           DISPLAY "WORK".
+"""
+        d = self._analyze(source)
+
+        main = next(n for n in d["nodes"] if n["name"] == "MAIN-LOGIC")
+        work = next(n for n in d["nodes"] if n["name"] == "WORK")
+
+        assert main.get("is_exit_point") is True
+        assert main.get("has_stop_run") is True
+        assert "is_exit_point" not in work or not work["is_exit_point"]
+
+    # -- edge output ----------------------------------------------------------
+
+    def test_perform_edges_show_source_and_target(self) -> None:
+        """PERFORM edges must identify correct source and target paragraphs."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PERFEDGE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM INIT-DATA
+           PERFORM PROCESS
+           PERFORM CLEANUP
+           STOP RUN.
+       INIT-DATA.
+           DISPLAY "INIT".
+       PROCESS.
+           DISPLAY "PROC".
+       CLEANUP.
+           DISPLAY "CLEAN".
+"""
+        d = self._analyze(source)
+
+        perform_edges = [e for e in d["edges"] if e["type"] == "PERFORM"]
+        edge_pairs = {(e["source"], e["target"]) for e in perform_edges}
+
+        assert ("MAIN-LOGIC", "INIT-DATA") in edge_pairs
+        assert ("MAIN-LOGIC", "PROCESS") in edge_pairs
+        assert ("MAIN-LOGIC", "CLEANUP") in edge_pairs
+
+    def test_perform_edge_shows_perform_type(self) -> None:
+        """PERFORM edges include perform_type field."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PERFTYPE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK-PARA
+           PERFORM WORK-PARA 3 TIMES
+           STOP RUN.
+       WORK-PARA.
+           DISPLAY "W".
+"""
+        d = self._analyze(source)
+
+        perform_edges = [e for e in d["edges"] if e["type"] == "PERFORM"]
+        types = [e.get("perform_type") for e in perform_edges]
+
+        assert "SIMPLE" in types
+        assert "TIMES" in types
+
+    def test_loop_edges_flagged_in_output(self) -> None:
+        """PERFORM UNTIL/TIMES/VARYING edges have is_loop = True."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LOOPOUT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-FLAG PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM READ-LOOP UNTIL WS-FLAG = 'Y'
+           STOP RUN.
+       READ-LOOP.
+           DISPLAY "READING".
+"""
+        d = self._analyze(source)
+
+        loop_edges = [
+            e for e in d["edges"] if e["type"] == "PERFORM" and e.get("is_loop")
+        ]
+        assert len(loop_edges) >= 1
+        assert loop_edges[0]["target"] == "READ-LOOP"
+        assert loop_edges[0]["perform_type"] == "UNTIL"
+
+    def test_goto_edge_in_output(self) -> None:
+        """GO TO edges show correct source and target."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOOUT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           GO TO THE-END.
+       THE-END.
+           STOP RUN.
+"""
+        d = self._analyze(source)
+
+        goto_edges = [e for e in d["edges"] if e["type"] == "GOTO"]
+        assert len(goto_edges) == 1
+        assert goto_edges[0]["source"] == "MAIN-LOGIC"
+        assert goto_edges[0]["target"] == "THE-END"
+
+    def test_goto_depending_edges_in_output(self) -> None:
+        """GO TO DEPENDING produces GOTO_DEPENDING edges (unit-level with
+        manually constructed AST, since the parser simplifies this syntax)."""
+        prog = _make_program(
+            [
+                (
+                    "MAIN-LOGIC",
+                    [_goto_depending(["STEP-1", "STEP-2", "STEP-3"], "WS-IDX")],
+                ),
+                ("STEP-1", [_continue()]),
+                ("STEP-2", [_continue()]),
+                ("STEP-3", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        dep_edges = [e for e in d["edges"] if e["type"] == "GOTO_DEPENDING"]
+        dep_targets = {e["target"] for e in dep_edges}
+
+        assert "STEP-1" in dep_targets
+        assert "STEP-2" in dep_targets
+        assert "STEP-3" in dep_targets
+        # Each edge should carry the condition
+        for edge in dep_edges:
+            assert "condition" in edge
+            assert "DEPENDING ON" in edge["condition"]
+
+    def test_call_edge_in_output(self) -> None:
+        """CALL edges show source paragraph and target program."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLOUT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'BILLING'
+           CALL 'REPORTING'
+           STOP RUN.
+"""
+        d = self._analyze(source)
+
+        call_edges = [e for e in d["edges"] if e["type"] == "CALL"]
+        targets = {e["target"] for e in call_edges}
+
+        assert "BILLING" in targets
+        assert "REPORTING" in targets
+        assert all(e["source"] == "MAIN-LOGIC" for e in call_edges)
+
+    def test_dynamic_call_edge_type_in_output(self) -> None:
+        """Dynamic CALL edges use type CALL_DYNAMIC."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DYNCALL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-PGM PIC X(8) VALUE 'SUBPGM01'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL WS-PGM
+           STOP RUN.
+"""
+        d = self._analyze(source)
+
+        dynamic_edges = [e for e in d["edges"] if e["type"] == "CALL_DYNAMIC"]
+        assert len(dynamic_edges) >= 1
+
+    def test_fall_through_edges_in_output(self) -> None:
+        """Sequential paragraphs without terminators produce FALL_THROUGH edges."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FALLTHRU.
+       PROCEDURE DIVISION.
+       PARA-A.
+           DISPLAY "A".
+       PARA-B.
+           DISPLAY "B".
+       PARA-C.
+           DISPLAY "C"
+           STOP RUN.
+"""
+        d = self._analyze(source)
+
+        ft_edges = [e for e in d["edges"] if e["type"] == "FALL_THROUGH"]
+        ft_pairs = [(e["source"], e["target"]) for e in ft_edges]
+
+        assert ("PARA-A", "PARA-B") in ft_pairs
+        assert ("PARA-B", "PARA-C") in ft_pairs
+
+    def test_no_fall_through_after_terminator(self) -> None:
+        """No FALL_THROUGH edge after a paragraph that ends with STOP RUN."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NOFT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+       UNREACHABLE.
+           DISPLAY "NEVER".
+"""
+        d = self._analyze(source)
+
+        ft_from_main = [
+            e
+            for e in d["edges"]
+            if e["type"] == "FALL_THROUGH" and e["source"] == "MAIN-LOGIC"
+        ]
+        assert len(ft_from_main) == 0
+
+    def test_perform_thru_edges_in_output(self) -> None:
+        """PERFORM THRU produces both PERFORM and PERFORM_THRU edges."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. THRUOUT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM STEP-A THRU STEP-C
+           STOP RUN.
+       STEP-A.
+           DISPLAY "A".
+       STEP-B.
+           DISPLAY "B".
+       STEP-C.
+           DISPLAY "C".
+"""
+        d = self._analyze(source)
+
+        edge_types_from_main = {
+            e["type"] for e in d["edges"] if e["source"] == "MAIN-LOGIC"
+        }
+        assert "PERFORM" in edge_types_from_main
+        assert "PERFORM_THRU" in edge_types_from_main
+
+        perf_edge = next(
+            e
+            for e in d["edges"]
+            if e["source"] == "MAIN-LOGIC" and e["type"] == "PERFORM"
+        )
+        thru_edge = next(
+            e
+            for e in d["edges"]
+            if e["source"] == "MAIN-LOGIC" and e["type"] == "PERFORM_THRU"
+        )
+        assert perf_edge["target"] == "STEP-A"
+        assert thru_edge["target"] == "STEP-C"
+
+    # -- external calls -------------------------------------------------------
+
+    def test_external_calls_in_output(self) -> None:
+        """External calls list has program name, dynamic flag, and caller."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXTCALLS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-PGM PIC X(8) VALUE 'DYNPGM'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'STATIC-PGM'
+           CALL WS-PGM
+           STOP RUN.
+"""
+        d = self._analyze(source)
+
+        assert len(d["external_calls"]) >= 2
+
+        static_call = next(
+            (c for c in d["external_calls"] if c["program"] == "STATIC-PGM"), None
+        )
+        assert static_call is not None
+        assert static_call["is_dynamic"] is False
+        assert static_call["called_from"] == "MAIN-LOGIC"
+        assert "location" in static_call
+
+        dynamic_call = next((c for c in d["external_calls"] if c["is_dynamic"]), None)
+        assert dynamic_call is not None
+
+    # -- entry / exit points lists -------------------------------------------
+
+    def test_entry_points_list_in_output(self) -> None:
+        """entry_points list includes the first paragraph."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ENTRYLIST.
+       PROCEDURE DIVISION.
+       PROGRAM-START.
+           PERFORM DO-WORK
+           STOP RUN.
+       DO-WORK.
+           DISPLAY "WORK".
+"""
+        d = self._analyze(source)
+
+        assert "PROGRAM-START" in d["entry_points"]
+
+    def test_exit_points_list_in_output(self) -> None:
+        """exit_points list includes all paragraphs with terminators."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXITLIST.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK-A
+           STOP RUN.
+       WORK-A.
+           DISPLAY "A".
+       ERROR-EXIT.
+           DISPLAY "ERR"
+           GOBACK.
+"""
+        d = self._analyze(source)
+
+        assert "MAIN-LOGIC" in d["exit_points"]
+        assert "ERROR-EXIT" in d["exit_points"]
+        assert "WORK-A" not in d["exit_points"]
+
+    # -- complete flow for a realistic program --------------------------------
+
+    def test_full_program_flow_output(self) -> None:
+        """End-to-end: a realistic program's flow output shows correct
+        overall structure — all paragraph nodes, PERFORM edges from main,
+        conditional branching, CALL to external, GOBACK exit, and summary."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ORDERPROC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-ORDER-TYPE   PIC X VALUE 'N'.
+       01 WS-STATUS        PIC 9 VALUE 0.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM INIT-PROCESSING
+           PERFORM VALIDATE-ORDER
+           PERFORM PROCESS-ORDER
+           PERFORM FINALIZE
+           STOP RUN.
+       INIT-PROCESSING.
+           DISPLAY "INITIALIZING".
+       VALIDATE-ORDER.
+           IF WS-STATUS = 0
+               DISPLAY "VALID"
+           ELSE
+               GO TO ERROR-HANDLER
+           END-IF.
+       PROCESS-ORDER.
+           EVALUATE WS-ORDER-TYPE
+               WHEN 'N' DISPLAY "NEW ORDER"
+               WHEN 'R' DISPLAY "RETURN"
+               WHEN OTHER DISPLAY "UNKNOWN"
+           END-EVALUATE
+           CALL 'ORDERSVC'.
+       ERROR-HANDLER.
+           DISPLAY "ERROR OCCURRED"
+           GOBACK.
+       FINALIZE.
+           DISPLAY "DONE".
+"""
+        d = self._analyze(source)
+
+        # -- program name --
+        assert d["program_name"] == "ORDERPROC"
+
+        # -- all paragraphs present --
+        node_names = [n["name"] for n in d["nodes"]]
+        for expected in [
+            "MAIN-LOGIC",
+            "INIT-PROCESSING",
+            "VALIDATE-ORDER",
+            "PROCESS-ORDER",
+            "ERROR-HANDLER",
+            "FINALIZE",
+        ]:
+            assert expected in node_names, f"{expected} missing from nodes"
+
+        # -- entry point --
+        assert d["entry_points"][0] == "MAIN-LOGIC"
+        main_node = next(n for n in d["nodes"] if n["name"] == "MAIN-LOGIC")
+        assert main_node.get("is_entry_point") is True
+
+        # -- exit points --
+        assert "MAIN-LOGIC" in d["exit_points"]  # STOP RUN
+        assert "ERROR-HANDLER" in d["exit_points"]  # GOBACK
+
+        # -- PERFORM edges from MAIN-LOGIC --
+        perform_targets = {
+            e["target"]
+            for e in d["edges"]
+            if e["source"] == "MAIN-LOGIC" and e["type"] == "PERFORM"
+        }
+        assert perform_targets == {
+            "INIT-PROCESSING",
+            "VALIDATE-ORDER",
+            "PROCESS-ORDER",
+            "FINALIZE",
+        }
+
+        # -- GOTO edge from VALIDATE-ORDER --
+        goto_edges = [
+            e
+            for e in d["edges"]
+            if e["type"] == "GOTO" and e["source"] == "VALIDATE-ORDER"
+        ]
+        assert len(goto_edges) == 1
+        assert goto_edges[0]["target"] == "ERROR-HANDLER"
+
+        # -- CALL edge from PROCESS-ORDER --
+        call_edges = [
+            e
+            for e in d["edges"]
+            if e["type"] == "CALL" and e["source"] == "PROCESS-ORDER"
+        ]
+        assert len(call_edges) == 1
+        assert call_edges[0]["target"] == "ORDERSVC"
+
+        # -- external calls list --
+        assert len(d["external_calls"]) >= 1
+        assert d["external_calls"][0]["program"] == "ORDERSVC"
+
+        # -- branching metrics --
+        validate = next(n for n in d["nodes"] if n["name"] == "VALIDATE-ORDER")
+        assert validate["branching"]["if_count"] >= 1
+
+        process = next(n for n in d["nodes"] if n["name"] == "PROCESS-ORDER")
+        assert process["branching"]["evaluate_count"] >= 1
+
+        error = next(n for n in d["nodes"] if n["name"] == "ERROR-HANDLER")
+        assert error.get("is_exit_point") is True
+        assert error.get("has_goback") is True
+
+        # -- summary counts match --
+        assert d["summary"]["node_count"] == len(d["nodes"])
+        assert d["summary"]["edge_count"] == len(d["edges"])
+
+    # -- sample file test using control_flow.cbl ------------------------------
+
+    def test_control_flow_sample_output(self) -> None:
+        """Analyze the control_flow.cbl sample file and verify key flow
+        relationships are properly represented in the output."""
+        import pathlib
+
+        sample = (
+            pathlib.Path(__file__).parent.parent.parent / "samples" / "control_flow.cbl"
+        )
+        if not sample.exists():
+            pytest.skip(f"Sample file not found: {sample}")
+
+        source = sample.read_text(encoding="utf-8")
+        d = self._analyze(source)
+
+        assert d["program_name"] == "CTRLFLOW"
+
+        node_names = {n["name"] for n in d["nodes"]}
+        # Key paragraphs must appear
+        for name in [
+            "MAIN-LOGIC",
+            "IF-TESTS",
+            "EVALUATE-TESTS",
+            "PERFORM-TESTS",
+            "GOTO-TESTS",
+            "SEARCH-TESTS",
+            "SIMPLE-PARA",
+        ]:
+            assert name in node_names, f"{name} missing from output nodes"
+
+        # MAIN-LOGIC performs each test section
+        main_performs = {
+            e["target"]
+            for e in d["edges"]
+            if e["source"] == "MAIN-LOGIC" and e["type"] == "PERFORM"
+        }
+        assert "IF-TESTS" in main_performs
+        assert "EVALUATE-TESTS" in main_performs
+        assert "PERFORM-TESTS" in main_performs
+        assert "GOTO-TESTS" in main_performs
+        assert "SEARCH-TESTS" in main_performs
+
+        # MAIN-LOGIC is entry and exit
+        assert "MAIN-LOGIC" in d["entry_points"]
+        assert "MAIN-LOGIC" in d["exit_points"]
+
+        # IF-TESTS has multiple IF statements
+        if_node = next(n for n in d["nodes"] if n["name"] == "IF-TESTS")
+        assert if_node["branching"]["if_count"] > 0
+
+        # EVALUATE-TESTS has EVALUATE statements
+        eval_node = next(n for n in d["nodes"] if n["name"] == "EVALUATE-TESTS")
+        assert eval_node["branching"]["evaluate_count"] > 0
+
+        # PERFORM-TESTS performs SIMPLE-PARA
+        perf_performs = {
+            e["target"]
+            for e in d["edges"]
+            if e["source"] == "PERFORM-TESTS" and e["type"] == "PERFORM"
+        }
+        assert "SIMPLE-PARA" in perf_performs
+
+        # GOTO-TESTS has GO TO edges
+        goto_edges = [
+            e for e in d["edges"] if e["type"] == "GOTO" and e["source"] == "GOTO-TESTS"
+        ]
+        assert len(goto_edges) >= 1
+
+        # Summary is consistent
+        assert d["summary"]["node_count"] == len(d["nodes"])
+        assert d["summary"]["edge_count"] == len(d["edges"])
+
+    # -- CLI output test using subprocess -------------------------------------
+
+    def test_cli_program_flow_json_output(self) -> None:
+        """The program-flow CLI subcommand produces valid JSON with
+        the expected top-level structure."""
+        import json
+        import subprocess
+        import sys
+        import tempfile
+
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CLITEST.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK-PARA
+           STOP RUN.
+       WORK-PARA.
+           DISPLAY "WORK".
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".cbl", delete=False) as tmp:
+            tmp.write(source)
+            tmp.flush()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from cobolparser.cli.parse import main; main()",
+                    "program-flow",
+                    tmp.name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+        stdout = proc.stdout.strip()
+        assert stdout, f"CLI produced no output; stderr: {proc.stderr}"
+
+        d = json.loads(stdout)
+
+        assert d["program_name"] == "CLITEST"
+        assert len(d["nodes"]) >= 2
+        assert len(d["edges"]) >= 1
+        assert "summary" in d
+
+    def test_cli_compact_output(self) -> None:
+        """--compact flag produces single-line JSON."""
+        import json
+        import subprocess
+        import sys
+        import tempfile
+
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. COMPACT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".cbl", delete=False) as tmp:
+            tmp.write(source)
+            tmp.flush()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from cobolparser.cli.parse import main; main()",
+                    "program-flow",
+                    "--compact",
+                    tmp.name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+        stdout = proc.stdout.strip()
+        assert stdout, f"CLI produced no output; stderr: {proc.stderr}"
+
+        # Compact JSON is a single line
+        lines = [line for line in stdout.splitlines() if line.strip()]
+        assert len(lines) == 1
+
+        d = json.loads(stdout)
+        assert d["program_name"] == "COMPACT"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Statement types and decisions in output
+# ---------------------------------------------------------------------------
+
+
+class TestProgramFlowStatementsAndDecisions:
+    """Tests verifying that all statement types and decision points
+    are properly represented in the flow output."""
+
+    @staticmethod
+    def _analyze(source: str) -> dict:
+        result = parse_cobol(source, filename="<test>")
+        assert result.ast is not None, f"Parse failed: {result.errors}"
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(result.ast)
+        return report.to_dict()
+
+    # -- statement_types field ------------------------------------------------
+
+    def test_statement_types_present_in_output(self) -> None:
+        """Every node in the output includes a statement_types dict."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STYPES.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "HELLO"
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        assert "statement_types" in d["nodes"][0]
+        assert isinstance(d["nodes"][0]["statement_types"], dict)
+
+    def test_statement_types_counts_display(self) -> None:
+        """DISPLAY statements are counted in statement_types."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DISPCNT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "FIRST"
+           DISPLAY "SECOND"
+           DISPLAY "THIRD"
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+
+        assert main["statement_types"].get("DISPLAY") == 3
+        assert main["statement_types"].get("STOP") == 1
+
+    def test_statement_types_counts_perform(self) -> None:
+        """PERFORM statements are counted in statement_types."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PERFCNT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM WORK
+           PERFORM WORK
+           STOP RUN.
+       WORK.
+           DISPLAY "W".
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+
+        assert main["statement_types"].get("PERFORM") == 2
+
+    def test_statement_types_multiple_verb_types(self) -> None:
+        """Multiple different verb types are all tracked."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MULTIVERB.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       01 WS-Y PIC 9 VALUE 2.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "HI"
+           MOVE 1 TO WS-X
+           ADD 1 TO WS-Y
+           PERFORM WORK
+           CALL 'EXTERN'
+           STOP RUN.
+       WORK.
+           DISPLAY "W".
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+        stypes = main["statement_types"]
+
+        assert "DISPLAY" in stypes
+        assert "MOVE" in stypes
+        assert "ADD" in stypes
+        assert "PERFORM" in stypes
+        assert "CALL" in stypes
+        assert "STOP" in stypes
+
+    def test_statement_types_nested_in_if(self) -> None:
+        """Statements nested inside IF blocks are still counted."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NESTIF.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-X = 1
+               DISPLAY "YES"
+               MOVE 2 TO WS-X
+           ELSE
+               DISPLAY "NO"
+           END-IF
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+        stypes = main["statement_types"]
+
+        # IF itself + DISPLAY x2 + MOVE + STOP
+        assert stypes.get("IF") == 1
+        assert stypes.get("DISPLAY") == 2
+        assert stypes.get("MOVE") == 1
+
+    def test_statement_types_nested_in_evaluate(self) -> None:
+        """Statements nested inside EVALUATE WHEN clauses are counted."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NESTEVAL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-X
+               WHEN 1 DISPLAY "ONE"
+               WHEN 2 DISPLAY "TWO"
+               WHEN OTHER DISPLAY "OTHER"
+           END-EVALUATE
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+        stypes = main["statement_types"]
+
+        assert stypes.get("EVALUATE") == 1
+        assert stypes.get("DISPLAY") == 3
+
+    # -- decisions field ------------------------------------------------------
+
+    def test_decisions_present_in_output(self) -> None:
+        """Every node includes a decisions list."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DECPRES.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        assert "decisions" in d["nodes"][0]
+        assert isinstance(d["nodes"][0]["decisions"], list)
+
+    def test_if_decision_recorded(self) -> None:
+        """IF statements produce decision entries with type, has_else, location."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IFDEC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-X = 1
+               DISPLAY "YES"
+           END-IF
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        main = d["nodes"][0]
+        decisions = main["decisions"]
+
+        if_decisions = [dec for dec in decisions if dec["type"] == "IF"]
+        assert len(if_decisions) == 1
+        assert if_decisions[0]["has_else"] is False
+        assert "location" in if_decisions[0]
+
+    def test_if_else_decision_records_has_else(self) -> None:
+        """IF-ELSE decisions have has_else = True."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IFELSE.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-X = 1
+               DISPLAY "YES"
+           ELSE
+               DISPLAY "NO"
+           END-IF
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        decisions = d["nodes"][0]["decisions"]
+        if_dec = next(dec for dec in decisions if dec["type"] == "IF")
+        assert if_dec["has_else"] is True
+
+    def test_evaluate_decision_recorded(self) -> None:
+        """EVALUATE statements produce decision entries with subjects and
+        when_count."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EVALDEC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-X
+               WHEN 1 DISPLAY "ONE"
+               WHEN 2 DISPLAY "TWO"
+               WHEN OTHER DISPLAY "DEFAULT"
+           END-EVALUATE
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        decisions = d["nodes"][0]["decisions"]
+
+        eval_decisions = [dec for dec in decisions if dec["type"] == "EVALUATE"]
+        assert len(eval_decisions) == 1
+        assert eval_decisions[0]["when_count"] == 2  # excludes WHEN OTHER
+        assert eval_decisions[0]["has_default"] is True
+        assert "subjects" in eval_decisions[0]
+        assert "location" in eval_decisions[0]
+
+    def test_evaluate_no_default(self) -> None:
+        """EVALUATE without WHEN OTHER has has_default = False."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EVALNODEF.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9 VALUE 1.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-X
+               WHEN 1 DISPLAY "ONE"
+           END-EVALUATE
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        decisions = d["nodes"][0]["decisions"]
+        eval_dec = next(dec for dec in decisions if dec["type"] == "EVALUATE")
+        assert eval_dec["has_default"] is False
+
+    def test_multiple_decisions_per_paragraph(self) -> None:
+        """Multiple IF/EVALUATE in one paragraph produce multiple decisions."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MULTIDEC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC 9 VALUE 1.
+       01 WS-B PIC X VALUE 'X'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-A = 1
+               DISPLAY "A IS 1"
+           END-IF
+           EVALUATE WS-B
+               WHEN 'X' DISPLAY "IS X"
+               WHEN 'Y' DISPLAY "IS Y"
+           END-EVALUATE
+           IF WS-A = 2
+               DISPLAY "A IS 2"
+           ELSE
+               DISPLAY "A IS NOT 2"
+           END-IF
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        decisions = d["nodes"][0]["decisions"]
+
+        assert len(decisions) == 3
+        types = [dec["type"] for dec in decisions]
+        assert types.count("IF") == 2
+        assert types.count("EVALUATE") == 1
+
+    def test_decisions_empty_when_no_branching(self) -> None:
+        """Paragraphs with no branching have an empty decisions list."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NOBRANCH.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "HELLO"
+           STOP RUN.
+"""
+        d = self._analyze(source)
+        assert d["nodes"][0]["decisions"] == []
+
+    # -- combined statement_types and decisions in full flow -------------------
+
+    def test_full_flow_with_statements_and_decisions(self) -> None:
+        """Realistic program: each paragraph's statement_types and decisions
+        are correctly populated in the output."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FULLFLOW.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC 9 VALUE 0.
+       01 WS-TYPE   PIC X VALUE 'A'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM VALIDATE-INPUT
+           PERFORM PROCESS-DATA
+           STOP RUN.
+       VALIDATE-INPUT.
+           IF WS-STATUS = 0
+               DISPLAY "VALID"
+           ELSE
+               DISPLAY "INVALID"
+               GO TO ERROR-EXIT
+           END-IF.
+       PROCESS-DATA.
+           EVALUATE WS-TYPE
+               WHEN 'A' DISPLAY "TYPE A"
+               WHEN 'B' DISPLAY "TYPE B"
+               WHEN OTHER DISPLAY "UNKNOWN"
+           END-EVALUATE
+           MOVE 1 TO WS-STATUS
+           CALL 'PROCESS-SVC'.
+       ERROR-EXIT.
+           DISPLAY "ERROR"
+           GOBACK.
+"""
+        d = self._analyze(source)
+
+        # -- MAIN-LOGIC: 2 PERFORMs + STOP --
+        main = next(n for n in d["nodes"] if n["name"] == "MAIN-LOGIC")
+        assert main["statement_types"].get("PERFORM") == 2
+        assert main["statement_types"].get("STOP") == 1
+        assert main["decisions"] == []  # no branching in main
+
+        # -- VALIDATE-INPUT: IF with ELSE, nested DISPLAY + GOTO --
+        validate = next(n for n in d["nodes"] if n["name"] == "VALIDATE-INPUT")
+        assert "IF" in validate["statement_types"]
+        assert validate["statement_types"].get("DISPLAY") == 2
+        assert validate["statement_types"].get("GOTO") == 1
+        assert len(validate["decisions"]) == 1
+        assert validate["decisions"][0]["type"] == "IF"
+        assert validate["decisions"][0]["has_else"] is True
+
+        # -- PROCESS-DATA: EVALUATE + MOVE + CALL --
+        process = next(n for n in d["nodes"] if n["name"] == "PROCESS-DATA")
+        assert "EVALUATE" in process["statement_types"]
+        assert process["statement_types"].get("DISPLAY") == 3  # inside WHEN clauses
+        assert process["statement_types"].get("MOVE") == 1
+        assert process["statement_types"].get("CALL") == 1
+        assert len(process["decisions"]) == 1
+        assert process["decisions"][0]["type"] == "EVALUATE"
+        assert process["decisions"][0]["when_count"] == 2
+        assert process["decisions"][0]["has_default"] is True
+
+        # -- ERROR-EXIT: DISPLAY + GOBACK, no decisions --
+        error = next(n for n in d["nodes"] if n["name"] == "ERROR-EXIT")
+        assert error["statement_types"].get("DISPLAY") == 1
+        assert error["statement_types"].get("GOBACK") == 1
+        assert error["decisions"] == []
