@@ -12,7 +12,16 @@ from ..parser import parse_cobol
 from ..plugins.core import DialectType, ErrorRecoveryMode
 
 _SUBCOMMANDS = frozenset(
-    {"parse", "batch", "tokenize", "preprocess", "expand", "analyze", "dead-code"}
+    {
+        "parse",
+        "batch",
+        "tokenize",
+        "preprocess",
+        "expand",
+        "analyze",
+        "dead-code",
+        "generate-tests",
+    }
 )
 
 _DIALECT_MAP = {"ibm-enterprise": DialectType.IBM_ENTERPRISE}
@@ -498,6 +507,67 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
     _json_out(report.to_dict(), args.compact)
 
 
+# -- Subcommand: generate-tests -----------------------------------------------
+
+
+def _build_generate_tests_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "generate-tests",
+        help="Generate CobolCheck unit tests from COBOL source",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    p.add_argument(
+        "--output",
+        "-o",
+        default=None,
+        metavar="FILE",
+        help="Output .cut file path (default: stdout)",
+    )
+    p.add_argument(
+        "--strategy",
+        action="append",
+        default=None,
+        choices=["paragraph", "branch", "boundary"],
+        help="Coverage strategy to use (repeatable; default: all)",
+    )
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    p.set_defaults(func=_cmd_generate_tests)
+
+
+def _cmd_generate_tests(args: argparse.Namespace) -> None:
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    from ..analysis.coverage_analyzer import CoverageAnalyzer
+    from ..analysis.test_plan import TestPlanGenerator
+    from ..generators.cobolcheck import CobolCheckGenerator
+
+    analyzer = CoverageAnalyzer()
+    coverage_map = analyzer.analyze(result.ast)
+
+    planner = TestPlanGenerator(strategies=args.strategy)
+    test_plan = planner.generate(coverage_map)
+
+    generator = CobolCheckGenerator()
+    output = generator.generate(test_plan)
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(output)
+        print(f"Generated {test_plan.total_test_cases} test cases -> {args.output}")
+    else:
+        print(output, end="")
+
+
 # -- Path resolution (unchanged) ---------------------------------------------
 
 
@@ -607,6 +677,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_expand_parser(subparsers)
     _build_analyze_parser(subparsers)
     _build_dead_code_parser(subparsers)
+    _build_generate_tests_parser(subparsers)
 
     return parser
 

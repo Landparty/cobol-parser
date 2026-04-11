@@ -16,8 +16,6 @@ tokens ensures parsers that inspect lookahead-1 (e.g. EXEC SQL vs EXEC
 CICS) are always dispatched to the correct handler.
 """
 
-from typing import Optional
-
 from .interfaces import IStatementParser, ITokenStream
 
 
@@ -58,7 +56,7 @@ class StatementParserRegistry:
         # the stream has fewer than two tokens remaining.
         self._dispatch_cache: dict[
             tuple[object, str | None, object | None, str | None],
-            Optional[IStatementParser],
+            IStatementParser | None,
         ] = {}
 
     def register(self, parser: IStatementParser, position: int | None = None) -> None:
