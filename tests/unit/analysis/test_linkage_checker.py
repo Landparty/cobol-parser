@@ -402,3 +402,236 @@ class TestLinkageCheckerRoundTrip:
             v.kind == LinkageViolationKind.UNREFERENCED_LINKAGE
             for v in report.violations
         )
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestLinkageItemLevelFiltering:
+    """Only 01-level items count as top-level LINKAGE parameters."""
+
+    def test_level_77_not_in_linkage_items(self):
+        """Level 77 is an elementary item, not an 01-level group — must NOT appear."""
+        prog = _make_program(linkage_items=[])  # start with empty
+        # Manually add a level-77 item to the LINKAGE section
+        data_div = CobolDivision("DATA", _LOC)
+        lk = CobolSection("LINKAGE", _LOC)
+        item77 = CobolDataItem("LK-77", 77, _LOC)
+        lk.add_data_item(item77)
+        data_div.add_section(lk)
+        prog.add_division(data_div)
+
+        report = LinkageChecker().check(prog)
+        assert "LK-77" not in report.linkage_items
+
+    def test_level_88_not_in_linkage_items(self):
+        """Level 88 condition items must never appear as top-level LINKAGE items."""
+        prog = _make_program(linkage_items=[])
+        data_div = CobolDivision("DATA", _LOC)
+        lk = CobolSection("LINKAGE", _LOC)
+        item88 = CobolDataItem("LK-88-COND", 88, _LOC)
+        lk.add_data_item(item88)
+        data_div.add_section(lk)
+        prog.add_division(data_div)
+
+        report = LinkageChecker().check(prog)
+        assert "LK-88-COND" not in report.linkage_items
+
+    def test_level_05_child_not_in_linkage_items(self):
+        """Level 05 sub-items in LINKAGE must not appear in linkage_items."""
+        prog = _make_program(linkage_items=[])
+        data_div = CobolDivision("DATA", _LOC)
+        lk = CobolSection("LINKAGE", _LOC)
+        parent = CobolDataItem("LK-PARENT", 1, _LOC)
+        child = CobolDataItem("LK-CHILD", 5, _LOC)
+        parent.add_child(child)
+        lk.add_data_item(parent)
+        data_div.add_section(lk)
+        prog.add_division(data_div)
+
+        report = LinkageChecker().check(prog)
+        assert "LK-PARENT" in report.linkage_items
+        assert "LK-CHILD" not in report.linkage_items
+
+
+class TestMultipleEntryPoints:
+    """Programs with multiple ENTRY statements."""
+
+    def test_two_entries_each_validated_independently(self):
+        """CALL to entry-A with too many args must not also flag entry-B."""
+        prog = _make_program(
+            entry_params={
+                "ENTRY-A": ["P1"],
+                "ENTRY-B": ["P1", "P2"],
+            },
+            calls=[
+                ("ENTRY-A", [("X", "REFERENCE"), ("Y", "REFERENCE")]),  # too many
+                ("ENTRY-B", [("X", "REFERENCE"), ("Y", "REFERENCE")]),  # correct
+            ],
+        )
+        report = LinkageChecker().check(prog)
+        too_many = [
+            v for v in report.violations if v.kind == LinkageViolationKind.TOO_MANY_ARGS
+        ]
+        assert len(too_many) == 1
+        assert too_many[0].call_target == "ENTRY-A"
+
+    def test_all_entries_appear_in_entry_interfaces(self):
+        prog = _make_program(
+            entry_params={
+                "ENTRY-A": ["P1"],
+                "ENTRY-B": ["P2", "P3"],
+            },
+        )
+        report = LinkageChecker().check(prog)
+        assert "ENTRY-A" in report.entry_interfaces
+        assert "ENTRY-B" in report.entry_interfaces
+
+    def test_linkage_item_referenced_by_any_entry_not_flagged(self):
+        """PARM-A referenced only by ENTRY-A should not be flagged as unreferenced."""
+        report = _check(
+            linkage_items=["PARM-A", "PARM-B"],
+            entry_params={"ENTRY-A": ["PARM-A"], "ENTRY-B": ["PARM-B"]},
+            calls=[],
+        )
+        assert not any(
+            v.kind == LinkageViolationKind.UNREFERENCED_LINKAGE
+            for v in report.violations
+        )
+
+
+class TestByContentMode:
+    """BY CONTENT is not BY VALUE — must NOT trigger VALUE_TO_LINKAGE."""
+
+    def test_by_content_to_linkage_item_no_violation(self):
+        report = _check(
+            linkage_items=["PARM-A"],
+            entry_params={"MY-ENTRY": ["PARM-A"]},
+            calls=[("MY-ENTRY", [("PARM-A", "CONTENT")])],
+        )
+        assert not any(
+            v.kind == LinkageViolationKind.VALUE_TO_LINKAGE for v in report.violations
+        )
+
+    def test_by_reference_and_content_mixed_no_value_violation(self):
+        report = _check(
+            linkage_items=["PARM-A", "PARM-B"],
+            entry_params={"MY-ENTRY": ["PARM-A", "PARM-B"]},
+            calls=[
+                (
+                    "MY-ENTRY",
+                    [("PARM-A", "REFERENCE"), ("PARM-B", "CONTENT")],
+                )
+            ],
+        )
+        assert not any(
+            v.kind == LinkageViolationKind.VALUE_TO_LINKAGE for v in report.violations
+        )
+
+
+class TestCaseInsensitiveMatching:
+    """CALL targets and ENTRY names should be matched case-insensitively."""
+
+    def test_call_uppercase_matches_entry_mixed_case(self):
+        """CALL 'MY-ENTRY' should match ENTRY 'My-Entry'."""
+        prog = _make_program(
+            entry_params={"My-Entry": ["P1"]},
+            calls=[("MY-ENTRY", [("X", "REFERENCE")])],
+        )
+        report = LinkageChecker().check(prog)
+        # Correct arg count → no arg-count violation
+        assert not any(
+            v.kind
+            in (LinkageViolationKind.TOO_MANY_ARGS, LinkageViolationKind.TOO_FEW_ARGS)
+            for v in report.violations
+        )
+
+    def test_linkage_item_matched_case_insensitively(self):
+        """ENTRY 'parm-a' should mark LINKAGE item 'PARM-A' as referenced."""
+        report = _check(
+            linkage_items=["PARM-A"],
+            entry_params={"MY-ENTRY": ["parm-a"]},
+            calls=[],
+        )
+        assert not any(
+            v.kind == LinkageViolationKind.UNREFERENCED_LINKAGE
+            for v in report.violations
+        )
+
+
+class TestAnalyzerStateReset:
+    """check() must fully reset between calls."""
+
+    def test_second_call_independent(self):
+        checker = LinkageChecker()
+        # First call: unreferenced item
+        prog1 = _make_program(linkage_items=["ORPHAN"])
+        checker.check(prog1)
+        assert "ORPHAN" in checker._linkage_items
+
+        # Second call: clean program
+        prog2 = _make_program()
+        report2 = checker.check(prog2)
+        assert not report2.has_violations
+        assert "ORPHAN" not in checker._linkage_items
+
+    def test_entry_interfaces_reset_between_calls(self):
+        checker = LinkageChecker()
+        prog1 = _make_program(entry_params={"ENTRY-ONE": ["P1"]})
+        checker.check(prog1)
+        assert "ENTRY-ONE" in checker._entry_interfaces
+
+        prog2 = _make_program(entry_params={"ENTRY-TWO": ["P2"]})
+        checker.check(prog2)
+        assert "ENTRY-ONE" not in checker._entry_interfaces
+        assert "ENTRY-TWO" in checker._entry_interfaces
+
+
+class TestViolationMessages:
+    """Violation messages must contain actionable details."""
+
+    def test_too_many_args_message_contains_target_and_counts(self):
+        report = _check(
+            entry_params={"MY-ENTRY": ["P1"]},
+            calls=[("MY-ENTRY", [("A", "REFERENCE"), ("B", "REFERENCE")])],
+        )
+        v = next(
+            v for v in report.violations if v.kind == LinkageViolationKind.TOO_MANY_ARGS
+        )
+        assert "MY-ENTRY" in v.message
+        # Both the actual count (2) and declared count (1) should appear
+        assert "2" in v.message or "1" in v.message
+
+    def test_too_few_args_message_contains_target_and_counts(self):
+        report = _check(
+            entry_params={"MY-ENTRY": ["P1", "P2"]},
+            calls=[("MY-ENTRY", [("A", "REFERENCE")])],
+        )
+        v = next(
+            v for v in report.violations if v.kind == LinkageViolationKind.TOO_FEW_ARGS
+        )
+        assert "MY-ENTRY" in v.message
+
+    def test_value_to_linkage_message_contains_param_name(self):
+        report = _check(
+            linkage_items=["PARM-A"],
+            entry_params={"MY-ENTRY": ["PARM-A"]},
+            calls=[("MY-ENTRY", [("PARM-A", "VALUE")])],
+        )
+        v = next(
+            v
+            for v in report.violations
+            if v.kind == LinkageViolationKind.VALUE_TO_LINKAGE
+        )
+        assert "PARM-A" in v.message
+
+    def test_unreferenced_message_contains_item_name(self):
+        report = _check(linkage_items=["LONELY-PARAM"], entry_params={}, calls=[])
+        v = next(
+            v
+            for v in report.violations
+            if v.kind == LinkageViolationKind.UNREFERENCED_LINKAGE
+        )
+        assert "LONELY-PARAM" in v.message

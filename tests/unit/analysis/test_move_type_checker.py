@@ -463,3 +463,201 @@ class TestMoveTypeCheckerRoundTrip:
         assert result.ast is not None
         report = MoveTypeChecker().check(result.ast)
         assert report.has_errors
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestPictureVariants:
+    """Additional PIC patterns not covered by basic classification tests."""
+
+    def test_repeated_nine_numeric(self):
+        # 999 (no parens) → NUMERIC
+        assert _classify_picture(_pic("999")) == DataCategory.NUMERIC
+
+    def test_sv_decimal_numeric(self):
+        assert _classify_picture(_pic("S9(3)V9(2)")) == DataCategory.NUMERIC
+
+    def test_xbx_alphanumeric_edited(self):
+        assert _classify_picture(_pic("XBX")) == DataCategory.ALPHANUMERIC_EDITED
+
+    def test_dollar_z_numeric_edited(self):
+        # $ZZZ.99 contains edit chars → NUMERIC_EDITED
+        assert _classify_picture(_pic("$ZZZ.99")) == DataCategory.NUMERIC_EDITED
+
+    def test_nine_slash_nine_numeric_edited(self):
+        # Date patterns like 99/99/99
+        assert _classify_picture(_pic("99/99/99")) == DataCategory.NUMERIC_EDITED
+
+    def test_a_with_space_in_pattern_alphabetic(self):
+        # A(5) → ALPHABETIC
+        assert _classify_picture(_pic("A(5)")) == DataCategory.ALPHABETIC
+
+
+class TestLiteralSourceMoves:
+    """MOVE with a literal source (not a data item name)."""
+
+    def test_numeric_literal_to_numeric_no_error(self):
+        report = _check(
+            [("TGT", "9(5)")],
+            [("12345", ["TGT"])],
+        )
+        assert not report.violations
+
+    def test_numeric_literal_to_alphabetic_is_error(self):
+        report = _check(
+            [("TGT", "A(10)")],
+            [("42", ["TGT"])],
+        )
+        assert report.has_errors
+        assert report.errors[0].source_category == DataCategory.NUMERIC
+        assert report.errors[0].target_category == DataCategory.ALPHABETIC
+
+    def test_string_literal_to_numeric_is_warning(self):
+        report = _check(
+            [("TGT", "9(5)")],
+            [('"HELLO"', ["TGT"])],
+        )
+        assert report.warnings
+        assert report.warnings[0].source_category == DataCategory.ALPHANUMERIC
+        assert report.warnings[0].target_category == DataCategory.NUMERIC
+
+    def test_string_literal_to_alphanumeric_no_error(self):
+        report = _check(
+            [("TGT", "X(10)")],
+            [('"HELLO"', ["TGT"])],
+        )
+        assert not report.violations
+
+    def test_string_literal_to_alphabetic_no_error(self):
+        # Quoted string is ALPHANUMERIC; ALPHANUMERIC → ALPHABETIC not in the
+        # illegal or warning sets, so no violation
+        report = _check(
+            [("TGT", "A(10)")],
+            [('"ABCDE"', ["TGT"])],
+        )
+        assert not report.violations
+
+
+class TestMoveCorresponding:
+    """MOVE CORRESPONDING sets is_corresponding=True; checker must not error."""
+
+    def test_corresponding_move_no_error(self):
+        prog = _make_program_with_items(
+            [("SRC", "9(5)"), ("TGT", "A(10)")],
+            [],
+        )
+        # Manually build a CORRESPONDING MOVE that would normally be illegal
+        from cobolparser.models.program import CobolParagraph
+        from cobolparser.models.statements import MoveStatement
+
+        loc = SourceLocation(1, 1)
+        stmt = MoveStatement(loc)
+        stmt.set_source("SRC")
+        stmt.set_corresponding(True)
+        stmt.add_target("TGT")
+        # Inject into the procedure division
+        para = CobolParagraph("EXTRA-PARA", loc)
+        para.add_statement(stmt)
+        prog.procedure_division.add_paragraph(para)
+
+        report = MoveTypeChecker().check(prog)
+        # CORRESPONDING moves are structural; skip category checking on them
+        assert not report.has_errors
+
+
+class TestMoveEmptyOperands:
+    """Moves with missing source or empty targets must not crash."""
+
+    def test_empty_source_skipped(self):
+        prog = _make_program_with_items([("TGT", "9(5)")], [])
+        from cobolparser.models.program import CobolParagraph
+        from cobolparser.models.statements import MoveStatement
+
+        loc = SourceLocation(1, 1)
+        stmt = MoveStatement(loc)
+        stmt.set_source("")  # empty
+        stmt.add_target("TGT")
+        para = CobolParagraph("P", loc)
+        para.add_statement(stmt)
+        prog.procedure_division.add_paragraph(para)
+        report = MoveTypeChecker().check(prog)
+        assert not report.violations
+
+    def test_no_targets_no_crash(self):
+        prog = _make_program_with_items([("SRC", "9(5)")], [])
+        from cobolparser.models.program import CobolParagraph
+        from cobolparser.models.statements import MoveStatement
+
+        loc = SourceLocation(1, 1)
+        stmt = MoveStatement(loc)
+        stmt.set_source("SRC")
+        # deliberately add no targets
+        para = CobolParagraph("P", loc)
+        para.add_statement(stmt)
+        prog.procedure_division.add_paragraph(para)
+        report = MoveTypeChecker().check(prog)
+        assert not report.violations
+
+
+class TestCheckerStateReset:
+    """check() must reset its internal catalog between calls."""
+
+    def test_second_call_replaces_catalog(self):
+        checker = MoveTypeChecker()
+        prog1 = _make_program_with_items([("FIRST-FIELD", "9(5)")], [])
+        checker.check(prog1)
+        assert "FIRST-FIELD" in checker.get_catalog()
+
+        prog2 = _make_program_with_items([("SECOND-FIELD", "X(10)")], [])
+        checker.check(prog2)
+        # Old catalog must be gone
+        assert "FIRST-FIELD" not in checker.get_catalog()
+        assert "SECOND-FIELD" in checker.get_catalog()
+
+    def test_second_call_violations_are_independent(self):
+        checker = MoveTypeChecker()
+        # First call: no violations
+        checker.check(
+            _make_program_with_items([("N", "9(5)"), ("X", "X(5)")], [("N", ["X"])])
+        )
+
+        # Second call: illegal move
+        report = checker.check(
+            _make_program_with_items([("N", "9(5)"), ("A", "A(10)")], [("N", ["A"])])
+        )
+        assert report.has_errors
+        # Only the second call's violation
+        assert len(report.violations) == 1
+
+
+class TestNestedDataItems:
+    """Data items nested inside a group item must also be catalogued."""
+
+    def test_elementary_child_catalogued(self):
+        from cobolparser.models.program import CobolParagraph
+
+        loc = SourceLocation(1, 1)
+        prog = CobolProgram("TEST", loc)
+        data_div = CobolDivision("DATA", loc)
+        ws = CobolSection("WORKING-STORAGE", loc)
+
+        # Build group: 01 GROUP → 05 CHILD PIC 9(5)
+        group = CobolDataItem("GROUP-ITEM", 1, loc)
+        child = CobolDataItem("CHILD-ITEM", 5, loc)
+        child.set_picture_clause(PictureClause("9(5)", loc))
+        group.add_child(child)
+        ws.add_data_item(group)
+        data_div.add_section(ws)
+        prog.add_division(data_div)
+        proc_div = CobolDivision("PROCEDURE", loc)
+        proc_div.add_paragraph(CobolParagraph("MAIN", loc))
+        prog.add_division(proc_div)
+
+        checker = MoveTypeChecker()
+        checker.check(prog)
+        catalog = checker.get_catalog()
+        assert "CHILD-ITEM" in catalog
+        assert catalog["CHILD-ITEM"] == "NUMERIC"

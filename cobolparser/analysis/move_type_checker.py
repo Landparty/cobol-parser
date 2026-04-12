@@ -276,6 +276,10 @@ class MoveTypeChecker:
         self, stmt: MoveStatement, violations: list[MoveTypeViolation]
     ) -> None:
         """Check a single MOVE statement for category mismatches."""
+        # MOVE CORRESPONDING resolves sub-fields structurally; skip type-checking
+        if stmt.is_corresponding:
+            return
+
         source_name = (stmt.source or "").strip()
         if not source_name:
             return
