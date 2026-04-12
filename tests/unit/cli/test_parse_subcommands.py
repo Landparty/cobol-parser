@@ -5,23 +5,17 @@ program-flow, generate-tests, and error paths in _read_source / _resolve_path.
 from __future__ import annotations
 
 import argparse
-import io
 import json
-import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from cobolparser.cli.parse import (
-    _build_parser,
     _cmd_analyze,
     _cmd_dead_code,
     _cmd_generate_tests,
-    _cmd_preprocess,
     _cmd_program_flow,
-    _cmd_tokenize,
     _read_source,
     _resolve_path,
     main,

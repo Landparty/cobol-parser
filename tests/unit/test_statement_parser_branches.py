@@ -11,8 +11,6 @@ Covers uncovered branches in:
 
 from __future__ import annotations
 
-import pytest
-
 from cobolparser import parse_cobol
 from cobolparser.plugins.core import ErrorRecoveryMode
 

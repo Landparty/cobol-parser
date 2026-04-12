@@ -9,13 +9,14 @@ Tests cover:
 - Error handling and reporting
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from cobolparser.core import ASTNodeFactory, create_node, get_factory, set_factory
 from cobolparser.core.ast_factory import FieldValidationError, NodeTypeError
 from cobolparser.core.exceptions import ValidationError
-from cobolparser.models.ast_base import ASTNode, SourceLocation
+from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements import DisplayStatement, MoveStatement
 
 
@@ -353,7 +354,6 @@ class TestValidateCreatedNodePaths:
     def test_create_logs_error_and_reraises(self):
         """create() appends to _validation_errors and re-raises on failure."""
         factory = ASTNodeFactory()
-        node_proto = DisplayStatement(SourceLocation(1, 1))
 
         # Patch _validate_created_node to raise after node is built
         with patch.object(
@@ -392,15 +392,13 @@ class TestValidateRequiredFieldsNonePath:
 class TestValidateFieldTypesGenericSkip:
     def test_generic_type_is_skipped(self):
         """If expected_type has __origin__ (e.g. list[str]), the check is skipped."""
-        import typing
-
         factory = ASTNodeFactory()
         node = DisplayStatement(SourceLocation(1, 1))
 
         # list[str] has __origin__ = list — should not raise
         result = factory.validate_field_types(
             node,
-            {"node_type": typing.Optional[str]},  # Optional[str] has __origin__
+            {"node_type": str | None},  # str | None has __origin__
             "DisplayStatement",
         )
         assert result is True
