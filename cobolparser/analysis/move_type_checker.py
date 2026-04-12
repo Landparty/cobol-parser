@@ -108,6 +108,10 @@ _PIC_NUMERIC_ONLY_RE = re.compile(r"^[S9VP()\d]+$", re.IGNORECASE)
 _PIC_ALPHA_ONLY_RE = re.compile(r"^(?:A+|A\(\d+\))$", re.IGNORECASE)
 _PIC_X_ONLY_RE = re.compile(r"^X(\(\d+\))?$", re.IGNORECASE)
 _PIC_EDITED_CHARS_RE = re.compile(r"[Z\*\+\-\$\.,/B0]", re.IGNORECASE)
+# Strip repetition counts like (10) or (20) before checking for edit chars so
+# that PIC 9(10) is not misclassified as NUMERIC_EDITED because of the '0'
+# inside the parenthesised repeat count.
+_PIC_REPEAT_RE = re.compile(r"\(\d+\)")
 
 _FIGURATIVE_CONSTANTS = frozenset(
     {
@@ -160,8 +164,10 @@ def _classify_picture(pic: PictureClause) -> DataCategory:
     if _PIC_X_ONLY_RE.match(pattern):
         return DataCategory.ALPHANUMERIC
 
-    # Check for editing characters that indicate edited categories
-    has_edit_chars = bool(_PIC_EDITED_CHARS_RE.search(pattern))
+    # Strip repetition counts before checking for edit chars so that a
+    # pattern like 9(10) is not misclassified due to the '0' in '(10)'.
+    pattern_no_reps = _PIC_REPEAT_RE.sub("", pattern)
+    has_edit_chars = bool(_PIC_EDITED_CHARS_RE.search(pattern_no_reps))
 
     if has_edit_chars:
         # Numeric-edited: contains 9s alongside editing characters

@@ -174,12 +174,15 @@ class IOSequenceAnalyzer:
         elif isinstance(node, IOReadStatement):
             self._check_open(node.file_name or "", "READ", loc)
         elif isinstance(node, IOWriteStatement):
-            # WRITE uses the record name; file_name may be absent
-            name = node.file_name or node.record_name or ""
-            self._check_open(name, "WRITE", loc)
+            # WRITE names a record (not a file); record_name cannot reliably
+            # identify which file is open, so only validate when file_name is
+            # explicitly set by the parser.
+            if node.file_name:
+                self._check_open(node.file_name, "WRITE", loc)
         elif isinstance(node, IORewriteStatement):
-            name = node.file_name or node.record_name or ""
-            self._check_open(name, "REWRITE", loc)
+            # Same as WRITE: record_name is not a reliable file identifier.
+            if node.file_name:
+                self._check_open(node.file_name, "REWRITE", loc)
         elif isinstance(node, IODeleteStatement):
             self._check_open(node.file_name or "", "DELETE", loc)
         elif isinstance(node, IOStartStatement):

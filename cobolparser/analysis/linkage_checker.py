@@ -157,8 +157,9 @@ class LinkageChecker:
         if not data_div:
             return
 
-        # Look for a section named LINKAGE
-        for section_name, section in data_div._sections.items():
+        # Look for a section named LINKAGE (use public .sections property)
+        for section in data_div.sections:
+            section_name = section.section_name or ""
             if "LINKAGE" in section_name.upper():
                 for item in section.data_items:
                     if isinstance(item, CobolDataItem) and item.level == 1:

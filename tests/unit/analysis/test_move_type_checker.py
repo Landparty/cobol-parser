@@ -501,6 +501,13 @@ class TestPictureVariants:
         assert _classify_picture(_pic("AAA")) == DataCategory.ALPHABETIC
         assert _classify_picture(_pic("AAAAA")) == DataCategory.ALPHABETIC
 
+    def test_nine_with_large_repetition_is_numeric(self):
+        # 9(10) and S9(20) must be NUMERIC, not NUMERIC_EDITED.
+        # The '0' in the repetition count must not trigger the edit-char check.
+        assert _classify_picture(_pic("9(10)")) == DataCategory.NUMERIC
+        assert _classify_picture(_pic("S9(20)")) == DataCategory.NUMERIC
+        assert _classify_picture(_pic("9(10)V9(2)")) == DataCategory.NUMERIC
+
 
 class TestLiteralSourceMoves:
     """MOVE with a literal source (not a data item name)."""
