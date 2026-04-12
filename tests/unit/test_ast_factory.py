@@ -10,10 +10,12 @@ Tests cover:
 """
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 from cobolparser.core import ASTNodeFactory, create_node, get_factory, set_factory
 from cobolparser.core.ast_factory import FieldValidationError, NodeTypeError
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser.core.exceptions import ValidationError
+from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.statements import DisplayStatement, MoveStatement
 
 
@@ -311,3 +313,94 @@ class TestASTNodeFactoryValidator:
 
         assert retrieved["class"] is DisplayStatement
         assert "location" in retrieved["required_fields"]
+
+
+# ---------------------------------------------------------------------------
+# _validate_created_node: paths for None location, wrong location type,
+# missing node_type  (lines 224-235)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateCreatedNodePaths:
+    """These tests exercise _validate_created_node directly by patching the
+    node attributes after construction so we don't need a real broken class.
+    """
+
+    def test_none_location_raises_validation_error(self):
+        """ValidationError raised when node.location is None."""
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+        node.location = None  # type: ignore[assignment]
+        with pytest.raises(ValidationError, match="location must be set"):
+            factory._validate_created_node(node)
+
+    def test_wrong_location_type_raises_validation_error(self):
+        """ValidationError raised when node.location is not a SourceLocation."""
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+        node.location = "not-a-source-location"  # type: ignore[assignment]
+        with pytest.raises(ValidationError, match="location must be SourceLocation"):
+            factory._validate_created_node(node)
+
+    def test_empty_node_type_raises_validation_error(self):
+        """ValidationError raised when node.node_type is falsy."""
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+        node.node_type = ""  # type: ignore[assignment]
+        with pytest.raises(ValidationError, match="Node type must be set"):
+            factory._validate_created_node(node)
+
+    def test_create_logs_error_and_reraises(self):
+        """create() appends to _validation_errors and re-raises on failure."""
+        factory = ASTNodeFactory()
+        node_proto = DisplayStatement(SourceLocation(1, 1))
+
+        # Patch _validate_created_node to raise after node is built
+        with patch.object(
+            factory,
+            "_validate_created_node",
+            side_effect=ValidationError("DisplayStatement", "synthetic validation fail"),
+        ):
+            with pytest.raises(ValidationError):
+                factory.create(DisplayStatement, SourceLocation(1, 1))
+
+        # Error should be logged
+        assert any("synthetic validation fail" in e for e in factory.get_validation_errors())
+
+
+# ---------------------------------------------------------------------------
+# validate_required_fields: None-value field path  (line 133)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRequiredFieldsNonePath:
+    def test_none_field_value_raises_field_validation_error(self):
+        """If a required field exists but its value is None, raise FieldValidationError."""
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+        # Patch location to None to trigger the None-value check
+        node.location = None  # type: ignore[assignment]
+        with pytest.raises(FieldValidationError):
+            factory.validate_required_fields(node, ["location"], "DisplayStatement")
+
+
+# ---------------------------------------------------------------------------
+# validate_field_types: generic-type skip path  (lines 162-164)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateFieldTypesGenericSkip:
+    def test_generic_type_is_skipped(self):
+        """If expected_type has __origin__ (e.g. list[str]), the check is skipped."""
+        import typing
+
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+
+        # list[str] has __origin__ = list — should not raise
+        result = factory.validate_field_types(
+            node,
+            {"node_type": typing.Optional[str]},  # Optional[str] has __origin__
+            "DisplayStatement",
+        )
+        assert result is True
