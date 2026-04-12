@@ -261,9 +261,18 @@ class IOSequenceAnalyzer:
 
     @staticmethod
     def _get_open_files(node: IOOpenStatement) -> list[str]:
-        """Return the list of file names in an OPEN statement."""
+        """Return the list of file names in an OPEN statement.
+
+        IOOpenStatement uses ``file_names`` (a list) populated via add_file().
+        We fall back to the legacy ``open_files`` attribute and finally to
+        ``operands`` for forward-compatibility.
+        """
         names: list[str] = []
-        # IOOpenStatement stores files in open_files list of dicts or strings
+        # Primary path: IOOpenStatement.file_names (list[str])
+        if hasattr(node, "file_names") and node.file_names:
+            names.extend(node.file_names)
+            return names
+        # Legacy / alternative path: open_files (list of str or dict)
         if hasattr(node, "open_files") and node.open_files:
             for entry in node.open_files:
                 if isinstance(entry, dict):
@@ -272,10 +281,14 @@ class IOSequenceAnalyzer:
                         names.append(str(name))
                 elif isinstance(entry, str):
                     names.append(entry)
-        elif hasattr(node, "file_name") and node.file_name:
+            if names:
+                return names
+        # Singular file_name attribute
+        if hasattr(node, "file_name") and node.file_name:
             names.append(node.file_name)
-        # Fall back to operands
-        if not names and hasattr(node, "operands"):
+            return names
+        # Last resort: operands list
+        if hasattr(node, "operands"):
             names.extend(node.operands)
         return names
 
