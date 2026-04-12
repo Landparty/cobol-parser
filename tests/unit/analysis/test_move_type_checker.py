@@ -495,6 +495,12 @@ class TestPictureVariants:
         # A(5) → ALPHABETIC
         assert _classify_picture(_pic("A(5)")) == DataCategory.ALPHABETIC
 
+    def test_repeated_a_alphabetic(self):
+        # AAA / AAAAA must be ALPHABETIC, not ALPHANUMERIC (regression for
+        # the original regex that only matched ^A(\(\d+\))?$)
+        assert _classify_picture(_pic("AAA")) == DataCategory.ALPHABETIC
+        assert _classify_picture(_pic("AAAAA")) == DataCategory.ALPHABETIC
+
 
 class TestLiteralSourceMoves:
     """MOVE with a literal source (not a data item name)."""

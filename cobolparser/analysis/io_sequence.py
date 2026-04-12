@@ -121,6 +121,7 @@ class IOSequenceAnalyzer:
 
     def __init__(self) -> None:
         self._open_files: set[str] = set()
+        self._closed_files: set[str] = set()
         self._violations: list[IOSequenceViolation] = []
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
@@ -133,6 +134,7 @@ class IOSequenceAnalyzer:
             IOSequenceReport containing all detected violations.
         """
         self._open_files = set()
+        self._closed_files = set()
         self._violations = []
         self._walk(ast)
         # Any files still open at end-of-program are violations
@@ -199,11 +201,14 @@ class IOSequenceAnalyzer:
                     )
                 )
             self._open_files.clear()
+            self._closed_files.clear()
 
     def _handle_open(self, node: IOOpenStatement, loc: SourceLocation | None) -> None:
         """Process an OPEN statement."""
         files = self._get_open_files(node)
         for file_name in files:
+            if not file_name.strip():
+                continue  # Skip empty/whitespace names
             key = file_name.upper()
             if key in self._open_files:
                 self._violations.append(
@@ -215,27 +220,37 @@ class IOSequenceAnalyzer:
                     )
                 )
             else:
+                self._closed_files.discard(key)  # Allow reopen after close
                 self._open_files.add(key)
 
     def _handle_close(self, node: IOCloseStatement, loc: SourceLocation | None) -> None:
         """Process a CLOSE statement."""
         files = self._get_close_files(node)
         for file_name in files:
+            if not file_name.strip():
+                continue  # Skip empty/whitespace names
             key = file_name.upper()
-            if key not in self._open_files:
+            if key in self._open_files:
+                self._open_files.discard(key)
+                self._closed_files.add(key)
+            elif key in self._closed_files:
+                self._violations.append(
+                    IOSequenceViolation(
+                        kind=IOViolationKind.DOUBLE_CLOSE,
+                        file_name=file_name,
+                        location=loc,
+                        message=f"CLOSE of file '{file_name}' that is already closed (duplicate CLOSE)",
+                    )
+                )
+            else:
                 self._violations.append(
                     IOSequenceViolation(
                         kind=IOViolationKind.CLOSE_NOT_OPEN,
                         file_name=file_name,
                         location=loc,
-                        message=(
-                            f"CLOSE of file '{file_name}' that was never opened "
-                            "or already closed"
-                        ),
+                        message=(f"CLOSE of file '{file_name}' that was never opened"),
                     )
                 )
-            else:
-                self._open_files.discard(key)
 
     def _check_open(
         self, file_name: str, verb: str, loc: SourceLocation | None

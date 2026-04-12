@@ -105,7 +105,7 @@ class MoveTypeReport:
 
 # Regex patterns for picture category classification
 _PIC_NUMERIC_ONLY_RE = re.compile(r"^[S9VP()\d]+$", re.IGNORECASE)
-_PIC_ALPHA_ONLY_RE = re.compile(r"^A(\(\d+\))?$", re.IGNORECASE)
+_PIC_ALPHA_ONLY_RE = re.compile(r"^(?:A+|A\(\d+\))$", re.IGNORECASE)
 _PIC_X_ONLY_RE = re.compile(r"^X(\(\d+\))?$", re.IGNORECASE)
 _PIC_EDITED_CHARS_RE = re.compile(r"[Z\*\+\-\$\.,/B0]", re.IGNORECASE)
 

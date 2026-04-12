@@ -228,9 +228,11 @@ class TestCloseNotOpen:
         assert any(v.kind == IOViolationKind.CLOSE_NOT_OPEN for v in report.violations)
 
     def test_double_close(self):
+        """Second CLOSE of the same file emits DOUBLE_CLOSE, not CLOSE_NOT_OPEN."""
         report = _analyze(_open("F"), _close("F"), _close("F"))
         kinds = [v.kind for v in report.violations]
-        assert IOViolationKind.CLOSE_NOT_OPEN in kinds
+        assert IOViolationKind.DOUBLE_CLOSE in kinds
+        assert IOViolationKind.CLOSE_NOT_OPEN not in kinds
 
 
 # ---------------------------------------------------------------------------
@@ -391,20 +393,9 @@ class TestIOSequenceRoundTrip:
         result = parse_cobol(src)
         assert result.ast is not None
         report = IOSequenceAnalyzer().analyze(result.ast)
-        # No double-open, no close-not-open, no use-before-open
-        for v in report.violations:
-            assert v.kind == IOViolationKind.FILE_LEFT_OPEN or True
-        # Specifically no use-before-open violations
-        assert not any(
-            v.kind
-            in (
-                IOViolationKind.READ_BEFORE_OPEN,
-                IOViolationKind.WRITE_BEFORE_OPEN,
-                IOViolationKind.DOUBLE_OPEN,
-                IOViolationKind.CLOSE_NOT_OPEN,
-            )
-            for v in report.violations
-        )
+        # A well-formed OPEN → READ → CLOSE program has no violations at all.
+        assert report.has_violations is False
+        assert report.violations == []
 
 
 # ---------------------------------------------------------------------------
