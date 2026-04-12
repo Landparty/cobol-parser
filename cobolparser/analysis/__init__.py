@@ -78,12 +78,76 @@ def __getattr__(name: str) -> object:
             "IMSDLICall": IMSDLICall,
         }
         return _map[name]
+    if name in (
+        "IOSequenceAnalyzer",
+        "IOSequenceReport",
+        "IOSequenceViolation",
+        "IOViolationKind",
+    ):
+        from .io_sequence import (
+            IOSequenceAnalyzer,
+            IOSequenceReport,
+            IOSequenceViolation,
+            IOViolationKind,
+        )
+
+        _map = {
+            "IOSequenceAnalyzer": IOSequenceAnalyzer,
+            "IOSequenceReport": IOSequenceReport,
+            "IOSequenceViolation": IOSequenceViolation,
+            "IOViolationKind": IOViolationKind,
+        }
+        return _map[name]
+    if name in (
+        "MoveTypeChecker",
+        "MoveTypeReport",
+        "MoveTypeViolation",
+        "MoveViolationKind",
+        "DataCategory",
+    ):
+        from .move_type_checker import (
+            DataCategory,
+            MoveTypeChecker,
+            MoveTypeReport,
+            MoveTypeViolation,
+            MoveViolationKind,
+        )
+
+        _map = {
+            "MoveTypeChecker": MoveTypeChecker,
+            "MoveTypeReport": MoveTypeReport,
+            "MoveTypeViolation": MoveTypeViolation,
+            "MoveViolationKind": MoveViolationKind,
+            "DataCategory": DataCategory,
+        }
+        return _map[name]
+    if name in (
+        "LinkageChecker",
+        "LinkageReport",
+        "LinkageViolation",
+        "LinkageViolationKind",
+    ):
+        from .linkage_checker import (
+            LinkageChecker,
+            LinkageReport,
+            LinkageViolation,
+            LinkageViolationKind,
+        )
+
+        _map = {
+            "LinkageChecker": LinkageChecker,
+            "LinkageReport": LinkageReport,
+            "LinkageViolation": LinkageViolation,
+            "LinkageViolationKind": LinkageViolationKind,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "CoverageAnalyzer",
     "CoverageMap",
+    "DataCategory",
     "DeadCodeAnalyzer",
     "DeadCodeReport",
     "DeadCodeItem",
@@ -93,6 +157,18 @@ __all__ = [
     "IOLogger",
     "IOLogReport",
     "IOOperation",
+    "IOSequenceAnalyzer",
+    "IOSequenceReport",
+    "IOSequenceViolation",
+    "IOViolationKind",
+    "LinkageChecker",
+    "LinkageReport",
+    "LinkageViolation",
+    "LinkageViolationKind",
+    "MoveTypeChecker",
+    "MoveTypeReport",
+    "MoveTypeViolation",
+    "MoveViolationKind",
     "TestPlan",
     "TestPlanGenerator",
     "ProgramFlowAnalyzer",

@@ -1,5 +1,5 @@
 """Simple statement parsers for CONTINUE, EXIT, GOBACK, CANCEL, ALTER,
-GENERATE, RELEASE, RETURN, and USE.
+GENERATE, RELEASE, RETURN, USE, COMMIT, and ROLLBACK.
 
 Each parser implements IStatementParser for registry-based dispatch.
 """
@@ -12,12 +12,14 @@ from ...models.ast_base import SourceLocation
 from ...models.statements import (
     AlterStatement,
     CancelStatement,
+    CommitStatement,
     ContinueStatement,
     ExitStatement,
     GenerateStatement,
     GobackStatement,
     ReleaseStatement,
     ReturnStatement,
+    RollbackStatement,
     UseStatement,
 )
 from ._utils import (
@@ -512,4 +514,77 @@ class UseStatementParser(IStatementParser):
             token_stream.consume()
             skip_whitespace(token_stream)
 
+        return stmt
+
+
+class CommitStatementParser(IStatementParser):
+    """Parser for COMMIT statements (transaction control).
+
+    Syntax: COMMIT
+    Commonly used in DB2/CICS COBOL programs to commit the current
+    unit of work. EXEC SQL COMMIT is handled by ExecSqlStatementParser;
+    this parser handles the native COBOL COMMIT verb.
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        token = token_stream.peek()
+        if not token:
+            return False
+        if token.type == TokenType.COMMIT:
+            return True
+        return (
+            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "COMMIT"
+        )
+
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> CommitStatement:
+        start = token_stream.consume()
+        stmt = CommitStatement(
+            start.location if hasattr(start, "location") else SourceLocation(0, 0)
+        )
+        skip_whitespace(token_stream)
+        # Optionally consume WORK keyword
+        token = token_stream.peek()
+        if token and _token_value_upper(token) == "WORK":
+            token_stream.consume()
+            skip_whitespace(token_stream)
+        consume_period(token_stream)
+        return stmt
+
+
+class RollbackStatementParser(IStatementParser):
+    """Parser for ROLLBACK statements (transaction control).
+
+    Syntax: ROLLBACK [WORK]
+    Rolls back the current unit of work. EXEC SQL ROLLBACK is handled
+    by ExecSqlStatementParser; this handles the native COBOL ROLLBACK verb.
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        token = token_stream.peek()
+        if not token:
+            return False
+        if token.type == TokenType.ROLLBACK:
+            return True
+        return (
+            token.type == TokenType.IDENTIFIER
+            and _token_value_upper(token) == "ROLLBACK"
+        )
+
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> RollbackStatement:
+        start = token_stream.consume()
+        stmt = RollbackStatement(
+            start.location if hasattr(start, "location") else SourceLocation(0, 0)
+        )
+        skip_whitespace(token_stream)
+        # Optional WORK keyword
+        token = token_stream.peek()
+        if token and _token_value_upper(token) == "WORK":
+            token_stream.consume()
+            stmt.set_rollback_work(True)
+            skip_whitespace(token_stream)
+        consume_period(token_stream)
         return stmt
