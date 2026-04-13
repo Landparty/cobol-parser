@@ -26,7 +26,7 @@ from enum import Enum, auto
 
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem
-from ..models.program import CobolProgram
+from ..models.program import CobolProgram, CobolSection
 from ..models.statements import CallStatement, EntryStatement
 
 
@@ -159,6 +159,8 @@ class LinkageChecker:
 
         # Look for a section named LINKAGE (use public .sections property)
         for section in data_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
             section_name = section.section_name or ""
             if "LINKAGE" in section_name.upper():
                 for item in section.data_items:
