@@ -70,6 +70,26 @@ def __getattr__(name: str) -> object:
             "FlowEdgeType": FlowEdgeType,
         }
         return _map[name]
+    if name in (
+        "LanguageEnvironmentAnalyzer",
+        "LEAnalysisResult",
+        "LEFunctionUsage",
+        "LEServiceCall",
+    ):
+        from .language_env_analyzer import (
+            LanguageEnvironmentAnalyzer,
+            LEAnalysisResult,
+            LEFunctionUsage,
+            LEServiceCall,
+        )
+
+        _map = {
+            "LanguageEnvironmentAnalyzer": LanguageEnvironmentAnalyzer,
+            "LEAnalysisResult": LEAnalysisResult,
+            "LEFunctionUsage": LEFunctionUsage,
+            "LEServiceCall": LEServiceCall,
+        }
+        return _map[name]
     if name in ("IMSSegmentAnalyzer", "IMSDLICall"):
         from .ims_segment_analyzer import IMSDLICall, IMSSegmentAnalyzer
 
@@ -146,6 +166,10 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "CoverageAnalyzer",
+    "LanguageEnvironmentAnalyzer",
+    "LEAnalysisResult",
+    "LEFunctionUsage",
+    "LEServiceCall",
     "CoverageMap",
     "DataCategory",
     "DeadCodeAnalyzer",
