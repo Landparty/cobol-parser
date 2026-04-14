@@ -9,13 +9,21 @@ Detects two categories of IBM Language Environment usage in COBOL programs:
 
 2. **IBM LE callable services** – ``CALL "CEExxxx"`` statements that invoke
    IBM Language Environment runtime services such as ``CEEDATM``,
-   ``CEEGMT``, ``CEEGTST``, ``CEEHDLR``, etc.
+   ``CEEGMT``, ``CEEGTST``, ``CEEHDLR``, etc.  Dynamic calls whose
+   ``possible_values`` (populated by :class:`~cobolparser.analysis.
+   value_tracker.DynamicCallAnalyzer`) contain a CEE-prefixed name are also
+   reported.
 
 The analyzer works entirely on the already-parsed AST – no re-tokenization is
-required.  Intrinsic function references are found by scanning every statement's
-text fields (operands, expression strings, source fields) with a regex that
-recognises both ``FUNCTION LENGTH`` (space-separated, as stored by the COMPUTE
-parser) and ``FUNCTIONLENGTH`` (concatenated, as stored by the MOVE parser).
+required.  Intrinsic function references are found by scanning every
+statement's text fields (operands, expression strings, source fields) with a
+regex that recognises both ``FUNCTION LENGTH`` (space-separated, as stored by
+the COMPUTE parser) and ``FUNCTIONLENGTH`` (concatenated, as stored by the
+MOVE parser).
+
+All function-name and service-name constants are sourced from
+:class:`~cobolparser.dialects.ibm_enterprise.IBMEnterpriseCobol` so that the
+dialect module remains the single source of truth.
 """
 
 from __future__ import annotations
@@ -23,6 +31,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from ..dialects.ibm_enterprise import IBMEnterpriseCobol
 
 if TYPE_CHECKING:
     from ..models.program import CobolProgram
@@ -36,104 +46,15 @@ _FUNCTION_RE = re.compile(
     re.IGNORECASE,
 )
 
-# IBM intrinsic function names from the IBM Enterprise COBOL dialect
+# Single source of truth: reference the dialect class attributes directly.
 _IBM_INTRINSIC_FUNCTIONS: frozenset[str] = frozenset(
-    {
-        "ACOS",
-        "ANNUITY",
-        "ASIN",
-        "ATAN",
-        "CHAR",
-        "COS",
-        "CURRENT-DATE",
-        "DATE-OF-INTEGER",
-        "DATE-TO-YYYYMMDD",
-        "DAY-OF-INTEGER",
-        "DAY-TO-YYYYDDD",
-        "FACTORIAL",
-        "INTEGER",
-        "INTEGER-OF-DATE",
-        "INTEGER-OF-DAY",
-        "LENGTH",
-        "LOG",
-        "LOG10",
-        "LOWER-CASE",
-        "MAX",
-        "MEAN",
-        "MEDIAN",
-        "MIDRANGE",
-        "MIN",
-        "MOD",
-        "NUMVAL",
-        "NUMVAL-C",
-        "ORD",
-        "ORD-MAX",
-        "ORD-MIN",
-        "PRESENT-VALUE",
-        "RANDOM",
-        "RANGE",
-        "REM",
-        "REVERSE",
-        "SIN",
-        "SQRT",
-        "STANDARD-DEVIATION",
-        "SUM",
-        "TAN",
-        "UPPER-CASE",
-        "VARIANCE",
-        "WHEN-COMPILED",
-        "YEAR-TO-YYYY",
-    }
+    IBMEnterpriseCobol.IBM_INTRINSIC_FUNCTIONS
 )
-
-# IBM LE callable service names (CEE prefix)
 _IBM_LE_SERVICES: frozenset[str] = frozenset(
-    {
-        "CEEDATM",
-        "CEEDATE",
-        "CEETIME",
-        "CEEGMT",
-        "CEELOCT",
-        "CEESECS",
-        "CEEFMTDT",
-        "CEEDTTM",
-        "CEEDYWK",
-        "CEEGMTO",
-        "CEEGMTCO",
-        "CEEFMTVF",
-        "CEEGTST",
-        "CEEFRMST",
-        "CEECREH",
-        "CEEDSHP",
-        "CEECRHP",
-        "CEEZLNG",
-        "CEEHDLR",
-        "CEETREC",
-        "CEEHOOK",
-        "CEEMRCR",
-        "CEENDUC",
-        "CEERADR",
-        "CEESGL",
-        "CEEDUMP",
-        "CEEABND",
-        "CEENVST",
-        "CEEENV",
-        "CEEGPID",
-        "CEEGPIL",
-        "CEEGMEM",
-        "CEEGLS",
-        "CEETERM",
-        "CEEBINIT",
-        "CEEPCMD",
-        "CEEMSG",
-        "CEEGLOB",
-        "CEEGSS",
-        "CEESST",
-        "CEESG",
-        "CEESQ",
-        "CEECZST",
-        "CEETDLI",
-    }
+    IBMEnterpriseCobol.IBM_LE_CALLABLE_SERVICES
+)
+_LE_SERVICE_CATEGORY: dict[str, str] = dict(
+    IBMEnterpriseCobol.IBM_LE_SERVICE_CATEGORIES
 )
 
 
@@ -264,54 +185,7 @@ class LEAnalysisResult:
         }
 
 
-# ── Service category lookup ────────────────────────────────────────────────────
-
-_LE_SERVICE_CATEGORY: dict[str, str] = {
-    "CEEDATM": "datetime",
-    "CEEDATE": "datetime",
-    "CEETIME": "datetime",
-    "CEEGMT": "datetime",
-    "CEELOCT": "datetime",
-    "CEESECS": "datetime",
-    "CEEFMTDT": "datetime",
-    "CEEDTTM": "datetime",
-    "CEEDYWK": "datetime",
-    "CEEGMTO": "datetime",
-    "CEEGMTCO": "datetime",
-    "CEEFMTVF": "datetime",
-    "CEEGTST": "storage",
-    "CEEFRMST": "storage",
-    "CEECREH": "storage",
-    "CEEDSHP": "storage",
-    "CEECRHP": "storage",
-    "CEEZLNG": "string",
-    "CEEHDLR": "condition",
-    "CEETREC": "condition",
-    "CEEHOOK": "condition",
-    "CEEMRCR": "condition",
-    "CEENDUC": "condition",
-    "CEERADR": "condition",
-    "CEESGL": "condition",
-    "CEEDUMP": "condition",
-    "CEEABND": "condition",
-    "CEENVST": "environment",
-    "CEEENV": "environment",
-    "CEEGPID": "environment",
-    "CEEGPIL": "environment",
-    "CEEGMEM": "environment",
-    "CEEGLS": "string",
-    "CEETERM": "runtime",
-    "CEEBINIT": "runtime",
-    "CEEPCMD": "runtime",
-    "CEEMSG": "runtime",
-    "CEEGLOB": "runtime",
-    "CEEGSS": "storage",
-    "CEESST": "storage",
-    "CEESG": "string",
-    "CEESQ": "string",
-    "CEECZST": "string",
-    "CEETDLI": "ims",
-}
+# ── Helper functions ───────────────────────────────────────────────────────────
 
 
 def _is_le_service(name: str) -> bool:
@@ -327,32 +201,37 @@ def _is_cee_prefixed(name: str) -> bool:
 def _collect_text_fields(stmt: CobolStatement) -> list[str]:
     """Collect all text fields from a statement that may contain FUNCTION refs.
 
-    Returns a list of (non-empty) strings to scan for ``FUNCTION <name>``
-    patterns.
+    Returns a list of (non-empty, non-duplicate) strings to scan for
+    ``FUNCTION <name>`` patterns.
     """
+    seen: set[str] = set()
     fields: list[str] = []
+
+    def _add(text: str | None) -> None:
+        if text and text not in seen:
+            seen.add(text)
+            fields.append(text)
 
     # Base operands list present on every statement
     for op in stmt.operands:
-        if op:
-            fields.append(op)
+        _add(op)
 
     # ComputeStatement.expression (stored as space-joined token values)
-    expr = getattr(stmt, "expression", None)
-    if isinstance(expr, str) and expr:
-        fields.append(expr)
+    _add(getattr(stmt, "expression", None))
 
-    # MoveStatement.source (stored as concatenated token values, no spaces)
+    # MoveStatement.source (stored as concatenated token values, no spaces).
+    # Skip it when it is already present in operands to avoid double-counting
+    # FUNCTION occurrences from the same canonical source text.
     source = getattr(stmt, "source", None)
-    if isinstance(source, str) and source:
-        fields.append(source)
+    if isinstance(source, str) and source not in stmt.operands:
+        _add(source)
 
-    # DisplayStatement items
-    items = getattr(stmt, "items", None)
-    if isinstance(items, list):
-        for item in items:
-            if isinstance(item, str) and item:
-                fields.append(item)
+    # DisplayStatement.display_items
+    display_items = getattr(stmt, "display_items", None)
+    if isinstance(display_items, list):
+        for item in display_items:
+            if isinstance(item, str):
+                _add(item)
 
     return fields
 
@@ -372,6 +251,11 @@ class LanguageEnvironmentAnalyzer:
         print(report.unique_functions)   # ['LENGTH', 'UPPER-CASE']
         print(report.unique_services)    # ['CEEDATM', 'CEEGMT']
         print(report.uses_language_environment)  # True
+
+    For dynamic ``CALL`` detection, run
+    :class:`~cobolparser.analysis.value_tracker.DynamicCallAnalyzer` on the
+    program **before** calling :meth:`analyze` so that
+    ``CallStatement.possible_values`` is populated.
     """
 
     def analyze(self, program: CobolProgram) -> LEAnalysisResult:
@@ -415,35 +299,56 @@ class LanguageEnvironmentAnalyzer:
     def _check_le_service_call(
         self, stmt: CobolStatement, result: LEAnalysisResult
     ) -> None:
-        """Detect CALL statements that target IBM LE callable services."""
+        """Detect CALL statements that target IBM LE callable services.
+
+        Static calls are matched by the literal program name.  Dynamic calls
+        are matched when ``CallStatement.possible_values`` (populated by
+        ``DynamicCallAnalyzer``) contains a CEE-prefixed or known LE service
+        name.
+        """
         if stmt.statement_type != "CALL":
             return
 
-        called = getattr(stmt, "called_program", None)
-        if not called:
-            return
-
-        # Strip surrounding quotes if present (static call literals are stored
-        # without quotes by the parser, but defensive strip is harmless)
-        service_name = called.strip("\"'").upper()
-
-        # Accept either a known LE service or any CEE-prefixed name
-        if not (_is_le_service(service_name) or _is_cee_prefixed(service_name)):
-            return
-
-        is_dynamic = getattr(stmt, "_is_dynamic", False)
-        using_params = [
-            p.name
-            for p in getattr(stmt, "using_parameters", [])
+        is_dynamic: bool = getattr(stmt, "is_dynamic", False)
+        using_params: list[str] = [
+            p.name for p in getattr(stmt, "using_parameters", [])
         ]
+        location = getattr(stmt, "location", None)
 
-        result.le_service_calls.append(
-            LEServiceCall(
-                service_name=service_name,
-                is_known_service=_is_le_service(service_name),
-                is_dynamic=is_dynamic,
-                using_params=using_params,
-                location=getattr(stmt, "location", None),
-                category=_LE_SERVICE_CATEGORY.get(service_name, "unknown"),
+        candidate_names: list[str] = []
+
+        if is_dynamic:
+            # Resolve via DynamicCallAnalyzer-populated possible_values
+            possible = getattr(stmt, "possible_values", None) or []
+            if isinstance(possible, str):
+                possible = [possible]
+            for value in possible:
+                if not value:
+                    continue
+                name = str(value).strip("\"'").upper()
+                if _is_le_service(name) or _is_cee_prefixed(name):
+                    candidate_names.append(name)
+        else:
+            called = getattr(stmt, "called_program", None)
+            if not called:
+                return
+            name = called.strip("\"'").upper()
+            if _is_le_service(name) or _is_cee_prefixed(name):
+                candidate_names.append(name)
+
+        # Deduplicate while preserving order
+        seen: set[str] = set()
+        for service_name in candidate_names:
+            if service_name in seen:
+                continue
+            seen.add(service_name)
+            result.le_service_calls.append(
+                LEServiceCall(
+                    service_name=service_name,
+                    is_known_service=_is_le_service(service_name),
+                    is_dynamic=is_dynamic,
+                    using_params=using_params,
+                    location=location,
+                    category=_LE_SERVICE_CATEGORY.get(service_name, "unknown"),
+                )
             )
-        )

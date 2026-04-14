@@ -506,19 +506,31 @@ class CobolProgram(ASTNode):
     def get_le_callable_service_calls(self) -> list["CobolStatement"]:
         """Get all CALL statements targeting IBM Language Environment services.
 
-        Detects any CALL whose program name starts with ``CEE`` (the IBM LE
-        service naming prefix).  This covers both well-known services such as
-        ``CEEDATM`` / ``CEEGMT`` / ``CEEGTST`` and any undocumented or
-        site-specific CEE-prefixed routines.
+        Detects any CALL whose static program name starts with ``CEE`` (the
+        IBM LE service naming prefix).  For dynamic calls, any entry in
+        ``CallStatement.possible_values`` (populated by
+        :class:`~cobolparser.analysis.value_tracker.DynamicCallAnalyzer`)
+        that is CEE-prefixed also qualifies.
         """
+
+        def _is_cee(name: object) -> bool:
+            return isinstance(name, str) and name.strip("\"'").upper().startswith(
+                "CEE"
+            )
+
         all_statements = self.get_all_statements()
         le_calls = []
         for stmt in all_statements:
             if stmt.statement_type != "CALL":
                 continue
             called = getattr(stmt, "called_program", None)
-            if called and called.strip("\"'").upper().startswith("CEE"):
+            if _is_cee(called):
                 le_calls.append(stmt)
+                continue
+            if getattr(stmt, "is_dynamic", False):
+                possible = getattr(stmt, "possible_values", []) or []
+                if any(_is_cee(v) for v in possible):
+                    le_calls.append(stmt)
         return le_calls
 
     def uses_language_environment(self) -> bool:
@@ -537,12 +549,20 @@ class CobolProgram(ASTNode):
         pattern = re.compile(r"FUNCTION\s*([A-Z][A-Z0-9-]*)", re.IGNORECASE)
         found: list[str] = []
         for stmt in self.get_all_statements():
-            texts: list[str] = list(stmt.operands)
+            seen_texts: set[str] = set()
+            texts: list[str] = []
+            for op in stmt.operands:
+                if op and op not in seen_texts:
+                    seen_texts.add(op)
+                    texts.append(op)
             expr = getattr(stmt, "expression", None)
-            if isinstance(expr, str):
+            if isinstance(expr, str) and expr not in seen_texts:
+                seen_texts.add(expr)
                 texts.append(expr)
+            # MoveStatement.source is inserted into operands by set_source(),
+            # so only scan it when it is not already covered above.
             source = getattr(stmt, "source", None)
-            if isinstance(source, str):
+            if isinstance(source, str) and source not in seen_texts:
                 texts.append(source)
             for text in texts:
                 for m in pattern.finditer(text):

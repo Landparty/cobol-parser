@@ -11,7 +11,7 @@ Coverage:
     * CALL to unknown CEE-prefixed name (treated as LE service)
     * CALL to non-LE program (ignored)
     * Program with no language-environment usage
-    * Dynamic CALL to CEE service (is_dynamic=True)
+    * Dynamic CALL to CEE service via possible_values (is_dynamic=True)
     * USING parameter extraction
     * LEAnalysisResult properties: unique_functions, unique_services,
       service_categories, uses_intrinsic_functions, uses_language_environment
@@ -531,6 +531,73 @@ class TestCobolProgramMethods:
     def test_uses_intrinsic_functions_false(self):
         program = _parse(_NO_LE_USAGE)
         assert not program.uses_intrinsic_functions()
+
+
+# ── Test: dynamic CALL detection ─────────────────────────────────────────────
+#
+# Dynamic calls use a variable as the called program name.  The
+# LanguageEnvironmentAnalyzer (and CobolProgram helpers) detect LE services
+# by inspecting CallStatement.possible_values, which is populated by
+# DynamicCallAnalyzer.  We simulate this by manually injecting possible_values
+# into the CallStatement after parsing.
+
+
+class TestDynamicCallDetection:
+    def _parse_and_inject(self, source: str, service_name: str):
+        """Parse *source*, find the dynamic CALL, and inject *service_name*
+        into its possible_values to simulate DynamicCallAnalyzer output."""
+        program = _parse(source)
+        for stmt in program.get_all_statements():
+            if stmt.statement_type == "CALL" and getattr(stmt, "is_dynamic", False):
+                stmt.add_possible_value(service_name)
+        return program
+
+    _DYNAMIC_CALL_SOURCE = (
+        _MINIMAL_HEADER
+        + """\
+       01 WS-PGMNAME PIC X(8) VALUE "CEEGMT".
+       01 WS-SECS    PIC S9(9) COMP.
+       01 WS-FC      PIC X(12).
+"""
+        + _PROCEDURE_HEADER
+        + """\
+           CALL WS-PGMNAME USING WS-SECS WS-FC.
+           STOP RUN.
+"""
+    )
+
+    def test_analyzer_detects_dynamic_le_call(self):
+        program = self._parse_and_inject(self._DYNAMIC_CALL_SOURCE, "CEEGMT")
+        analyzer = LanguageEnvironmentAnalyzer()
+        report = analyzer.analyze(program)
+        assert report.uses_language_environment
+        assert "CEEGMT" in report.unique_services
+
+    def test_dynamic_call_is_flagged_as_dynamic(self):
+        program = self._parse_and_inject(self._DYNAMIC_CALL_SOURCE, "CEEGMT")
+        analyzer = LanguageEnvironmentAnalyzer()
+        report = analyzer.analyze(program)
+        call = next(c for c in report.le_service_calls if c.service_name == "CEEGMT")
+        assert call.is_dynamic is True
+
+    def test_dynamic_call_category_resolved(self):
+        program = self._parse_and_inject(self._DYNAMIC_CALL_SOURCE, "CEEGMT")
+        analyzer = LanguageEnvironmentAnalyzer()
+        report = analyzer.analyze(program)
+        call = next(c for c in report.le_service_calls if c.service_name == "CEEGMT")
+        assert call.category == "datetime"
+
+    def test_program_method_detects_dynamic_le_call(self):
+        program = self._parse_and_inject(self._DYNAMIC_CALL_SOURCE, "CEEDATM")
+        assert program.uses_language_environment()
+
+    def test_dynamic_call_unknown_program_ignored(self):
+        """A dynamic CALL with no CEE-prefixed possible_values is not reported."""
+        program = _parse(self._DYNAMIC_CALL_SOURCE)
+        # Do NOT inject any possible_values → nothing to detect
+        analyzer = LanguageEnvironmentAnalyzer()
+        report = analyzer.analyze(program)
+        assert not report.uses_language_environment
 
 
 # ── Test: lazy import paths ────────────────────────────────────────────────────

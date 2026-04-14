@@ -302,7 +302,14 @@ class TokenType(Enum):
     INCLUDE = auto()
     COPY = auto()
     REPLACING = auto()
-    FUNCTION = auto()  # FUNCTION keyword for intrinsic function calls
+    # NOTE: FUNCTION is intentionally NOT added to the KEYWORDS mapping.
+    # Registering it as a keyword would cause statement parsers that only
+    # accept IDENTIFIER tokens in operand positions to reject expressions
+    # like `DISPLAY FUNCTION CURRENT-DATE` or `MOVE FUNCTION LENGTH(x) TO y`.
+    # The LanguageEnvironmentAnalyzer detects FUNCTION usage by scanning the
+    # text values of operand/expression strings, so a distinct token type is
+    # not required for correct detection.
+    FUNCTION = auto()
 
     # Level numbers
     LEVEL_NUMBER = auto()
@@ -584,7 +591,7 @@ class CobolLexer:
         "INCLUDE": TokenType.INCLUDE,
         "COPY": TokenType.COPY,
         "REPLACING": TokenType.REPLACING,
-        "FUNCTION": TokenType.FUNCTION,
+        # FUNCTION is deliberately absent – see TokenType.FUNCTION comment.
     }
     KEYWORDS = {sys.intern(k): v for k, v in KEYWORDS.items()}
 
