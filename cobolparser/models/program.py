@@ -503,6 +503,56 @@ class CobolProgram(ASTNode):
 
         return ims_calls
 
+    def get_le_callable_service_calls(self) -> list["CobolStatement"]:
+        """Get all CALL statements targeting IBM Language Environment services.
+
+        Detects any CALL whose program name starts with ``CEE`` (the IBM LE
+        service naming prefix).  This covers both well-known services such as
+        ``CEEDATM`` / ``CEEGMT`` / ``CEEGTST`` and any undocumented or
+        site-specific CEE-prefixed routines.
+        """
+        all_statements = self.get_all_statements()
+        le_calls = []
+        for stmt in all_statements:
+            if stmt.statement_type != "CALL":
+                continue
+            called = getattr(stmt, "called_program", None)
+            if called and called.strip("\"'").upper().startswith("CEE"):
+                le_calls.append(stmt)
+        return le_calls
+
+    def uses_language_environment(self) -> bool:
+        """Return True if the program calls any IBM Language Environment service."""
+        return bool(self.get_le_callable_service_calls())
+
+    def get_intrinsic_function_usages(self) -> list[str]:
+        """Return a list of intrinsic function names referenced by the program.
+
+        Scans all statement operand and expression strings for the ``FUNCTION``
+        keyword followed by an identifier, returning each matched function name
+        in the order it appears (duplicates included).
+        """
+        import re
+
+        pattern = re.compile(r"FUNCTION\s*([A-Z][A-Z0-9-]*)", re.IGNORECASE)
+        found: list[str] = []
+        for stmt in self.get_all_statements():
+            texts: list[str] = list(stmt.operands)
+            expr = getattr(stmt, "expression", None)
+            if isinstance(expr, str):
+                texts.append(expr)
+            source = getattr(stmt, "source", None)
+            if isinstance(source, str):
+                texts.append(source)
+            for text in texts:
+                for m in pattern.finditer(text):
+                    found.append(m.group(1).upper())
+        return found
+
+    def uses_intrinsic_functions(self) -> bool:
+        """Return True if the program uses any COBOL intrinsic functions."""
+        return bool(self.get_intrinsic_function_usages())
+
     def get_procedures(self) -> list["CobolProcedure"]:
         """Get all procedure paragraphs/sections in the program."""
         procedures: list[CobolProcedure] = []

@@ -302,6 +302,7 @@ class TokenType(Enum):
     INCLUDE = auto()
     COPY = auto()
     REPLACING = auto()
+    FUNCTION = auto()  # FUNCTION keyword for intrinsic function calls
 
     # Level numbers
     LEVEL_NUMBER = auto()
@@ -583,6 +584,7 @@ class CobolLexer:
         "INCLUDE": TokenType.INCLUDE,
         "COPY": TokenType.COPY,
         "REPLACING": TokenType.REPLACING,
+        "FUNCTION": TokenType.FUNCTION,
     }
     KEYWORDS = {sys.intern(k): v for k, v in KEYWORDS.items()}
 

@@ -348,6 +348,126 @@ class IBMEnterpriseCobol:
         "NOHANDLE",
     }
 
+    # IBM Language Environment (LE) callable services (CEE* functions)
+    IBM_LE_CALLABLE_SERVICES = {
+        # Date and Time services
+        "CEEDATM",  # Convert Lilian date to character date/time
+        "CEEDATE",  # Convert Lilian date to character date
+        "CEETIME",  # Get current time
+        "CEEGMT",   # Get current Greenwich Mean Time
+        "CEELOCT",  # Get current local time
+        "CEESECS",  # Convert date/time to Lilian seconds
+        "CEEFMTDT", # Format date/time
+        "CEEDTTM",  # Convert character date/time to Lilian seconds
+        "CEEDYWK",  # Calculate day of week from Lilian date
+        "CEEGMTO",  # Get Greenwich Mean Time offset
+        "CEEGMTCO", # Get GMT offset for a date
+        "CEEFMTVF", # Format date/time using variable-length format
+        # Heap Storage services
+        "CEEGTST",  # Get heap storage
+        "CEEFRMST", # Free heap storage
+        "CEECREH",  # Create heap
+        "CEEDSHP",  # Destroy heap
+        "CEECRHP",  # Create heap (alternate)
+        # Mathematical services
+        "CEEZLNG",  # Get string length
+        # Condition and Error Handling services
+        "CEEHDLR",  # Register a condition handler
+        "CEETREC",  # Remove a condition handler
+        "CEEHOOK",  # Set hook
+        "CEEMRCR",  # Move condition record
+        "CEENDUC",  # Non-destructive update of condition
+        "CEERADR",  # Re-raise a condition
+        "CEESGL",   # Signal a condition
+        "CEEDUMP",  # Produce a system dump
+        "CEEABND",  # Abend with condition
+        # Environment services
+        "CEENVST",  # Get next environment setting
+        "CEEENV",   # Get environment variable
+        "CEEGPID",  # Get program instance data
+        "CEEGPIL",  # Get program instance level
+        "CEEGMEM",  # Get member name
+        "CEEGLS",   # Get language sensitive string length
+        # Runtime services
+        "CEETERM",  # Terminate the run unit
+        "CEEBINIT", # Initialize Language Environment
+        "CEEPCMD",  # Perform command
+        "CEEMSG",   # Get message text
+        "CEEGLOB",  # Get global data
+        "CEEGSS",   # Get stack storage
+        "CEESST",   # Get static storage
+        # String conversion services
+        "CEESG",    # Convert string
+        "CEESQ",    # Convert string length
+        "CEECZST",  # Convert string with terminator
+        # IMS LE interface (also a LE service)
+        "CEETDLI",  # IMS DL/I call through Language Environment
+    }
+
+    # Metadata for the most commonly used LE callable services
+    IBM_LE_SERVICE_INFO: dict[str, dict] = {
+        "CEEDATM": {
+            "category": "datetime",
+            "description": "Convert Lilian date to character date and time",
+            "parameters": ["seconds", "picture-string", "output-string", "fc"],
+        },
+        "CEEGMT": {
+            "category": "datetime",
+            "description": "Get current Greenwich Mean Time",
+            "parameters": ["seconds", "fc"],
+        },
+        "CEELOCT": {
+            "category": "datetime",
+            "description": "Get current local time",
+            "parameters": ["seconds", "gregorian-date", "fc"],
+        },
+        "CEESECS": {
+            "category": "datetime",
+            "description": "Convert date/time to Lilian seconds",
+            "parameters": ["input-string", "picture-string", "seconds", "fc"],
+        },
+        "CEEFMTDT": {
+            "category": "datetime",
+            "description": "Format date/time",
+            "parameters": ["seconds", "picture-string", "output-string", "fc"],
+        },
+        "CEEDYWK": {
+            "category": "datetime",
+            "description": "Calculate day of week from Lilian date",
+            "parameters": ["lilian-date", "day-of-week", "fc"],
+        },
+        "CEEGTST": {
+            "category": "storage",
+            "description": "Get heap storage",
+            "parameters": ["heap-id", "size", "pointer", "fc"],
+        },
+        "CEEFRMST": {
+            "category": "storage",
+            "description": "Free heap storage",
+            "parameters": ["pointer", "fc"],
+        },
+        "CEEHDLR": {
+            "category": "condition",
+            "description": "Register a condition handler",
+            "parameters": ["handler-routine", "token", "fc"],
+        },
+        "CEETREC": {
+            "category": "condition",
+            "description": "Remove a condition handler",
+            "parameters": ["token", "fc"],
+        },
+        "CEETERM": {
+            "category": "runtime",
+            "description": "Terminate the run unit",
+            "parameters": ["termination-code"],
+        },
+        "CEETDLI": {
+            "category": "ims",
+            "description": "IMS DL/I call through Language Environment",
+            "parameters": ["func-code", "pcb", "io-area", "ssa..."],
+        },
+    }
+
     # IMS commands (DL/I call types)
     IMS_COMMANDS = {
         "GU",
@@ -376,6 +496,7 @@ class IBMEnterpriseCobol:
             "exec_cics",
             "exec_ims",
             "ibm_intrinsic_functions",
+            "le_callable_services",
             "pointer_data_types",
             "object_oriented_cobol",
             "zos_file_handling",
@@ -538,6 +659,18 @@ class IBMEnterpriseCobol:
         """Check if command is a valid IMS command."""
         return command.upper() in self.IMS_COMMANDS
 
+    def is_le_callable_service(self, name: str) -> bool:
+        """Check if name is an IBM Language Environment callable service."""
+        return name.upper() in self.IBM_LE_CALLABLE_SERVICES
+
+    def get_le_service_info(self, name: str) -> dict | None:
+        """Get metadata for an IBM LE callable service.
+
+        Returns a dict with keys 'category', 'description', 'parameters',
+        or None if the service is not known or has no metadata.
+        """
+        return self.IBM_LE_SERVICE_INFO.get(name.upper())
+
     def get_dialect_info(self) -> dict[str, Any]:
         """Get dialect information."""
         return {
@@ -549,4 +682,5 @@ class IBMEnterpriseCobol:
             "intrinsic_functions": len(self.IBM_INTRINSIC_FUNCTIONS),
             "cics_commands": len(self.CICS_COMMANDS),
             "ims_commands": len(self.IMS_COMMANDS),
+            "le_callable_services": len(self.IBM_LE_CALLABLE_SERVICES),
         }
