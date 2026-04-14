@@ -4,12 +4,13 @@ from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import StringStatement, UnstringStatement
 from ._utils import (
     STATEMENT_KEYWORDS,
     consume_period,
+    matches_keyword,
     skip_whitespace,
+    token_location,
     try_parse_nested_statement,
 )
 from ._utils import (
@@ -56,19 +57,14 @@ class StringStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.STRING:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "STRING"
+        return matches_keyword(token_stream, TokenType.STRING, "STRING")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> StringStatement:
         start = token_stream.consume()
         stmt = StringStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
+            token_location(start)
         )
         skip_whitespace(token_stream)
 
@@ -175,19 +171,14 @@ class UnstringStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.UNSTRING:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "UNSTRING"
+        return matches_keyword(token_stream, TokenType.UNSTRING, "UNSTRING")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> UnstringStatement:
         start = token_stream.consume()
         stmt = UnstringStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
+            token_location(start)
         )
         skip_whitespace(token_stream)
 

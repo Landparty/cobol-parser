@@ -3,8 +3,10 @@
 from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import EntryStatement
+from ._utils import matches_keyword
 
 
 class EntryStatementParser(IStatementParser):
@@ -18,22 +20,7 @@ class EntryStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is ENTRY keyword.
-
-        Args:
-            token_stream: Token stream to check
-
-        Returns:
-            True if next token is ENTRY, False otherwise
-        """
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            token_val_upper = token.value.upper() if token.value else ""
-            return token_val_upper == "ENTRY"
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.ENTRY, "ENTRY")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

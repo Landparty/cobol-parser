@@ -13,7 +13,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
-from ._utils import skip_whitespace
+from ._utils import matches_keyword, skip_whitespace
 
 
 class DisplayStatementParser(IStatementParser):
@@ -29,31 +29,7 @@ class DisplayStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if this parser can handle the current statement.
-
-        Matches if the next token is DISPLAY keyword.
-
-        Args:
-            token_stream: The token stream to check
-
-        Returns:
-            True if next token is DISPLAY, False otherwise
-        """
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-
-            # Check for DISPLAY keyword (by type or identifier value)
-            if token.type == TokenType.DISPLAY:
-                return True
-
-            if token.type == TokenType.IDENTIFIER and token.value:
-                return token.value.upper() == "DISPLAY"
-
-            return False
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.DISPLAY, "DISPLAY")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

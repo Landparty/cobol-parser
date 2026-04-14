@@ -2,7 +2,7 @@
 
 from typing import Any, cast
 
-from cobolparser.parsers.statements._utils import skip_whitespace
+from cobolparser.parsers.statements._utils import matches_keyword, skip_whitespace
 
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -20,22 +20,7 @@ class MoveStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is MOVE keyword."""
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            if token.type == TokenType.MOVE:
-                return True
-            if (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "MOVE"
-            ):
-                return True
-            return False
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.MOVE, "MOVE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

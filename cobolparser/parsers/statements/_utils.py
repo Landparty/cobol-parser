@@ -12,6 +12,7 @@ from typing import Any
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.statements.data import DisplayStatement, MoveStatement
 
 # ---------------------------------------------------------------------------
 # Token-type sets used by multiple parsers to detect statement boundaries
@@ -131,6 +132,34 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
 def token_value_upper(token: Any) -> str:
     """Return the upper-cased value of *token*, or ``""`` if unavailable."""
     return token.value.upper() if token and token.value else ""
+
+
+def token_location(token: Any) -> SourceLocation:
+    """Return the source location of *token*, or a zero location if absent."""
+    return token.location if token else SourceLocation(0, 0)
+
+
+def matches_keyword(
+    token_stream: ITokenStream, token_type: Any, keyword: str
+) -> bool:
+    """Return True if the next token matches *token_type* or is an IDENTIFIER equal to *keyword*.
+
+    This is the canonical implementation for statement-parser ``matches()`` methods
+    that detect a single COBOL verb.  It avoids the repetitive try/except and
+    dual-check pattern that would otherwise be copy-pasted across every parser.
+    Returns False on any stream error so that the registry can safely probe each parser.
+    """
+    try:
+        token = token_stream.peek()
+        if not token:
+            return False
+        return token.type == token_type or (
+            token.type == TokenType.IDENTIFIER
+            and token.value is not None
+            and token.value.upper() == keyword
+        )
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -320,3 +349,162 @@ def try_parse_nested_statement(
         return parser.parse(stream)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Arithmetic size-error clause parsing (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE)
+# ---------------------------------------------------------------------------
+
+
+def _skip_newlines(stream: ITokenStream) -> Any | None:
+    """Consume NEWLINE tokens and return the next non-NEWLINE token."""
+    token = stream.peek()
+    while token and token.type == TokenType.NEWLINE:
+        stream.consume()
+        token = stream.peek()
+    return token
+
+
+def parse_size_error_clauses(stream: ITokenStream, stmt: Any) -> None:
+    """Parse optional ON SIZE ERROR / NOT ON SIZE ERROR clauses.
+
+    Calls ``stmt.set_on_size_error_clause()`` and
+    ``stmt.set_not_on_size_error_clause()`` when the clauses are present and
+    consumes the trailing period.  Used by ADD and COMPUTE statement parsers.
+    """
+    while not stream.is_empty():
+        token = stream.peek()
+        if not token or token.type == TokenType.PERIOD:
+            if token:
+                stream.consume()
+            break
+
+        if token.type == TokenType.NEWLINE:
+            stream.consume()
+            continue
+
+        if not token.value:
+            stream.consume()
+            continue
+
+        token_upper = token.value.upper()
+        if token_upper == "ON":
+            stream.consume()
+            next_token = _skip_newlines(stream)
+            if next_token and next_token.value and next_token.value.upper() == "SIZE":
+                stream.consume()
+                next_token = _skip_newlines(stream)
+                if (
+                    next_token
+                    and next_token.value
+                    and next_token.value.upper() == "ERROR"
+                ):
+                    stream.consume()
+                    stmt.set_on_size_error_clause(_parse_size_error_stmts(stream))
+        elif token_upper == "NOT":
+            stream.consume()
+            next_token = _skip_newlines(stream)
+            if next_token and next_token.value and next_token.value.upper() == "ON":
+                stream.consume()
+                next_token = _skip_newlines(stream)
+                if (
+                    next_token
+                    and next_token.value
+                    and next_token.value.upper() == "SIZE"
+                ):
+                    stream.consume()
+                    next_token = _skip_newlines(stream)
+                    if (
+                        next_token
+                        and next_token.value
+                        and next_token.value.upper() == "ERROR"
+                    ):
+                        stream.consume()
+                        stmt.set_not_on_size_error_clause(
+                            _parse_size_error_stmts(stream)
+                        )
+        else:
+            break
+
+
+def _parse_size_error_stmts(stream: ITokenStream) -> list:
+    """Parse imperative statements inside an ON SIZE ERROR / NOT ON SIZE ERROR clause.
+
+    Handles DISPLAY and MOVE as inline mini-parsers; all other verbs are skipped.
+    The trailing period (or next clause boundary) is NOT consumed.
+    """
+    nested: list = []
+
+    while not stream.is_empty():
+        token = stream.peek()
+        if not token or token.type == TokenType.PERIOD:
+            if token:
+                stream.consume()
+            break
+
+        if token.type == TokenType.NEWLINE:
+            stream.consume()
+            continue
+
+        if not token.value:
+            stream.consume()
+            continue
+
+        token_upper = token.value.upper()
+
+        if token_upper == "DISPLAY":
+            start = stream.consume()
+            start_loc = start.location if start else SourceLocation(0, 0)
+            display_stmt = DisplayStatement(start_loc)
+            while not stream.is_empty():
+                t = stream.peek()
+                if not t:
+                    break
+                if t.type == TokenType.NEWLINE:
+                    stream.consume()
+                    continue
+                if t.type == TokenType.PERIOD or (
+                    t.value and t.value.upper() in ("MOVE", "DISPLAY")
+                ):
+                    break
+                if t.type in (
+                    TokenType.STRING_LITERAL,
+                    TokenType.IDENTIFIER,
+                    TokenType.NUMERIC_LITERAL,
+                ):
+                    display_stmt.add_display_item(t.value)
+                stream.consume()
+            nested.append(display_stmt)
+
+        elif token_upper == "MOVE":
+            start = stream.consume()
+            start_loc = start.location if start else SourceLocation(0, 0)
+            move_stmt = MoveStatement(start_loc)
+            while not stream.is_empty():
+                t = stream.peek()
+                if not t:
+                    break
+                if t.type == TokenType.NEWLINE:
+                    stream.consume()
+                    continue
+                if t.type == TokenType.PERIOD:
+                    break
+                if t.value and t.value.upper() == "TO":
+                    stream.consume()
+                    target_token = _skip_newlines(stream)
+                    if target_token and target_token.type == TokenType.IDENTIFIER:
+                        move_stmt.add_target(target_token.value)
+                        stream.consume()
+                    break
+                if t.type in (
+                    TokenType.IDENTIFIER,
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.STRING_LITERAL,
+                ):
+                    move_stmt.add_operand(t.value)
+                stream.consume()
+            nested.append(move_stmt)
+        else:
+            stream.consume()
+
+    return nested

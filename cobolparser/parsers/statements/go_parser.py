@@ -2,9 +2,14 @@
 
 from typing import Any
 
-from cobolparser.parsers.statements._utils import get_parse_context, report_parse_error
+from cobolparser.parsers.statements._utils import (
+    get_parse_context,
+    matches_keyword,
+    report_parse_error,
+)
 
 from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import GoStatement
 
@@ -31,14 +36,7 @@ class GoStatementParser(IStatementParser):
         Returns:
             True if next token is GO, False otherwise
         """
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            token_val_upper = token.value.upper() if token.value else ""
-            return token_val_upper == "GO"
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.GO, "GO")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

@@ -118,19 +118,19 @@ class IOReadStatement(CobolStatement):
                 "with_nowait": self.with_nowait,
                 # Clauses
                 "at_end_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.at_end_clause or [])
                 ],
                 "not_at_end_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.not_at_end_clause or [])
                 ],
                 "invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.invalid_key_clause or [])
                 ],
                 "not_invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.not_invalid_key_clause or [])
                 ],
                 "retry_count": self.retry_count,
@@ -245,15 +245,15 @@ class IOWriteStatement(CobolStatement):
                 "with_lock": self.with_lock,
                 # Clauses
                 "at_eop_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.at_eop_clause or [])
                 ],
                 "invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.invalid_key_clause or [])
                 ],
                 "not_invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.not_invalid_key_clause or [])
                 ],
                 "retry_count": self.retry_count,
@@ -507,11 +507,11 @@ class IORewriteStatement(CobolStatement):
                 "file_name": self.file_name,
                 "record_name": self.record_name,
                 "invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.invalid_key_clause or [])
                 ],
                 "not_invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.not_invalid_key_clause or [])
                 ],
                 "with_lock": self.with_lock,
@@ -561,11 +561,11 @@ class IODeleteStatement(CobolStatement):
             {
                 "file_name": self.file_name,
                 "invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.invalid_key_clause or [])
                 ],
                 "not_invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.not_invalid_key_clause or [])
                 ],
                 "with_lock": self.with_lock,
@@ -615,11 +615,11 @@ class IOStartStatement(CobolStatement):
                 "file_name": self.file_name,
                 "key_condition": self.key_condition,
                 "invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.invalid_key_clause or [])
                 ],
                 "not_invalid_key_clause": [
-                    s.to_dict() if hasattr(s, "to_dict") else s
+                    s.to_dict()
                     for s in (self.not_invalid_key_clause or [])
                 ],
             }

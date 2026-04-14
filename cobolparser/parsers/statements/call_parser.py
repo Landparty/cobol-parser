@@ -5,6 +5,7 @@ from typing import Any, cast
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    matches_keyword,
     skip_whitespace,
 )
 
@@ -20,18 +21,7 @@ class CallStatementParser(IStatementParser):
     """Parser for CALL statements using IStatementParser interface."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is CALL keyword."""
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            if token.type == TokenType.CALL:
-                return True
-            if token.type == TokenType.IDENTIFIER and token.value:
-                return token.value.upper() == "CALL"
-            return False
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.CALL, "CALL")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
