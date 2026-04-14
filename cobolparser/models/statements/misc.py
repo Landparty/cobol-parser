@@ -518,3 +518,38 @@ class MergeStatement(CobolStatement):
             }
         )
         return result
+
+
+class CommitStatement(CobolStatement):
+    """AST node for COMMIT statements (transaction control).
+
+    Syntax: COMMIT
+    Commits the current unit of work in DB2/CICS embedded SQL programs.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("COMMIT", location)
+
+    def to_dict(self) -> dict[str, Any]:
+        return super().to_dict()
+
+
+class RollbackStatement(CobolStatement):
+    """AST node for ROLLBACK statements (transaction control).
+
+    Syntax: ROLLBACK [WORK]
+    Rolls back the current unit of work in DB2/CICS embedded SQL programs.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("ROLLBACK", location)
+        self.rollback_work: bool = False  # ROLLBACK WORK variant
+
+    def set_rollback_work(self, value: bool = True) -> None:
+        """Mark that the WORK keyword was present."""
+        self.rollback_work = value
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["rollback_work"] = self.rollback_work
+        return result

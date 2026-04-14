@@ -20,6 +20,7 @@ from cobolparser.parsers.statements import (
     CallStatementParser,
     CancelStatementParser,
     CloseStatementParser,
+    CommitStatementParser,
     ComputeStatementParser,
     ContinueStatementParser,
     DeleteStatementParser,
@@ -45,6 +46,7 @@ from cobolparser.parsers.statements import (
     ReleaseStatementParser,
     ReturnStatementParser,
     RewriteStatementParser,
+    RollbackStatementParser,
     SearchStatementParser,
     SetStatementParser,
     SortStatementParser,
@@ -165,6 +167,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(CancelStatementParser())
         registry.register(GenerateStatementParser())
         registry.register(UseStatementParser())
+
+        # Transaction control
+        registry.register(CommitStatementParser())
+        registry.register(RollbackStatementParser())
 
         return registry
 

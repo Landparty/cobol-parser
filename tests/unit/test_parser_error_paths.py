@@ -13,11 +13,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import ErrorRecoveryMode, MemoryConfiguration, ParseError
-
 
 # ---------------------------------------------------------------------------
 # parse() catch-all exception handler  (lines 198-202)

@@ -59,12 +59,14 @@ from .set_parser import SetStatementParser
 from .simple_statement_parsers import (
     AlterStatementParser,
     CancelStatementParser,
+    CommitStatementParser,
     ContinueStatementParser,
     ExitStatementParser,
     GenerateStatementParser,
     GobackStatementParser,
     ReleaseStatementParser,
     ReturnStatementParser,
+    RollbackStatementParser,
     UseStatementParser,
 )
 from .sort_merge_parsers import MergeStatementParser, SortStatementParser
@@ -117,4 +119,6 @@ __all__ = [
     "SortStatementParser",
     "MergeStatementParser",
     "UnlockStatementParser",
+    "CommitStatementParser",
+    "RollbackStatementParser",
 ]
