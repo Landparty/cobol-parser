@@ -62,13 +62,15 @@ class TestDynamicCallAnalyzerInit:
         analyzer = DynamicCallAnalyzer()
         ast1 = _parse(source1)
         analyzer.analyze(ast1)
-        vals_first = analyzer.get_variable_values("PROG-NAME")
 
         ast2 = _parse(source2)
         analyzer.analyze(ast2)
         vals_second = analyzer.get_variable_values("PROG-NAME")
 
-        assert vals_first != vals_second or "FIRST" not in vals_second
+        # After the second analyze() call the state must be fully reset:
+        # only "SECOND" should be present, "FIRST" must be gone.
+        assert "SECOND" in vals_second
+        assert "FIRST" not in vals_second
 
 
 class TestInitialValueCollection:

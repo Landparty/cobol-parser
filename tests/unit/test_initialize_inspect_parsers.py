@@ -495,6 +495,8 @@ class TestInspectToDict:
         ]
         stmt = InspectStatementParser().parse(_stream(*tokens))
         d = stmt.to_dict()
-        # converting fields are present when CONVERTING type was set
-        assert d.get("converting_from") == "ABC" or stmt.converting_from == "ABC"
-        assert d.get("converting_to") == "abc" or stmt.converting_to == "abc"
+        # converting fields are conditionally serialised — assert directly on d
+        # so that a missing key in to_dict() is caught rather than masked by the
+        # stmt attribute fallback.
+        assert d["converting_from"] == "ABC"
+        assert d["converting_to"] == "abc"

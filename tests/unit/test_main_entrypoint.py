@@ -30,6 +30,7 @@ def _run(*args: str, input_text: str | None = None) -> subprocess.CompletedProce
         capture_output=True,
         text=True,
         input=input_text,
+        timeout=30,
     )
 
 
@@ -120,8 +121,8 @@ class TestMainParseSubcommand:
         result = _run(_SIMPLE)
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        # AST root should be a program node
-        assert "type" in data or "program_name" in data or "node_type" in data or data
+        # AST root must contain at least one of these canonical node keys
+        assert any(k in data for k in ("node_type", "type", "program_name", "statement_type"))
 
 
 class TestMainModuleInvocation:
@@ -138,4 +139,5 @@ class TestMainModuleInvocation:
         # Either shows help (exit 0) or exits with usage error (non-zero).
         # Both are acceptable — what is NOT acceptable is an ImportError/crash.
         combined = result.stdout + result.stderr
-        assert "Traceback" not in combined or "ImportError" not in combined
+        # Both must be absent — the process must not crash with a traceback or import error
+        assert "Traceback" not in combined and "ImportError" not in combined

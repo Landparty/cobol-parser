@@ -256,9 +256,10 @@ class TestEncodingDetection:
         assert "EMP-NAME" in result
 
     def test_convert_to_utf8_unknown_encoding_fallback(self):
-        # Unknown encoding should fall back to ASCII with replacement
+        # An unrecognised codec name triggers LookupError, which exercises the
+        # ASCII-with-replacement fallback branch inside convert_to_utf8().
         content = b"      01 TEST PIC X.\n"
-        result = convert_to_utf8(content, "ascii")
+        result = convert_to_utf8(content, "not-a-real-codec-xyz")
         assert "TEST" in result
 
     def test_read_file_with_encoding_override(self):
