@@ -4679,3 +4679,113 @@ class TestProgramFlowAuditEdgeCases:
 
         # HANDLER is unreachable via internal flow
         assert "HANDLER" in report.unreachable_nodes
+
+    # ------------------------------------------------------------------
+    # Section with no paragraphs (line 374-376 in _scan_statements)
+    # ------------------------------------------------------------------
+
+    def test_section_with_no_paragraphs_becomes_node(self) -> None:
+        """A CobolSection that has no child paragraphs is still collected as
+        a SECTION node with zero statements and no crash."""
+        # Pass sections=[("MY-SECTION", [])] → section with empty paragraph list
+        prog = _make_program([], sections=[("MY-SECTION", [])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.node_count == 1
+        node = report.nodes[0]
+        assert node.name == "MY-SECTION"
+        assert node.procedure_type == "SECTION"
+        assert node.statement_count == 0
+
+    def test_section_with_paragraphs_and_empty_section_coexist(self) -> None:
+        """A section with no paragraphs alongside a normal section are both
+        collected correctly."""
+        prog = _make_program(
+            [],
+            sections=[
+                ("INIT-SECTION", []),
+                ("WORK-SECTION", [("WORK-PARA", [_continue()])]),
+            ],
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        node_names = {n.name for n in report.nodes}
+        assert "INIT-SECTION" in node_names
+        assert "WORK-SECTION" in node_names
+        assert "WORK-PARA" in node_names
+
+        init_node = next(n for n in report.nodes if n.name == "INIT-SECTION")
+        assert init_node.statement_count == 0
+
+    # ------------------------------------------------------------------
+    # GOTO + PERFORM together: fall-through should still happen (line 801)
+    # ------------------------------------------------------------------
+
+    def test_fall_through_when_goto_and_perform_both_present(self) -> None:
+        """When a paragraph has both a GO TO and a PERFORM, the heuristic
+        does NOT suppress fall-through (perform_count > 0 overrides GOTO)."""
+        prog = _make_program([
+            ("MAIN", [_perform("HELPER"), _goto("MAIN")]),
+            ("HELPER", [_continue()]),
+            ("AFTER", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "MAIN"
+            and e.target == "HELPER"
+        ]
+        assert len(ft_edges) == 1
+
+    # ------------------------------------------------------------------
+    # AlterStatement with multiple alterations (line 683-690)
+    # ------------------------------------------------------------------
+
+    def test_alter_multiple_alterations_all_create_edges(self) -> None:
+        """AlterStatement with two alterations produces two ALTER edges."""
+        from cobolparser.models.statements.misc import AlterStatement
+
+        alter = AlterStatement(LOC)
+        alter.add_alteration("DISPATCH-A", "HANDLER-A")
+        alter.add_alteration("DISPATCH-B", "HANDLER-B")
+
+        prog = _make_program([
+            ("MAIN", [alter, _stop_run()]),
+            ("DISPATCH-A", [_continue()]),
+            ("DISPATCH-B", [_continue()]),
+            ("HANDLER-A", [_continue()]),
+            ("HANDLER-B", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        alter_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.ALTER]
+        sources_targets = {(e.source, e.target) for e in alter_edges}
+        assert ("DISPATCH-A", "HANDLER-A") in sources_targets
+        assert ("DISPATCH-B", "HANDLER-B") in sources_targets
+
+    # ------------------------------------------------------------------
+    # EntryStatement with entry_name=None (line 696-699)
+    # ------------------------------------------------------------------
+
+    def test_entry_statement_with_none_entry_name_skipped(self) -> None:
+        """EntryStatement whose entry_name was never set (None) is silently
+        ignored by _collect_entry_points."""
+        entry = EntryStatement(LOC)
+        # set_entry_name is deliberately NOT called → entry_name stays None
+
+        prog = _make_program([("MAIN-LOGIC", [entry, _stop_run()])])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # Only MAIN-LOGIC is an entry point (the first paragraph); no extra
+        # entry point from the un-named EntryStatement
+        assert report.entry_points == ["MAIN-LOGIC"]
