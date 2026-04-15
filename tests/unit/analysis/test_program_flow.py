@@ -3203,7 +3203,7 @@ class TestProgramFlowCycleDetection:
         assert "PARA-B" in all_cycle_nodes
 
     def test_goto_cycle_detected(self) -> None:
-        """A → B via GO TO and B → A via fall-through creates a cycle."""
+        """A → B via GO TO and B → A via GO TO creates a two-node cycle."""
         prog = _make_program(
             [
                 ("PARA-A", [_goto("PARA-B")]),
@@ -3405,7 +3405,7 @@ class TestProgramFlowRealCobolIntegration:
     """
 
     @staticmethod
-    def _analyze(source: str) -> "ProgramFlowReport":  # type: ignore[name-defined]
+    def _analyze(source: str) -> ProgramFlowReport:
         result = parse_cobol(source, filename="<integration-test>")
         assert result.ast is not None, f"Parse failed: {result.errors}"
         return ProgramFlowAnalyzer().analyze(result.ast)

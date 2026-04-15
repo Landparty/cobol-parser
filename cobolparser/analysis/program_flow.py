@@ -7,6 +7,7 @@ and other control flow statements. Provides a complete picture of program
 execution flow including entry points, exit points, branching, and loops.
 """
 
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -510,7 +511,8 @@ class ProgramFlowAnalyzer:
                     node.has_exit_section = True
                 elif exit_type == "PARAGRAPH":
                     node.has_exit_paragraph = True
-                elif exit_type == "PERFORM":
+                elif exit_type.startswith("PERFORM"):
+                    # Covers both "PERFORM" and "PERFORM CYCLE"
                     node.has_exit_perform = True
 
         for stmt in para.statements:
@@ -700,11 +702,16 @@ class ProgramFlowAnalyzer:
                     self._entry_points.append(entry_name)
 
     def _detect_cycles(self) -> None:
-        """Detect cycles in the internal control flow graph using DFS.
+        """Detect cycles in the internal control flow graph using iterative DFS.
 
         A cycle exists when procedure A (directly or transitively) transfers
         control back to itself via PERFORM, GO TO, or fall-through edges.
         Each reported cycle is the list of node names that form the loop.
+
+        Uses an explicit stack instead of recursion to avoid Python's recursion
+        limit on large COBOL programs (1 000+ paragraphs). A companion
+        ``stack_pos`` dict maps each GRAY node to its index in the current DFS
+        path so cycle extraction is O(1) rather than O(depth).
         """
         adj: dict[str, list[str]] = {name: [] for name in self._nodes}
         for edge in self._edges:
@@ -717,29 +724,47 @@ class ProgramFlowAnalyzer:
 
         WHITE, GRAY, BLACK = 0, 1, 2
         color: dict[str, int] = dict.fromkeys(self._nodes, WHITE)
-        path: list[str] = []
         seen_keys: set[frozenset[str]] = set()
 
-        def dfs(node: str) -> None:
-            color[node] = GRAY
-            path.append(node)
-            for neighbor in adj.get(node, []):
-                if color.get(neighbor, BLACK) == GRAY:
-                    # Back edge found — extract the cycle portion
-                    cycle_start = path.index(neighbor)
-                    cycle = path[cycle_start:]
-                    key = frozenset(cycle)
-                    if key not in seen_keys:
-                        seen_keys.add(key)
-                        self._cycles.append(list(cycle))
-                elif color.get(neighbor, BLACK) == WHITE:
-                    dfs(neighbor)
-            path.pop()
-            color[node] = BLACK
+        for start in self._ordered_procedures:
+            if color.get(start, BLACK) != WHITE:
+                continue
 
-        for name in self._ordered_procedures:
-            if color.get(name, BLACK) == WHITE:
-                dfs(name)
+            # Each stack frame: (node, iterator-over-neighbors, entered-as-new)
+            path: list[str] = []
+            stack_pos: dict[str, int] = {}  # node -> index in path while GRAY
+            # Stack entries: (node, neighbor_iter)
+            frame_stack: list[tuple[str, Any]] = [
+                (start, iter(adj.get(start, [])))
+            ]
+            color[start] = GRAY
+            path.append(start)
+            stack_pos[start] = 0
+
+            while frame_stack:
+                node, neighbors = frame_stack[-1]
+                try:
+                    neighbor = next(neighbors)
+                    c = color.get(neighbor, BLACK)
+                    if c == GRAY:
+                        # Back edge — extract cycle using O(1) stack_pos lookup
+                        idx = stack_pos[neighbor]
+                        cycle = path[idx:]
+                        key = frozenset(cycle)
+                        if key not in seen_keys:
+                            seen_keys.add(key)
+                            self._cycles.append(list(cycle))
+                    elif c == WHITE:
+                        color[neighbor] = GRAY
+                        path.append(neighbor)
+                        stack_pos[neighbor] = len(path) - 1
+                        frame_stack.append((neighbor, iter(adj.get(neighbor, []))))
+                except StopIteration:
+                    # Done with this node — pop and mark BLACK
+                    frame_stack.pop()
+                    path.pop()
+                    del stack_pos[node]
+                    color[node] = BLACK
 
     def _detect_unreachable_nodes(self) -> None:
         """Find nodes not reachable from any entry point via internal edges.
@@ -757,10 +782,10 @@ class ProgramFlowAnalyzer:
                 adj[edge.source].append(edge.target)
 
         reachable: set[str] = set()
-        queue: list[str] = list(self._entry_points)
+        queue: deque[str] = deque(self._entry_points)
 
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             if node in reachable or node not in self._nodes:
                 continue
             reachable.add(node)
