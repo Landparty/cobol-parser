@@ -165,6 +165,7 @@ class DataDivisionParser(BaseDivisionParser):
             TokenType.PROCEDURE_DIVISION,
         }
         paren_depth = 0  # Track nesting depth of parentheses
+        current_fd_name: str | None = None  # FD/SD file name for FILE SECTION items
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -208,6 +209,37 @@ class DataDivisionParser(BaseDivisionParser):
                 token_stream.consume()
                 continue
 
+            # In FILE SECTION, detect FD/SD declarations to build record-to-file mapping
+            if (
+                section_name == "FILE"
+                and paren_depth == 0
+                and (
+                    token.type in (TokenType.FD, TokenType.SD)
+                    or (
+                        token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() in ("FD", "SD")
+                    )
+                )
+            ):
+                token_stream.consume()  # consume FD/SD
+                fd_name_tok = token_stream.peek()
+                if fd_name_tok and fd_name_tok.type == TokenType.IDENTIFIER:
+                    current_fd_name = fd_name_tok.value
+                    token_stream.consume()  # consume file name
+                # Skip remaining FD clauses until period or level number
+                while not token_stream.is_empty():
+                    ahead = token_stream.peek()
+                    if ahead is None:
+                        break
+                    if ahead.type == TokenType.PERIOD:
+                        token_stream.consume()
+                        break
+                    if ahead.type == TokenType.LEVEL_NUMBER:
+                        break  # leave the level number for data item parsing
+                    token_stream.consume()
+                continue
+
             # Parse EXEC SQL blocks that appear in the data division
             # (e.g. DCLGEN-generated DECLARE TABLE or INCLUDE SQLCA)
             is_exec = token.type == TokenType.EXEC or (
@@ -249,6 +281,13 @@ class DataDivisionParser(BaseDivisionParser):
                 else:
                     data_item = self._parse_data_item(token_stream)
                     if data_item:
+                        # Tag 01-level FILE SECTION records with their parent FD name
+                        if (
+                            section_name == "FILE"
+                            and data_item.level == 1
+                            and current_fd_name is not None
+                        ):
+                            data_item.set_metadata("fd_file_name", current_fd_name)
                         data_items.append(data_item)
             else:
                 # Skip unexpected tokens
