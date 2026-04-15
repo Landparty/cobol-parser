@@ -462,6 +462,7 @@ def _build_expand_parser(
         help="Maximum copybook nesting depth (default: 100)",
     )
     _add_define_args(p)
+    _add_output_arg(p)
     p.set_defaults(func=_cmd_expand)
 
 
@@ -483,7 +484,7 @@ def _cmd_expand(args: argparse.Namespace) -> None:
         defined_symbols=defines,
     )
 
-    _json_out(result.to_dict(), args.compact)
+    _json_out(result.to_dict(), args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: analyze ------------------------------------------------------

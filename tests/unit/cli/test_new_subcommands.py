@@ -497,3 +497,310 @@ class TestNewSubcommandsRegistered:
         out = capsys.readouterr().out
         data = json.loads(out)
         assert isinstance(data, dict)
+
+
+# ---------------------------------------------------------------------------
+# _json_out: compact + file output together (previously untested combination)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonOutCompactFile:
+    def test_compact_and_file_combined(self, tmp_path):
+        out_file = str(tmp_path / "compact.json")
+        _json_out({"a": [1, 2]}, compact=True, output_path=out_file)
+        content = Path(out_file).read_text()
+        # compact means no interior newlines (trailing newline from write is ok)
+        lines = content.splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0]) == {"a": [1, 2]}
+
+    def test_compact_false_file_is_pretty(self, tmp_path):
+        out_file = str(tmp_path / "pretty.json")
+        _json_out({"a": [1, 2]}, compact=False, output_path=out_file)
+        content = Path(out_file).read_text()
+        # pretty-printed: multiple lines
+        assert content.count("\n") > 1
+        assert json.loads(content) == {"a": [1, 2]}
+
+
+# ---------------------------------------------------------------------------
+# expand --output flag (was missing from original implementation)
+# ---------------------------------------------------------------------------
+
+
+class TestExpandOutput:
+    def test_expand_output_to_file(self, tmp_path, capsys):
+        out_file = str(tmp_path / "expand.json")
+        with patch("sys.argv", ["cobol-parser", "expand", _SIMPLE, "-o", out_file]):
+            main()
+        assert Path(out_file).exists()
+        data = json.loads(Path(out_file).read_text())
+        assert isinstance(data, dict)
+        # stdout is empty when writing to file
+        assert capsys.readouterr().out == ""
+
+    def test_expand_output_to_stdout_by_default(self, capsys):
+        with patch("sys.argv", ["cobol-parser", "expand", _SIMPLE]):
+            main()
+        out = capsys.readouterr().out
+        assert json.loads(out)  # valid JSON on stdout
+
+
+# ---------------------------------------------------------------------------
+# batch --output flag
+# ---------------------------------------------------------------------------
+
+
+class TestBatchOutput:
+    def test_batch_output_to_file(self, tmp_path, capsys):
+        out_file = str(tmp_path / "batch.json")
+        with patch(
+            "sys.argv",
+            ["cobol-parser", "batch", _SIMPLE, _DYNAMIC, "-o", out_file],
+        ):
+            main()
+        assert Path(out_file).exists()
+        data = json.loads(Path(out_file).read_text())
+        assert isinstance(data, list)
+        assert len(data) == 2
+        # nothing on stdout
+        assert capsys.readouterr().out == ""
+
+    def test_batch_glob_output_to_file(self, tmp_path, capsys):
+        cobol = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROG.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        (tmp_path / "x.cbl").write_text(cobol)
+        out_file = str(tmp_path / "batch_glob.json")
+        pattern = str(tmp_path / "*.cbl")
+        with patch(
+            "sys.argv",
+            ["cobol-parser", "batch", "--glob", pattern, "-o", out_file],
+        ):
+            main()
+        assert Path(out_file).exists()
+        data = json.loads(Path(out_file).read_text())
+        assert isinstance(data, list)
+        assert len(data) == 1
+
+
+# ---------------------------------------------------------------------------
+# batch --glob recursive pattern
+# ---------------------------------------------------------------------------
+
+
+class TestBatchGlobRecursive:
+    def test_recursive_glob(self, tmp_path, capsys):
+        cobol = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROG.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (tmp_path / "root.cbl").write_text(cobol)
+        (sub / "nested.cbl").write_text(cobol)
+        pattern = str(tmp_path / "**" / "*.cbl")
+        with patch("sys.argv", ["cobol-parser", "batch", "--glob", pattern]):
+            main()
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert len(data) == 2  # root.cbl + sub/nested.cbl
+
+    def test_multiple_glob_patterns(self, tmp_path, capsys):
+        cobol = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROG.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        (tmp_path / "a.cbl").write_text(cobol)
+        (tmp_path / "b.cob").write_text(cobol)
+        pat_cbl = str(tmp_path / "*.cbl")
+        pat_cob = str(tmp_path / "*.cob")
+        with patch(
+            "sys.argv",
+            ["cobol-parser", "batch", "--glob", pat_cbl, "--glob", pat_cob],
+        ):
+            main()
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert len(data) == 2
+
+
+# ---------------------------------------------------------------------------
+# New subcommands via main: stdout is silent when --output is used
+# ---------------------------------------------------------------------------
+
+
+class TestNewSubcommandsOutputSilent:
+    @pytest.mark.parametrize(
+        "subcmd",
+        ["io-sequence", "move-type-check", "linkage-check", "language-env", "ims-dli"],
+    )
+    def test_stdout_silent_when_output_flag_used(self, subcmd, tmp_path, capsys):
+        out_file = str(tmp_path / f"{subcmd}.json")
+        with patch("sys.argv", ["cobol-parser", subcmd, _SIMPLE, "-o", out_file]):
+            main()
+        assert capsys.readouterr().out == ""
+        assert Path(out_file).exists()
+        json.loads(Path(out_file).read_text())  # valid JSON written
+
+
+# ---------------------------------------------------------------------------
+# Positive-case tests: subcommands with sources that trigger findings
+# ---------------------------------------------------------------------------
+
+# Minimal COBOL that triggers an io-sequence violation (READ before OPEN)
+_IO_VIOLATION_SRC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IOBAD.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT MY-FILE ASSIGN TO 'FILE.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD MY-FILE.
+       01 MY-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-EOF PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           READ MY-FILE INTO MY-REC
+               AT END MOVE 'Y' TO WS-EOF
+           END-READ
+           STOP RUN.
+"""
+
+# Minimal COBOL with an illegal MOVE (NUMERIC → ALPHABETIC)
+_MOVE_VIOLATION_SRC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MOVEBAD.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-NUM    PIC 9(5).
+       01 WS-ALPHA  PIC A(5).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE WS-NUM TO WS-ALPHA
+           STOP RUN.
+"""
+
+# Minimal COBOL with a LINKAGE SECTION and ENTRY
+_LINKAGE_SRC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LNKPROG.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-PARAM-A PIC X(10).
+       01 LK-PARAM-B PIC 9(5).
+       PROCEDURE DIVISION USING LK-PARAM-A LK-PARAM-B.
+       MAIN-LOGIC.
+           STOP RUN.
+"""
+
+
+class TestPositiveCaseFindings:
+    def test_io_sequence_detects_read_before_open(self, tmp_path, capsys):
+        src = tmp_path / "bad_io.cbl"
+        src.write_text(_IO_VIOLATION_SRC)
+        args = _make_args(str(src))
+        _cmd_io_sequence(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert data["has_violations"] is True
+        assert data["violation_count"] > 0
+        kinds = [v["kind"] for v in data["violations"]]
+        assert any("BEFORE_OPEN" in k or "LEFT_OPEN" in k for k in kinds)
+
+    def test_move_type_check_detects_illegal_move(self, tmp_path, capsys):
+        src = tmp_path / "bad_move.cbl"
+        src.write_text(_MOVE_VIOLATION_SRC)
+        args = _make_args(str(src))
+        _cmd_move_type_check(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        # The illegal NUMERIC→ALPHABETIC move should be an ERROR
+        assert data["error_count"] > 0
+        assert any(
+            v["kind"] == "ERROR"
+            and "WS-NUM" in v["source"]
+            and "WS-ALPHA" in v["target"]
+            for v in data["violations"]
+        )
+
+    def test_linkage_check_reports_linkage_items(self, tmp_path, capsys):
+        src = tmp_path / "linkage.cbl"
+        src.write_text(_LINKAGE_SRC)
+        args = _make_args(str(src))
+        _cmd_linkage_check(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        # Should list the two 01-level LINKAGE items
+        assert "LK-PARAM-A" in data["linkage_items"] or len(data["linkage_items"]) > 0
+
+    def test_language_env_detects_intrinsic_functions(self, capsys):
+        # ibm_extensions.cbl uses FUNCTION LENGTH, UPPER-CASE, etc.
+        args = _make_args(_IBM)
+        _cmd_language_env(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert data["uses_intrinsic_functions"] is True
+        assert len(data["unique_functions"]) > 0
+        # LENGTH is used in ibm_extensions.cbl
+        assert "LENGTH" in data["unique_functions"]
+
+    def test_ims_dli_detects_dli_calls(self, capsys):
+        # ims_banking_accounts.cbl has CBLTDLI calls
+        ims_file = str(SAMPLES / "ims_banking_accounts.cbl")
+        args = _make_args(ims_file)
+        _cmd_ims_dli(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert data["dli_call_count"] > 0
+        assert len(data["all_segments"]) > 0
+        # Each call should have interface, function_code fields
+        for call in data["dli_calls"]:
+            assert "interface" in call
+            assert "segment_names" in call
+
+    def test_ims_dli_call_structure(self, capsys):
+        ims_file = str(SAMPLES / "ims_banking_accounts.cbl")
+        args = _make_args(ims_file)
+        _cmd_ims_dli(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        required_fields = {
+            "interface",
+            "function_code",
+            "function_code_var",
+            "pcb_name",
+            "io_area_name",
+            "ssa_names",
+            "segment_names",
+            "primary_segment",
+            "location",
+        }
+        for call in data["dli_calls"]:
+            assert required_fields.issubset(call.keys())
+
+
+# ---------------------------------------------------------------------------
+# --version via _build_parser() directly
+# ---------------------------------------------------------------------------
+
+
+class TestVersionViaParser:
+    def test_version_action_on_parser(self, capsys):
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--version"])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert "1.0.0" in output
