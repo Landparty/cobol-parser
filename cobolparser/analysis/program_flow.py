@@ -28,9 +28,11 @@ from ..models.statements.control import (
 )
 from ..models.statements.misc import (
     AlterStatement,
+    CancelStatement,
     ExitStatement,
     GobackStatement,
     MergeStatement,
+    ReturnStatement,
     SortStatement,
 )
 
@@ -45,8 +47,11 @@ class FlowEdgeType(Enum):
     CALL = "CALL"
     CALL_DYNAMIC = "CALL_DYNAMIC"
     SORT_INPUT_PROCEDURE = "SORT_INPUT_PROCEDURE"
+    SORT_INPUT_PROCEDURE_THRU = "SORT_INPUT_PROCEDURE_THRU"
     SORT_OUTPUT_PROCEDURE = "SORT_OUTPUT_PROCEDURE"
+    SORT_OUTPUT_PROCEDURE_THRU = "SORT_OUTPUT_PROCEDURE_THRU"
     MERGE_OUTPUT_PROCEDURE = "MERGE_OUTPUT_PROCEDURE"
+    MERGE_OUTPUT_PROCEDURE_THRU = "MERGE_OUTPUT_PROCEDURE_THRU"
     ALTER = "ALTER"
     FALL_THROUGH = "FALL_THROUGH"
 
@@ -64,8 +69,13 @@ class FlowNode:
     has_stop_run: bool = False
     has_goback: bool = False
     has_exit_program: bool = False
+    has_return: bool = False
+    has_exit_section: bool = False
+    has_exit_paragraph: bool = False
+    has_exit_perform: bool = False
     if_count: int = 0
     evaluate_count: int = 0
+    search_count: int = 0
     perform_count: int = 0
     goto_count: int = 0
     call_count: int = 0
@@ -89,9 +99,18 @@ class FlowNode:
             result["has_goback"] = True
         if self.has_exit_program:
             result["has_exit_program"] = True
+        if self.has_return:
+            result["has_return"] = True
+        if self.has_exit_section:
+            result["has_exit_section"] = True
+        if self.has_exit_paragraph:
+            result["has_exit_paragraph"] = True
+        if self.has_exit_perform:
+            result["has_exit_perform"] = True
         result["branching"] = {
             "if_count": self.if_count,
             "evaluate_count": self.evaluate_count,
+            "search_count": self.search_count,
         }
         result["calls"] = {
             "perform_count": self.perform_count,
@@ -141,6 +160,9 @@ class ProgramFlowReport:
     entry_points: list[str] = field(default_factory=list)
     exit_points: list[str] = field(default_factory=list)
     external_calls: list[dict[str, Any]] = field(default_factory=list)
+    program_cancellations: list[dict[str, Any]] = field(default_factory=list)
+    cycles: list[list[str]] = field(default_factory=list)
+    unreachable_nodes: list[str] = field(default_factory=list)
 
     @property
     def node_count(self) -> int:
@@ -158,12 +180,18 @@ class ProgramFlowReport:
             "entry_points": self.entry_points,
             "exit_points": self.exit_points,
             "external_calls": self.external_calls,
+            "program_cancellations": self.program_cancellations,
+            "cycles": self.cycles,
+            "unreachable_nodes": self.unreachable_nodes,
             "summary": {
                 "node_count": self.node_count,
                 "edge_count": self.edge_count,
                 "entry_point_count": len(self.entry_points),
                 "exit_point_count": len(self.exit_points),
                 "external_call_count": len(self.external_calls),
+                "cancellation_count": len(self.program_cancellations),
+                "cycle_count": len(self.cycles),
+                "unreachable_node_count": len(self.unreachable_nodes),
             },
         }
 
@@ -195,6 +223,24 @@ class ProgramFlowAnalyzer:
         ```
     """
 
+    # Edge types that represent internal flow within the program (not external calls).
+    _INTERNAL_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
+        {
+            FlowEdgeType.PERFORM,
+            FlowEdgeType.PERFORM_THRU,
+            FlowEdgeType.GOTO,
+            FlowEdgeType.GOTO_DEPENDING,
+            FlowEdgeType.FALL_THROUGH,
+            FlowEdgeType.SORT_INPUT_PROCEDURE,
+            FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE,
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+            FlowEdgeType.ALTER,
+        }
+    )
+
     def __init__(self) -> None:
         self._nodes: dict[str, FlowNode] = {}
         self._edges: list[FlowEdge] = []
@@ -202,6 +248,9 @@ class ProgramFlowAnalyzer:
         self._entry_points: list[str] = []
         self._exit_points: set[str] = set()
         self._external_calls: list[dict[str, Any]] = []
+        self._program_cancellations: list[dict[str, Any]] = []
+        self._cycles: list[list[str]] = []
+        self._unreachable_nodes: list[str] = []
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
 
@@ -220,6 +269,9 @@ class ProgramFlowAnalyzer:
         self._entry_points = []
         self._exit_points = set()
         self._external_calls = []
+        self._program_cancellations = []
+        self._cycles = []
+        self._unreachable_nodes = []
         self._current_procedure = None
 
         proc_division = ast.procedure_division
@@ -238,13 +290,20 @@ class ProgramFlowAnalyzer:
         # Pass 4: Determine fall-through edges
         self._build_fall_through_edges()
 
-        # Mark the first procedure as entry point
+        # Mark the first procedure as entry point before cycle/reachability analysis
+        # so that the entry point set is complete when those passes run.
         if self._ordered_procedures:
             first = self._ordered_procedures[0]
             if first in self._nodes:
                 self._nodes[first].is_entry_point = True
                 if first not in self._entry_points:
                     self._entry_points.insert(0, first)
+
+        # Pass 5: Detect cycles in internal flow graph
+        self._detect_cycles()
+
+        # Pass 6: Detect nodes unreachable from any entry point
+        self._detect_unreachable_nodes()
 
         # Mark exit points on nodes
         for name in self._exit_points:
@@ -258,6 +317,9 @@ class ProgramFlowAnalyzer:
         report.entry_points = self._entry_points
         report.exit_points = sorted(self._exit_points)
         report.external_calls = self._external_calls
+        report.program_cancellations = self._program_cancellations
+        report.cycles = self._cycles
+        report.unreachable_nodes = self._unreachable_nodes
         return report
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
@@ -347,12 +409,22 @@ class ProgramFlowAnalyzer:
             if isinstance(stmt, PerformStatement):
                 node.perform_count += 1
                 self._process_perform(stmt, proc_name)
+                # Recurse into inline PERFORM blocks
+                for s in stmt.inline_statements:
+                    scan(s)
             elif isinstance(stmt, GoStatement):
                 node.goto_count += 1
                 self._process_goto(stmt, proc_name)
             elif isinstance(stmt, CallStatement):
                 node.call_count += 1
                 self._process_call(stmt, proc_name)
+                # Scan exception handler branches for nested flow
+                for s in stmt.on_overflow or []:
+                    scan(s)
+                for s in stmt.on_exception or []:
+                    scan(s)
+                for s in stmt.not_on_exception or []:
+                    scan(s)
             elif isinstance(stmt, IfStatement):
                 node.if_count += 1
                 decision: dict[str, Any] = {
@@ -393,6 +465,7 @@ class ProgramFlowAnalyzer:
                     for s in stmt.default_when.statements:
                         scan(s)
             elif isinstance(stmt, SearchStatement):
+                node.search_count += 1
                 decision = {
                     "type": "SEARCH",
                     "location": stmt.location.to_dict(),
@@ -413,6 +486,15 @@ class ProgramFlowAnalyzer:
                 self._process_merge(stmt, proc_name)
             elif isinstance(stmt, AlterStatement):
                 self._process_alter(stmt, proc_name)
+            elif isinstance(stmt, CancelStatement):
+                self._process_cancel(stmt, proc_name)
+            elif isinstance(stmt, ReturnStatement):
+                node.has_return = True
+                # Scan AT END / NOT AT END branches for nested flow
+                for s in stmt.at_end_clause or []:
+                    scan(s)
+                for s in stmt.not_at_end_clause or []:
+                    scan(s)
             elif isinstance(stmt, StopStatement):
                 node.has_stop_run = True
                 self._exit_points.add(proc_name)
@@ -420,14 +502,16 @@ class ProgramFlowAnalyzer:
                 node.has_goback = True
                 self._exit_points.add(proc_name)
             elif isinstance(stmt, ExitStatement):
-                if stmt.exit_type == "PROGRAM":
+                exit_type = stmt.exit_type or ""
+                if exit_type == "PROGRAM":
                     node.has_exit_program = True
                     self._exit_points.add(proc_name)
-
-            # Recurse into inline PERFORM blocks
-            if isinstance(stmt, PerformStatement):
-                for s in stmt.inline_statements:
-                    scan(s)
+                elif exit_type == "SECTION":
+                    node.has_exit_section = True
+                elif exit_type == "PARAGRAPH":
+                    node.has_exit_paragraph = True
+                elif exit_type == "PERFORM":
+                    node.has_exit_perform = True
 
         for stmt in para.statements:
             scan(stmt)
@@ -532,6 +616,15 @@ class ProgramFlowAnalyzer:
                     location=stmt.location,
                 )
             )
+            if stmt.input_procedure_thru:
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=stmt.input_procedure_thru.upper(),
+                        edge_type=FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
+                        location=stmt.location,
+                    )
+                )
         if stmt.output_procedure:
             self._edges.append(
                 FlowEdge(
@@ -541,6 +634,15 @@ class ProgramFlowAnalyzer:
                     location=stmt.location,
                 )
             )
+            if stmt.output_procedure_thru:
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=stmt.output_procedure_thru.upper(),
+                        edge_type=FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+                        location=stmt.location,
+                    )
+                )
 
     def _process_merge(self, stmt: MergeStatement, source: str) -> None:
         """Create edges for MERGE OUTPUT PROCEDURE references."""
@@ -553,6 +655,28 @@ class ProgramFlowAnalyzer:
                     location=stmt.location,
                 )
             )
+            if stmt.output_procedure_thru:
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=stmt.output_procedure_thru.upper(),
+                        edge_type=FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+                        location=stmt.location,
+                    )
+                )
+
+    def _process_cancel(self, stmt: CancelStatement, source: str) -> None:
+        """Record CANCEL statements as program cancellation events."""
+        for name in stmt.program_names:
+            program_name = name.strip("'\"")
+            if program_name:
+                self._program_cancellations.append(
+                    {
+                        "program": program_name,
+                        "cancelled_from": source,
+                        "location": stmt.location.to_dict(),
+                    }
+                )
 
     def _process_alter(self, stmt: AlterStatement, source: str) -> None:
         """Create edges for ALTER statement procedure redirections."""
@@ -574,6 +698,79 @@ class ProgramFlowAnalyzer:
                 entry_name = stmt.entry_name.strip("'\"").strip().upper()
                 if entry_name and entry_name not in self._entry_points:
                     self._entry_points.append(entry_name)
+
+    def _detect_cycles(self) -> None:
+        """Detect cycles in the internal control flow graph using DFS.
+
+        A cycle exists when procedure A (directly or transitively) transfers
+        control back to itself via PERFORM, GO TO, or fall-through edges.
+        Each reported cycle is the list of node names that form the loop.
+        """
+        adj: dict[str, list[str]] = {name: [] for name in self._nodes}
+        for edge in self._edges:
+            if (
+                edge.edge_type in self._INTERNAL_EDGE_TYPES
+                and edge.source in adj
+                and edge.target in self._nodes
+            ):
+                adj[edge.source].append(edge.target)
+
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: dict[str, int] = dict.fromkeys(self._nodes, WHITE)
+        path: list[str] = []
+        seen_keys: set[frozenset[str]] = set()
+
+        def dfs(node: str) -> None:
+            color[node] = GRAY
+            path.append(node)
+            for neighbor in adj.get(node, []):
+                if color.get(neighbor, BLACK) == GRAY:
+                    # Back edge found — extract the cycle portion
+                    cycle_start = path.index(neighbor)
+                    cycle = path[cycle_start:]
+                    key = frozenset(cycle)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        self._cycles.append(list(cycle))
+                elif color.get(neighbor, BLACK) == WHITE:
+                    dfs(neighbor)
+            path.pop()
+            color[node] = BLACK
+
+        for name in self._ordered_procedures:
+            if color.get(name, BLACK) == WHITE:
+                dfs(name)
+
+    def _detect_unreachable_nodes(self) -> None:
+        """Find nodes not reachable from any entry point via internal edges.
+
+        Uses breadth-first search from all known entry points. Nodes that
+        cannot be reached are recorded as unreachable.
+        """
+        adj: dict[str, list[str]] = {name: [] for name in self._nodes}
+        for edge in self._edges:
+            if (
+                edge.edge_type in self._INTERNAL_EDGE_TYPES
+                and edge.source in adj
+                and edge.target in self._nodes
+            ):
+                adj[edge.source].append(edge.target)
+
+        reachable: set[str] = set()
+        queue: list[str] = list(self._entry_points)
+
+        while queue:
+            node = queue.pop(0)
+            if node in reachable or node not in self._nodes:
+                continue
+            reachable.add(node)
+            for neighbor in adj.get(node, []):
+                if neighbor not in reachable:
+                    queue.append(neighbor)
+
+        self._unreachable_nodes = [
+            name for name in self._ordered_procedures if name not in reachable
+        ]
 
     def _build_fall_through_edges(self) -> None:
         """Build fall-through edges between sequential paragraphs.

@@ -2645,3 +2645,746 @@ class TestProgramFlowEdgeCases:
                 # All entry_points should be non-empty strings
                 for ep in d["entry_points"]:
                     assert ep.strip(), f"Empty entry point in {cbl_file.name}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: New features — SORT/MERGE THRU, CANCEL, RETURN, EXIT variants,
+#         CALL exception handlers, search_count, cycles, unreachable nodes
+# ---------------------------------------------------------------------------
+
+
+class TestProgramFlowSortMergeThru:
+    """Tests for SORT/MERGE THRU edge generation."""
+
+    def test_sort_input_procedure_thru_edge(self) -> None:
+        """SORT INPUT PROCEDURE THRU creates a SORT_INPUT_PROCEDURE_THRU edge."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.set_input_procedure("IN-START", thru="IN-END")
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("IN-START", [_continue()]),
+                ("IN-END", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        edge_types = {(e.edge_type, e.target) for e in report.edges}
+        assert (FlowEdgeType.SORT_INPUT_PROCEDURE, "IN-START") in edge_types
+        assert (FlowEdgeType.SORT_INPUT_PROCEDURE_THRU, "IN-END") in edge_types
+
+    def test_sort_output_procedure_thru_edge(self) -> None:
+        """SORT OUTPUT PROCEDURE THRU creates a SORT_OUTPUT_PROCEDURE_THRU edge."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.set_output_procedure("OUT-START", thru="OUT-END")
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("OUT-START", [_continue()]),
+                ("OUT-END", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        edge_types = {(e.edge_type, e.target) for e in report.edges}
+        assert (FlowEdgeType.SORT_OUTPUT_PROCEDURE, "OUT-START") in edge_types
+        assert (FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU, "OUT-END") in edge_types
+
+    def test_sort_without_thru_no_thru_edge(self) -> None:
+        """SORT without THRU does not create THRU edges."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.set_input_procedure("IN-PROC")  # no thru
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("IN-PROC", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        thru_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.SORT_INPUT_PROCEDURE_THRU
+        ]
+        assert len(thru_edges) == 0
+
+    def test_merge_output_procedure_thru_edge(self) -> None:
+        """MERGE OUTPUT PROCEDURE THRU creates a MERGE_OUTPUT_PROCEDURE_THRU edge."""
+        from cobolparser.models.statements.misc import MergeStatement
+
+        stmt = MergeStatement(LOC)
+        stmt.set_file_name("MERGE-FILE")
+        stmt.set_output_procedure("MERGE-START", thru="MERGE-END")
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("MERGE-START", [_continue()]),
+                ("MERGE-END", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        edge_types = {(e.edge_type, e.target) for e in report.edges}
+        assert (FlowEdgeType.MERGE_OUTPUT_PROCEDURE, "MERGE-START") in edge_types
+        assert (FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU, "MERGE-END") in edge_types
+
+    def test_sort_thru_edge_types_in_enum(self) -> None:
+        """New SORT/MERGE THRU edge types exist in FlowEdgeType."""
+        assert FlowEdgeType.SORT_INPUT_PROCEDURE_THRU.value == "SORT_INPUT_PROCEDURE_THRU"
+        assert (
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU.value == "SORT_OUTPUT_PROCEDURE_THRU"
+        )
+        assert (
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU.value
+            == "MERGE_OUTPUT_PROCEDURE_THRU"
+        )
+
+
+class TestProgramFlowCancel:
+    """Tests for CANCEL statement tracking."""
+
+    def test_cancel_recorded_in_report(self) -> None:
+        """CANCEL records the cancelled program name and source."""
+        from cobolparser.models.statements.misc import CancelStatement
+
+        cancel = CancelStatement(LOC)
+        cancel.add_program_name("'SUBPROG'")
+
+        prog = _make_program([("MAIN-LOGIC", [cancel, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.program_cancellations) == 1
+        assert report.program_cancellations[0]["program"] == "SUBPROG"
+        assert report.program_cancellations[0]["cancelled_from"] == "MAIN-LOGIC"
+        assert "location" in report.program_cancellations[0]
+
+    def test_cancel_multiple_programs(self) -> None:
+        """CANCEL with multiple program names records each."""
+        from cobolparser.models.statements.misc import CancelStatement
+
+        cancel = CancelStatement(LOC)
+        cancel.add_program_name("'PROG-A'")
+        cancel.add_program_name("'PROG-B'")
+
+        prog = _make_program([("MAIN-LOGIC", [cancel, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.program_cancellations) == 2
+        names = {c["program"] for c in report.program_cancellations}
+        assert names == {"PROG-A", "PROG-B"}
+
+    def test_cancel_in_to_dict(self) -> None:
+        """program_cancellations appears in to_dict output with correct count."""
+        from cobolparser.models.statements.misc import CancelStatement
+
+        cancel = CancelStatement(LOC)
+        cancel.add_program_name("'UTIL'")
+
+        prog = _make_program([("MAIN-LOGIC", [cancel, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert "program_cancellations" in d
+        assert len(d["program_cancellations"]) == 1
+        assert d["summary"]["cancellation_count"] == 1
+
+    def test_no_cancel_empty_list(self) -> None:
+        """No CANCEL statements means empty program_cancellations list."""
+        prog = _make_program([("MAIN-LOGIC", [_stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.program_cancellations == []
+        d = report.to_dict()
+        assert d["summary"]["cancellation_count"] == 0
+
+
+class TestProgramFlowReturn:
+    """Tests for RETURN statement handling."""
+
+    def test_return_sets_has_return_flag(self) -> None:
+        """RETURN statement sets has_return on the FlowNode."""
+        from cobolparser.models.statements.misc import ReturnStatement
+
+        ret = ReturnStatement(LOC)
+        ret.set_file_name("SORT-FILE")
+
+        prog = _make_program([("OUTPUT-PROC", [ret])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].has_return is True
+
+    def test_return_has_return_in_to_dict(self) -> None:
+        """has_return appears in FlowNode.to_dict() when True."""
+        from cobolparser.models.statements.misc import ReturnStatement
+
+        ret = ReturnStatement(LOC)
+        ret.set_file_name("SORT-FILE")
+
+        prog = _make_program([("OUTPUT-PROC", [ret])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert d["nodes"][0].get("has_return") is True
+
+    def test_return_at_end_nested_statements_scanned(self) -> None:
+        """Statements inside RETURN AT END clause are scanned for flow."""
+        from cobolparser.models.statements.misc import ReturnStatement
+
+        ret = ReturnStatement(LOC)
+        ret.set_file_name("SORT-FILE")
+        ret.set_at_end_clause([_stop_run()])
+
+        prog = _make_program([("OUTPUT-PROC", [ret])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # STOP RUN inside AT END should be counted and mark the proc as exit
+        assert report.nodes[0].has_stop_run is True
+        assert "OUTPUT-PROC" in report.exit_points
+
+    def test_return_not_at_end_nested_statements_scanned(self) -> None:
+        """Statements inside RETURN NOT AT END clause are scanned."""
+        from cobolparser.models.statements.misc import ReturnStatement
+
+        ret = ReturnStatement(LOC)
+        ret.set_file_name("SORT-FILE")
+        ret.set_not_at_end_clause([_perform("PROCESS-REC")])
+
+        prog = _make_program(
+            [
+                ("OUTPUT-PROC", [ret]),
+                ("PROCESS-REC", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert any(e.target == "PROCESS-REC" for e in perform_edges)
+
+    def test_no_return_flag_when_absent(self) -> None:
+        """has_return is absent from to_dict when no RETURN statement exists."""
+        prog = _make_program([("MAIN-LOGIC", [_stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert "has_return" not in d["nodes"][0]
+
+
+class TestProgramFlowExitVariants:
+    """Tests for EXIT SECTION, EXIT PARAGRAPH, and EXIT PERFORM."""
+
+    def test_exit_section_sets_flag(self) -> None:
+        """EXIT SECTION sets has_exit_section on the FlowNode."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("SECTION")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].has_exit_section is True
+        assert not report.nodes[0].has_exit_program
+        assert not report.nodes[0].is_exit_point
+
+    def test_exit_paragraph_sets_flag(self) -> None:
+        """EXIT PARAGRAPH sets has_exit_paragraph on the FlowNode."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("PARAGRAPH")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].has_exit_paragraph is True
+        assert not report.nodes[0].has_exit_program
+
+    def test_exit_perform_sets_flag(self) -> None:
+        """EXIT PERFORM sets has_exit_perform on the FlowNode."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("PERFORM")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].has_exit_perform is True
+
+    def test_exit_section_in_to_dict(self) -> None:
+        """has_exit_section appears in FlowNode.to_dict() when True."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("SECTION")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert d["nodes"][0].get("has_exit_section") is True
+
+    def test_exit_paragraph_in_to_dict(self) -> None:
+        """has_exit_paragraph appears in FlowNode.to_dict() when True."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("PARAGRAPH")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert d["nodes"][0].get("has_exit_paragraph") is True
+
+    def test_exit_perform_in_to_dict(self) -> None:
+        """has_exit_perform appears in FlowNode.to_dict() when True."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("PERFORM")
+
+        prog = _make_program([("MAIN-LOGIC", [exit_stmt])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert d["nodes"][0].get("has_exit_perform") is True
+
+    def test_flags_absent_when_false(self) -> None:
+        """EXIT variant flags are absent from to_dict when not set."""
+        prog = _make_program([("MAIN-LOGIC", [_continue()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        node_dict = d["nodes"][0]
+        assert "has_exit_section" not in node_dict
+        assert "has_exit_paragraph" not in node_dict
+        assert "has_exit_perform" not in node_dict
+
+
+class TestProgramFlowCallExceptionHandlers:
+    """Tests for CALL ON EXCEPTION / NOT ON EXCEPTION handler scanning."""
+
+    def test_perform_in_on_exception_creates_edge(self) -> None:
+        """PERFORM inside ON EXCEPTION handler generates a flow edge."""
+        call = CallStatement(LOC)
+        call.set_called_program("'SUBPROG'")
+        call.on_exception = [_perform("ERROR-HANDLER")]
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [call, _stop_run()]),
+                ("ERROR-HANDLER", [_goback()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert any(e.target == "ERROR-HANDLER" for e in perform_edges)
+
+    def test_stop_run_in_on_exception_marks_exit(self) -> None:
+        """STOP RUN inside ON EXCEPTION marks paragraph as exit point."""
+        call = CallStatement(LOC)
+        call.set_called_program("'SUBPROG'")
+        call.on_exception = [_stop_run()]
+
+        prog = _make_program([("MAIN-LOGIC", [call])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].has_stop_run is True
+        assert "MAIN-LOGIC" in report.exit_points
+
+    def test_perform_in_on_overflow_creates_edge(self) -> None:
+        """PERFORM inside ON OVERFLOW handler generates a flow edge."""
+        call = CallStatement(LOC)
+        call.set_called_program("'SUBPROG'")
+        call.on_overflow = [_perform("OVERFLOW-HANDLER")]
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [call, _stop_run()]),
+                ("OVERFLOW-HANDLER", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert any(e.target == "OVERFLOW-HANDLER" for e in perform_edges)
+
+    def test_perform_in_not_on_exception_creates_edge(self) -> None:
+        """PERFORM inside NOT ON EXCEPTION handler generates a flow edge."""
+        call = CallStatement(LOC)
+        call.set_called_program("'SUBPROG'")
+        call.not_on_exception = [_perform("SUCCESS-HANDLER")]
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [call, _stop_run()]),
+                ("SUCCESS-HANDLER", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert any(e.target == "SUCCESS-HANDLER" for e in perform_edges)
+
+    def test_nested_statements_in_handlers_counted(self) -> None:
+        """Statements inside CALL exception handlers are counted in statement_count."""
+        call = CallStatement(LOC)
+        call.set_called_program("'SUBPROG'")
+        call.on_exception = [_continue(), _continue()]  # 2 statements in handler
+
+        prog = _make_program([("MAIN-LOGIC", [call, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # CALL + 2 handler stmts + STOP RUN = 4
+        assert report.nodes[0].statement_count == 4
+
+
+class TestProgramFlowSearchCount:
+    """Tests for search_count metric on FlowNode."""
+
+    def test_search_increments_search_count(self) -> None:
+        """SEARCH statement increments search_count on the node."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        search = SearchStatement(LOC)
+        search.set_table_name("WS-TABLE")
+        search.add_when_clause("condition", [_continue()])
+
+        prog = _make_program([("MAIN-LOGIC", [search, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].search_count == 1
+
+    def test_multiple_search_counts(self) -> None:
+        """Multiple SEARCH statements accumulate in search_count."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        s1 = SearchStatement(LOC)
+        s1.set_table_name("TABLE-A")
+        s1.add_when_clause("c1", [_continue()])
+
+        s2 = SearchStatement(LOC)
+        s2.set_table_name("TABLE-B")
+        s2.add_when_clause("c2", [_continue()])
+
+        prog = _make_program([("MAIN-LOGIC", [s1, s2, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.nodes[0].search_count == 2
+
+    def test_search_count_in_to_dict(self) -> None:
+        """search_count appears in branching dict in FlowNode.to_dict()."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        search = SearchStatement(LOC)
+        search.set_table_name("WS-TABLE")
+        search.add_when_clause("condition", [_continue()])
+
+        prog = _make_program([("MAIN-LOGIC", [search, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert d["nodes"][0]["branching"]["search_count"] == 1
+
+    def test_search_count_zero_when_absent(self) -> None:
+        """search_count is 0 (present in dict) when no SEARCH statements."""
+        prog = _make_program([("MAIN-LOGIC", [_stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert d["nodes"][0]["branching"]["search_count"] == 0
+
+
+class TestProgramFlowCycleDetection:
+    """Tests for cycle detection in the control flow graph."""
+
+    def test_no_cycles_in_linear_flow(self) -> None:
+        """A linear program with no loops has no cycles."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("WORK"), _stop_run()]),
+                ("WORK", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.cycles == []
+        assert report.to_dict()["summary"]["cycle_count"] == 0
+
+    def test_self_perform_creates_cycle(self) -> None:
+        """A paragraph that PERFORMs itself is a cycle."""
+        prog = _make_program(
+            [
+                ("LOOP-PARA", [_perform("LOOP-PARA")]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.cycles) >= 1
+        # The self-loop cycle should contain LOOP-PARA
+        all_cycle_nodes = {node for cycle in report.cycles for node in cycle}
+        assert "LOOP-PARA" in all_cycle_nodes
+
+    def test_mutual_perform_cycle(self) -> None:
+        """A → B → A via PERFORM forms a cycle."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_perform("PARA-B")]),
+                ("PARA-B", [_perform("PARA-A")]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.cycles) >= 1
+        all_cycle_nodes = {node for cycle in report.cycles for node in cycle}
+        assert "PARA-A" in all_cycle_nodes
+        assert "PARA-B" in all_cycle_nodes
+
+    def test_goto_cycle_detected(self) -> None:
+        """A → B via GO TO and B → A via fall-through creates a cycle."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_goto("PARA-B")]),
+                ("PARA-B", [_goto("PARA-A")]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.cycles) >= 1
+
+    def test_cycles_in_to_dict(self) -> None:
+        """Cycles appear in to_dict() under the 'cycles' key."""
+        prog = _make_program(
+            [
+                ("LOOP-PARA", [_perform("LOOP-PARA"), _stop_run()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert "cycles" in d
+        assert d["summary"]["cycle_count"] >= 1
+
+    def test_no_cycles_empty_program(self) -> None:
+        """Empty procedure division has no cycles."""
+        loc = SourceLocation(1, 1)
+        prog = CobolProgram("EMPTY", loc)
+        proc_div = CobolDivision("PROCEDURE", loc)
+        prog.add_division(proc_div)
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.cycles == []
+
+
+class TestProgramFlowUnreachableNodes:
+    """Tests for unreachable node detection."""
+
+    def test_no_unreachable_in_linear_flow(self) -> None:
+        """A linear program with fall-through has no unreachable nodes."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_continue()]),
+                ("PARA-B", [_continue()]),
+                ("PARA-C", [_stop_run()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.unreachable_nodes == []
+        assert report.to_dict()["summary"]["unreachable_node_count"] == 0
+
+    def test_paragraph_after_stop_run_is_unreachable(self) -> None:
+        """A paragraph after STOP RUN with no other path is unreachable."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_stop_run()]),
+                ("NEVER-CALLED", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # MAIN-LOGIC has STOP RUN so no fall-through, and no PERFORM to NEVER-CALLED
+        assert "NEVER-CALLED" in report.unreachable_nodes
+
+    def test_performed_paragraph_is_reachable(self) -> None:
+        """A paragraph that is PERFORMed is reachable."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("HELPER"), _stop_run()]),
+                ("HELPER", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert "HELPER" not in report.unreachable_nodes
+
+    def test_goto_target_is_reachable(self) -> None:
+        """A paragraph targeted by GO TO is reachable."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_goto("ERROR-EXIT")]),
+                ("ERROR-EXIT", [_stop_run()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert "ERROR-EXIT" not in report.unreachable_nodes
+
+    def test_unreachable_nodes_in_to_dict(self) -> None:
+        """unreachable_nodes appears in to_dict() with correct count."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_stop_run()]),
+                ("DEAD-CODE", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+        d = report.to_dict()
+
+        assert "unreachable_nodes" in d
+        assert "DEAD-CODE" in d["unreachable_nodes"]
+        assert d["summary"]["unreachable_node_count"] >= 1
+
+    def test_all_reachable_empty_unreachable_list(self) -> None:
+        """When all nodes are reachable, unreachable_nodes is empty."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("WORK"), _stop_run()]),
+                ("WORK", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.unreachable_nodes == []
+
+
+class TestProgramFlowReportNewFields:
+    """Tests for new top-level fields in ProgramFlowReport.to_dict()."""
+
+    def test_to_dict_has_program_cancellations(self) -> None:
+        """to_dict() includes program_cancellations key."""
+        report = ProgramFlowReport(program_name="TEST")
+        d = report.to_dict()
+        assert "program_cancellations" in d
+        assert isinstance(d["program_cancellations"], list)
+
+    def test_to_dict_has_cycles(self) -> None:
+        """to_dict() includes cycles key."""
+        report = ProgramFlowReport(program_name="TEST")
+        d = report.to_dict()
+        assert "cycles" in d
+        assert isinstance(d["cycles"], list)
+
+    def test_to_dict_has_unreachable_nodes(self) -> None:
+        """to_dict() includes unreachable_nodes key."""
+        report = ProgramFlowReport(program_name="TEST")
+        d = report.to_dict()
+        assert "unreachable_nodes" in d
+        assert isinstance(d["unreachable_nodes"], list)
+
+    def test_summary_has_new_counts(self) -> None:
+        """summary dict includes cancellation_count, cycle_count, unreachable_node_count."""
+        report = ProgramFlowReport(program_name="TEST")
+        d = report.to_dict()
+        summary = d["summary"]
+        assert "cancellation_count" in summary
+        assert "cycle_count" in summary
+        assert "unreachable_node_count" in summary
+
+    def test_summary_counts_match_lists(self) -> None:
+        """New summary counts reflect the actual list lengths."""
+        report = ProgramFlowReport(program_name="TEST")
+        report.program_cancellations = [{"program": "X", "cancelled_from": "Y"}]
+        report.cycles = [["A", "B"], ["C"]]
+        report.unreachable_nodes = ["DEAD"]
+        d = report.to_dict()
+        assert d["summary"]["cancellation_count"] == 1
+        assert d["summary"]["cycle_count"] == 2
+        assert d["summary"]["unreachable_node_count"] == 1
+
+    def test_branching_dict_has_search_count(self) -> None:
+        """FlowNode.to_dict() branching dict includes search_count."""
+        node = FlowNode("PARA", "PARAGRAPH", SourceLocation(1, 1))
+        d = node.to_dict()
+        assert "search_count" in d["branching"]
+        assert d["branching"]["search_count"] == 0
