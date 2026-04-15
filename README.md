@@ -1,17 +1,17 @@
 # COBOL Parser for Python
 
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-2975%20passing-green.svg)](#testing)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-3456%20passing-green.svg)](#testing)
 [![Coverage](https://img.shields.io/badge/coverage-81%25%2B%20enforced-green.svg)](#testing)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 [![IBM COBOL](https://img.shields.io/badge/IBM%20Enterprise%20COBOL-supported-blue.svg)](docs/ibm-enterprise.md)
 
-A COBOL source code parser for Python 3.13+ that converts COBOL programs into structured ASTs. Supports IBM Enterprise COBOL, configurable memory management, JSON export, and robust error recovery. Built with TDD — 2,975 tests, 81%+ coverage enforced.
+A COBOL source code parser for Python 3.11+ that converts COBOL programs into structured ASTs. Supports IBM Enterprise COBOL, configurable memory management, JSON export, and robust error recovery. Built with TDD — 3,456 tests, 81%+ coverage enforced.
 
 ## Features
 
 - **IBM Enterprise COBOL** — COMP-3, EXEC SQL, EXEC CICS, 75+ verbs, IBM intrinsic functions
-- **Full CLI** — parse, tokenize, preprocess, expand copybooks, analyze dynamic calls, and detect dead code from the terminal
+- **Full CLI** — parse, tokenize, preprocess, expand copybooks, analyze dynamic calls, detect dead code, inspect program flow, and generate tests from the terminal
 - **Error recovery** — fail-fast or collect-all modes with detailed diagnostics
 - **JSON export** — cross-platform AST serialization with source locations and metadata
 - **Memory management** — configurable limits from 64MB to 8GB with streaming support for large files
@@ -19,6 +19,12 @@ A COBOL source code parser for Python 3.13+ that converts COBOL programs into st
 - **Copybook expansion** — recursive COPY statement inlining with circular reference detection and REPLACING clause support
 - **Dynamic call analysis** — tracks possible values for variables used in dynamic CALL statements
 - **Dead code detection** — identifies unreferenced paragraphs and sections
+- **Program flow analysis** — builds control flow graphs across paragraphs, PERFORM, GO TO, and CALL edges
+- **IO operation logging** — records every OPEN/CLOSE/READ/WRITE/REWRITE/DELETE/START at runtime with source location
+- **IO sequence validation** — detects invalid I/O operation sequences (e.g., writing to a closed file)
+- **MOVE type checking** — flags type-incompatible MOVE statements (numeric to alphanumeric, etc.)
+- **Linkage section checking** — validates LINKAGE SECTION data items and USING/RETURNING clause consistency
+- **Language Environment analysis** — identifies IBM LE function calls, service calls, and condition handling
 - **CobolCheck test generation** — automatically generates `.cut` unit test suites targeting paragraph, branch, and boundary coverage
 
 ## Installation
@@ -32,7 +38,7 @@ cd cobol-parser
 pip install -e ".[dev]"
 ```
 
-Requires Python 3.13+.
+Requires Python 3.11, 3.12, or 3.13.
 
 ## Quick Start
 
@@ -57,6 +63,9 @@ cobol-parser tokenize program.cbl
 # Preprocess fixed-format to free-form
 cobol-parser preprocess program.cbl
 
+# Preprocess with conditional compilation symbols
+cobol-parser preprocess program.cbl --define DEBUG --define ENV=PROD
+
 # Expand COPY statements
 cobol-parser expand program.cbl --copybook-path ./copybooks
 
@@ -66,8 +75,14 @@ cobol-parser analyze program.cbl
 # Detect dead code (unreferenced paragraphs)
 cobol-parser dead-code program.cbl
 
+# Display program control flow graph
+cobol-parser program-flow program.cbl
+
 # Batch parse multiple files in parallel
 cobol-parser batch prog1.cbl prog2.cbl prog3.cbl --stats
+
+# Generate CobolCheck unit tests
+cobol-parser generate-tests program.cbl -o program.cut
 ```
 
 ### Python API
@@ -86,6 +101,126 @@ else:
 ```
 
 See [docs/PARSER_INVOCATION_GUIDE.md](docs/PARSER_INVOCATION_GUIDE.md) for the full API including `CobolParser`, `MemoryConfiguration`, `ErrorRecoveryMode`, and `parse_files()`.
+
+## Analysis Tools
+
+The `cobolparser.analysis` module provides static and dynamic analysis passes that run on a parsed AST.
+
+### Dynamic Call Analysis
+
+Tracks possible values of variables used in dynamic CALL statements by following MOVE and VALUE clause assignments:
+
+```python
+from cobolparser import parse_cobol, DynamicCallAnalyzer
+
+result = parse_cobol(source)
+analyzer = DynamicCallAnalyzer()
+analyzer.analyze(result.ast)
+
+for stmt in result.ast.find_all_by_type("CallStatement"):
+    if stmt.is_dynamic:
+        print(f"Dynamic CALL, possible targets: {stmt.possible_values}")
+```
+
+### Dead Code Detection
+
+Identifies paragraphs and sections that are never referenced by PERFORM, GO TO, or CALL:
+
+```python
+from cobolparser import parse_cobol, DeadCodeAnalyzer
+
+result = parse_cobol(source)
+report = DeadCodeAnalyzer().analyze(result.ast)
+
+for item in report.dead_items:
+    print(f"Unreferenced: {item.name} ({item.kind}) at line {item.line}")
+```
+
+### Program Flow Analysis
+
+Builds a control flow graph of the program's paragraphs and sections, with typed edges for PERFORM, GO TO, CALL, and fall-through:
+
+```python
+from cobolparser import parse_cobol, ProgramFlowAnalyzer
+
+result = parse_cobol(source)
+report = ProgramFlowAnalyzer().analyze(result.ast)
+
+for edge in report.edges:
+    print(f"{edge.from_node} --[{edge.edge_type.name}]--> {edge.to_node}")
+```
+
+### IO Operation Logging
+
+Records every I/O operation (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START) with file name, operation type, and source location:
+
+```python
+from cobolparser import parse_cobol, IOLogger
+
+result = parse_cobol(source)
+log_report = IOLogger().analyze(result.ast)
+
+for op in log_report.operations:
+    print(f"{op.file_name}: {op.operation} at line {op.line}")
+```
+
+### IO Sequence Validation
+
+Detects invalid I/O operation sequences, such as reading from a file that was never opened or writing after a close:
+
+```python
+from cobolparser import parse_cobol, IOSequenceAnalyzer
+
+result = parse_cobol(source)
+report = IOSequenceAnalyzer().analyze(result.ast)
+
+for violation in report.violations:
+    print(f"{violation.kind.name}: {violation.message} at line {violation.line}")
+```
+
+### MOVE Type Checking
+
+Flags MOVE statements where the source and destination data types are incompatible (e.g., numeric to alphabetic, or truncating a value that does not fit the target PIC clause):
+
+```python
+from cobolparser import parse_cobol, MoveTypeChecker
+
+result = parse_cobol(source)
+report = MoveTypeChecker().analyze(result.ast)
+
+for violation in report.violations:
+    print(f"{violation.kind.name}: {violation.message} at line {violation.line}")
+```
+
+### Linkage Section Checking
+
+Validates that LINKAGE SECTION data items are referenced consistently in PROCEDURE DIVISION USING/RETURNING clauses:
+
+```python
+from cobolparser import parse_cobol, LinkageChecker
+
+result = parse_cobol(source)
+report = LinkageChecker().analyze(result.ast)
+
+for violation in report.violations:
+    print(f"{violation.kind.name}: {violation.message}")
+```
+
+### Language Environment Analysis
+
+Identifies IBM Language Environment (LE) function calls, service calls (e.g., `CEE*`), and condition-handling patterns:
+
+```python
+from cobolparser import parse_cobol, LanguageEnvironmentAnalyzer
+
+result = parse_cobol(source)
+le_result = LanguageEnvironmentAnalyzer().analyze(result.ast)
+
+for fn in le_result.le_functions:
+    print(f"LE function: {fn.name} at line {fn.line}")
+for svc in le_result.service_calls:
+    print(f"LE service call: {svc.name} at line {svc.line}")
+```
 
 ## CobolCheck Test Generation
 
