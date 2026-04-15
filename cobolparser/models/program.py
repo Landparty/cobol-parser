@@ -514,9 +514,7 @@ class CobolProgram(ASTNode):
         """
 
         def _is_cee(name: object) -> bool:
-            return isinstance(name, str) and name.strip("\"'").upper().startswith(
-                "CEE"
-            )
+            return isinstance(name, str) and name.strip("\"'").upper().startswith("CEE")
 
         all_statements = self.get_all_statements()
         le_calls = []

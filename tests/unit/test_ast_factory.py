@@ -359,13 +359,17 @@ class TestValidateCreatedNodePaths:
         with patch.object(
             factory,
             "_validate_created_node",
-            side_effect=ValidationError("DisplayStatement", "synthetic validation fail"),
+            side_effect=ValidationError(
+                "DisplayStatement", "synthetic validation fail"
+            ),
         ):
             with pytest.raises(ValidationError):
                 factory.create(DisplayStatement, SourceLocation(1, 1))
 
         # Error should be logged
-        assert any("synthetic validation fail" in e for e in factory.get_validation_errors())
+        assert any(
+            "synthetic validation fail" in e for e in factory.get_validation_errors()
+        )
 
 
 # ---------------------------------------------------------------------------

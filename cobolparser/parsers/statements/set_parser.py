@@ -33,9 +33,7 @@ class SetStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> SetStatement:
         start = token_stream.consume()
-        stmt = SetStatement(
-            token_location(start)
-        )
+        stmt = SetStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Collect targets until TO/UP/DOWN/period

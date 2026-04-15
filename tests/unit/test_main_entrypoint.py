@@ -39,7 +39,11 @@ class TestMainModuleImport:
 
     def test_main_function_importable(self):
         result = subprocess.run(
-            [sys.executable, "-c", "from cobolparser.cli import main; assert callable(main)"],
+            [
+                sys.executable,
+                "-c",
+                "from cobolparser.cli import main; assert callable(main)",
+            ],
             capture_output=True,
             text=True,
         )
@@ -48,6 +52,7 @@ class TestMainModuleImport:
     def test_main_module_file_exists(self):
         """__main__.py must exist so `python -m cobolparser` works."""
         import cobolparser
+
         pkg_dir = Path(cobolparser.__file__).parent
         assert (pkg_dir / "__main__.py").exists()
 
@@ -73,9 +78,9 @@ class TestMainParseSubcommand:
 
     def test_parse_valid_file_exits_zero(self):
         result = _run(_SIMPLE)
-        assert result.returncode == 0, (
-            f"stdout: {result.stdout[:500]}\nstderr: {result.stderr[:500]}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"stdout: {result.stdout[:500]}\nstderr: {result.stderr[:500]}"
 
     def test_parse_valid_file_produces_json(self):
         result = _run(_SIMPLE)
@@ -122,7 +127,9 @@ class TestMainParseSubcommand:
         assert result.returncode == 0
         data = json.loads(result.stdout)
         # AST root must contain at least one of these canonical node keys
-        assert any(k in data for k in ("node_type", "type", "program_name", "statement_type"))
+        assert any(
+            k in data for k in ("node_type", "type", "program_name", "statement_type")
+        )
 
 
 class TestMainModuleInvocation:

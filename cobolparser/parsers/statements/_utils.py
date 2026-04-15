@@ -139,9 +139,7 @@ def token_location(token: Any) -> SourceLocation:
     return token.location if token else SourceLocation(0, 0)
 
 
-def matches_keyword(
-    token_stream: ITokenStream, token_type: Any, keyword: str
-) -> bool:
+def matches_keyword(token_stream: ITokenStream, token_type: Any, keyword: str) -> bool:
     """Return True if the next token matches *token_type* or is an IDENTIFIER equal to *keyword*.
 
     This is the canonical implementation for statement-parser ``matches()`` methods

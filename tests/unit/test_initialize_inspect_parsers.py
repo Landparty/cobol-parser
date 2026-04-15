@@ -14,7 +14,6 @@ Covers:
 - matches() on correct and wrong tokens
 """
 
-
 from cobolparser.core.token_stream import TokenStream
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation

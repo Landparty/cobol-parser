@@ -38,9 +38,7 @@ class InitializeStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> InitializeStatement:
         start = token_stream.consume()
-        stmt = InitializeStatement(
-            token_location(start)
-        )
+        stmt = InitializeStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Collect target identifiers
@@ -130,9 +128,7 @@ class InspectStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> InspectStatement:
         start = token_stream.consume()
-        stmt = InspectStatement(
-            token_location(start)
-        )
+        stmt = InspectStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Target identifier

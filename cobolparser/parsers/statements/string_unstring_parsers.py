@@ -63,9 +63,7 @@ class StringStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> StringStatement:
         start = token_stream.consume()
-        stmt = StringStatement(
-            token_location(start)
-        )
+        stmt = StringStatement(token_location(start))
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -177,9 +175,7 @@ class UnstringStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> UnstringStatement:
         start = token_stream.consume()
-        stmt = UnstringStatement(
-            token_location(start)
-        )
+        stmt = UnstringStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Source identifier

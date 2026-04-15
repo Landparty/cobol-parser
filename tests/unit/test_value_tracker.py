@@ -102,9 +102,9 @@ class TestInitialValueCollection:
         analyzer = DynamicCallAnalyzer()
         ast = _parse(source)
         analyzer.analyze(ast)
-        assert analyzer.get_variable_values("prog-name") == analyzer.get_variable_values(
-            "PROG-NAME"
-        )
+        assert analyzer.get_variable_values(
+            "prog-name"
+        ) == analyzer.get_variable_values("PROG-NAME")
 
     def test_get_all_tracked_variables_after_value_clause(self):
         source = (

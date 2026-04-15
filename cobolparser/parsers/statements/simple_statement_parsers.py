@@ -45,9 +45,7 @@ class ContinueStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ContinueStatement:
         start = token_stream.consume()
-        stmt = ContinueStatement(
-            token_location(start)
-        )
+        stmt = ContinueStatement(token_location(start))
         skip_whitespace(token_stream)
         consume_period(token_stream)
         return stmt
@@ -66,9 +64,7 @@ class ExitStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ExitStatement:
         start = token_stream.consume()
-        stmt = ExitStatement(
-            token_location(start)
-        )
+        stmt = ExitStatement(token_location(start))
         skip_whitespace(token_stream)
 
         if not token_stream.is_empty():
@@ -103,9 +99,7 @@ class GobackStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> GobackStatement:
         start = token_stream.consume()
-        stmt = GobackStatement(
-            token_location(start)
-        )
+        stmt = GobackStatement(token_location(start))
         skip_whitespace(token_stream)
 
         if not token_stream.is_empty():
@@ -136,9 +130,7 @@ class CancelStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> CancelStatement:
         start = token_stream.consume()
-        stmt = CancelStatement(
-            token_location(start)
-        )
+        stmt = CancelStatement(token_location(start))
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -171,9 +163,7 @@ class AlterStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> AlterStatement:
         start = token_stream.consume()
-        stmt = AlterStatement(
-            token_location(start)
-        )
+        stmt = AlterStatement(token_location(start))
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -231,9 +221,7 @@ class GenerateStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> GenerateStatement:
         start = token_stream.consume()
-        stmt = GenerateStatement(
-            token_location(start)
-        )
+        stmt = GenerateStatement(token_location(start))
         skip_whitespace(token_stream)
 
         token = token_stream.peek()
@@ -259,9 +247,7 @@ class ReleaseStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ReleaseStatement:
         start = token_stream.consume()
-        stmt = ReleaseStatement(
-            token_location(start)
-        )
+        stmt = ReleaseStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Record name
@@ -300,9 +286,7 @@ class ReturnStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ReturnStatement:
         start = token_stream.consume()
-        stmt = ReturnStatement(
-            token_location(start)
-        )
+        stmt = ReturnStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # File name
@@ -416,9 +400,7 @@ class UseStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> UseStatement:
         start = token_stream.consume()
-        stmt = UseStatement(
-            token_location(start)
-        )
+        stmt = UseStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Optional GLOBAL
@@ -470,9 +452,7 @@ class CommitStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> CommitStatement:
         start = token_stream.consume()
-        stmt = CommitStatement(
-            token_location(start)
-        )
+        stmt = CommitStatement(token_location(start))
         skip_whitespace(token_stream)
         # Optionally consume WORK keyword
         token = token_stream.peek()
@@ -498,9 +478,7 @@ class RollbackStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> RollbackStatement:
         start = token_stream.consume()
-        stmt = RollbackStatement(
-            token_location(start)
-        )
+        stmt = RollbackStatement(token_location(start))
         skip_whitespace(token_stream)
         # Optional WORK keyword
         token = token_stream.peek()

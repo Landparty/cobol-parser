@@ -40,9 +40,7 @@ class SearchStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> SearchStatement:
         start = token_stream.consume()
-        stmt = SearchStatement(
-            token_location(start)
-        )
+        stmt = SearchStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Check for ALL

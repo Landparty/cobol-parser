@@ -114,9 +114,7 @@ class SortStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> SortStatement:
         start = token_stream.consume()
-        stmt = SortStatement(
-            token_location(start)
-        )
+        stmt = SortStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # File name
@@ -259,9 +257,7 @@ class MergeStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> MergeStatement:
         start = token_stream.consume()
-        stmt = MergeStatement(
-            token_location(start)
-        )
+        stmt = MergeStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # File name

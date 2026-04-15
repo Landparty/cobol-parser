@@ -20,7 +20,6 @@ Covers:
         MergeStatement
 """
 
-
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements.arithmetic import (
     AddStatement,

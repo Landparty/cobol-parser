@@ -30,7 +30,6 @@ Coverage:
 - cobolparser top-level import paths
 """
 
-
 from cobolparser import parse_cobol
 from cobolparser.analysis.language_env_analyzer import (
     LanguageEnvironmentAnalyzer,
@@ -149,14 +148,10 @@ _BOTH_FUNCTION_AND_SERVICE = (
 """
 )
 
-_UNKNOWN_CEE_SERVICE = (
-    _MINIMAL_HEADER
-    + _PROCEDURE_HEADER
-    + """\
+_UNKNOWN_CEE_SERVICE = _MINIMAL_HEADER + _PROCEDURE_HEADER + """\
            CALL "CEECUSTOM" USING WS-A.
            STOP RUN.
 """
-)
 
 
 # ── Test: dialect helpers ──────────────────────────────────────────────────────
@@ -433,9 +428,7 @@ class TestNoLEUsage:
     def test_non_cee_call_ignored(self):
         report = self.analyzer.analyze(self.program)
         # MYSUBR must not be flagged as an LE service
-        assert all(
-            c.service_name != "MYSUBR" for c in report.le_service_calls
-        )
+        assert all(c.service_name != "MYSUBR" for c in report.le_service_calls)
 
 
 # ── Test: both FUNCTION and LE service ────────────────────────────────────────
@@ -475,16 +468,12 @@ class TestUnknownCEEService:
 
     def test_unknown_service_flagged_not_known(self):
         report = self.analyzer.analyze(self.program)
-        call = next(
-            c for c in report.le_service_calls if c.service_name == "CEECUSTOM"
-        )
+        call = next(c for c in report.le_service_calls if c.service_name == "CEECUSTOM")
         assert not call.is_known_service
 
     def test_unknown_service_category_is_unknown(self):
         report = self.analyzer.analyze(self.program)
-        call = next(
-            c for c in report.le_service_calls if c.service_name == "CEECUSTOM"
-        )
+        call = next(c for c in report.le_service_calls if c.service_name == "CEECUSTOM")
         assert call.category == "unknown"
 
 
