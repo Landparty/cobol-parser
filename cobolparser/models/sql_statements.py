@@ -6,7 +6,8 @@ embedded within COBOL EXEC SQL blocks, with structured output for analysis.
 """
 
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from .ast_base import SourceLocation
@@ -27,6 +28,17 @@ _SQL_UPDATE_TABLE_RE = re.compile(r"UPDATE\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNOR
 _SQL_INTO_VARS_RE = re.compile(r"INTO\s+(:[\w-]+(?:\s*,\s*:[\w-]+)*)", re.IGNORECASE)
 _SQL_DECLARE_CURSOR_RE = re.compile(
     r"DECLARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+CURSOR", re.IGNORECASE
+)
+_SQL_DECLARE_TABLE_RE = re.compile(
+    r"DECLARE\s+([A-Za-z_][A-Za-z0-9_]*)\s+TABLE", re.IGNORECASE
+)
+# Matches a single column definition: NAME  TYPE[(len[,scale])]  [NOT NULL]
+_SQL_COLUMN_DEF_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)"           # column name
+    r"\s+([A-Za-z][A-Za-z0-9]*)"           # DB2 type keyword
+    r"(?:\s*\(\s*(\d+)(?:\s*,\s*(\d+))?\s*\))?"  # optional (len) or (prec,scale)
+    r"(?:\s+(NOT\s+NULL))?",               # optional NOT NULL
+    re.IGNORECASE,
 )
 _SQL_FETCH_RE = re.compile(
     r"FETCH\s+(?:NEXT\s+)?(?:FROM\s+)?([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE
@@ -85,6 +97,7 @@ class SQLStatementType:
     UPDATE: ClassVar[str] = "UPDATE"
     DELETE: ClassVar[str] = "DELETE"
     DECLARE_CURSOR: ClassVar[str] = "DECLARE CURSOR"
+    DECLARE_TABLE: ClassVar[str] = "DECLARE TABLE"
     OPEN_CURSOR: ClassVar[str] = "OPEN"
     FETCH: ClassVar[str] = "FETCH"
     CLOSE_CURSOR: ClassVar[str] = "CLOSE"
@@ -95,6 +108,193 @@ class SQLStatementType:
     INCLUDE: ClassVar[str] = "INCLUDE"
     WHENEVER: ClassVar[str] = "WHENEVER"
     UNKNOWN: ClassVar[str] = "UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# DB2 column definition (produced by DCLGEN)
+# ---------------------------------------------------------------------------
+
+# Mapping from DB2 type name (upper-cased) to a function that returns the
+# equivalent COBOL picture string given (length, precision, scale) parameters.
+# Returns None for types that have no simple picture equivalent (e.g. BLOB).
+def _db2_pic_char(length: int | None, _prec: int | None, _scale: int | None) -> str:
+    n = length or 1
+    return f"X({n})"
+
+
+def _db2_pic_varchar(length: int | None, _prec: int | None, _scale: int | None) -> str:
+    # VARCHAR is represented as a group with a 2-byte length prefix in DCLGEN
+    n = length or 1
+    return f"X({n})"  # simplified; full form is a 49-level group
+
+
+def _db2_pic_integer(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "S9(9)"
+
+
+def _db2_pic_smallint(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "S9(4)"
+
+
+def _db2_pic_bigint(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "S9(18)"
+
+
+def _db2_pic_decimal(
+    _l: int | None, precision: int | None, scale: int | None
+) -> str:
+    p = precision or 9
+    s = scale or 0
+    integer_digits = p - s
+    if s > 0:
+        return f"S9({integer_digits})V9({s})"
+    return f"S9({p})"
+
+
+def _db2_pic_float(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "COMP-1"  # single-precision — not a PIC, but conventional usage annotation
+
+
+def _db2_pic_double(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "COMP-2"  # double-precision
+
+
+def _db2_pic_date(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "X(10)"
+
+
+def _db2_pic_time(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "X(8)"
+
+
+def _db2_pic_timestamp(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "X(26)"
+
+
+def _db2_pic_clob(length: int | None, _p: int | None, _s: int | None) -> str:
+    n = length or 1
+    return f"X({n})"
+
+
+_Db2PicFn = Callable[[int | None, int | None, int | None], str]
+
+_DB2_TYPE_MAP: dict[str, _Db2PicFn] = {
+    "CHAR": _db2_pic_char,
+    "CHARACTER": _db2_pic_char,
+    "VARCHAR": _db2_pic_varchar,
+    "INTEGER": _db2_pic_integer,
+    "INT": _db2_pic_integer,
+    "SMALLINT": _db2_pic_smallint,
+    "BIGINT": _db2_pic_bigint,
+    "DECIMAL": _db2_pic_decimal,
+    "DEC": _db2_pic_decimal,
+    "NUMERIC": _db2_pic_decimal,
+    "NUM": _db2_pic_decimal,
+    "FLOAT": _db2_pic_float,
+    "REAL": _db2_pic_float,
+    "DOUBLE": _db2_pic_double,
+    "DATE": _db2_pic_date,
+    "TIME": _db2_pic_time,
+    "TIMESTAMP": _db2_pic_timestamp,
+    "CLOB": _db2_pic_clob,
+}
+
+# DB2 numeric types that require COMP-3 storage in DCLGEN-generated copybooks
+_DB2_COMP3_TYPES = frozenset({"DECIMAL", "DEC", "NUMERIC", "NUM"})
+# DB2 numeric types that require COMP (binary) storage
+_DB2_COMP_TYPES = frozenset({"INTEGER", "INT", "SMALLINT", "BIGINT"})
+# DB2 float types (usage annotation rather than PIC)
+_DB2_FLOAT_TYPES = frozenset({"FLOAT", "REAL", "DOUBLE"})
+# DB2 character-like types
+_DB2_CHAR_TYPES = frozenset({"CHAR", "CHARACTER", "VARCHAR", "CLOB", "DATE", "TIME", "TIMESTAMP"})
+
+
+def db2_type_to_cobol_pic(
+    db2_type: str,
+    length: int | None = None,
+    precision: int | None = None,
+    scale: int | None = None,
+) -> str | None:
+    """Map a DB2 column type to a COBOL PICTURE string.
+
+    Args:
+        db2_type: DB2 data type keyword (e.g. ``"CHAR"``, ``"DECIMAL"``).
+        length: Length parameter for CHAR / VARCHAR columns.
+        precision: Total digits for DECIMAL / NUMERIC columns.
+        scale: Decimal digits for DECIMAL / NUMERIC columns.
+
+    Returns:
+        A COBOL picture string (e.g. ``"X(30)"``, ``"S9(7)V9(2)"``),
+        or *None* for types without a direct picture equivalent (BLOB, etc.).
+    """
+    fn = _DB2_TYPE_MAP.get(db2_type.upper())
+    if fn is None:
+        return None
+    return fn(length, precision, scale)
+
+
+def db2_type_to_cobol_usage(db2_type: str) -> str:
+    """Return the COBOL USAGE clause string for a DB2 column type.
+
+    Returns ``"DISPLAY"`` for character types, ``"COMP-3"`` for packed decimal,
+    ``"COMP"`` for binary integer types, ``"COMP-1"`` / ``"COMP-2"`` for floats.
+    """
+    upper = db2_type.upper()
+    if upper in _DB2_COMP3_TYPES:
+        return "COMP-3"
+    if upper in _DB2_COMP_TYPES:
+        return "COMP"
+    if upper == "FLOAT" or upper == "REAL":
+        return "COMP-1"
+    if upper == "DOUBLE":
+        return "COMP-2"
+    return "DISPLAY"
+
+
+@dataclass
+class DB2ColumnDefinition:
+    """A single column definition from a DB2 DECLARE TABLE (DCLGEN output).
+
+    Attributes:
+        name: Column name as it appears in the DB2 catalog.
+        db2_type: DB2 data type keyword (upper-cased), e.g. ``"CHAR"``.
+        length: Length for CHAR / VARCHAR columns; ``None`` otherwise.
+        precision: Total digits for DECIMAL / NUMERIC; ``None`` otherwise.
+        scale: Decimal places for DECIMAL / NUMERIC; ``None`` otherwise.
+        nullable: ``True`` if the column accepts NULL (default); ``False``
+            when ``NOT NULL`` is declared.
+        cobol_picture: COBOL PICTURE string derived from the DB2 type,
+            computed automatically on construction.
+        cobol_usage: COBOL USAGE clause string (e.g. ``"COMP-3"``).
+    """
+
+    name: str
+    db2_type: str
+    length: int | None = None
+    precision: int | None = None
+    scale: int | None = None
+    nullable: bool = True
+    cobol_picture: str | None = field(init=False)
+    cobol_usage: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.cobol_picture = db2_type_to_cobol_pic(
+            self.db2_type, self.length, self.precision, self.scale
+        )
+        self.cobol_usage = db2_type_to_cobol_usage(self.db2_type)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a plain dictionary."""
+        return {
+            "name": self.name,
+            "db2_type": self.db2_type,
+            "length": self.length,
+            "precision": self.precision,
+            "scale": self.scale,
+            "nullable": self.nullable,
+            "cobol_picture": self.cobol_picture,
+            "cobol_usage": self.cobol_usage,
+        }
 
 
 class ExecSQLStatement(CobolStatement):
@@ -152,9 +352,12 @@ class ExecSQLStatement(CobolStatement):
     def _determine_sql_type(self, upper_sql: str) -> str:
         """Determine the type of SQL statement."""
         # Check for cursor operations first
-        if upper_sql.startswith("DECLARE") and "CURSOR" in upper_sql:
-            return SQLStatementType.DECLARE_CURSOR
-        elif upper_sql.startswith("FETCH"):
+        if upper_sql.startswith("DECLARE"):
+            if "CURSOR" in upper_sql:
+                return SQLStatementType.DECLARE_CURSOR
+            if "TABLE" in upper_sql:
+                return SQLStatementType.DECLARE_TABLE
+        if upper_sql.startswith("FETCH"):
             return SQLStatementType.FETCH
         elif upper_sql.startswith("OPEN"):
             return SQLStatementType.OPEN_CURSOR
@@ -233,6 +436,10 @@ class ExecSQLStatement(CobolStatement):
         elif self._sql_type == SQLStatementType.DECLARE_CURSOR:
             compiled_patterns.append(_SQL_FROM_TABLE_RE)
             compiled_patterns.append(_SQL_JOIN_TABLE_RE)
+
+        elif self._sql_type == SQLStatementType.DECLARE_TABLE:
+            # Table name is extracted by DeclareTableStatement directly
+            pass
 
         elif self._sql_type == SQLStatementType.FETCH:
             pass
@@ -402,6 +609,133 @@ class DeclareCursorStatement(ExecSQLStatement):
         return result
 
 
+class DeclareTableStatement(ExecSQLStatement):
+    """AST node for EXEC SQL DECLARE tablename TABLE (...) END-EXEC.
+
+    This is the output of the IBM DB2 DCLGEN utility, which generates a
+    ``DECLARE TABLE`` SQL block together with a matching COBOL 01-level
+    structure in the DATA DIVISION.  Parsing this block lets the host-variable
+    resolver correlate :host-var references in DML statements with their DB2
+    column type.
+
+    Attributes:
+        table_name: DB2 table name as declared (upper-cased).
+        columns: Ordered list of :class:`DB2ColumnDefinition` objects.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__(location)
+        self.statement_type = "DECLARE-TABLE"
+        self.table_name: str | None = None
+        self.columns: list[DB2ColumnDefinition] = []
+
+    # ------------------------------------------------------------------
+    # Column parsing
+    # ------------------------------------------------------------------
+
+    def _parse_columns(self, sql_text: str) -> None:
+        """Extract column definitions from the SQL text.
+
+        Expects the normalized SQL text of a DECLARE TABLE statement.
+        The column block is the parenthesised list after TABLE.
+        """
+        # Extract everything inside the outermost parentheses
+        paren_start = sql_text.find("(")
+        paren_end = sql_text.rfind(")")
+        if paren_start == -1 or paren_end == -1:
+            return
+
+        col_block = sql_text[paren_start + 1 : paren_end]
+
+        # Split on commas that are *not* inside nested parens
+        # (handles DECIMAL(10,2) correctly)
+        col_defs: list[str] = []
+        depth = 0
+        current: list[str] = []
+        for ch in col_block:
+            if ch == "(":
+                depth += 1
+                current.append(ch)
+            elif ch == ")":
+                depth -= 1
+                current.append(ch)
+            elif ch == "," and depth == 0:
+                col_defs.append("".join(current).strip())
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            col_defs.append("".join(current).strip())
+
+        for col_text in col_defs:
+            col_text = col_text.strip()
+            if not col_text:
+                continue
+            m = _SQL_COLUMN_DEF_RE.match(col_text)
+            if not m:
+                continue
+            col_name = m.group(1)
+            db2_type = m.group(2).upper()
+            raw_len = m.group(3)
+            raw_scale = m.group(4)
+            not_null_flag = m.group(5)
+
+            length: int | None = None
+            precision: int | None = None
+            scale: int | None = None
+
+            upper_type = db2_type
+            if upper_type in _DB2_CHAR_TYPES:
+                length = int(raw_len) if raw_len else None
+            elif upper_type in _DB2_COMP3_TYPES:
+                precision = int(raw_len) if raw_len else None
+                scale = int(raw_scale) if raw_scale else None
+            # For integer/float types length/precision/scale stay None
+
+            nullable = not_null_flag is None or "NOT" not in not_null_flag.upper()
+
+            self.columns.append(
+                DB2ColumnDefinition(
+                    name=col_name,
+                    db2_type=db2_type,
+                    length=length,
+                    precision=precision,
+                    scale=scale,
+                    nullable=nullable,
+                )
+            )
+
+    def set_sql_text(self, sql_text: str) -> None:
+        """Override to also parse table name and column definitions."""
+        super().set_sql_text(sql_text)
+        # Extract table name
+        m = _SQL_DECLARE_TABLE_RE.search(sql_text)
+        if m:
+            self.table_name = m.group(1).upper()
+            if self.table_name not in self.tables:
+                self.tables.append(self.table_name)
+        # Parse columns
+        self._parse_columns(sql_text)
+
+    def get_structured_output(self) -> SQLStatementInfo:
+        """Get structured output for DECLARE TABLE."""
+        result = SQLStatementInfo()
+        result.table = self.table_name
+        result.query = self.sql_text
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        result = super().to_dict()
+        result.update(
+            {
+                "table_name": self.table_name,
+                "columns": [c.to_dict() for c in self.columns],
+            }
+        )
+        return result
+
+
 class FetchStatement(ExecSQLStatement):
     """AST node specifically for FETCH statements."""
 
@@ -514,25 +848,32 @@ def parse_exec_sql(sql_text: str, location: SourceLocation) -> ExecSQLStatement:
     upper_sql = normalized.upper()
 
     # Determine statement type and create appropriate node
-    if upper_sql.startswith("DECLARE") and "CURSOR" in upper_sql:
-        declare_stmt = DeclareCursorStatement(location)
-        declare_stmt.set_sql_text(sql_text)
-        # Extract cursor name
-        match = _SQL_DECLARE_CURSOR_RE.search(sql_text)
-        if match:
-            declare_stmt.cursor_name = match.group(1)
-        # Extract SELECT statement
-        match = _SQL_FOR_SELECT_RE.search(sql_text)
-        if match:
-            declare_stmt.set_select_statement(match.group(1))
-        # Extract cursor options
-        if "WITH HOLD" in upper_sql:
-            declare_stmt.add_cursor_option("WITH HOLD")
-        if "FOR UPDATE" in upper_sql:
-            declare_stmt.add_cursor_option("FOR UPDATE")
-        return declare_stmt
+    if upper_sql.startswith("DECLARE"):
+        if "CURSOR" in upper_sql:
+            declare_stmt = DeclareCursorStatement(location)
+            declare_stmt.set_sql_text(sql_text)
+            # Extract cursor name
+            match = _SQL_DECLARE_CURSOR_RE.search(sql_text)
+            if match:
+                declare_stmt.cursor_name = match.group(1)
+            # Extract SELECT statement
+            match = _SQL_FOR_SELECT_RE.search(sql_text)
+            if match:
+                declare_stmt.set_select_statement(match.group(1))
+            # Extract cursor options
+            if "WITH HOLD" in upper_sql:
+                declare_stmt.add_cursor_option("WITH HOLD")
+            if "FOR UPDATE" in upper_sql:
+                declare_stmt.add_cursor_option("FOR UPDATE")
+            return declare_stmt
 
-    elif upper_sql.startswith("FETCH"):
+        if "TABLE" in upper_sql:
+            # DCLGEN-generated DECLARE TABLE statement
+            table_stmt = DeclareTableStatement(location)
+            table_stmt.set_sql_text(sql_text)
+            return table_stmt
+
+    if upper_sql.startswith("FETCH"):
         fetch_stmt = FetchStatement(location)
         fetch_stmt.set_sql_text(sql_text)
         # Extract direction
@@ -573,12 +914,16 @@ def parse_exec_sql(sql_text: str, location: SourceLocation) -> ExecSQLStatement:
 
 
 __all__ = [
+    "DB2ColumnDefinition",
     "SQLStatementInfo",
     "SQLStatementType",
     "ExecSQLStatement",
     "DeclareCursorStatement",
+    "DeclareTableStatement",
     "FetchStatement",
     "DynamicSQLStatement",
     "TransactionControlStatement",
+    "db2_type_to_cobol_pic",
+    "db2_type_to_cobol_usage",
     "parse_exec_sql",
 ]
