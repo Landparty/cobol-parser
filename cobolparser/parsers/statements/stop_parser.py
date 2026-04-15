@@ -3,22 +3,16 @@
 from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
 from ...models.statements import StopStatement
+from ._utils import matches_keyword
 
 
 class StopStatementParser(IStatementParser):
     """Parser for STOP statements using IStatementParser interface."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is STOP keyword."""
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            token_val_upper = token.value.upper() if token.value else ""
-            return token_val_upper == "STOP"
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.STOP, "STOP")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

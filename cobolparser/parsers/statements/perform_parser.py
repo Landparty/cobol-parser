@@ -6,6 +6,7 @@ from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
     get_parse_context,
+    matches_keyword,
     report_parse_error,
     skip_whitespace,
     try_parse_nested_statement,
@@ -23,21 +24,7 @@ class PerformStatementParser(IStatementParser):
     """Parser for PERFORM statements using IStatementParser interface."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is PERFORM keyword."""
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            return bool(
-                token.type == TokenType.PERFORM
-                or (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "PERFORM"
-                )
-            )
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.PERFORM, "PERFORM")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

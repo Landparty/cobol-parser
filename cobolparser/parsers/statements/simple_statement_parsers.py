@@ -8,7 +8,6 @@ from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import (
     AlterStatement,
     CancelStatement,
@@ -26,7 +25,9 @@ from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
     STATEMENT_KEYWORDS,
     consume_period,
+    matches_keyword,
     skip_whitespace,
+    token_location,
     try_parse_nested_statement,
 )
 from ._utils import (
@@ -38,23 +39,13 @@ class ContinueStatementParser(IStatementParser):
     """Parser for CONTINUE statements (no-op)."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.CONTINUE:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER
-            and _token_value_upper(token) == "CONTINUE"
-        )
+        return matches_keyword(token_stream, TokenType.CONTINUE, "CONTINUE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ContinueStatement:
         start = token_stream.consume()
-        stmt = ContinueStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = ContinueStatement(token_location(start))
         skip_whitespace(token_stream)
         consume_period(token_stream)
         return stmt
@@ -67,22 +58,13 @@ class ExitStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.EXIT:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "EXIT"
-        )
+        return matches_keyword(token_stream, TokenType.EXIT, "EXIT")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ExitStatement:
         start = token_stream.consume()
-        stmt = ExitStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = ExitStatement(token_location(start))
         skip_whitespace(token_stream)
 
         if not token_stream.is_empty():
@@ -111,22 +93,13 @@ class GobackStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.GOBACK:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "GOBACK"
-        )
+        return matches_keyword(token_stream, TokenType.GOBACK, "GOBACK")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> GobackStatement:
         start = token_stream.consume()
-        stmt = GobackStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = GobackStatement(token_location(start))
         skip_whitespace(token_stream)
 
         if not token_stream.is_empty():
@@ -151,22 +124,13 @@ class CancelStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.CANCEL:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "CANCEL"
-        )
+        return matches_keyword(token_stream, TokenType.CANCEL, "CANCEL")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> CancelStatement:
         start = token_stream.consume()
-        stmt = CancelStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = CancelStatement(token_location(start))
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -193,22 +157,13 @@ class AlterStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.ALTER:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "ALTER"
-        )
+        return matches_keyword(token_stream, TokenType.ALTER, "ALTER")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> AlterStatement:
         start = token_stream.consume()
-        stmt = AlterStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = AlterStatement(token_location(start))
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -260,23 +215,13 @@ class GenerateStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.GENERATE:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER
-            and _token_value_upper(token) == "GENERATE"
-        )
+        return matches_keyword(token_stream, TokenType.GENERATE, "GENERATE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> GenerateStatement:
         start = token_stream.consume()
-        stmt = GenerateStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = GenerateStatement(token_location(start))
         skip_whitespace(token_stream)
 
         token = token_stream.peek()
@@ -296,23 +241,13 @@ class ReleaseStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.RELEASE:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER
-            and _token_value_upper(token) == "RELEASE"
-        )
+        return matches_keyword(token_stream, TokenType.RELEASE, "RELEASE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ReleaseStatement:
         start = token_stream.consume()
-        stmt = ReleaseStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = ReleaseStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Record name
@@ -345,22 +280,13 @@ class ReturnStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.RETURN:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "RETURN"
-        )
+        return matches_keyword(token_stream, TokenType.RETURN, "RETURN")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> ReturnStatement:
         start = token_stream.consume()
-        stmt = ReturnStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = ReturnStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # File name
@@ -468,20 +394,13 @@ class UseStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.USE:
-            return True
-        return token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "USE"
+        return matches_keyword(token_stream, TokenType.USE, "USE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> UseStatement:
         start = token_stream.consume()
-        stmt = UseStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = UseStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Optional GLOBAL
@@ -527,22 +446,13 @@ class CommitStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.COMMIT:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER and _token_value_upper(token) == "COMMIT"
-        )
+        return matches_keyword(token_stream, TokenType.COMMIT, "COMMIT")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> CommitStatement:
         start = token_stream.consume()
-        stmt = CommitStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = CommitStatement(token_location(start))
         skip_whitespace(token_stream)
         # Optionally consume WORK keyword
         token = token_stream.peek()
@@ -562,23 +472,13 @@ class RollbackStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.ROLLBACK:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER
-            and _token_value_upper(token) == "ROLLBACK"
-        )
+        return matches_keyword(token_stream, TokenType.ROLLBACK, "ROLLBACK")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> RollbackStatement:
         start = token_stream.consume()
-        stmt = RollbackStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = RollbackStatement(token_location(start))
         skip_whitespace(token_stream)
         # Optional WORK keyword
         token = token_stream.peek()

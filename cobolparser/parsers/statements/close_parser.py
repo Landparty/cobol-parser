@@ -2,7 +2,7 @@
 
 from typing import Any, cast
 
-from cobolparser.parsers.statements._utils import skip_whitespace
+from cobolparser.parsers.statements._utils import matches_keyword, skip_whitespace
 
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -19,12 +19,7 @@ class CloseStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is CLOSE keyword."""
-        try:
-            token = token_stream.peek()
-            return bool(token and token.type == TokenType.CLOSE)
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.CLOSE, "CLOSE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

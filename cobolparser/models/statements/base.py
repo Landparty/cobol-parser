@@ -7,6 +7,11 @@ from typing import Any, Union
 from ..ast_base import ASTNode, SourceLocation
 
 
+def _serialize_operand(operand: Any) -> Any:
+    """Serialize a binary-expression operand to a dict or passthrough value."""
+    return operand.to_dict() if isinstance(operand, ASTNode) else operand
+
+
 class CobolStatement(ASTNode):
     """Base class for COBOL statement AST nodes."""
 
@@ -93,23 +98,11 @@ class ArithmeticExpression(CobolExpression):
     def to_dict(self) -> dict[str, Any]:
         """Convert arithmetic expression to dictionary representation."""
         result = super().to_dict()
-
-        left_dict = (
-            self.left_operand.to_dict()
-            if isinstance(self.left_operand, CobolExpression)
-            else self.left_operand
-        )
-        right_dict = (
-            self.right_operand.to_dict()
-            if isinstance(self.right_operand, CobolExpression)
-            else self.right_operand
-        )
-
         result.update(
             {
                 "operator": self.operator,
-                "left_operand": left_dict,
-                "right_operand": right_dict,
+                "left_operand": _serialize_operand(self.left_operand),
+                "right_operand": _serialize_operand(self.right_operand),
             }
         )
         return result
@@ -139,23 +132,11 @@ class ConditionalExpression(CobolExpression):
     def to_dict(self) -> dict[str, Any]:
         """Convert conditional expression to dictionary representation."""
         result = super().to_dict()
-
-        left_dict = (
-            self.left_operand.to_dict()
-            if isinstance(self.left_operand, CobolExpression)
-            else self.left_operand
-        )
-        right_dict = (
-            self.right_operand.to_dict()
-            if isinstance(self.right_operand, CobolExpression)
-            else self.right_operand
-        )
-
         result.update(
             {
                 "operator": self.operator,
-                "left_operand": left_dict,
-                "right_operand": right_dict,
+                "left_operand": _serialize_operand(self.left_operand),
+                "right_operand": _serialize_operand(self.right_operand),
                 "condition_type": self.expression_type,
             }
         )

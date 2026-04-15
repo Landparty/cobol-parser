@@ -5,6 +5,7 @@ from typing import Any, cast
 from cobolparser.parsers.statements._utils import (
     collect_clause_stmts,
     consume_end_keyword_and_period,
+    matches_keyword,
     skip_whitespace,
 )
 
@@ -28,12 +29,7 @@ class ReadStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is READ keyword."""
-        try:
-            token = token_stream.peek()
-            return bool(token and token.type == TokenType.READ)
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.READ, "READ")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

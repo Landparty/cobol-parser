@@ -20,7 +20,9 @@ from cobolparser.plugins.core import ErrorRecoveryMode
 
 
 def _parse(src: str):
-    return parse_cobol(src, error_recovery=ErrorRecoveryMode.COLLECT_ALL, free_form=True)
+    return parse_cobol(
+        src, error_recovery=ErrorRecoveryMode.COLLECT_ALL, free_form=True
+    )
 
 
 def _assert_parsed(src: str):
@@ -487,34 +489,26 @@ class TestInitializeInspectBranches:
         assert len(stmts) >= 1
 
     def test_initialize_replacing_numeric(self):
-        src = _wrap(
-            "    INITIALIZE WS-A\n"
-            "        REPLACING NUMERIC BY 0.\n"
-        )
+        src = _wrap("    INITIALIZE WS-A\n" "        REPLACING NUMERIC BY 0.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_initialize_replacing_alphabetic(self):
         src = _wrap(
-            "    INITIALIZE WS-STR\n"
-            "        REPLACING ALPHABETIC BY SPACES.\n"
+            "    INITIALIZE WS-STR\n" "        REPLACING ALPHABETIC BY SPACES.\n"
         )
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_initialize_replacing_alphanumeric(self):
         src = _wrap(
-            "    INITIALIZE WS-STR\n"
-            "        REPLACING ALPHANUMERIC BY SPACES.\n"
+            "    INITIALIZE WS-STR\n" "        REPLACING ALPHANUMERIC BY SPACES.\n"
         )
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_inspect_tallying_for_all(self):
-        src = _wrap(
-            "    INSPECT WS-STR\n"
-            "        TALLYING WS-CNT FOR ALL 'A'.\n"
-        )
+        src = _wrap("    INSPECT WS-STR\n" "        TALLYING WS-CNT FOR ALL 'A'.\n")
         result = _assert_parsed(src)
         stmts = _find_stmts(result, "INSPECT")
         assert len(stmts) >= 1
@@ -538,27 +532,18 @@ class TestInitializeInspectBranches:
         assert result.ast is not None
 
     def test_inspect_replacing_all(self):
-        src = _wrap(
-            "    INSPECT WS-STR\n"
-            "        REPLACING ALL 'A' BY 'B'.\n"
-        )
+        src = _wrap("    INSPECT WS-STR\n" "        REPLACING ALL 'A' BY 'B'.\n")
         result = _assert_parsed(src)
         stmts = _find_stmts(result, "INSPECT")
         assert len(stmts) >= 1
 
     def test_inspect_replacing_leading(self):
-        src = _wrap(
-            "    INSPECT WS-STR\n"
-            "        REPLACING LEADING '0' BY SPACE.\n"
-        )
+        src = _wrap("    INSPECT WS-STR\n" "        REPLACING LEADING '0' BY SPACE.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_inspect_converting(self):
-        src = _wrap(
-            "    INSPECT WS-STR\n"
-            "        CONVERTING 'abc' TO 'ABC'.\n"
-        )
+        src = _wrap("    INSPECT WS-STR\n" "        CONVERTING 'abc' TO 'ABC'.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
@@ -580,9 +565,7 @@ class TestInitializeInspectBranches:
 class TestPerformBranches:
     def test_perform_times(self):
         src = _wrap(
-            "    PERFORM 5 TIMES\n"
-            "        MOVE 0 TO WS-A\n"
-            "    END-PERFORM.\n"
+            "    PERFORM 5 TIMES\n" "        MOVE 0 TO WS-A\n" "    END-PERFORM.\n"
         )
         result = _assert_parsed(src)
         stmts = _find_stmts(result, "PERFORM")

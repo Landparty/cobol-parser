@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
     consume_end_keyword_and_period,
+    matches_keyword,
     parse_invalid_key_clauses,
     skip_whitespace,
 )
@@ -24,12 +25,7 @@ class RewriteStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is REWRITE keyword."""
-        try:
-            token = token_stream.peek()
-            return bool(token and token.type == TokenType.REWRITE)
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.REWRITE, "REWRITE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

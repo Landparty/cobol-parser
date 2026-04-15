@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     get_parse_context,
+    matches_keyword,
     report_parse_error,
     try_parse_nested_statement,
 )
@@ -20,20 +21,7 @@ class EvaluateStatementParser(IStatementParser):
     """Parser for EVALUATE statements using IStatementParser interface."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is EVALUATE keyword."""
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            is_evaluate = token.type == TokenType.EVALUATE
-            is_evaluate_id = (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "EVALUATE"
-            )
-            return bool(is_evaluate or is_evaluate_id)
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.EVALUATE, "EVALUATE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

@@ -5,9 +5,8 @@ from typing import Any
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import IOAcceptStatement
-from ._utils import skip_whitespace
+from ._utils import matches_keyword, skip_whitespace, token_location
 
 
 class AcceptStatementParser(IStatementParser):
@@ -19,22 +18,13 @@ class AcceptStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.ACCEPT:
-            return True
-        return (
-            token.type == TokenType.IDENTIFIER
-            and token.value is not None
-            and token.value.upper() == "ACCEPT"
-        )
+        return matches_keyword(token_stream, TokenType.ACCEPT, "ACCEPT")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOAcceptStatement:
         start = token_stream.consume()
-        loc = start.location if hasattr(start, "location") else SourceLocation(0, 0)
+        loc = token_location(start)
         factory = get_factory()
         stmt = factory.create(IOAcceptStatement, loc)
         if not isinstance(stmt, IOAcceptStatement):

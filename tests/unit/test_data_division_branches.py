@@ -25,7 +25,9 @@ from cobolparser.plugins.core import ErrorRecoveryMode
 
 
 def _parse(src: str):
-    return parse_cobol(src, error_recovery=ErrorRecoveryMode.COLLECT_ALL, free_form=True)
+    return parse_cobol(
+        src, error_recovery=ErrorRecoveryMode.COLLECT_ALL, free_form=True
+    )
 
 
 def _assert_parsed(src: str):
@@ -139,52 +141,36 @@ class TestLevel66Renames:
 
 class TestLevel88ConditionNames:
     def test_level_88_single_value(self):
-        src = _wrap(
-            "01  WS-STATUS PIC X.\n"
-            "    88  WS-ACTIVE VALUE 'A'.\n"
-        )
+        src = _wrap("01  WS-STATUS PIC X.\n" "    88  WS-ACTIVE VALUE 'A'.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_level_88_multiple_values(self):
-        src = _wrap(
-            "01  WS-CODE PIC X.\n"
-            "    88  WS-YES VALUE 'Y' 'y'.\n"
-        )
+        src = _wrap("01  WS-CODE PIC X.\n" "    88  WS-YES VALUE 'Y' 'y'.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_level_88_through_range(self):
         src = _wrap(
-            "01  WS-GRADE PIC 9.\n"
-            "    88  WS-HIGH-GRADE VALUE 7 THROUGH 9.\n"
+            "01  WS-GRADE PIC 9.\n" "    88  WS-HIGH-GRADE VALUE 7 THROUGH 9.\n"
         )
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_level_88_thru_range(self):
-        src = _wrap(
-            "01  WS-SCORE PIC 99.\n"
-            "    88  WS-PASS VALUE 50 THRU 100.\n"
-        )
+        src = _wrap("01  WS-SCORE PIC 99.\n" "    88  WS-PASS VALUE 50 THRU 100.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_level_88_value_is_keyword(self):
         """VALUE IS ... form."""
-        src = _wrap(
-            "01  WS-FLAG PIC X.\n"
-            "    88  WS-ON VALUE IS 'T'.\n"
-        )
+        src = _wrap("01  WS-FLAG PIC X.\n" "    88  WS-ON VALUE IS 'T'.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
     def test_level_88_value_are_keyword(self):
         """VALUE ARE ... form."""
-        src = _wrap(
-            "01  WS-STATE PIC 9.\n"
-            "    88  WS-DONE VALUE ARE 9.\n"
-        )
+        src = _wrap("01  WS-STATE PIC 9.\n" "    88  WS-DONE VALUE ARE 9.\n")
         result = _assert_parsed(src)
         assert result.ast is not None
 
@@ -234,10 +220,7 @@ class TestOccursDependingOn:
         assert item.occurs_clause is not None
 
     def test_occurs_fixed_count(self):
-        src = _wrap(
-            "01  WS-ARRAY.\n"
-            "    05  WS-EL OCCURS 5 TIMES PIC X(3).\n"
-        )
+        src = _wrap("01  WS-ARRAY.\n" "    05  WS-EL OCCURS 5 TIMES PIC X(3).\n")
         result = _assert_parsed(src)
         items = result.ast.find_all_by_type("DataItem")
         el = next((i for i in items if i.name == "WS-EL"), None)
@@ -296,10 +279,7 @@ class TestFillerItems:
 
     def test_filler_implicit_anonymous(self):
         """An item with no name becomes ANONYMOUS-level-line."""
-        src = _wrap(
-            "01  WS-REC.\n"
-            "    05  PIC X(5).\n"
-        )
+        src = _wrap("01  WS-REC.\n" "    05  PIC X(5).\n")
         result = _assert_parsed(src)
         # Just verify parsing succeeds
         assert result.ast is not None

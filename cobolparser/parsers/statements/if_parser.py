@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     get_parse_context,
+    matches_keyword,
     report_parse_error,
     skip_whitespace,
     try_parse_nested_statement,
@@ -21,21 +22,7 @@ class IfStatementParser(IStatementParser):
     """Parser for IF statements using IStatementParser interface."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next token is IF keyword."""
-        try:
-            token = token_stream.peek()
-            if not token:
-                return False
-            return bool(
-                token.type == TokenType.IF
-                or (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "IF"
-                )
-            )
-        except Exception:
-            return False
+        return matches_keyword(token_stream, TokenType.IF, "IF")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

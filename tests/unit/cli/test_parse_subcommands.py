@@ -55,7 +55,9 @@ def _make_program_flow_args(filepath: str, **kwargs) -> argparse.Namespace:
     return _make_analyze_args(filepath, **kwargs)
 
 
-def _make_generate_tests_args(filepath: str, output=None, strategy=None, **kwargs) -> argparse.Namespace:
+def _make_generate_tests_args(
+    filepath: str, output=None, strategy=None, **kwargs
+) -> argparse.Namespace:
     defaults = {
         "file": filepath,
         "compact": False,

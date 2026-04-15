@@ -4,9 +4,8 @@ from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import MergeStatement, SortStatement
-from ._utils import skip_whitespace
+from ._utils import matches_keyword, skip_whitespace, token_location
 from ._utils import token_value_upper as _val
 
 
@@ -109,20 +108,13 @@ class SortStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.SORT:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "SORT"
+        return matches_keyword(token_stream, TokenType.SORT, "SORT")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> SortStatement:
         start = token_stream.consume()
-        stmt = SortStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = SortStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # File name
@@ -259,20 +251,13 @@ class MergeStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.MERGE:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "MERGE"
+        return matches_keyword(token_stream, TokenType.MERGE, "MERGE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> MergeStatement:
         start = token_stream.consume()
-        stmt = MergeStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = MergeStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # File name

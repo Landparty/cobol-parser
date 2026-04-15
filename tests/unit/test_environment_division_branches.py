@@ -22,7 +22,9 @@ from cobolparser.plugins.core import ErrorRecoveryMode
 
 
 def _parse(src: str):
-    return parse_cobol(src, error_recovery=ErrorRecoveryMode.COLLECT_ALL, free_form=True)
+    return parse_cobol(
+        src, error_recovery=ErrorRecoveryMode.COLLECT_ALL, free_form=True
+    )
 
 
 def _assert_parsed(src: str):
@@ -33,21 +35,14 @@ def _assert_parsed(src: str):
 
 def _env_wrap(env_body: str, data_body: str = "") -> str:
     data_section = (
-        (
-            "DATA DIVISION.\n"
-            "WORKING-STORAGE SECTION.\n"
-            + data_body
-        )
+        ("DATA DIVISION.\n" "WORKING-STORAGE SECTION.\n" + data_body)
         if data_body
         else ""
     )
     return (
         "IDENTIFICATION DIVISION.\n"
         "PROGRAM-ID. TEST.\n"
-        "ENVIRONMENT DIVISION.\n"
-        + env_body
-        + data_section
-        + "PROCEDURE DIVISION.\n"
+        "ENVIRONMENT DIVISION.\n" + env_body + data_section + "PROCEDURE DIVISION.\n"
         "    STOP RUN.\n"
     )
 

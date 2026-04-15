@@ -135,7 +135,9 @@ class TestNestingDepthEnforcement:
             _write(tmpdir, "INNER.CPY", "      01 INNER-VAR PIC X.\n")
             _write(tmpdir, "OUTER.CPY", "      COPY INNER.\n")
             source = _HEADER + "      COPY OUTER.\n" + _FOOTER
-            result = expand_copybooks(source, copybook_paths=[tmpdir], max_nesting_depth=10)
+            result = expand_copybooks(
+                source, copybook_paths=[tmpdir], max_nesting_depth=10
+            )
             assert result.expanded_source is not None
             assert result.max_depth_reached >= 1
 
@@ -163,7 +165,10 @@ class TestReplacingClause:
                 + _FOOTER
             )
             result = expand_copybooks(source, copybook_paths=[tmpdir])
-            assert "EMP-RECORD" in result.expanded_source or "EMP" in result.expanded_source
+            assert (
+                "EMP-RECORD" in result.expanded_source
+                or "EMP" in result.expanded_source
+            )
 
     def test_replacing_changes_identifier(self):
         """REPLACING a word should substitute it in the expanded content."""
@@ -188,8 +193,7 @@ class TestReplacingClause:
             _write(
                 tmpdir,
                 "MULTI.CPY",
-                "      01 AAA-FIELD PIC X.\n"
-                "      01 BBB-FIELD PIC X.\n",
+                "      01 AAA-FIELD PIC X.\n" "      01 BBB-FIELD PIC X.\n",
             )
             source = (
                 _HEADER
@@ -310,12 +314,7 @@ class TestMultipleCopyStatements:
         with tempfile.TemporaryDirectory() as tmpdir:
             _write(tmpdir, "COPY-A.CPY", "      01 FIELD-A PIC X.\n")
             _write(tmpdir, "COPY-B.CPY", "      01 FIELD-B PIC X.\n")
-            source = (
-                _HEADER
-                + "      COPY COPY-A.\n"
-                + "      COPY COPY-B.\n"
-                + _FOOTER
-            )
+            source = _HEADER + "      COPY COPY-A.\n" + "      COPY COPY-B.\n" + _FOOTER
             result = expand_copybooks(source, copybook_paths=[tmpdir])
             assert "FIELD-A" in result.expanded_source
             assert "FIELD-B" in result.expanded_source
@@ -325,12 +324,7 @@ class TestMultipleCopyStatements:
         """The same copybook included twice should appear once in included_copybooks."""
         with tempfile.TemporaryDirectory() as tmpdir:
             _write(tmpdir, "SHARED.CPY", "      01 SHARED-FIELD PIC X.\n")
-            source = (
-                _HEADER
-                + "      COPY SHARED.\n"
-                + "      COPY SHARED.\n"
-                + _FOOTER
-            )
+            source = _HEADER + "      COPY SHARED.\n" + "      COPY SHARED.\n" + _FOOTER
             result = expand_copybooks(source, copybook_paths=[tmpdir])
             assert "SHARED-FIELD" in result.expanded_source
             # Duplicate tracking: included_copybooks should count unique paths
@@ -352,12 +346,7 @@ class TestDiamondDependency:
             _write(tmpdir, "COMMON.CPY", "      01 COMMON-FIELD PIC X(5).\n")
             _write(tmpdir, "LEFT.CPY", "      COPY COMMON.\n")
             _write(tmpdir, "RIGHT.CPY", "      COPY COMMON.\n")
-            source = (
-                _HEADER
-                + "      COPY LEFT.\n"
-                + "      COPY RIGHT.\n"
-                + _FOOTER
-            )
+            source = _HEADER + "      COPY LEFT.\n" + "      COPY RIGHT.\n" + _FOOTER
             result = expand_copybooks(source, copybook_paths=[tmpdir])
             assert "COMMON-FIELD" in result.expanded_source
 

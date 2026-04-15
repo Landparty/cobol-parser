@@ -4,9 +4,8 @@ from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import SetStatement
-from ._utils import skip_whitespace
+from ._utils import matches_keyword, skip_whitespace, token_location
 from ._utils import token_value_upper as _val
 
 
@@ -28,20 +27,13 @@ class SetStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.SET:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "SET"
+        return matches_keyword(token_stream, TokenType.SET, "SET")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> SetStatement:
         start = token_stream.consume()
-        stmt = SetStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = SetStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Collect targets until TO/UP/DOWN/period

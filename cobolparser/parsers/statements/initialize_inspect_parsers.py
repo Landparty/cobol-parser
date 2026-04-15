@@ -4,9 +4,8 @@ from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import InitializeStatement, InspectStatement
-from ._utils import consume_period, skip_whitespace
+from ._utils import consume_period, matches_keyword, skip_whitespace, token_location
 from ._utils import token_value_upper as _val
 
 _REPLACING_CATEGORIES = frozenset(
@@ -33,20 +32,13 @@ class InitializeStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.INITIALIZE:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "INITIALIZE"
+        return matches_keyword(token_stream, TokenType.INITIALIZE, "INITIALIZE")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> InitializeStatement:
         start = token_stream.consume()
-        stmt = InitializeStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = InitializeStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Collect target identifiers
@@ -130,20 +122,13 @@ class InspectStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        token = token_stream.peek()
-        if not token:
-            return False
-        if token.type == TokenType.INSPECT:
-            return True
-        return token.type == TokenType.IDENTIFIER and _val(token) == "INSPECT"
+        return matches_keyword(token_stream, TokenType.INSPECT, "INSPECT")
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> InspectStatement:
         start = token_stream.consume()
-        stmt = InspectStatement(
-            start.location if hasattr(start, "location") else SourceLocation(0, 0)
-        )
+        stmt = InspectStatement(token_location(start))
         skip_whitespace(token_stream)
 
         # Target identifier

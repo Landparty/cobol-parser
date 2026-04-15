@@ -47,9 +47,7 @@ class TestParseTopLevelExceptionHandler:
             "parse_program",
             side_effect=ValueError("deliberate parse_program explosion"),
         ):
-            result = parser.parse(
-                "IDENTIFICATION DIVISION.\n PROGRAM-ID. TEST."
-            )
+            result = parser.parse("IDENTIFICATION DIVISION.\n PROGRAM-ID. TEST.")
         assert result.ast is None
         assert any("Parser error" in str(e) for e in result.errors)
 
@@ -217,8 +215,10 @@ class TestParseProgramOuterExceptionHandler:
         ):
             parser.parse_program()
 
-        assert any("Division parsing error" in str(e) or "stream explosion" in str(e)
-                   for e in parser.errors)
+        assert any(
+            "Division parsing error" in str(e) or "stream explosion" in str(e)
+            for e in parser.errors
+        )
 
 
 # ---------------------------------------------------------------------------

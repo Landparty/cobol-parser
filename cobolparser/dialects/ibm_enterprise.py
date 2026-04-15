@@ -354,18 +354,18 @@ class IBMEnterpriseCobol:
         "CEEDATM",  # Convert Lilian date to character date/time
         "CEEDATE",  # Convert Lilian date to character date
         "CEETIME",  # Get current time
-        "CEEGMT",   # Get current Greenwich Mean Time
+        "CEEGMT",  # Get current Greenwich Mean Time
         "CEELOCT",  # Get current local time
         "CEESECS",  # Convert date/time to Lilian seconds
-        "CEEFMTDT", # Format date/time
+        "CEEFMTDT",  # Format date/time
         "CEEDTTM",  # Convert character date/time to Lilian seconds
         "CEEDYWK",  # Calculate day of week from Lilian date
         "CEEGMTO",  # Get Greenwich Mean Time offset
-        "CEEGMTCO", # Get GMT offset for a date
-        "CEEFMTVF", # Format date/time using variable-length format
+        "CEEGMTCO",  # Get GMT offset for a date
+        "CEEFMTVF",  # Format date/time using variable-length format
         # Heap Storage services
         "CEEGTST",  # Get heap storage
-        "CEEFRMST", # Free heap storage
+        "CEEFRMST",  # Free heap storage
         "CEECREH",  # Create heap
         "CEEDSHP",  # Destroy heap
         "CEECRHP",  # Create heap (alternate)
@@ -378,27 +378,27 @@ class IBMEnterpriseCobol:
         "CEEMRCR",  # Move condition record
         "CEENDUC",  # Non-destructive update of condition
         "CEERADR",  # Re-raise a condition
-        "CEESGL",   # Signal a condition
+        "CEESGL",  # Signal a condition
         "CEEDUMP",  # Produce a system dump
         "CEEABND",  # Abend with condition
         # Environment services
         "CEENVST",  # Get next environment setting
-        "CEEENV",   # Get environment variable
+        "CEEENV",  # Get environment variable
         "CEEGPID",  # Get program instance data
         "CEEGPIL",  # Get program instance level
         "CEEGMEM",  # Get member name
-        "CEEGLS",   # Get language sensitive string length
+        "CEEGLS",  # Get language sensitive string length
         # Runtime services
         "CEETERM",  # Terminate the run unit
-        "CEEBINIT", # Initialize Language Environment
+        "CEEBINIT",  # Initialize Language Environment
         "CEEPCMD",  # Perform command
-        "CEEMSG",   # Get message text
+        "CEEMSG",  # Get message text
         "CEEGLOB",  # Get global data
-        "CEEGSS",   # Get stack storage
-        "CEESST",   # Get static storage
+        "CEEGSS",  # Get stack storage
+        "CEESST",  # Get static storage
         # String conversion services
-        "CEESG",    # Convert string
-        "CEESQ",    # Convert string length
+        "CEESG",  # Convert string
+        "CEESQ",  # Convert string length
         "CEECZST",  # Convert string with terminator
         # IMS LE interface (also a LE service)
         "CEETDLI",  # IMS DL/I call through Language Environment
