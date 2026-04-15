@@ -22,6 +22,11 @@ _SUBCOMMANDS = frozenset(
         "dead-code",
         "program-flow",
         "generate-tests",
+        "io-sequence",
+        "move-type-check",
+        "linkage-check",
+        "language-env",
+        "ims-dli",
     }
 )
 
@@ -85,6 +90,16 @@ def _add_define_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_output_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--output",
+        "-o",
+        default=None,
+        metavar="FILE",
+        help="Write output to FILE instead of stdout",
+    )
+
+
 def _get_error_recovery(args: argparse.Namespace) -> ErrorRecoveryMode:
     mode_map = {
         "fail-fast": ErrorRecoveryMode.FAIL_FAST,
@@ -118,16 +133,25 @@ def _read_source(filepath: str) -> str:
         _fail(f"Cannot read file: {e}")
 
 
-def _json_out(data: Any, compact: bool) -> None:
+def _json_out(data: Any, compact: bool, output_path: str | None = None) -> None:
     indent = None if compact else 2
-    print(json.dumps(data, indent=indent))
+    text = json.dumps(data, indent=indent)
+    if output_path:
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.write("\n")
+        except OSError as e:
+            _fail(f"Cannot write output file: {e}")
+    else:
+        print(text)
 
 
 # -- Subcommand: parse -------------------------------------------------------
 
 
 def _build_parse_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser("parse", help="Parse a COBOL source file to AST JSON")
     p.add_argument("file", help="Path to the COBOL source file")
@@ -143,6 +167,7 @@ def _build_parse_parser(
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
     _add_define_args(p)
+    _add_output_arg(p)
     p.add_argument(
         "--errors",
         action="store_true",
@@ -208,7 +233,7 @@ def _cmd_parse(args: argparse.Namespace) -> None:
     if args.find_type:
         matched = result.ast.find_all_by_type(args.find_type)
         output: Any = [n.to_dict() for n in matched]
-        _json_out(output, args.compact)
+        _json_out(output, args.compact, getattr(args, "output", None))
         return
 
     # Resolve path or output full AST
@@ -232,17 +257,24 @@ def _cmd_parse(args: argparse.Namespace) -> None:
             }
         output = wrapper
 
-    _json_out(output, args.compact)
+    _json_out(output, args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: batch --------------------------------------------------------
 
 
 def _build_batch_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser("batch", help="Parse multiple COBOL files in parallel")
-    p.add_argument("files", nargs="+", help="Paths to COBOL source files")
+    p.add_argument("files", nargs="*", help="Paths to COBOL source files")
+    p.add_argument(
+        "--glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="Glob pattern to collect source files (repeatable, e.g. 'src/**/*.cbl')",
+    )
     p.add_argument(
         "--workers",
         type=int,
@@ -258,6 +290,7 @@ def _build_batch_parser(
     _add_compact_arg(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
+    _add_output_arg(p)
     p.add_argument(
         "--errors",
         action="store_true",
@@ -272,13 +305,36 @@ def _build_batch_parser(
 
 
 def _cmd_batch(args: argparse.Namespace) -> None:
+    import glob as _glob
+
     from ..batch import parse_files
+
+    # Combine explicit file args with --glob expansions
+    file_list: list[str] = list(args.files)
+    for pattern in args.glob:
+        expanded = _glob.glob(pattern, recursive=True)
+        if not expanded:
+            print(
+                f"warning: glob pattern {pattern!r} matched no files", file=sys.stderr
+            )
+        file_list.extend(expanded)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_files: list[str] = []
+    for f in file_list:
+        if f not in seen:
+            seen.add(f)
+            unique_files.append(f)
+
+    if not unique_files:
+        _fail("No input files specified. Provide file arguments or use --glob.")
 
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
     results = parse_files(
-        args.files,
+        unique_files,
         workers=args.workers,
         error_recovery=error_recovery,
         dialect=dialect,
@@ -306,20 +362,21 @@ def _cmd_batch(args: argparse.Namespace) -> None:
                 }
         output.append(entry)
 
-    _json_out(output, args.compact)
+    _json_out(output, args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: tokenize -----------------------------------------------------
 
 
 def _build_tokenize_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser("tokenize", help="Tokenize a COBOL source file")
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
     _add_free_form_arg(p)
     _add_dialect_arg(p)
+    _add_output_arg(p)
     p.set_defaults(func=_cmd_tokenize)
 
 
@@ -342,14 +399,14 @@ def _cmd_tokenize(args: argparse.Namespace) -> None:
         for t in tokens
     ]
 
-    _json_out(output, args.compact)
+    _json_out(output, args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: preprocess ---------------------------------------------------
 
 
 def _build_preprocess_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser(
         "preprocess", help="Preprocess fixed-format COBOL to free-form"
@@ -391,7 +448,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
 
 
 def _build_expand_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser("expand", help="Expand COPY statements (copybooks)")
     p.add_argument("file", help="Path to the COBOL source file")
@@ -433,7 +490,7 @@ def _cmd_expand(args: argparse.Namespace) -> None:
 
 
 def _build_analyze_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser(
         "analyze", help="Analyze dynamic CALL targets in COBOL source"
@@ -445,6 +502,7 @@ def _build_analyze_parser(
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
     _add_define_args(p)
+    _add_output_arg(p)
     p.set_defaults(func=_cmd_analyze)
 
 
@@ -471,14 +529,14 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             entry["possible_values"] = stmt.possible_values
         calls.append(entry)
 
-    _json_out({"calls": calls}, args.compact)
+    _json_out({"calls": calls}, args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: dead-code ----------------------------------------------------
 
 
 def _build_dead_code_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser(
         "dead-code", help="Detect unreferenced paragraphs/sections (dead code)"
@@ -490,6 +548,7 @@ def _build_dead_code_parser(
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
     _add_define_args(p)
+    _add_output_arg(p)
     p.set_defaults(func=_cmd_dead_code)
 
 
@@ -505,14 +564,14 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
     analyzer = DeadCodeAnalyzer()
     report = analyzer.analyze(result.ast)
 
-    _json_out(report.to_dict(), args.compact)
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: program-flow -------------------------------------------------
 
 
 def _build_program_flow_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser(
         "program-flow",
@@ -525,6 +584,7 @@ def _build_program_flow_parser(
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
     _add_define_args(p)
+    _add_output_arg(p)
     p.set_defaults(func=_cmd_program_flow)
 
 
@@ -540,14 +600,14 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
     analyzer = ProgramFlowAnalyzer()
     report = analyzer.analyze(result.ast)
 
-    _json_out(report.to_dict(), args.compact)
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: generate-tests -----------------------------------------------
 
 
 def _build_generate_tests_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
 ) -> None:
     p = subparsers.add_parser(
         "generate-tests",
@@ -604,7 +664,215 @@ def _cmd_generate_tests(args: argparse.Namespace) -> None:
         print(output, end="")
 
 
-# -- Path resolution (unchanged) ---------------------------------------------
+# -- Subcommand: io-sequence --------------------------------------------------
+
+
+def _build_io_sequence_parser(
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+) -> None:
+    p = subparsers.add_parser(
+        "io-sequence",
+        help="Validate file I/O operation ordering (OPEN/READ/WRITE/CLOSE lifecycle)",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_io_sequence)
+
+
+def _cmd_io_sequence(args: argparse.Namespace) -> None:
+    from ..analysis.io_sequence import IOSequenceAnalyzer
+
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    analyzer = IOSequenceAnalyzer()
+    report = analyzer.analyze(result.ast)
+
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: move-type-check ----------------------------------------------
+
+
+def _build_move_type_check_parser(
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+) -> None:
+    p = subparsers.add_parser(
+        "move-type-check",
+        help="Check MOVE statement data category compatibility",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_move_type_check)
+
+
+def _cmd_move_type_check(args: argparse.Namespace) -> None:
+    from ..analysis.move_type_checker import MoveTypeChecker
+
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    checker = MoveTypeChecker()
+    report = checker.check(result.ast)
+
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: linkage-check ------------------------------------------------
+
+
+def _build_linkage_check_parser(
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+) -> None:
+    p = subparsers.add_parser(
+        "linkage-check",
+        help="Validate LINKAGE SECTION items against CALL/ENTRY USING clauses",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_linkage_check)
+
+
+def _cmd_linkage_check(args: argparse.Namespace) -> None:
+    from ..analysis.linkage_checker import LinkageChecker
+
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    checker = LinkageChecker()
+    report = checker.check(result.ast)
+
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: language-env -------------------------------------------------
+
+
+def _build_language_env_parser(
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+) -> None:
+    p = subparsers.add_parser(
+        "language-env",
+        help="Detect COBOL intrinsic functions and IBM Language Environment service calls",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_language_env)
+
+
+def _cmd_language_env(args: argparse.Namespace) -> None:
+    from ..analysis.language_env_analyzer import LanguageEnvironmentAnalyzer
+    from ..analysis.value_tracker import DynamicCallAnalyzer
+
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    # Populate possible_values on dynamic CALLs before LE analysis
+    DynamicCallAnalyzer().analyze(result.ast)
+
+    analyzer = LanguageEnvironmentAnalyzer()
+    report = analyzer.analyze(result.ast)
+
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: ims-dli ------------------------------------------------------
+
+
+def _build_ims_dli_parser(
+    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+) -> None:
+    p = subparsers.add_parser(
+        "ims-dli",
+        help="Extract IMS DLI segment references from CBLTDLI/AIBTDLI/CEETDLI calls",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_ims_dli)
+
+
+def _cmd_ims_dli(args: argparse.Namespace) -> None:
+    from ..analysis.ims_segment_analyzer import IMSSegmentAnalyzer
+
+    result = _do_parse(args)
+
+    if result.ast is None:
+        error_lines = [str(e) for e in result.errors]
+        _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+
+    analyzer = IMSSegmentAnalyzer()
+    dli_calls = analyzer.analyze(result.ast)
+    all_segments = analyzer.get_all_segment_names(dli_calls)
+
+    calls_out = []
+    for c in dli_calls:
+        loc = c.location
+        calls_out.append(
+            {
+                "interface": c.interface,
+                "function_code": c.function_code,
+                "function_code_var": c.function_code_var,
+                "pcb_name": c.pcb_name,
+                "io_area_name": c.io_area_name,
+                "ssa_names": c.ssa_names,
+                "segment_names": c.segment_names,
+                "primary_segment": c.primary_segment,
+                "location": ({"line": loc.line, "column": loc.column} if loc else None),
+            }
+        )
+
+    output: dict[str, Any] = {
+        "dli_call_count": len(calls_out),
+        "all_segments": all_segments,
+        "dli_calls": calls_out,
+    }
+
+    _json_out(output, args.compact, getattr(args, "output", None))
+
+
+# -- Path resolution ---------------------------------------------------------
 
 
 def _resolve_path(
@@ -700,9 +968,16 @@ def _fail(message: str) -> NoReturn:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    from .. import __version__  # type: ignore[attr-defined]
+
     parser = argparse.ArgumentParser(
         prog="cobol-parser",
         description="Parse, tokenize, preprocess, and analyze COBOL source files.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -715,6 +990,11 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_dead_code_parser(subparsers)
     _build_program_flow_parser(subparsers)
     _build_generate_tests_parser(subparsers)
+    _build_io_sequence_parser(subparsers)
+    _build_move_type_check_parser(subparsers)
+    _build_linkage_check_parser(subparsers)
+    _build_language_env_parser(subparsers)
+    _build_ims_dli_parser(subparsers)
 
     return parser
 
