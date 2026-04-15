@@ -161,6 +161,58 @@ def __getattr__(name: str) -> object:
             "LinkageViolationKind": LinkageViolationKind,
         }
         return _map[name]
+    if name in (
+        "DataLineageAnalyzer",
+        "DataLineageReport",
+        "TaintSource",
+        "SinkField",
+        "LineageEdge",
+        "SourceKind",
+        "SinkKind",
+    ):
+        from .data_lineage import (
+            DataLineageAnalyzer,
+            DataLineageReport,
+            LineageEdge,
+            SinkField,
+            SinkKind,
+            SourceKind,
+            TaintSource,
+        )
+
+        _map = {
+            "DataLineageAnalyzer": DataLineageAnalyzer,
+            "DataLineageReport": DataLineageReport,
+            "TaintSource": TaintSource,
+            "SinkField": SinkField,
+            "LineageEdge": LineageEdge,
+            "SourceKind": SourceKind,
+            "SinkKind": SinkKind,
+        }
+        return _map[name]
+    if name in (
+        "ComplexityAnalyzer",
+        "ComplexityReport",
+        "ParagraphMetrics",
+        "HalsteadMetrics",
+        "CopybookCoupling",
+    ):
+        from .complexity_metrics import (
+            ComplexityAnalyzer,
+            ComplexityReport,
+            CopybookCoupling,
+            HalsteadMetrics,
+            ParagraphMetrics,
+        )
+
+        _map = {
+            "ComplexityAnalyzer": ComplexityAnalyzer,
+            "ComplexityReport": ComplexityReport,
+            "ParagraphMetrics": ParagraphMetrics,
+            "HalsteadMetrics": HalsteadMetrics,
+            "CopybookCoupling": CopybookCoupling,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -200,4 +252,18 @@ __all__ = [
     "FlowNode",
     "FlowEdge",
     "FlowEdgeType",
+    # Data lineage
+    "DataLineageAnalyzer",
+    "DataLineageReport",
+    "TaintSource",
+    "SinkField",
+    "LineageEdge",
+    "SourceKind",
+    "SinkKind",
+    # Complexity metrics
+    "ComplexityAnalyzer",
+    "ComplexityReport",
+    "ParagraphMetrics",
+    "HalsteadMetrics",
+    "CopybookCoupling",
 ]
