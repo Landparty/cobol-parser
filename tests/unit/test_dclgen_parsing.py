@@ -168,9 +168,9 @@ class TestDeclareTableStatement:
 
     def _parse(self, sql: str) -> DeclareTableStatement:
         stmt = parse_exec_sql(sql, _make_loc())
-        assert isinstance(stmt, DeclareTableStatement), (
-            f"Expected DeclareTableStatement, got {type(stmt).__name__}"
-        )
+        assert isinstance(
+            stmt, DeclareTableStatement
+        ), f"Expected DeclareTableStatement, got {type(stmt).__name__}"
         return stmt
 
     def test_basic_table_name(self):
@@ -218,7 +218,13 @@ class TestDeclareTableStatement:
         assert len(stmt.columns) == 5
 
         names = [c.name for c in stmt.columns]
-        assert names == ["CUST_ID", "CUST_NAME", "CUST_ADDR", "CUST_PHONE", "CREDIT_LIMIT"]
+        assert names == [
+            "CUST_ID",
+            "CUST_NAME",
+            "CUST_ADDR",
+            "CUST_PHONE",
+            "CREDIT_LIMIT",
+        ]
 
         # CUST_ID — INTEGER
         assert stmt.columns[0].db2_type == "INTEGER"
@@ -256,6 +262,29 @@ class TestDeclareTableStatement:
         sql = "DECLARE EMP TABLE (EMP_ID CHAR(6))"
         stmt = self._parse(sql)
         assert stmt.host_variables == []
+
+    def test_set_sql_text_idempotent(self):
+        """Calling set_sql_text twice must not accumulate duplicate columns."""
+        sql = "DECLARE EMP TABLE (EMP_ID CHAR(6))"
+        stmt = self._parse(sql)
+        assert len(stmt.columns) == 1
+        # Call again with the same SQL
+        stmt.set_sql_text(sql)
+        assert len(stmt.columns) == 1  # still 1, not 2
+
+    def test_decimal_scale_equals_precision_clamped(self):
+        """DECIMAL(5,5) — scale equals precision — integer digits clamped to 1."""
+        stmt = parse_exec_sql("DECLARE T TABLE (V DECIMAL(5,5))", _make_loc())
+        assert isinstance(stmt, DeclareTableStatement)
+        col = stmt.columns[0]
+        assert col.cobol_picture == "S9(1)V9(5)"
+
+    def test_decimal_scale_exceeds_precision_raises(self):
+        """DECIMAL(3,5) — scale > precision — must raise ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="scale"):
+            parse_exec_sql("DECLARE T TABLE (V DECIMAL(3,5))", _make_loc())
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +394,12 @@ class TestHostVariableResolver:
         assert len(tbl.columns) == 2
 
     def test_dclgen_column_used_as_fallback(self):
-        """When a host var has no DATA DIVISION entry, fall back to DB2 column."""
+        """Host vars with no DATA DIVISION entry fall back to the DB2 column definition.
+
+        This test uses underscore-form host variable names (matching the DECLARE
+        TABLE column names exactly) to exercise the DB2 column fallback path in
+        HostVariableResolver.
+        """
         cobol = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TEST4.
@@ -381,24 +415,32 @@ class TestHostVariableResolver:
        MAIN.
            EXEC SQL
                SELECT EMP_ID, EMP_NAME
-               INTO :EMP-ID, :EMP-NAME
+               INTO :EMP_ID, :EMP_NAME
                FROM EMPLOYEE
            END-EXEC
            STOP RUN.
 """
         report = self._resolve(cobol)
-        # EMP-ID and EMP-NAME have no COBOL data items — fall back to DB2 columns
-        # Note: SQL uses EMP-ID but DCLGEN column is EMP_ID (underscore).
-        # The resolver does exact-name matching (upper-cased). The host var
-        # name in COBOL SQL uses hyphens, so EMP-ID won't match EMP_ID.
-        # Both should appear as unresolved or resolved depending on name form.
-        # This test validates the fallback path when names DO match.
-        # Use underscore form that matches the column index.
-        assert "EMP_ID" not in report.resolved  # hyphen form used in SQL
-        assert "EMP_NAME" not in report.resolved
+        # EMP_ID and EMP_NAME have no COBOL DATA DIVISION entries — the resolver
+        # falls back to the DB2 column definitions from the DECLARE TABLE block.
+        assert "EMP_ID" in report.resolved
+        assert "EMP_NAME" in report.resolved
+        # No DATA DIVISION item; db2_column is populated from DECLARE TABLE
+        assert report.resolved["EMP_ID"].data_item is None
+        assert report.resolved["EMP_ID"].db2_column is not None
+        assert report.resolved["EMP_ID"].picture == "X(6)"
+        assert report.resolved["EMP_NAME"].picture == "X(30)"
+        # These variables are NOT unresolved
+        assert "EMP_ID" not in report.unresolved
+        assert "EMP_NAME" not in report.unresolved
 
-    def test_null_indicators_not_double_counted(self):
-        """Null indicator variables should not be resolved as host variables."""
+    def test_null_indicators_resolved_as_host_variables(self):
+        """Null indicator variables that exist in Working-Storage are resolved normally.
+
+        COBOL allows null indicators to be any S9(4) COMP host variable.  The
+        resolver treats them identically to other host variables: if the name is
+        found in the DATA DIVISION it is *resolved*, not unresolved.
+        """
         cobol = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TEST5.
@@ -415,7 +457,9 @@ class TestHostVariableResolver:
 """
         report = self._resolve(cobol)
         assert "WS-NAME" in report.resolved
-        # WS-IND may appear as resolved (it IS in WS) but not as unresolved
+        # WS-IND is a valid Working-Storage item and appears as a host variable
+        # (INDICATOR syntax is syntactic sugar; the var still has a WS entry)
+        assert "WS-IND" in report.resolved
         assert "WS-IND" not in report.unresolved
 
     def test_to_dict_serialisable(self):
@@ -460,6 +504,57 @@ class TestHostVariableResolver:
         assert "WS-ID" in report.resolved
         # The same variable appears in two statements
         assert len(report.resolved["WS-ID"].sql_statements) == 2
+
+    def test_column_collision_reported(self):
+        """Column names that appear in multiple DECLARE TABLE blocks are flagged."""
+        cobol = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST9.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL
+               DECLARE TABLE1 TABLE (ID INTEGER NOT NULL, NAME CHAR(30))
+           END-EXEC.
+           EXEC SQL
+               DECLARE TABLE2 TABLE (ID CHAR(10) NOT NULL, CODE CHAR(5))
+           END-EXEC.
+       PROCEDURE DIVISION.
+       MAIN.
+           STOP RUN.
+"""
+        report = self._resolve(cobol)
+        # "ID" appears in both TABLE1 and TABLE2 — must be flagged as a collision
+        assert "ID" in report.column_name_collisions
+        tables_for_id = report.column_name_collisions["ID"]
+        assert "TABLE1" in tables_for_id
+        assert "TABLE2" in tables_for_id
+        # "NAME" and "CODE" are unique — no collision
+        assert "NAME" not in report.column_name_collisions
+        assert "CODE" not in report.column_name_collisions
+
+    def test_collision_in_to_dict(self):
+        """column_name_collisions is included in to_dict output."""
+        cobol = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST10.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL
+               DECLARE A TABLE (STATUS CHAR(1))
+           END-EXEC.
+           EXEC SQL
+               DECLARE B TABLE (STATUS CHAR(2))
+           END-EXEC.
+       PROCEDURE DIVISION.
+       MAIN.
+           STOP RUN.
+"""
+        report = self._resolve(cobol)
+        d = report.to_dict()
+        assert "column_name_collisions" in d
+        assert "collision_count" in d
+        assert d["collision_count"] == 1
+        assert "STATUS" in d["column_name_collisions"]
 
     def test_symbol_table_accessible(self):
         from cobolparser.analysis import HostVariableResolver
@@ -556,8 +651,13 @@ class TestEndToEndDclgen:
         result = parse_cobol(self.DCLGEN_PROGRAM)
         report = HostVariableResolver().resolve(result.ast)
 
-        for var in ["WS-CUST-ID", "WS-CUST-NAME", "WS-CUST-ADDR",
-                    "WS-CUST-PHONE", "WS-CREDIT-LIMIT"]:
+        for var in [
+            "WS-CUST-ID",
+            "WS-CUST-NAME",
+            "WS-CUST-ADDR",
+            "WS-CUST-PHONE",
+            "WS-CREDIT-LIMIT",
+        ]:
             assert var in report.resolved, (
                 f"Expected {var!r} to be resolved, but it wasn't. "
                 f"Resolved: {list(report.resolved)}, "

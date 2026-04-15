@@ -91,21 +91,30 @@ class HostVarResolutionReport:
             neither a DATA DIVISION entry nor a matching DB2 column.
         declare_tables: All ``DECLARE TABLE`` statements found in the program,
             keyed by upper-cased table name.
+        column_name_collisions: Mapping of upper-cased column name → list of
+            table names that define a column with that name.  Only populated
+            when the same column name exists in **two or more** DECLARE TABLE
+            blocks.  When a collision exists the DB2 fallback for that name is
+            ambiguous; callers should prefer the DATA DIVISION definition or
+            disambiguate by table.
     """
 
     resolved: dict[str, HostVariableInfo] = field(default_factory=dict)
     unresolved: set[str] = field(default_factory=set)
     declare_tables: dict[str, DeclareTableStatement] = field(default_factory=dict)
+    column_name_collisions: dict[str, list[str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary."""
         return {
             "resolved_count": len(self.resolved),
             "unresolved_count": len(self.unresolved),
+            "collision_count": len(self.column_name_collisions),
             "resolved": {k: v.to_dict() for k, v in self.resolved.items()},
             "unresolved": sorted(self.unresolved),
-            "declare_tables": {
-                k: v.to_dict() for k, v in self.declare_tables.items()
+            "declare_tables": {k: v.to_dict() for k, v in self.declare_tables.items()},
+            "column_name_collisions": {
+                k: sorted(v) for k, v in self.column_name_collisions.items()
             },
         }
 
@@ -134,8 +143,10 @@ class HostVariableResolver:
         self._symbol_table: dict[str, CobolDataItem] = {}
         # Upper-cased table name → DeclareTableStatement
         self._declare_tables: dict[str, DeclareTableStatement] = {}
-        # Upper-cased column name → DB2ColumnDefinition (across all DECLARE TABLEs)
+        # Upper-cased column name → DB2ColumnDefinition (first occurrence wins)
         self._column_index: dict[str, DB2ColumnDefinition] = {}
+        # Upper-cased column name → list of table names that define it
+        self._column_table_map: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -154,11 +165,21 @@ class HostVariableResolver:
         self._symbol_table = {}
         self._declare_tables = {}
         self._column_index = {}
+        self._column_table_map = {}
 
         self._build_symbol_table(ast)
         self._collect_declare_tables(ast)
 
-        report = HostVarResolutionReport(declare_tables=self._declare_tables)
+        # Identify column names that collide across multiple DECLARE TABLE blocks
+        collisions = {
+            col: tables
+            for col, tables in self._column_table_map.items()
+            if len(tables) > 1
+        }
+        report = HostVarResolutionReport(
+            declare_tables=self._declare_tables,
+            column_name_collisions=collisions,
+        )
         self._resolve_host_vars(ast, report)
         return report
 
@@ -183,14 +204,22 @@ class HostVariableResolver:
     # ------------------------------------------------------------------
 
     def _collect_declare_tables(self, node: ASTNode) -> None:
-        """Recursively find DeclareTableStatement nodes and index their columns."""
+        """Recursively find DeclareTableStatement nodes and index their columns.
+
+        When the same column name appears in multiple DECLARE TABLE blocks the
+        first occurrence is kept in ``_column_index`` (so fallback resolution
+        is deterministic) and the collision is recorded in ``_column_table_map``
+        for later reporting.
+        """
         if isinstance(node, DeclareTableStatement) and node.table_name:
             table_upper = node.table_name.upper()
             self._declare_tables[table_upper] = node
             for col in node.columns:
-                # Column names are unique within a table; across tables we do
-                # a best-effort match (last write wins — unusual in practice).
-                self._column_index[col.name.upper()] = col
+                col_upper = col.name.upper()
+                self._column_table_map.setdefault(col_upper, [])
+                self._column_table_map[col_upper].append(table_upper)
+                # First occurrence wins — keeps fallback resolution deterministic
+                self._column_index.setdefault(col_upper, col)
 
         if hasattr(node, "children"):
             for child in node.children:
@@ -200,7 +229,9 @@ class HostVariableResolver:
     # Pass 3: resolve host variables in EXEC SQL statements
     # ------------------------------------------------------------------
 
-    def _resolve_host_vars(self, node: ASTNode, report: HostVarResolutionReport) -> None:
+    def _resolve_host_vars(
+        self, node: ASTNode, report: HostVarResolutionReport
+    ) -> None:
         """Walk the AST and resolve host variables in every ExecSQLStatement."""
         if isinstance(node, ExecSQLStatement) and not isinstance(
             node, DeclareTableStatement

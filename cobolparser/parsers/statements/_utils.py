@@ -425,6 +425,69 @@ def parse_size_error_clauses(stream: ITokenStream, stmt: Any) -> None:
             break
 
 
+# ---------------------------------------------------------------------------
+# EXEC SQL / EXEC CICS block text collector
+# ---------------------------------------------------------------------------
+
+#: Token types that should be attached directly to the preceding token (no space).
+_EXEC_SQL_NO_SPACE_BEFORE: frozenset[TokenType] = frozenset(
+    {
+        TokenType.COLON,
+        TokenType.COMMA,
+        TokenType.PERIOD,
+        TokenType.SEMICOLON,
+    }
+)
+
+
+def collect_exec_sql_text(stream: ITokenStream) -> str:
+    """Collect the raw SQL text from a token stream up to (and consuming) END-EXEC.
+
+    The stream must be positioned **after** the ``EXEC SQL`` keyword pair has
+    already been consumed by the caller.
+
+    Host-variable colons (e.g. ``:WS-NAME``) are preserved by attaching the
+    identifier directly to the preceding colon token (no space inserted).
+    Punctuation tokens (comma, period, semicolon) are similarly attached to
+    avoid spurious spaces.
+
+    Args:
+        stream: Token stream positioned at the first SQL token after ``SQL``.
+
+    Returns:
+        The reconstructed SQL text as a single string, without leading/trailing
+        whitespace.
+    """
+    sql_parts: list[str] = []
+    prev_was_colon = False
+    while not stream.is_empty():
+        token = stream.peek(0)
+        if not token:
+            break
+
+        is_end_exec = token.type == TokenType.END_EXEC or (
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "END-EXEC"
+        )
+        if is_end_exec:
+            stream.consume()
+            break
+
+        if token.value:
+            if prev_was_colon or token.type in _EXEC_SQL_NO_SPACE_BEFORE:
+                if sql_parts:
+                    sql_parts[-1] = sql_parts[-1] + token.value
+                else:
+                    sql_parts.append(token.value)
+            else:
+                sql_parts.append(token.value)
+            prev_was_colon = token.type == TokenType.COLON
+        stream.consume()
+
+    return " ".join(sql_parts)
+
+
 def _parse_size_error_stmts(stream: ITokenStream) -> list:
     """Parse imperative statements inside an ON SIZE ERROR / NOT ON SIZE ERROR clause.
 

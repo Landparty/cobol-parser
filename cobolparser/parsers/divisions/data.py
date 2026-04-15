@@ -21,6 +21,7 @@ from cobolparser.models.data_items import (
 )
 from cobolparser.models.program import CobolDivision, CobolSection
 from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
+from cobolparser.parsers.statements._utils import collect_exec_sql_text
 
 from .base import BaseDivisionParser
 
@@ -604,6 +605,9 @@ class DataDivisionParser(BaseDivisionParser):
         ``INCLUDE SQLCA`` / ``INCLUDE SQLDA`` directives that are placed in
         the Working-Storage or Linkage sections.
 
+        The token-to-SQL-text reconstruction is shared with the procedure-
+        division EXEC SQL parser via :func:`collect_exec_sql_text`.
+
         Args:
             token_stream: Token stream positioned at the EXEC token.
 
@@ -611,13 +615,6 @@ class DataDivisionParser(BaseDivisionParser):
             An :class:`ExecSQLStatement` (or subclass) node, or *None* if the
             block cannot be parsed.
         """
-        _NO_SPACE_BEFORE = {
-            TokenType.COLON,
-            TokenType.COMMA,
-            TokenType.PERIOD,
-            TokenType.SEMICOLON,
-        }
-
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
@@ -625,34 +622,7 @@ class DataDivisionParser(BaseDivisionParser):
         if not token_stream.is_empty():
             token_stream.consume()
 
-        sql_parts: list[str] = []
-        prev_was_colon = False
-        while not token_stream.is_empty():
-            token = token_stream.peek(0)
-            if not token:
-                break
-
-            is_end_exec = token.type == TokenType.END_EXEC or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "END-EXEC"
-            )
-            if is_end_exec:
-                token_stream.consume()
-                break
-
-            if token.value:
-                if prev_was_colon or token.type in _NO_SPACE_BEFORE:
-                    if sql_parts:
-                        sql_parts[-1] = sql_parts[-1] + token.value
-                    else:
-                        sql_parts.append(token.value)
-                else:
-                    sql_parts.append(token.value)
-                prev_was_colon = token.type == TokenType.COLON
-            token_stream.consume()
-
-        sql_text = " ".join(sql_parts)
+        sql_text = collect_exec_sql_text(token_stream)
         if not sql_text.strip():
             return None
         return parse_exec_sql(sql_text, start_location)

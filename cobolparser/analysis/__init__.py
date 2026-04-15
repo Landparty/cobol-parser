@@ -167,9 +167,9 @@ def __getattr__(name: str) -> object:
         "HostVarResolutionReport",
     ):
         from .host_var_resolver import (
-            HostVarResolutionReport,
             HostVariableInfo,
             HostVariableResolver,
+            HostVarResolutionReport,
         )
 
         _map = {

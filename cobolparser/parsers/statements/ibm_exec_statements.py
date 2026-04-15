@@ -9,6 +9,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import ASTNode, SourceLocation
 from ...models.sql_statements import parse_exec_sql
+from ._utils import collect_exec_sql_text
 
 
 class ExecCicsStatement(ASTNode):
@@ -69,10 +70,7 @@ class ExecSqlStatementParser(IStatementParser):
             return False
 
     def parse(self, token_stream: ITokenStream, context: Any | None = None) -> ASTNode:
-        """Parse an EXEC SQL statement.
-
-        Simplified implementation that skips to END-EXEC.
-        """
+        """Parse an EXEC SQL statement."""
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
@@ -80,43 +78,7 @@ class ExecSqlStatementParser(IStatementParser):
         if not token_stream.is_empty():
             token_stream.consume()
 
-        # Collect SQL content until END-EXEC, preserving host variable syntax (:VAR)
-        _NO_SPACE_BEFORE = {
-            TokenType.COLON,
-            TokenType.COMMA,
-            TokenType.PERIOD,
-            TokenType.SEMICOLON,
-        }
-        sql_parts: list[str] = []
-        prev_was_colon = False
-        while not token_stream.is_empty():
-            token = token_stream.peek(0)
-            if not token:
-                break
-
-            is_end_exec = token.type == TokenType.END_EXEC or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "END-EXEC"
-            )
-            if is_end_exec:
-                token_stream.consume()
-                break
-
-            if token.value:
-                # Attach directly to previous token when it was a colon (host var)
-                # or when this token is punctuation that shouldn't be space-separated
-                if prev_was_colon or token.type in _NO_SPACE_BEFORE:
-                    if sql_parts:
-                        sql_parts[-1] = sql_parts[-1] + token.value
-                    else:
-                        sql_parts.append(token.value)
-                else:
-                    sql_parts.append(token.value)
-                prev_was_colon = token.type == TokenType.COLON
-            token_stream.consume()
-
-        sql_text = " ".join(sql_parts)
+        sql_text = collect_exec_sql_text(token_stream)
         return parse_exec_sql(sql_text, start_location)
 
 

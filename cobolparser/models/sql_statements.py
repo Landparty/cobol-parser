@@ -14,9 +14,9 @@ from .ast_base import SourceLocation
 from .statements import CobolStatement
 
 # Pre-compiled regex patterns for SQL statement parsing (avoids re-compilation per statement)
-_SQL_HOST_VAR_RE = re.compile(r":([A-Za-z][A-Za-z0-9-]*)")
+_SQL_HOST_VAR_RE = re.compile(r":([A-Za-z][A-Za-z0-9_-]*)")
 _SQL_INDICATOR_RE = re.compile(
-    r":([A-Za-z][A-Za-z0-9-]*)\s*:\s*([A-Za-z][A-Za-z0-9-]*)"
+    r":([A-Za-z][A-Za-z0-9_-]*)\s*:\s*([A-Za-z][A-Za-z0-9_-]*)"
 )
 _SQL_INDICATOR_KW_RE = re.compile(
     r"INDICATOR\s+:([A-Za-z][A-Za-z0-9-]*)", re.IGNORECASE
@@ -34,10 +34,10 @@ _SQL_DECLARE_TABLE_RE = re.compile(
 )
 # Matches a single column definition: NAME  TYPE[(len[,scale])]  [NOT NULL]
 _SQL_COLUMN_DEF_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*)"           # column name
-    r"\s+([A-Za-z][A-Za-z0-9]*)"           # DB2 type keyword
+    r"([A-Za-z_][A-Za-z0-9_]*)"  # column name
+    r"\s+([A-Za-z][A-Za-z0-9]*)"  # DB2 type keyword
     r"(?:\s*\(\s*(\d+)(?:\s*,\s*(\d+))?\s*\))?"  # optional (len) or (prec,scale)
-    r"(?:\s+(NOT\s+NULL))?",               # optional NOT NULL
+    r"(?:\s+(NOT\s+NULL))?",  # optional NOT NULL
     re.IGNORECASE,
 )
 _SQL_FETCH_RE = re.compile(
@@ -114,6 +114,7 @@ class SQLStatementType:
 # DB2 column definition (produced by DCLGEN)
 # ---------------------------------------------------------------------------
 
+
 # Mapping from DB2 type name (upper-cased) to a function that returns the
 # equivalent COBOL picture string given (length, precision, scale) parameters.
 # Returns None for types that have no simple picture equivalent (e.g. BLOB).
@@ -140,13 +141,19 @@ def _db2_pic_bigint(_l: int | None, _p: int | None, _s: int | None) -> str:
     return "S9(18)"
 
 
-def _db2_pic_decimal(
-    _l: int | None, precision: int | None, scale: int | None
-) -> str:
+def _db2_pic_decimal(_l: int | None, precision: int | None, scale: int | None) -> str:
     p = precision or 9
     s = scale or 0
-    integer_digits = p - s
+    if p <= 0:
+        raise ValueError(f"Invalid DECIMAL precision: {p}")
+    if s < 0:
+        raise ValueError(f"Invalid DECIMAL scale: {s}")
+    if s > p:
+        raise ValueError(
+            f"Invalid DECIMAL definition: scale ({s}) cannot exceed precision ({p})"
+        )
     if s > 0:
+        integer_digits = max(1, p - s)
         return f"S9({integer_digits})V9({s})"
     return f"S9({p})"
 
@@ -206,7 +213,9 @@ _DB2_COMP_TYPES = frozenset({"INTEGER", "INT", "SMALLINT", "BIGINT"})
 # DB2 float types (usage annotation rather than PIC)
 _DB2_FLOAT_TYPES = frozenset({"FLOAT", "REAL", "DOUBLE"})
 # DB2 character-like types
-_DB2_CHAR_TYPES = frozenset({"CHAR", "CHARACTER", "VARCHAR", "CLOB", "DATE", "TIME", "TIMESTAMP"})
+_DB2_CHAR_TYPES = frozenset(
+    {"CHAR", "CHARACTER", "VARCHAR", "CLOB", "DATE", "TIME", "TIMESTAMP"}
+)
 
 
 def db2_type_to_cobol_pic(
@@ -707,6 +716,9 @@ class DeclareTableStatement(ExecSQLStatement):
 
     def set_sql_text(self, sql_text: str) -> None:
         """Override to also parse table name and column definitions."""
+        # Reset state so re-invocations don't accumulate duplicates
+        self.table_name = None
+        self.columns = []
         super().set_sql_text(sql_text)
         # Extract table name
         m = _SQL_DECLARE_TABLE_RE.search(sql_text)
