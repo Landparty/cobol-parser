@@ -161,11 +161,31 @@ def __getattr__(name: str) -> object:
             "LinkageViolationKind": LinkageViolationKind,
         }
         return _map[name]
+    if name in (
+        "HostVariableResolver",
+        "HostVariableInfo",
+        "HostVarResolutionReport",
+    ):
+        from .host_var_resolver import (
+            HostVariableInfo,
+            HostVariableResolver,
+            HostVarResolutionReport,
+        )
+
+        _map = {
+            "HostVariableResolver": HostVariableResolver,
+            "HostVariableInfo": HostVariableInfo,
+            "HostVarResolutionReport": HostVarResolutionReport,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "CoverageAnalyzer",
+    "HostVarResolutionReport",
+    "HostVariableInfo",
+    "HostVariableResolver",
     "LanguageEnvironmentAnalyzer",
     "LEAnalysisResult",
     "LEFunctionUsage",

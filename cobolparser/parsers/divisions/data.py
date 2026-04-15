@@ -20,6 +20,8 @@ from cobolparser.models.data_items import (
     RenamesItem,
 )
 from cobolparser.models.program import CobolDivision, CobolSection
+from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
+from cobolparser.parsers.statements._utils import collect_exec_sql_text
 
 from .base import BaseDivisionParser
 
@@ -144,6 +146,7 @@ class DataDivisionParser(BaseDivisionParser):
 
         # Parse data items until we reach next section or division
         data_items: list[ConditionNameItem | RenamesItem | CobolDataItem] = []
+        exec_sql_items: list[ExecSQLStatement] = []
         section_keywords = {
             "SECTION",
             "FILE",
@@ -205,6 +208,29 @@ class DataDivisionParser(BaseDivisionParser):
                 token_stream.consume()
                 continue
 
+            # Parse EXEC SQL blocks that appear in the data division
+            # (e.g. DCLGEN-generated DECLARE TABLE or INCLUDE SQLCA)
+            is_exec = token.type == TokenType.EXEC or (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "EXEC"
+            )
+            if is_exec and paren_depth == 0:
+                next_tok = token_stream.peek(1)
+                is_sql = next_tok and (
+                    next_tok.type == TokenType.SQL
+                    or (
+                        next_tok.type == TokenType.IDENTIFIER
+                        and next_tok.value
+                        and next_tok.value.upper() == "SQL"
+                    )
+                )
+                if is_sql:
+                    sql_stmt = self._parse_exec_sql_in_data(token_stream)
+                    if sql_stmt is not None:
+                        exec_sql_items.append(sql_stmt)
+                    continue
+
             # Try to parse a data item (should start with level number, but not inside parentheses)
             if token.type == TokenType.LEVEL_NUMBER and paren_depth == 0:
                 try:
@@ -234,6 +260,7 @@ class DataDivisionParser(BaseDivisionParser):
         return {
             "type": section_name.lower().replace("-", "_"),
             "data_items": hierarchical_items,
+            "exec_sql_items": exec_sql_items,
         }
 
     def _build_data_hierarchy(self, data_items: list) -> list:
@@ -569,6 +596,37 @@ class DataDivisionParser(BaseDivisionParser):
 
         return item
 
+    def _parse_exec_sql_in_data(
+        self, token_stream: ITokenStream
+    ) -> ExecSQLStatement | None:
+        """Parse an EXEC SQL...END-EXEC block appearing in the Data Division.
+
+        This handles DCLGEN-generated ``DECLARE TABLE`` blocks and
+        ``INCLUDE SQLCA`` / ``INCLUDE SQLDA`` directives that are placed in
+        the Working-Storage or Linkage sections.
+
+        The token-to-SQL-text reconstruction is shared with the procedure-
+        division EXEC SQL parser via :func:`collect_exec_sql_text`.
+
+        Args:
+            token_stream: Token stream positioned at the EXEC token.
+
+        Returns:
+            An :class:`ExecSQLStatement` (or subclass) node, or *None* if the
+            block cannot be parsed.
+        """
+        start_token = token_stream.consume()  # EXEC
+        start_location = start_token.location if start_token else SourceLocation(0, 0)
+
+        # Consume SQL keyword
+        if not token_stream.is_empty():
+            token_stream.consume()
+
+        sql_text = collect_exec_sql_text(token_stream)
+        if not sql_text.strip():
+            return None
+        return parse_exec_sql(sql_text, start_location)
+
     def _parse_renames_item(self, token_stream: ITokenStream) -> RenamesItem | None:
         """Parse a level-66 RENAMES item.
 
@@ -797,6 +855,9 @@ class DataDivisionParser(BaseDivisionParser):
                         elif isinstance(data_item, RenamesItem):
                             # RenamesItem is not a CobolDataItem but must be in the AST tree
                             section.add_child(data_item)
+                    # EXEC SQL blocks (DECLARE TABLE, INCLUDE SQLCA, etc.)
+                    for sql_node in division_content[key].get("exec_sql_items", []):
+                        section.add_child(sql_node)
 
                 division_node.add_section(section)
 
