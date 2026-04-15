@@ -471,7 +471,7 @@ class ProgramFlowAnalyzer:
                     "location": stmt.location.to_dict(),
                     "table_name": stmt.table_name,
                     "when_count": len(stmt.when_clauses),
-                    "has_at_end": stmt.at_end_clause is not None,
+                    "has_at_end": bool(stmt.at_end_clause),
                 }
                 node.decisions.append(decision)
                 for wc_dict in stmt.when_clauses:

@@ -4192,3 +4192,490 @@ class TestProgramFlowRealCobolIntegration:
         assert d["summary"]["edge_count"] == len(d["edges"])
         assert d["summary"]["cancellation_count"] == 1
         assert d["summary"]["unreachable_node_count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: Edge-case coverage (audit gaps)
+# ---------------------------------------------------------------------------
+
+
+class TestProgramFlowAuditEdgeCases:
+    """Covers boundary conditions and untested branches found by the deep audit."""
+
+    # ------------------------------------------------------------------
+    # CANCEL: empty program_names list
+    # ------------------------------------------------------------------
+
+    def test_cancel_empty_program_names_ignored(self) -> None:
+        """CANCEL with no program names produces no cancellations."""
+        from cobolparser.models.statements.misc import CancelStatement
+
+        cancel = CancelStatement(LOC)
+        # add_program_name is never called -> program_names stays []
+        prog = _make_program([("MAIN-LOGIC", [cancel, _stop_run()])])
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert report.program_cancellations == []
+
+    # ------------------------------------------------------------------
+    # CALL: called_program is None
+    # ------------------------------------------------------------------
+
+    def test_call_none_program_no_edge(self) -> None:
+        """CALL statement whose called_program was never set produces no edges."""
+        call = CallStatement(LOC)
+        # set_called_program is deliberately NOT called
+
+        prog = _make_program([("MAIN-LOGIC", [call, _stop_run()])])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        call_edges = [
+            e
+            for e in report.edges
+            if e.edge_type in (FlowEdgeType.CALL, FlowEdgeType.CALL_DYNAMIC)
+        ]
+        assert len(call_edges) == 0
+        assert report.external_calls == []
+
+    # ------------------------------------------------------------------
+    # SORT/MERGE THRU without base procedure
+    # ------------------------------------------------------------------
+
+    def test_sort_input_procedure_thru_without_base_creates_no_edge(self) -> None:
+        """SORT with input_procedure_thru but no input_procedure -> no SORT edges."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.input_procedure_thru = "PROC-END"  # THRU set directly, base is None
+
+        prog = _make_program([
+            ("MAIN-LOGIC", [stmt, _stop_run()]),
+            ("PROC-END", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        sort_input_edges = [
+            e
+            for e in report.edges
+            if e.edge_type
+            in (FlowEdgeType.SORT_INPUT_PROCEDURE, FlowEdgeType.SORT_INPUT_PROCEDURE_THRU)
+        ]
+        assert len(sort_input_edges) == 0
+
+    def test_sort_output_procedure_thru_without_base_creates_no_edge(self) -> None:
+        """SORT with output_procedure_thru but no output_procedure -> no edges."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.output_procedure_thru = "PROC-END"  # THRU set directly, base is None
+
+        prog = _make_program([
+            ("MAIN-LOGIC", [stmt, _stop_run()]),
+            ("PROC-END", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        sort_output_edges = [
+            e
+            for e in report.edges
+            if e.edge_type
+            in (FlowEdgeType.SORT_OUTPUT_PROCEDURE, FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU)
+        ]
+        assert len(sort_output_edges) == 0
+
+    def test_merge_output_procedure_thru_without_base_creates_no_edge(self) -> None:
+        """MERGE with output_procedure_thru but no output_procedure -> no edges."""
+        from cobolparser.models.statements.misc import MergeStatement
+
+        stmt = MergeStatement(LOC)
+        stmt.set_file_name("MERGE-FILE")
+        stmt.output_procedure_thru = "PROC-END"  # THRU set directly, base is None
+
+        prog = _make_program([
+            ("MAIN-LOGIC", [stmt, _stop_run()]),
+            ("PROC-END", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        merge_output_edges = [
+            e
+            for e in report.edges
+            if e.edge_type
+            in (
+                FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
+                FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+            )
+        ]
+        assert len(merge_output_edges) == 0
+
+    # ------------------------------------------------------------------
+    # Fall-through: EXIT SECTION/PARAGRAPH/PERFORM do NOT block it
+    # ------------------------------------------------------------------
+
+    def test_fall_through_after_exit_section(self) -> None:
+        """EXIT SECTION does NOT prevent fall-through to the next paragraph."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("SECTION")
+
+        prog = _make_program([
+            ("PARA-A", [exit_stmt]),
+            ("PARA-B", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 1
+
+    def test_fall_through_after_exit_paragraph(self) -> None:
+        """EXIT PARAGRAPH does NOT prevent fall-through to the next paragraph."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("PARAGRAPH")
+
+        prog = _make_program([
+            ("PARA-A", [exit_stmt]),
+            ("PARA-B", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 1
+
+    def test_fall_through_after_exit_perform(self) -> None:
+        """EXIT PERFORM does NOT prevent fall-through to the next paragraph."""
+        exit_stmt = ExitStatement(LOC)
+        exit_stmt.set_exit_type("PERFORM")
+
+        prog = _make_program([
+            ("PARA-A", [exit_stmt]),
+            ("PARA-B", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 1
+
+    def test_fall_through_after_goto_depending(self) -> None:
+        """GO TO DEPENDING ON is conditional; fall-through still happens."""
+        prog = _make_program([
+            ("DISPATCH", [_goto_depending(["BRANCH-A", "BRANCH-B"], "WS-IDX")]),
+            ("NEXT-PARA", [_continue()]),
+            ("BRANCH-A", [_continue()]),
+            ("BRANCH-B", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "DISPATCH"
+            and e.target == "NEXT-PARA"
+        ]
+        assert len(ft_edges) == 1
+
+    # ------------------------------------------------------------------
+    # Cycle detection: multiple independent cycles
+    # ------------------------------------------------------------------
+
+    def test_two_independent_cycles_both_detected(self) -> None:
+        """Two disjoint cycle clusters are both reported in cycles list."""
+        prog = _make_program([
+            ("LOOP-A", [_perform("LOOP-B")]),
+            ("LOOP-B", [_perform("LOOP-A")]),
+            ("LOOP-C", [_perform("LOOP-D")]),
+            ("LOOP-D", [_perform("LOOP-C")]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert len(report.cycles) >= 2
+        all_nodes_in_cycles = {n for cycle in report.cycles for n in cycle}
+        assert {"LOOP-A", "LOOP-B"}.issubset(all_nodes_in_cycles)
+        assert {"LOOP-C", "LOOP-D"}.issubset(all_nodes_in_cycles)
+
+    # ------------------------------------------------------------------
+    # Cycle detection: de-duplication
+    # ------------------------------------------------------------------
+
+    def test_cycle_deduplication_same_cycle_reported_once(self) -> None:
+        """The same cycle found from multiple DFS entry points is only in
+        cycles list once."""
+        prog = _make_program([
+            ("LOOP-A", [_perform("LOOP-B")]),
+            ("LOOP-B", [_perform("LOOP-C")]),
+            ("LOOP-C", [_perform("LOOP-A")]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # Exactly one unique cycle in the graph
+        assert len(report.cycles) == 1
+        assert set(report.cycles[0]) == {"LOOP-A", "LOOP-B", "LOOP-C"}
+
+    # ------------------------------------------------------------------
+    # Unreachable: empty entry_points
+    # ------------------------------------------------------------------
+
+    def test_all_nodes_unreachable_when_entry_points_cleared(self) -> None:
+        """After clearing _entry_points and re-running detection, all nodes
+        are reported as unreachable."""
+        prog = _make_program([
+            ("PARA-A", [_perform("PARA-B")]),
+            ("PARA-B", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        analyzer.analyze(prog)  # normal run first to populate _nodes/_ordered_procedures
+
+        # Manually clear entry points to simulate the boundary condition
+        analyzer._entry_points = []
+        analyzer._unreachable_nodes = []
+        analyzer._detect_unreachable_nodes()
+
+        assert "PARA-A" in analyzer._unreachable_nodes
+        assert "PARA-B" in analyzer._unreachable_nodes
+
+    # ------------------------------------------------------------------
+    # Unreachable: entry point not in _nodes (external ENTRY)
+    # ------------------------------------------------------------------
+
+    def test_entry_point_not_in_nodes_skipped_gracefully(self) -> None:
+        """An ENTRY statement name that has no matching paragraph node is
+        skipped without error during reachability analysis."""
+        entry = EntryStatement(LOC)
+        entry.set_entry_name("'GHOST-ENTRY'")  # No matching paragraph
+
+        prog = _make_program([
+            ("MAIN-LOGIC", [entry, _stop_run()]),
+            ("ISOLATED", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # GHOST-ENTRY was registered as an entry point but has no node
+        assert "GHOST-ENTRY" in report.entry_points
+        # ISOLATED is unreachable from MAIN-LOGIC (no edge to it)
+        assert "ISOLATED" in report.unreachable_nodes
+
+    # ------------------------------------------------------------------
+    # Unreachable: isolated cycle cluster
+    # ------------------------------------------------------------------
+
+    def test_unreachable_isolated_cycle_cluster(self) -> None:
+        """A mutual cycle disconnected from the entry point is marked
+        unreachable, even though a cycle exists among those nodes."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_stop_run()]),
+            ("CYCLE-A", [_perform("CYCLE-B")]),
+            ("CYCLE-B", [_perform("CYCLE-A")]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        assert "CYCLE-A" in report.unreachable_nodes
+        assert "CYCLE-B" in report.unreachable_nodes
+        # The cycle itself is still detected even though it's unreachable
+        assert len(report.cycles) >= 1
+        cycle_nodes = {n for c in report.cycles for n in c}
+        assert {"CYCLE-A", "CYCLE-B"}.issubset(cycle_nodes)
+
+    # ------------------------------------------------------------------
+    # SearchStatement: when_clause dict missing "statements" key
+    # ------------------------------------------------------------------
+
+    def test_search_when_clause_missing_statements_key_no_crash(self) -> None:
+        """SearchStatement when_clause without 'statements' key falls back to
+        empty list and does not crash."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        search = SearchStatement(LOC)
+        search.set_table_name("WS-TABLE")
+        # Inject a when_clause dict without the "statements" key
+        search.when_clauses.append({"condition": "WS-TABLE(IDX) = TARGET"})
+
+        prog = _make_program([("MAIN-LOGIC", [search, _stop_run()])])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # Should not crash; search_count should still be incremented
+        main_node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert main_node.search_count == 1
+
+    # ------------------------------------------------------------------
+    # SearchStatement: at_end_clause as empty list
+    # ------------------------------------------------------------------
+
+    def test_search_at_end_clause_empty_list_treated_as_none(self) -> None:
+        """SearchStatement with at_end_clause=[] is falsy and recorded as
+        has_at_end=False in decisions."""
+        from cobolparser.models.statements.control import SearchStatement
+
+        search = SearchStatement(LOC)
+        search.set_table_name("WS-TABLE")
+        search.add_when_clause("WS-TABLE(IDX) = TARGET", [_continue()])
+        search.at_end_clause = []  # Empty list, not None
+
+        prog = _make_program([("MAIN-LOGIC", [search, _stop_run()])])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        main_node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        search_decisions = [d for d in main_node.decisions if d["type"] == "SEARCH"]
+        assert len(search_decisions) == 1
+        assert search_decisions[0]["has_at_end"] is False
+
+    # ------------------------------------------------------------------
+    # FlowNode: all boolean exit fields absent from to_dict when False
+    # ------------------------------------------------------------------
+
+    def test_flow_node_all_exit_flags_false_omitted_from_dict(self) -> None:
+        """FlowNode.to_dict() omits every exit-related boolean when it is
+        False (the default)."""
+        node = FlowNode("NORMAL", "PARAGRAPH", SourceLocation(1, 1))
+        d = node.to_dict()
+
+        for field_name in (
+            "has_stop_run",
+            "has_goback",
+            "has_exit_program",
+            "has_return",
+            "has_exit_section",
+            "has_exit_paragraph",
+            "has_exit_perform",
+            "is_exit_point",
+        ):
+            assert field_name not in d, f"Expected {field_name!r} to be absent when False"
+
+    def test_flow_node_is_entry_point_false_omitted(self) -> None:
+        """FlowNode.to_dict() omits is_entry_point when False."""
+        node = FlowNode("NORMAL", "PARAGRAPH", SourceLocation(1, 1))
+        assert "is_entry_point" not in node.to_dict()
+
+    # ------------------------------------------------------------------
+    # FlowEdge: perform_type=None omitted from to_dict
+    # ------------------------------------------------------------------
+
+    def test_flow_edge_perform_type_none_omitted(self) -> None:
+        """FlowEdge.to_dict() omits perform_type when it is None."""
+        edge = FlowEdge(
+            "A",
+            "B",
+            FlowEdgeType.PERFORM,
+            SourceLocation(1, 1),
+            perform_type=None,
+        )
+        d = edge.to_dict()
+        assert "perform_type" not in d
+
+    def test_flow_edge_perform_type_times_included(self) -> None:
+        """FlowEdge.to_dict() includes perform_type when set."""
+        edge = FlowEdge(
+            "A",
+            "B",
+            FlowEdgeType.PERFORM,
+            SourceLocation(1, 1),
+            perform_type="TIMES",
+        )
+        d = edge.to_dict()
+        assert d["perform_type"] == "TIMES"
+
+    def test_flow_edge_perform_type_varying_included(self) -> None:
+        """FlowEdge.to_dict() includes VARYING perform_type."""
+        edge = FlowEdge(
+            "A",
+            "B",
+            FlowEdgeType.PERFORM,
+            SourceLocation(1, 1),
+            perform_type="VARYING",
+        )
+        assert edge.to_dict()["perform_type"] == "VARYING"
+
+    # ------------------------------------------------------------------
+    # Report: empty new fields serialize to valid JSON
+    # ------------------------------------------------------------------
+
+    def test_report_empty_new_fields_serialize_to_json(self) -> None:
+        """ProgramFlowReport with empty cycles/unreachable/cancellations
+        produces valid JSON with correct zero counts in summary."""
+        import json
+
+        report = ProgramFlowReport(program_name="TEST")
+        d = report.to_dict()
+
+        json_str = json.dumps(d)
+        parsed = json.loads(json_str)
+
+        assert parsed["cycles"] == []
+        assert parsed["unreachable_nodes"] == []
+        assert parsed["program_cancellations"] == []
+        assert parsed["summary"]["cycle_count"] == 0
+        assert parsed["summary"]["unreachable_node_count"] == 0
+        assert parsed["summary"]["cancellation_count"] == 0
+
+    # ------------------------------------------------------------------
+    # _INTERNAL_EDGE_TYPES: CALL edges excluded from cycle/reachability
+    # ------------------------------------------------------------------
+
+    def test_call_edges_excluded_from_cycle_detection(self) -> None:
+        """A CALL edge from MAIN to EXTERNAL doesn't form a cycle even if
+        EXTERNAL has a PERFORM back to MAIN (EXTERNAL is a separate paragraph
+        but CALL is external—only internal edges count)."""
+        # MAIN calls 'EXTERNAL-PROG' (external); no paragraph named that exists.
+        # WORKER only reachable via PERFORM from MAIN.
+        prog = _make_program([
+            ("MAIN", [_call("'EXTERNAL-PROG'"), _perform("WORKER"), _stop_run()]),
+            ("WORKER", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # CALL edge is present but not used for cycle detection
+        call_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.CALL]
+        assert len(call_edges) == 1
+
+        # No cycle should be found (PERFORM WORKER -> no back edge)
+        assert report.cycles == []
+
+    def test_call_dynamic_edges_excluded_from_unreachable_detection(self) -> None:
+        """A dynamic CALL edge does not make a paragraph reachable."""
+        # MAIN dynamically calls 'HANDLER', but HANDLER is also a paragraph.
+        # Since CALL edges are external, HANDLER paragraph is still unreachable
+        # from MAIN via internal flow.
+        prog = _make_program([
+            ("MAIN", [_call("WS-PROG-NAME", is_dynamic=True), _stop_run()]),
+            ("HANDLER", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        # Dynamic CALL edge present
+        dyn_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.CALL_DYNAMIC]
+        assert len(dyn_edges) == 1
+
+        # HANDLER is unreachable via internal flow
+        assert "HANDLER" in report.unreachable_nodes
