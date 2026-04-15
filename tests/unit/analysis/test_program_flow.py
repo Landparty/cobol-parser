@@ -3388,3 +3388,807 @@ class TestProgramFlowReportNewFields:
         d = node.to_dict()
         assert "search_count" in d["branching"]
         assert d["branching"]["search_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: Real-COBOL integration — all new features exercised via parse_cobol
+# ---------------------------------------------------------------------------
+
+
+class TestProgramFlowRealCobolIntegration:
+    """Integration tests that parse actual COBOL source with parse_cobol()
+    and verify every new feature added to ProgramFlowAnalyzer.
+
+    These complement the unit tests that use manually-constructed ASTs by
+    proving that the full pipeline (lexer → parser → analyzer) produces the
+    expected results on real COBOL text.
+    """
+
+    @staticmethod
+    def _analyze(source: str) -> "ProgramFlowReport":  # type: ignore[name-defined]
+        result = parse_cobol(source, filename="<integration-test>")
+        assert result.ast is not None, f"Parse failed: {result.errors}"
+        return ProgramFlowAnalyzer().analyze(result.ast)
+
+    # ------------------------------------------------------------------
+    # SORT INPUT/OUTPUT PROCEDURE THRU
+    # ------------------------------------------------------------------
+
+    def test_sort_input_procedure_thru_real_cobol(self) -> None:
+        """SORT INPUT PROCEDURE ... THRU produces the correct edge types."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SORTTHRU.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SORT-WRK ASSIGN TO 'SORTWRK'.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SORT-WRK.
+       01 SORT-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-DONE PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SORT SORT-WRK ON ASCENDING KEY SORT-REC
+               INPUT PROCEDURE IN-START THRU IN-END
+               OUTPUT PROCEDURE OUT-START THRU OUT-END.
+           STOP RUN.
+       IN-START.
+           DISPLAY 'INPUT START'.
+       IN-END.
+           EXIT.
+       OUT-START.
+           DISPLAY 'OUTPUT START'.
+       OUT-END.
+           EXIT.
+"""
+        report = self._analyze(source)
+        edge_pairs = {(e.edge_type, e.target) for e in report.edges}
+
+        assert (FlowEdgeType.SORT_INPUT_PROCEDURE, "IN-START") in edge_pairs
+        assert (FlowEdgeType.SORT_INPUT_PROCEDURE_THRU, "IN-END") in edge_pairs
+        assert (FlowEdgeType.SORT_OUTPUT_PROCEDURE, "OUT-START") in edge_pairs
+        assert (FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU, "OUT-END") in edge_pairs
+
+    def test_sort_output_procedure_thru_no_input_thru(self) -> None:
+        """SORT with OUTPUT THRU but no INPUT THRU emits only one THRU edge."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SORTOUT.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SORT-WRK ASSIGN TO 'SORTWRK'.
+           SELECT IN-FILE ASSIGN TO 'INPUT'.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SORT-WRK.
+       01 SORT-REC PIC X(80).
+       FD IN-FILE.
+       01 IN-REC PIC X(80).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SORT SORT-WRK ON ASCENDING KEY SORT-REC
+               USING IN-FILE
+               OUTPUT PROCEDURE OUT-A THRU OUT-Z.
+           STOP RUN.
+       OUT-A.
+           DISPLAY 'A'.
+       OUT-Z.
+           EXIT.
+"""
+        report = self._analyze(source)
+        thru_edges = [
+            e for e in report.edges
+            if e.edge_type == FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU
+        ]
+        input_thru_edges = [
+            e for e in report.edges
+            if e.edge_type == FlowEdgeType.SORT_INPUT_PROCEDURE_THRU
+        ]
+
+        assert len(thru_edges) == 1
+        assert thru_edges[0].target == "OUT-Z"
+        assert len(input_thru_edges) == 0
+
+    # ------------------------------------------------------------------
+    # MERGE OUTPUT PROCEDURE THRU
+    # ------------------------------------------------------------------
+
+    def test_merge_output_procedure_thru_real_cobol(self) -> None:
+        """MERGE OUTPUT PROCEDURE ... THRU produces the correct edge types."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MERGETHRU.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT MERGE-WRK  ASSIGN TO 'MRGWRK'.
+           SELECT MERGE-IN1  ASSIGN TO 'MRGF1'.
+           SELECT MERGE-IN2  ASSIGN TO 'MRGF2'.
+       DATA DIVISION.
+       FILE SECTION.
+       SD MERGE-WRK.
+       01 MERGE-REC PIC X(80).
+       FD MERGE-IN1.
+       01 IN1-REC PIC X(80).
+       FD MERGE-IN2.
+       01 IN2-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-EOF PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MERGE MERGE-WRK ON ASCENDING KEY MERGE-REC
+               USING MERGE-IN1 MERGE-IN2
+               OUTPUT PROCEDURE OUT-START THRU OUT-END.
+           STOP RUN.
+       OUT-START.
+           RETURN MERGE-WRK
+               AT END MOVE 'Y' TO WS-EOF
+           END-RETURN.
+       OUT-END.
+           EXIT.
+"""
+        report = self._analyze(source)
+        edge_pairs = {(e.edge_type, e.target) for e in report.edges}
+
+        assert (FlowEdgeType.MERGE_OUTPUT_PROCEDURE, "OUT-START") in edge_pairs
+        assert (FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU, "OUT-END") in edge_pairs
+
+    # ------------------------------------------------------------------
+    # CANCEL statement tracking
+    # ------------------------------------------------------------------
+
+    def test_cancel_tracked_in_real_cobol(self) -> None:
+        """CANCEL statement records cancelled program and calling paragraph."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CANCELTEST.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'MODULE-A' USING WS-PARAM
+           CANCEL 'MODULE-A'
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert len(report.program_cancellations) == 1
+        c = report.program_cancellations[0]
+        assert c["program"] == "MODULE-A"
+        assert c["cancelled_from"] == "MAIN-LOGIC"
+        assert "location" in c
+
+    def test_cancel_count_in_summary(self) -> None:
+        """cancellation_count in summary matches the cancellations list."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CANCELCNT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM LOAD-MODULES
+           PERFORM DO-WORK
+           PERFORM UNLOAD-MODULES
+           STOP RUN.
+       LOAD-MODULES.
+           CALL 'MOD-A'
+           CALL 'MOD-B'.
+       DO-WORK.
+           DISPLAY 'WORKING'.
+       UNLOAD-MODULES.
+           CANCEL 'MOD-A'
+           CANCEL 'MOD-B'.
+"""
+        report = self._analyze(source)
+        d = report.to_dict()
+
+        assert d["summary"]["cancellation_count"] == 2
+        assert d["summary"]["cancellation_count"] == len(d["program_cancellations"])
+        names = {c["program"] for c in d["program_cancellations"]}
+        assert names == {"MOD-A", "MOD-B"}
+
+    # ------------------------------------------------------------------
+    # RETURN statement (SORT/MERGE output procedure)
+    # ------------------------------------------------------------------
+
+    def test_return_has_return_flag_real_cobol(self) -> None:
+        """RETURN inside a SORT output procedure sets has_return on the node."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RETFLAG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SORT-WRK ASSIGN TO 'SORTWRK'.
+           SELECT IN-FILE  ASSIGN TO 'INPUT'.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SORT-WRK.
+       01 SORT-REC PIC X(80).
+       FD IN-FILE.
+       01 IN-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-EOF PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SORT SORT-WRK ON ASCENDING KEY SORT-REC
+               USING IN-FILE
+               OUTPUT PROCEDURE OUTPUT-PROC.
+           STOP RUN.
+       OUTPUT-PROC.
+           RETURN SORT-WRK
+               AT END MOVE 'Y' TO WS-EOF
+               NOT AT END PERFORM WRITE-RECORD
+           END-RETURN.
+       WRITE-RECORD.
+           DISPLAY SORT-REC.
+"""
+        report = self._analyze(source)
+
+        out_node = next((n for n in report.nodes if n.name == "OUTPUT-PROC"), None)
+        assert out_node is not None
+        assert out_node.has_return is True
+
+        d = report.to_dict()
+        out_dict = next(n for n in d["nodes"] if n["name"] == "OUTPUT-PROC")
+        assert out_dict.get("has_return") is True
+
+    def test_return_not_at_end_generates_perform_edge(self) -> None:
+        """PERFORM inside RETURN NOT AT END clause creates a flow edge."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RETEDGE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SORT-WRK ASSIGN TO 'SORTWRK'.
+           SELECT IN-FILE  ASSIGN TO 'INPUT'.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SORT-WRK.
+       01 SORT-REC PIC X(80).
+       FD IN-FILE.
+       01 IN-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-EOF PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SORT SORT-WRK ON ASCENDING KEY SORT-REC
+               USING IN-FILE
+               OUTPUT PROCEDURE OUTPUT-PROC.
+           STOP RUN.
+       OUTPUT-PROC.
+           RETURN SORT-WRK
+               AT END MOVE 'Y' TO WS-EOF
+               NOT AT END PERFORM PROCESS-RECORD
+           END-RETURN.
+       PROCESS-RECORD.
+           DISPLAY SORT-REC.
+"""
+        report = self._analyze(source)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        targets = {e.target for e in perform_edges if e.source == "OUTPUT-PROC"}
+        assert "PROCESS-RECORD" in targets
+
+    # ------------------------------------------------------------------
+    # EXIT SECTION / EXIT PARAGRAPH / EXIT PERFORM
+    # ------------------------------------------------------------------
+
+    def test_exit_section_flag_real_cobol(self) -> None:
+        """EXIT SECTION sets has_exit_section on the paragraph's FlowNode."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXSEC.
+       PROCEDURE DIVISION.
+       WORK SECTION.
+       WORK-PARA.
+           IF 1 = 1
+               EXIT SECTION
+           END-IF
+           DISPLAY 'NEVER'.
+       MAIN SECTION.
+       MAIN-PARA.
+           PERFORM WORK-PARA
+           STOP RUN.
+"""
+        report = self._analyze(source)
+        work_node = next((n for n in report.nodes if n.name == "WORK-PARA"), None)
+        assert work_node is not None
+        assert work_node.has_exit_section is True
+
+        d = report.to_dict()
+        work_dict = next(n for n in d["nodes"] if n["name"] == "WORK-PARA")
+        assert work_dict.get("has_exit_section") is True
+
+    def test_exit_paragraph_flag_real_cobol(self) -> None:
+        """EXIT PARAGRAPH sets has_exit_paragraph on the FlowNode."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXPARA.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM COND-EXIT
+           STOP RUN.
+       COND-EXIT.
+           IF 1 = 1
+               EXIT PARAGRAPH
+           END-IF
+           DISPLAY 'CONTINUATION'.
+       AFTER-COND.
+           DISPLAY 'AFTER'.
+"""
+        report = self._analyze(source)
+        node = next((n for n in report.nodes if n.name == "COND-EXIT"), None)
+        assert node is not None
+        assert node.has_exit_paragraph is True
+
+    def test_exit_perform_flag_real_cobol(self) -> None:
+        """EXIT PERFORM inside an inline PERFORM sets has_exit_perform."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXPERF.
+       WORKING-STORAGE SECTION.
+       01 WS-CTR PIC 9 VALUE 0.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM UNTIL WS-CTR > 10
+               ADD 1 TO WS-CTR
+               IF WS-CTR = 5
+                   EXIT PERFORM
+               END-IF
+           END-PERFORM
+           STOP RUN.
+"""
+        report = self._analyze(source)
+        main_node = next((n for n in report.nodes if n.name == "MAIN-LOGIC"), None)
+        assert main_node is not None
+        assert main_node.has_exit_perform is True
+
+        d = report.to_dict()
+        main_dict = next(n for n in d["nodes"] if n["name"] == "MAIN-LOGIC")
+        assert main_dict.get("has_exit_perform") is True
+
+    # ------------------------------------------------------------------
+    # CALL ON EXCEPTION / NOT ON EXCEPTION / ON OVERFLOW
+    # ------------------------------------------------------------------
+
+    def test_call_on_exception_perform_creates_edge(self) -> None:
+        """PERFORM inside ON EXCEPTION generates a flow edge from the caller."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXCPERF.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'SUBPROG' USING WS-IN
+               ON EXCEPTION
+                   PERFORM ERROR-HANDLER
+               NOT ON EXCEPTION
+                   PERFORM SUCCESS-HANDLER
+           END-CALL.
+           STOP RUN.
+       ERROR-HANDLER.
+           DISPLAY 'ERROR'.
+       SUCCESS-HANDLER.
+           DISPLAY 'OK'.
+"""
+        report = self._analyze(source)
+        perform_edges = {e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM}
+
+        assert "ERROR-HANDLER" in perform_edges
+        assert "SUCCESS-HANDLER" in perform_edges
+
+    def test_call_on_exception_stop_run_marks_exit(self) -> None:
+        """STOP RUN inside ON EXCEPTION marks the paragraph as an exit point."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXCSTOP.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'CRITICAL-SVC'
+               ON EXCEPTION
+                   DISPLAY 'FATAL ERROR'
+                   STOP RUN
+           END-CALL.
+           DISPLAY 'CONTINUING'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+        main_node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert main_node.has_stop_run is True
+        assert "MAIN-LOGIC" in report.exit_points
+
+    def test_call_on_overflow_perform_creates_edge(self) -> None:
+        """PERFORM inside ON OVERFLOW generates a flow edge."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OVFLW.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'SUBPROG'
+               ON OVERFLOW
+                   PERFORM OVERFLOW-HANDLER
+           END-CALL.
+           STOP RUN.
+       OVERFLOW-HANDLER.
+           DISPLAY 'OVERFLOW'.
+"""
+        report = self._analyze(source)
+        perform_edges = {e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM}
+        assert "OVERFLOW-HANDLER" in perform_edges
+
+    def test_call_exception_sample_file(self) -> None:
+        """The call_exception_handlers_complete.cbl sample produces PERFORM
+        edges for paragraphs called from within exception handler branches."""
+        import pathlib
+
+        sample = (
+            pathlib.Path(__file__).parent.parent.parent
+            / "samples"
+            / "call_exception_handlers_complete.cbl"
+        )
+        if not sample.exists():
+            pytest.skip(f"Sample not found: {sample}")
+
+        report = self._analyze(sample.read_text(encoding="utf-8"))
+
+        # Paragraphs PERFORMed from inside exception handlers must appear
+        perform_targets = {
+            e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM
+        }
+        # These come from ON EXCEPTION handler branches in the sample file
+        assert "LOG-ERROR" in perform_targets
+        assert "HANDLE-SERVICE-FAILURE" in perform_targets
+
+    # ------------------------------------------------------------------
+    # SEARCH statement — search_count metric
+    # ------------------------------------------------------------------
+
+    def test_search_count_real_cobol(self) -> None:
+        """SEARCH statement increments search_count in the branching metrics."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SRCHCNT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-TABLE.
+           05 WS-ENTRY OCCURS 10 TIMES INDEXED BY WS-IDX.
+               10 WS-KEY PIC X(5).
+               10 WS-VAL PIC X(10).
+       01 WS-FIND PIC X(5) VALUE 'KEY01'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SET WS-IDX TO 1
+           SEARCH WS-ENTRY
+               AT END DISPLAY 'NOT FOUND'
+               WHEN WS-KEY(WS-IDX) = WS-FIND
+                   DISPLAY WS-VAL(WS-IDX)
+           END-SEARCH.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+        main_node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert main_node.search_count == 1
+
+        d = report.to_dict()
+        main_dict = next(n for n in d["nodes"] if n["name"] == "MAIN-LOGIC")
+        assert main_dict["branching"]["search_count"] == 1
+
+    def test_search_count_real_cobol_sample(self) -> None:
+        """The control_flow.cbl sample's SEARCH-TESTS paragraph has a
+        positive search_count in the flow report."""
+        import pathlib
+
+        sample = (
+            pathlib.Path(__file__).parent.parent.parent / "samples" / "control_flow.cbl"
+        )
+        if not sample.exists():
+            pytest.skip(f"Sample not found: {sample}")
+
+        report = self._analyze(sample.read_text(encoding="utf-8"))
+
+        search_node = next(
+            (n for n in report.nodes if n.name == "SEARCH-TESTS"), None
+        )
+        assert search_node is not None
+        assert search_node.search_count >= 1
+
+    def test_multiple_search_statements_real_cobol(self) -> None:
+        """Two SEARCH statements in one paragraph give search_count == 2."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SRCH2.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 TABLE-A.
+           05 A-ENTRY OCCURS 5 TIMES INDEXED BY A-IDX.
+               10 A-KEY PIC X(3).
+       01 TABLE-B.
+           05 B-ENTRY OCCURS 5 TIMES INDEXED BY B-IDX.
+               10 B-KEY PIC X(3).
+       01 WS-FIND PIC X(3) VALUE 'XYZ'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SET A-IDX TO 1
+           SEARCH A-ENTRY
+               AT END DISPLAY 'A NOT FOUND'
+               WHEN A-KEY(A-IDX) = WS-FIND DISPLAY 'A FOUND'
+           END-SEARCH.
+           SET B-IDX TO 1
+           SEARCH B-ENTRY
+               AT END DISPLAY 'B NOT FOUND'
+               WHEN B-KEY(B-IDX) = WS-FIND DISPLAY 'B FOUND'
+           END-SEARCH.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+        main_node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert main_node.search_count == 2
+
+    # ------------------------------------------------------------------
+    # Cycle detection
+    # ------------------------------------------------------------------
+
+    def test_mutual_perform_cycle_real_cobol(self) -> None:
+        """Two paragraphs that PERFORM each other form a detected cycle."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CYCLTEST.
+       PROCEDURE DIVISION.
+       PARA-A.
+           PERFORM PARA-B.
+       PARA-B.
+           PERFORM PARA-A.
+"""
+        report = self._analyze(source)
+
+        assert len(report.cycles) >= 1
+        all_cycle_nodes = {node for cycle in report.cycles for node in cycle}
+        assert "PARA-A" in all_cycle_nodes
+        assert "PARA-B" in all_cycle_nodes
+
+        d = report.to_dict()
+        assert d["summary"]["cycle_count"] >= 1
+        assert isinstance(d["cycles"][0], list)
+
+    def test_self_perform_cycle_real_cobol(self) -> None:
+        """A paragraph that PERFORMs itself is detected as a cycle."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SELFLOOP.
+       PROCEDURE DIVISION.
+       LOOP-PARA.
+           PERFORM LOOP-PARA.
+"""
+        report = self._analyze(source)
+
+        assert len(report.cycles) >= 1
+        all_cycle_nodes = {n for c in report.cycles for n in c}
+        assert "LOOP-PARA" in all_cycle_nodes
+
+    def test_no_cycle_in_normal_flow_real_cobol(self) -> None:
+        """A program with no recursive PERFORM has cycles == []."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NOCYCLE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM INIT-PARA
+           PERFORM WORK-PARA
+           PERFORM DONE-PARA
+           STOP RUN.
+       INIT-PARA.
+           DISPLAY 'INIT'.
+       WORK-PARA.
+           DISPLAY 'WORK'.
+       DONE-PARA.
+           DISPLAY 'DONE'.
+"""
+        report = self._analyze(source)
+
+        assert report.cycles == []
+        assert report.to_dict()["summary"]["cycle_count"] == 0
+
+    def test_three_way_cycle_real_cobol(self) -> None:
+        """A → B → C → A mutual PERFORM chain is detected."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CYCLE3.
+       PROCEDURE DIVISION.
+       PARA-A.
+           PERFORM PARA-B.
+       PARA-B.
+           PERFORM PARA-C.
+       PARA-C.
+           PERFORM PARA-A.
+"""
+        report = self._analyze(source)
+
+        assert len(report.cycles) >= 1
+        all_cycle_nodes = {n for c in report.cycles for n in c}
+        assert "PARA-A" in all_cycle_nodes
+        assert "PARA-B" in all_cycle_nodes
+        assert "PARA-C" in all_cycle_nodes
+
+    # ------------------------------------------------------------------
+    # Unreachable node detection
+    # ------------------------------------------------------------------
+
+    def test_unreachable_after_stop_run_real_cobol(self) -> None:
+        """Paragraphs with no path from any entry point are unreachable."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DEADCODE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+       NEVER-CALLED.
+           DISPLAY 'DEAD CODE'.
+       ALSO-DEAD.
+           DISPLAY 'ALSO DEAD'.
+"""
+        report = self._analyze(source)
+
+        assert "NEVER-CALLED" in report.unreachable_nodes
+        assert "ALSO-DEAD" in report.unreachable_nodes
+        assert "MAIN-LOGIC" not in report.unreachable_nodes
+
+        d = report.to_dict()
+        assert d["summary"]["unreachable_node_count"] == 2
+        assert "NEVER-CALLED" in d["unreachable_nodes"]
+
+    def test_reachable_via_perform_real_cobol(self) -> None:
+        """All PERFORMed paragraphs are reachable — unreachable list is empty."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FULLREACH.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM INIT-PARA
+           PERFORM WORK-PARA
+           PERFORM EXIT-PARA
+           STOP RUN.
+       INIT-PARA.
+           DISPLAY 'INIT'.
+       WORK-PARA.
+           DISPLAY 'WORK'.
+       EXIT-PARA.
+           DISPLAY 'EXIT'.
+"""
+        report = self._analyze(source)
+
+        assert report.unreachable_nodes == []
+        assert report.to_dict()["summary"]["unreachable_node_count"] == 0
+
+    def test_reachable_via_goto_real_cobol(self) -> None:
+        """Paragraph targeted by GO TO is not unreachable."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOREAC.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF 1 = 1
+               GO TO ERROR-EXIT
+           END-IF
+           STOP RUN.
+       ERROR-EXIT.
+           DISPLAY 'ERROR'
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert "ERROR-EXIT" not in report.unreachable_nodes
+
+    def test_unreachable_count_in_summary_real_cobol(self) -> None:
+        """unreachable_node_count in summary matches unreachable_nodes list."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. URCNT.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP RUN.
+       DEAD-1.
+           DISPLAY 'D1'.
+       DEAD-2.
+           DISPLAY 'D2'.
+       DEAD-3.
+           DISPLAY 'D3'.
+"""
+        report = self._analyze(source)
+        d = report.to_dict()
+
+        assert d["summary"]["unreachable_node_count"] == len(d["unreachable_nodes"])
+        assert d["summary"]["unreachable_node_count"] == 3
+
+    # ------------------------------------------------------------------
+    # Combined real-COBOL program exercising multiple new features
+    # ------------------------------------------------------------------
+
+    def test_full_feature_integration_real_cobol(self) -> None:
+        """One realistic program exercises CANCEL, SEARCH, EXIT PERFORM,
+        CALL exception handlers, unreachable detection, and summary counts
+        all in a single parse-and-analyze run."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FULLINT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC 9 VALUE 0.
+       01 WS-LOOKUP-TABLE.
+           05 WS-CODE-ENTRY OCCURS 5 TIMES INDEXED BY WS-IDX.
+               10 WS-CODE PIC X(3).
+               10 WS-DESC PIC X(20).
+       01 WS-FIND-CODE PIC X(3) VALUE 'ERR'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM LOAD-CODES
+           PERFORM LOOKUP-CODE
+           CALL 'EXTERNAL-SVC' USING WS-STATUS
+               ON EXCEPTION
+                   PERFORM ERROR-HANDLER
+               NOT ON EXCEPTION
+                   PERFORM SUCCESS-HANDLER
+           END-CALL.
+           CANCEL 'EXTERNAL-SVC'.
+           PERFORM CLEANUP
+           STOP RUN.
+       LOAD-CODES.
+           DISPLAY 'LOADING'.
+       LOOKUP-CODE.
+           SET WS-IDX TO 1
+           SEARCH WS-CODE-ENTRY
+               AT END DISPLAY 'CODE NOT FOUND'
+               WHEN WS-CODE(WS-IDX) = WS-FIND-CODE
+                   DISPLAY WS-DESC(WS-IDX)
+           END-SEARCH.
+       ERROR-HANDLER.
+           DISPLAY 'SERVICE ERROR'
+           MOVE 1 TO WS-STATUS.
+       SUCCESS-HANDLER.
+           DISPLAY 'SERVICE OK'
+           MOVE 0 TO WS-STATUS.
+       CLEANUP.
+           DISPLAY 'CLEANUP'
+           GOBACK.
+       DEAD-PARA.
+           DISPLAY 'UNREACHABLE'.
+"""
+        report = self._analyze(source)
+
+        # -- all paragraphs found --
+        node_names = {n.name for n in report.nodes}
+        for expected in [
+            "MAIN-LOGIC", "LOAD-CODES", "LOOKUP-CODE",
+            "ERROR-HANDLER", "SUCCESS-HANDLER", "CLEANUP", "DEAD-PARA",
+        ]:
+            assert expected in node_names
+
+        # -- CANCEL tracking --
+        assert len(report.program_cancellations) == 1
+        assert report.program_cancellations[0]["program"] == "EXTERNAL-SVC"
+        assert report.program_cancellations[0]["cancelled_from"] == "MAIN-LOGIC"
+
+        # -- SEARCH count --
+        lookup_node = next(n for n in report.nodes if n.name == "LOOKUP-CODE")
+        assert lookup_node.search_count == 1
+
+        # -- CALL exception handler edges --
+        perform_targets = {
+            e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM
+        }
+        assert "ERROR-HANDLER" in perform_targets
+        assert "SUCCESS-HANDLER" in perform_targets
+
+        # -- unreachable detection --
+        assert "DEAD-PARA" in report.unreachable_nodes
+
+        # -- no cycles (normal flow) --
+        assert report.cycles == []
+
+        # -- summary consistency --
+        d = report.to_dict()
+        assert d["summary"]["node_count"] == len(d["nodes"])
+        assert d["summary"]["edge_count"] == len(d["edges"])
+        assert d["summary"]["cancellation_count"] == 1
+        assert d["summary"]["unreachable_node_count"] >= 1
