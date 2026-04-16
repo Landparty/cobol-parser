@@ -309,8 +309,6 @@ class CRUDMatrixGenerator:
         lets WRITE/REWRITE statements (which carry a record name, not a file name)
         be attributed to the correct file.
         """
-        from ..models.data_items import CobolDataItem
-
         data_div = ast.get_division("DATA")
         if data_div is None:
             return
@@ -318,8 +316,6 @@ class CRUDMatrixGenerator:
         if file_section is None:
             return
         for item in file_section.data_items:
-            if not isinstance(item, CobolDataItem):
-                continue
             fd_file = item.get_metadata("fd_file_name")
             if fd_file and item.name:
                 self._record_to_file[item.name.upper()] = fd_file.upper()

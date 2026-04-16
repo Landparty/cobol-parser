@@ -39,7 +39,6 @@ from cobolparser.analysis.crud_matrix import (
     TableEntry,
 )
 
-
 # ---------------------------------------------------------------------------
 # CRUDFlags unit tests
 # ---------------------------------------------------------------------------
@@ -159,7 +158,7 @@ class TestCRUDMatrix:
 
     def test_to_csv_header_and_rows(self):
         csv_text = self._matrix().to_csv()
-        lines = [l for l in csv_text.strip().splitlines() if l]
+        lines = [ln for ln in csv_text.strip().splitlines() if ln]
         assert lines[0].startswith("Program,ResourceType,ResourceName")
         # Header + 2 data rows
         assert len(lines) == 3
@@ -186,7 +185,7 @@ class TestCRUDMatrix:
         assert m.entries == []
         csv_text = m.to_csv()
         # Only header line
-        assert len([l for l in csv_text.strip().splitlines() if l]) == 1
+        assert len([ln for ln in csv_text.strip().splitlines() if ln]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +562,13 @@ class TestMultipleOpenModes:
 
 def test_public_api_imports():
     """CRUDMatrixGenerator and friends are importable from cobolparser."""
-    from cobolparser import CRUDFlags, CRUDMatrix, CRUDMatrixGenerator, FileEntry, TableEntry
+    from cobolparser import (
+        CRUDFlags,
+        CRUDMatrix,
+        CRUDMatrixGenerator,
+        FileEntry,
+        TableEntry,
+    )
 
     assert CRUDMatrixGenerator is not None
     assert CRUDMatrix is not None
@@ -666,7 +671,7 @@ class TestCRUDMatrixCSVDetails:
         fe = FileEntry("P", "F", CRUDFlags())  # no CRUD at all
         m = CRUDMatrix(program_name="P", file_entries=[fe])
         csv_text = m.to_csv()
-        data_line = [l for l in csv_text.strip().splitlines() if "FILE" in l][0]
+        data_line = [ln for ln in csv_text.strip().splitlines() if "FILE" in ln][0]
         # C, R, U, D columns should be empty (not "C"/"R"/"U"/"D")
         assert "----" in data_line
 
