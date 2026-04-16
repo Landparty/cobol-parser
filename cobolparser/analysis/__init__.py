@@ -178,11 +178,39 @@ def __getattr__(name: str) -> object:
             "HostVarResolutionReport": HostVarResolutionReport,
         }
         return _map[name]
+    if name in (
+        "CRUDMatrixGenerator",
+        "CRUDMatrix",
+        "CRUDFlags",
+        "FileEntry",
+        "TableEntry",
+    ):
+        from .crud_matrix import (
+            CRUDFlags,
+            CRUDMatrix,
+            CRUDMatrixGenerator,
+            FileEntry,
+            TableEntry,
+        )
+
+        _map = {
+            "CRUDMatrixGenerator": CRUDMatrixGenerator,
+            "CRUDMatrix": CRUDMatrix,
+            "CRUDFlags": CRUDFlags,
+            "FileEntry": FileEntry,
+            "TableEntry": TableEntry,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "CoverageAnalyzer",
+    "CRUDFlags",
+    "CRUDMatrix",
+    "CRUDMatrixGenerator",
+    "FileEntry",
+    "TableEntry",
     "HostVarResolutionReport",
     "HostVariableInfo",
     "HostVariableResolver",
