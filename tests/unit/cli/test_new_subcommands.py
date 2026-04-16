@@ -453,6 +453,47 @@ class TestBatchGlob:
         data = json.loads(out)
         assert len(data) == 2  # deduplicated
 
+    def test_dedup_resolves_relative_vs_absolute(self, tmp_path, capsys):
+        """Same file given as absolute and via glob (which may return absolute)
+        should only appear once in the output."""
+        cobol = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROG.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        f = tmp_path / "only.cbl"
+        f.write_text(cobol)
+        abs_path = str(f.resolve())
+        pattern = str(tmp_path / "*.cbl")
+        # Pass absolute path explicitly AND expand it via glob – should deduplicate
+        with patch(
+            "sys.argv",
+            ["cobol-parser", "batch", abs_path, "--glob", pattern],
+        ):
+            main()
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert len(data) == 1  # only.cbl counted once
+
+    def test_glob_output_is_sorted(self, tmp_path, capsys):
+        """Files matched by --glob should appear in sorted (deterministic) order."""
+        cobol = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROG.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        for name in ("c.cbl", "a.cbl", "b.cbl"):
+            (tmp_path / name).write_text(cobol)
+        pattern = str(tmp_path / "*.cbl")
+        with patch("sys.argv", ["cobol-parser", "batch", "--glob", pattern]):
+            main()
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        paths = [entry["path"] for entry in data]
+        assert paths == sorted(paths)
+
     def test_batch_no_files_fails(self, capsys):
         with patch("sys.argv", ["cobol-parser", "batch"]):
             with pytest.raises(SystemExit):

@@ -306,25 +306,31 @@ def _build_batch_parser(
 
 def _cmd_batch(args: argparse.Namespace) -> None:
     import glob as _glob
+    from pathlib import Path as _Path
 
     from ..batch import parse_files
 
-    # Combine explicit file args with --glob expansions
+    # Combine explicit file args with --glob expansions.
+    # Each glob's results are sorted so output order is deterministic
+    # regardless of filesystem traversal order.
     file_list: list[str] = list(args.files)
     for pattern in args.glob:
-        expanded = _glob.glob(pattern, recursive=True)
+        expanded = sorted(_glob.glob(pattern, recursive=True))
         if not expanded:
             print(
                 f"warning: glob pattern {pattern!r} matched no files", file=sys.stderr
             )
         file_list.extend(expanded)
 
-    # Deduplicate while preserving order
+    # Deduplicate while preserving order.  Use the resolved (absolute,
+    # canonical) path as the dedup key so that ./a.cbl, a.cbl, and
+    # /abs/path/a.cbl all map to the same file and are not parsed twice.
     seen: set[str] = set()
     unique_files: list[str] = []
     for f in file_list:
-        if f not in seen:
-            seen.add(f)
+        key = str(_Path(f).resolve())
+        if key not in seen:
+            seen.add(key)
             unique_files.append(f)
 
     if not unique_files:
