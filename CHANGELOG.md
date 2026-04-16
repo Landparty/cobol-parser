@@ -5,6 +5,26 @@ All notable changes to the COBOL parser project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Analysis toolkit**: comprehensive static and dynamic analyzers exposed via `cobolparser.analysis` and the top-level package:
+  - `DeadCodeAnalyzer` — unreferenced paragraphs and sections
+  - `ProgramFlowAnalyzer` — control-flow graph with typed PERFORM / GO TO / CALL / fall-through edges (also wired to the `cobol-parser program-flow` CLI)
+  - `IOLogger` — structured report of every CALL / SQL / FILE-IO / CONSOLE-IO / ENTRY operation with direction (INPUT / OUTPUT / BIDIRECTIONAL)
+  - `IOSequenceAnalyzer` — detects READ/WRITE/REWRITE/DELETE/START before OPEN, double open/close, files left open at program exit
+  - `MoveTypeChecker` — flags category-incompatible MOVE statements (numeric ↔ alphabetic, etc.)
+  - `LinkageChecker` — cross-references CALL arguments with ENTRY declarations and LINKAGE SECTION 01-items
+  - `LanguageEnvironmentAnalyzer` — IBM LE intrinsic functions and service calls
+  - `CRUDMatrixGenerator` — program × file/table Create/Read/Update/Delete matrix with CSV and JSON export
+  - `IMSSegmentAnalyzer` — resolves IMS DLI segment names for CBLTDLI / AIBTDLI / CEETDLI calls (all 16 DLI function codes)
+  - `HostVariableResolver` — resolves `:host-var` references in EXEC SQL to DATA DIVISION data items and DCLGEN DECLARE TABLE columns
+- **CobolCheck test generation**: `cobol-parser generate-tests` CLI and `generate_cobolcheck_tests()` Python API, powered by `CoverageAnalyzer` + `TestPlanGenerator` + `CobolCheckGenerator`; supports `paragraph`, `branch`, and `boundary` strategies across 18 branch types
+- CLI subcommands grew from 7 to 9 (`program-flow`, `generate-tests`)
+- `docs/analysis.md` — comprehensive reference for every analyzer
+- Test suite expanded to 3,456 tests across `unit/`, `integration/`, `contract/`, `regression/`, `performance/`
+
 ## [1.0.0] - 2026-03-31
 
 ### Added
@@ -25,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plugin architecture (`cobolparser/plugins/core.py`) for memory config, dialect, and serialization config
 - `ASTNodeFactory` for validated, consistent AST node construction
 - `StatementParserRegistry` for dynamic statement parser dispatch
+- `DynamicCallAnalyzer` — tracks possible values of variables used in dynamic `CALL` statements
 - IO coverage reporter and CLI (`python -m cobolparser.cli.coverage`)
 - 2,975 unit, integration, and contract tests; 81%+ line coverage enforced
 

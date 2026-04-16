@@ -74,6 +74,30 @@ cobol-parser parse program.cbl
 
 **`cobolparser/batch.py`** — `parse_files(paths)` for parallel multi-file parsing via multiprocessing.
 
+**`cobolparser/analysis/`** — Static and dynamic analysis passes that run against a parsed AST. Each analyzer is a self-contained module exposing `.analyze(ast)` (or `.resolve(ast)` for the host-variable resolver) and returning a report dataclass with `to_dict()`:
+
+- `value_tracker.py` — `DynamicCallAnalyzer` (dynamic CALL target tracking via MOVE/VALUE)
+- `dead_code.py` — `DeadCodeAnalyzer` (unreferenced paragraphs/sections)
+- `program_flow.py` — `ProgramFlowAnalyzer` (control-flow graph with typed edges)
+- `io_logger.py` — `IOLogger` (CALL/SQL/FILE-IO/CONSOLE-IO/ENTRY extraction)
+- `io_sequence.py` — `IOSequenceAnalyzer` (file lifecycle violations)
+- `move_type_checker.py` — `MoveTypeChecker` (data category compatibility)
+- `linkage_checker.py` — `LinkageChecker` (CALL ↔ ENTRY ↔ LINKAGE correlation)
+- `language_env_analyzer.py` — `LanguageEnvironmentAnalyzer` (IBM LE calls/services)
+- `crud_matrix.py` — `CRUDMatrixGenerator` (program × file/table CRUD matrix; CSV/JSON export)
+- `ims_segment_analyzer.py` — `IMSSegmentAnalyzer` (DLI segment name resolution)
+- `host_var_resolver.py` — `HostVariableResolver` (EXEC SQL `:host-var` → DATA DIVISION / DCLGEN)
+- `coverage_analyzer.py` / `test_plan.py` — `CoverageAnalyzer` / `TestPlanGenerator` (coverage targets and test plans)
+- `io_coverage_reporter.py` — `IOCoverageReporter` (machine-readable IO coverage artifacts)
+- `io_diagnostics.py` — lower-level IO operation diagnostics
+
+**`cobolparser/generators/cobolcheck.py`** — `CobolCheckGenerator` renders a `TestPlan` to a CobolCheck `.cut` file.
+
+**`cobolparser/cli/`** — Command-line interface entry points:
+
+- `parse.py` — the `cobol-parser` command (9 subcommands: `parse`, `batch`, `tokenize`, `preprocess`, `expand`, `analyze`, `dead-code`, `program-flow`, `generate-tests`)
+- `coverage.py` — `python -m cobolparser.cli.coverage` (`status`, `generate`, `validate`, `render`)
+
 ## Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser`.
