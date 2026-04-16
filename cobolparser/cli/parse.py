@@ -151,7 +151,7 @@ def _json_out(data: Any, compact: bool, output_path: str | None = None) -> None:
 
 
 def _build_parse_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser("parse", help="Parse a COBOL source file to AST JSON")
     p.add_argument("file", help="Path to the COBOL source file")
@@ -264,7 +264,7 @@ def _cmd_parse(args: argparse.Namespace) -> None:
 
 
 def _build_batch_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser("batch", help="Parse multiple COBOL files in parallel")
     p.add_argument("files", nargs="*", help="Paths to COBOL source files")
@@ -375,7 +375,7 @@ def _cmd_batch(args: argparse.Namespace) -> None:
 
 
 def _build_tokenize_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser("tokenize", help="Tokenize a COBOL source file")
     p.add_argument("file", help="Path to the COBOL source file")
@@ -412,7 +412,7 @@ def _cmd_tokenize(args: argparse.Namespace) -> None:
 
 
 def _build_preprocess_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "preprocess", help="Preprocess fixed-format COBOL to free-form"
@@ -454,7 +454,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
 
 
 def _build_expand_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser("expand", help="Expand COPY statements (copybooks)")
     p.add_argument("file", help="Path to the COBOL source file")
@@ -497,7 +497,7 @@ def _cmd_expand(args: argparse.Namespace) -> None:
 
 
 def _build_analyze_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "analyze", help="Analyze dynamic CALL targets in COBOL source"
@@ -543,7 +543,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
 
 def _build_dead_code_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "dead-code", help="Detect unreferenced paragraphs/sections (dead code)"
@@ -578,7 +578,7 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
 
 
 def _build_program_flow_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "program-flow",
@@ -614,7 +614,7 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
 
 
 def _build_generate_tests_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "generate-tests",
@@ -675,7 +675,7 @@ def _cmd_generate_tests(args: argparse.Namespace) -> None:
 
 
 def _build_io_sequence_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "io-sequence",
@@ -711,7 +711,7 @@ def _cmd_io_sequence(args: argparse.Namespace) -> None:
 
 
 def _build_move_type_check_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "move-type-check",
@@ -747,7 +747,7 @@ def _cmd_move_type_check(args: argparse.Namespace) -> None:
 
 
 def _build_linkage_check_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "linkage-check",
@@ -783,7 +783,7 @@ def _cmd_linkage_check(args: argparse.Namespace) -> None:
 
 
 def _build_language_env_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "language-env",
@@ -823,7 +823,7 @@ def _cmd_language_env(args: argparse.Namespace) -> None:
 
 
 def _build_ims_dli_parser(
-    subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
+    subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
         "ims-dli",
@@ -975,7 +975,7 @@ def _fail(message: str) -> NoReturn:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    from .. import __version__  # type: ignore[attr-defined]
+    from .. import __version__
 
     parser = argparse.ArgumentParser(
         prog="cobol-parser",

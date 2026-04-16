@@ -734,9 +734,7 @@ class ProgramFlowAnalyzer:
             path: list[str] = []
             stack_pos: dict[str, int] = {}  # node -> index in path while GRAY
             # Stack entries: (node, neighbor_iter)
-            frame_stack: list[tuple[str, Any]] = [
-                (start, iter(adj.get(start, [])))
-            ]
+            frame_stack: list[tuple[str, Any]] = [(start, iter(adj.get(start, [])))]
             color[start] = GRAY
             path.append(start)
             stack_pos[start] = 0

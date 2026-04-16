@@ -2746,9 +2746,12 @@ class TestProgramFlowSortMergeThru:
 
     def test_sort_thru_edge_types_in_enum(self) -> None:
         """New SORT/MERGE THRU edge types exist in FlowEdgeType."""
-        assert FlowEdgeType.SORT_INPUT_PROCEDURE_THRU.value == "SORT_INPUT_PROCEDURE_THRU"
         assert (
-            FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU.value == "SORT_OUTPUT_PROCEDURE_THRU"
+            FlowEdgeType.SORT_INPUT_PROCEDURE_THRU.value == "SORT_INPUT_PROCEDURE_THRU"
+        )
+        assert (
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU.value
+            == "SORT_OUTPUT_PROCEDURE_THRU"
         )
         assert (
             FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU.value
@@ -3481,11 +3484,13 @@ class TestProgramFlowRealCobolIntegration:
 """
         report = self._analyze(source)
         thru_edges = [
-            e for e in report.edges
+            e
+            for e in report.edges
             if e.edge_type == FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU
         ]
         input_thru_edges = [
-            e for e in report.edges
+            e
+            for e in report.edges
             if e.edge_type == FlowEdgeType.SORT_INPUT_PROCEDURE_THRU
         ]
 
@@ -3774,7 +3779,9 @@ class TestProgramFlowRealCobolIntegration:
            DISPLAY 'OK'.
 """
         report = self._analyze(source)
-        perform_edges = {e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM}
+        perform_edges = {
+            e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM
+        }
 
         assert "ERROR-HANDLER" in perform_edges
         assert "SUCCESS-HANDLER" in perform_edges
@@ -3815,7 +3822,9 @@ class TestProgramFlowRealCobolIntegration:
            DISPLAY 'OVERFLOW'.
 """
         report = self._analyze(source)
-        perform_edges = {e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM}
+        perform_edges = {
+            e.target for e in report.edges if e.edge_type == FlowEdgeType.PERFORM
+        }
         assert "OVERFLOW-HANDLER" in perform_edges
 
     def test_call_exception_sample_file(self) -> None:
@@ -3888,9 +3897,7 @@ class TestProgramFlowRealCobolIntegration:
 
         report = self._analyze(sample.read_text(encoding="utf-8"))
 
-        search_node = next(
-            (n for n in report.nodes if n.name == "SEARCH-TESTS"), None
-        )
+        search_node = next((n for n in report.nodes if n.name == "SEARCH-TESTS"), None)
         assert search_node is not None
         assert search_node.search_count >= 1
 
@@ -4159,8 +4166,13 @@ class TestProgramFlowRealCobolIntegration:
         # -- all paragraphs found --
         node_names = {n.name for n in report.nodes}
         for expected in [
-            "MAIN-LOGIC", "LOAD-CODES", "LOOKUP-CODE",
-            "ERROR-HANDLER", "SUCCESS-HANDLER", "CLEANUP", "DEAD-PARA",
+            "MAIN-LOGIC",
+            "LOAD-CODES",
+            "LOOKUP-CODE",
+            "ERROR-HANDLER",
+            "SUCCESS-HANDLER",
+            "CLEANUP",
+            "DEAD-PARA",
         ]:
             assert expected in node_names
 
@@ -4250,10 +4262,12 @@ class TestProgramFlowAuditEdgeCases:
         stmt.set_file_name("SORT-FILE")
         stmt.input_procedure_thru = "PROC-END"  # THRU set directly, base is None
 
-        prog = _make_program([
-            ("MAIN-LOGIC", [stmt, _stop_run()]),
-            ("PROC-END", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt, _stop_run()]),
+                ("PROC-END", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4261,7 +4275,10 @@ class TestProgramFlowAuditEdgeCases:
             e
             for e in report.edges
             if e.edge_type
-            in (FlowEdgeType.SORT_INPUT_PROCEDURE, FlowEdgeType.SORT_INPUT_PROCEDURE_THRU)
+            in (
+                FlowEdgeType.SORT_INPUT_PROCEDURE,
+                FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
+            )
         ]
         assert len(sort_input_edges) == 0
 
@@ -4271,10 +4288,12 @@ class TestProgramFlowAuditEdgeCases:
         stmt.set_file_name("SORT-FILE")
         stmt.output_procedure_thru = "PROC-END"  # THRU set directly, base is None
 
-        prog = _make_program([
-            ("MAIN-LOGIC", [stmt, _stop_run()]),
-            ("PROC-END", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt, _stop_run()]),
+                ("PROC-END", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4282,7 +4301,10 @@ class TestProgramFlowAuditEdgeCases:
             e
             for e in report.edges
             if e.edge_type
-            in (FlowEdgeType.SORT_OUTPUT_PROCEDURE, FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU)
+            in (
+                FlowEdgeType.SORT_OUTPUT_PROCEDURE,
+                FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+            )
         ]
         assert len(sort_output_edges) == 0
 
@@ -4294,10 +4316,12 @@ class TestProgramFlowAuditEdgeCases:
         stmt.set_file_name("MERGE-FILE")
         stmt.output_procedure_thru = "PROC-END"  # THRU set directly, base is None
 
-        prog = _make_program([
-            ("MAIN-LOGIC", [stmt, _stop_run()]),
-            ("PROC-END", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt, _stop_run()]),
+                ("PROC-END", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4321,10 +4345,12 @@ class TestProgramFlowAuditEdgeCases:
         exit_stmt = ExitStatement(LOC)
         exit_stmt.set_exit_type("SECTION")
 
-        prog = _make_program([
-            ("PARA-A", [exit_stmt]),
-            ("PARA-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("PARA-A", [exit_stmt]),
+                ("PARA-B", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4342,10 +4368,12 @@ class TestProgramFlowAuditEdgeCases:
         exit_stmt = ExitStatement(LOC)
         exit_stmt.set_exit_type("PARAGRAPH")
 
-        prog = _make_program([
-            ("PARA-A", [exit_stmt]),
-            ("PARA-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("PARA-A", [exit_stmt]),
+                ("PARA-B", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4363,10 +4391,12 @@ class TestProgramFlowAuditEdgeCases:
         exit_stmt = ExitStatement(LOC)
         exit_stmt.set_exit_type("PERFORM")
 
-        prog = _make_program([
-            ("PARA-A", [exit_stmt]),
-            ("PARA-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("PARA-A", [exit_stmt]),
+                ("PARA-B", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4381,12 +4411,14 @@ class TestProgramFlowAuditEdgeCases:
 
     def test_fall_through_after_goto_depending(self) -> None:
         """GO TO DEPENDING ON is conditional; fall-through still happens."""
-        prog = _make_program([
-            ("DISPATCH", [_goto_depending(["BRANCH-A", "BRANCH-B"], "WS-IDX")]),
-            ("NEXT-PARA", [_continue()]),
-            ("BRANCH-A", [_continue()]),
-            ("BRANCH-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("DISPATCH", [_goto_depending(["BRANCH-A", "BRANCH-B"], "WS-IDX")]),
+                ("NEXT-PARA", [_continue()]),
+                ("BRANCH-A", [_continue()]),
+                ("BRANCH-B", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4405,12 +4437,14 @@ class TestProgramFlowAuditEdgeCases:
 
     def test_two_independent_cycles_both_detected(self) -> None:
         """Two disjoint cycle clusters are both reported in cycles list."""
-        prog = _make_program([
-            ("LOOP-A", [_perform("LOOP-B")]),
-            ("LOOP-B", [_perform("LOOP-A")]),
-            ("LOOP-C", [_perform("LOOP-D")]),
-            ("LOOP-D", [_perform("LOOP-C")]),
-        ])
+        prog = _make_program(
+            [
+                ("LOOP-A", [_perform("LOOP-B")]),
+                ("LOOP-B", [_perform("LOOP-A")]),
+                ("LOOP-C", [_perform("LOOP-D")]),
+                ("LOOP-D", [_perform("LOOP-C")]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4426,11 +4460,13 @@ class TestProgramFlowAuditEdgeCases:
     def test_cycle_deduplication_same_cycle_reported_once(self) -> None:
         """The same cycle found from multiple DFS entry points is only in
         cycles list once."""
-        prog = _make_program([
-            ("LOOP-A", [_perform("LOOP-B")]),
-            ("LOOP-B", [_perform("LOOP-C")]),
-            ("LOOP-C", [_perform("LOOP-A")]),
-        ])
+        prog = _make_program(
+            [
+                ("LOOP-A", [_perform("LOOP-B")]),
+                ("LOOP-B", [_perform("LOOP-C")]),
+                ("LOOP-C", [_perform("LOOP-A")]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4445,12 +4481,16 @@ class TestProgramFlowAuditEdgeCases:
     def test_all_nodes_unreachable_when_entry_points_cleared(self) -> None:
         """After clearing _entry_points and re-running detection, all nodes
         are reported as unreachable."""
-        prog = _make_program([
-            ("PARA-A", [_perform("PARA-B")]),
-            ("PARA-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("PARA-A", [_perform("PARA-B")]),
+                ("PARA-B", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
-        analyzer.analyze(prog)  # normal run first to populate _nodes/_ordered_procedures
+        analyzer.analyze(
+            prog
+        )  # normal run first to populate _nodes/_ordered_procedures
 
         # Manually clear entry points to simulate the boundary condition
         analyzer._entry_points = []
@@ -4470,10 +4510,12 @@ class TestProgramFlowAuditEdgeCases:
         entry = EntryStatement(LOC)
         entry.set_entry_name("'GHOST-ENTRY'")  # No matching paragraph
 
-        prog = _make_program([
-            ("MAIN-LOGIC", [entry, _stop_run()]),
-            ("ISOLATED", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [entry, _stop_run()]),
+                ("ISOLATED", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4489,11 +4531,13 @@ class TestProgramFlowAuditEdgeCases:
     def test_unreachable_isolated_cycle_cluster(self) -> None:
         """A mutual cycle disconnected from the entry point is marked
         unreachable, even though a cycle exists among those nodes."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_stop_run()]),
-            ("CYCLE-A", [_perform("CYCLE-B")]),
-            ("CYCLE-B", [_perform("CYCLE-A")]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_stop_run()]),
+                ("CYCLE-A", [_perform("CYCLE-B")]),
+                ("CYCLE-B", [_perform("CYCLE-A")]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4569,7 +4613,9 @@ class TestProgramFlowAuditEdgeCases:
             "has_exit_perform",
             "is_exit_point",
         ):
-            assert field_name not in d, f"Expected {field_name!r} to be absent when False"
+            assert (
+                field_name not in d
+            ), f"Expected {field_name!r} to be absent when False"
 
     def test_flow_node_is_entry_point_false_omitted(self) -> None:
         """FlowNode.to_dict() omits is_entry_point when False."""
@@ -4647,10 +4693,12 @@ class TestProgramFlowAuditEdgeCases:
         but CALL is external—only internal edges count)."""
         # MAIN calls 'EXTERNAL-PROG' (external); no paragraph named that exists.
         # WORKER only reachable via PERFORM from MAIN.
-        prog = _make_program([
-            ("MAIN", [_call("'EXTERNAL-PROG'"), _perform("WORKER"), _stop_run()]),
-            ("WORKER", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN", [_call("'EXTERNAL-PROG'"), _perform("WORKER"), _stop_run()]),
+                ("WORKER", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4666,15 +4714,19 @@ class TestProgramFlowAuditEdgeCases:
         # MAIN dynamically calls 'HANDLER', but HANDLER is also a paragraph.
         # Since CALL edges are external, HANDLER paragraph is still unreachable
         # from MAIN via internal flow.
-        prog = _make_program([
-            ("MAIN", [_call("WS-PROG-NAME", is_dynamic=True), _stop_run()]),
-            ("HANDLER", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN", [_call("WS-PROG-NAME", is_dynamic=True), _stop_run()]),
+                ("HANDLER", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
         # Dynamic CALL edge present
-        dyn_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.CALL_DYNAMIC]
+        dyn_edges = [
+            e for e in report.edges if e.edge_type == FlowEdgeType.CALL_DYNAMIC
+        ]
         assert len(dyn_edges) == 1
 
         # HANDLER is unreachable via internal flow
@@ -4728,11 +4780,13 @@ class TestProgramFlowAuditEdgeCases:
     def test_fall_through_when_goto_and_perform_both_present(self) -> None:
         """When a paragraph has both a GO TO and a PERFORM, the heuristic
         does NOT suppress fall-through (perform_count > 0 overrides GOTO)."""
-        prog = _make_program([
-            ("MAIN", [_perform("HELPER"), _goto("MAIN")]),
-            ("HELPER", [_continue()]),
-            ("AFTER", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN", [_perform("HELPER"), _goto("MAIN")]),
+                ("HELPER", [_continue()]),
+                ("AFTER", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
@@ -4757,13 +4811,15 @@ class TestProgramFlowAuditEdgeCases:
         alter.add_alteration("DISPATCH-A", "HANDLER-A")
         alter.add_alteration("DISPATCH-B", "HANDLER-B")
 
-        prog = _make_program([
-            ("MAIN", [alter, _stop_run()]),
-            ("DISPATCH-A", [_continue()]),
-            ("DISPATCH-B", [_continue()]),
-            ("HANDLER-A", [_continue()]),
-            ("HANDLER-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN", [alter, _stop_run()]),
+                ("DISPATCH-A", [_continue()]),
+                ("DISPATCH-B", [_continue()]),
+                ("HANDLER-A", [_continue()]),
+                ("HANDLER-B", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
