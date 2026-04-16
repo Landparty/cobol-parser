@@ -210,7 +210,118 @@ cobol-parser dead-code program.cbl --copybook-path ./copybooks
 cobol-parser dead-code program.cbl --compact
 ```
 
-## Recipe 6: Custom Dialect "Hotfix"
+## Recipe 6: CRUD Matrix for Mainframe Modernization
+
+**Problem**: You're leading a mainframe modernization project and need to document which COBOL programs touch which files and DB2 tables, and how (Create / Read / Update / Delete). The output goes into a spreadsheet for the migration team.
+
+**Solution**: Use `CRUDMatrixGenerator`. It handles both VSAM/sequential files (via `OPEN`/`READ`/`WRITE`/`REWRITE`/`DELETE`) and DB2 tables (via `EXEC SQL INSERT`/`SELECT`/`UPDATE`/`DELETE` and cursor `FETCH`) in a single pass.
+
+```python
+from pathlib import Path
+from cobolparser import parse_cobol
+from cobolparser.analysis import CRUDMatrixGenerator
+
+def emit_portfolio_crud(folder: Path, csv_out: Path) -> None:
+    rows = []
+    for cbl in folder.glob("*.cbl"):
+        result = parse_cobol(cbl.read_text(), filename=str(cbl))
+        if not result.ast:
+            continue
+        matrix = CRUDMatrixGenerator().analyze(result.ast)
+        rows.append(matrix.to_csv())
+
+    # Merge per-program CSVs; keep the header only once
+    header, *body_chunks = [r for r in rows if r]
+    merged = header.splitlines()[0] + "\n"
+    for chunk in body_chunks:
+        merged += "\n".join(chunk.splitlines()[1:]) + "\n"
+
+    csv_out.write_text(merged)
+
+# emit_portfolio_crud(Path("./legacy"), Path("./crud.csv"))
+```
+
+The per-entry `to_dict()` also captures file `organization` (SEQUENTIAL / INDEXED / RELATIVE), `access_mode`, `open_modes`, and cursor names — enough to reconstruct DB2 access patterns.
+
+## Recipe 7: IMS Segment Inventory
+
+**Problem**: You need to list every IMS database segment that a set of COBOL programs reads or writes, so the IMS administrator can size the replacement database.
+
+**Solution**: `IMSSegmentAnalyzer` resolves segment names from the first 8 bytes of SSA data items, tracking values through `MOVE` propagation.
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.analysis import IMSSegmentAnalyzer
+
+def inventory_ims_segments(source: str) -> dict[str, list[str]]:
+    result = parse_cobol(source)
+    analyzer = IMSSegmentAnalyzer()
+    calls = analyzer.analyze(result.ast)
+
+    inventory: dict[str, list[str]] = {}
+    for call in calls:
+        for seg in call.segment_names:
+            if seg is None:
+                continue
+            inventory.setdefault(seg, []).append(
+                f"{call.interface} {call.function_code or '?'} @ line {call.location.line}"
+            )
+    return inventory
+```
+
+## Recipe 8: EXEC SQL Host Variable Typing
+
+**Problem**: Your DB2-to-Postgres migration tool needs to know the COBOL type of every host variable that appears in `EXEC SQL`, including ones declared via DCLGEN.
+
+**Solution**: `HostVariableResolver` walks the DATA DIVISION, indexes DCLGEN `DECLARE TABLE` blocks, and resolves every `:host-var` reference it finds in SQL.
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.analysis import HostVariableResolver
+
+result = parse_cobol(source)
+report = HostVariableResolver().resolve(result.ast)
+
+for name, info in sorted(report.resolved.items()):
+    pic = info.picture or "(group)"
+    db2 = info.db2_column.sql_type if info.db2_column else "n/a"
+    print(f":{name:<20} PIC {pic:<15} USAGE {info.usage:<10} DB2={db2}")
+
+if report.unresolved:
+    print("UNRESOLVED host variables (no DATA DIVISION entry):")
+    for name in sorted(report.unresolved):
+        print(f"  :{name}")
+
+if report.column_name_collisions:
+    print("AMBIGUOUS column names (defined in multiple DECLARE TABLE blocks):")
+    for col, tables in report.column_name_collisions.items():
+        print(f"  {col}: {', '.join(tables)}")
+```
+
+## Recipe 9: Dead Code + Program Flow Report
+
+**Problem**: You want a single JSON report that a downstream tool can ingest, combining dead code detection and a control-flow graph.
+
+**Solution**:
+
+```python
+import json
+from cobolparser import parse_cobol, DeadCodeAnalyzer, ProgramFlowAnalyzer
+
+result = parse_cobol(source)
+
+dead_code = DeadCodeAnalyzer().analyze(result.ast)
+flow      = ProgramFlowAnalyzer().analyze(result.ast)
+
+report = {
+    "program": result.ast.program_name,
+    "dead_code": dead_code.to_dict(),
+    "flow": flow.to_dict(),
+}
+print(json.dumps(report, indent=2))
+```
+
+## Recipe 10: Custom Dialect "Hotfix"
 
 **Problem**: Your vendor uses a non-standard verb `SUPER-COMPUTE` that isn't valid COBOL, causing the parser to choke.
 

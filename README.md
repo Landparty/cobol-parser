@@ -25,6 +25,9 @@ A COBOL source code parser for Python 3.11+ that converts COBOL programs into st
 - **MOVE type checking** — flags type-incompatible MOVE statements (numeric to alphanumeric, etc.)
 - **Linkage section checking** — validates LINKAGE SECTION data items and USING/RETURNING clause consistency
 - **Language Environment analysis** — identifies IBM LE function calls, service calls, and condition handling
+- **CRUD matrix generator** — program × file/table Create/Read/Update/Delete matrix with CSV and JSON export
+- **IMS segment analyzer** — resolves IMS DLI segment names for CBLTDLI/AIBTDLI/CEETDLI calls
+- **Host variable resolver** — resolves `:host-var` references in EXEC SQL to DATA DIVISION and DCLGEN types
 - **CobolCheck test generation** — automatically generates `.cut` unit test suites targeting paragraph, branch, and boundary coverage
 
 ## Installation
@@ -222,6 +225,80 @@ for svc in le_result.service_calls:
     print(f"LE service call: {svc.name} at line {svc.line}")
 ```
 
+### CRUD Matrix Generation
+
+Generates a Create/Read/Update/Delete matrix for every resource touched by a
+program — both COBOL files (`OPEN`/`READ`/`WRITE`/`REWRITE`/`DELETE`) and
+DB2 tables (`INSERT`/`SELECT`/`UPDATE`/`DELETE` via `EXEC SQL`). Standard
+deliverable for mainframe modernization engagements; renders to CSV or JSON
+for spreadsheet delivery.
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.analysis import CRUDMatrixGenerator
+
+result = parse_cobol(source)
+matrix = CRUDMatrixGenerator().analyze(result.ast)
+
+# Per-entry inspection
+for entry in matrix.entries:
+    print(f"{entry.program_name} · {entry.crud.as_string()}")
+
+print(matrix.to_csv())    # spreadsheet-friendly
+print(matrix.to_json())   # machine-readable
+```
+
+### IMS Segment Analysis
+
+Statically resolves the IMS DLI segment names accessed by each
+`CALL 'CBLTDLI' / 'AIBTDLI' / 'CEETDLI'` by inspecting SSA data-item
+definitions and `MOVE` value propagation. Recognizes all 16 standard DLI
+function codes (GU, GN, GNP, GHU, GHN, GHNP, ISRT, DLET, REPL, CHKP, XRST,
+XDLT, XRPL, TERM, ROLLB, PURG):
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.analysis import IMSSegmentAnalyzer
+
+result = parse_cobol(source)
+analyzer = IMSSegmentAnalyzer()
+dli_calls = analyzer.analyze(result.ast)
+
+for call in dli_calls:
+    print(f"{call.interface} {call.function_code} {call.pcb_name}")
+    print(f"  Segments: {call.segment_names}")
+
+# All distinct segment names touched by the program
+all_segments = analyzer.get_all_segment_names(dli_calls)
+```
+
+### Host Variable Resolution
+
+Walks the AST and resolves every `:host-var` reference in `EXEC SQL` blocks
+back to its DATA DIVISION definition, cross-referencing with DCLGEN
+`DECLARE TABLE` column definitions so PICTURE, USAGE, and DB2 column types
+are available in one place:
+
+```python
+from cobolparser import parse_cobol
+from cobolparser.analysis import HostVariableResolver
+
+result = parse_cobol(source)
+report = HostVariableResolver().resolve(result.ast)
+
+for name, info in report.resolved.items():
+    print(f":{name}  PIC {info.picture}  USAGE {info.usage}")
+
+for name in report.unresolved:
+    print(f":{name}  — no DATA DIVISION entry found")
+
+for col, tables in report.column_name_collisions.items():
+    print(f"ambiguous column {col} across tables: {', '.join(tables)}")
+```
+
+See [docs/analysis.md](docs/analysis.md) for the full reference covering
+every analyzer, report types, and CLI integration.
+
 ## CobolCheck Test Generation
 
 Automatically generate [CobolCheck](https://github.com/openmainframeproject/cobol-check) unit test suites (`.cut` files) from any COBOL program. The generator analyzes the AST and produces tests targeting paragraph execution, branch coverage, and boundary values -- no manual test writing required.
@@ -356,9 +433,14 @@ The analyzer detects 18 branch types across all major COBOL constructs:
 | Architecture & pipeline | [architecture.md](docs/architecture.md) |
 | Configuration options | [configuration.md](docs/configuration.md) |
 | Performance & optimization | [performance.md](docs/performance.md) |
+| Analysis toolkit (all analyzers) | [analysis.md](docs/analysis.md) |
 | Copybook expansion | [copybook-expansion.md](docs/copybook-expansion.md) |
 | IBM Enterprise COBOL | [ibm-enterprise.md](docs/ibm-enterprise.md) |
+| IBM dialect registration | [ibm-dialect-registration.md](docs/ibm-dialect-registration.md) |
+| Factory API (AST node creation) | [factory-api.md](docs/factory-api.md) |
+| Factory extension guide | [factory-extension-guide.md](docs/factory-extension-guide.md) |
 | CobolCheck test generation | [README.md](#cobolcheck-test-generation) |
+| Packaging (mypyc binary wheel) | [packaging-mypyc.md](docs/packaging-mypyc.md) |
 | Troubleshooting | [troubleshooting.md](docs/troubleshooting.md) |
 | Contributing | [contributing.md](docs/contributing.md) |
 
