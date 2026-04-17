@@ -55,6 +55,12 @@ class FlowEdgeType(Enum):
     MERGE_OUTPUT_PROCEDURE_THRU = "MERGE_OUTPUT_PROCEDURE_THRU"
     ALTER = "ALTER"
     FALL_THROUGH = "FALL_THROUGH"
+    IF_BRANCH = "IF_BRANCH"
+    IF_THEN = "IF_THEN"
+    IF_ELSE = "IF_ELSE"
+    EVALUATE_BRANCH = "EVALUATE_BRANCH"
+    EVALUATE_WHEN = "EVALUATE_WHEN"
+    EVALUATE_WHEN_OTHER = "EVALUATE_WHEN_OTHER"
 
 
 @dataclass
@@ -152,6 +158,48 @@ class FlowEdge:
 
 
 @dataclass
+class BranchArm:
+    """One arm of a branch node (THEN/ELSE/WHEN/WHEN OTHER)."""
+
+    arm_id: str
+    arm_type: str  # "THEN", "ELSE", "WHEN", "WHEN_OTHER"
+    label: str
+    statement_count: int
+    nested_call_targets: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "arm_id": self.arm_id,
+            "arm_type": self.arm_type,
+            "label": self.label,
+            "statement_count": self.statement_count,
+            "nested_call_targets": self.nested_call_targets,
+        }
+
+
+@dataclass
+class BranchNode:
+    """A decision node (IF or EVALUATE) in the flow graph."""
+
+    node_id: str
+    branch_type: str  # "IF" or "EVALUATE"
+    parent_proc: str
+    location: SourceLocation
+    condition_text: str
+    arms: list[BranchArm] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "branch_type": self.branch_type,
+            "parent_proc": self.parent_proc,
+            "location": self.location.to_dict(),
+            "condition_text": self.condition_text,
+            "arms": [a.to_dict() for a in self.arms],
+        }
+
+
+@dataclass
 class ProgramFlowReport:
     """Complete program flow analysis report."""
 
@@ -164,6 +212,7 @@ class ProgramFlowReport:
     program_cancellations: list[dict[str, Any]] = field(default_factory=list)
     cycles: list[list[str]] = field(default_factory=list)
     unreachable_nodes: list[str] = field(default_factory=list)
+    branch_nodes: list["BranchNode"] = field(default_factory=list)
 
     @property
     def node_count(self) -> int:
@@ -184,6 +233,7 @@ class ProgramFlowReport:
             "program_cancellations": self.program_cancellations,
             "cycles": self.cycles,
             "unreachable_nodes": self.unreachable_nodes,
+            "branch_nodes": [b.to_dict() for b in self.branch_nodes],
             "summary": {
                 "node_count": self.node_count,
                 "edge_count": self.edge_count,
@@ -239,6 +289,12 @@ class ProgramFlowAnalyzer:
             FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
             FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
             FlowEdgeType.ALTER,
+            FlowEdgeType.IF_BRANCH,
+            FlowEdgeType.IF_THEN,
+            FlowEdgeType.IF_ELSE,
+            FlowEdgeType.EVALUATE_BRANCH,
+            FlowEdgeType.EVALUATE_WHEN,
+            FlowEdgeType.EVALUATE_WHEN_OTHER,
         }
     )
 
@@ -254,6 +310,8 @@ class ProgramFlowAnalyzer:
         self._unreachable_nodes: list[str] = []
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
+        self._branch_seq: int = 0
+        self._branch_nodes: list[BranchNode] = []
 
     def analyze(self, ast: CobolProgram) -> ProgramFlowReport:
         """Analyze a COBOL program and build its control flow graph.
@@ -274,6 +332,8 @@ class ProgramFlowAnalyzer:
         self._cycles = []
         self._unreachable_nodes = []
         self._current_procedure = None
+        self._branch_seq = 0
+        self._branch_nodes = []
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -321,6 +381,7 @@ class ProgramFlowAnalyzer:
         report.program_cancellations = self._program_cancellations
         report.cycles = self._cycles
         report.unreachable_nodes = self._unreachable_nodes
+        report.branch_nodes = self._branch_nodes
         return report
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
@@ -397,7 +458,7 @@ class ProgramFlowAnalyzer:
             if stype:
                 node.statement_types[stype] = node.statement_types.get(stype, 0) + 1
 
-        def scan(stmt: Any) -> None:
+        def scan(stmt: Any, source_id: str = proc_name) -> None:
             if not hasattr(stmt, "node_type"):
                 return
             if id(stmt) in visited:
@@ -409,10 +470,14 @@ class ProgramFlowAnalyzer:
 
             if isinstance(stmt, PerformStatement):
                 node.perform_count += 1
+                # Always use proc_name for inter-procedure edges so that
+                # reachability analysis and existing consumers see the
+                # containing procedure as the source, regardless of which
+                # IF/EVALUATE arm the PERFORM lives in.
                 self._process_perform(stmt, proc_name)
                 # Recurse into inline PERFORM blocks
                 for s in stmt.inline_statements:
-                    scan(s)
+                    scan(s, source_id)
             elif isinstance(stmt, GoStatement):
                 node.goto_count += 1
                 self._process_goto(stmt, proc_name)
@@ -421,13 +486,15 @@ class ProgramFlowAnalyzer:
                 self._process_call(stmt, proc_name)
                 # Scan exception handler branches for nested flow
                 for s in stmt.on_overflow or []:
-                    scan(s)
+                    scan(s, source_id)
                 for s in stmt.on_exception or []:
-                    scan(s)
+                    scan(s, source_id)
                 for s in stmt.not_on_exception or []:
-                    scan(s)
+                    scan(s, source_id)
             elif isinstance(stmt, IfStatement):
                 node.if_count += 1
+                # Derive condition text
+                cond_text = "IF"
                 decision: dict[str, Any] = {
                     "type": "IF",
                     "location": stmt.location.to_dict(),
@@ -435,14 +502,64 @@ class ProgramFlowAnalyzer:
                 }
                 if stmt.condition:
                     cond_dict = stmt.condition.to_dict()
-                    decision["condition"] = cond_dict.get(
-                        "expression_type", str(cond_dict)
-                    )
+                    cond_text = cond_dict.get("expression_type", str(cond_dict))
+                    decision["condition"] = cond_text
                 node.decisions.append(decision)
+                # Build BranchNode
+                self._branch_seq += 1
+                bn_id = f"{proc_name}__IF_{self._branch_seq}"
+                then_id = f"{bn_id}__THEN"
+                else_id = f"{bn_id}__ELSE"
+                then_arm = BranchArm(
+                    arm_id=then_id,
+                    arm_type="THEN",
+                    label="THEN",
+                    statement_count=len(stmt.then_statements),
+                )
+                else_arm = BranchArm(
+                    arm_id=else_id,
+                    arm_type="ELSE",
+                    label="ELSE",
+                    statement_count=len(stmt.else_statements),
+                )
+                bn = BranchNode(
+                    node_id=bn_id,
+                    branch_type="IF",
+                    parent_proc=proc_name,
+                    location=stmt.location,
+                    condition_text=cond_text,
+                    arms=[then_arm, else_arm],
+                )
+                self._branch_nodes.append(bn)
+                # Edges: source_id → branch node, branch node → arms
+                self._edges.append(
+                    FlowEdge(
+                        source=source_id,
+                        target=bn_id,
+                        edge_type=FlowEdgeType.IF_BRANCH,
+                        location=stmt.location,
+                    )
+                )
+                self._edges.append(
+                    FlowEdge(
+                        source=bn_id,
+                        target=then_id,
+                        edge_type=FlowEdgeType.IF_THEN,
+                        location=stmt.location,
+                    )
+                )
+                self._edges.append(
+                    FlowEdge(
+                        source=bn_id,
+                        target=else_id,
+                        edge_type=FlowEdgeType.IF_ELSE,
+                        location=stmt.location,
+                    )
+                )
                 for s in stmt.then_statements:
-                    scan(s)
+                    scan(s, then_id)
                 for s in stmt.else_statements:
-                    scan(s)
+                    scan(s, else_id)
             elif isinstance(stmt, EvaluateStatement):
                 node.evaluate_count += 1
                 subjects: list[Any] = []
@@ -451,6 +568,10 @@ class ProgramFlowAnalyzer:
                         subjects.append(subj.to_dict())
                     else:
                         subjects.append(subj)
+                subj_text = ", ".join(
+                    s.get("expression_type", str(s)) if isinstance(s, dict) else str(s)
+                    for s in subjects
+                ) or "EVALUATE"
                 decision = {
                     "type": "EVALUATE",
                     "location": stmt.location.to_dict(),
@@ -459,12 +580,82 @@ class ProgramFlowAnalyzer:
                     "has_default": stmt.default_when is not None,
                 }
                 node.decisions.append(decision)
-                for wc in stmt.when_clauses:
+                # Build BranchNode
+                self._branch_seq += 1
+                bn_id = f"{proc_name}__EVAL_{self._branch_seq}"
+                bn = BranchNode(
+                    node_id=bn_id,
+                    branch_type="EVALUATE",
+                    parent_proc=proc_name,
+                    location=stmt.location,
+                    condition_text=subj_text,
+                )
+                self._branch_nodes.append(bn)
+                # Edges: source_id → branch node
+                self._edges.append(
+                    FlowEdge(
+                        source=source_id,
+                        target=bn_id,
+                        edge_type=FlowEdgeType.EVALUATE_BRANCH,
+                        location=stmt.location,
+                    )
+                )
+                # WHEN arms
+                for wc_idx, wc in enumerate(stmt.when_clauses):
+                    sel = wc.selectors[0] if wc.selectors else {}
+                    sel_type = sel.get("type", "") if isinstance(sel, dict) else ""
+                    if sel_type == "Any":
+                        when_label = "WHEN ANY"
+                    elif sel_type == "Literal":
+                        when_label = f"WHEN {sel.get('value', '')}"
+                    elif sel_type == "Identifier":
+                        when_label = f"WHEN {sel.get('value', '')}"
+                    elif sel_type == "Range":
+                        when_label = f"WHEN {sel.get('start', '')}..{sel.get('end', '')}"
+                    elif sel_type == "Condition":
+                        when_label = f"WHEN {sel.get('text', '')}"
+                    else:
+                        when_label = f"WHEN {wc_idx + 1}"
+                    arm_id = f"{bn_id}__WHEN_{wc_idx + 1}"
+                    arm = BranchArm(
+                        arm_id=arm_id,
+                        arm_type="WHEN",
+                        label=when_label,
+                        statement_count=len(wc.statements),
+                    )
+                    bn.arms.append(arm)
+                    self._edges.append(
+                        FlowEdge(
+                            source=bn_id,
+                            target=arm_id,
+                            edge_type=FlowEdgeType.EVALUATE_WHEN,
+                            location=stmt.location,
+                            condition=when_label,
+                        )
+                    )
                     for s in wc.statements:
-                        scan(s)
+                        scan(s, arm_id)
+                # WHEN OTHER arm
                 if stmt.default_when:
+                    other_id = f"{bn_id}__WHEN_OTHER"
+                    other_arm = BranchArm(
+                        arm_id=other_id,
+                        arm_type="WHEN_OTHER",
+                        label="WHEN OTHER",
+                        statement_count=len(stmt.default_when.statements),
+                    )
+                    bn.arms.append(other_arm)
+                    self._edges.append(
+                        FlowEdge(
+                            source=bn_id,
+                            target=other_id,
+                            edge_type=FlowEdgeType.EVALUATE_WHEN_OTHER,
+                            location=stmt.location,
+                            condition="WHEN OTHER",
+                        )
+                    )
                     for s in stmt.default_when.statements:
-                        scan(s)
+                        scan(s, other_id)
             elif isinstance(stmt, SearchStatement):
                 node.search_count += 1
                 decision = {
@@ -477,18 +668,18 @@ class ProgramFlowAnalyzer:
                 node.decisions.append(decision)
                 for wc_dict in stmt.when_clauses:
                     for s in wc_dict.get("statements", []):
-                        scan(s)
+                        scan(s, source_id)
                 if stmt.at_end_clause:
                     for s in stmt.at_end_clause:
-                        scan(s)
+                        scan(s, source_id)
             elif isinstance(stmt, SortStatement):
-                self._process_sort(stmt, proc_name)
+                self._process_sort(stmt, source_id)
             elif isinstance(stmt, MergeStatement):
-                self._process_merge(stmt, proc_name)
+                self._process_merge(stmt, source_id)
             elif isinstance(stmt, AlterStatement):
-                self._process_alter(stmt, proc_name)
+                self._process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):
-                self._process_cancel(stmt, proc_name)
+                self._process_cancel(stmt, source_id)
             elif isinstance(stmt, ReturnStatement):
                 node.has_return = True
                 # Scan AT END / NOT AT END branches for nested flow

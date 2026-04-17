@@ -53,8 +53,12 @@ def __getattr__(name: str) -> object:
         "FlowNode",
         "FlowEdge",
         "FlowEdgeType",
+        "BranchArm",
+        "BranchNode",
     ):
         from .program_flow import (
+            BranchArm,
+            BranchNode,
             FlowEdge,
             FlowEdgeType,
             FlowNode,
@@ -68,6 +72,8 @@ def __getattr__(name: str) -> object:
             "FlowNode": FlowNode,
             "FlowEdge": FlowEdge,
             "FlowEdgeType": FlowEdgeType,
+            "BranchArm": BranchArm,
+            "BranchNode": BranchNode,
         }
         return _map[name]
     if name in (

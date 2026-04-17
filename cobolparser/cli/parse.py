@@ -147,6 +147,20 @@ def _json_out(data: Any, compact: bool, output_path: str | None = None) -> None:
         print(text)
 
 
+def _text_out(text: str, output_path: str | None = None) -> None:
+    """Write *text* to *output_path* or stdout."""
+    if output_path:
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(text)
+                if not text.endswith("\n"):
+                    f.write("\n")
+        except OSError as e:
+            _fail(f"Cannot write output file: {e}")
+    else:
+        print(text)
+
+
 # -- Subcommand: parse -------------------------------------------------------
 
 
@@ -585,6 +599,13 @@ def _build_program_flow_parser(
         help="Display program control flow graph (paragraphs, PERFORM, GO TO, CALL)",
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    p.add_argument(
+        "--format",
+        choices=["json", "mermaid", "dot"],
+        default="json",
+        metavar="FORMAT",
+        help="Output format: json (default), mermaid (Mermaid flowchart), or dot (Graphviz DOT)",
+    )
     _add_compact_arg(p)
     _add_free_form_arg(p)
     _add_dialect_arg(p)
@@ -607,7 +628,21 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
     analyzer = ProgramFlowAnalyzer()
     report = analyzer.analyze(result.ast)
 
-    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+    fmt = getattr(args, "format", "json")
+    output_path = getattr(args, "output", None)
+
+    if fmt == "mermaid":
+        from ..generators.flowchart import FlowchartOptions, MermaidFlowchartGenerator
+
+        gen = MermaidFlowchartGenerator()
+        _text_out(gen.generate(report, FlowchartOptions()), output_path)
+    elif fmt == "dot":
+        from ..generators.flowchart import DotFlowchartGenerator, FlowchartOptions
+
+        gen = DotFlowchartGenerator()
+        _text_out(gen.generate(report, FlowchartOptions()), output_path)
+    else:
+        _json_out(report.to_dict(), args.compact, output_path)
 
 
 # -- Subcommand: generate-tests -----------------------------------------------

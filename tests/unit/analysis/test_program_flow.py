@@ -3,6 +3,8 @@
 import pytest
 
 from cobolparser.analysis.program_flow import (
+    BranchArm,
+    BranchNode,
     FlowEdge,
     FlowEdgeType,
     FlowNode,
@@ -4845,3 +4847,243 @@ class TestProgramFlowAuditEdgeCases:
         # Only MAIN-LOGIC is an entry point (the first paragraph); no extra
         # entry point from the un-named EntryStatement
         assert report.entry_points == ["MAIN-LOGIC"]
+
+
+# ---------------------------------------------------------------------------
+# BranchNode / BranchArm population tests
+# ---------------------------------------------------------------------------
+
+
+class TestBranchNodes:
+    """Tests for BranchNode and BranchArm population in ProgramFlowReport.
+
+    Verifies that the analyzer correctly identifies IF/EVALUATE statements,
+    creates the right node/arm IDs, populates condition text and labels, and
+    registers all nodes in report.branch_nodes.
+    """
+
+    # ------------------------------------------------------------------
+    # IF statement tests
+    # ------------------------------------------------------------------
+
+    def test_if_with_else_creates_one_branch_node(self) -> None:
+        """IF+ELSE produces exactly one BranchNode of type 'IF'."""
+        prog = _make_program(
+            [("MAIN-LOGIC", [_if_stmt([_continue()], else_stmts=[_continue()]), _stop_run()])]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+
+        assert len(report.branch_nodes) == 1
+        bn = report.branch_nodes[0]
+        assert bn.branch_type == "IF"
+        assert bn.parent_proc == "MAIN-LOGIC"
+        assert bn.condition_text == "COMPARISON"
+        assert len(bn.arms) == 2
+
+    def test_if_arm_types_and_ids(self) -> None:
+        """IF node and arm IDs follow the expected naming pattern."""
+        prog = _make_program(
+            [("MAIN-LOGIC", [_if_stmt([_continue()], else_stmts=[_continue()])])]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+
+        assert bn.node_id == "MAIN-LOGIC__IF_1"
+        assert bn.arms[0].arm_id == "MAIN-LOGIC__IF_1__THEN"
+        assert bn.arms[0].arm_type == "THEN"
+        assert bn.arms[0].label == "THEN"
+        assert bn.arms[1].arm_id == "MAIN-LOGIC__IF_1__ELSE"
+        assert bn.arms[1].arm_type == "ELSE"
+        assert bn.arms[1].label == "ELSE"
+
+    def test_if_without_else_creates_both_arms(self) -> None:
+        """IF with no ELSE clause still creates both THEN and ELSE arms;
+        the ELSE arm has statement_count == 0."""
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+
+        assert len(bn.arms) == 2
+        assert bn.arms[0].arm_type == "THEN"
+        assert bn.arms[0].statement_count == 1
+        assert bn.arms[1].arm_type == "ELSE"
+        assert bn.arms[1].statement_count == 0
+
+    def test_nested_if_creates_two_branch_nodes(self) -> None:
+        """Nested IFs each produce their own BranchNode."""
+        prog = _make_program(
+            [("MAIN-LOGIC", [_if_stmt([_if_stmt([_continue()])])])]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        assert len(report.branch_nodes) == 2
+
+    def test_branch_node_parent_proc_matches_paragraph(self) -> None:
+        """parent_proc matches the paragraph name containing the IF."""
+        prog = _make_program([("CHECK-DATA", [_if_stmt([_continue()])])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        assert report.branch_nodes[0].parent_proc == "CHECK-DATA"
+
+    # ------------------------------------------------------------------
+    # EVALUATE statement tests
+    # ------------------------------------------------------------------
+
+    def test_evaluate_creates_branch_node(self) -> None:
+        """EVALUATE produces exactly one BranchNode of type 'EVALUATE'."""
+        prog = _make_program([("MAIN-LOGIC", [_evaluate(when_count=2)])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+
+        assert len(report.branch_nodes) == 1
+        bn = report.branch_nodes[0]
+        assert bn.branch_type == "EVALUATE"
+        assert bn.node_id == "MAIN-LOGIC__EVAL_1"
+        assert bn.condition_text == "WS-VAR"
+        assert len(bn.arms) == 2
+        assert all(a.arm_type == "WHEN" for a in bn.arms)
+
+    def test_evaluate_when_arm_ids_and_labels(self) -> None:
+        """EVALUATE WHEN arm IDs are 1-based and labels are 'WHEN <value>'."""
+        prog = _make_program([("MAIN-LOGIC", [_evaluate(when_count=3)])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+
+        assert bn.arms[0].arm_id == "MAIN-LOGIC__EVAL_1__WHEN_1"
+        assert bn.arms[1].arm_id == "MAIN-LOGIC__EVAL_1__WHEN_2"
+        assert bn.arms[2].arm_id == "MAIN-LOGIC__EVAL_1__WHEN_3"
+        assert bn.arms[0].label == "WHEN 1"
+        assert bn.arms[1].label == "WHEN 1"
+
+    def test_evaluate_when_other_arm(self) -> None:
+        """WHEN OTHER clause produces a dedicated arm with arm_type 'WHEN_OTHER'."""
+        ev = _evaluate(when_count=1)
+        other_wc = WhenClause([], LOC)
+        other_wc.add_statement(ContinueStatement(LOC))
+        ev.set_default_when(other_wc)
+        prog = _make_program([("MAIN-LOGIC", [ev])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+
+        assert len(bn.arms) == 2  # 1 WHEN + 1 WHEN_OTHER
+        other_arm = bn.arms[-1]
+        assert other_arm.arm_type == "WHEN_OTHER"
+        assert other_arm.arm_id == "MAIN-LOGIC__EVAL_1__WHEN_OTHER"
+        assert other_arm.label == "WHEN OTHER"
+
+    # ------------------------------------------------------------------
+    # Global _branch_seq counter
+    # ------------------------------------------------------------------
+
+    def test_branch_seq_is_global_across_paragraphs(self) -> None:
+        """_branch_seq increments globally — the second IF (in a different
+        paragraph) gets seq=2, not seq=1."""
+        prog = _make_program([
+            ("PARA-A", [_if_stmt([_continue()])]),
+            ("PARA-B", [_if_stmt([_continue()])]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+
+        assert len(report.branch_nodes) == 2
+        assert report.branch_nodes[0].node_id == "PARA-A__IF_1"
+        assert report.branch_nodes[1].node_id == "PARA-B__IF_2"
+
+    def test_branch_seq_increments_across_if_and_evaluate(self) -> None:
+        """IF and EVALUATE share the same global counter."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_continue()]), _evaluate(when_count=1)]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+
+        assert len(report.branch_nodes) == 2
+        assert report.branch_nodes[0].node_id == "MAIN-LOGIC__IF_1"
+        assert report.branch_nodes[1].node_id == "MAIN-LOGIC__EVAL_2"
+
+    # ------------------------------------------------------------------
+    # Regression guard: GOTO/PERFORM/CALL inside branch arms
+    # ------------------------------------------------------------------
+
+    def test_goto_inside_if_arm_source_is_proc_name(self) -> None:
+        """GOTO inside an IF THEN arm generates an edge whose source is the
+        containing procedure name, not the arm node ID."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_goto("TARGET-PARA")])]),
+            ("TARGET-PARA", [_stop_run()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+
+        goto_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.GOTO]
+        assert len(goto_edges) == 1
+        assert goto_edges[0].source == "MAIN-LOGIC"  # must NOT be arm node ID
+
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    def test_report_to_dict_includes_branch_nodes(self) -> None:
+        """report.to_dict() contains a 'branch_nodes' list."""
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        d = report.to_dict()
+
+        assert "branch_nodes" in d
+        assert isinstance(d["branch_nodes"], list)
+        assert len(d["branch_nodes"]) == 1
+
+    def test_branch_node_to_dict_fields(self) -> None:
+        """BranchNode.to_dict() exposes all expected keys."""
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        d = report.branch_nodes[0].to_dict()
+
+        assert set(d.keys()) == {
+            "node_id",
+            "branch_type",
+            "parent_proc",
+            "location",
+            "condition_text",
+            "arms",
+        }
+
+    def test_branch_arm_to_dict_fields(self) -> None:
+        """BranchArm.to_dict() exposes all expected keys."""
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        arm_d = report.branch_nodes[0].arms[0].to_dict()
+
+        assert set(arm_d.keys()) == {
+            "arm_id",
+            "arm_type",
+            "label",
+            "statement_count",
+            "nested_call_targets",
+        }
+
+    def test_branch_arm_nested_call_targets_default_empty(self) -> None:
+        """nested_call_targets defaults to [] (analyzer never populates it)."""
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        for arm in report.branch_nodes[0].arms:
+            assert arm.nested_call_targets == []
+
+    # ------------------------------------------------------------------
+    # Isolation: multiple analyze() calls
+    # ------------------------------------------------------------------
+
+    def test_analyze_resets_branch_nodes_between_calls(self) -> None:
+        """Two separate analyze() calls produce independent branch_nodes lists."""
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
+        analyzer = ProgramFlowAnalyzer()
+        r1 = analyzer.analyze(prog)
+        r2 = analyzer.analyze(prog)
+
+        assert len(r1.branch_nodes) == 1
+        assert len(r2.branch_nodes) == 1
+        assert r1.branch_nodes is not r2.branch_nodes
+
+    # ------------------------------------------------------------------
+    # No branches
+    # ------------------------------------------------------------------
+
+    def test_no_branch_nodes_for_simple_program(self) -> None:
+        """A program with no IF or EVALUATE has an empty branch_nodes list."""
+        prog = _make_program([("MAIN-LOGIC", [_stop_run()])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        assert report.branch_nodes == []
