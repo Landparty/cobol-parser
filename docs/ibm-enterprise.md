@@ -394,9 +394,9 @@ cobol-parser parse program.cbl data
 ## Usage in IBM Environment Analysis
 
 ```python
-from cobolparser import parse_cobol
-from cobolparser.dialects.ibm_enterprise import ExecCICSStatement, ExecSQLStatement
-from cobolparser.models.data_items import DataItem
+from cobolparser import parse_cobol, CobolDataItem
+from cobolparser.dialects.ibm_enterprise import ExecCICSStatement
+from cobolparser.models.sql_statements import ExecSQLStatement
 
 def analyze_ibm_features(cobol_source):
     result = parse_cobol(cobol_source)
@@ -422,7 +422,7 @@ def analyze_ibm_features(cobol_source):
                 'host_vars': len(node.host_variables),
                 'line': node.location.line
             })
-        elif isinstance(node, DataItem):
+        elif isinstance(node, CobolDataItem):
             if node.usage == 'COMP-3':
                 ibm_features['comp3_fields'].append({
                     'name': node.name,

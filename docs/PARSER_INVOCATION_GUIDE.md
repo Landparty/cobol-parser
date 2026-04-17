@@ -69,7 +69,7 @@ result = parser.parse_file("path/to/program.cbl")
 
 ## CLI Reference
 
-The `cobol-parser` CLI exposes seven subcommands that cover the full pipeline from preprocessing through analysis.
+The `cobol-parser` CLI exposes fourteen subcommands covering the full pipeline from preprocessing through analysis.
 
 ### parse -- Parse COBOL to AST JSON
 
@@ -176,6 +176,64 @@ cobol-parser dead-code program.cbl
 # With copybook expansion
 cobol-parser dead-code program.cbl --copybook-path ./copybooks
 ```
+
+### program-flow -- Build a control-flow graph
+
+```bash
+# Emit flow graph (nodes + typed edges)
+cobol-parser program-flow program.cbl
+
+# Compact JSON for pipeline use
+cobol-parser program-flow program.cbl --compact
+```
+
+### generate-tests -- Generate CobolCheck test stubs
+
+```bash
+# Produce a .cut file with paragraph/branch test stubs
+cobol-parser generate-tests program.cbl
+
+# Limit to specific strategies
+cobol-parser generate-tests program.cbl --strategy paragraph --strategy branch
+```
+
+### io-sequence -- Validate file I/O lifecycle
+
+```bash
+# Detect READ-before-OPEN, double-OPEN, FILE-LEFT-OPEN, etc.
+cobol-parser io-sequence program.cbl
+```
+
+### move-type-check -- Flag incompatible MOVE statements
+
+```bash
+# Report MOVE statements where source and target categories are incompatible
+cobol-parser move-type-check program.cbl
+```
+
+### linkage-check -- Validate CALL/ENTRY linkage
+
+```bash
+# Correlate CALL argument lists with LINKAGE SECTION and ENTRY USING clauses
+cobol-parser linkage-check program.cbl
+```
+
+### language-env -- Detect IBM Language Environment usage
+
+```bash
+# List IBM LE intrinsic functions and service calls (CEExxxx)
+cobol-parser language-env program.cbl
+```
+
+### ims-dli -- Extract IMS DLI segment references
+
+```bash
+# Resolve CBLTDLI/AIBTDLI/CEETDLI segment names via MOVE/VALUE propagation
+cobol-parser ims-dli program.cbl
+```
+
+All subcommands accept `--compact`, `--free-form`, `--dialect`, `--errors`,
+`--copybook-path`, and `--output` unless noted otherwise.
 
 ### Legacy syntax
 
@@ -1026,56 +1084,43 @@ for r in results:
 
 ---
 
-## File Locations Reference
+## Module Reference
 
-### Core Parsing Components
+### Core Parsing
 
-| Component | Location | Responsibility |
-|-----------|----------|-----------------|
-| `parse_cobol()` | `cobolparser/parser.py:3551` | Module-level convenience function |
-| `CobolParser` class | `cobolparser/parser.py:65` | Main parser class |
-| `CobolParser.parse()` | `cobolparser/parser.py:130` | Parse source code |
-| `CobolParser.parse_file()` | `cobolparser/parser.py:173` | Parse from file |
-| `CobolLexer` class | `cobolparser/lexer.py:~500` | Tokenization engine |
-| `CobolLexer.tokenize()` | `cobolparser/lexer.py:~600` | Generate token stream |
+| Symbol | Module | Responsibility |
+|--------|--------|----------------|
+| `parse_cobol()` | `cobolparser` | Module-level convenience function |
+| `CobolParser` | `cobolparser` | Reusable parser class |
+| `CobolLexer` | `cobolparser.lexer` | Tokenization engine |
 
 ### AST Node Classes
 
-| Node Type | Location | Represents |
-|-----------|----------|------------|
-| `CobolProgram` | `cobolparser/models/program.py:200` | Complete COBOL program |
-| `CobolDivision` | `cobolparser/models/program.py:60` | Division (ID, DATA, PROCEDURE) |
-| `CobolSection` | `cobolparser/models/program.py:20` | Section (WORKING-STORAGE, FILE, etc.) |
-| `CobolDataItem` | `cobolparser/models/data_items.py:50` | Data definition (01, 02, etc.) |
-| `CobolStatement` | `cobolparser/models/statements.py:50` | Executable statement (MOVE, DISPLAY) |
+| Node Type | Module | Represents |
+|-----------|--------|------------|
+| `CobolProgram` | `cobolparser.models.program` | Complete COBOL program |
+| `CobolDivision` | `cobolparser.models.program` | Division (ID, DATA, PROCEDURE) |
+| `CobolSection` | `cobolparser.models.program` | Section (WORKING-STORAGE, FILE, etc.) |
+| `CobolDataItem` | `cobolparser.models.data_items` | Data definition (01, 02, etc.) |
+| `CobolStatement` | `cobolparser.models.statements.base` | Executable statement base class |
 
-### Configuration & Plugins
+### Configuration
 
-| Configuration | Location | Purpose |
-|---------------|----------|---------|
-| `MemoryConfiguration` | `cobolparser/plugins/core.py:30` | Memory management settings |
-| `ErrorRecoveryMode` | `cobolparser/plugins/core.py:16` | Error handling strategy |
-| `DialectType` | `cobolparser/plugins/core.py:21` | COBOL dialect selection |
-| `SerializationConfig` | `cobolparser/plugins/core.py:56` | JSON export settings |
-| `ParseError` | `cobolparser/plugins/core.py:75` | Parse error representation |
+| Symbol | Module | Purpose |
+|--------|--------|---------|
+| `MemoryConfiguration` | `cobolparser.plugins.core` | Memory management settings |
+| `ErrorRecoveryMode` | `cobolparser.plugins.core` | Error handling strategy |
+| `DialectType` | `cobolparser.plugins.core` | COBOL dialect selection |
+| `SerializationConfig` | `cobolparser.plugins.core` | JSON export settings |
+| `ParseError` | `cobolparser` | Parse error base class |
 
 ### Preprocessing & Copybooks
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `parse_cobol_with_expansion()` | `cobolparser/preprocess/copybook_expander.py:470` | Expand copybooks + parse |
-| `expand_copybooks()` | `cobolparser/preprocess/copybook_expander.py:~300` | Expand COPY statements |
-| `normalize_fixed_format()` | `cobolparser/preprocess/__init__.py:130` | Normalize fixed-format columns |
-| `detect_encoding()` | `cobolparser/preprocess/copybook_expander.py:30` | Detect file encoding |
-
-### Test Examples
-
-| Test File | Location | Demonstrates |
-|-----------|----------|--------------|
-| `test_all_cobol_examples.py` | `tests/integration/` | Real-world file parsing |
-| `test_advanced_constructs.py` | `tests/unit/` | Parser usage patterns |
-| Integration tests | `tests/integration/` | End-to-end workflows |
-| Contract tests | `tests/contracts/` | API compatibility |
+| Symbol | Module | Purpose |
+|--------|--------|---------|
+| `parse_cobol_with_expansion()` | `cobolparser.preprocess.copybook_expander` | Expand copybooks + parse in one call |
+| `expand_copybooks()` | `cobolparser` | Expand COPY statements |
+| `normalize_fixed_format()` | `cobolparser.preprocess` | Normalize fixed-format columns |
 
 ---
 

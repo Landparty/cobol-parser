@@ -524,6 +524,7 @@ node = factory.create(CustomStatement, location)
 
 ## See Also
 
-- [Parser Architecture Guide](../docs/PARSER_INVOCATION_GUIDE.md)
+- [Parser Architecture Guide](PARSER_INVOCATION_GUIDE.md)
 - [Factory Performance Benchmarks](factory-performance.md)
 - [Extension Guide for New Statement Parsers](factory-extension-guide.md)
+

@@ -169,19 +169,7 @@ These examples demonstrate how the COBOL parser converts COBOL source code into 
 
 All examples use the default parser configuration with IBM Enterprise COBOL dialect support enabled. For custom configurations, see [configuration.md](configuration.md).
 
-## 📦 Archived Documentation
-
-Historical documentation has been archived for compliance and reference. See:
-- **[Archive Index](../archived_docs/ARCHIVE_INDEX.md)** - Complete archive inventory with cross-references
-- **[Archive Manifest](../archived_docs/archive_manifest.json)** - Machine-readable metadata for all archived files
-
-Archived categories:
-- Coverage reports (EVALUATE, Statement Coverage matrices)
-- Metrics and baseline tracking documents
-- Completed feature documentation
-
 ## 🔗 Related Resources
 
 - **Main README**: [../README.md](../README.md) - Installation, quick start, API reference
 - **Test Suite**: `../tests/` - 3,456+ comprehensive tests across unit, integration, regression, contract, and performance directories
-- **Archived Docs**: `../archived_docs/` - Historical documentation and compliance records

@@ -148,7 +148,7 @@ incompatible.
 from cobolparser import parse_cobol, MoveTypeChecker
 
 result = parse_cobol(source)
-report = MoveTypeChecker().analyze(result.ast)
+report = MoveTypeChecker().check(result.ast)
 
 for v in report.violations:
     print(f"{v.kind.name}: {v.source_name} ({v.source_category.name}) "
@@ -170,7 +170,7 @@ declarations and `LINKAGE SECTION` data items.
 from cobolparser import parse_cobol, LinkageChecker
 
 result = parse_cobol(source)
-report = LinkageChecker().analyze(result.ast)
+report = LinkageChecker().check(result.ast)
 
 for v in report.violations:
     print(f"{v.kind.name}: {v.message}")
@@ -308,6 +308,8 @@ REWRITE, DELETE, START, ACCEPT, DISPLAY, UNLOCK variants). Maintains an IO
 variation catalog, generates artifacts from pytest results, validates against
 a schema, and renders Markdown / CSV reports.
 
+### CLI
+
 ```bash
 # Show coverage status (table)
 python -m cobolparser.cli.coverage status
@@ -331,8 +333,43 @@ python -m cobolparser.cli.coverage render --input io-coverage.json \
     --output report.md --format markdown
 ```
 
-- **Statuses**: `covered`, `partial`, `gap`, `unsupported`
-- **Python API**: `from cobolparser.analysis.io_coverage_reporter import IOCoverageReporter`
+### Python API
+
+```python
+from cobolparser.analysis.io_coverage_reporter import IOCoverageReporter
+
+# Use the default catalog bundled with the package
+reporter = IOCoverageReporter()
+
+# Load test results produced by: pytest --json-report --json-report-file=results.json
+artifact = reporter.generate_artifact(pytest_results_path="results.json")
+
+# Inspect coverage by verb
+for var in artifact.variations:
+    status = var.get("status", "unknown")
+    verb   = var.get("verb", "")
+    qual   = var.get("qualifier", "")
+    print(f"{status:<10} {verb} {qual}")
+
+# Summary counts
+print(artifact.summary)
+# {'covered': 42, 'partial': 8, 'gap': 15, 'unsupported': 3}
+
+# Validate the artifact against the schema
+ok, errors = reporter.validate_artifact(artifact)
+if not ok:
+    for err in errors:
+        print(f"  Schema error: {err}")
+
+# Render to Markdown
+md = reporter.render(artifact, format="markdown")
+with open("io-coverage.md", "w") as f:
+    f.write(md)
+```
+
+- **Statuses** (`CoverageStatus`): `covered`, `partial`, `gap`, `unsupported`
+- **`IOCoverageReporter` arguments**: `catalog_path` (default: bundled `io-variation-catalog.csv`), `schema_path` (optional JSON schema)
+- **`IoVariationCoverage` fields**: `verb`, `qualifier`, `status`, `test_ids`, `notes`
 
 ---
 
@@ -378,12 +415,16 @@ See also the [main README CobolCheck section](../README.md#cobolcheck-test-gener
 | `cobol-parser dead-code`      | `DeadCodeAnalyzer` |
 | `cobol-parser program-flow`   | `ProgramFlowAnalyzer` |
 | `cobol-parser generate-tests` | `CoverageAnalyzer` + `TestPlanGenerator` + `CobolCheckGenerator` |
+| `cobol-parser io-sequence`    | `IOSequenceAnalyzer` |
+| `cobol-parser move-type-check`| `MoveTypeChecker` |
+| `cobol-parser linkage-check`  | `LinkageChecker` |
+| `cobol-parser language-env`   | `LanguageEnvironmentAnalyzer` |
+| `cobol-parser ims-dli`        | `IMSSegmentAnalyzer` |
 | `python -m cobolparser.cli.coverage` | `IOCoverageReporter` |
 
-Analyzers without a dedicated subcommand (`IOLogger`, `IOSequenceAnalyzer`,
-`MoveTypeChecker`, `LinkageChecker`, `LanguageEnvironmentAnalyzer`,
-`CRUDMatrixGenerator`, `IMSSegmentAnalyzer`, `HostVariableResolver`) are
-Python-API only — instantiate them on a `ParseResult.ast` as shown above.
+All analyzers above also have a Python API — instantiate them on a `ParseResult.ast`
+as shown in each section. `IOLogger`, `CRUDMatrixGenerator`, and `HostVariableResolver`
+are Python-API only (no dedicated subcommand).
 
 ## Combining Analyzers
 
@@ -425,7 +466,7 @@ host_vars       = HostVariableResolver().resolve(ast)
 full_report = {
     "dead_code":     dead_code.to_dict(),
     "flow":          flow.to_dict(),
-    "io_log":        {op.to_dict() for op in io_log.operations},
+    "io_log":        [op.to_dict() for op in io_log.operations],
     "io_sequence":   io_sequence.to_dict(),
     "move_types":    move_types.to_dict(),
     "linkage":       linkage.to_dict(),

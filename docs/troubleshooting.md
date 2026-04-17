@@ -100,18 +100,22 @@ This outputs every token with its type, value, line, and column, which can help 
 ## Import errors / wrong Python version
 
 ```bash
-python --version          # must be 3.13+
+python --version          # must be 3.11+
 pip install -e ".[dev]"   # reinstall with dev dependencies
 python -c "from cobolparser import parse_cobol; print('ok')"
 ```
 
 ## Debug logging
 
+Enable Python's standard `logging` module at `DEBUG` level before parsing — the
+parser emits structured log records for token consumption and rule dispatch:
+
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-result = parse_cobol(source, debug=True)
+from cobolparser import parse_cobol
+result = parse_cobol(source)
 ```
 
 ## Getting help

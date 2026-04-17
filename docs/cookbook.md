@@ -94,8 +94,6 @@ def validate_file_descriptors(cobol_code):
         
     file_section = data_div.get_section_by_name("FILE")
     if not file_section:
-            
-    if not file_section:
         return ["No File Section"]
         
     # Access FD entries through the section's data_records
@@ -209,6 +207,56 @@ cobol-parser dead-code program.cbl --copybook-path ./copybooks
 # Compact output for scripting
 cobol-parser dead-code program.cbl --compact
 ```
+
+**Solution**: Use `DeadCodeAnalyzer` to scan a portfolio and produce a CSV report.
+
+```python
+import csv
+import sys
+from pathlib import Path
+from cobolparser import parse_cobol, DeadCodeAnalyzer
+from cobolparser.plugins.core import ErrorRecoveryMode
+
+def find_dead_code(folder: Path, out_csv: Path) -> None:
+    rows = []
+
+    for cbl in sorted(folder.glob("*.cbl")):
+        result = parse_cobol(
+            cbl.read_text(),
+            filename=str(cbl),
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+        if not result.ast:
+            print(f"  SKIP  {cbl.name} (critical parse error)", file=sys.stderr)
+            continue
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        for item in report.dead_items:
+            rows.append({
+                "file": cbl.name,
+                "kind": item.kind,
+                "name": item.name,
+                "line": item.line,
+            })
+
+        if report.dead_count:
+            pct = report.dead_count / report.total_procedures * 100
+            print(f"  {cbl.name}: {report.dead_count}/{report.total_procedures} dead ({pct:.0f}%)")
+
+    if rows:
+        with out_csv.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["file", "kind", "name", "line"])
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"\nWrote {len(rows)} dead-code entries → {out_csv}")
+    else:
+        print("No dead code found.")
+
+# find_dead_code(Path("./legacy_source"), Path("./dead_code.csv"))
+```
+
+- **Report fields**: `dead_items: list[DeadCodeItem]`, `dead_count`, `total_procedures`, `referenced_procedures`, `to_dict()`
+- **`DeadCodeItem` fields**: `kind` (`"paragraph"` or `"section"`), `name`, `line`
 
 ## Recipe 6: CRUD Matrix for Mainframe Modernization
 
