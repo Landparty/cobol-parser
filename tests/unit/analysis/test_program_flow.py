@@ -5056,12 +5056,123 @@ class TestBranchNodes:
             "nested_call_targets",
         }
 
-    def test_branch_arm_nested_call_targets_default_empty(self) -> None:
-        """nested_call_targets defaults to [] (analyzer never populates it)."""
+    def test_branch_arm_nested_call_targets_empty_when_no_perform(self) -> None:
+        """nested_call_targets is empty when the arm contains no PERFORM or GO TO."""
         prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
         report = ProgramFlowAnalyzer().analyze(prog)
         for arm in report.branch_nodes[0].arms:
             assert arm.nested_call_targets == []
+
+    def test_branch_arm_nested_call_targets_populated_by_perform(self) -> None:
+        """PERFORM inside a THEN arm populates nested_call_targets on that arm."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_perform("PROCESS-A")], else_stmts=[_perform("PROCESS-B")])]),
+            ("PROCESS-A", [_continue()]),
+            ("PROCESS-B", [_continue()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+        then_arm = next(a for a in bn.arms if a.arm_type == "THEN")
+        else_arm = next(a for a in bn.arms if a.arm_type == "ELSE")
+
+        assert "PROCESS-A" in then_arm.nested_call_targets
+        assert "PROCESS-B" in else_arm.nested_call_targets
+        # Targets are exclusive — not shared between arms
+        assert "PROCESS-B" not in then_arm.nested_call_targets
+        assert "PROCESS-A" not in else_arm.nested_call_targets
+
+    def test_branch_arm_nested_call_targets_populated_by_goto(self) -> None:
+        """GO TO inside an arm populates nested_call_targets."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_goto("ERROR-PARA")])]),
+            ("ERROR-PARA", [_stop_run()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        then_arm = next(a for a in report.branch_nodes[0].arms if a.arm_type == "THEN")
+        assert "ERROR-PARA" in then_arm.nested_call_targets
+
+    def test_branch_arm_nested_call_targets_no_duplicates(self) -> None:
+        """The same paragraph performed twice in an arm appears only once."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_perform("WORK"), _perform("WORK")])]),
+            ("WORK", [_continue()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        then_arm = next(a for a in report.branch_nodes[0].arms if a.arm_type == "THEN")
+        assert then_arm.nested_call_targets.count("WORK") == 1
+
+    def test_branch_arm_nested_call_targets_independent_across_analyze_calls(self) -> None:
+        """Arm targets do not bleed between separate analyze() calls."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_perform("PROCESS")])]),
+            ("PROCESS", [_continue()]),
+        ])
+        analyzer = ProgramFlowAnalyzer()
+        r1 = analyzer.analyze(prog)
+        r2 = analyzer.analyze(prog)
+        t1 = r1.branch_nodes[0].arms[0].nested_call_targets
+        t2 = r2.branch_nodes[0].arms[0].nested_call_targets
+        assert t1 is not t2
+        assert t1 == t2
+
+    # ------------------------------------------------------------------
+    # convergence_node
+    # ------------------------------------------------------------------
+
+    def test_convergence_node_set_to_next_paragraph(self) -> None:
+        """convergence_node is the paragraph that follows parent_proc in source order."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_perform("THEN-WORK")], else_stmts=[_perform("ELSE-WORK")])]),
+            ("THEN-WORK", [_continue()]),
+            ("ELSE-WORK", [_continue()]),
+            ("AFTER-IF", [_stop_run()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+        assert bn.convergence_node == "AFTER-IF"
+
+    def test_convergence_node_none_when_parent_is_terminal(self) -> None:
+        """convergence_node is None when parent_proc ends with STOP RUN (no fall-through)."""
+        prog = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_continue()]), _stop_run()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        bn = report.branch_nodes[0]
+        # MAIN-LOGIC ends with STOP RUN, so no FALL_THROUGH edge → convergence_node is None
+        assert bn.convergence_node is None
+
+    def test_convergence_node_in_to_dict_output(self) -> None:
+        """convergence_node appears in to_dict() only when set."""
+        prog_with = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_continue()])]),
+            ("NEXT-PARA", [_stop_run()]),
+        ])
+        prog_without = _make_program([
+            ("MAIN-LOGIC", [_if_stmt([_continue()]), _stop_run()]),
+        ])
+        r_with = ProgramFlowAnalyzer().analyze(prog_with)
+        r_without = ProgramFlowAnalyzer().analyze(prog_without)
+
+        d_with = r_with.branch_nodes[0].to_dict()
+        d_without = r_without.branch_nodes[0].to_dict()
+
+        assert "convergence_node" in d_with
+        assert d_with["convergence_node"] == "NEXT-PARA"
+        assert "convergence_node" not in d_without
+
+    def test_multiple_branches_each_get_convergence_node(self) -> None:
+        """Each branch node in the same program gets its own convergence_node."""
+        prog = _make_program([
+            ("FIRST-PARA", [_if_stmt([_continue()])]),
+            ("SECOND-PARA", [_if_stmt([_continue()])]),
+            ("THIRD-PARA", [_stop_run()]),
+        ])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        assert len(report.branch_nodes) == 2
+        first_bn = next(b for b in report.branch_nodes if b.parent_proc == "FIRST-PARA")
+        second_bn = next(b for b in report.branch_nodes if b.parent_proc == "SECOND-PARA")
+        assert first_bn.convergence_node == "SECOND-PARA"
+        assert second_bn.convergence_node == "THIRD-PARA"
 
     # ------------------------------------------------------------------
     # Isolation: multiple analyze() calls

@@ -187,9 +187,10 @@ class BranchNode:
     location: SourceLocation
     condition_text: str
     arms: list[BranchArm] = field(default_factory=list)
+    convergence_node: str | None = None  # paragraph where all arms rejoin
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "node_id": self.node_id,
             "branch_type": self.branch_type,
             "parent_proc": self.parent_proc,
@@ -197,6 +198,9 @@ class BranchNode:
             "condition_text": self.condition_text,
             "arms": [a.to_dict() for a in self.arms],
         }
+        if self.convergence_node is not None:
+            result["convergence_node"] = self.convergence_node
+        return result
 
 
 @dataclass
@@ -360,6 +364,9 @@ class ProgramFlowAnalyzer:
                 if first not in self._entry_points:
                     self._entry_points.insert(0, first)
 
+        # Pass 4a: Compute convergence nodes for branch decisions
+        self._compute_convergence_nodes()
+
         # Pass 5: Detect cycles in internal flow graph
         self._detect_cycles()
 
@@ -452,6 +459,9 @@ class ProgramFlowAnalyzer:
 
         node = self._nodes[proc_name]
         visited: set[int] = set()
+        # Mutable reference so nested scan() calls can read/write current arm context.
+        # Used only to populate nested_call_targets; does not affect edge routing.
+        arm_ctx: list[BranchArm | None] = [None]
 
         def _record_type(stmt: Any) -> None:
             stype = getattr(stmt, "statement_type", None)
@@ -475,12 +485,21 @@ class ProgramFlowAnalyzer:
                 # containing procedure as the source, regardless of which
                 # IF/EVALUATE arm the PERFORM lives in.
                 self._process_perform(stmt, proc_name)
+                # Record perform target in current arm for swimlane data.
+                if arm_ctx[0] is not None and stmt.target_paragraph:
+                    target = stmt.target_paragraph.upper()
+                    if target not in arm_ctx[0].nested_call_targets:
+                        arm_ctx[0].nested_call_targets.append(target)
                 # Recurse into inline PERFORM blocks
                 for s in stmt.inline_statements:
                     scan(s, source_id)
             elif isinstance(stmt, GoStatement):
                 node.goto_count += 1
                 self._process_goto(stmt, proc_name)
+                if arm_ctx[0] is not None and stmt.target_paragraph:
+                    target = stmt.target_paragraph.upper()
+                    if target not in arm_ctx[0].nested_call_targets:
+                        arm_ctx[0].nested_call_targets.append(target)
             elif isinstance(stmt, CallStatement):
                 node.call_count += 1
                 self._process_call(stmt, proc_name)
@@ -556,10 +575,14 @@ class ProgramFlowAnalyzer:
                         location=stmt.location,
                     )
                 )
+                prev_arm = arm_ctx[0]
+                arm_ctx[0] = then_arm
                 for s in stmt.then_statements:
                     scan(s, then_id)
+                arm_ctx[0] = else_arm
                 for s in stmt.else_statements:
                     scan(s, else_id)
+                arm_ctx[0] = prev_arm
             elif isinstance(stmt, EvaluateStatement):
                 node.evaluate_count += 1
                 subjects: list[Any] = []
@@ -633,8 +656,11 @@ class ProgramFlowAnalyzer:
                             condition=when_label,
                         )
                     )
+                    prev_arm = arm_ctx[0]
+                    arm_ctx[0] = arm
                     for s in wc.statements:
                         scan(s, arm_id)
+                    arm_ctx[0] = prev_arm
                 # WHEN OTHER arm
                 if stmt.default_when:
                     other_id = f"{bn_id}__WHEN_OTHER"
@@ -654,8 +680,11 @@ class ProgramFlowAnalyzer:
                             condition="WHEN OTHER",
                         )
                     )
+                    prev_arm = arm_ctx[0]
+                    arm_ctx[0] = other_arm
                     for s in stmt.default_when.statements:
                         scan(s, other_id)
+                    arm_ctx[0] = prev_arm
             elif isinstance(stmt, SearchStatement):
                 node.search_count += 1
                 decision = {
@@ -985,6 +1014,22 @@ class ProgramFlowAnalyzer:
         self._unreachable_nodes = [
             name for name in self._ordered_procedures if name not in reachable
         ]
+
+    def _compute_convergence_nodes(self) -> None:
+        """Set convergence_node on each branch decision.
+
+        The convergence node is the paragraph that execution reaches after all
+        arms of the branch complete.  For the common case this is the paragraph
+        that follows the branch's parent procedure in source order (i.e. the
+        target of the parent's FALL_THROUGH edge).  Called after
+        _build_fall_through_edges so those edges are already present.
+        """
+        fall_through: dict[str, str] = {}
+        for edge in self._edges:
+            if edge.edge_type == FlowEdgeType.FALL_THROUGH:
+                fall_through[edge.source] = edge.target
+        for bn in self._branch_nodes:
+            bn.convergence_node = fall_through.get(bn.parent_proc)
 
     def _build_fall_through_edges(self) -> None:
         """Build fall-through edges between sequential paragraphs.
