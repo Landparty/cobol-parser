@@ -248,6 +248,11 @@ class PathResolver:
     Provides a unified interface for resolving copybook file paths
     with integrated validation, size checking, and fuzzy matching.
 
+    Uses a directory index cache to avoid repeated filesystem traversals.
+    The index is built once on first resolution and maps normalized names
+    to their absolute paths, reducing 3000+ program × 50+ copybook
+    scenarios from O(dirs × extensions × stat) to O(1) dict lookup.
+
     Attributes:
         search_config: Configuration for copybook search paths and extensions
     """
@@ -260,10 +265,54 @@ class PathResolver:
             search_config: Search path configuration
         """
         self.search_config = search_config
+        # Resolution cache: member_name -> absolute path (avoids re-scanning)
+        self._resolution_cache: dict[str, str] = {}
+        # Directory index: normalized_name -> absolute_path (built lazily)
+        self._dir_index: dict[str, str] | None = None
+
+    def _build_directory_index(self) -> dict[str, str]:
+        """Build an index of all copybook files across search directories.
+
+        Returns a dict mapping normalized (uppercased, no-extension) names
+        AND full filenames to their absolute paths. This turns per-lookup
+        filesystem traversal into a one-time scan + O(1) dict lookups.
+        """
+        index: dict[str, str] = {}
+        for search_dir in self.search_config.directories:
+            if not os.path.isdir(search_dir):
+                continue
+            try:
+                entries = os.scandir(search_dir)
+            except OSError:
+                continue
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                abs_path = os.path.abspath(entry.path)
+                name = entry.name
+                # Index by exact filename
+                if self.search_config.case_sensitive:
+                    index[name] = abs_path
+                    # Also index by stem (without extension)
+                    stem = Path(name).stem
+                    if stem not in index:
+                        index[stem] = abs_path
+                else:
+                    name_upper = name.upper()
+                    index[name_upper] = abs_path
+                    stem_upper = Path(name).stem.upper()
+                    if stem_upper not in index:
+                        index[stem_upper] = abs_path
+        return index
 
     def resolve(self, member_name: str, library_qualifier: str | None = None) -> str:
         """
         Resolve a copybook member name to an absolute file path.
+
+        Uses a multi-tier caching strategy:
+        1. Exact resolution cache (member already resolved before)
+        2. Directory index (O(1) lookup by normalized name)
+        3. Fallback to full filesystem search
 
         Args:
             member_name: Copybook member name
@@ -277,7 +326,46 @@ class PathResolver:
             PathTraversalError: If path validation fails
             CopybookSizeExceededError: If file exceeds size limit
         """
-        return find_copybook_file(member_name, self.search_config, library_qualifier)
+        # Tier 1: Resolution cache (exact match from prior call)
+        cache_key = f"{member_name}::{library_qualifier or ''}"
+        if cache_key in self._resolution_cache:
+            return self._resolution_cache[cache_key]
+
+        # Tier 2: Directory index lookup (no library qualifier, fast path)
+        if library_qualifier is None:
+            if self._dir_index is None:
+                self._dir_index = self._build_directory_index()
+
+            lookup_key = member_name if self.search_config.case_sensitive else member_name.upper()
+            if lookup_key in self._dir_index:
+                result = self._dir_index[lookup_key]
+                # Validate size
+                file_size = os.path.getsize(result)
+                if file_size > self.search_config.max_file_size:
+                    raise CopybookSizeExceededError(
+                        result, file_size, self.search_config.max_file_size
+                    )
+                self._resolution_cache[cache_key] = result
+                return result
+
+            # Try with common extensions
+            for ext in self.search_config.extensions:
+                if ext:
+                    ext_key = f"{lookup_key}{ext.upper() if not self.search_config.case_sensitive else ext}"
+                    if ext_key in self._dir_index:
+                        result = self._dir_index[ext_key]
+                        file_size = os.path.getsize(result)
+                        if file_size > self.search_config.max_file_size:
+                            raise CopybookSizeExceededError(
+                                result, file_size, self.search_config.max_file_size
+                            )
+                        self._resolution_cache[cache_key] = result
+                        return result
+
+        # Tier 3: Full filesystem search (handles library qualifiers and edge cases)
+        result = find_copybook_file(member_name, self.search_config, library_qualifier)
+        self._resolution_cache[cache_key] = result
+        return result
 
     def normalize(self, path: str) -> str:
         """

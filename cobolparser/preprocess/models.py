@@ -7,6 +7,7 @@ and internal expansion state.
 """
 
 import sys
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -278,39 +279,47 @@ class ExpansionContext:
 
     current_file: str = ""
     expansion_stack: list[str] = field(default_factory=list)
+    _expansion_stack_set: set[str] = field(default_factory=set)
     source_maps: dict[int, tuple[str, int]] = field(default_factory=dict)
     current_depth: int = 0
-    content_cache: dict[str, str] = field(default_factory=dict)
+    content_cache: OrderedDict[str, str] = field(default_factory=OrderedDict)
     total_bytes: int = 0
     defined_symbols: dict[str, str] = field(default_factory=dict)
 
-    # LRU management
-    cache_order: list[str] = field(default_factory=list)
-    max_cache_size: int = 100
+    # LRU management (OrderedDict provides O(1) move_to_end/popitem)
+    max_cache_size: int = 512
+
+    def stack_push(self, file: str) -> None:
+        """Push file onto expansion stack with O(1) membership check."""
+        self.expansion_stack.append(file)
+        self._expansion_stack_set.add(file)
+
+    def stack_pop(self) -> str:
+        """Pop file from expansion stack."""
+        file = self.expansion_stack.pop()
+        self._expansion_stack_set.discard(file)
+        return file
+
+    def stack_contains(self, file: str) -> bool:
+        """O(1) circular reference check."""
+        return file in self._expansion_stack_set
 
     def cache_get(self, key: str) -> str | None:
-        """Get item from cache and update its position (LRU)."""
+        """Get item from cache and update its position (LRU). O(1)."""
         if key in self.content_cache:
-            # Move to front (most recent)
-            if key in self.cache_order:
-                self.cache_order.remove(key)
-            self.cache_order.append(key)
+            self.content_cache.move_to_end(key)
             return self.content_cache[key]
         return None
 
     def cache_put(self, key: str, value: str) -> None:
-        """Put item in cache with eviction if full."""
+        """Put item in cache with LRU eviction if full. O(1)."""
         if key in self.content_cache:
-            self.cache_order.remove(key)
-        elif len(self.content_cache) >= self.max_cache_size:
-            # Evict oldest (at the beginning of the list)
-            if self.cache_order:
-                oldest_key = self.cache_order.pop(0)
-                if oldest_key in self.content_cache:
-                    del self.content_cache[oldest_key]
-
-        self.content_cache[key] = value
-        self.cache_order.append(key)
+            self.content_cache.move_to_end(key)
+            self.content_cache[key] = value
+        else:
+            if len(self.content_cache) >= self.max_cache_size:
+                self.content_cache.popitem(last=False)
+            self.content_cache[key] = value
 
     def get_cache_key(
         self, copybook_path: str, replacing_clauses: list | None = None

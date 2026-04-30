@@ -4,9 +4,16 @@ Core copybook expansion engine.
 This module implements the main copybook expansion logic, including
 recursive resolution of nested copybooks, encoding detection,
 source location tracking, content validation, and caching.
+
+Performance features for large batch scenarios (3000+ programs, 50+ copybooks):
+- Module-level file content cache to avoid re-reading the same copybook from disk
+- O(1) LRU expansion cache using OrderedDict
+- O(1) circular reference detection using a set
+- Directory index in PathResolver for instant file lookups
 """
 
 import time
+from collections import OrderedDict
 from typing import Any
 
 from . import (
@@ -34,6 +41,41 @@ from .models import (
     ExpansionStatistics,
 )
 from .path_resolver import PathResolver
+
+# Module-level file content cache for batch scenarios.
+# When parsing 3000+ programs that reference the same 50+ copybooks,
+# this avoids re-reading and re-decoding the same file from disk.
+# Uses OrderedDict for O(1) LRU eviction.
+_FILE_CONTENT_CACHE: OrderedDict[str, str] = OrderedDict()
+_FILE_CONTENT_CACHE_MAX = 2048  # Max cached file contents
+
+
+def _cached_read_file(file_path: str, encoding_override: str | None = None) -> str:
+    """Read a file with caching to avoid redundant disk I/O.
+
+    The cache key includes the encoding override to handle cases where
+    the same file might be read with different encodings (rare but possible).
+    """
+    cache_key = f"{file_path}::{encoding_override or 'auto'}"
+    if cache_key in _FILE_CONTENT_CACHE:
+        _FILE_CONTENT_CACHE.move_to_end(cache_key)
+        return _FILE_CONTENT_CACHE[cache_key]
+
+    content = read_file_with_encoding(file_path, encoding_override)
+
+    # LRU eviction
+    if len(_FILE_CONTENT_CACHE) >= _FILE_CONTENT_CACHE_MAX:
+        _FILE_CONTENT_CACHE.popitem(last=False)
+    _FILE_CONTENT_CACHE[cache_key] = content
+    return content
+
+
+def clear_file_cache() -> None:
+    """Clear the module-level file content cache.
+
+    Call between independent batch runs if memory reclamation is needed.
+    """
+    _FILE_CONTENT_CACHE.clear()
 
 
 def detect_encoding(file_path: str) -> str:
@@ -185,6 +227,7 @@ def expand_copybooks(
     defined_symbols: dict[str, str] | None = None,
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES,
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES,
+    path_resolver: "PathResolver | None" = None,
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
@@ -357,7 +400,7 @@ def _expand_source_recursive(
         )
 
     # Check for circular reference
-    if source_file in context.expansion_stack:
+    if context.stack_contains(source_file):
         # Build dependency chain for error message
         chain = context.expansion_stack + [source_file]
         raise CircularReferenceError(chain)
@@ -381,7 +424,7 @@ def _expand_source_recursive(
 
     # Push current file onto stack
 
-    context.expansion_stack.append(source_file)
+    context.stack_push(source_file)
     max_depth = context.current_depth
 
     # Process COPY statements in reverse order to maintain positions
@@ -407,7 +450,7 @@ def _expand_source_recursive(
             nested_depth = context.current_depth + 1
         else:
             # Read copybook content with encoding detection (or forced override)
-            copybook_content = read_file_with_encoding(
+            copybook_content = _cached_read_file(
                 copybook_path,
                 encoding_override=path_resolver.search_config.encoding,
             )
@@ -521,7 +564,7 @@ def _expand_source_recursive(
 
     # Pop current file from stack
     # Pop current file from stack
-    context.expansion_stack.pop()
+    context.stack_pop()
 
     # Return normalized source (we don't pad here to avoid double-padding during recursion)
     return expanded_source, max_depth, True

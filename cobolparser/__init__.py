@@ -107,6 +107,7 @@ from .analysis import (
 from .batch import (
     BatchResult,
     parse_files,
+    parse_files_with_copybooks,
 )
 from .dialects import (
     IBMEnterpriseCobol,

@@ -419,13 +419,45 @@ def normalize_fixed_format(
     pending_literal = False
     quote_char: str | None = None
     parts: list[str] = []  # accumulates chunks for the current logical line
+    # Track quote state incrementally to avoid O(n²) rescanning
+    _quote_open = False
+    _quote_ch: str | None = None
+
+    def _update_quote_state(text: str) -> None:
+        """Incrementally update quote state for new text chunk."""
+        nonlocal _quote_open, _quote_ch, pending_literal, quote_char
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if _quote_open:
+                if ch == _quote_ch:
+                    if i + 1 < len(text) and text[i + 1] == _quote_ch:
+                        i += 2  # escaped quote
+                        continue
+                    _quote_open = False
+                    _quote_ch = None
+                i += 1
+            else:
+                if ch in ("'", '"'):
+                    _quote_open = True
+                    _quote_ch = ch
+                    i += 1
+                else:
+                    i += 1
+        pending_literal = _quote_open
+        quote_char = _quote_ch
 
     def flush_parts() -> None:
-        nonlocal parts
+        nonlocal parts, _quote_open, _quote_ch, pending_literal, quote_char
         combined = "".join(parts)
         if combined:
             result.append(combined)
         parts = []
+        # Reset quote state for new logical line
+        _quote_open = False
+        _quote_ch = None
+        pending_literal = False
+        quote_char = None
 
     for raw in lines:
         line = raw.rstrip("\n")
@@ -446,65 +478,37 @@ def normalize_fixed_format(
         if is_cont:
             # This is a continuation line - merge with previous buffer
             if pending_literal and merge_continued_literals:
-                # Special handling for string literal continuations:
-                # In COBOL fixed-format, continuation lines for string literals start with
-                # a quote character that is just a marker and should be removed.
-                # Example: Line 1: VALUE "PART1
-                #          Line 2: -    "PART2".
-                # The quote at the start of PART2 is a continuation marker, not part of the string.
                 chunk = text_slice.lstrip()
                 if chunk and chunk[0] == quote_char:
-                    # Remove the continuation quote marker
                     chunk = chunk[1:]
-                parts.append(chunk.rstrip())
+                stripped = chunk.rstrip()
+                parts.append(stripped)
+                if merge_continued_literals:
+                    _update_quote_state(stripped)
             else:
-                # Regular continuation (non-literal) - just append with a space
-                parts.append(" " + text_slice.lstrip())
+                stripped = " " + text_slice.lstrip()
+                parts.append(stripped)
+                if merge_continued_literals:
+                    _update_quote_state(stripped)
         else:
             # Non-continuation line - start new logical line
             flush_parts()
-            parts.append(text_slice.rstrip())
+            stripped = text_slice.rstrip()
+            parts.append(stripped)
+            if merge_continued_literals:
+                _update_quote_state(stripped)
 
-        if merge_continued_literals:
-            # Count quotes ignoring doubled ones
-            current = "".join(parts)
-            i = 0
-            quote_char = None
-            pending_literal = False
-
-            while i < len(current):
-                ch = current[i]
-                if quote_char:
-                    if ch == quote_char:
-                        if (
-                            i + 1 < len(current) and current[i + 1] == quote_char
-                        ):  # escaped
-                            i += 2
-                            continue
-                        # closing quote
-                        quote_char = None
-                        pending_literal = False
-                    i += 1
-                else:
-                    if ch in ("'", '"'):
-                        quote_char = ch
-                        pending_literal = True
-                        i += 1
-                    else:
-                        i += 1
-
-            # Important: If we hit the end of the buffer and pending_literal is true,
-            # this is only a valid pending literal if the next line is actually a continuation.
-            # But here we don't know the next line yet. So we just leave pending_literal as is.
-
+    # Save state before final flush
+    final_pending_literal = pending_literal
+    final_quote_char = quote_char
     flush_parts()
 
     # If pending_literal is True at EOF there is no subsequent continuation line,
     # so the string is genuinely unterminated.
-    if pending_literal and merge_continued_literals:
+    if final_pending_literal and merge_continued_literals:
         raise ValueError(
             f"Unterminated string literal at end of input "
-            f"(opened with quote character '{quote_char or '?'}')"
+            f"(opened with quote character '{final_quote_char or '?'}')"
         )
 
     return "\n".join(result) + "\n"

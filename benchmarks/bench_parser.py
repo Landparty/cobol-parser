@@ -238,19 +238,19 @@ def bench_sql_parsing(iterations: int) -> list[float]:
 
 def bench_statement_registry(source: str, iterations: int) -> list[float]:
     """Benchmark statement registry dispatch (parser initialization + lookup)."""
-    from cobolparser.parsers.arithmetic_parsers import (
+    from cobolparser.parsers.statements.arithmetic_parsers import (
         AddStatementParser,
         ComputeStatementParser,
         DivideStatementParser,
         MultiplyStatementParser,
         SubtractStatementParser,
     )
-    from cobolparser.parsers.call_parser import CallStatementParser
-    from cobolparser.parsers.display_parser import DisplayStatementParser
-    from cobolparser.parsers.evaluate_parser import EvaluateStatementParser
-    from cobolparser.parsers.if_parser import IfStatementParser
-    from cobolparser.parsers.move_parser import MoveStatementParser
-    from cobolparser.parsers.perform_parser import PerformStatementParser
+    from cobolparser.parsers.statements.call_parser import CallStatementParser
+    from cobolparser.parsers.statements.display_parser import DisplayStatementParser
+    from cobolparser.parsers.statements.evaluate_parser import EvaluateStatementParser
+    from cobolparser.parsers.statements.if_parser import IfStatementParser
+    from cobolparser.parsers.statements.move_parser import MoveStatementParser
+    from cobolparser.parsers.statements.perform_parser import PerformStatementParser
 
     from cobolparser.core.registry import StatementParserRegistry
     from cobolparser.core.token_stream import TokenStream
