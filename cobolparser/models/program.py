@@ -214,6 +214,11 @@ class CobolProgram(ASTNode):
         self._divisions: dict[str, CobolDivision] = {}
         # Cached statistics
         self._statistics: dict[str, Any] | None = None
+        # S1 optimization: cache get_all_statements() result. Multiple
+        # extractors (call/copy/sql/file_io) call this method 1-2 times each
+        # — ~7 traversals per program. Memoizing converts that into one
+        # traversal + 6 O(1) returns. Invalidated by add_division().
+        self._cached_all_statements: list["CobolStatement"] | None = None
 
     @property
     def divisions(self) -> list[CobolDivision]:
@@ -244,6 +249,8 @@ class CobolProgram(ASTNode):
         """Add a division to the program (keeps both dict and list representations)."""
         self.add_child(division)
         self._divisions[division.division_name] = division
+        # Invalidate S1 statement cache — a new division may add statements.
+        self._cached_all_statements = None
 
     def get_division(self, name: str) -> CobolDivision | None:
         """Get a division by name."""
@@ -325,7 +332,14 @@ class CobolProgram(ASTNode):
         Recursively traverses nested structures to extract ALL statements.
         Handles both AST children and specific statement attributes that
         might hold nested statements (e.g. invalid_key_clause, on_exception).
+
+        Result is cached on the program instance (invalidated by
+        add_division). The AST is immutable post-parse in the production
+        path, so the cached list is safe to share across all callers.
         """
+        if self._cached_all_statements is not None:
+            return self._cached_all_statements
+
         from .statements import CobolStatement
 
         statements = []
@@ -394,6 +408,7 @@ class CobolProgram(ASTNode):
         if proc_division:
             traverse(proc_division)
 
+        self._cached_all_statements = statements
         return statements
 
     def find_statements(self, stmt_type: str | None = None) -> list["CobolStatement"]:
