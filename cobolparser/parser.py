@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, overload
 
-from cobolparser.profiling import ProfilerContext, ProfilingResult
+from .profiling import ProfilerContext, ProfilingResult
 
 # Core parsing infrastructure
 from .core.token_stream import TokenStream
@@ -234,22 +234,6 @@ class CobolParser:
         top_n: int = 50,
         prof_output: str | None = None,
     ) -> "ParseResult | tuple[ParseResult, ProfilingResult]":
-        """Parse COBOL source code into AST.
-
-        Args:
-            source: COBOL source code
-            filename: Source filename for error reporting
-            error_recovery: Error recovery mode (FAIL_FAST or COLLECT_ALL).
-                           Defaults to FAIL_FAST if not specified.
-            enable_profiling: When True, wrap parsing with cProfile + tracemalloc
-                              and return a (ParseResult, ProfilingResult) tuple.
-            top_n: Number of top functions to capture in profiling output (default 50).
-            prof_output: Optional path to write a .prof binary file.
-
-        Returns:
-            ParseResult when enable_profiling is False (default).
-            tuple[ParseResult, ProfilingResult] when enable_profiling is True.
-        """
         if not enable_profiling:
             return self._parse_core(source, filename, error_recovery)
         ctx = ProfilerContext(top_n=top_n, prof_output=prof_output)

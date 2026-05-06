@@ -35,7 +35,7 @@ def test_parse_method_no_profiling_returns_parse_result():
 def test_parse_method_profiling_metrics_positive():
     parser = CobolParser()
     _, prof = parser.parse(_HELLO, enable_profiling=True)
-    assert prof.wall_clock_s >= 0.0
+    assert prof.wall_clock_s > 0.0
     assert prof.peak_memory_mb >= 0.0
 
 
@@ -48,7 +48,7 @@ def test_parse_method_profiling_top_functions_non_empty():
 def test_parse_method_profiling_top_n_respected():
     parser = CobolParser()
     _, prof = parser.parse(_HELLO, enable_profiling=True, top_n=3)
-    assert len(prof.top_functions) <= 3
+    assert 0 < len(prof.top_functions) <= 3
 
 
 def test_parse_method_profiling_prof_file(tmp_path):
