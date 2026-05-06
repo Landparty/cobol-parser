@@ -7,7 +7,6 @@ usable without it.
 from __future__ import annotations
 
 import cProfile
-import io
 import json
 import pstats
 import time
@@ -20,13 +19,12 @@ try:
 
     _PSUTIL_AVAILABLE = True
 except ImportError:  # pragma: no cover
+    _psutil: Any = None
     _PSUTIL_AVAILABLE = False
 
 
 @dataclass
 class FunctionProfile:
-    """Timing profile for a single function from cProfile."""
-
     function: str  # "filename:lineno(funcname)"
     calls: int
     total_time_s: float  # time in body only (excluding callees)
@@ -47,8 +45,6 @@ class FunctionProfile:
 
 @dataclass
 class ProfilingResult:
-    """Structured profiling output from a profiled parse call."""
-
     wall_clock_s: float
     cpu_user_s: float | None  # None when psutil is not installed
     cpu_system_s: float | None  # None when psutil is not installed
@@ -73,16 +69,6 @@ class ProfilingResult:
 
 
 class ProfilerContext:
-    """Context manager that profiles a parse call with cProfile + tracemalloc.
-
-    Usage::
-
-        ctx = ProfilerContext(top_n=50, prof_output="/tmp/parse.prof")
-        with ctx:
-            result = parser.parse(source)
-        profiling: ProfilingResult = ctx.result
-    """
-
     def __init__(self, top_n: int = 50, prof_output: str | None = None) -> None:
         self._top_n = top_n
         self._prof_output = prof_output
@@ -131,8 +117,7 @@ class ProfilerContext:
         # Extract top-N functions by cumulative time from cProfile stats
         top_functions: list[FunctionProfile] = []
         if self._top_n > 0:
-            stream = io.StringIO()
-            stats = pstats.Stats(self._profiler, stream=stream)
+            stats = pstats.Stats(self._profiler)
             # stats.stats: {(file, lineno, name): (cc, nc, tt, ct, callers)}
             sorted_entries = sorted(
                 stats.stats.items(),

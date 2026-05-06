@@ -129,6 +129,7 @@ def test_profiler_context_function_profile_fields():
     ctx = ProfilerContext(top_n=50)
     with ctx:
         _ = [x * 2 for x in range(5_000)]
+    assert ctx.result.top_functions, "expected at least one profiled function"
     fp = ctx.result.top_functions[0]
     assert fp.calls >= 1
     assert fp.cumul_time_s >= 0.0
