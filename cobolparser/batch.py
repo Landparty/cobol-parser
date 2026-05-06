@@ -29,6 +29,7 @@ from pathlib import Path
 
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
+from cobolparser.profiling import ProfilingResult
 
 
 @dataclass
@@ -38,6 +39,7 @@ class BatchResult:
     path: Path
     result: ParseResult | None
     read_error: str | None  # str(exc) — always pickle-safe on Windows spawn
+    profiling: ProfilingResult | None = None
 
 
 # Module-level reusable parser for sequential fast-path
@@ -66,6 +68,9 @@ def _parse_one(
     errors: str,
     error_recovery: ErrorRecoveryMode,
     dialect: DialectType,
+    enable_profiling: bool,
+    top_n: int,
+    prof_output_dir: str | None,
 ) -> BatchResult:
     """Read one file and parse it.
 
@@ -78,13 +83,29 @@ def _parse_one(
     except OSError as exc:
         return BatchResult(path=path, result=None, read_error=str(exc))
 
-    result = parse_cobol(
+    if not enable_profiling:
+        result = parse_cobol(
+            source,
+            filename=path_str,
+            error_recovery=error_recovery,
+            dialect=dialect,
+        )
+        return BatchResult(path=path, result=result, read_error=None)
+
+    prof_output: str | None = None
+    if prof_output_dir is not None:
+        prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
+
+    parse_result, prof = parse_cobol(  # type: ignore[misc]
         source,
         filename=path_str,
         error_recovery=error_recovery,
         dialect=dialect,
+        enable_profiling=True,
+        top_n=top_n,
+        prof_output=prof_output,
     )
-    return BatchResult(path=path, result=result, read_error=None)
+    return BatchResult(path=path, result=parse_result, read_error=None, profiling=prof)
 
 
 def _parse_one_reuse(
@@ -93,6 +114,9 @@ def _parse_one_reuse(
     errors: str,
     error_recovery: ErrorRecoveryMode,
     dialect: DialectType,
+    enable_profiling: bool,
+    top_n: int,
+    prof_output_dir: str | None,
 ) -> BatchResult:
     """Parse one file reusing a module-level parser (sequential mode only).
 
@@ -105,8 +129,24 @@ def _parse_one_reuse(
         return BatchResult(path=path, result=None, read_error=str(exc))
 
     parser = _get_reusable_parser(error_recovery, dialect)
-    result = parser.parse(source, filename=path_str, error_recovery=error_recovery)
-    return BatchResult(path=path, result=result, read_error=None)
+
+    if not enable_profiling:
+        result = parser.parse(source, filename=path_str, error_recovery=error_recovery)
+        return BatchResult(path=path, result=result, read_error=None)
+
+    prof_output: str | None = None
+    if prof_output_dir is not None:
+        prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
+
+    parse_result, prof = parser.parse(  # type: ignore[misc]
+        source,
+        filename=path_str,
+        error_recovery=error_recovery,
+        enable_profiling=True,
+        top_n=top_n,
+        prof_output=prof_output,
+    )
+    return BatchResult(path=path, result=parse_result, read_error=None, profiling=prof)
 
 
 def _parse_one_packed(args: tuple) -> BatchResult:
@@ -126,6 +166,9 @@ def parse_files(
     encoding: str = "utf-8",
     errors: str = "replace",
     executor: ProcessPoolExecutor | None = None,
+    enable_profiling: bool = False,
+    top_n: int = 50,
+    prof_output: str | None = None,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files in parallel.
 
@@ -140,15 +183,28 @@ def parse_files(
         executor: Optional pre-created ProcessPoolExecutor to reuse.  When
             provided the caller owns the executor lifecycle (shutdown/cleanup).
             Useful for amortising spawn overhead across many consecutive batches.
+        enable_profiling: When True, attach a ProfilingResult to each BatchResult.
+        top_n: Number of top functions to include in each ProfilingResult.
+        prof_output: Directory path to write per-file .prof binaries. Each file
+            is written as <stem>.prof inside this directory. Must not end with
+            ".prof" (that would be a file path, not a directory).
 
     Returns:
         list[BatchResult] in input order.
 
     Raises:
-        ValueError: If workers <= 0.
+        ValueError: If workers <= 0 or prof_output ends with ".prof".
     """
     if workers is not None and workers <= 0:
         raise ValueError("workers must be >= 1 or None")
+
+    if prof_output is not None and prof_output.endswith(".prof"):
+        raise ValueError(
+            "prof_output in batch mode must be a directory path, not a .prof file. "
+            "Each file will be written as <stem>.prof inside that directory."
+        )
+    if prof_output is not None:
+        os.makedirs(prof_output, exist_ok=True)
 
     path_list = [str(p) for p in paths]
 
@@ -156,7 +212,7 @@ def parse_files(
         return []
 
     resolved_workers = workers if workers is not None else (os.cpu_count() or 1)
-    args = [(p, encoding, errors, error_recovery, dialect) for p in path_list]
+    args = [(p, encoding, errors, error_recovery, dialect, enable_profiling, top_n, prof_output) for p in path_list]
 
     if executor is None and resolved_workers == 1:
         # Sequential fast path: reuse parser instance, clean stack traces, no pickle overhead
@@ -184,6 +240,9 @@ def parse_files_with_copybooks(
     errors: str = "replace",
     max_nesting_depth: int = 100,
     copybook_cache_size: int = 1024,
+    enable_profiling: bool = False,
+    top_n: int = 50,
+    prof_output: str | None = None,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files with shared copybook expansion cache.
 
@@ -209,6 +268,14 @@ def parse_files_with_copybooks(
     Returns:
         list[BatchResult] in input order.
     """
+    if prof_output is not None and prof_output.endswith(".prof"):
+        raise ValueError(
+            "prof_output in batch mode must be a directory path, not a .prof file. "
+            "Each file will be written as <stem>.prof inside that directory."
+        )
+    if prof_output is not None:
+        os.makedirs(prof_output, exist_ok=True)
+
     from cobolparser.preprocess.copybook_expander import expand_copybooks
     from cobolparser.preprocess.models import CopybookSearchPath
     from cobolparser.preprocess.path_resolver import PathResolver
@@ -257,9 +324,23 @@ def parse_files_with_copybooks(
             expanded_source = source
 
         # Parse expanded source reusing the parser instance
-        result = parser.parse(
-            expanded_source, filename=path_str, error_recovery=error_recovery
-        )
-        results.append(BatchResult(path=path, result=result, read_error=None))
+        if not enable_profiling:
+            result = parser.parse(
+                expanded_source, filename=path_str, error_recovery=error_recovery
+            )
+            results.append(BatchResult(path=path, result=result, read_error=None))
+        else:
+            prof_file: str | None = None
+            if prof_output is not None:
+                prof_file = str(Path(prof_output) / (path.stem + ".prof"))
+            parse_result, prof = parser.parse(  # type: ignore[misc]
+                expanded_source,
+                filename=path_str,
+                error_recovery=error_recovery,
+                enable_profiling=True,
+                top_n=top_n,
+                prof_output=prof_file,
+            )
+            results.append(BatchResult(path=path, result=parse_result, read_error=None, profiling=prof))
 
     return results
