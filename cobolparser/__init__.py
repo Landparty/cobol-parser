@@ -150,6 +150,10 @@ from .parser import (
     ParseResult,
     parse_cobol,
 )
+from .profiling import (
+    FunctionProfile,
+    ProfilingResult,
+)
 from .plugins.core import (
     DialectType,
     ErrorRecoveryMode,
@@ -265,6 +269,9 @@ __all__ = [
     # Batch parsing
     "parse_files",
     "BatchResult",
+    # Profiling
+    "ProfilingResult",
+    "FunctionProfile",
     # Preprocessing utilities
     "normalize_fixed_format",
     # Enhanced features
