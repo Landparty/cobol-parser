@@ -64,3 +64,25 @@ def test_parse_method_profiling_ast_still_valid():
     parse_result, _ = parser.parse(_HELLO, enable_profiling=True)
     assert parse_result.ast is not None
     assert parse_result.ast.program_name == "HELLO"
+
+
+def test_parse_cobol_profiling_returns_tuple():
+    from cobolparser import parse_cobol
+    result = parse_cobol(_HELLO, enable_profiling=True)
+    assert isinstance(result, tuple) and len(result) == 2
+
+
+def test_parse_cobol_no_profiling_returns_parse_result():
+    from cobolparser.parser import ParseResult
+    from cobolparser import parse_cobol
+    result = parse_cobol(_HELLO)
+    assert isinstance(result, ParseResult)
+
+
+def test_parse_cobol_profiling_result_valid():
+    from cobolparser import parse_cobol
+    from cobolparser.profiling import ProfilingResult
+    _, prof = parse_cobol(_HELLO, enable_profiling=True)
+    assert isinstance(prof, ProfilingResult)
+    assert prof.wall_clock_s > 0.0
+    assert len(prof.top_functions) > 0

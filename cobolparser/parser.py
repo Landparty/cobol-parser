@@ -435,6 +435,34 @@ def _detect_fixed_format(source: str) -> bool:
     return fixed_format_indicators >= threshold
 
 
+@overload
+def parse_cobol(
+    source: str,
+    filename: str = ...,
+    dialect: DialectType = ...,
+    error_recovery: ErrorRecoveryMode = ...,
+    free_form: bool = ...,
+    preprocess_fixed: bool | None = ...,
+    enable_profiling: Literal[False] = ...,
+    top_n: int = ...,
+    prof_output: str | None = ...,
+) -> ParseResult: ...
+
+
+@overload
+def parse_cobol(
+    source: str,
+    filename: str = ...,
+    dialect: DialectType = ...,
+    error_recovery: ErrorRecoveryMode = ...,
+    free_form: bool = ...,
+    preprocess_fixed: bool | None = ...,
+    enable_profiling: Literal[True] = ...,
+    top_n: int = ...,
+    prof_output: str | None = ...,
+) -> tuple[ParseResult, ProfilingResult]: ...
+
+
 def parse_cobol(
     source: str,
     filename: str = "<string>",
@@ -442,7 +470,10 @@ def parse_cobol(
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
     free_form: bool = False,
     preprocess_fixed: bool | None = None,
-) -> ParseResult:
+    enable_profiling: bool = False,
+    top_n: int = 50,
+    prof_output: str | None = None,
+) -> "ParseResult | tuple[ParseResult, ProfilingResult]":
     """Convenience function to parse COBOL source code.
 
     Automatically detects fixed-format COBOL and preprocesses if needed.
@@ -491,4 +522,10 @@ def parse_cobol(
     parser = CobolParser(
         dialect=dialect, error_recovery=error_recovery, free_form=free_form
     )
-    return parser.parse(source, filename)
+    return parser.parse(
+        source,
+        filename,
+        enable_profiling=enable_profiling,  # type: ignore[call-overload]
+        top_n=top_n,
+        prof_output=prof_output,
+    )
