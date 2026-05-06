@@ -225,7 +225,7 @@ def _build_parse_parser(
 
 def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     """Shared parse logic used by parse and analyze subcommands."""
-    from ..profiling import ProfilerContext  # noqa: F401
+    from ..profiling import ProfilerContext
 
     source = _read_source(args.file)
     dialect = _DIALECT_MAP[args.dialect]
@@ -291,6 +291,8 @@ def _cmd_parse(args: argparse.Namespace) -> None:
     if args.find_type:
         matched = result.ast.find_all_by_type(args.find_type)
         output: Any = [n.to_dict() for n in matched]
+        if prof is not None:
+            output = {"result": output, "profiling": prof.to_dict()}
         _json_out(output, args.compact, getattr(args, "output", None))
         return
 
@@ -407,6 +409,9 @@ def _cmd_batch(args: argparse.Namespace) -> None:
     enable_profiling = getattr(args, "profile", False)
     top_n = getattr(args, "profile_top_n", 20)
     prof_output = getattr(args, "profile_output", None)
+
+    if prof_output is not None and prof_output.endswith(".prof"):
+        _fail("--profile-output in batch mode must be a directory path, not a .prof file")
 
     results = parse_files(
         unique_files,

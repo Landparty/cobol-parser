@@ -95,3 +95,24 @@ def test_batch_no_profile_no_profiling_key(tmp_path):
     out = _run_cli(["batch", str(p)])
     data = json.loads(out)
     assert "profiling" not in data[0]
+
+
+def test_parse_find_type_with_profile_includes_profiling_key(cobol_file):
+    out = _run_cli(["parse", cobol_file, "--profile", "--find-type", "DisplayStatement"])
+    data = json.loads(out)
+    assert "profiling" in data
+    assert isinstance(data["result"], list)
+
+
+def test_parse_path_with_profile_includes_profiling_key(cobol_file):
+    out = _run_cli(["parse", cobol_file, "procedure", "--profile"])
+    data = json.loads(out)
+    assert "profiling" in data
+
+
+def test_batch_profile_output_dot_prof_raises(tmp_path):
+    import sys
+    p = tmp_path / "prog.cbl"
+    p.write_text(_HELLO, encoding="utf-8")
+    with pytest.raises(SystemExit):
+        _run_cli(["batch", str(p), "--profile", "--profile-output", "out.prof"])
