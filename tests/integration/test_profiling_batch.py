@@ -82,3 +82,23 @@ def test_parse_files_with_copybooks_prof_output_dot_prof_raises(cobol_files):
         parse_files_with_copybooks(
             cobol_files, copybook_paths=[], enable_profiling=True, prof_output="out.prof"
         )
+
+
+def test_parse_files_with_copybooks_writes_prof_files(cobol_files, tmp_path):
+    prof_dir = str(tmp_path / "cb_profiles")
+    results = parse_files_with_copybooks(
+        cobol_files, copybook_paths=[], enable_profiling=True, prof_output=prof_dir
+    )
+    for r in results:
+        expected = Path(prof_dir) / (Path(str(r.path)).stem + ".prof")
+        assert expected.exists()
+
+
+def test_parse_files_profiling_parallel(cobol_files):
+    results = parse_files(cobol_files, workers=2, enable_profiling=True)
+    assert all(isinstance(r.profiling, ProfilingResult) for r in results)
+
+
+def test_parse_files_no_profiling_parallel(cobol_files):
+    results = parse_files(cobol_files, workers=2)
+    assert all(r.profiling is None for r in results)

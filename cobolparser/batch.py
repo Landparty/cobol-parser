@@ -203,7 +203,7 @@ def parse_files(
             "prof_output in batch mode must be a directory path, not a .prof file. "
             "Each file will be written as <stem>.prof inside that directory."
         )
-    if prof_output is not None:
+    if enable_profiling and prof_output is not None:
         os.makedirs(prof_output, exist_ok=True)
 
     path_list = [str(p) for p in paths]
@@ -264,6 +264,9 @@ def parse_files_with_copybooks(
         errors: Error handling for file reads ('replace' avoids crashes).
         max_nesting_depth: Maximum copybook nesting depth.
         copybook_cache_size: Maximum entries in the shared expansion cache.
+        enable_profiling: When True, attach a ProfilingResult to each BatchResult.
+        top_n: Number of top functions to include in each ProfilingResult.
+        prof_output: Directory path to write per-file .prof binaries.
 
     Returns:
         list[BatchResult] in input order.
@@ -273,7 +276,7 @@ def parse_files_with_copybooks(
             "prof_output in batch mode must be a directory path, not a .prof file. "
             "Each file will be written as <stem>.prof inside that directory."
         )
-    if prof_output is not None:
+    if enable_profiling and prof_output is not None:
         os.makedirs(prof_output, exist_ok=True)
 
     from cobolparser.preprocess.copybook_expander import expand_copybooks
