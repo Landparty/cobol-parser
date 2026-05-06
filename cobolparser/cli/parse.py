@@ -100,6 +100,27 @@ def _add_output_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_profiling_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Profile the parse and include timing/memory metrics in output",
+    )
+    parser.add_argument(
+        "--profile-top-n",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Number of top functions to include in profiling output (default: 20)",
+    )
+    parser.add_argument(
+        "--profile-output",
+        default=None,
+        metavar="PATH",
+        help="Write cProfile binary to PATH (.prof for single file, directory for batch)",
+    )
+
+
 def _get_error_recovery(args: argparse.Namespace) -> ErrorRecoveryMode:
     mode_map = {
         "fail-fast": ErrorRecoveryMode.FAIL_FAST,
@@ -198,17 +219,23 @@ def _build_parse_parser(
         metavar="NODE_TYPE",
         help="Find all AST nodes of the given type (e.g., MoveStatement)",
     )
+    _add_profiling_args(p)
     p.set_defaults(func=_cmd_parse)
 
 
-def _do_parse(args: argparse.Namespace) -> Any:
+def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     """Shared parse logic used by parse and analyze subcommands."""
+    from ..profiling import ProfilerContext  # noqa: F401
+
     source = _read_source(args.file)
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
     copybook_paths = getattr(args, "copybook_path", [])
     defines = _parse_defines(getattr(args, "define", []))
+    enable_profiling = getattr(args, "profile", False)
+    top_n = getattr(args, "profile_top_n", 20)
+    prof_output = getattr(args, "profile_output", None)
 
     if defines:
         from ..preprocess import preprocess_conditional_compilation
@@ -221,23 +248,40 @@ def _do_parse(args: argparse.Namespace) -> Any:
         "free_form": getattr(args, "free_form", False),
     }
 
-    if copybook_paths:
-        from ..preprocess.copybook_expander import parse_cobol_with_expansion
+    if not enable_profiling:
+        if copybook_paths:
+            from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
-        result = parse_cobol_with_expansion(
-            source,
-            filename=args.file,
-            copybook_paths=copybook_paths,
-            **parse_kwargs,
-        )
-    else:
-        result = parse_cobol(source, filename=args.file, **parse_kwargs)
+            result = parse_cobol_with_expansion(
+                source,
+                filename=args.file,
+                copybook_paths=copybook_paths,
+                **parse_kwargs,
+            )
+        else:
+            result = parse_cobol(source, filename=args.file, **parse_kwargs)
+        return result, None
 
-    return result
+    # With profiling
+    ctx = ProfilerContext(top_n=top_n, prof_output=prof_output)
+    with ctx:
+        if copybook_paths:
+            from ..preprocess.copybook_expander import parse_cobol_with_expansion
+
+            result = parse_cobol_with_expansion(
+                source,
+                filename=args.file,
+                copybook_paths=copybook_paths,
+                **parse_kwargs,
+            )
+        else:
+            result = parse_cobol(source, filename=args.file, **parse_kwargs)
+    assert ctx.result is not None
+    return result, ctx.result
 
 
 def _cmd_parse(args: argparse.Namespace) -> None:
-    result = _do_parse(args)
+    result, prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -270,6 +314,12 @@ def _cmd_parse(args: argparse.Namespace) -> None:
                 "memory_peak_mb": result.statistics.memory_peak_mb,
             }
         output = wrapper
+
+    if prof is not None:
+        if isinstance(output, dict):
+            output["profiling"] = prof.to_dict()
+        else:
+            output = {"result": output, "profiling": prof.to_dict()}
 
     _json_out(output, args.compact, getattr(args, "output", None))
 
@@ -315,6 +365,7 @@ def _build_batch_parser(
         action="store_true",
         help="Include parse statistics per file",
     )
+    _add_profiling_args(p)
     p.set_defaults(func=_cmd_batch)
 
 
@@ -353,12 +404,19 @@ def _cmd_batch(args: argparse.Namespace) -> None:
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
+    enable_profiling = getattr(args, "profile", False)
+    top_n = getattr(args, "profile_top_n", 20)
+    prof_output = getattr(args, "profile_output", None)
+
     results = parse_files(
         unique_files,
         workers=args.workers,
         error_recovery=error_recovery,
         dialect=dialect,
         encoding=args.encoding,
+        enable_profiling=enable_profiling,
+        top_n=top_n,
+        prof_output=prof_output,
     )
 
     output = []
@@ -380,6 +438,8 @@ def _cmd_batch(args: argparse.Namespace) -> None:
                     "parse_time_seconds": br.result.statistics.parse_time_seconds,
                     "memory_peak_mb": br.result.statistics.memory_peak_mb,
                 }
+            if enable_profiling and br.profiling is not None:
+                entry["profiling"] = br.profiling.to_dict()
         output.append(entry)
 
     _json_out(output, args.compact, getattr(args, "output", None))
@@ -524,13 +584,14 @@ def _build_analyze_parser(
     _add_copybook_args(p)
     _add_define_args(p)
     _add_output_arg(p)
+    _add_profiling_args(p)
     p.set_defaults(func=_cmd_analyze)
 
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
     from ..analysis.value_tracker import DynamicCallAnalyzer
 
-    result = _do_parse(args)
+    result, prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -550,7 +611,10 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             entry["possible_values"] = stmt.possible_values
         calls.append(entry)
 
-    _json_out({"calls": calls}, args.compact, getattr(args, "output", None))
+    output: dict[str, Any] = {"calls": calls}
+    if prof is not None:
+        output["profiling"] = prof.to_dict()
+    _json_out(output, args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: dead-code ----------------------------------------------------
@@ -570,13 +634,14 @@ def _build_dead_code_parser(
     _add_copybook_args(p)
     _add_define_args(p)
     _add_output_arg(p)
+    _add_profiling_args(p)
     p.set_defaults(func=_cmd_dead_code)
 
 
 def _cmd_dead_code(args: argparse.Namespace) -> None:
     from ..analysis.dead_code import DeadCodeAnalyzer
 
-    result = _do_parse(args)
+    result, prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -585,7 +650,10 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
     analyzer = DeadCodeAnalyzer()
     report = analyzer.analyze(result.ast)
 
-    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+    output: dict[str, Any] = report.to_dict()
+    if prof is not None:
+        output["profiling"] = prof.to_dict()
+    _json_out(output, args.compact, getattr(args, "output", None))
 
 
 # -- Subcommand: program-flow -------------------------------------------------
@@ -613,13 +681,14 @@ def _build_program_flow_parser(
     _add_copybook_args(p)
     _add_define_args(p)
     _add_output_arg(p)
+    _add_profiling_args(p)
     p.set_defaults(func=_cmd_program_flow)
 
 
 def _cmd_program_flow(args: argparse.Namespace) -> None:
     from ..analysis.program_flow import ProgramFlowAnalyzer
 
-    result = _do_parse(args)
+    result, prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -642,7 +711,10 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
         gen = DotFlowchartGenerator()
         _text_out(gen.generate(report, FlowchartOptions()), output_path)
     else:
-        _json_out(report.to_dict(), args.compact, output_path)
+        output: dict[str, Any] = report.to_dict()
+        if prof is not None:
+            output["profiling"] = prof.to_dict()
+        _json_out(output, args.compact, output_path)
 
 
 # -- Subcommand: generate-tests -----------------------------------------------
@@ -679,7 +751,7 @@ def _build_generate_tests_parser(
 
 
 def _cmd_generate_tests(args: argparse.Namespace) -> None:
-    result = _do_parse(args)
+    result, _prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -730,7 +802,7 @@ def _build_io_sequence_parser(
 def _cmd_io_sequence(args: argparse.Namespace) -> None:
     from ..analysis.io_sequence import IOSequenceAnalyzer
 
-    result = _do_parse(args)
+    result, _prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -766,7 +838,7 @@ def _build_move_type_check_parser(
 def _cmd_move_type_check(args: argparse.Namespace) -> None:
     from ..analysis.move_type_checker import MoveTypeChecker
 
-    result = _do_parse(args)
+    result, _prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -802,7 +874,7 @@ def _build_linkage_check_parser(
 def _cmd_linkage_check(args: argparse.Namespace) -> None:
     from ..analysis.linkage_checker import LinkageChecker
 
-    result = _do_parse(args)
+    result, _prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -839,7 +911,7 @@ def _cmd_language_env(args: argparse.Namespace) -> None:
     from ..analysis.language_env_analyzer import LanguageEnvironmentAnalyzer
     from ..analysis.value_tracker import DynamicCallAnalyzer
 
-    result = _do_parse(args)
+    result, _prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -878,7 +950,7 @@ def _build_ims_dli_parser(
 def _cmd_ims_dli(args: argparse.Namespace) -> None:
     from ..analysis.ims_segment_analyzer import IMSSegmentAnalyzer
 
-    result = _do_parse(args)
+    result, _prof = _do_parse(args)
 
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
