@@ -8,7 +8,9 @@ This module provides delegating CobolParser that orchestrates parsing through:
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, overload
+
+from cobolparser.profiling import ProfilerContext, ProfilingResult
 
 # Core parsing infrastructure
 from .core.token_stream import TokenStream
@@ -123,13 +125,13 @@ class CobolParser:
 
         return content
 
-    def parse(
+    def _parse_core(
         self,
         source: str,
         filename: str = "<string>",
         error_recovery: ErrorRecoveryMode | None = None,
     ) -> ParseResult:
-        """Parse COBOL source code into AST.
+        """Parse COBOL source code into AST (core implementation).
 
         Args:
             source: COBOL source code
@@ -200,6 +202,64 @@ class CobolParser:
                 ParseError(f"Parser error: {str(e)}", line_number=1, column=1)
             )
             return self._create_result(None)
+
+    @overload
+    def parse(
+        self,
+        source: str,
+        filename: str = ...,
+        error_recovery: ErrorRecoveryMode | None = ...,
+        enable_profiling: Literal[False] = ...,
+        top_n: int = ...,
+        prof_output: str | None = ...,
+    ) -> ParseResult: ...
+
+    @overload
+    def parse(
+        self,
+        source: str,
+        filename: str = ...,
+        error_recovery: ErrorRecoveryMode | None = ...,
+        enable_profiling: Literal[True] = ...,
+        top_n: int = ...,
+        prof_output: str | None = ...,
+    ) -> tuple[ParseResult, ProfilingResult]: ...
+
+    def parse(
+        self,
+        source: str,
+        filename: str = "<string>",
+        error_recovery: ErrorRecoveryMode | None = None,
+        enable_profiling: bool = False,
+        top_n: int = 50,
+        prof_output: str | None = None,
+    ) -> "ParseResult | tuple[ParseResult, ProfilingResult]":
+        """Parse COBOL source code into AST.
+
+        Args:
+            source: COBOL source code
+            filename: Source filename for error reporting
+            error_recovery: Error recovery mode (FAIL_FAST or COLLECT_ALL).
+                           Defaults to FAIL_FAST if not specified.
+            enable_profiling: When True, wrap parsing with cProfile + tracemalloc
+                              and return a (ParseResult, ProfilingResult) tuple.
+            top_n: Number of top functions to capture in profiling output (default 50).
+            prof_output: Optional path to write a .prof binary file.
+
+        Returns:
+            ParseResult when enable_profiling is False (default).
+            tuple[ParseResult, ProfilingResult] when enable_profiling is True.
+        """
+        if not enable_profiling:
+            return self._parse_core(source, filename, error_recovery)
+        ctx = ProfilerContext(top_n=top_n, prof_output=prof_output)
+        with ctx:
+            result = self._parse_core(source, filename, error_recovery)
+        assert ctx.result is not None
+        # Keep ParseStatistics timing consistent with profiler wall-clock measurement
+        result.statistics.parse_time_seconds = ctx.result.wall_clock_s
+        result.statistics.total_time_ms = ctx.result.wall_clock_s * 1000.0
+        return result, ctx.result
 
     def parse_file(self, filepath: str) -> ParseResult:
         """Parse COBOL source code from a file.
