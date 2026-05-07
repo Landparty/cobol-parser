@@ -7,8 +7,6 @@ missing program name error recovery.
 
 from __future__ import annotations
 
-import pytest
-
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements.call import CallStatement
 

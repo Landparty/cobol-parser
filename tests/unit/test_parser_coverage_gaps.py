@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from cobolparser import CobolParser
 from cobolparser._errors import ParseError
 from cobolparser.plugins.core import ErrorRecoveryMode, MemoryConfiguration

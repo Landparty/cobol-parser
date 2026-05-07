@@ -7,8 +7,6 @@ with period terminator, ELSE with period terminator.
 
 from __future__ import annotations
 
-import pytest
-
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements.control import IfStatement
 

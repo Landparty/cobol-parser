@@ -7,8 +7,6 @@ VARYING with WITH TEST timing.
 
 from __future__ import annotations
 
-import pytest
-
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements import PerformStatement
 
