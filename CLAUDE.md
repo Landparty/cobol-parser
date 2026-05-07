@@ -38,8 +38,16 @@ python -m ruff check . --fix
 python -m black .
 python -m mypy cobolparser/
 
-# CLI usage
-cobol-parser <file.cbl> [path] [--compact] [--free-form] [--dialect ibm-enterprise] [--errors] [--stats]
+# CLI subcommands
+cobol-parser parse <file.cbl> [path] [--compact] [--free-form] [--dialect ibm-enterprise] [--errors] [--stats]
+cobol-parser tokenize <file.cbl>
+cobol-parser preprocess <file.cbl> [--define DEBUG]
+cobol-parser expand <file.cbl> --copybook-path ./copybooks
+cobol-parser analyze <file.cbl>
+cobol-parser dead-code <file.cbl>
+cobol-parser program-flow <file.cbl>
+cobol-parser batch prog1.cbl prog2.cbl [--stats]
+cobol-parser generate-tests <file.cbl> -o <file.cut>
 ```
 
 ## Architecture
@@ -83,7 +91,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 25+ statement parser files (see "Statement Parsers" section below)
+- `statements/` -- 26 statement parser files (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -95,17 +103,33 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/plugins/core.py`** -- Configuration: `ErrorRecoveryMode` (FAIL_FAST / COLLECT_ALL), `DialectType`, `MemoryConfiguration`, `SerializationConfig`, `ParseStatistics`, `PluginManager`.
 
-**`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS, IBM intrinsic functions.
+**`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- Analysis utilities:
+**`cobolparser/analysis/`** -- 16 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
+- `io_logger.py` -- IO operation logging
+- `io_sequence.py` -- IO sequence validation
+- `coverage_analyzer.py` -- Test coverage analysis
+- `crud_matrix.py` -- CRUD matrix generation for file operations
+- `dead_code.py` -- Unreferenced paragraph/section detection
+- `host_var_resolver.py` -- SQL host variable resolution
+- `ims_segment_analyzer.py` -- IMS DLI segment analysis
+- `language_env_analyzer.py` -- IBM Language Environment detection
+- `linkage_checker.py` -- LINKAGE SECTION validation
+- `move_type_checker.py` -- MOVE statement type compatibility checking
+- `program_flow.py` -- Control flow graph analysis
+- `test_plan.py` -- Test plan generation from AST
+
+**`cobolparser/generators/`** -- Code generation utilities:
+- `cobolcheck.py` -- Generates CobolCheck `.cut` test files from parsed AST
+- `flowchart.py` -- Generates flowchart representations from parsed AST
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches.
 
 **`cobolparser/cli/`** -- Command-line interface:
-- `parse.py` -- `cobol-parser <file> [path]` command: parse COBOL files, output AST as JSON, supports dot-separated AST path navigation (e.g., `procedure.MAIN-LOGIC.display`)
+- `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, generate-tests
 - `coverage.py` -- IO coverage CLI tools
 
 ### Statement Parsers (cobolparser/parsers/statements/)
@@ -121,7 +145,7 @@ COBOL source (.cbl/.cob)
 | `entry_parser.py` | ENTRY |
 | `evaluate_parser.py` | EVALUATE |
 | `go_parser.py` | GO TO |
-| `ibm_exec_statements.py` | EXEC SQL, EXEC CICS |
+| `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI |
 | `if_parser.py` | IF |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT |
 | `move_parser.py` | MOVE |
@@ -194,6 +218,18 @@ parse_result = parse_cobol_with_expansion(source, copybook_paths=["/path"])
 from cobolparser.analysis import DynamicCallAnalyzer
 analyzer = DynamicCallAnalyzer()
 analyzer.analyze(parse_result.ast)
+
+# Dead code detection
+from cobolparser.analysis import dead_code
+unreferenced = dead_code.find_dead_code(parse_result.ast)
+
+# Program flow graph
+from cobolparser.analysis import program_flow
+graph = program_flow.build_flow_graph(parse_result.ast)
+
+# CobolCheck test generation
+from cobolparser import generate_cobolcheck_tests
+generate_cobolcheck_tests(source, output_path="program.cut")
 ```
 
 ### Adding a New Statement Parser
@@ -219,27 +255,30 @@ analyzer.analyze(parse_result.ast)
 
 ## Test Structure
 
-**3,456 tests** across 5 directories:
+**3,456 tests** across 5 directories (152 test files total):
 
 ```
 tests/
   conftest.py            # Shared fixtures: parser(), samples_dir()
-  unit/                  # Unit tests (~100+ files) - individual components
-    analysis/            # IO coverage reporter, diagnostics tests
+  test_all_samples.py    # Smoke-tests all sample COBOL programs
+  unit/                  # Unit tests (135 files) - individual components
+    analysis/            # IO coverage reporter, diagnostics, all analyzers
     cli/                 # CLI command tests
+    generators/          # CobolCheck and flowchart generator tests
     io_statements/       # IO parser unit tests
-  integration/           # Integration tests - end-to-end parsing
+  integration/           # Integration tests (14 files) - end-to-end parsing
     io/                  # IO coverage reporting integration
     io_statements/       # IO statement parsing, VSAM
-  contracts/             # API contract tests - stability guarantees
+  contracts/             # API contract tests (17 files) - stability guarantees
     io_statements/       # IO statement contracts
   regression/            # Regression tests - backward compatibility
   performance/           # Performance benchmarks (factory, parser)
-  samples/               # Shared COBOL test fixtures
+  samples/               # Shared COBOL test fixtures (69 files)
     copybook_programs/   # Programs with COPY statements
     copybooks/           # Copybook files (.CPY)
     io/                  # IO test samples
-      negative/          # Negative test cases
+      positive/          # Valid IO operations
+      negative/          # Invalid IO patterns
 ```
 
 ### Pytest Markers
@@ -285,5 +324,13 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
 ## Example COBOL Files
 
-- `tests/samples/` -- 47+ COBOL sample programs covering all statement types
+- `tests/samples/` -- 69 COBOL sample programs covering all statement types
 - `examples/cobol/` -- NIST COBOL-85 test suite (400+ .CBL files) and copybooks (.CPY)
+
+## Additional Directories
+
+- `docs/` -- 20+ markdown documentation files (architecture, API reference, dialect guides, etc.)
+- `tools/` -- Utility scripts for IO cataloging, coverage analysis, code metrics, and performance profiling
+- `baselines/` -- Stored test baselines for regression comparison
+- `benchmarks/` -- Performance benchmark programs
+- `setup.py` -- Optional mypyc compilation support (compiles 20 core modules to C extensions)
