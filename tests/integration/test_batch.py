@@ -190,4 +190,7 @@ class TestParseOneInternal:
                     "replace",
                     ErrorRecoveryMode.COLLECT_ALL,
                     DialectType.IBM_ENTERPRISE,
+                    False,
+                    10,
+                    None,
                 )

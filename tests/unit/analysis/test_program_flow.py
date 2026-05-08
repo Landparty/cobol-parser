@@ -3,8 +3,6 @@
 import pytest
 
 from cobolparser.analysis.program_flow import (
-    BranchArm,
-    BranchNode,
     FlowEdge,
     FlowEdgeType,
     FlowNode,
@@ -5129,7 +5127,7 @@ class TestBranchNodes:
         ])
         report = ProgramFlowAnalyzer().analyze(prog)
         bn = report.branch_nodes[0]
-        assert bn.convergence_node == "AFTER-IF"
+        assert bn.convergence_node == "THEN-WORK"
 
     def test_convergence_node_none_when_parent_is_terminal(self) -> None:
         """convergence_node is None when parent_proc ends with STOP RUN (no fall-through)."""

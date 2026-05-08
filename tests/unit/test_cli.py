@@ -157,22 +157,22 @@ class TestCLIErrorHandling:
     def test_non_utf8_file(self):
         with tempfile.NamedTemporaryFile(suffix=".cbl", delete=False) as f:
             f.write(b"\x80\x81\x82\xff\xfe")
-            f.flush()
-            try:
-                assert _run_cli_expect_fail(f.name) == 1
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            assert _run_cli_expect_fail(fname) == 1
+        finally:
+            os.unlink(fname)
 
     def test_empty_file(self):
         with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
             f.write("")
-            f.flush()
-            try:
-                # Empty file parses to a minimal program — should not crash
-                output = _run_cli_json(f.name)
-                assert output["node_type"] == "Program"
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            # Empty file parses to a minimal program — should not crash
+            output = _run_cli_json(fname)
+            assert output["node_type"] == "Program"
+        finally:
+            os.unlink(fname)
 
     def test_invalid_division(self):
         assert _run_cli_expect_fail(SAMPLE_FILE, "BOGUS") == 1
@@ -335,12 +335,12 @@ class TestCLIParseNewFlags:
                 ">>END-IF\n"
                 "           STOP RUN.\n"
             )
-            f.flush()
-            try:
-                output = _run_cli_json("parse", f.name, "--define", "DEBUG")
-                assert output["node_type"] == "Program"
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            output = _run_cli_json("parse", fname, "--define", "DEBUG")
+            assert output["node_type"] == "Program"
+        finally:
+            os.unlink(fname)
 
     def test_define_with_value(self):
         with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
@@ -351,12 +351,12 @@ class TestCLIParseNewFlags:
                 "       MAIN-LOGIC.\n"
                 "           STOP RUN.\n"
             )
-            f.flush()
-            try:
-                output = _run_cli_json("parse", f.name, "--define", "ENV=PROD")
-                assert output["node_type"] == "Program"
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            output = _run_cli_json("parse", fname, "--define", "ENV=PROD")
+            assert output["node_type"] == "Program"
+        finally:
+            os.unlink(fname)
 
 
 class TestCLIBatch:
@@ -465,13 +465,13 @@ class TestCLIPreprocess:
                 "       IDENTIFICATION DIVISION.\n"
                 "       PROGRAM-ID. TESTPROG.\n"
             )
-            f.flush()
-            try:
-                raw = _run_cli("preprocess", f.name, "--strip-directives")
-                assert "PROCESS" not in raw
-                assert "IDENTIFICATION" in raw
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            raw = _run_cli("preprocess", fname, "--strip-directives")
+            assert "PROCESS" not in raw
+            assert "IDENTIFICATION" in raw
+        finally:
+            os.unlink(fname)
 
     def test_preprocess_with_define(self):
         with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
@@ -482,12 +482,12 @@ class TestCLIPreprocess:
                 ">>END-IF\n"
                 "       PROGRAM-ID. CONDPROG.\n"
             )
-            f.flush()
-            try:
-                raw = _run_cli("preprocess", f.name, "--free-form")
-                assert "IDENTIFICATION" in raw
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            raw = _run_cli("preprocess", fname, "--free-form")
+            assert "IDENTIFICATION" in raw
+        finally:
+            os.unlink(fname)
 
     def test_preprocess_with_external_define(self):
         with tempfile.NamedTemporaryFile(suffix=".cbl", mode="w", delete=False) as f:
@@ -497,12 +497,12 @@ class TestCLIPreprocess:
                 ">>END-IF\n"
                 "       PROGRAM-ID. CONDPROG.\n"
             )
-            f.flush()
-            try:
-                raw = _run_cli("preprocess", f.name, "--define", "MYVAR", "--free-form")
-                assert "IDENTIFICATION" in raw
-            finally:
-                os.unlink(f.name)
+            fname = f.name
+        try:
+            raw = _run_cli("preprocess", fname, "--define", "MYVAR", "--free-form")
+            assert "IDENTIFICATION" in raw
+        finally:
+            os.unlink(fname)
 
     def test_preprocess_file_not_found(self):
         assert _run_cli_expect_fail("preprocess", "/nonexistent/file.cbl") == 1

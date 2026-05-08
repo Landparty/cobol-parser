@@ -63,6 +63,8 @@ import logging
 # Import implemented modules
 # Analysis utilities
 from .analysis import (
+    BranchArm,
+    BranchNode,
     CoverageAnalyzer,
     CoverageMap,
     CRUDFlags,
@@ -74,8 +76,6 @@ from .analysis import (
     DeadCodeReport,
     DynamicCallAnalyzer,
     FileEntry,
-    BranchArm,
-    BranchNode,
     FlowEdge,
     FlowEdgeType,
     FlowNode,
@@ -150,10 +150,6 @@ from .parser import (
     ParseResult,
     parse_cobol,
 )
-from .profiling import (
-    FunctionProfile,
-    ProfilingResult,
-)
 from .plugins.core import (
     DialectType,
     ErrorRecoveryMode,
@@ -185,6 +181,10 @@ from .preprocess.models import (
     CopybookSearchPath,
     CopyStatement,
     ExpansionStatistics,
+)
+from .profiling import (
+    FunctionProfile,
+    ProfilingResult,
 )
 
 # Other dialects will be added when implemented

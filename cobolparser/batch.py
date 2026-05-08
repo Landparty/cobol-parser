@@ -96,7 +96,7 @@ def _parse_one(
     if prof_output_dir is not None:
         prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
 
-    parse_result, prof = parse_cobol(  # type: ignore[misc]
+    parse_result, prof = parse_cobol(
         source,
         filename=path_str,
         error_recovery=error_recovery,
@@ -138,7 +138,7 @@ def _parse_one_reuse(
     if prof_output_dir is not None:
         prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
 
-    parse_result, prof = parser.parse(  # type: ignore[misc]
+    parse_result, prof = parser.parse(
         source,
         filename=path_str,
         error_recovery=error_recovery,
@@ -336,7 +336,7 @@ def parse_files_with_copybooks(
             prof_file: str | None = None
             if prof_output is not None:
                 prof_file = str(Path(prof_output) / (path.stem + ".prof"))
-            parse_result, prof = parser.parse(  # type: ignore[misc]
+            parse_result, prof = parser.parse(
                 expanded_source,
                 filename=path_str,
                 error_recovery=error_recovery,

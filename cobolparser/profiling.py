@@ -15,11 +15,11 @@ from dataclasses import dataclass
 from typing import Any
 
 try:
-    import psutil as _psutil
+    import psutil as _psutil  # type: ignore[import-untyped]
 
     _PSUTIL_AVAILABLE = True
 except ImportError:  # pragma: no cover
-    _psutil: Any = None
+    _psutil: Any = None  # type: ignore[no-redef]
     _PSUTIL_AVAILABLE = False
 
 
@@ -78,7 +78,7 @@ class ProfilerContext:
         self._was_tracing: bool = False
         self.result: ProfilingResult | None = None
 
-    def __enter__(self) -> "ProfilerContext":
+    def __enter__(self) -> ProfilerContext:
         # Memory: start tracemalloc only if not already running
         self._was_tracing = tracemalloc.is_tracing()
         if not self._was_tracing:
@@ -97,7 +97,7 @@ class ProfilerContext:
         wall_clock_s = time.perf_counter() - self._wall_start
 
         # Memory peak within this call
-        _, peak_bytes = tracemalloc.get_traced_memory()
+        _current, peak_bytes = tracemalloc.get_traced_memory()
         if not self._was_tracing:
             tracemalloc.stop()
         peak_memory_mb = peak_bytes / (1024 * 1024)
@@ -120,7 +120,7 @@ class ProfilerContext:
             stats = pstats.Stats(self._profiler)
             # stats.stats: {(file, lineno, name): (cc, nc, tt, ct, callers)}
             sorted_entries = sorted(
-                stats.stats.items(),
+                stats.stats.items(),  # type: ignore[attr-defined]
                 key=lambda kv: kv[1][3],  # ct = cumulative time
                 reverse=True,
             )[: self._top_n]

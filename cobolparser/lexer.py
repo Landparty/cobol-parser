@@ -26,6 +26,9 @@ _FF_LINE_END = 72  # column 73+: identification area (ignored) — index 72
 
 _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 
+# First characters of any COBOL division keyword (upper + lower)
+_DIVISION_FIRST = frozenset("IEDPiedp")
+
 
 class TokenType(Enum):
     """Token types for COBOL lexical analysis."""
@@ -348,7 +351,7 @@ _LEVEL_NUMBER_2DIGIT_RE = re.compile(r"^\d{2}$")
 _LEVEL_NUMBER_1_2DIGIT_RE = re.compile(r"^\d{1,2}$")
 
 
-class CobolLexer:
+class _CobolLexerPure:
     """COBOL lexical analyzer with support for multiple dialects.
 
     This lexer handles the complexities of COBOL tokenization including:
@@ -1018,8 +1021,9 @@ class CobolLexer:
         """Tokenize COBOL program text from a line."""
         tokens: list[Token] = []
         pos = 0
+        length = len(text)
 
-        while pos < len(text):
+        while pos < length:
             char = text[pos]
 
             # Skip whitespace (no location needed)
@@ -1119,18 +1123,16 @@ class CobolLexer:
 
             # Check for identifiers that start with digits (e.g., 42-DATANAMES)
             if char.isdigit():
-                # Look ahead to see if this could be an identifier starting with digits
+                # Advance past leading digits (position only — no string needed)
                 lookahead_pos = pos
-                lookahead_value = ""
-                while lookahead_pos < len(text) and (text[lookahead_pos].isdigit()):
-                    lookahead_value += text[lookahead_pos]
+                while lookahead_pos < length and (text[lookahead_pos].isdigit()):
                     lookahead_pos += 1
 
                 # Check if after digits we have a dash followed by letters (identifier pattern)
                 if (
-                    lookahead_pos < len(text)
+                    lookahead_pos < length
                     and text[lookahead_pos] == "-"
-                    and lookahead_pos + 1 < len(text)
+                    and lookahead_pos + 1 < length
                     and text[lookahead_pos + 1].isalpha()
                 ):
                     # This looks like an identifier starting with digits (e.g., 42-DATANAMES)
@@ -1452,7 +1454,9 @@ class CobolLexer:
         self, text: str, start_pos: int
     ) -> tuple[TokenType | None, int]:
         """Check if text at position starts a division header and return appropriate token type."""
-        remaining = text[start_pos:].strip().upper()
+        if start_pos >= len(text) or text[start_pos] not in _DIVISION_FIRST:
+            return None, start_pos
+        remaining = text[start_pos:start_pos + 24].upper()
 
         # Check for complete division headers
         if remaining.startswith("IDENTIFICATION DIVISION"):
@@ -1473,26 +1477,27 @@ class CobolLexer:
     ) -> tuple[Token, int]:
         """Read word (identifier/keyword) from text starting at position."""
         location = SourceLocation(line_num + 1, start_col + start_pos, 1)
-        value = ""
         pos = start_pos
+        length = len(text)
 
-        # First check if this might be a division header
-        division_type, division_end = self.check_division_header(text, start_pos)
-        if division_type:
-            # Preserve the division token type but keep the value to the keyword only.
-            division_word = text[start_pos:division_end].strip().split()[0]
-            return Token(division_type, division_word, location), division_end
+        # Only check for division header when the first char could match
+        if pos < length and text[pos] in _DIVISION_FIRST:
+            division_type, division_end = self.check_division_header(text, start_pos)
+            if division_type:
+                division_word = text[start_pos:division_end].strip().split()[0]
+                return Token(division_type, division_word, location), division_end
 
-        # Read regular word
-        while pos < len(text):
+        # Read regular word — use list+join to avoid O(n²) string concatenation
+        parts: list[str] = []
+        while pos < length:
             char = text[pos]
             if char.isalnum() or char in "-_":
-                value += char
+                parts.append(char)
                 pos += 1
             else:
                 break
 
-        # Determine token type
+        value = "".join(parts)
         upper_value = sys.intern(value.upper())
         if upper_value in self.KEYWORDS:
             token_type = self.KEYWORDS[upper_value]
@@ -1573,4 +1578,17 @@ def tokenize_cobol(
         # Raise first error
         raise lexer.get_errors()[0]
 
-    return tokens
+    return tokens  # type: ignore[no-any-return]
+
+
+# ---------------------------------------------------------------------------
+# Optional Cython fast path – transparent drop-in for CobolLexer.
+# The Cython subclass is defined in _lexer_fast.pyx and overrides the three
+# innermost hot-path methods.  Falls back to the pure-Python class silently
+# if the extension module was not compiled.
+# ---------------------------------------------------------------------------
+try:
+    from cobolparser._lexer_fast import CobolLexer  # type: ignore[import-not-found]
+except ImportError:
+    CobolLexer = _CobolLexerPure
+

@@ -218,7 +218,7 @@ class CobolProgram(ASTNode):
         # extractors (call/copy/sql/file_io) call this method 1-2 times each
         # — ~7 traversals per program. Memoizing converts that into one
         # traversal + 6 O(1) returns. Invalidated by add_division().
-        self._cached_all_statements: list["CobolStatement"] | None = None
+        self._cached_all_statements: list[CobolStatement] | None = None
 
     @property
     def divisions(self) -> list[CobolDivision]:

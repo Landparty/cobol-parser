@@ -1,6 +1,8 @@
 """Integration tests: batch profiling support."""
-import pytest
 from pathlib import Path
+
+import pytest
+
 from cobolparser.batch import BatchResult, parse_files, parse_files_with_copybooks
 from cobolparser.profiling import ProfilingResult
 

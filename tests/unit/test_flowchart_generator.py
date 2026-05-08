@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from cobolparser.analysis.program_flow import (
     BranchArm,
     BranchNode,
@@ -33,7 +31,6 @@ from cobolparser.generators.flowchart import (
     _short_edge_label,
 )
 from cobolparser.models.ast_base import SourceLocation
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -380,7 +377,7 @@ class TestMermaidFlowchartGenerator:
     def test_node_id_sanitized(self) -> None:
         out = self._gen(_simple_report())
         # Hyphens must not appear as raw node IDs — they should be sanitized
-        lines = [l for l in out.splitlines() if "MAIN_LOGIC" in l]
+        lines = [line for line in out.splitlines() if "MAIN_LOGIC" in line]
         assert lines, "Expected sanitized node ID MAIN_LOGIC"
 
     def test_entry_node_annotated(self) -> None:

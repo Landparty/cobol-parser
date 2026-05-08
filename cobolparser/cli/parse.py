@@ -713,7 +713,7 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
     elif fmt == "dot":
         from ..generators.flowchart import DotFlowchartGenerator, FlowchartOptions
 
-        gen = DotFlowchartGenerator()
+        gen = DotFlowchartGenerator()  # type: ignore[assignment]
         _text_out(gen.generate(report, FlowchartOptions()), output_path)
     else:
         output: dict[str, Any] = report.to_dict()

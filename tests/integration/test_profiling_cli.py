@@ -111,7 +111,6 @@ def test_parse_path_with_profile_includes_profiling_key(cobol_file):
 
 
 def test_batch_profile_output_dot_prof_raises(tmp_path):
-    import sys
     p = tmp_path / "prog.cbl"
     p.write_text(_HELLO, encoding="utf-8")
     with pytest.raises(SystemExit):

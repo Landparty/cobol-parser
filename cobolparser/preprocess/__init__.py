@@ -746,3 +746,14 @@ from .copybook_expander import (  # noqa: E402
     expand_copybooks,
     parse_cobol_with_expansion,
 )
+
+# ---------------------------------------------------------------------------
+# Optional Cython fast path for normalize_fixed_format.
+# Falls back to the pure-Python implementation silently when not compiled.
+# ---------------------------------------------------------------------------
+try:
+    from cobolparser._preprocess_fast import (  # type: ignore[import-not-found,no-redef]
+        normalize_fixed_format,
+    )
+except ImportError:
+    pass  # pure-Python normalize_fixed_format defined above is used

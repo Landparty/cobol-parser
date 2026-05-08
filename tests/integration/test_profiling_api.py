@@ -1,5 +1,4 @@
 """Integration tests: parse_cobol / CobolParser.parse() with enable_profiling=True."""
-import pytest
 from cobolparser import CobolParser, parse_cobol
 from cobolparser.profiling import ProfilingResult
 
@@ -67,20 +66,17 @@ def test_parse_method_profiling_ast_still_valid():
 
 
 def test_parse_cobol_profiling_returns_tuple():
-    from cobolparser import parse_cobol
     result = parse_cobol(_HELLO, enable_profiling=True)
     assert isinstance(result, tuple) and len(result) == 2
 
 
 def test_parse_cobol_no_profiling_returns_parse_result():
     from cobolparser.parser import ParseResult
-    from cobolparser import parse_cobol
     result = parse_cobol(_HELLO)
     assert isinstance(result, ParseResult)
 
 
 def test_parse_cobol_profiling_result_valid():
-    from cobolparser import parse_cobol
     from cobolparser.profiling import ProfilingResult
     _, prof = parse_cobol(_HELLO, enable_profiling=True)
     assert isinstance(prof, ProfilingResult)

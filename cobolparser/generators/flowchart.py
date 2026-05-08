@@ -8,11 +8,15 @@ or a **Graphviz DOT** digraph string.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..analysis.program_flow import BranchArm, BranchNode, FlowEdge, FlowNode, ProgramFlowReport
+    from ..analysis.program_flow import (
+        FlowEdge,
+        FlowNode,
+        ProgramFlowReport,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +117,7 @@ class MermaidFlowchartGenerator:
 
     def generate(
         self,
-        report: "ProgramFlowReport",
+        report: ProgramFlowReport,
         options: FlowchartOptions | None = None,
     ) -> str:
         """Return the Mermaid diagram as a plain string.
@@ -224,7 +228,7 @@ class MermaidFlowchartGenerator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _node_label(node: "FlowNode", options: FlowchartOptions) -> str:
+    def _node_label(node: FlowNode, options: FlowchartOptions) -> str:
         """Build the display label for a node, escaping Mermaid special chars."""
         # Mermaid labels inside [] / () don't need quoting but some chars must
         # be escaped.  We keep it simple: wrap in double-quotes when needed.
@@ -238,7 +242,7 @@ class MermaidFlowchartGenerator:
     @staticmethod
     def _edge_style(
         etype: str,
-        edge: "FlowEdge",
+        edge: FlowEdge,
         options: FlowchartOptions,
     ) -> tuple[str, list[str]]:
         """Return ``(arrow_str, label_parts)`` for a Mermaid edge."""
@@ -297,7 +301,7 @@ class DotFlowchartGenerator:
 
     def generate(
         self,
-        report: "ProgramFlowReport",
+        report: ProgramFlowReport,
         options: FlowchartOptions | None = None,
     ) -> str:
         """Return the DOT source as a plain string.
@@ -416,7 +420,7 @@ class DotFlowchartGenerator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _node_role(node: "FlowNode", unreachable_set: set[str]) -> str:
+    def _node_role(node: FlowNode, unreachable_set: set[str]) -> str:
         if node.is_entry_point:
             return "entry"
         if node.is_exit_point:
@@ -431,7 +435,7 @@ class DotFlowchartGenerator:
         escaped = text.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
 
-    def _node_label_dot(self, node: "FlowNode", options: FlowchartOptions) -> str:
+    def _node_label_dot(self, node: FlowNode, options: FlowchartOptions) -> str:
         name = node.name
         if options.show_statement_counts and node.statement_count > 0:
             return self._dot_str(f"{name}\\n({node.statement_count} stmts)")
@@ -440,7 +444,7 @@ class DotFlowchartGenerator:
     def _edge_attrs(
         self,
         etype: str,
-        edge: "FlowEdge",
+        edge: FlowEdge,
         options: FlowchartOptions,
     ) -> dict[str, str]:
         attrs: dict[str, str] = {}

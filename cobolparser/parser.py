@@ -10,8 +10,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, overload
 
-from .profiling import ProfilerContext, ProfilingResult
-
 # Core parsing infrastructure
 from .core.token_stream import TokenStream
 from .lexer import CobolLexer, Token
@@ -32,6 +30,7 @@ from .plugins.core import (
     SerializationConfig,
 )
 from .preprocess import normalize_fixed_format
+from .profiling import ProfilerContext, ProfilingResult
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call)
 _ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE)
@@ -522,7 +521,7 @@ def parse_cobol(
     parser = CobolParser(
         dialect=dialect, error_recovery=error_recovery, free_form=free_form
     )
-    return parser.parse(
+    return parser.parse(  # type: ignore[no-any-return]
         source,
         filename,
         enable_profiling=enable_profiling,  # type: ignore[call-overload]

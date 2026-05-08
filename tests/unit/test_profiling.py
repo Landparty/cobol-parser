@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from cobolparser.profiling import FunctionProfile, ProfilingResult, ProfilerContext
+from cobolparser.profiling import FunctionProfile, ProfilerContext, ProfilingResult
 
 
 def test_function_profile_to_dict():
