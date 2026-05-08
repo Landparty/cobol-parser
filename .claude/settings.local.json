@@ -56,7 +56,13 @@
       "Bash(\"C:/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/vswhere.exe\" -all -format json)",
       "Bash(ls:*)",
       "Bash(\"C:/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/vswhere.exe\" -all -prerelease -format json)",
-      "Bash(cmd /c \"C:\\\\\\\\Users\\\\\\\\samdi\\\\\\\\Documents\\\\\\\\workspace\\\\\\\\cobol-parser\\\\\\\\build_mypyc.bat\" 2>&1)"
+      "Bash(cmd /c \"C:\\\\\\\\Users\\\\\\\\samdi\\\\\\\\Documents\\\\\\\\workspace\\\\\\\\cobol-parser\\\\\\\\build_mypyc.bat\" 2>&1)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\jcl-parser\" -Force | Select-Object Name, @{Name='Type';Expression={if\\($_.PSIsContainer\\){'DIR'}else{'FILE'}}} | Format-Table -AutoSize)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser\\\\docs\\\\superpowers\\\\specs\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\jcl-parser\\\\docs\\\\superpowers\\\\specs\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser\\\\docs\\\\superpowers\\\\plans\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\jcl-parser\\\\docs\\\\superpowers\\\\plans\")",
+      "WebSearch"
     ],
     "additionalDirectories": [
       "\\tmp"

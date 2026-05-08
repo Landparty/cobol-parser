@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. Version 1.0.0, authored by Samuel Dion.
 
+## Backend Integration
+
+This library is **vendored** into `backend/_vendor/cobol-parser/` — it is not installed from PyPI. Changes to this standalone repo must be manually copied before they reach the backend:
+```bash
+cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/
+```
+
 ## Commands
 
 ```bash
