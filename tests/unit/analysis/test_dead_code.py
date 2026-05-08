@@ -19,6 +19,7 @@ from cobolparser.models.statements.control import (
 from cobolparser.models.statements.misc import (
     AlterStatement,
     ContinueStatement,
+    MergeStatement,
     SortStatement,
 )
 from cobolparser.parser import parse_cobol
@@ -547,3 +548,175 @@ class TestDeadCodeIntegration:
 
         assert report.has_dead_code
         assert report.dead_items[0].name == "DEAD-PARA"
+
+
+# ---------------------------------------------------------------------------
+# _collect_sort_refs with INPUT/OUTPUT PROCEDURE THRU
+# ---------------------------------------------------------------------------
+
+
+def _sort_stmt(
+    input_proc: str | None = None,
+    input_thru: str | None = None,
+    output_proc: str | None = None,
+    output_thru: str | None = None,
+) -> SortStatement:
+    loc = SourceLocation(1, 12)
+    stmt = SortStatement(loc)
+    stmt.set_file_name("FILE-SORT")
+    if input_proc:
+        stmt.set_input_procedure(input_proc, input_thru)
+    if output_proc:
+        stmt.set_output_procedure(output_proc, output_thru)
+    return stmt
+
+
+def _merge_stmt(
+    output_proc: str | None = None,
+    output_thru: str | None = None,
+) -> MergeStatement:
+    loc = SourceLocation(1, 12)
+    stmt = MergeStatement(loc)
+    stmt.set_file_name("FILE-MERGE")
+    if output_proc:
+        stmt.set_output_procedure(output_proc, output_thru)
+    return stmt
+
+
+class TestSortMergeThruReferences:
+    def test_sort_input_procedure_thru_marks_range(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN", [_sort_stmt(input_proc="IN-START", input_thru="IN-END")]),
+                ("IN-START", [ContinueStatement(SourceLocation(1, 12))]),
+                ("IN-MIDDLE", [ContinueStatement(SourceLocation(1, 12))]),
+                ("IN-END", [ContinueStatement(SourceLocation(1, 12))]),
+                ("DEAD-PARA", [ContinueStatement(SourceLocation(1, 12))]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "IN-START" not in dead
+        assert "IN-MIDDLE" not in dead
+        assert "IN-END" not in dead
+        assert "DEAD-PARA" in dead
+
+    def test_sort_output_procedure_thru_marks_range(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN", [_sort_stmt(output_proc="OUT-A", output_thru="OUT-B")]),
+                ("OUT-A", [ContinueStatement(SourceLocation(1, 12))]),
+                ("OUT-B", [ContinueStatement(SourceLocation(1, 12))]),
+                ("ORPHAN", [ContinueStatement(SourceLocation(1, 12))]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "OUT-A" not in dead
+        assert "OUT-B" not in dead
+        assert "ORPHAN" in dead
+
+    def test_sort_with_both_procedures(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                (
+                    "MAIN",
+                    [
+                        _sort_stmt(
+                            input_proc="IN-PROC",
+                            input_thru="IN-END",
+                            output_proc="OUT-PROC",
+                            output_thru="OUT-END",
+                        )
+                    ],
+                ),
+                ("IN-PROC", [ContinueStatement(SourceLocation(1, 12))]),
+                ("IN-END", [ContinueStatement(SourceLocation(1, 12))]),
+                ("OUT-PROC", [ContinueStatement(SourceLocation(1, 12))]),
+                ("OUT-END", [ContinueStatement(SourceLocation(1, 12))]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert not dead  # all procedures are referenced
+
+    def test_merge_output_procedure_thru_marks_range(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN", [_merge_stmt(output_proc="MRG-START", output_thru="MRG-END")]),
+                ("MRG-START", [ContinueStatement(SourceLocation(1, 12))]),
+                ("MRG-MID", [ContinueStatement(SourceLocation(1, 12))]),
+                ("MRG-END", [ContinueStatement(SourceLocation(1, 12))]),
+                ("DEAD", [ContinueStatement(SourceLocation(1, 12))]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "MRG-START" not in dead
+        assert "MRG-MID" not in dead
+        assert "MRG-END" not in dead
+        assert "DEAD" in dead
+
+
+# ---------------------------------------------------------------------------
+# _mark_thru_range with inverted range (start > end — no-op)
+# ---------------------------------------------------------------------------
+
+
+class TestMarkThruRangeInverted:
+    def test_inverted_thru_range_does_not_mark_procedures(self) -> None:
+        # PERFORM PARA-B THRU PARA-A where B comes *after* A in source order
+        # _mark_thru_range should be a no-op when start_index > end_index
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN", [_perform("PARA-B", thru="PARA-A")]),
+                ("PARA-A", [ContinueStatement(SourceLocation(1, 12))]),
+                ("PARA-B", [ContinueStatement(SourceLocation(1, 12))]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        # PARA-A is directly between PARA-A and PARA-B per source order;
+        # inverted range means only the direct targets (PARA-A, PARA-B) stay
+        # referenced because they were named — range marking itself is skipped.
+        assert "PARA-A" not in dead
+        assert "PARA-B" not in dead
+
+    def test_thru_range_with_unknown_names_is_noop(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN", [_perform("UNKNOWN-START", thru="UNKNOWN-END")]),
+                ("REAL-PARA", [ContinueStatement(SourceLocation(1, 12))]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "REAL-PARA" in dead  # not referenced at all
+
+
+# ---------------------------------------------------------------------------
+# _collect_alter_refs
+# ---------------------------------------------------------------------------
+
+
+class TestAlterReferences:
+    def test_alter_marks_both_from_and_to(self) -> None:
+        loc = SourceLocation(1, 12)
+        alter = AlterStatement(loc)
+        alter.add_alteration("PARA-X", "PARA-Y")
+        alter.add_alteration("PARA-Y", "PARA-Z")
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN", [alter]),
+                ("PARA-X", [ContinueStatement(loc)]),
+                ("PARA-Y", [ContinueStatement(loc)]),
+                ("PARA-Z", [ContinueStatement(loc)]),
+                ("DEAD", [ContinueStatement(loc)]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "PARA-X" not in dead
+        assert "PARA-Y" not in dead
+        assert "PARA-Z" not in dead
+        assert "DEAD" in dead
