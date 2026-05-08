@@ -406,3 +406,32 @@ class TestValidateFieldTypesGenericSkip:
             "DisplayStatement",
         )
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# validate_field_types: type mismatch raises FieldValidationError
+# ---------------------------------------------------------------------------
+
+
+class TestValidateFieldTypesMismatch:
+    def test_wrong_type_raises_field_validation_error(self):
+        """A field whose value is not an instance of expected_type raises FieldValidationError."""
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+        # node_type is a str; expect int to force a mismatch
+        with pytest.raises(FieldValidationError):
+            factory.validate_field_types(node, {"node_type": int}, "DisplayStatement")
+
+    def test_correct_type_returns_true(self):
+        factory = ASTNodeFactory()
+        node = DisplayStatement(SourceLocation(1, 1))
+        result = factory.validate_field_types(node, {"node_type": str}, "DisplayStatement")
+        assert result is True
+
+    def test_none_value_is_skipped(self):
+        """None field values are skipped (not checked for type)."""
+        factory = ASTNodeFactory()
+        node = MoveStatement(SourceLocation(1, 1))
+        # source is None on a fresh MoveStatement
+        result = factory.validate_field_types(node, {"source": str}, "MoveStatement")
+        assert result is True
