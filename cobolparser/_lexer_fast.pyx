@@ -16,7 +16,7 @@ cimport cython
 import sys
 
 from cobolparser.lexer import (
-    CobolLexer as _CobolLexerBase,
+    _CobolLexerPure as _CobolLexerBase,
     Token,
     TokenType,
     LexerError,

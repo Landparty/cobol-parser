@@ -755,7 +755,7 @@ class _CobolLexerPure:
                 has_decimal = True
                 value += char
                 self.advance_char()
-            elif char in "Ee" and value and not has_exponent:
+            elif char in "Ee" and pos > start_pos and not has_exponent:
                 # Scientific notation
                 has_exponent = True
                 value += char
@@ -1412,7 +1412,6 @@ class _CobolLexerPure:
     ) -> tuple[Token, int]:
         """Read numeric literal from text starting at position."""
         location = SourceLocation(line_num + 1, start_col + start_pos, 1)
-        value = ""
         pos = start_pos
         has_decimal = False
         has_exponent = False
@@ -1420,23 +1419,21 @@ class _CobolLexerPure:
         while pos < len(text):
             char = text[pos]
             if char.isdigit():
-                value += char
                 pos += 1
             elif char == "." and not has_decimal and not has_exponent:
                 has_decimal = True
-                value += char
                 pos += 1
-            elif char in "Ee" and value and not has_exponent:
+            elif char in "Ee" and pos > start_pos and not has_exponent:
                 # Scientific notation
                 has_exponent = True
-                value += char
                 pos += 1
                 # Check for optional sign after E/e
                 if pos < len(text) and text[pos] in "+-":
-                    value += text[pos]
                     pos += 1
             else:
                 break
+
+        value = text[start_pos:pos]
 
         # Check if this should be a level number (01-99 without decimal or exponent)
         if (
@@ -1487,17 +1484,15 @@ class _CobolLexerPure:
                 division_word = text[start_pos:division_end].strip().split()[0]
                 return Token(division_type, division_word, location), division_end
 
-        # Read regular word — use list+join to avoid O(n²) string concatenation
-        parts: list[str] = []
+        # Read the token boundary, then slice once to avoid per-character allocations.
         while pos < length:
             char = text[pos]
             if char.isalnum() or char in "-_":
-                parts.append(char)
                 pos += 1
             else:
                 break
 
-        value = "".join(parts)
+        value = text[start_pos:pos]
         upper_value = sys.intern(value.upper())
         if upper_value in self.KEYWORDS:
             token_type = self.KEYWORDS[upper_value]

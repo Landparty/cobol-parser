@@ -174,12 +174,19 @@ def bench_lexer(source: str, iterations: int, free_form: bool = True) -> list[fl
     return _run_timed(run, iterations)
 
 
-def bench_parser(source: str, iterations: int) -> list[float]:
-    """Benchmark full parser (tokenize + parse)."""
+def bench_parser(
+    source: str, iterations: int, *, free_form: bool = True
+) -> list[float]:
+    """Benchmark full parser (tokenize + parse) for already-prepared source."""
 
     def run():
-        parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
-        parser.parse(source, "<bench>")
+        parser = CobolParser(
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+            free_form=free_form,
+        )
+        result = parser.parse(source, "<bench>")
+        if not result.success:
+            raise RuntimeError("Benchmark parse failed")
 
     return _run_timed(run, iterations)
 

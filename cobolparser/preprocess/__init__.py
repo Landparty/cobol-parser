@@ -426,7 +426,29 @@ def normalize_fixed_format(
     def _update_quote_state(text: str) -> None:
         """Incrementally update quote state for new text chunk."""
         nonlocal _quote_open, _quote_ch, pending_literal, quote_char
-        i = 0
+        if not text:
+            pending_literal = _quote_open
+            quote_char = _quote_ch
+            return
+
+        if not _quote_open:
+            first_single = text.find("'")
+            first_double = text.find('"')
+
+            if first_single == -1 and first_double == -1:
+                pending_literal = False
+                quote_char = None
+                return
+
+            if first_single == -1:
+                i = first_double
+            elif first_double == -1:
+                i = first_single
+            else:
+                i = min(first_single, first_double)
+        else:
+            i = 0
+
         while i < len(text):
             ch = text[i]
             if _quote_open:
