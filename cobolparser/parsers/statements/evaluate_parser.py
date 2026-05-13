@@ -10,6 +10,7 @@ from cobolparser.parsers.statements._utils import (
     try_parse_nested_statement,
 )
 
+from ...core.ast_factory import create_node
 from ...core.exceptions import ParseError, UnexpectedEndOfInput
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
@@ -37,7 +38,7 @@ class EvaluateStatementParser(IStatementParser):
                 if hasattr(start_token, "location")
                 else SourceLocation(0, 0)
             )
-            stmt = EvaluateStatement(start_location)
+            stmt: EvaluateStatement = create_node(EvaluateStatement, start_location)  # type: ignore[assignment]
             context = get_parse_context(token_stream)
 
             subject_count = self._parse_subjects(token_stream, stmt)
@@ -145,7 +146,7 @@ class EvaluateStatementParser(IStatementParser):
 
             return stmt
         except ParseError:
-            return EvaluateStatement(SourceLocation(0, 0))
+            return create_node(EvaluateStatement, SourceLocation(0, 0))  # type: ignore[return-value]
 
     def _parse_subjects(
         self, token_stream: ITokenStream, stmt: EvaluateStatement
