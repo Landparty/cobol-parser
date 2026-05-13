@@ -158,9 +158,9 @@ class MermaidFlowchartGenerator:
             label = self._node_label(node, options)
             # paragraph → rectangle; section → rounded rectangle
             if node.procedure_type == "SECTION":
-                shape = f'({label})'
+                shape = f"({label})"
             else:
-                shape = f'[{label}]'
+                shape = f"[{label}]"
             lines.append(f"    {nid}{shape}")
             # class annotations
             if node.is_entry_point and node.is_exit_point:
@@ -187,18 +187,22 @@ class MermaidFlowchartGenerator:
         # ---- branch / arm nodes -----------------------------------------------
         for bn in report.branch_nodes:
             bn_id = _sanitize_id(bn.node_id)
-            cond = bn.condition_text.replace('"', '#quot;')
+            cond = bn.condition_text.replace('"', "#quot;")
             lines.append(f'    {bn_id}{{"[{bn.branch_type}] {cond}"}}')
             lines.append(f"    class {bn_id} branch")
             for arm in bn.arms:
                 arm_id = _sanitize_id(arm.arm_id)
-                arm_label = arm.label.replace('"', '#quot;')
+                arm_label = arm.label.replace('"', "#quot;")
                 lines.append(f'    {arm_id}["{arm_label}"]')
                 lines.append(f"    class {arm_id} arm")
 
         # ---- edges ------------------------------------------------------------
         for edge in report.edges:
-            etype = edge.edge_type.value if hasattr(edge.edge_type, "value") else str(edge.edge_type)
+            etype = (
+                edge.edge_type.value
+                if hasattr(edge.edge_type, "value")
+                else str(edge.edge_type)
+            )
 
             if etype == "FALL_THROUGH" and not options.show_fall_through:
                 continue
@@ -329,7 +333,7 @@ class DotFlowchartGenerator:
         lines.append("")
 
         if not report.nodes and not report.external_calls:
-            lines.append("    EMPTY [label=\"No procedures found\"];")
+            lines.append('    EMPTY [label="No procedures found"];')
             lines.append("}")
             return "\n".join(lines)
 
@@ -346,7 +350,7 @@ class DotFlowchartGenerator:
             shape = "box" if node.procedure_type == "PARAGRAPH" else "ellipse"
             label = self._node_label_dot(node, options)
             lines.append(
-                f'    {nid} [label={label}, shape={shape},'
+                f"    {nid} [label={label}, shape={shape},"
                 f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
             )
 
@@ -362,7 +366,7 @@ class DotFlowchartGenerator:
                 fill = _DOT_COLORS["external"]
                 fontcolor = _DOT_FONT_COLOR["external"]
                 lines.append(
-                    f'    {eid} [label={self._dot_str(target)}, shape=ellipse,'
+                    f"    {eid} [label={self._dot_str(target)}, shape=ellipse,"
                     f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
                 )
 
@@ -373,7 +377,7 @@ class DotFlowchartGenerator:
             fill = _DOT_COLORS["branch"]
             fontcolor = _DOT_FONT_COLOR["branch"]
             lines.append(
-                f'    {bn_id} [label={cond_label}, shape=diamond,'
+                f"    {bn_id} [label={cond_label}, shape=diamond,"
                 f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
             )
             for arm in bn.arms:
@@ -382,7 +386,7 @@ class DotFlowchartGenerator:
                 afill = _DOT_COLORS["arm"]
                 afontcolor = _DOT_FONT_COLOR["arm"]
                 lines.append(
-                    f'    {arm_id} [label={arm_label}, shape=box,'
+                    f"    {arm_id} [label={arm_label}, shape=box,"
                     f' fillcolor="{afill}", fontcolor="{afontcolor}"];'
                 )
 
@@ -390,7 +394,11 @@ class DotFlowchartGenerator:
 
         # ---- edges -----------------------------------------------------------
         for edge in report.edges:
-            etype = edge.edge_type.value if hasattr(edge.edge_type, "value") else str(edge.edge_type)
+            etype = (
+                edge.edge_type.value
+                if hasattr(edge.edge_type, "value")
+                else str(edge.edge_type)
+            )
 
             if etype == "FALL_THROUGH" and not options.show_fall_through:
                 continue
@@ -407,7 +415,9 @@ class DotFlowchartGenerator:
 
             attrs = self._edge_attrs(etype, edge, options)
             if attrs:
-                attr_str = " [" + ", ".join(f'{k}="{v}"' for k, v in attrs.items()) + "]"
+                attr_str = (
+                    " [" + ", ".join(f'{k}="{v}"' for k, v in attrs.items()) + "]"
+                )
             else:
                 attr_str = ""
             lines.append(f"    {src_id} -> {tgt_id}{attr_str};")

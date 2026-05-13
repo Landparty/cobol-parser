@@ -49,33 +49,93 @@ from .path_resolver import PathResolver
 _FILE_CONTENT_CACHE: OrderedDict[str, str] = OrderedDict()
 _FILE_CONTENT_CACHE_MAX = 2048  # Max cached file contents
 
+# Cache observability — track hits / misses / evictions across the process so
+# operators can spot thrashing on large batches and tune ``set_file_cache_size``.
+_FILE_CONTENT_CACHE_HITS = 0
+_FILE_CONTENT_CACHE_MISSES = 0
+_FILE_CONTENT_CACHE_EVICTIONS = 0
 
-def _cached_read_file(file_path: str, encoding_override: str | None = None) -> str:
+
+def _cached_read_file(
+    file_path: str,
+    encoding_override: str | None = None,
+    warnings: list[str] | None = None,
+) -> str:
     """Read a file with caching to avoid redundant disk I/O.
 
     The cache key includes the encoding override to handle cases where
     the same file might be read with different encodings (rare but possible).
+    Optional *warnings* receives encoding-loss diagnostics emitted by
+    :func:`read_file_with_encoding`.
     """
+    global _FILE_CONTENT_CACHE_HITS, _FILE_CONTENT_CACHE_MISSES
+    global _FILE_CONTENT_CACHE_EVICTIONS
+
     cache_key = f"{file_path}::{encoding_override or 'auto'}"
     if cache_key in _FILE_CONTENT_CACHE:
         _FILE_CONTENT_CACHE.move_to_end(cache_key)
+        _FILE_CONTENT_CACHE_HITS += 1
         return _FILE_CONTENT_CACHE[cache_key]
 
-    content = read_file_with_encoding(file_path, encoding_override)
+    _FILE_CONTENT_CACHE_MISSES += 1
+    content = read_file_with_encoding(file_path, encoding_override, warnings=warnings)
 
     # LRU eviction
     if len(_FILE_CONTENT_CACHE) >= _FILE_CONTENT_CACHE_MAX:
         _FILE_CONTENT_CACHE.popitem(last=False)
+        _FILE_CONTENT_CACHE_EVICTIONS += 1
     _FILE_CONTENT_CACHE[cache_key] = content
     return content
 
 
 def clear_file_cache() -> None:
-    """Clear the module-level file content cache.
+    """Clear the module-level file content cache and reset its counters.
 
     Call between independent batch runs if memory reclamation is needed.
     """
+    global _FILE_CONTENT_CACHE_HITS, _FILE_CONTENT_CACHE_MISSES
+    global _FILE_CONTENT_CACHE_EVICTIONS
     _FILE_CONTENT_CACHE.clear()
+    _FILE_CONTENT_CACHE_HITS = 0
+    _FILE_CONTENT_CACHE_MISSES = 0
+    _FILE_CONTENT_CACHE_EVICTIONS = 0
+
+
+def set_file_cache_size(max_entries: int) -> None:
+    """Configure the maximum entry count of the copybook content cache.
+
+    The default of 2048 fits most batches; raise it when parsing many
+    thousands of programs that share copybooks, or lower it to constrain
+    memory. Excess entries are evicted in LRU order until the limit is met.
+
+    Args:
+        max_entries: Positive integer. Values below 1 raise ``ValueError``.
+    """
+    global _FILE_CONTENT_CACHE_MAX, _FILE_CONTENT_CACHE_EVICTIONS
+    if max_entries < 1:
+        raise ValueError(f"File cache size must be at least 1, got {max_entries}")
+    _FILE_CONTENT_CACHE_MAX = max_entries
+    while len(_FILE_CONTENT_CACHE) > _FILE_CONTENT_CACHE_MAX:
+        _FILE_CONTENT_CACHE.popitem(last=False)
+        _FILE_CONTENT_CACHE_EVICTIONS += 1
+
+
+def get_file_cache_stats() -> dict[str, int]:
+    """Return a snapshot of file-cache observability counters.
+
+    Keys: ``size``, ``max_size``, ``hits``, ``misses``, ``evictions``.
+
+    A high eviction count relative to ``size`` indicates the cache is too
+    small for the working set and should be enlarged via
+    :func:`set_file_cache_size`.
+    """
+    return {
+        "size": len(_FILE_CONTENT_CACHE),
+        "max_size": _FILE_CONTENT_CACHE_MAX,
+        "hits": _FILE_CONTENT_CACHE_HITS,
+        "misses": _FILE_CONTENT_CACHE_MISSES,
+        "evictions": _FILE_CONTENT_CACHE_EVICTIONS,
+    }
 
 
 def detect_encoding(file_path: str) -> str:
@@ -138,7 +198,19 @@ def detect_encoding(file_path: str) -> str:
         raise EncodingError(file_path, f"Failed to detect encoding: {str(e)}") from e
 
 
-def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
+#: U+FFFD REPLACEMENT CHARACTER — emitted by Python's ``errors="replace"``
+#: decoding when a byte cannot be mapped to the target codec. We scan for it
+#: post-decode to detect lossy conversions and surface them as warnings.
+_REPLACEMENT_CHARACTER = "�"
+
+
+def convert_to_utf8(
+    content: bytes,
+    detected_encoding: str,
+    *,
+    source_label: str = "<content>",
+    warnings: list[str] | None = None,
+) -> str:
     """
     Convert file content to UTF-8 string with fallback handling.
 
@@ -150,9 +222,16 @@ def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
     Use ``CopybookSearchPath.encoding`` to supply a specific EBCDIC variant
     rather than relying on auto-detection.
 
+    When the decode replaces unmappable bytes, a diagnostic is appended to
+    *warnings* (when provided) naming the source so callers can surface it
+    via ``ExpansionStatistics.warnings``.
+
     Args:
         content: Raw bytes from file
         detected_encoding: Encoding name from detect_encoding() or caller override
+        source_label: Identifier used in warning messages (file path or
+            ``"<content>"`` for in-memory data).
+        warnings: Optional list that lossy-decode diagnostics are appended to.
 
     Returns:
         UTF-8 string content
@@ -163,19 +242,34 @@ def convert_to_utf8(content: bytes, detected_encoding: str) -> str:
     try:
         # Decode using detected encoding
         text = content.decode(detected_encoding, errors="replace")
-        return text
     except (UnicodeDecodeError, LookupError):
         # Fallback to ASCII with replacement
         try:
-            return content.decode("ascii", errors="replace")
+            text = content.decode("ascii", errors="replace")
+            detected_encoding = "ascii"
         except (UnicodeDecodeError, LookupError) as e2:
             raise EncodingError(
-                "<content>", f"Failed to convert from {detected_encoding}: {str(e2)}"
+                source_label,
+                f"Failed to convert from {detected_encoding}: {str(e2)}",
             ) from e2
+
+    if warnings is not None and _REPLACEMENT_CHARACTER in text:
+        replacement_count = text.count(_REPLACEMENT_CHARACTER)
+        warnings.append(
+            f"Lossy decode of '{source_label}' as {detected_encoding}: "
+            f"{replacement_count} byte(s) could not be mapped and were "
+            f"replaced with U+FFFD. Set CopybookSearchPath.encoding "
+            f"explicitly to silence this warning."
+        )
+
+    return text
 
 
 def read_file_with_encoding(
-    file_path: str, encoding_override: str | None = None
+    file_path: str,
+    encoding_override: str | None = None,
+    *,
+    warnings: list[str] | None = None,
 ) -> str:
     """
     Read a file with automatic encoding detection and UTF-8 conversion.
@@ -185,6 +279,7 @@ def read_file_with_encoding(
         encoding_override: When provided, skip auto-detection and use this
             encoding directly.  Pass via ``CopybookSearchPath.encoding`` to
             force a specific EBCDIC variant for all copybooks in an expansion.
+        warnings: Optional list that lossy-decode diagnostics are appended to.
 
     Returns:
         File content as UTF-8 string
@@ -208,7 +303,12 @@ def read_file_with_encoding(
         with open(file_path, "rb") as f:
             raw_content = f.read()
 
-        return convert_to_utf8(raw_content, encoding)
+        return convert_to_utf8(
+            raw_content,
+            encoding,
+            source_label=file_path,
+            warnings=warnings,
+        )
 
     except EncodingError:
         raise
@@ -449,10 +549,14 @@ def _expand_source_recursive(
         if expanded_copybook is not None:
             nested_depth = context.current_depth + 1
         else:
-            # Read copybook content with encoding detection (or forced override)
+            # Read copybook content with encoding detection (or forced override).
+            # Lossy decodes are recorded in ExpansionStatistics.warnings so
+            # callers see when bytes were silently replaced with U+FFFD.
+            encoding_warnings: list[str] = stats.warnings if stats else []
             copybook_content = _cached_read_file(
                 copybook_path,
                 encoding_override=path_resolver.search_config.encoding,
+                warnings=encoding_warnings,
             )
 
             # Update total bytes and check limit
@@ -576,6 +680,9 @@ __all__ = [
     "read_file_with_encoding",
     "expand_copybooks",
     "parse_cobol_with_expansion",
+    "clear_file_cache",
+    "set_file_cache_size",
+    "get_file_cache_stats",
 ]
 
 

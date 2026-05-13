@@ -6,7 +6,7 @@ binary-form parsers (ADD/SUBTRACT/MULTIPLY/DIVIDE) share their operand and
 target plumbing through helpers in :mod:`_utils`.
 """
 
-from typing import Any
+from typing import Any, Protocol, TypeVar, cast
 
 from ...core.ast_factory import create_node
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -19,6 +19,22 @@ from ...models.statements import (
     MultiplyStatement,
     SubtractStatement,
 )
+
+
+class _BinaryArithmeticNode(Protocol):
+    """Structural protocol for the binary-form arithmetic AST nodes.
+
+    MULTIPLY and DIVIDE share this shape but don't inherit from a common
+    intermediate class, so a Protocol lets the shared helper type-check
+    without giving up the concrete return type each parser exposes.
+    """
+
+    def add_operand(self, value: str) -> None: ...
+
+    def set_giving(self, value: str) -> None: ...
+
+
+_ArithT = TypeVar("_ArithT", bound=_BinaryArithmeticNode)
 from ._utils import (
     ARITHMETIC_OPERAND_TOKEN_TYPES,
     _skip_newlines,
@@ -49,14 +65,14 @@ class AddStatementParser(IStatementParser):
         stmt: AddStatement = create_node(AddStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
-        operands, separator = parse_arithmetic_operands(
-            token_stream, {"TO", "GIVING"}
-        )
+        operands, separator = parse_arithmetic_operands(token_stream, {"TO", "GIVING"})
         for operand in operands:
             stmt.add_operand(operand)
 
         if not operands:
-            report_or_raise(ctx, "ADD statement requires at least one operand", start_loc)
+            report_or_raise(
+                ctx, "ADD statement requires at least one operand", start_loc
+            )
 
         if separator == "TO":
             token_stream.consume()  # consume TO
@@ -80,9 +96,7 @@ class AddStatementParser(IStatementParser):
                     ctx, "ADD ... GIVING requires a target identifier", start_loc
                 )
         else:
-            report_or_raise(
-                ctx, "ADD statement missing TO or GIVING clause", start_loc
-            )
+            report_or_raise(ctx, "ADD statement missing TO or GIVING clause", start_loc)
 
         parse_size_error_clauses(token_stream, stmt)
         return stmt
@@ -190,8 +204,8 @@ def _parse_binary_arithmetic(
     *,
     verb: str,
     separator: str | tuple[str, ...],
-    node_class: type[ASTNode],
-) -> Any:
+    node_class: type[_ArithT],
+) -> _ArithT:
     """Shared parser for the ``MULTIPLY x BY y [GIVING z]`` shape.
 
     Used by MULTIPLY (separator ``BY``) and DIVIDE (separator ``BY`` or
@@ -200,7 +214,7 @@ def _parse_binary_arithmetic(
     """
     start_token = token_stream.consume()
     start_loc = token_location(start_token)
-    stmt = create_node(node_class, start_loc)
+    stmt = cast(_ArithT, create_node(cast(type[ASTNode], node_class), start_loc))
     ctx = get_parse_context(token_stream)
 
     separators = (separator,) if isinstance(separator, str) else separator
@@ -246,11 +260,7 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
     """
     _skip_newlines(stream)
     token = stream.peek()
-    if (
-        token
-        and token.type in ARITHMETIC_OPERAND_TOKEN_TYPES
-        and token.value
-    ):
+    if token and token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
         value = token.value
         stream.consume()
         return value
@@ -321,9 +331,7 @@ class ComputeStatementParser(IStatementParser):
             expr_str = " ".join(expr_tokens).strip()
             stmt.set_expression(expr_str)
         else:
-            report_or_raise(
-                ctx, "COMPUTE statement missing expression", start_loc
-            )
+            report_or_raise(ctx, "COMPUTE statement missing expression", start_loc)
 
         parse_size_error_clauses(token_stream, stmt)
         return stmt

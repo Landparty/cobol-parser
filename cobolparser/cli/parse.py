@@ -411,7 +411,9 @@ def _cmd_batch(args: argparse.Namespace) -> None:
     prof_output = getattr(args, "profile_output", None)
 
     if prof_output is not None and prof_output.endswith(".prof"):
-        _fail("--profile-output in batch mode must be a directory path, not a .prof file")
+        _fail(
+            "--profile-output in batch mode must be a directory path, not a .prof file"
+        )
 
     results = parse_files(
         unique_files,

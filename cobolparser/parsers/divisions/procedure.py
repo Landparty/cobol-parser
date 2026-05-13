@@ -9,6 +9,7 @@ Uses StatementParserRegistry for pluggable statement parsing and dispatch.
 
 from typing import Any
 
+from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.core.registry import StatementParserRegistry
 from cobolparser.models.ast_base import ASTNode, SourceLocation
@@ -57,7 +58,6 @@ from cobolparser.parsers.statements import (
     UnstringStatementParser,
     UseStatementParser,
 )
-from cobolparser._errors import ParseError
 from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS, skip_whitespace
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
 from cobolparser.parsers.statements.write_parser import WriteStatementParser

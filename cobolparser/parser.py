@@ -196,10 +196,19 @@ class CobolParser:
 
             return self._create_result(program)
 
+        except ParseError as pe:
+            # Already-located parse errors propagate verbatim so callers see
+            # the original line/column rather than a generic line-1 message.
+            if pe not in self.errors:
+                self.add_error(pe)
+            return self._create_result(None)
         except Exception as e:
-            self.add_error(
-                ParseError(f"Parser error: {str(e)}", line_number=1, column=1)
-            )
+            # Top-level safety net: ``parse()`` must not raise unexpected
+            # exceptions. Preserve the cause chain so tracebacks can be
+            # recovered during debugging.
+            err = ParseError(f"Parser error: {e}", line_number=1, column=1)
+            err.__cause__ = e
+            self.add_error(err)
             return self._create_result(None)
 
     @overload

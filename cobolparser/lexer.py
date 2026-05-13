@@ -755,8 +755,10 @@ class _CobolLexerPure:
                 has_decimal = True
                 value += char
                 self.advance_char()
-            elif char in "Ee" and pos > start_pos and not has_exponent:
-                # Scientific notation
+            elif char in "Ee" and value and not has_exponent:
+                # Scientific notation: require at least one digit before E.
+                # (Previously referenced undefined ``pos``/``start_pos`` which
+                # raised NameError on every scientific-notation literal.)
                 has_exponent = True
                 value += char
                 self.advance_char()
@@ -1035,8 +1037,16 @@ class _CobolLexerPure:
 
             # String literals
             if char in "\"'":
-                # Check if this line starts with a quote - could be continuation from previous VALUE
-                is_line_start_quote = pos == 0 or text[:pos].strip() == ""
+                # Check if this line starts with a quote - could be continuation from previous VALUE.
+                # Use a short-circuit scan rather than allocating ``text[:pos].strip()``.
+                if pos == 0:
+                    is_line_start_quote = True
+                else:
+                    is_line_start_quote = True
+                    for _ws_i in range(pos):
+                        if text[_ws_i] not in " \t":
+                            is_line_start_quote = False
+                            break
 
                 token, new_pos, unterminated = self._try_single_line_string(
                     text, pos, line_num, start_col
@@ -1453,7 +1463,7 @@ class _CobolLexerPure:
         """Check if text at position starts a division header and return appropriate token type."""
         if start_pos >= len(text) or text[start_pos] not in _DIVISION_FIRST:
             return None, start_pos
-        remaining = text[start_pos:start_pos + 24].upper()
+        remaining = text[start_pos : start_pos + 24].upper()
 
         # Check for complete division headers
         if remaining.startswith("IDENTIFICATION DIVISION"):
@@ -1586,4 +1596,3 @@ try:
     from cobolparser._lexer_fast import CobolLexer  # type: ignore[import-not-found]
 except ImportError:
     CobolLexer = _CobolLexerPure
-
