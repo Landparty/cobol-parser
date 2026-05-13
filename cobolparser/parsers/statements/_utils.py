@@ -7,7 +7,7 @@ individual parser files.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
@@ -355,22 +355,31 @@ def report_or_raise(
     context: ParseContext | None,
     message: str,
     location: SourceLocation | None = None,
-) -> None:
-    """Report a statement-level parse error, or raise it in FAIL_FAST mode.
+) -> NoReturn:
+    """Record a statement-level parse error and raise it.
 
-    In FAIL_FAST the error is raised as ``ParseError`` so that the enclosing
-    division parser can short-circuit. In COLLECT_ALL (or when no context is
-    attached) the error is appended via ``context.error()`` and parsing
-    continues so additional issues can be surfaced in a single pass.
+    Always raises a ``ParseError`` so the enclosing division parser drives
+    recovery uniformly: in ``FAIL_FAST`` it re-raises to short-circuit the
+    parse, in ``COLLECT_ALL`` it records and skips to the next statement.
+
+    The error is also appended to ``host.errors`` **before** the raise so
+    diagnostics survive even when the raised exception is swallowed by
+    :func:`try_parse_nested_statement` (which can hide nested-arithmetic
+    failures inside IF/EVALUATE/PERFORM clauses). The raised exception is
+    tagged with ``_already_recorded = True`` so the division-level handler
+    can dedupe instead of adding it a second time.
     """
     line = getattr(location, "line", None) if location is not None else None
     column = getattr(location, "column", None) if location is not None else None
-
-    if get_error_recovery_mode(context) == ErrorRecoveryMode.FAIL_FAST:
-        raise ParseError(message, line_number=line, column=column, location=location)
+    err = ParseError(message, line_number=line, column=column, location=location)
 
     if context is not None:
-        context.error(message, location)
+        host = getattr(context, "host", None)
+        if host is not None and hasattr(host, "add_error"):
+            host.add_error(err)
+            err._already_recorded = True  # type: ignore[attr-defined]
+
+    raise err
 
 
 # ---------------------------------------------------------------------------
@@ -430,30 +439,63 @@ ARITHMETIC_OPERAND_TOKEN_TYPES: frozenset[TokenType] = frozenset(
 )
 
 
+#: Tokens that close an arithmetic-operand run regardless of value.
+#:
+#: PERIOD ends the statement; the rest are scope terminators that may follow
+#: an arithmetic verb. Without this set, an operand run would walk past the
+#: period of a malformed statement (e.g. ``ADD A.``) and devour subsequent
+#: statements while looking for ``TO``/``GIVING``.
+ARITHMETIC_OPERAND_STOP_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.PERIOD,
+        TokenType.END_IF,
+        TokenType.END_PERFORM,
+        TokenType.END_EVALUATE,
+    }
+)
+
+
 def parse_arithmetic_operands(
     stream: ITokenStream,
     stop_keywords: set[str] | frozenset[str],
 ) -> tuple[list[str], str]:
-    """Consume tokens as arithmetic operands until a keyword in *stop_keywords*.
+    """Consume tokens as arithmetic operands until a separator or boundary.
 
-    Tokens of type IDENTIFIER or NUMERIC_LITERAL are appended to the result;
-    other tokens are silently consumed so the parser is tolerant of unexpected
-    punctuation. Stops on stream exhaustion or on a token whose upper-cased
-    value is in ``stop_keywords`` (the stop token is **not** consumed).
+    Tokens of type IDENTIFIER, NUMERIC_LITERAL, or LEVEL_NUMBER are appended
+    to the result; other intermediate tokens (commas, newlines, whitespace)
+    are silently consumed so the parser is tolerant of incidental
+    punctuation. Stops without consuming the boundary when any of these
+    occur:
+
+    * stream exhaustion;
+    * a token whose upper-cased value is in *stop_keywords* (the expected
+      separator, e.g. ``TO``/``GIVING``/``BY``/``FROM``);
+    * a token in :data:`ARITHMETIC_OPERAND_STOP_TYPES` (period or scope
+      terminator), which terminates the statement;
+    * a token whose upper-cased value is a known statement keyword from
+      :data:`STATEMENT_KEYWORDS` or a control-flow boundary from
+      :data:`CONTROL_FLOW_BOUNDARIES`, so a malformed statement does not
+      eat the next statement during recovery.
 
     Returns:
         A tuple ``(operands, stop_keyword)`` where ``stop_keyword`` is the
-        upper-cased value of the token that ended the operand run, or ``""``
-        if the stream was exhausted first.
+        upper-cased value of the token that ended the operand run, or
+        ``""`` if the stream was exhausted or terminated on a non-keyword
+        boundary token (period, scope terminator).
     """
     operands: list[str] = []
     while not stream.is_empty():
         token = stream.peek()
         if not token:
             break
+        if token.type in ARITHMETIC_OPERAND_STOP_TYPES:
+            return operands, ""
         upper = token.value.upper() if token.value else ""
         if upper in stop_keywords:
             return operands, upper
+        if upper and (upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES):
+            # Don't devour the next statement when this one is malformed.
+            return operands, ""
         if token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
             operands.append(token.value)
         stream.consume()

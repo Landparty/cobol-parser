@@ -173,8 +173,11 @@ from .preprocess import (
 
 # Copybook expansion (preprocessing)
 from .preprocess.copybook_expander import (
+    clear_file_cache,
     expand_copybooks,
+    get_file_cache_stats,
     parse_cobol_with_expansion,
+    set_file_cache_size,
 )
 from .preprocess.models import (
     CopybookExpansion,
@@ -288,6 +291,9 @@ __all__ = [
     # Copybook expansion
     "expand_copybooks",
     "parse_cobol_with_expansion",
+    "clear_file_cache",
+    "set_file_cache_size",
+    "get_file_cache_stats",
     "CopybookExpansion",
     "CopyStatement",
     "CopybookSearchPath",

@@ -267,6 +267,47 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
     return None
 
 
+def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
+    """Consume an IDENTIFIER target, including any subscript group.
+
+    Distinct from :func:`_consume_arithmetic_operand`: COBOL targets must be
+    data items, not literals or level numbers. ``COMPUTE 1 = A`` is therefore
+    rejected. A trailing ``(subscript[, subscript]...)`` group is folded into
+    the returned string so subscripted references like ``WS-T(I, J)`` survive
+    intact instead of leaking ``(...)`` tokens into the expression.
+    """
+    _skip_newlines(stream)
+    token = stream.peek()
+    if not (token and token.type == TokenType.IDENTIFIER and token.value):
+        return None
+
+    parts: list[str] = [token.value]
+    stream.consume()
+
+    # Optional subscript group: ``(...)``. Track paren depth so nested calls
+    # like ``WS-T(FUNCTION FOO(I))`` are captured correctly.
+    next_token = stream.peek()
+    if next_token and next_token.type == TokenType.LEFT_PAREN:
+        depth = 0
+        while not stream.is_empty():
+            t = stream.peek()
+            if not t:
+                break
+            if t.type == TokenType.LEFT_PAREN:
+                depth += 1
+                parts.append("(")
+            elif t.type == TokenType.RIGHT_PAREN:
+                depth -= 1
+                parts.append(")")
+            else:
+                parts.append(t.value if t.value else "")
+            stream.consume()
+            if depth == 0:
+                break
+
+    return " ".join(p for p in parts if p)
+
+
 class ComputeStatementParser(IStatementParser):
     """Parser for COMPUTE statements using IStatementParser interface."""
 
@@ -282,14 +323,13 @@ class ComputeStatementParser(IStatementParser):
         stmt: ComputeStatement = create_node(ComputeStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
-        # Parse target variable(s)
-        target = _consume_arithmetic_operand(token_stream)
+        # Parse target identifier (literals/level-numbers are not valid here).
+        target = _consume_arithmetic_target(token_stream)
         if target is None:
             report_or_raise(
                 ctx, "COMPUTE statement requires a target identifier", start_loc
             )
-        else:
-            stmt.add_target(target)
+        stmt.add_target(target)
 
         # Skip ROUNDED if present
         if peek_value_upper(token_stream) == "ROUNDED":

@@ -617,9 +617,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
           past the offending statement so parsing continues.
         * ``FAIL_FAST``: the error is recorded and re-raised so the division
           parser's outer handler can short-circuit the parse.
+
+        Statement parsers that called :func:`report_or_raise` tag the
+        ParseError with ``_already_recorded`` so we don't double-count when
+        we receive it here.
         """
         if self.host is not None and hasattr(self.host, "add_error"):
-            self.host.add_error(error)
+            if not getattr(error, "_already_recorded", False):
+                self.host.add_error(error)
 
         mode = getattr(self.host, "error_recovery", None)
         if mode == ErrorRecoveryMode.FAIL_FAST:

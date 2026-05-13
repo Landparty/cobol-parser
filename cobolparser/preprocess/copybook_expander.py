@@ -46,7 +46,12 @@ from .path_resolver import PathResolver
 # When parsing 3000+ programs that reference the same 50+ copybooks,
 # this avoids re-reading and re-decoding the same file from disk.
 # Uses OrderedDict for O(1) LRU eviction.
-_FILE_CONTENT_CACHE: OrderedDict[str, str] = OrderedDict()
+#
+# Each entry stores ``(content, decode_warnings)`` so cache hits replay any
+# lossy-decode diagnostics — without this, only the first reader of a copybook
+# would see U+FFFD-replacement warnings; subsequent readers from the same
+# process would silently use the replaced text.
+_FILE_CONTENT_CACHE: OrderedDict[str, tuple[str, tuple[str, ...]]] = OrderedDict()
 _FILE_CONTENT_CACHE_MAX = 2048  # Max cached file contents
 
 # Cache observability — track hits / misses / evictions across the process so
@@ -66,7 +71,9 @@ def _cached_read_file(
     The cache key includes the encoding override to handle cases where
     the same file might be read with different encodings (rare but possible).
     Optional *warnings* receives encoding-loss diagnostics emitted by
-    :func:`read_file_with_encoding`.
+    :func:`read_file_with_encoding`; on cache hit, any diagnostics recorded
+    on the original read are replayed into *warnings* so downstream
+    expansions don't lose visibility into prior lossy decodes.
     """
     global _FILE_CONTENT_CACHE_HITS, _FILE_CONTENT_CACHE_MISSES
     global _FILE_CONTENT_CACHE_EVICTIONS
@@ -75,16 +82,24 @@ def _cached_read_file(
     if cache_key in _FILE_CONTENT_CACHE:
         _FILE_CONTENT_CACHE.move_to_end(cache_key)
         _FILE_CONTENT_CACHE_HITS += 1
-        return _FILE_CONTENT_CACHE[cache_key]
+        content, cached_warnings = _FILE_CONTENT_CACHE[cache_key]
+        if warnings is not None and cached_warnings:
+            warnings.extend(cached_warnings)
+        return content
 
     _FILE_CONTENT_CACHE_MISSES += 1
-    content = read_file_with_encoding(file_path, encoding_override, warnings=warnings)
+    fresh_warnings: list[str] = []
+    content = read_file_with_encoding(
+        file_path, encoding_override, warnings=fresh_warnings
+    )
+    if warnings is not None and fresh_warnings:
+        warnings.extend(fresh_warnings)
 
     # LRU eviction
     if len(_FILE_CONTENT_CACHE) >= _FILE_CONTENT_CACHE_MAX:
         _FILE_CONTENT_CACHE.popitem(last=False)
         _FILE_CONTENT_CACHE_EVICTIONS += 1
-    _FILE_CONTENT_CACHE[cache_key] = content
+    _FILE_CONTENT_CACHE[cache_key] = (content, tuple(fresh_warnings))
     return content
 
 
