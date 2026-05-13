@@ -245,6 +245,8 @@ def bench_sql_parsing(iterations: int) -> list[float]:
 
 def bench_statement_registry(source: str, iterations: int) -> list[float]:
     """Benchmark statement registry dispatch (parser initialization + lookup)."""
+    from cobolparser.core.registry import StatementParserRegistry
+    from cobolparser.core.token_stream import TokenStream
     from cobolparser.parsers.statements.arithmetic_parsers import (
         AddStatementParser,
         ComputeStatementParser,
@@ -258,9 +260,6 @@ def bench_statement_registry(source: str, iterations: int) -> list[float]:
     from cobolparser.parsers.statements.if_parser import IfStatementParser
     from cobolparser.parsers.statements.move_parser import MoveStatementParser
     from cobolparser.parsers.statements.perform_parser import PerformStatementParser
-
-    from cobolparser.core.registry import StatementParserRegistry
-    from cobolparser.core.token_stream import TokenStream
 
     # Pre-tokenize
     lexer = CobolLexer(source, "<bench>", free_form=True)

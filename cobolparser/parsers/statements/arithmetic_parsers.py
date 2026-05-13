@@ -19,6 +19,19 @@ from ...models.statements import (
     MultiplyStatement,
     SubtractStatement,
 )
+from ._utils import (
+    ARITHMETIC_OPERAND_TOKEN_TYPES,
+    _skip_newlines,
+    consume_keyword_and_operand,
+    get_parse_context,
+    matches_keyword,
+    parse_arithmetic_operands,
+    parse_size_error_clauses,
+    peek_value_upper,
+    report_or_raise,
+    skip_to_period,
+    token_location,
+)
 
 
 class _BinaryArithmeticNode(Protocol):
@@ -35,19 +48,6 @@ class _BinaryArithmeticNode(Protocol):
 
 
 _ArithT = TypeVar("_ArithT", bound=_BinaryArithmeticNode)
-from ._utils import (
-    ARITHMETIC_OPERAND_TOKEN_TYPES,
-    _skip_newlines,
-    consume_keyword_and_operand,
-    get_parse_context,
-    matches_keyword,
-    parse_arithmetic_operands,
-    parse_size_error_clauses,
-    peek_value_upper,
-    report_or_raise,
-    skip_to_period,
-    token_location,
-)
 
 
 class AddStatementParser(IStatementParser):

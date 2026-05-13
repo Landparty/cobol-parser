@@ -4867,7 +4867,12 @@ class TestBranchNodes:
     def test_if_with_else_creates_one_branch_node(self) -> None:
         """IF+ELSE produces exactly one BranchNode of type 'IF'."""
         prog = _make_program(
-            [("MAIN-LOGIC", [_if_stmt([_continue()], else_stmts=[_continue()]), _stop_run()])]
+            [
+                (
+                    "MAIN-LOGIC",
+                    [_if_stmt([_continue()], else_stmts=[_continue()]), _stop_run()],
+                )
+            ]
         )
         report = ProgramFlowAnalyzer().analyze(prog)
 
@@ -4909,9 +4914,7 @@ class TestBranchNodes:
 
     def test_nested_if_creates_two_branch_nodes(self) -> None:
         """Nested IFs each produce their own BranchNode."""
-        prog = _make_program(
-            [("MAIN-LOGIC", [_if_stmt([_if_stmt([_continue()])])])]
-        )
+        prog = _make_program([("MAIN-LOGIC", [_if_stmt([_if_stmt([_continue()])])])])
         report = ProgramFlowAnalyzer().analyze(prog)
         assert len(report.branch_nodes) == 2
 
@@ -4973,10 +4976,12 @@ class TestBranchNodes:
     def test_branch_seq_is_global_across_paragraphs(self) -> None:
         """_branch_seq increments globally — the second IF (in a different
         paragraph) gets seq=2, not seq=1."""
-        prog = _make_program([
-            ("PARA-A", [_if_stmt([_continue()])]),
-            ("PARA-B", [_if_stmt([_continue()])]),
-        ])
+        prog = _make_program(
+            [
+                ("PARA-A", [_if_stmt([_continue()])]),
+                ("PARA-B", [_if_stmt([_continue()])]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
 
         assert len(report.branch_nodes) == 2
@@ -4985,9 +4990,11 @@ class TestBranchNodes:
 
     def test_branch_seq_increments_across_if_and_evaluate(self) -> None:
         """IF and EVALUATE share the same global counter."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_continue()]), _evaluate(when_count=1)]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_continue()]), _evaluate(when_count=1)]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
 
         assert len(report.branch_nodes) == 2
@@ -5001,10 +5008,12 @@ class TestBranchNodes:
     def test_goto_inside_if_arm_source_is_proc_name(self) -> None:
         """GOTO inside an IF THEN arm generates an edge whose source is the
         containing procedure name, not the arm node ID."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_goto("TARGET-PARA")])]),
-            ("TARGET-PARA", [_stop_run()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_goto("TARGET-PARA")])]),
+                ("TARGET-PARA", [_stop_run()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
 
         goto_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.GOTO]
@@ -5063,11 +5072,20 @@ class TestBranchNodes:
 
     def test_branch_arm_nested_call_targets_populated_by_perform(self) -> None:
         """PERFORM inside a THEN arm populates nested_call_targets on that arm."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_perform("PROCESS-A")], else_stmts=[_perform("PROCESS-B")])]),
-            ("PROCESS-A", [_continue()]),
-            ("PROCESS-B", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                (
+                    "MAIN-LOGIC",
+                    [
+                        _if_stmt(
+                            [_perform("PROCESS-A")], else_stmts=[_perform("PROCESS-B")]
+                        )
+                    ],
+                ),
+                ("PROCESS-A", [_continue()]),
+                ("PROCESS-B", [_continue()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
         bn = report.branch_nodes[0]
         then_arm = next(a for a in bn.arms if a.arm_type == "THEN")
@@ -5081,30 +5099,38 @@ class TestBranchNodes:
 
     def test_branch_arm_nested_call_targets_populated_by_goto(self) -> None:
         """GO TO inside an arm populates nested_call_targets."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_goto("ERROR-PARA")])]),
-            ("ERROR-PARA", [_stop_run()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_goto("ERROR-PARA")])]),
+                ("ERROR-PARA", [_stop_run()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
         then_arm = next(a for a in report.branch_nodes[0].arms if a.arm_type == "THEN")
         assert "ERROR-PARA" in then_arm.nested_call_targets
 
     def test_branch_arm_nested_call_targets_no_duplicates(self) -> None:
         """The same paragraph performed twice in an arm appears only once."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_perform("WORK"), _perform("WORK")])]),
-            ("WORK", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_perform("WORK"), _perform("WORK")])]),
+                ("WORK", [_continue()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
         then_arm = next(a for a in report.branch_nodes[0].arms if a.arm_type == "THEN")
         assert then_arm.nested_call_targets.count("WORK") == 1
 
-    def test_branch_arm_nested_call_targets_independent_across_analyze_calls(self) -> None:
+    def test_branch_arm_nested_call_targets_independent_across_analyze_calls(
+        self,
+    ) -> None:
         """Arm targets do not bleed between separate analyze() calls."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_perform("PROCESS")])]),
-            ("PROCESS", [_continue()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_perform("PROCESS")])]),
+                ("PROCESS", [_continue()]),
+            ]
+        )
         analyzer = ProgramFlowAnalyzer()
         r1 = analyzer.analyze(prog)
         r2 = analyzer.analyze(prog)
@@ -5119,21 +5145,32 @@ class TestBranchNodes:
 
     def test_convergence_node_set_to_next_paragraph(self) -> None:
         """convergence_node is the paragraph that follows parent_proc in source order."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_perform("THEN-WORK")], else_stmts=[_perform("ELSE-WORK")])]),
-            ("THEN-WORK", [_continue()]),
-            ("ELSE-WORK", [_continue()]),
-            ("AFTER-IF", [_stop_run()]),
-        ])
+        prog = _make_program(
+            [
+                (
+                    "MAIN-LOGIC",
+                    [
+                        _if_stmt(
+                            [_perform("THEN-WORK")], else_stmts=[_perform("ELSE-WORK")]
+                        )
+                    ],
+                ),
+                ("THEN-WORK", [_continue()]),
+                ("ELSE-WORK", [_continue()]),
+                ("AFTER-IF", [_stop_run()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
         bn = report.branch_nodes[0]
         assert bn.convergence_node == "THEN-WORK"
 
     def test_convergence_node_none_when_parent_is_terminal(self) -> None:
         """convergence_node is None when parent_proc ends with STOP RUN (no fall-through)."""
-        prog = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_continue()]), _stop_run()]),
-        ])
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_continue()]), _stop_run()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
         bn = report.branch_nodes[0]
         # MAIN-LOGIC ends with STOP RUN, so no FALL_THROUGH edge → convergence_node is None
@@ -5141,13 +5178,17 @@ class TestBranchNodes:
 
     def test_convergence_node_in_to_dict_output(self) -> None:
         """convergence_node appears in to_dict() only when set."""
-        prog_with = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_continue()])]),
-            ("NEXT-PARA", [_stop_run()]),
-        ])
-        prog_without = _make_program([
-            ("MAIN-LOGIC", [_if_stmt([_continue()]), _stop_run()]),
-        ])
+        prog_with = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_continue()])]),
+                ("NEXT-PARA", [_stop_run()]),
+            ]
+        )
+        prog_without = _make_program(
+            [
+                ("MAIN-LOGIC", [_if_stmt([_continue()]), _stop_run()]),
+            ]
+        )
         r_with = ProgramFlowAnalyzer().analyze(prog_with)
         r_without = ProgramFlowAnalyzer().analyze(prog_without)
 
@@ -5160,15 +5201,19 @@ class TestBranchNodes:
 
     def test_multiple_branches_each_get_convergence_node(self) -> None:
         """Each branch node in the same program gets its own convergence_node."""
-        prog = _make_program([
-            ("FIRST-PARA", [_if_stmt([_continue()])]),
-            ("SECOND-PARA", [_if_stmt([_continue()])]),
-            ("THIRD-PARA", [_stop_run()]),
-        ])
+        prog = _make_program(
+            [
+                ("FIRST-PARA", [_if_stmt([_continue()])]),
+                ("SECOND-PARA", [_if_stmt([_continue()])]),
+                ("THIRD-PARA", [_stop_run()]),
+            ]
+        )
         report = ProgramFlowAnalyzer().analyze(prog)
         assert len(report.branch_nodes) == 2
         first_bn = next(b for b in report.branch_nodes if b.parent_proc == "FIRST-PARA")
-        second_bn = next(b for b in report.branch_nodes if b.parent_proc == "SECOND-PARA")
+        second_bn = next(
+            b for b in report.branch_nodes if b.parent_proc == "SECOND-PARA"
+        )
         assert first_bn.convergence_node == "SECOND-PARA"
         assert second_bn.convergence_node == "THIRD-PARA"
 

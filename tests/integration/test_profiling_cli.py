@@ -1,4 +1,5 @@
 """Integration tests: CLI profiling flags."""
+
 import contextlib
 import io
 import json
@@ -98,7 +99,9 @@ def test_batch_no_profile_no_profiling_key(tmp_path):
 
 
 def test_parse_find_type_with_profile_includes_profiling_key(cobol_file):
-    out = _run_cli(["parse", cobol_file, "--profile", "--find-type", "DisplayStatement"])
+    out = _run_cli(
+        ["parse", cobol_file, "--profile", "--find-type", "DisplayStatement"]
+    )
     data = json.loads(out)
     assert "profiling" in data
     assert isinstance(data["result"], list)

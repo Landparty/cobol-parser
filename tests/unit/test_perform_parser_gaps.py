@@ -24,9 +24,7 @@ def _wrap(body: str) -> str:
         "       01 WS-COUNT PIC 9(4) VALUE 0.\n"
         "       01 WS-IDX   PIC 9(4) VALUE 1.\n"
         "       PROCEDURE DIVISION.\n"
-        "       MAIN-PARA.\n"
-        + body
-        + "\n"
+        "       MAIN-PARA.\n" + body + "\n"
         "           STOP RUN.\n"
         "       SUB-PARA.\n"
         "           DISPLAY 'SUB'.\n"
@@ -36,7 +34,9 @@ def _wrap(body: str) -> str:
 def _find_performs(result) -> list[PerformStatement]:
     if result.ast is None:
         return []
-    return [s for s in result.ast.get_all_statements() if isinstance(s, PerformStatement)]
+    return [
+        s for s in result.ast.get_all_statements() if isinstance(s, PerformStatement)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +77,9 @@ class TestPerformNumericTimes:
         result = _parser().parse(src)
         assert result.ast is not None
         performs = _find_performs(result)
-        assert any(p.times_count is not None or p.perform_type is not None for p in performs)
+        assert any(
+            p.times_count is not None or p.perform_type is not None for p in performs
+        )
 
     def test_perform_level_number_token_times(self) -> None:
         # Small integers like 03 tokenize as LEVEL_NUMBER — covers that branch

@@ -1,4 +1,5 @@
 """Integration tests: parse_cobol / CobolParser.parse() with enable_profiling=True."""
+
 from cobolparser import CobolParser, parse_cobol
 from cobolparser.profiling import ProfilingResult
 
@@ -26,6 +27,7 @@ def test_parse_method_profiling_result_type():
 
 def test_parse_method_no_profiling_returns_parse_result():
     from cobolparser.parser import ParseResult
+
     parser = CobolParser()
     result = parser.parse(_HELLO)
     assert isinstance(result, ParseResult)
@@ -52,6 +54,7 @@ def test_parse_method_profiling_top_n_respected():
 
 def test_parse_method_profiling_prof_file(tmp_path):
     import os
+
     prof_path = str(tmp_path / "parse.prof")
     parser = CobolParser()
     parser.parse(_HELLO, enable_profiling=True, prof_output=prof_path)
@@ -72,12 +75,14 @@ def test_parse_cobol_profiling_returns_tuple():
 
 def test_parse_cobol_no_profiling_returns_parse_result():
     from cobolparser.parser import ParseResult
+
     result = parse_cobol(_HELLO)
     assert isinstance(result, ParseResult)
 
 
 def test_parse_cobol_profiling_result_valid():
     from cobolparser.profiling import ProfilingResult
+
     _, prof = parse_cobol(_HELLO, enable_profiling=True)
     assert isinstance(prof, ProfilingResult)
     assert prof.wall_clock_s > 0.0

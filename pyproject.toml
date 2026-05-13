@@ -99,6 +99,9 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+extend-exclude = [
+    "docs",  # one-off cookbook-patching scripts with intentionally broken Python
+]
 
 [tool.ruff.lint]
 select = [
@@ -136,6 +139,7 @@ extend-exclude = '''
   | buck-out
   | build
   | dist
+  | docs  # one-off cookbook-patching scripts with intentionally broken Python
 )/
 '''
 

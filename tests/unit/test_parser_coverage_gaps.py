@@ -61,7 +61,10 @@ class TestParseFileErrors:
             result = CobolParser().parse_file(str(bad))
         assert result.ast is None
         assert len(result.errors) > 0
-        assert any("permission denied" in str(e).lower() or "file error" in str(e).lower() for e in result.errors)
+        assert any(
+            "permission denied" in str(e).lower() or "file error" in str(e).lower()
+            for e in result.errors
+        )
 
     def test_valid_file_parses_ok(self, tmp_path) -> None:
         f = tmp_path / "valid.cbl"
@@ -84,9 +87,7 @@ class TestErrorCountLimit:
         )
         result = parser.parse(_BROKEN)
         messages = [str(e) for e in result.errors]
-        assert any(
-            "suppressed" in m.lower() or "limit" in m.lower() for m in messages
-        )
+        assert any("suppressed" in m.lower() or "limit" in m.lower() for m in messages)
 
     def test_add_error_skips_when_already_limit_reached(self) -> None:
         config = MemoryConfiguration(max_error_count=2)
@@ -146,8 +147,12 @@ class TestParseTopLevelException:
     def test_unexpected_internal_error_is_caught(self) -> None:
         parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
         # Force an exception inside parse() by corrupting the stream setup
-        with patch.object(parser, "_skip_to_identification_division", side_effect=RuntimeError("boom")):
+        with patch.object(
+            parser, "_skip_to_identification_division", side_effect=RuntimeError("boom")
+        ):
             result = parser.parse(_MINIMAL)
         assert result is not None
         assert result.ast is None
-        assert any("boom" in str(e) or "parser error" in str(e).lower() for e in result.errors)
+        assert any(
+            "boom" in str(e) or "parser error" in str(e).lower() for e in result.errors
+        )

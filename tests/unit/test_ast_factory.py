@@ -425,7 +425,9 @@ class TestValidateFieldTypesMismatch:
     def test_correct_type_returns_true(self):
         factory = ASTNodeFactory()
         node = DisplayStatement(SourceLocation(1, 1))
-        result = factory.validate_field_types(node, {"node_type": str}, "DisplayStatement")
+        result = factory.validate_field_types(
+            node, {"node_type": str}, "DisplayStatement"
+        )
         assert result is True
 
     def test_none_value_is_skipped(self):
