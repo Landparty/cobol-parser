@@ -1,4 +1,5 @@
 """Integration tests: batch profiling support."""
+
 from pathlib import Path
 
 import pytest
@@ -56,7 +57,9 @@ def test_parse_files_profiling_top_n_respected(cobol_files):
 
 def test_parse_files_profiling_writes_prof_files(cobol_files, tmp_path):
     prof_dir = str(tmp_path / "profiles")
-    results = parse_files(cobol_files, workers=1, enable_profiling=True, prof_output=prof_dir)
+    results = parse_files(
+        cobol_files, workers=1, enable_profiling=True, prof_output=prof_dir
+    )
     for r in results:
         expected = Path(prof_dir) / (Path(str(r.path)).stem + ".prof")
         assert expected.exists()
@@ -64,7 +67,9 @@ def test_parse_files_profiling_writes_prof_files(cobol_files, tmp_path):
 
 def test_parse_files_prof_output_dot_prof_raises(cobol_files):
     with pytest.raises(ValueError, match=r"\.prof"):
-        parse_files(cobol_files, workers=1, enable_profiling=True, prof_output="out.prof")
+        parse_files(
+            cobol_files, workers=1, enable_profiling=True, prof_output="out.prof"
+        )
 
 
 def test_parse_files_with_copybooks_no_profiling(cobol_files):
@@ -82,7 +87,10 @@ def test_parse_files_with_copybooks_profiling(cobol_files):
 def test_parse_files_with_copybooks_prof_output_dot_prof_raises(cobol_files):
     with pytest.raises(ValueError, match=r"\.prof"):
         parse_files_with_copybooks(
-            cobol_files, copybook_paths=[], enable_profiling=True, prof_output="out.prof"
+            cobol_files,
+            copybook_paths=[],
+            enable_profiling=True,
+            prof_output="out.prof",
         )
 
 

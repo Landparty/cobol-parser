@@ -1,4 +1,5 @@
 """Unit tests for cobolparser.profiling module."""
+
 from __future__ import annotations
 
 import json
@@ -156,6 +157,7 @@ def test_profiler_context_no_prof_file_by_default():
 def test_profiler_context_nested_tracemalloc_safe():
     """ProfilerContext must not stop an outer tracemalloc session."""
     import tracemalloc
+
     tracemalloc.start()
     try:
         ctx = ProfilerContext(top_n=5)

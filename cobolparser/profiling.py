@@ -4,6 +4,7 @@ ProfilerContext wraps any parse call with cProfile, tracemalloc, and
 optional psutil CPU accounting. Import psutil lazily so the package remains
 usable without it.
 """
+
 from __future__ import annotations
 
 import cProfile

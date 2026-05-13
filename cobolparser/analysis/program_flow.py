@@ -468,7 +468,7 @@ class ProgramFlowAnalyzer:
             if stype:
                 node.statement_types[stype] = node.statement_types.get(stype, 0) + 1
 
-        def scan(stmt: Any, source_id: str = proc_name) -> None:  # type: ignore[assignment]
+        def scan(stmt: Any, source_id: str = proc_name) -> None:
             if not hasattr(stmt, "node_type"):
                 return
             if id(stmt) in visited:
@@ -591,10 +591,17 @@ class ProgramFlowAnalyzer:
                         subjects.append(subj.to_dict())
                     else:
                         subjects.append(subj)
-                subj_text = ", ".join(
-                    s.get("expression_type", str(s)) if isinstance(s, dict) else str(s)
-                    for s in subjects
-                ) or "EVALUATE"
+                subj_text = (
+                    ", ".join(
+                        (
+                            s.get("expression_type", str(s))
+                            if isinstance(s, dict)
+                            else str(s)
+                        )
+                        for s in subjects
+                    )
+                    or "EVALUATE"
+                )
                 decision = {
                     "type": "EVALUATE",
                     "location": stmt.location.to_dict(),
@@ -634,7 +641,9 @@ class ProgramFlowAnalyzer:
                     elif sel_type == "Identifier":
                         when_label = f"WHEN {sel.get('value', '')}"
                     elif sel_type == "Range":
-                        when_label = f"WHEN {sel.get('start', '')}..{sel.get('end', '')}"
+                        when_label = (
+                            f"WHEN {sel.get('start', '')}..{sel.get('end', '')}"
+                        )
                     elif sel_type == "Condition":
                         when_label = f"WHEN {sel.get('text', '')}"
                     else:

@@ -68,7 +68,9 @@ class TestCmdTokenize:
         assert isinstance(data, list)
         assert len(data) > 0
 
-    def test_token_has_required_fields(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_token_has_required_fields(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         _cmd_tokenize(_tokenize_args(_SIMPLE))
         tokens = json.loads(capsys.readouterr().out)
         first = tokens[0]
@@ -92,7 +94,9 @@ class TestCmdTokenize:
         assert isinstance(data, list)
         assert len(data) > 0
 
-    def test_free_form_flag_accepted(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_free_form_flag_accepted(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         src = tmp_path / "free.cbl"
         src.write_text(
             "IDENTIFICATION DIVISION.\n"
@@ -187,7 +191,9 @@ class TestCmdPreprocess:
             "       PROCEDURE DIVISION.\n"
             "           STOP RUN.\n"
         )
-        _cmd_preprocess(_preprocess_args(str(src), define=["KEY=some value with spaces"]))
+        _cmd_preprocess(
+            _preprocess_args(str(src), define=["KEY=some value with spaces"])
+        )
         capsys.readouterr()  # no assertion needed — just must not raise
 
 

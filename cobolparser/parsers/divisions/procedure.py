@@ -9,6 +9,7 @@ Uses StatementParserRegistry for pluggable statement parsing and dispatch.
 
 from typing import Any
 
+from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.core.registry import StatementParserRegistry
 from cobolparser.models.ast_base import ASTNode, SourceLocation
@@ -60,6 +61,7 @@ from cobolparser.parsers.statements import (
 from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS, skip_whitespace
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
 from cobolparser.parsers.statements.write_parser import WriteStatementParser
+from cobolparser.plugins.core import ErrorRecoveryMode
 
 from .base import BaseDivisionParser
 
@@ -305,16 +307,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 # Try to parse the statement
                 parser = self._statement_registry.find_parser(token_stream)
                 if parser:
+                    self._attach_context(token_stream)
                     try:
-                        # Attach registry to stream for nested statement parsing
-                        if not hasattr(token_stream, "_registry"):
-                            token_stream._registry = self._statement_registry  # type: ignore[attr-defined]
-
-                        # Attach context to stream for error reporting
-                        context = ParseContext(self.host, self._statement_registry)
-                        token_stream.context = context
-                        token_stream._context = context  # type: ignore[attr-defined]
-
                         statement = parser.parse(token_stream)
                         active[-1]["statements"].append(
                             {
@@ -323,9 +317,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
                                 "statement": statement,
                             }
                         )
-                    except Exception:
-                        # Skip to next statement on error
-                        self._skip_to_next_statement(token_stream)
+                    except ParseError as e:
+                        self._handle_statement_error(e, token, token_stream)
+                    except Exception as e:
+                        self._handle_statement_error(
+                            self._wrap_unexpected(e, token), token, token_stream
+                        )
                 else:
                     # No parser found, skip the statement
                     self._skip_to_next_statement(token_stream)
@@ -448,16 +445,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         f"DEBUG PROC: Found parser: {type(parser).__name__}",
                         file=sys.stderr,
                     )
+                self._attach_context(token_stream)
                 try:
-                    # Attach registry to stream for nested statement parsing
-                    if not hasattr(token_stream, "_registry"):
-                        token_stream._registry = self._statement_registry  # type: ignore[attr-defined]
-
-                    # Attach context to stream for error reporting
-                    context = ParseContext(self.host, self._statement_registry)
-                    token_stream.context = context
-                    token_stream._context = context  # type: ignore[attr-defined]
-
                     statement = parser.parse(token_stream)
                     statements.append(
                         {
@@ -466,9 +455,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
                             "statement": statement,
                         }
                     )
-                except Exception:
-                    # If parsing fails, skip statement and continue
-                    self._skip_to_next_statement(token_stream)
+                except ParseError as e:
+                    self._handle_statement_error(e, token, token_stream)
+                except Exception as e:
+                    self._handle_statement_error(
+                        self._wrap_unexpected(e, token), token, token_stream
+                    )
             elif token.value == ".":
                 # Period terminates statement - consume it and continue
                 token_stream.consume()
@@ -584,6 +576,61 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 return True
 
         return False
+
+    def _attach_context(self, token_stream: ITokenStream) -> None:
+        """Attach the statement registry and a fresh ParseContext to the stream.
+
+        Statement parsers retrieve this context via ``_utils.get_parse_context``
+        to report recoverable errors. Recreating the context on each statement
+        keeps recovery decisions tied to the host parser's current state.
+        """
+        if not hasattr(token_stream, "_registry"):
+            token_stream._registry = self._statement_registry  # type: ignore[attr-defined]
+        context = ParseContext(self.host, self._statement_registry)
+        token_stream.context = context
+        token_stream._context = context  # type: ignore[attr-defined]
+
+    def _wrap_unexpected(self, exc: BaseException, token: Any) -> ParseError:
+        """Convert an unexpected exception into a ParseError with location."""
+        loc = getattr(token, "location", None) if token is not None else None
+        line = getattr(loc, "line", None) if loc is not None else None
+        column = getattr(loc, "column", None) if loc is not None else None
+        return ParseError(
+            f"Unexpected error parsing statement: {exc}",
+            line_number=line,
+            column=column,
+            location=loc,
+        )
+
+    def _handle_statement_error(
+        self,
+        error: ParseError,
+        token: Any,
+        token_stream: ITokenStream,
+    ) -> None:
+        """Record a statement-level parse error and continue or re-raise.
+
+        Behavior is determined by ``host.error_recovery``:
+
+        * ``COLLECT_ALL`` (default for batch runs): the error is appended to
+          the host's error list via ``add_error`` and the stream is advanced
+          past the offending statement so parsing continues.
+        * ``FAIL_FAST``: the error is recorded and re-raised so the division
+          parser's outer handler can short-circuit the parse.
+
+        Statement parsers that called :func:`report_or_raise` tag the
+        ParseError with ``_already_recorded`` so we don't double-count when
+        we receive it here.
+        """
+        if self.host is not None and hasattr(self.host, "add_error"):
+            if not getattr(error, "_already_recorded", False):
+                self.host.add_error(error)
+
+        mode = getattr(self.host, "error_recovery", None)
+        if mode == ErrorRecoveryMode.FAIL_FAST:
+            raise error
+
+        self._skip_to_next_statement(token_stream)
 
     def _skip_to_next_statement(self, token_stream: ITokenStream) -> None:
         """Skip to start of next statement or paragraph.

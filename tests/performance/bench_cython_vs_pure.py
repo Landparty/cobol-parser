@@ -23,10 +23,26 @@ CORPUS_DIR = REPO_ROOT / "examples" / "cobol"
 
 # Reproducible 20-file sample (spread across modules in the NIST suite)
 DEFAULT_SAMPLE = [
-    "CM101M.CBL", "CM201M.CBL", "DB101A.CBL", "DB201A.CBL", "DB301M.CBL",
-    "EXEC85.CBL", "IC101A.CBL", "IF101A.CBL", "IX101A.CBL", "NC101A.CBL",
-    "OB101A.CBL", "PC101A.CBL", "RL101A.CBL", "SC101A.CBL", "SQ101A.CBL",
-    "ST101A.CBL", "TA101A.CBL", "TF101A.CBL", "XI101A.CBL", "SM101A.CBL",
+    "CM101M.CBL",
+    "CM201M.CBL",
+    "DB101A.CBL",
+    "DB201A.CBL",
+    "DB301M.CBL",
+    "EXEC85.CBL",
+    "IC101A.CBL",
+    "IF101A.CBL",
+    "IX101A.CBL",
+    "NC101A.CBL",
+    "OB101A.CBL",
+    "PC101A.CBL",
+    "RL101A.CBL",
+    "SC101A.CBL",
+    "SQ101A.CBL",
+    "ST101A.CBL",
+    "TA101A.CBL",
+    "TF101A.CBL",
+    "XI101A.CBL",
+    "SM101A.CBL",
 ]
 
 
@@ -45,9 +61,13 @@ def _run_lexer(lexer_cls, source: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Cython vs pure-Python lexer benchmark")
+    parser = argparse.ArgumentParser(
+        description="Cython vs pure-Python lexer benchmark"
+    )
     parser.add_argument("--all", action="store_true", help="Use full NIST corpus")
-    parser.add_argument("--files", type=int, default=20, help="Number of files to sample")
+    parser.add_argument(
+        "--files", type=int, default=20, help="Number of files to sample"
+    )
     parser.add_argument("--reps", type=int, default=5, help="Repetitions per file")
     args = parser.parse_args()
 
@@ -62,11 +82,14 @@ def main() -> int:
     # Import Cython lexer (optional)
     try:
         from cobolparser._lexer_fast import CobolLexer as FastLexer
+
         has_fast = True
     except ImportError:
         FastLexer = None
         has_fast = False
-        print("WARNING: _lexer_fast extension not compiled — skipping Cython timings.\n")
+        print(
+            "WARNING: _lexer_fast extension not compiled — skipping Cython timings.\n"
+        )
 
     # Collect corpus files
     all_files = sorted(CORPUS_DIR.glob("*.CBL"))
@@ -79,7 +102,9 @@ def main() -> int:
     else:
         n = min(args.files, len(all_files))
         # Use the predefined sample; fall back to first N files if any are missing
-        sample_paths = [CORPUS_DIR / name for name in DEFAULT_SAMPLE if (CORPUS_DIR / name).exists()]
+        sample_paths = [
+            CORPUS_DIR / name for name in DEFAULT_SAMPLE if (CORPUS_DIR / name).exists()
+        ]
         if len(sample_paths) < n:
             extras = [f for f in all_files if f not in sample_paths]
             sample_paths.extend(extras[: n - len(sample_paths)])
@@ -112,7 +137,9 @@ def main() -> int:
         pure_times.append(pure_ms)
 
         if has_fast:
-            fast_ms = _timeit(lambda s: _run_lexer(FastLexer, s), source, args.reps) * 1000
+            fast_ms = (
+                _timeit(lambda s: _run_lexer(FastLexer, s), source, args.reps) * 1000
+            )
             fast_times.append(fast_ms)
             ratio = pure_ms / fast_ms if fast_ms > 0 else float("inf")
             speedups.append(ratio)
@@ -121,7 +148,9 @@ def main() -> int:
                 f"{fast_ms:>{col_w[2]}.2f} {ratio:>{col_w[3]}.2f}x"
             )
         else:
-            print(f"{path.name:<{col_w[0]}} {pure_ms:>{col_w[1]}.2f} {'N/A':>{col_w[2]}} {'N/A':>{col_w[3]}}")
+            print(
+                f"{path.name:<{col_w[0]}} {pure_ms:>{col_w[1]}.2f} {'N/A':>{col_w[2]}} {'N/A':>{col_w[3]}}"
+            )
 
     print(sep)
 
@@ -143,7 +172,10 @@ def main() -> int:
             print(f"\nPASS: median speedup {median_speedup:.2f}x >= 3.0x target")
             return 0
         else:
-            print(f"\nFAIL: median speedup {median_speedup:.2f}x < 3.0x target", file=sys.stderr)
+            print(
+                f"\nFAIL: median speedup {median_speedup:.2f}x < 3.0x target",
+                file=sys.stderr,
+            )
             return 1
     else:
         print("\nCython extension not compiled — compile with:")

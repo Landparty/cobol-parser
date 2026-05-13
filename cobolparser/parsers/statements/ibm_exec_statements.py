@@ -9,7 +9,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import ASTNode, SourceLocation
 from ...models.sql_statements import parse_exec_sql
-from ._utils import collect_exec_sql_text
+from ._utils import collect_exec_sql_text, peek_token
 
 
 class ExecCicsStatement(ASTNode):
@@ -38,36 +38,37 @@ class ExecSqlStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next tokens are EXEC SQL."""
-        try:
-            token = token_stream.peek(0)
-            if not token:
-                return False
+        """Check if next tokens are EXEC SQL.
 
-            # Check if first token is EXEC (dedicated token type or identifier)
-            is_exec = token.type == TokenType.EXEC or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "EXEC"
-            )
-            if not is_exec:
-                return False
-
-            # Check if next token is SQL
-            next_token = token_stream.peek(1)
-            if not next_token:
-                return False
-
-            return bool(
-                next_token.type == TokenType.SQL
-                or (
-                    next_token.type == TokenType.IDENTIFIER
-                    and next_token.value
-                    and next_token.value.upper() == "SQL"
-                )
-            )
-        except Exception:
+        Uses :func:`peek_token` so the contract that ``matches()`` never raises
+        is honored even for streams that throw on out-of-bounds peek.
+        """
+        token = peek_token(token_stream, 0)
+        if not token:
             return False
+
+        # Check if first token is EXEC (dedicated token type or identifier)
+        is_exec = token.type == TokenType.EXEC or (
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "EXEC"
+        )
+        if not is_exec:
+            return False
+
+        # Check if next token is SQL
+        next_token = peek_token(token_stream, 1)
+        if not next_token:
+            return False
+
+        return bool(
+            next_token.type == TokenType.SQL
+            or (
+                next_token.type == TokenType.IDENTIFIER
+                and next_token.value
+                and next_token.value.upper() == "SQL"
+            )
+        )
 
     def parse(self, token_stream: ITokenStream, context: Any | None = None) -> ASTNode:
         """Parse an EXEC SQL statement."""
@@ -95,33 +96,34 @@ class ExecCicsStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        """Check if next tokens are EXEC CICS."""
-        try:
-            token = token_stream.peek(0)
-            if not token:
-                return False
+        """Check if next tokens are EXEC CICS.
 
-            # Check if first token is EXEC (dedicated token type or identifier)
-            is_exec = token.type == TokenType.EXEC or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "EXEC"
-            )
-            if not is_exec:
-                return False
-
-            # Check if next token is CICS
-            next_token = token_stream.peek(1)
-            if not next_token:
-                return False
-
-            return bool(
-                next_token.type == TokenType.IDENTIFIER
-                and next_token.value
-                and next_token.value.upper() == "CICS"
-            )
-        except Exception:
+        Uses :func:`peek_token` so the contract that ``matches()`` never raises
+        is honored even for streams that throw on out-of-bounds peek.
+        """
+        token = peek_token(token_stream, 0)
+        if not token:
             return False
+
+        # Check if first token is EXEC (dedicated token type or identifier)
+        is_exec = token.type == TokenType.EXEC or (
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == "EXEC"
+        )
+        if not is_exec:
+            return False
+
+        # Check if next token is CICS
+        next_token = peek_token(token_stream, 1)
+        if not next_token:
+            return False
+
+        return bool(
+            next_token.type == TokenType.IDENTIFIER
+            and next_token.value
+            and next_token.value.upper() == "CICS"
+        )
 
     def parse(self, token_stream: ITokenStream, context: Any | None = None) -> ASTNode:
         """Parse an EXEC CICS statement.

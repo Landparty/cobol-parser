@@ -24,9 +24,7 @@ def _wrap(body: str) -> str:
         "       01 WS-FLAG PIC X VALUE 'N'.\n"
         "       01 WS-X    PIC 9 VALUE 0.\n"
         "       PROCEDURE DIVISION.\n"
-        "       MAIN-PARA.\n"
-        + body
-        + "\n"
+        "       MAIN-PARA.\n" + body + "\n"
         "           STOP RUN.\n"
     )
 
@@ -45,10 +43,7 @@ def _find_ifs(result) -> list[IfStatement]:
 class TestIfPeriodTerminatedThenBranch:
     def test_inline_if_period_after_then_statement(self) -> None:
         # Inline IF: condition is true, body ends with period (no END-IF, no ELSE)
-        src = _wrap(
-            "           IF WS-FLAG = 'Y'\n"
-            "               DISPLAY 'YES'.\n"
-        )
+        src = _wrap("           IF WS-FLAG = 'Y'\n" "               DISPLAY 'YES'.\n")
         result = _parser().parse(src)
         assert result.ast is not None
         ifs = _find_ifs(result)
@@ -70,8 +65,7 @@ class TestIfPeriodTerminatedThenBranch:
     def test_if_then_period_no_end_if(self) -> None:
         # IF without END-IF, body statement has no period on its own line
         src = _wrap(
-            "           IF WS-FLAG = 'N' THEN\n"
-            "               DISPLAY 'NOPE'.\n"
+            "           IF WS-FLAG = 'N' THEN\n" "               DISPLAY 'NOPE'.\n"
         )
         result = _parser().parse(src)
         assert result.ast is not None
@@ -152,10 +146,7 @@ class TestIfConditionEdgeCases:
 
     def test_if_empty_then_branch_recovers(self) -> None:
         # IF condition followed immediately by END-IF
-        src = _wrap(
-            "           IF WS-FLAG = 'Y'\n"
-            "           END-IF.\n"
-        )
+        src = _wrap("           IF WS-FLAG = 'Y'\n" "           END-IF.\n")
         result = _parser().parse(src)
         assert result.ast is not None
 

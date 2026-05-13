@@ -56,9 +56,7 @@ def _get_reusable_parser(
         or _REUSABLE_PARSER.error_recovery != error_recovery
         or _REUSABLE_PARSER.dialect != dialect
     ):
-        _REUSABLE_PARSER = CobolParser(
-            error_recovery=error_recovery, dialect=dialect
-        )
+        _REUSABLE_PARSER = CobolParser(error_recovery=error_recovery, dialect=dialect)
     return _REUSABLE_PARSER
 
 
@@ -212,7 +210,19 @@ def parse_files(
         return []
 
     resolved_workers = workers if workers is not None else (os.cpu_count() or 1)
-    args = [(p, encoding, errors, error_recovery, dialect, enable_profiling, top_n, prof_output) for p in path_list]
+    args = [
+        (
+            p,
+            encoding,
+            errors,
+            error_recovery,
+            dialect,
+            enable_profiling,
+            top_n,
+            prof_output,
+        )
+        for p in path_list
+    ]
 
     if executor is None and resolved_workers == 1:
         # Sequential fast path: reuse parser instance, clean stack traces, no pickle overhead
@@ -344,6 +354,10 @@ def parse_files_with_copybooks(
                 top_n=top_n,
                 prof_output=prof_file,
             )
-            results.append(BatchResult(path=path, result=parse_result, read_error=None, profiling=prof))
+            results.append(
+                BatchResult(
+                    path=path, result=parse_result, read_error=None, profiling=prof
+                )
+            )
 
     return results

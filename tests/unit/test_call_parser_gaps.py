@@ -26,9 +26,7 @@ def _wrap(body: str) -> str:
         "       01 WS-B     PIC 9(4) VALUE 1.\n"
         "       01 WS-RET   PIC 9(4) VALUE 0.\n"
         "       PROCEDURE DIVISION.\n"
-        "       MAIN-PARA.\n"
-        + body
-        + "\n"
+        "       MAIN-PARA.\n" + body + "\n"
         "           STOP RUN.\n"
     )
 
@@ -166,8 +164,7 @@ class TestCallUsingModes:
 
     def test_using_by_value_multiple_params(self) -> None:
         src = _wrap(
-            "           CALL 'SUBPROG'\n"
-            "               USING BY VALUE WS-A WS-B.\n"
+            "           CALL 'SUBPROG'\n" "               USING BY VALUE WS-A WS-B.\n"
         )
         result = _parser().parse(src)
         assert result.ast is not None

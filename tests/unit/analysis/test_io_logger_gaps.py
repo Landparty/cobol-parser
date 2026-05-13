@@ -192,7 +192,9 @@ class TestCallGivingReturning:
         prog = _make_program(stmt)
         report = IOLogger().analyze(prog)
         call_ops = report.calls
-        giving_ops = [op for op in call_ops if op.details.get("passing_mode") == "GIVING"]
+        giving_ops = [
+            op for op in call_ops if op.details.get("passing_mode") == "GIVING"
+        ]
         assert len(giving_ops) >= 1
         assert giving_ops[0].direction == "OUTPUT"
         assert "WS-RESULT" in giving_ops[0].variables
@@ -204,7 +206,9 @@ class TestCallGivingReturning:
         prog = _make_program(stmt)
         report = IOLogger().analyze(prog)
         call_ops = report.calls
-        ret_ops = [op for op in call_ops if op.details.get("passing_mode") == "RETURNING"]
+        ret_ops = [
+            op for op in call_ops if op.details.get("passing_mode") == "RETURNING"
+        ]
         assert len(ret_ops) >= 1
         assert ret_ops[0].direction == "OUTPUT"
         assert "WS-RET" in ret_ops[0].variables

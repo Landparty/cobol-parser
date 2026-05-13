@@ -45,8 +45,14 @@ class TestParseOneOSError:
         p = tmp_path / "no.cbl"
         # File does not exist — read_text raises OSError / FileNotFoundError
         result = _parse_one(
-            str(p), "utf-8", "replace", ErrorRecoveryMode.COLLECT_ALL, DialectType.IBM_ENTERPRISE,
-            False, 10, None,
+            str(p),
+            "utf-8",
+            "replace",
+            ErrorRecoveryMode.COLLECT_ALL,
+            DialectType.IBM_ENTERPRISE,
+            False,
+            10,
+            None,
         )
         assert result.read_error is not None
         assert result.result is None
@@ -54,8 +60,14 @@ class TestParseOneOSError:
     def test_oserror_path_is_preserved(self, tmp_path):
         p = tmp_path / "ghost.cbl"
         result = _parse_one(
-            str(p), "utf-8", "replace", ErrorRecoveryMode.COLLECT_ALL, DialectType.IBM_ENTERPRISE,
-            False, 10, None,
+            str(p),
+            "utf-8",
+            "replace",
+            ErrorRecoveryMode.COLLECT_ALL,
+            DialectType.IBM_ENTERPRISE,
+            False,
+            10,
+            None,
         )
         assert result.path == p
 

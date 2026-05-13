@@ -760,13 +760,19 @@ __all__ = [
     "validate_level_numbers",
     "expand_copybooks",
     "parse_cobol_with_expansion",
+    "clear_file_cache",
+    "set_file_cache_size",
+    "get_file_cache_stats",
 ]
 
 
 # Import functions from submodules for convenience
 from .copybook_expander import (  # noqa: E402
+    clear_file_cache,
     expand_copybooks,
+    get_file_cache_stats,
     parse_cobol_with_expansion,
+    set_file_cache_size,
 )
 
 # ---------------------------------------------------------------------------

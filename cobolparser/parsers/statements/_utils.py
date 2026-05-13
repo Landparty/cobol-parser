@@ -7,12 +7,14 @@ individual parser files.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
+from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
-from cobolparser.lexer import TokenType
+from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements.data import DisplayStatement, MoveStatement
+from cobolparser.plugins.core import ErrorRecoveryMode
 
 # ---------------------------------------------------------------------------
 # Token-type sets used by multiple parsers to detect statement boundaries
@@ -129,14 +131,39 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def token_value_upper(token: Any) -> str:
+def token_value_upper(token: Token | None) -> str:
     """Return the upper-cased value of *token*, or ``""`` if unavailable."""
     return token.value.upper() if token and token.value else ""
 
 
-def token_location(token: Any) -> SourceLocation:
+def token_location(token: Token | None) -> SourceLocation:
     """Return the source location of *token*, or a zero location if absent."""
     return token.location if token else SourceLocation(0, 0)
+
+
+def peek_token(token_stream: ITokenStream, offset: int = 0) -> Token | None:
+    """Safely peek into the stream, returning ``None`` on any failure.
+
+    Used by the ``matches()`` probes in the registry, whose contract is to
+    never raise: a broken or third-party stream implementation must result in
+    ``False`` rather than a stack trace bubbling up through ``find_parser``.
+    """
+    try:
+        return token_stream.peek(offset)
+    except Exception:
+        return None
+
+
+def peek_value_upper(token_stream: ITokenStream, offset: int = 0) -> str:
+    """Return upper-cased value of the token at ``peek(offset)``, or ``""``."""
+    token = peek_token(token_stream, offset)
+    return token.value.upper() if token and token.value else ""
+
+
+def peek_value(token_stream: ITokenStream, offset: int = 0) -> str:
+    """Return raw value of the token at ``peek(offset)``, or ``""``."""
+    token = peek_token(token_stream, offset)
+    return token.value if token and token.value else ""
 
 
 def matches_keyword(token_stream: ITokenStream, token_type: Any, keyword: str) -> bool:
@@ -145,19 +172,16 @@ def matches_keyword(token_stream: ITokenStream, token_type: Any, keyword: str) -
     This is the canonical implementation for statement-parser ``matches()`` methods
     that detect a single COBOL verb.  It avoids the repetitive try/except and
     dual-check pattern that would otherwise be copy-pasted across every parser.
-    Returns False on any stream error so that the registry can safely probe each parser.
+    Returns False on stream exhaustion so the registry can safely probe each parser.
     """
-    try:
-        token = token_stream.peek()
-        if not token:
-            return False
-        return token.type == token_type or (
-            token.type == TokenType.IDENTIFIER
-            and token.value is not None
-            and token.value.upper() == keyword
-        )
-    except Exception:
+    token = peek_token(token_stream)
+    if not token:
         return False
+    return token.type == token_type or (
+        token.type == TokenType.IDENTIFIER
+        and token.value is not None
+        and token.value.upper() == keyword
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +326,21 @@ def get_parse_context(stream: ITokenStream) -> ParseContext | None:
     return context
 
 
+def get_error_recovery_mode(
+    context: ParseContext | None,
+) -> ErrorRecoveryMode | None:
+    """Return the host parser's ``error_recovery`` mode, if reachable."""
+    if context is None:
+        return None
+    host = getattr(context, "host", None)
+    if host is None:
+        return None
+    mode = getattr(host, "error_recovery", None)
+    if isinstance(mode, ErrorRecoveryMode):
+        return mode
+    return None
+
+
 def report_parse_error(
     context: ParseContext | None,
     message: str,
@@ -310,6 +349,37 @@ def report_parse_error(
     """Forward *message* to *context* if one is available."""
     if context:
         context.error(message, location)
+
+
+def report_or_raise(
+    context: ParseContext | None,
+    message: str,
+    location: SourceLocation | None = None,
+) -> NoReturn:
+    """Record a statement-level parse error and raise it.
+
+    Always raises a ``ParseError`` so the enclosing division parser drives
+    recovery uniformly: in ``FAIL_FAST`` it re-raises to short-circuit the
+    parse, in ``COLLECT_ALL`` it records and skips to the next statement.
+
+    The error is also appended to ``host.errors`` **before** the raise so
+    diagnostics survive even when the raised exception is swallowed by
+    :func:`try_parse_nested_statement` (which can hide nested-arithmetic
+    failures inside IF/EVALUATE/PERFORM clauses). The raised exception is
+    tagged with ``_already_recorded = True`` so the division-level handler
+    can dedupe instead of adding it a second time.
+    """
+    line = getattr(location, "line", None) if location is not None else None
+    column = getattr(location, "column", None) if location is not None else None
+    err = ParseError(message, line_number=line, column=column, location=location)
+
+    if context is not None:
+        host = getattr(context, "host", None)
+        if host is not None and hasattr(host, "add_error"):
+            host.add_error(err)
+            err._already_recorded = True  # type: ignore[attr-defined]
+
+    raise err
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +395,12 @@ def try_parse_nested_statement(
 
     Pass *exclude_self* (the calling parser instance) to prevent the registry
     from recursively dispatching back to the same parser.
+
+    Any exception from a nested parse is swallowed here so a malformed inner
+    statement does not abort the surrounding clause; the error is already
+    reported via the parse context when statement parsers use
+    :func:`report_or_raise`. This wide net is intentional — callers depend on
+    the helper never raising during exploratory nested-statement dispatch.
     """
     try:
         registry = getattr(stream, "_registry", None) or getattr(
@@ -347,6 +423,107 @@ def try_parse_nested_statement(
         return parser.parse(stream)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Arithmetic-statement shared helpers
+# ---------------------------------------------------------------------------
+
+#: Token types that may legally appear as an arithmetic operand.
+#:
+#: ``LEVEL_NUMBER`` is included because the lexer eagerly classifies bare
+#: integers 01-99 as level numbers regardless of context, so ``ADD 1 TO A``
+#: would otherwise lose its first operand.
+ARITHMETIC_OPERAND_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER}
+)
+
+
+#: Tokens that close an arithmetic-operand run regardless of value.
+#:
+#: PERIOD ends the statement; the rest are scope terminators that may follow
+#: an arithmetic verb. Without this set, an operand run would walk past the
+#: period of a malformed statement (e.g. ``ADD A.``) and devour subsequent
+#: statements while looking for ``TO``/``GIVING``.
+ARITHMETIC_OPERAND_STOP_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.PERIOD,
+        TokenType.END_IF,
+        TokenType.END_PERFORM,
+        TokenType.END_EVALUATE,
+    }
+)
+
+
+def parse_arithmetic_operands(
+    stream: ITokenStream,
+    stop_keywords: set[str] | frozenset[str],
+) -> tuple[list[str], str]:
+    """Consume tokens as arithmetic operands until a separator or boundary.
+
+    Tokens of type IDENTIFIER, NUMERIC_LITERAL, or LEVEL_NUMBER are appended
+    to the result; other intermediate tokens (commas, newlines, whitespace)
+    are silently consumed so the parser is tolerant of incidental
+    punctuation. Stops without consuming the boundary when any of these
+    occur:
+
+    * stream exhaustion;
+    * a token whose upper-cased value is in *stop_keywords* (the expected
+      separator, e.g. ``TO``/``GIVING``/``BY``/``FROM``);
+    * a token in :data:`ARITHMETIC_OPERAND_STOP_TYPES` (period or scope
+      terminator), which terminates the statement;
+    * a token whose upper-cased value is a known statement keyword from
+      :data:`STATEMENT_KEYWORDS` or a control-flow boundary from
+      :data:`CONTROL_FLOW_BOUNDARIES`, so a malformed statement does not
+      eat the next statement during recovery.
+
+    Returns:
+        A tuple ``(operands, stop_keyword)`` where ``stop_keyword`` is the
+        upper-cased value of the token that ended the operand run, or
+        ``""`` if the stream was exhausted or terminated on a non-keyword
+        boundary token (period, scope terminator).
+    """
+    operands: list[str] = []
+    while not stream.is_empty():
+        token = stream.peek()
+        if not token:
+            break
+        if token.type in ARITHMETIC_OPERAND_STOP_TYPES:
+            return operands, ""
+        upper = token.value.upper() if token.value else ""
+        if upper in stop_keywords:
+            return operands, upper
+        if upper and (upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES):
+            # Don't devour the next statement when this one is malformed.
+            return operands, ""
+        if token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
+            operands.append(token.value)
+        stream.consume()
+    return operands, ""
+
+
+def consume_keyword_and_operand(
+    stream: ITokenStream,
+    keyword: str,
+) -> str | None:
+    """Consume *keyword* and the following IDENTIFIER, returning its value.
+
+    Whitespace and NEWLINE tokens between the keyword and the identifier are
+    skipped so that COBOL line continuations don't break clause recognition.
+
+    Returns ``None`` if the keyword is not present at the current position or
+    if no identifier follows it. The keyword check is case-insensitive.
+    """
+    if peek_value_upper(stream) != keyword.upper():
+        return None
+    stream.consume()
+    _skip_newlines(stream)
+    token = stream.peek()
+    if token and token.type == TokenType.IDENTIFIER and token.value:
+        value = token.value
+        stream.consume()
+        return value
+    return None
 
 
 # ---------------------------------------------------------------------------

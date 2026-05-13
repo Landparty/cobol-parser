@@ -94,7 +94,9 @@ class TableEntry:
     program_name: str
     table_name: str
     crud: CRUDFlags = field(default_factory=CRUDFlags)
-    cursors: list[str] = field(default_factory=list)  # cursor names that select from table
+    cursors: list[str] = field(
+        default_factory=list
+    )  # cursor names that select from table
 
     def to_dict(self) -> dict[str, Any]:
         return {

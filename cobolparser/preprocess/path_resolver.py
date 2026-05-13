@@ -336,7 +336,11 @@ class PathResolver:
             if self._dir_index is None:
                 self._dir_index = self._build_directory_index()
 
-            lookup_key = member_name if self.search_config.case_sensitive else member_name.upper()
+            lookup_key = (
+                member_name
+                if self.search_config.case_sensitive
+                else member_name.upper()
+            )
             if lookup_key in self._dir_index:
                 result = self._dir_index[lookup_key]
                 # Validate size

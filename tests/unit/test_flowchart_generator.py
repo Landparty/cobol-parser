@@ -36,12 +36,19 @@ from cobolparser.models.ast_base import SourceLocation
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _loc(line: int = 1, col: int = 8) -> SourceLocation:
     return SourceLocation(line=line, column=col)
 
 
-def _para(name: str, *, entry: bool = False, exit_: bool = False,
-          stmt_count: int = 0, unreachable: bool = False) -> FlowNode:
+def _para(
+    name: str,
+    *,
+    entry: bool = False,
+    exit_: bool = False,
+    stmt_count: int = 0,
+    unreachable: bool = False,
+) -> FlowNode:
     return FlowNode(
         name=name,
         procedure_type="PARAGRAPH",
@@ -279,6 +286,7 @@ def _eval_branch_report() -> ProgramFlowReport:
 # _sanitize_id
 # ---------------------------------------------------------------------------
 
+
 class TestSanitizeId:
     def test_plain_name(self) -> None:
         assert _sanitize_id("MAIN_LOGIC") == "MAIN_LOGIC"
@@ -305,6 +313,7 @@ class TestSanitizeId:
 # _short_edge_label
 # ---------------------------------------------------------------------------
 
+
 class TestShortEdgeLabel:
     def test_goto_label(self) -> None:
         assert _short_edge_label("GOTO") == "GO TO"
@@ -322,6 +331,7 @@ class TestShortEdgeLabel:
 # ---------------------------------------------------------------------------
 # FlowchartOptions
 # ---------------------------------------------------------------------------
+
 
 class TestFlowchartOptions:
     def test_defaults(self) -> None:
@@ -341,6 +351,7 @@ class TestFlowchartOptions:
 # ---------------------------------------------------------------------------
 # MermaidFlowchartGenerator
 # ---------------------------------------------------------------------------
+
 
 class TestMermaidFlowchartGenerator:
     def _gen(self, report: ProgramFlowReport, **kw: object) -> str:
@@ -463,6 +474,7 @@ class TestMermaidFlowchartGenerator:
 # ---------------------------------------------------------------------------
 # DotFlowchartGenerator
 # ---------------------------------------------------------------------------
+
 
 class TestDotFlowchartGenerator:
     def _gen(self, report: ProgramFlowReport, **kw: object) -> str:
