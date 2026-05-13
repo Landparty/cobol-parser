@@ -747,6 +747,7 @@ class _CobolLexerPure:
         chars: list[str] = []
         has_decimal = False
         has_exponent = False
+        has_digit = False
 
         while True:
             char = self.peek_char()
@@ -755,15 +756,14 @@ class _CobolLexerPure:
 
             if char.isdigit():
                 chars.append(char)
+                has_digit = True
                 self.advance_char()
             elif char == "." and not has_decimal and not has_exponent:
                 has_decimal = True
                 chars.append(char)
                 self.advance_char()
-            elif char in "Ee" and chars and not has_exponent:
+            elif char in "Ee" and has_digit and not has_exponent:
                 # Scientific notation: require at least one digit before E.
-                # (Previously referenced undefined ``pos``/``start_pos`` which
-                # raised NameError on every scientific-notation literal.)
                 has_exponent = True
                 chars.append(char)
                 self.advance_char()
@@ -1259,20 +1259,28 @@ class _CobolLexerPure:
         Returns (token_or_None, new_pos, unterminated_flag)."""
         quote = text[start_pos]
         location = SourceLocation(line_num + 1, start_col + start_pos, 1)
-        value = ""
+        # Accumulate characters into a list and join once. ``s += c`` in a
+        # loop is amortised O(n) only when the interpreter can prove the
+        # string has refcount 1 — fragile, and worst-case O(n²) on long
+        # literals. Lists give us a guaranteed O(n) construction.
+        chars: list[str] = []
         pos = start_pos + 1
         while pos < len(text):
             ch = text[pos]
             if ch == quote:
                 # doubled quote escape
                 if pos + 1 < len(text) and text[pos + 1] == quote:
-                    value += quote
+                    chars.append(quote)
                     pos += 2
                     continue
                 pos += 1
-                return Token(TokenType.STRING_LITERAL, value, location), pos, False
+                return (
+                    Token(TokenType.STRING_LITERAL, "".join(chars), location),
+                    pos,
+                    False,
+                )
             else:
-                value += ch
+                chars.append(ch)
                 pos += 1
         # Not closed on this line - check if this could be a multi-line string
         return None, pos, True
