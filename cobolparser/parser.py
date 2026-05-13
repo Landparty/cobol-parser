@@ -6,6 +6,7 @@ This module provides delegating CobolParser that orchestrates parsing through:
 - TokenStream abstraction for lookahead and error recovery
 """
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Literal, overload
@@ -457,7 +458,7 @@ def _detect_fixed_format(source: str) -> bool:
 
 @overload
 def parse_cobol(
-    source: str,
+    source: str | os.PathLike[str],
     filename: str = ...,
     dialect: DialectType = ...,
     error_recovery: ErrorRecoveryMode = ...,
@@ -471,7 +472,7 @@ def parse_cobol(
 
 @overload
 def parse_cobol(
-    source: str,
+    source: str | os.PathLike[str],
     filename: str = ...,
     dialect: DialectType = ...,
     error_recovery: ErrorRecoveryMode = ...,
@@ -484,7 +485,7 @@ def parse_cobol(
 
 
 def parse_cobol(
-    source: str,
+    source: str | os.PathLike[str],
     filename: str = "<string>",
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
@@ -509,19 +510,42 @@ def parse_cobol(
     Returns:
         ParseResult with AST and metadata
     """
-    import os
+    # Normalize PathLike to str before applying the "looks like a path" heuristics.
+    # This preserves compatibility with pathlib.Path and other os.PathLike inputs
+    # while still avoiding syscalls on large/multi-line source strings.
+    try:
+        source_str = os.fspath(source)
+        is_pathlike = True
+    except TypeError:
+        # source is already a str (or something else that's not PathLike)
+        source_str = source  # type: ignore[assignment]
+        is_pathlike = False
 
-    # Handle file paths
-    if os.path.isfile(source):
-        with open(source, encoding="utf-8", errors="replace") as f:
+    # Handle file paths. The check is gated on the input "looking like" a path
+    # before touching the filesystem so we don't (a) issue an `os.path.isfile`
+    # syscall on every parse_cobol() call against a multi-KB source string, or
+    # (b) silently read from disk if a COBOL source happens to contain a
+    # newline-free prefix that resolves to a real file. A real path is short,
+    # has no embedded newlines, and is plausibly a single-line string.
+    # PathLike objects always go through the file-path branch.
+    if (
+        is_pathlike
+        or (
+            isinstance(source_str, str)
+            and len(source_str) < 4096
+            and "\n" not in source_str
+            and "\r" not in source_str
+        )
+    ) and os.path.isfile(source_str):
+        with open(source_str, encoding="utf-8", errors="replace") as f:
             file_content = f.read()
         if filename == "<string>":
-            filename = source
-        source = file_content
+            filename = source_str
+        source_str = file_content
 
     # Auto-detect fixed-format if not explicitly specified
     if preprocess_fixed is None:
-        detected_fixed = _detect_fixed_format(source)
+        detected_fixed = _detect_fixed_format(source_str)
         preprocess_fixed = detected_fixed
         # If we detected free-format (not fixed), ensure free_form is True
         if not detected_fixed and not free_form:
@@ -529,7 +553,7 @@ def parse_cobol(
 
     if preprocess_fixed:
         try:
-            source = normalize_fixed_format(source.splitlines())
+            source_str = normalize_fixed_format(source_str.splitlines())
         except ValueError as exc:
             # Preprocessing failed (e.g. unterminated string literal at EOF).
             # Return a result with no AST and the preprocessing error so callers
@@ -543,7 +567,7 @@ def parse_cobol(
         dialect=dialect, error_recovery=error_recovery, free_form=free_form
     )
     return parser.parse(  # type: ignore[no-any-return]
-        source,
+        source_str,
         filename,
         enable_profiling=enable_profiling,  # type: ignore[call-overload]
         top_n=top_n,
