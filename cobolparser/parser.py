@@ -511,8 +511,19 @@ def parse_cobol(
     """
     import os
 
-    # Handle file paths
-    if os.path.isfile(source):
+    # Handle file paths. The check is gated on the input "looking like" a path
+    # before touching the filesystem so we don't (a) issue an `os.path.isfile`
+    # syscall on every parse_cobol() call against a multi-KB source string, or
+    # (b) silently read from disk if a COBOL source happens to contain a
+    # newline-free prefix that resolves to a real file. A real path is short,
+    # has no embedded newlines, and is plausibly a single-line string.
+    if (
+        isinstance(source, str)
+        and len(source) < 4096
+        and "\n" not in source
+        and "\r" not in source
+        and os.path.isfile(source)
+    ):
         with open(source, encoding="utf-8", errors="replace") as f:
             file_content = f.read()
         if filename == "<string>":

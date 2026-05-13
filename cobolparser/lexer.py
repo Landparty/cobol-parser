@@ -706,7 +706,11 @@ class _CobolLexerPure:
     def read_string_literal(self, quote_char: str) -> Token:
         """Read a string literal enclosed in quotes or apostrophes, with COBOL multi-line support."""
         start_location = self.get_current_location()
-        value = ""
+        # Accumulate characters into a list and join once. ``s += c`` in a
+        # loop is amortised O(n) only when the interpreter can prove the
+        # string has refcount 1 — fragile, and worst-case O(n²) on long
+        # literals. Lists give us a guaranteed O(n) construction.
+        chars: list[str] = []
         self.advance_char()  # Skip opening quote
 
         while True:
@@ -717,7 +721,7 @@ class _CobolLexerPure:
                     LexerError(
                         "Unterminated string literal",
                         start_location,
-                        quote_char + value,
+                        quote_char + "".join(chars),
                     )
                 )
                 break
@@ -726,20 +730,21 @@ class _CobolLexerPure:
                 self.advance_char()  # Skip closing quote
                 # Check for doubled quote (escape sequence)
                 if self.peek_char() == quote_char:
-                    value += quote_char
+                    chars.append(quote_char)
                     self.advance_char()
                 else:
                     break
             else:
-                value += char
+                chars.append(char)
                 self.advance_char()
 
-        return Token(TokenType.STRING_LITERAL, value, start_location)
+        return Token(TokenType.STRING_LITERAL, "".join(chars), start_location)
 
     def read_numeric_literal(self) -> Token:
         """Read a numeric literal (integer or decimal)."""
         start_location = self.get_current_location()
-        value = ""
+        # See ``read_string_literal`` for the rationale on list+join vs ``+=``.
+        chars: list[str] = []
         has_decimal = False
         has_exponent = False
 
@@ -749,27 +754,27 @@ class _CobolLexerPure:
                 break
 
             if char.isdigit():
-                value += char
+                chars.append(char)
                 self.advance_char()
             elif char == "." and not has_decimal and not has_exponent:
                 has_decimal = True
-                value += char
+                chars.append(char)
                 self.advance_char()
-            elif char in "Ee" and value and not has_exponent:
+            elif char in "Ee" and chars and not has_exponent:
                 # Scientific notation: require at least one digit before E.
                 # (Previously referenced undefined ``pos``/``start_pos`` which
                 # raised NameError on every scientific-notation literal.)
                 has_exponent = True
-                value += char
+                chars.append(char)
                 self.advance_char()
                 next_char = self.peek_char()
                 if next_char and next_char in "+-":
-                    value += next_char
+                    chars.append(next_char)
                     self.advance_char()
             else:
                 break
 
-        return Token(TokenType.NUMERIC_LITERAL, value, start_location)
+        return Token(TokenType.NUMERIC_LITERAL, "".join(chars), start_location)
 
     def read_identifier(self) -> Token:
         """Read an identifier or keyword."""
