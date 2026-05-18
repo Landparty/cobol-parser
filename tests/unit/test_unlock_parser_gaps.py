@@ -38,10 +38,7 @@ class TestUnlockParserBranches:
         # Following statement provides the next token (non-PERIOD), exercising
         # the `if p and p.type == TokenType.PERIOD` false branch.
         result = parse_cobol(
-            _prog(
-                "           UNLOCK WS-VAR\n"
-                "           DISPLAY 'after unlock'."
-            )
+            _prog("           UNLOCK WS-VAR\n" "           DISPLAY 'after unlock'.")
         )
         assert result.ast is not None
         stmts = result.ast.find_statements("UNLOCK_STATEMENT")
@@ -63,8 +60,8 @@ class TestUnlockParserDirectInvocation:
 
     def test_unlock_period_immediately(self):
         """UNLOCK followed by a period — peek returns PERIOD, branch 34->38."""
-        from cobolparser.lexer import CobolLexer
         from cobolparser.core.token_stream import TokenStream
+        from cobolparser.lexer import CobolLexer
         from cobolparser.parsers.statements.unlock_parser import UnlockStatementParser
 
         tokens = CobolLexer("UNLOCK.").tokenize()
@@ -76,8 +73,8 @@ class TestUnlockParserDirectInvocation:
 
     def test_unlock_empty_after_verb(self):
         """UNLOCK with empty stream after verb — branch 49->54 (stream is_empty)."""
-        from cobolparser.lexer import CobolLexer
         from cobolparser.core.token_stream import TokenStream
+        from cobolparser.lexer import CobolLexer
         from cobolparser.parsers.statements.unlock_parser import UnlockStatementParser
 
         tokens = CobolLexer("UNLOCK").tokenize()
