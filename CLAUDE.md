@@ -21,6 +21,10 @@ cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/
 # Install for development
 pip install -e ".[dev,docs]"
 
+# Optional: build Cython-accelerated hot-path modules in place
+pip install -e ".[fast]"
+python setup.py build_ext --inplace
+
 # Run all tests with coverage (81% minimum enforced)
 python -m pytest tests/ -v
 
@@ -55,6 +59,11 @@ cobol-parser dead-code <file.cbl>
 cobol-parser program-flow <file.cbl>
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
 cobol-parser generate-tests <file.cbl> -o <file.cut>
+cobol-parser io-sequence <file.cbl>
+cobol-parser move-type-check <file.cbl>
+cobol-parser linkage-check <file.cbl>
+cobol-parser language-env <file.cbl>
+cobol-parser ims-dli <file.cbl>
 ```
 
 ## Architecture
@@ -71,7 +80,9 @@ COBOL source (.cbl/.cob)
 
 ### Key Packages
 
-**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (235 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them.
+**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (236 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. When `cobolparser._lexer_fast` is compiled (see Cython acceleration below), the lexer transparently uses the Cython-accelerated subclass for hot-path methods; otherwise it falls back to pure Python.
+
+**`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor and override the inner hot-path methods with C-typed implementations. Built via `setup.py build_ext --inplace`; both `.c` files are checked in so the extension can be built without re-running Cython.
 
 **`cobolparser/preprocess/`** -- Preprocessing pipeline:
 - `__init__.py` -- `normalize_fixed_format()` converts fixed-format COBOL to free-form text (comment lines silently dropped). Also: `preprocess_conditional_compilation()`, `validate_copybook_content()`, `validate_level_numbers()`
@@ -133,7 +144,9 @@ COBOL source (.cbl/.cob)
 - `cobolcheck.py` -- Generates CobolCheck `.cut` test files from parsed AST
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 
-**`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches.
+**`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
+
+**`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 
 **`cobolparser/cli/`** -- Command-line interface:
 - `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, generate-tests
@@ -162,7 +175,7 @@ COBOL source (.cbl/.cob)
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
-| `simple_statement_parsers.py` | ALTER, CANCEL, CONTINUE, EXIT, GENERATE, GOBACK, RELEASE, RETURN, USE |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE |
 | `sort_merge_parsers.py` | SORT, MERGE |
 | `start_parser.py` | START |
 | `stop_parser.py` | STOP |
@@ -180,7 +193,7 @@ COBOL source (.cbl/.cob)
 | `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` |
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
-| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement` |
+| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement` |
 
 ### Data Flow Detail
 
@@ -215,6 +228,16 @@ ast.find_all_by_type("MoveStatement")
 # Parallel multi-file parsing
 from cobolparser import parse_files
 results = parse_files(["a.cbl", "b.cbl"])   # List[BatchResult]
+
+# Parallel parsing with copybook expansion
+from cobolparser.batch import parse_files_with_copybooks
+results = parse_files_with_copybooks(["a.cbl"], copybook_paths=["/path/to/copybooks"])
+
+# Profiling a parse
+from cobolparser.profiling import ProfilerContext
+with ProfilerContext() as prof:
+    parse_cobol(source)
+profile = prof.result   # ProfilingResult with FunctionProfile entries
 
 # Copybook expansion
 from cobolparser import expand_copybooks, parse_cobol_with_expansion
@@ -262,25 +285,25 @@ generate_cobolcheck_tests(source, output_path="program.cut")
 
 ## Test Structure
 
-**3,456 tests** across 5 directories (152 test files total):
+Roughly 200 test files across 5 directories:
 
 ```
 tests/
   conftest.py            # Shared fixtures: parser(), samples_dir()
   test_all_samples.py    # Smoke-tests all sample COBOL programs
-  unit/                  # Unit tests (135 files) - individual components
+  unit/                  # Unit tests - individual components
     analysis/            # IO coverage reporter, diagnostics, all analyzers
     cli/                 # CLI command tests
     generators/          # CobolCheck and flowchart generator tests
     io_statements/       # IO parser unit tests
-  integration/           # Integration tests (14 files) - end-to-end parsing
+  integration/           # Integration tests - end-to-end parsing
     io/                  # IO coverage reporting integration
     io_statements/       # IO statement parsing, VSAM
-  contracts/             # API contract tests (17 files) - stability guarantees
+  contracts/             # API contract tests - stability guarantees
     io_statements/       # IO statement contracts
   regression/            # Regression tests - backward compatibility
   performance/           # Performance benchmarks (factory, parser)
-  samples/               # Shared COBOL test fixtures (69 files)
+  samples/               # Shared COBOL test fixtures
     copybook_programs/   # Programs with COPY statements
     copybooks/           # Copybook files (.CPY)
     io/                  # IO test samples
@@ -336,8 +359,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
 ## Additional Directories
 
-- `docs/` -- 20+ markdown documentation files (architecture, API reference, dialect guides, etc.)
-- `tools/` -- Utility scripts for IO cataloging, coverage analysis, code metrics, and performance profiling
-- `baselines/` -- Stored test baselines for regression comparison
+- `docs/` -- Markdown documentation (architecture, API reference, dialect guides, etc.)
+- `tools/` -- Utility scripts grouped by area:
+  - `io_catalog/validate_catalog.py` -- Validates the IO operation catalog
+  - `io_coverage/` -- `generate_artifact.py` and `render_markdown.py` for IO coverage reports
+  - `metrics/io_ticket_tracker.py` -- Tracks IO-related work items
+  - `perf/io_threshold_guard.py` -- Guards IO performance against thresholds
+- `scripts/validate_io_coverage.py` -- Standalone IO coverage validator
+- `baselines/` -- Stored coverage baselines (`current-coverage.json`, `final.json`) for regression comparison
 - `benchmarks/` -- Performance benchmark programs
-- `setup.py` -- Optional mypyc compilation support (compiles 20 core modules to C extensions)
+- `reports/` -- Audit reports
+- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time.
