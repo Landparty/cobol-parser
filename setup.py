@@ -31,8 +31,9 @@ def _build_ext_modules() -> list:
     try:
         from Cython.Build import cythonize
 
-        sources = [os.path.join(_PKG, f"{m}.pyx") for m in _MODULES]
-        extensions = [Extension(f"{_PKG}.{m}", [s]) for m, s in zip(_MODULES, sources)]
+        extensions = [
+            Extension(f"{_PKG}.{m}", [os.path.join(_PKG, f"{m}.pyx")]) for m in _MODULES
+        ]
         return cythonize(
             extensions,
             compiler_directives={
