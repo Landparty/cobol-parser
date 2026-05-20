@@ -43,27 +43,34 @@ class PictureClause(ASTNode):
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
-        # Check for sign
-        if "S" in self.pattern:
+        pattern = self.pattern
+
+        # Cheap membership tests before regex work -- the regexes below
+        # were being invoked even when they could not possibly match.
+        if "S" in pattern:
             self.is_signed = True
 
-        # Check for scaling factor P
-        p_matches = _PIC_P_FACTOR_RE.findall(self.pattern)
-        if p_matches:
-            self.has_scaling_factor = True
-            if p_matches[0][1]:  # P(n) format
-                self.scaling_factor = int(p_matches[0][1])
-            else:  # Single P
-                self.scaling_factor = 1
+        if "P" in pattern:
+            p_matches = _PIC_P_FACTOR_RE.findall(pattern)
+            if p_matches:
+                self.has_scaling_factor = True
+                if p_matches[0][1]:  # P(n) format
+                    self.scaling_factor = int(p_matches[0][1])
+                else:  # Single P
+                    self.scaling_factor = 1
 
-        # Handle various PICTURE patterns
+        # First-char dispatch -- the original code tried up to 8 regex
+        # patterns in sequence for every PICTURE clause. The first char
+        # of a COBOL PICTURE string rules out most of them.
+        first = pattern[0] if pattern else ""
 
         # 1. Basic alphanumeric patterns: X, X(n), A, A(n)
-        alpha_match = _PIC_ALPHA_RE.match(self.pattern)
-        if alpha_match:
-            count_str = alpha_match.group(3)
-            self.size = int(count_str) if count_str else 1
-            return
+        if first == "X" or first == "A":
+            alpha_match = _PIC_ALPHA_RE.match(pattern)
+            if alpha_match:
+                count_str = alpha_match.group(3)
+                self.size = int(count_str) if count_str else 1
+                return
 
         # 2. Basic numeric patterns: 9, 9(n)
         basic_numeric = _PIC_BASIC_NUMERIC_RE.match(self.pattern)
