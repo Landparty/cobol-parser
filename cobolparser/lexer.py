@@ -321,7 +321,7 @@ class TokenType(Enum):
     INVALID_TOKEN = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class Token:
     """Represents a lexical token in COBOL source code."""
 

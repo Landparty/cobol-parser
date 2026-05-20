@@ -54,6 +54,20 @@ _COMP_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Hoisted out of _parse_picture_clause -- the union was being rebuilt on
+# every iteration of that method's inner loop.
+_PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
+    _COMP_KEYWORDS | {"VALUE", "USAGE", "OCCURS", "REDEFINES"}
+)
+_PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.IDENTIFIER,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.STRING_LITERAL,
+        TokenType.LEVEL_NUMBER,
+    }
+)
+
 
 class DataDivisionParser(BaseDivisionParser):
     """Parser for COBOL Data Division.
@@ -423,8 +437,13 @@ class DataDivisionParser(BaseDivisionParser):
             ):
                 break
 
+            # Compute upper-cased token value once -- the chain of clause
+            # checks below would otherwise call ``.upper()`` up to six times
+            # per loop iteration on the same string.
+            value_upper = token.value.upper() if token.value else ""
+
             #  PICTURE/PIC clause
-            if token.value and token.value.upper() in ["PICTURE", "PIC"]:
+            if value_upper == "PICTURE" or value_upper == "PIC":
                 token_stream.consume()  # Consume PIC keyword
                 picture_pattern = self._parse_picture_clause(token_stream)
                 if picture_pattern:
@@ -433,22 +452,22 @@ class DataDivisionParser(BaseDivisionParser):
                     )
 
             # VALUE clause
-            elif token.value and token.value.upper() == "VALUE":
+            elif value_upper == "VALUE":
                 token_stream.consume()  # Consume VALUE keyword
                 value = self._parse_value_clause(token_stream)
                 if value:
                     data_item.set_value_clause(value)
 
             # USAGE clause
-            elif token.value and token.value.upper() == "USAGE":
+            elif value_upper == "USAGE":
                 token_stream.consume()  # Consume USAGE keyword
                 usage = self._parse_usage_clause(token_stream)
                 if usage:
                     data_item.set_usage(usage)
 
             # COMP, COMP-3, etc. without USAGE keyword
-            elif token.value and token.value.upper() in _COMP_KEYWORDS:
-                data_item.set_usage(token.value.upper())
+            elif value_upper in _COMP_KEYWORDS:
+                data_item.set_usage(value_upper)
                 token_stream.consume()
 
             # Also check for COMP token types (COMP_1, COMP_2, COMP_3, etc.)
@@ -457,7 +476,7 @@ class DataDivisionParser(BaseDivisionParser):
                 token_stream.consume()
 
             # REDEFINES clause
-            elif token.value and token.value.upper() == "REDEFINES":
+            elif value_upper == "REDEFINES":
                 token_stream.consume()  # Consume REDEFINES keyword
                 redef_token = token_stream.peek()
                 if redef_token and redef_token.type == TokenType.IDENTIFIER:
@@ -465,7 +484,7 @@ class DataDivisionParser(BaseDivisionParser):
                     token_stream.consume()
 
             # OCCURS clause
-            elif token.value and token.value.upper() == "OCCURS":
+            elif value_upper == "OCCURS":
                 token_stream.consume()  # Consume OCCURS keyword
                 occurs = OccursClause(location)
 
@@ -751,21 +770,14 @@ class DataDivisionParser(BaseDivisionParser):
                 if token.type == TokenType.PERIOD:
                     break
                 # Stop at keywords that follow picture clause
-                if token.value and token.value.upper() in (
-                    _COMP_KEYWORDS | {"VALUE", "USAGE", "OCCURS", "REDEFINES"}
-                ):
+                if token.value and token.value.upper() in _PICTURE_TERMINATOR_KEYWORDS:
                     break
                 # Also stop at COMP token types
                 if token.type in _COMP_TOKEN_TYPES:
                     break
 
             # Collect picture pattern tokens
-            if token.type in [
-                TokenType.IDENTIFIER,
-                TokenType.NUMERIC_LITERAL,
-                TokenType.STRING_LITERAL,
-                TokenType.LEVEL_NUMBER,
-            ]:
+            if token.type in _PICTURE_PATTERN_TOKEN_TYPES:
                 # All these token types can be part of a picture pattern
                 token_value = token.value
                 if paren_depth == 0 and token_value.endswith("."):
