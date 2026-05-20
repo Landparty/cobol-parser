@@ -557,16 +557,11 @@ class DataDivisionParser(BaseDivisionParser):
                     data_item.set_occurs_clause(occurs)
 
             else:
-                # Skip unknown tokens/clauses
-                if tok_type == TokenType.NEWLINE:
-                    token_stream.consume()
-                elif tok_type in _DIVISION_TOKEN_TYPES:
-                    # Never consume division tokens
-                    break
-                elif tok_type not in (TokenType.PERIOD, TokenType.LEVEL_NUMBER):
-                    token_stream.consume()
-                else:
-                    break
+                # Skip unknown tokens/clauses. PERIOD, LEVEL_NUMBER, and
+                # division tokens are already handled at the top of the
+                # loop (they ``break`` before we get here), so the only
+                # remaining case is "consume and continue".
+                token_stream.consume()
 
         return data_item
 
