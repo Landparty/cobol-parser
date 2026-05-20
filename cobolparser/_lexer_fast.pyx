@@ -171,6 +171,43 @@ class CobolLexer(_CobolLexerBase):
         return out_tokens
 
     # ------------------------------------------------------------------
+    # _try_single_line_string
+    # ------------------------------------------------------------------
+    def _try_single_line_string(self, str text, int start_pos, int line_num, int start_col):
+        """Read a single-line string literal; returns ``(token | None, new_pos, unterminated)``.
+
+        C-typed loop; matches the pure-Python implementation including the
+        doubled-quote escape ``''`` -> ``'``.
+        """
+        cdef str quote = text[start_pos]
+        cdef int pos = start_pos + 1
+        cdef int length = len(text)
+        cdef str ch
+        cdef list chars = []
+
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+
+        while pos < length:
+            ch = text[pos]
+            if ch == quote:
+                if pos + 1 < length and text[pos + 1] == quote:
+                    # doubled quote escape (e.g. '' inside '...')
+                    chars.append(quote)
+                    pos += 2
+                    continue
+                pos += 1
+                return (
+                    Token(TokenType.STRING_LITERAL, "".join(chars), location),
+                    pos,
+                    False,
+                )
+            chars.append(ch)
+            pos += 1
+
+        # Not closed on this line
+        return None, pos, True
+
+    # ------------------------------------------------------------------
     # read_number_from_text
     # ------------------------------------------------------------------
     def read_number_from_text(self, str text, int start_pos, int line_num, int start_col):
