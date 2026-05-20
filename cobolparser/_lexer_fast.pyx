@@ -21,6 +21,7 @@ from cobolparser.lexer import (
     TokenType,
     LexerError,
     _LEVEL_NUM_RE,
+    _LEVEL_NUMBER_1_2DIGIT_RE,
     _FF_INDICATOR,
     _DIVISION_FIRST,
 )
@@ -109,6 +110,51 @@ class CobolLexer(_CobolLexerBase):
             token_type = TokenType.IDENTIFIER
 
         return Token(token_type, value, location), pos
+
+    # ------------------------------------------------------------------
+    # read_number_from_text
+    # ------------------------------------------------------------------
+    def read_number_from_text(self, str text, int start_pos, int line_num, int start_col):
+        """Read a numeric literal (or level number) starting at *start_pos*.
+
+        C-typed scan loop -- avoids the per-char Python attribute lookups in
+        the pure-Python fallback. Behaviour matches the base implementation.
+        """
+        cdef int pos          = start_pos
+        cdef int length       = len(text)
+        cdef bint has_decimal = False
+        cdef bint has_exponent = False
+        cdef str char
+
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+
+        while pos < length:
+            char = text[pos]
+            if char.isdigit():
+                pos += 1
+            elif char == "." and not has_decimal and not has_exponent:
+                has_decimal = True
+                pos += 1
+            elif (char == "E" or char == "e") and pos > start_pos and not has_exponent:
+                has_exponent = True
+                pos += 1
+                if pos < length and (text[pos] == "+" or text[pos] == "-"):
+                    pos += 1
+            else:
+                break
+
+        value = text[start_pos:pos]
+
+        # Level number 01-99 detection mirrors the pure-Python path
+        if (
+            not has_decimal
+            and not has_exponent
+            and _LEVEL_NUMBER_1_2DIGIT_RE.match(value)
+            and 1 <= int(value) <= 99
+        ):
+            return Token(TokenType.LEVEL_NUMBER, value, location), pos
+
+        return Token(TokenType.NUMERIC_LITERAL, value, location), pos
 
     # ------------------------------------------------------------------
     # tokenize_program_text
