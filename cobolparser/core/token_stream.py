@@ -22,6 +22,7 @@ class TokenStream(ITokenStream):
         """
         self._tokens = tokens
         self._pos = 0
+        self._len = len(tokens)
         self._lookahead_size = lookahead
         self._parse_context = None
 
@@ -35,9 +36,12 @@ class TokenStream(ITokenStream):
             Token at position+offset, or None if out of bounds
         """
         idx = self._pos + offset
-        if 0 <= idx < len(self._tokens):
+        if idx < 0:
+            return None
+        try:
             return self._tokens[idx]
-        return None
+        except IndexError:
+            return None
 
     def consume(self) -> Token:
         """Consume and return the next token (ITokenStream interface).
@@ -48,9 +52,10 @@ class TokenStream(ITokenStream):
         Raises:
             UnexpectedEndOfInput: If stream is exhausted
         """
-        token = self.peek()
-        if token is None:
-            raise UnexpectedEndOfInput()
+        try:
+            token = self._tokens[self._pos]
+        except IndexError as exc:
+            raise UnexpectedEndOfInput() from exc
         self._pos += 1
         return token
 
@@ -82,7 +87,7 @@ class TokenStream(ITokenStream):
         Returns:
             True if no more tokens, False otherwise
         """
-        return self._pos >= len(self._tokens)
+        return self._pos >= self._len
 
     def match(self, *types: TokenType) -> bool:
         """Check if next token matches any of the given types."""
