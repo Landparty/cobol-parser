@@ -403,16 +403,12 @@ class DataDivisionParser(BaseDivisionParser):
         if token and token.type == TokenType.IDENTIFIER:
             name = token.value
             token_stream.consume()
-        elif token and token.value and token.value.upper() in ["FILLER"]:
+        elif token and token.value and token.value.upper() == "FILLER":
             name = "FILLER"
             token_stream.consume()
         else:
-            # Anonymous data item
-            name = (
-                f"ANONYMOUS-{level}-{location.line}"
-                if hasattr(location, "line")
-                else f"ANONYMOUS-{level}"
-            )
+            # Anonymous data item; ``location`` is always a SourceLocation.
+            name = f"ANONYMOUS-{level}-{location.line}"
 
         # Create data item
         data_item = CobolDataItem(name, level, location)
@@ -423,22 +419,19 @@ class DataDivisionParser(BaseDivisionParser):
             if not token:
                 break
 
+            tok_type = token.type
+
             # Period ends this data item
-            if token.type == TokenType.PERIOD:
+            if tok_type == TokenType.PERIOD:
                 token_stream.consume()
                 break
 
             # Level number starts next item
-            if token.type == TokenType.LEVEL_NUMBER:
+            if tok_type == TokenType.LEVEL_NUMBER:
                 break
 
             # Division tokens end this data item (don't consume them)
-            if token.type in (
-                TokenType.IDENTIFICATION_DIVISION,
-                TokenType.ENVIRONMENT_DIVISION,
-                TokenType.DATA_DIVISION,
-                TokenType.PROCEDURE_DIVISION,
-            ):
+            if tok_type in _DIVISION_TOKEN_TYPES:
                 break
 
             # Compute upper-cased token value once -- the chain of clause
@@ -565,17 +558,12 @@ class DataDivisionParser(BaseDivisionParser):
 
             else:
                 # Skip unknown tokens/clauses
-                if token.type == TokenType.NEWLINE:
+                if tok_type == TokenType.NEWLINE:
                     token_stream.consume()
-                elif token.type in (
-                    TokenType.IDENTIFICATION_DIVISION,
-                    TokenType.ENVIRONMENT_DIVISION,
-                    TokenType.DATA_DIVISION,
-                    TokenType.PROCEDURE_DIVISION,
-                ):
+                elif tok_type in _DIVISION_TOKEN_TYPES:
                     # Never consume division tokens
                     break
-                elif token.type not in [TokenType.PERIOD, TokenType.LEVEL_NUMBER]:
+                elif tok_type not in (TokenType.PERIOD, TokenType.LEVEL_NUMBER):
                     token_stream.consume()
                 else:
                     break
