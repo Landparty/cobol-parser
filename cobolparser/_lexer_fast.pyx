@@ -112,6 +112,65 @@ class CobolLexer(_CobolLexerBase):
         return Token(token_type, value, location), pos
 
     # ------------------------------------------------------------------
+    # tokenize  (outer per-line loop)
+    # ------------------------------------------------------------------
+    def tokenize(self):
+        """Tokenize the entire COBOL source code.
+
+        Mirrors the pure-Python implementation but with C-typed loop
+        counters and direct list operations to remove the per-line Python
+        overhead that dominates the profile once the inner tokenization
+        methods are Cythonized.
+        """
+        cdef int line_num
+        cdef int n_lines
+        cdef bint free_form = self.free_form
+        cdef list lines = self.lines
+        cdef list tokens
+        cdef list out_tokens = []
+        cdef str line
+        cdef str program_text
+
+        self.tokens = out_tokens
+        self.errors = []
+
+        n_lines = len(lines)
+        for line_num in range(n_lines):
+            line = lines[line_num]
+            if free_form:
+                if line.endswith("\n"):
+                    program_text = line[:-1]
+                else:
+                    program_text = line
+                tokens = self.tokenize_program_text(program_text, line_num, 1)
+                if tokens:
+                    out_tokens.extend(tokens)
+                    out_tokens.append(
+                        Token(
+                            TokenType.NEWLINE,
+                            "\n",
+                            SourceLocation(line_num + 1, len(line) + 1, 1),
+                        )
+                    )
+            else:
+                tokens = self.handle_cobol_line_format(line, line_num)
+                if tokens:
+                    out_tokens.extend(tokens)
+                    if tokens[0].type is not TokenType.COMMENT:
+                        out_tokens.append(
+                            Token(
+                                TokenType.NEWLINE,
+                                "\n",
+                                SourceLocation(line_num + 1, len(line) + 1, 1),
+                            )
+                        )
+
+        out_tokens.append(
+            Token(TokenType.EOF, "", SourceLocation(n_lines + 1, 1, 1))
+        )
+        return out_tokens
+
+    # ------------------------------------------------------------------
     # read_number_from_text
     # ------------------------------------------------------------------
     def read_number_from_text(self, str text, int start_pos, int line_num, int start_col):
