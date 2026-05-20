@@ -68,6 +68,33 @@ _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Hoisted out of _parse_section -- these were being rebuilt as set
+# literals on every call.
+_SECTION_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "SECTION",
+        "FILE",
+        "WORKING-STORAGE",
+        "LOCAL-STORAGE",
+        "LINKAGE",
+        "DATA",
+        "PROCEDURE",
+        "ENVIRONMENT",
+        "IDENTIFICATION",
+    }
+)
+_SECTION_BREAK_HEADERS: frozenset[str] = frozenset(
+    {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"}
+)
+_DIVISION_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.IDENTIFICATION_DIVISION,
+        TokenType.ENVIRONMENT_DIVISION,
+        TokenType.DATA_DIVISION,
+        TokenType.PROCEDURE_DIVISION,
+    }
+)
+
 
 class DataDivisionParser(BaseDivisionParser):
     """Parser for COBOL Data Division.
@@ -161,23 +188,6 @@ class DataDivisionParser(BaseDivisionParser):
         # Parse data items until we reach next section or division
         data_items: list[ConditionNameItem | RenamesItem | CobolDataItem] = []
         exec_sql_items: list[ExecSQLStatement] = []
-        section_keywords = {
-            "SECTION",
-            "FILE",
-            "WORKING-STORAGE",
-            "LOCAL-STORAGE",
-            "LINKAGE",
-            "DATA",
-            "PROCEDURE",
-            "ENVIRONMENT",
-            "IDENTIFICATION",
-        }
-        division_token_types = {
-            TokenType.IDENTIFICATION_DIVISION,
-            TokenType.ENVIRONMENT_DIVISION,
-            TokenType.DATA_DIVISION,
-            TokenType.PROCEDURE_DIVISION,
-        }
         paren_depth = 0  # Track nesting depth of parentheses
         current_fd_name: str | None = None  # FD/SD file name for FILE SECTION items
 
@@ -186,17 +196,29 @@ class DataDivisionParser(BaseDivisionParser):
             if not token:
                 break
 
+            tok_type = token.type
+            tok_value = token.value
+
             # Check if we've reached next section/division (by token type, not just value check)
-            if token.type in division_token_types:
+            if tok_type in _DIVISION_TOKEN_TYPES:
                 break
 
+            # Cheap parenthesis tracking before any keyword work.
+            if tok_value == "(":
+                paren_depth += 1
+                token_stream.consume()
+                continue
+            if tok_value == ")":
+                paren_depth -= 1
+                token_stream.consume()
+                continue
+
+            # Compute upper-cased value once per iteration -- the next two
+            # checks each need it (and several deeper branches also do).
+            value_upper = tok_value.upper() if tok_value else ""
+
             # Stop when we encounter the next section header or division header.
-            if token.value and token.value.upper() in {
-                "FILE",
-                "WORKING-STORAGE",
-                "LOCAL-STORAGE",
-                "LINKAGE",
-            }:
+            if value_upper in _SECTION_BREAK_HEADERS:
                 next_token = token_stream.peek(1)
                 if (
                     next_token
@@ -206,33 +228,17 @@ class DataDivisionParser(BaseDivisionParser):
                     break
 
             # Also check for section keywords that appear as identifiers
-            if (
-                token.value
-                and token.value.upper() in section_keywords
-                and token.type != TokenType.IDENTIFIER
-            ):
+            if value_upper in _SECTION_KEYWORDS and tok_type != TokenType.IDENTIFIER:
                 break
-
-            # Track parentheses depth to avoid treating numbers inside parens as level numbers
-            if token.value and token.value == "(":
-                paren_depth += 1
-                token_stream.consume()
-                continue
-            elif token.value and token.value == ")":
-                paren_depth -= 1
-                token_stream.consume()
-                continue
 
             # In FILE SECTION, detect FD/SD declarations to build record-to-file mapping
             if (
                 section_name == "FILE"
                 and paren_depth == 0
                 and (
-                    token.type in (TokenType.FD, TokenType.SD)
+                    tok_type in (TokenType.FD, TokenType.SD)
                     or (
-                        token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() in ("FD", "SD")
+                        tok_type == TokenType.IDENTIFIER and value_upper in ("FD", "SD")
                     )
                 )
             ):
@@ -256,10 +262,8 @@ class DataDivisionParser(BaseDivisionParser):
 
             # Parse EXEC SQL blocks that appear in the data division
             # (e.g. DCLGEN-generated DECLARE TABLE or INCLUDE SQLCA)
-            is_exec = token.type == TokenType.EXEC or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "EXEC"
+            is_exec = tok_type == TokenType.EXEC or (
+                tok_type == TokenType.IDENTIFIER and value_upper == "EXEC"
             )
             if is_exec and paren_depth == 0:
                 next_tok = token_stream.peek(1)
@@ -278,9 +282,9 @@ class DataDivisionParser(BaseDivisionParser):
                     continue
 
             # Try to parse a data item (should start with level number, but not inside parentheses)
-            if token.type == TokenType.LEVEL_NUMBER and paren_depth == 0:
+            if tok_type == TokenType.LEVEL_NUMBER and paren_depth == 0:
                 try:
-                    lvl = int(token.value)
+                    lvl = int(tok_value)
                 except (ValueError, TypeError):
                     lvl = -1
 
