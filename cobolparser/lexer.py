@@ -13,7 +13,7 @@ This module provides comprehensive tokenization of COBOL source code including:
 import re
 import sys
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import IntEnum, auto
 
 from .models.ast_base import SourceLocation
 from .plugins.core import DialectType, ParseError
@@ -30,8 +30,13 @@ _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 _DIVISION_FIRST = frozenset("IEDPiedp")
 
 
-class TokenType(Enum):
-    """Token types for COBOL lexical analysis."""
+class TokenType(IntEnum):
+    """Token types for COBOL lexical analysis.
+
+    Using ``IntEnum`` (vs plain ``Enum``) makes membership tests and
+    ``hash()`` lookups significantly cheaper -- these are on the hot path
+    of every ``TokenStream.match`` and registry-cache key construction.
+    """
 
     # Literals
     STRING_LITERAL = auto()
@@ -321,7 +326,7 @@ class TokenType(Enum):
     INVALID_TOKEN = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class Token:
     """Represents a lexical token in COBOL source code."""
 

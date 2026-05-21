@@ -54,6 +54,66 @@ _COMP_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Hoisted out of _parse_picture_clause -- the union was being rebuilt on
+# every iteration of that method's inner loop.
+_PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
+    _COMP_KEYWORDS | {"VALUE", "USAGE", "OCCURS", "REDEFINES"}
+)
+_PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.IDENTIFIER,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.STRING_LITERAL,
+        TokenType.LEVEL_NUMBER,
+    }
+)
+
+# Hoisted out of _parse_section -- these were being rebuilt as set
+# literals on every call.
+_SECTION_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "SECTION",
+        "FILE",
+        "WORKING-STORAGE",
+        "LOCAL-STORAGE",
+        "LINKAGE",
+        "DATA",
+        "PROCEDURE",
+        "ENVIRONMENT",
+        "IDENTIFICATION",
+    }
+)
+_SECTION_BREAK_HEADERS: frozenset[str] = frozenset(
+    {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"}
+)
+_DIVISION_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.IDENTIFICATION_DIVISION,
+        TokenType.ENVIRONMENT_DIVISION,
+        TokenType.DATA_DIVISION,
+        TokenType.PROCEDURE_DIVISION,
+    }
+)
+
+# Optional Cython acceleration for the picture-clause inner loop. The
+# pure-Python implementation in ``_parse_picture_clause`` below remains
+# the authoritative behaviour; we only delegate when the extension is
+# available and the token stream is the standard ``TokenStream`` (so we
+# can safely poke its underlying token list and cursor).
+try:
+    from cobolparser._data_fast import (  # type: ignore[import-not-found]
+        parse_data_item_clauses_fast as _fast_data_item_clauses,
+    )
+    from cobolparser._data_fast import (
+        parse_picture_clause_fast as _fast_pic,
+    )
+
+    _HAS_DATA_FAST = True
+except ImportError:
+    _fast_pic = None
+    _fast_data_item_clauses = None
+    _HAS_DATA_FAST = False
+
 
 class DataDivisionParser(BaseDivisionParser):
     """Parser for COBOL Data Division.
@@ -147,23 +207,6 @@ class DataDivisionParser(BaseDivisionParser):
         # Parse data items until we reach next section or division
         data_items: list[ConditionNameItem | RenamesItem | CobolDataItem] = []
         exec_sql_items: list[ExecSQLStatement] = []
-        section_keywords = {
-            "SECTION",
-            "FILE",
-            "WORKING-STORAGE",
-            "LOCAL-STORAGE",
-            "LINKAGE",
-            "DATA",
-            "PROCEDURE",
-            "ENVIRONMENT",
-            "IDENTIFICATION",
-        }
-        division_token_types = {
-            TokenType.IDENTIFICATION_DIVISION,
-            TokenType.ENVIRONMENT_DIVISION,
-            TokenType.DATA_DIVISION,
-            TokenType.PROCEDURE_DIVISION,
-        }
         paren_depth = 0  # Track nesting depth of parentheses
         current_fd_name: str | None = None  # FD/SD file name for FILE SECTION items
 
@@ -172,17 +215,29 @@ class DataDivisionParser(BaseDivisionParser):
             if not token:
                 break
 
+            tok_type = token.type
+            tok_value = token.value
+
             # Check if we've reached next section/division (by token type, not just value check)
-            if token.type in division_token_types:
+            if tok_type in _DIVISION_TOKEN_TYPES:
                 break
 
+            # Cheap parenthesis tracking before any keyword work.
+            if tok_value == "(":
+                paren_depth += 1
+                token_stream.consume()
+                continue
+            if tok_value == ")":
+                paren_depth -= 1
+                token_stream.consume()
+                continue
+
+            # Compute upper-cased value once per iteration -- the next two
+            # checks each need it (and several deeper branches also do).
+            value_upper = tok_value.upper() if tok_value else ""
+
             # Stop when we encounter the next section header or division header.
-            if token.value and token.value.upper() in {
-                "FILE",
-                "WORKING-STORAGE",
-                "LOCAL-STORAGE",
-                "LINKAGE",
-            }:
+            if value_upper in _SECTION_BREAK_HEADERS:
                 next_token = token_stream.peek(1)
                 if (
                     next_token
@@ -192,33 +247,17 @@ class DataDivisionParser(BaseDivisionParser):
                     break
 
             # Also check for section keywords that appear as identifiers
-            if (
-                token.value
-                and token.value.upper() in section_keywords
-                and token.type != TokenType.IDENTIFIER
-            ):
+            if value_upper in _SECTION_KEYWORDS and tok_type != TokenType.IDENTIFIER:
                 break
-
-            # Track parentheses depth to avoid treating numbers inside parens as level numbers
-            if token.value and token.value == "(":
-                paren_depth += 1
-                token_stream.consume()
-                continue
-            elif token.value and token.value == ")":
-                paren_depth -= 1
-                token_stream.consume()
-                continue
 
             # In FILE SECTION, detect FD/SD declarations to build record-to-file mapping
             if (
                 section_name == "FILE"
                 and paren_depth == 0
                 and (
-                    token.type in (TokenType.FD, TokenType.SD)
+                    tok_type in (TokenType.FD, TokenType.SD)
                     or (
-                        token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() in ("FD", "SD")
+                        tok_type == TokenType.IDENTIFIER and value_upper in ("FD", "SD")
                     )
                 )
             ):
@@ -242,10 +281,8 @@ class DataDivisionParser(BaseDivisionParser):
 
             # Parse EXEC SQL blocks that appear in the data division
             # (e.g. DCLGEN-generated DECLARE TABLE or INCLUDE SQLCA)
-            is_exec = token.type == TokenType.EXEC or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "EXEC"
+            is_exec = tok_type == TokenType.EXEC or (
+                tok_type == TokenType.IDENTIFIER and value_upper == "EXEC"
             )
             if is_exec and paren_depth == 0:
                 next_tok = token_stream.peek(1)
@@ -264,9 +301,9 @@ class DataDivisionParser(BaseDivisionParser):
                     continue
 
             # Try to parse a data item (should start with level number, but not inside parentheses)
-            if token.type == TokenType.LEVEL_NUMBER and paren_depth == 0:
+            if tok_type == TokenType.LEVEL_NUMBER and paren_depth == 0:
                 try:
-                    lvl = int(token.value)
+                    lvl = int(tok_value)
                 except (ValueError, TypeError):
                     lvl = -1
 
@@ -385,19 +422,45 @@ class DataDivisionParser(BaseDivisionParser):
         if token and token.type == TokenType.IDENTIFIER:
             name = token.value
             token_stream.consume()
-        elif token and token.value and token.value.upper() in ["FILLER"]:
+        elif token and token.value and token.value.upper() == "FILLER":
             name = "FILLER"
             token_stream.consume()
         else:
-            # Anonymous data item
-            name = (
-                f"ANONYMOUS-{level}-{location.line}"
-                if hasattr(location, "line")
-                else f"ANONYMOUS-{level}"
-            )
+            # Anonymous data item; ``location`` is always a SourceLocation.
+            name = f"ANONYMOUS-{level}-{location.line}"
 
         # Create data item
         data_item = CobolDataItem(name, level, location)
+
+        # Fast path: drive the clause-dispatch loop in Cython. VALUE and
+        # USAGE clauses still call back into the Python helpers below
+        # via ``parser_self`` -- the fast helper handles only the
+        # token-walking orchestration.
+        if _HAS_DATA_FAST:
+            tokens_list = getattr(token_stream, "_tokens", None)
+            if tokens_list is not None:
+                new_pos = _fast_data_item_clauses(
+                    tokens_list,
+                    token_stream._pos,  # type: ignore[attr-defined]
+                    data_item,
+                    location,
+                    self,
+                    token_stream,
+                    _PICTURE_TERMINATOR_KEYWORDS,
+                    _PICTURE_PATTERN_TOKEN_TYPES,
+                    _COMP_KEYWORDS,
+                    _COMP_TOKEN_TYPES,
+                    _DIVISION_TOKEN_TYPES,
+                    PictureClause,
+                    OccursClause,
+                    TokenType.PERIOD,
+                    TokenType.LEVEL_NUMBER,
+                    TokenType.IDENTIFIER,
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.NEWLINE,
+                )
+                token_stream._pos = new_pos  # type: ignore[attr-defined]
+                return data_item
 
         # Parse clauses until period or next item
         while not token_stream.is_empty():
@@ -405,26 +468,28 @@ class DataDivisionParser(BaseDivisionParser):
             if not token:
                 break
 
+            tok_type = token.type
+
             # Period ends this data item
-            if token.type == TokenType.PERIOD:
+            if tok_type == TokenType.PERIOD:
                 token_stream.consume()
                 break
 
             # Level number starts next item
-            if token.type == TokenType.LEVEL_NUMBER:
+            if tok_type == TokenType.LEVEL_NUMBER:
                 break
 
             # Division tokens end this data item (don't consume them)
-            if token.type in (
-                TokenType.IDENTIFICATION_DIVISION,
-                TokenType.ENVIRONMENT_DIVISION,
-                TokenType.DATA_DIVISION,
-                TokenType.PROCEDURE_DIVISION,
-            ):
+            if tok_type in _DIVISION_TOKEN_TYPES:
                 break
 
+            # Compute upper-cased token value once -- the chain of clause
+            # checks below would otherwise call ``.upper()`` up to six times
+            # per loop iteration on the same string.
+            value_upper = token.value.upper() if token.value else ""
+
             #  PICTURE/PIC clause
-            if token.value and token.value.upper() in ["PICTURE", "PIC"]:
+            if value_upper == "PICTURE" or value_upper == "PIC":
                 token_stream.consume()  # Consume PIC keyword
                 picture_pattern = self._parse_picture_clause(token_stream)
                 if picture_pattern:
@@ -433,22 +498,22 @@ class DataDivisionParser(BaseDivisionParser):
                     )
 
             # VALUE clause
-            elif token.value and token.value.upper() == "VALUE":
+            elif value_upper == "VALUE":
                 token_stream.consume()  # Consume VALUE keyword
                 value = self._parse_value_clause(token_stream)
                 if value:
                     data_item.set_value_clause(value)
 
             # USAGE clause
-            elif token.value and token.value.upper() == "USAGE":
+            elif value_upper == "USAGE":
                 token_stream.consume()  # Consume USAGE keyword
                 usage = self._parse_usage_clause(token_stream)
                 if usage:
                     data_item.set_usage(usage)
 
             # COMP, COMP-3, etc. without USAGE keyword
-            elif token.value and token.value.upper() in _COMP_KEYWORDS:
-                data_item.set_usage(token.value.upper())
+            elif value_upper in _COMP_KEYWORDS:
+                data_item.set_usage(value_upper)
                 token_stream.consume()
 
             # Also check for COMP token types (COMP_1, COMP_2, COMP_3, etc.)
@@ -457,7 +522,7 @@ class DataDivisionParser(BaseDivisionParser):
                 token_stream.consume()
 
             # REDEFINES clause
-            elif token.value and token.value.upper() == "REDEFINES":
+            elif value_upper == "REDEFINES":
                 token_stream.consume()  # Consume REDEFINES keyword
                 redef_token = token_stream.peek()
                 if redef_token and redef_token.type == TokenType.IDENTIFIER:
@@ -465,7 +530,7 @@ class DataDivisionParser(BaseDivisionParser):
                     token_stream.consume()
 
             # OCCURS clause
-            elif token.value and token.value.upper() == "OCCURS":
+            elif value_upper == "OCCURS":
                 token_stream.consume()  # Consume OCCURS keyword
                 occurs = OccursClause(location)
 
@@ -541,21 +606,11 @@ class DataDivisionParser(BaseDivisionParser):
                     data_item.set_occurs_clause(occurs)
 
             else:
-                # Skip unknown tokens/clauses
-                if token.type == TokenType.NEWLINE:
-                    token_stream.consume()
-                elif token.type in (
-                    TokenType.IDENTIFICATION_DIVISION,
-                    TokenType.ENVIRONMENT_DIVISION,
-                    TokenType.DATA_DIVISION,
-                    TokenType.PROCEDURE_DIVISION,
-                ):
-                    # Never consume division tokens
-                    break
-                elif token.type not in [TokenType.PERIOD, TokenType.LEVEL_NUMBER]:
-                    token_stream.consume()
-                else:
-                    break
+                # Skip unknown tokens/clauses. PERIOD, LEVEL_NUMBER, and
+                # division tokens are already handled at the top of the
+                # loop (they ``break`` before we get here), so the only
+                # remaining case is "consume and continue".
+                token_stream.consume()
 
         return data_item
 
@@ -738,6 +793,28 @@ class DataDivisionParser(BaseDivisionParser):
 
         Returns the picture pattern string (e.g., 'X(10)', '9(5)', '9(7)V99').
         """
+        # Fast path: when the Cython helper is compiled and we're handed a
+        # standard ``TokenStream`` (which exposes ``_tokens`` and ``_pos``
+        # as documented internals), drive the inner loop in C and update
+        # the stream cursor in one shot. Falls through to the pure-Python
+        # walker below otherwise.
+        if _HAS_DATA_FAST:
+            tokens = getattr(token_stream, "_tokens", None)
+            if tokens is not None:
+                pattern, new_pos = _fast_pic(
+                    tokens,
+                    token_stream._pos,  # type: ignore[attr-defined]
+                    _PICTURE_TERMINATOR_KEYWORDS,
+                    _PICTURE_PATTERN_TOKEN_TYPES,
+                    _COMP_TOKEN_TYPES,
+                    TokenType.PERIOD,
+                    TokenType.NEWLINE,
+                )
+                token_stream._pos = new_pos  # type: ignore[attr-defined]
+                # The Cython helper is untyped to mypy; it returns either
+                # ``None`` or the joined pattern string.
+                return pattern  # type: ignore[no-any-return]
+
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
 
@@ -751,21 +828,14 @@ class DataDivisionParser(BaseDivisionParser):
                 if token.type == TokenType.PERIOD:
                     break
                 # Stop at keywords that follow picture clause
-                if token.value and token.value.upper() in (
-                    _COMP_KEYWORDS | {"VALUE", "USAGE", "OCCURS", "REDEFINES"}
-                ):
+                if token.value and token.value.upper() in _PICTURE_TERMINATOR_KEYWORDS:
                     break
                 # Also stop at COMP token types
                 if token.type in _COMP_TOKEN_TYPES:
                     break
 
             # Collect picture pattern tokens
-            if token.type in [
-                TokenType.IDENTIFIER,
-                TokenType.NUMERIC_LITERAL,
-                TokenType.STRING_LITERAL,
-                TokenType.LEVEL_NUMBER,
-            ]:
+            if token.type in _PICTURE_PATTERN_TOKEN_TYPES:
                 # All these token types can be part of a picture pattern
                 token_value = token.value
                 if paren_depth == 0 and token_value.endswith("."):

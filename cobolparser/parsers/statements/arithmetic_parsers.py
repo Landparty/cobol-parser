@@ -350,19 +350,20 @@ class ComputeStatementParser(IStatementParser):
             if not token:
                 break
 
-            token_val_upper = token.value.upper() if token.value else ""
-
-            # Stop at terminators
-            if paren_depth == 0 and (
-                token.type == TokenType.PERIOD
-                or token_val_upper in ("ON", "NOT", "END-COMPUTE")
-            ):
-                break
-
-            if token.type == TokenType.LEFT_PAREN:
+            # Cheap checks first: token type tests, parenthesis counting.
+            # Only fall back to the ``.upper()`` keyword test at paren depth
+            # zero when the token could plausibly be ``ON``/``NOT``/
+            # ``END-COMPUTE`` (i.e. has a value).
+            tok_type = token.type
+            if tok_type == TokenType.LEFT_PAREN:
                 paren_depth += 1
-            elif token.type == TokenType.RIGHT_PAREN:
+            elif tok_type == TokenType.RIGHT_PAREN:
                 paren_depth -= 1
+            elif paren_depth == 0:
+                if tok_type == TokenType.PERIOD:
+                    break
+                if token.value and token.value.upper() in ("ON", "NOT", "END-COMPUTE"):
+                    break
 
             expr_tokens.append(token.value if token.value else "")
             token_stream.consume()

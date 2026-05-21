@@ -78,6 +78,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
     division_name: str | None = "PROCEDURE"
     division_keywords: tuple = ()
 
+    # Class-level cache for the shared statement registry. The set of
+    # statement parsers is identical for every ProcedureDivisionParser
+    # instance and the parsers themselves are stateless, so a single
+    # registry can be reused across parses -- letting the registry's
+    # dispatch cache warm up across batches instead of starting empty
+    # for every program.
+    _SHARED_REGISTRY: StatementParserRegistry | None = None
+
     def __init__(self, host: Any = None) -> None:
         """Initialize Procedure Division parser with statement registry.
 
@@ -86,7 +94,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
         """
         super().__init__()
         self.host = host
-        self._statement_registry = self._create_statement_registry()
+        if ProcedureDivisionParser._SHARED_REGISTRY is None:
+            ProcedureDivisionParser._SHARED_REGISTRY = self._create_statement_registry()
+        self._statement_registry = ProcedureDivisionParser._SHARED_REGISTRY
 
     def set_host(self, host: Any) -> None:
         """Set the host parser after initialization.

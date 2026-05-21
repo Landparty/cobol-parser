@@ -21,6 +21,7 @@ from cobolparser.lexer import (
     TokenType,
     LexerError,
     _LEVEL_NUM_RE,
+    _LEVEL_NUMBER_1_2DIGIT_RE,
     _FF_INDICATOR,
     _DIVISION_FIRST,
 )
@@ -109,6 +110,147 @@ class CobolLexer(_CobolLexerBase):
             token_type = TokenType.IDENTIFIER
 
         return Token(token_type, value, location), pos
+
+    # ------------------------------------------------------------------
+    # tokenize  (outer per-line loop)
+    # ------------------------------------------------------------------
+    def tokenize(self):
+        """Tokenize the entire COBOL source code.
+
+        Mirrors the pure-Python implementation but with C-typed loop
+        counters and direct list operations to remove the per-line Python
+        overhead that dominates the profile once the inner tokenization
+        methods are Cythonized.
+        """
+        cdef int line_num
+        cdef int n_lines
+        cdef bint free_form = self.free_form
+        cdef list lines = self.lines
+        cdef list tokens
+        cdef list out_tokens = []
+        cdef str line
+        cdef str program_text
+
+        self.tokens = out_tokens
+        self.errors = []
+
+        n_lines = len(lines)
+        for line_num in range(n_lines):
+            line = lines[line_num]
+            if free_form:
+                if line.endswith("\n"):
+                    program_text = line[:-1]
+                else:
+                    program_text = line
+                tokens = self.tokenize_program_text(program_text, line_num, 1)
+                if tokens:
+                    out_tokens.extend(tokens)
+                    out_tokens.append(
+                        Token(
+                            TokenType.NEWLINE,
+                            "\n",
+                            SourceLocation(line_num + 1, len(line) + 1, 1),
+                        )
+                    )
+            else:
+                tokens = self.handle_cobol_line_format(line, line_num)
+                if tokens:
+                    out_tokens.extend(tokens)
+                    if tokens[0].type is not TokenType.COMMENT:
+                        out_tokens.append(
+                            Token(
+                                TokenType.NEWLINE,
+                                "\n",
+                                SourceLocation(line_num + 1, len(line) + 1, 1),
+                            )
+                        )
+
+        out_tokens.append(
+            Token(TokenType.EOF, "", SourceLocation(n_lines + 1, 1, 1))
+        )
+        return out_tokens
+
+    # ------------------------------------------------------------------
+    # _try_single_line_string
+    # ------------------------------------------------------------------
+    def _try_single_line_string(self, str text, int start_pos, int line_num, int start_col):
+        """Read a single-line string literal; returns ``(token | None, new_pos, unterminated)``.
+
+        C-typed loop; matches the pure-Python implementation including the
+        doubled-quote escape ``''`` -> ``'``.
+        """
+        cdef str quote = text[start_pos]
+        cdef int pos = start_pos + 1
+        cdef int length = len(text)
+        cdef str ch
+        cdef list chars = []
+
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+
+        while pos < length:
+            ch = text[pos]
+            if ch == quote:
+                if pos + 1 < length and text[pos + 1] == quote:
+                    # doubled quote escape (e.g. '' inside '...')
+                    chars.append(quote)
+                    pos += 2
+                    continue
+                pos += 1
+                return (
+                    Token(TokenType.STRING_LITERAL, "".join(chars), location),
+                    pos,
+                    False,
+                )
+            chars.append(ch)
+            pos += 1
+
+        # Not closed on this line
+        return None, pos, True
+
+    # ------------------------------------------------------------------
+    # read_number_from_text
+    # ------------------------------------------------------------------
+    def read_number_from_text(self, str text, int start_pos, int line_num, int start_col):
+        """Read a numeric literal (or level number) starting at *start_pos*.
+
+        C-typed scan loop -- avoids the per-char Python attribute lookups in
+        the pure-Python fallback. Behaviour matches the base implementation.
+        """
+        cdef int pos          = start_pos
+        cdef int length       = len(text)
+        cdef bint has_decimal = False
+        cdef bint has_exponent = False
+        cdef str char
+
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+
+        while pos < length:
+            char = text[pos]
+            if char.isdigit():
+                pos += 1
+            elif char == "." and not has_decimal and not has_exponent:
+                has_decimal = True
+                pos += 1
+            elif (char == "E" or char == "e") and pos > start_pos and not has_exponent:
+                has_exponent = True
+                pos += 1
+                if pos < length and (text[pos] == "+" or text[pos] == "-"):
+                    pos += 1
+            else:
+                break
+
+        value = text[start_pos:pos]
+
+        # Level number 01-99 detection mirrors the pure-Python path
+        if (
+            not has_decimal
+            and not has_exponent
+            and _LEVEL_NUMBER_1_2DIGIT_RE.match(value)
+            and 1 <= int(value) <= 99
+        ):
+            return Token(TokenType.LEVEL_NUMBER, value, location), pos
+
+        return Token(TokenType.NUMERIC_LITERAL, value, location), pos
 
     # ------------------------------------------------------------------
     # tokenize_program_text
