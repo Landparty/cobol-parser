@@ -59,9 +59,9 @@ class PictureClause(ASTNode):
                 else:  # Single P
                     self.scaling_factor = 1
 
-        # First-char dispatch -- the original code tried up to 8 regex
-        # patterns in sequence for every PICTURE clause. The first char
-        # of a COBOL PICTURE string rules out most of them.
+        # Use the first character as a cheap guard for the simple
+        # alphanumeric branch below, so we avoid that regex when the
+        # pattern cannot be X/A-based.
         first = pattern[0] if pattern else ""
 
         # 1. Basic alphanumeric patterns: X, X(n), A, A(n)
