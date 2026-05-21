@@ -1,12 +1,17 @@
 # cython: language_level=3
 """Cython-accelerated parser-side hot paths for the Data Division.
 
-Currently provides a single helper, :func:`parse_picture_clause_fast`,
-which mirrors :meth:`DataDivisionParser._parse_picture_clause` but
-operates directly on the underlying token list and cursor index. This
-sidesteps the Python-level overhead of repeated
-``token_stream.peek()`` / ``.consume()`` / ``.is_empty()`` calls in
-the inner loop that walks every token of every PICTURE clause.
+Currently provides two helpers:
+
+* :func:`parse_picture_clause_fast`, which mirrors
+  :meth:`DataDivisionParser._parse_picture_clause` but operates
+  directly on the underlying token list and cursor index. This
+  sidesteps the Python-level overhead of repeated
+  ``token_stream.peek()`` / ``.consume()`` / ``.is_empty()`` calls in
+  the inner loop that walks every token of every PICTURE clause.
+* :func:`parse_data_item_clauses_fast`, which accelerates the
+  per-clause loop of :meth:`DataDivisionParser._parse_data_item` using
+  the same token-list-and-cursor approach.
 
 The pure-Python implementation in
 ``cobolparser.parsers.divisions.data`` remains the authoritative
