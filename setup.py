@@ -21,7 +21,7 @@ from setuptools import setup
 from setuptools.extension import Extension
 
 _PKG = "cobolparser"
-_MODULES = ("_lexer_fast", "_preprocess_fast")
+_MODULES = ("_lexer_fast", "_preprocess_fast", "_data_fast")
 
 
 def _build_ext_modules() -> list:

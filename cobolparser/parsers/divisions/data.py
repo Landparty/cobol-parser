@@ -95,6 +95,25 @@ _DIVISION_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Optional Cython acceleration for the picture-clause inner loop. The
+# pure-Python implementation in ``_parse_picture_clause`` below remains
+# the authoritative behaviour; we only delegate when the extension is
+# available and the token stream is the standard ``TokenStream`` (so we
+# can safely poke its underlying token list and cursor).
+try:
+    from cobolparser._data_fast import (  # type: ignore[import-not-found]
+        parse_data_item_clauses_fast as _fast_data_item_clauses,
+    )
+    from cobolparser._data_fast import (
+        parse_picture_clause_fast as _fast_pic,
+    )
+
+    _HAS_DATA_FAST = True
+except ImportError:
+    _fast_pic = None
+    _fast_data_item_clauses = None
+    _HAS_DATA_FAST = False
+
 
 class DataDivisionParser(BaseDivisionParser):
     """Parser for COBOL Data Division.
@@ -412,6 +431,36 @@ class DataDivisionParser(BaseDivisionParser):
 
         # Create data item
         data_item = CobolDataItem(name, level, location)
+
+        # Fast path: drive the clause-dispatch loop in Cython. VALUE and
+        # USAGE clauses still call back into the Python helpers below
+        # via ``parser_self`` -- the fast helper handles only the
+        # token-walking orchestration.
+        if _HAS_DATA_FAST:
+            tokens_list = getattr(token_stream, "_tokens", None)
+            if tokens_list is not None:
+                new_pos = _fast_data_item_clauses(
+                    tokens_list,
+                    token_stream._pos,  # type: ignore[attr-defined]
+                    data_item,
+                    location,
+                    self,
+                    token_stream,
+                    _PICTURE_TERMINATOR_KEYWORDS,
+                    _PICTURE_PATTERN_TOKEN_TYPES,
+                    _COMP_KEYWORDS,
+                    _COMP_TOKEN_TYPES,
+                    _DIVISION_TOKEN_TYPES,
+                    PictureClause,
+                    OccursClause,
+                    TokenType.PERIOD,
+                    TokenType.LEVEL_NUMBER,
+                    TokenType.IDENTIFIER,
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.NEWLINE,
+                )
+                token_stream._pos = new_pos  # type: ignore[attr-defined]
+                return data_item
 
         # Parse clauses until period or next item
         while not token_stream.is_empty():
@@ -744,6 +793,28 @@ class DataDivisionParser(BaseDivisionParser):
 
         Returns the picture pattern string (e.g., 'X(10)', '9(5)', '9(7)V99').
         """
+        # Fast path: when the Cython helper is compiled and we're handed a
+        # standard ``TokenStream`` (which exposes ``_tokens`` and ``_pos``
+        # as documented internals), drive the inner loop in C and update
+        # the stream cursor in one shot. Falls through to the pure-Python
+        # walker below otherwise.
+        if _HAS_DATA_FAST:
+            tokens = getattr(token_stream, "_tokens", None)
+            if tokens is not None:
+                pattern, new_pos = _fast_pic(
+                    tokens,
+                    token_stream._pos,  # type: ignore[attr-defined]
+                    _PICTURE_TERMINATOR_KEYWORDS,
+                    _PICTURE_PATTERN_TOKEN_TYPES,
+                    _COMP_TOKEN_TYPES,
+                    TokenType.PERIOD,
+                    TokenType.NEWLINE,
+                )
+                token_stream._pos = new_pos  # type: ignore[attr-defined]
+                # The Cython helper is untyped to mypy; it returns either
+                # ``None`` or the joined pattern string.
+                return pattern  # type: ignore[no-any-return]
+
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
 
