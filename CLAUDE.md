@@ -25,7 +25,10 @@ pip install -e ".[dev,docs]"
 pip install -e ".[fast]"
 python setup.py build_ext --inplace
 
-# Run all tests with coverage (81% minimum enforced)
+# Skip the C extension build entirely (no compiler / no Cython available)
+COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
+
+# Run all tests with coverage (81% minimum enforced; ~3,456 tests across 211 files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -82,7 +85,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (236 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. When `cobolparser._lexer_fast` is compiled (see Cython acceleration below), the lexer transparently uses the Cython-accelerated subclass for hot-path methods; otherwise it falls back to pure Python.
 
-**`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor and override the inner hot-path methods with C-typed implementations. Built via `setup.py build_ext --inplace`; both `.c` files are checked in so the extension can be built without re-running Cython.
+**`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** / **`cobolparser/_data_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor (and accelerate the DATA DIVISION `PICTURE` / data-item clause loops) by overriding the inner hot-path methods with C-typed implementations. Built via `setup.py build_ext --inplace`; the corresponding `.c` files are checked in so the extension builds without re-running Cython. Setting `COBOLPARSER_SKIP_EXT=1` at install time skips the C build and falls back to the pure-Python paths.
 
 **`cobolparser/preprocess/`** -- Preprocessing pipeline:
 - `__init__.py` -- `normalize_fixed_format()` converts fixed-format COBOL to free-form text (comment lines silently dropped). Also: `preprocess_conditional_compilation()`, `validate_copybook_content()`, `validate_level_numbers()`
@@ -149,7 +152,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 
 **`cobolparser/cli/`** -- Command-line interface:
-- `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, generate-tests
+- `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, generate-tests, io-sequence, move-type-check, linkage-check, language-env, ims-dli
 - `coverage.py` -- IO coverage CLI tools
 
 ### Statement Parsers (cobolparser/parsers/statements/)
@@ -246,20 +249,27 @@ parse_result = parse_cobol_with_expansion(source, copybook_paths=["/path"])
 
 # Dynamic call analysis
 from cobolparser.analysis import DynamicCallAnalyzer
-analyzer = DynamicCallAnalyzer()
-analyzer.analyze(parse_result.ast)
+DynamicCallAnalyzer().analyze(parse_result.ast)
 
-# Dead code detection
-from cobolparser.analysis import dead_code
-unreferenced = dead_code.find_dead_code(parse_result.ast)
+# Analyzers exported from the top-level package — all follow the same
+# `<Analyzer>().analyze(ast) -> <Report>` shape (HostVariableResolver
+# uses `.resolve(ast)` instead):
+from cobolparser import (
+    DeadCodeAnalyzer,           # report.dead_items
+    ProgramFlowAnalyzer,        # report.edges (typed PERFORM/GO TO/CALL/fall-through)
+    IOLogger,                   # report.operations
+    IOSequenceAnalyzer,         # report.violations
+    MoveTypeChecker,            # report.violations
+    LinkageChecker,             # report.violations
+    LanguageEnvironmentAnalyzer,# .le_functions / .service_calls
+    CRUDMatrixGenerator,        # matrix.entries, .to_csv(), .to_json()
+)
+from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 
-# Program flow graph
-from cobolparser.analysis import program_flow
-graph = program_flow.build_flow_graph(parse_result.ast)
-
-# CobolCheck test generation
+# CobolCheck test generation — three-stage pipeline available via
+# CoverageAnalyzer + TestPlanGenerator + CobolCheckGenerator
 from cobolparser import generate_cobolcheck_tests
-generate_cobolcheck_tests(source, output_path="program.cut")
+output = generate_cobolcheck_tests(source, strategies=["paragraph", "branch", "boundary"])
 ```
 
 ### Adding a New Statement Parser
@@ -285,7 +295,7 @@ generate_cobolcheck_tests(source, output_path="program.cut")
 
 ## Test Structure
 
-Roughly 200 test files across 5 directories:
+~3,456 tests across 211 files in 5 directories:
 
 ```
 tests/
@@ -354,7 +364,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
 ## Example COBOL Files
 
-- `tests/samples/` -- 69 COBOL sample programs covering all statement types
+- `tests/samples/` -- ~48 COBOL sample programs covering all statement types (plus copybook and IO sub-directories)
 - `examples/cobol/` -- NIST COBOL-85 test suite (400+ .CBL files) and copybooks (.CPY)
 
 ## Additional Directories
@@ -369,4 +379,6 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 - `baselines/` -- Stored coverage baselines (`current-coverage.json`, `final.json`) for regression comparison
 - `benchmarks/` -- Performance benchmark programs
 - `reports/` -- Audit reports
-- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time.
+- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely.
+- `.pre-commit-config.yaml` -- Hooks for `ruff` (with `--fix`), `ruff-format`, `black`, and `mypy cobolparser/` (with `--ignore-missing-imports`). The CI lint/typecheck jobs duplicate these checks, so running `pre-commit run --all-files` locally catches the same issues.
+- `CHANGELOG.md` -- Keep-a-Changelog history. The Unreleased section is the source of truth for which analyzers and CLI subcommands are wired up beyond the 1.0.0 baseline.
