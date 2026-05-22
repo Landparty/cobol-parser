@@ -42,6 +42,7 @@ from .evaluate_parser import EvaluateStatementParser
 from .go_parser import GoStatementParser
 from .ibm_exec_statements import (
     ExecCicsStatementParser,
+    ExecImsStatementParser,
     ExecSqlStatementParser,
 )
 from .if_parser import IfStatementParser
@@ -91,6 +92,7 @@ __all__ = [
     "ComputeStatementParser",
     "ExecSqlStatementParser",
     "ExecCicsStatementParser",
+    "ExecImsStatementParser",
     "EntryStatementParser",
     "GoStatementParser",
     "ReadStatementParser",

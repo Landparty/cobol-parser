@@ -40,7 +40,10 @@ _COMP_KEYWORDS: frozenset[str] = frozenset(
         "COMPUTATIONAL-1",
         "COMPUTATIONAL-2",
         "COMPUTATIONAL-3",
+        "COMPUTATIONAL-4",
+        "COMPUTATIONAL-5",
         "BINARY",
+        "PACKED-DECIMAL",
     }
 )
 
@@ -54,10 +57,21 @@ _COMP_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+_POINTER_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "POINTER",
+        "PROCEDURE-POINTER",
+        "FUNCTION-POINTER",
+    }
+)
+
 # Hoisted out of _parse_picture_clause -- the union was being rebuilt on
 # every iteration of that method's inner loop.
 _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
-    _COMP_KEYWORDS | {"VALUE", "USAGE", "OCCURS", "REDEFINES"}
+    _COMP_KEYWORDS
+    | _POINTER_KEYWORDS
+    | {"VALUE", "USAGE", "OCCURS", "REDEFINES",
+       "SIGN", "SYNCHRONIZED", "SYNC", "JUSTIFIED", "JUST", "BLANK"}
 )
 _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     {
@@ -520,6 +534,57 @@ class DataDivisionParser(BaseDivisionParser):
             elif token.type in _COMP_TOKEN_TYPES:
                 data_item.set_usage(token.value.upper())
                 token_stream.consume()
+
+            # POINTER, PROCEDURE-POINTER, FUNCTION-POINTER without USAGE keyword
+            elif value_upper in _POINTER_KEYWORDS:
+                data_item.set_usage(value_upper)
+                token_stream.consume()
+
+            # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
+            elif value_upper == "SIGN":
+                token_stream.consume()
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "IS":
+                    token_stream.consume()
+                dir_tok = token_stream.peek()
+                if dir_tok and dir_tok.value:
+                    direction = dir_tok.value.upper()
+                    token_stream.consume()
+                    sep = token_stream.peek()
+                    if sep and sep.value and sep.value.upper() == "SEPARATE":
+                        token_stream.consume()
+                        ch = token_stream.peek()
+                        if ch and ch.value and ch.value.upper() == "CHARACTER":
+                            token_stream.consume()
+                        direction = direction + " SEPARATE"
+                    data_item.sign_clause = direction
+
+            # SYNCHRONIZED / SYNC clause
+            elif value_upper in {"SYNCHRONIZED", "SYNC"}:
+                data_item.synchronized = True
+                token_stream.consume()
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() in {"LEFT", "RIGHT"}:
+                    token_stream.consume()
+
+            # JUSTIFIED / JUST [RIGHT] clause
+            elif value_upper in {"JUSTIFIED", "JUST"}:
+                data_item.justified = True
+                token_stream.consume()
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "RIGHT":
+                    token_stream.consume()
+
+            # BLANK WHEN ZERO clause
+            elif value_upper == "BLANK":
+                token_stream.consume()
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "WHEN":
+                    token_stream.consume()
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() in {"ZERO", "ZEROS", "ZEROES"}:
+                    token_stream.consume()
+                data_item.blank_when_zero = True
 
             # REDEFINES clause
             elif value_upper == "REDEFINES":

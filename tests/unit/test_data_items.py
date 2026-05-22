@@ -686,6 +686,43 @@ class TestCobolDataItem:
         item2.set_usage("COMP-2")
         assert item2.calculate_size() == 8
 
+    def test_calculate_size_packed_decimal(self):
+        """PACKED-DECIMAL is a synonym for COMP-3 and must produce the same size."""
+        location = SourceLocation(1, 1)
+        item = CobolDataItem("WS-AMOUNT", 5, location)
+
+        # 9(7)V99 = 9 total digits -> (9+1)/2 = 5 bytes
+        pic = PictureClause("9(7)V99", location)
+        item.set_picture_clause(pic)
+        item.set_usage("PACKED-DECIMAL")
+
+        assert item.calculate_size() == 5
+
+    def test_calculate_size_computational_4_5(self):
+        """COMPUTATIONAL-4 and COMPUTATIONAL-5 follow the same binary rules as COMP-4/5."""
+        location = SourceLocation(1, 1)
+
+        item1 = CobolDataItem("WS-C4", 5, location)
+        pic1 = PictureClause("9(7)", location)
+        item1.set_picture_clause(pic1)
+        item1.set_usage("COMPUTATIONAL-4")
+        assert item1.calculate_size() == 4  # 5-9 digits -> 4 bytes
+
+        item2 = CobolDataItem("WS-C5", 5, location)
+        pic2 = PictureClause("9(12)", location)
+        item2.set_picture_clause(pic2)
+        item2.set_usage("COMPUTATIONAL-5")
+        assert item2.calculate_size() == 8  # 10+ digits -> 8 bytes
+
+    def test_calculate_size_pointer_types(self):
+        """POINTER, PROCEDURE-POINTER, and FUNCTION-POINTER are 4 bytes (IBM z/OS 31-bit)."""
+        location = SourceLocation(1, 1)
+
+        for usage in ["POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"]:
+            item = CobolDataItem(f"WS-{usage}", 5, location)
+            item.set_usage(usage)
+            assert item.calculate_size() == 4, f"{usage} should be 4 bytes"
+
     def test_calculate_size_with_occurs(self):
         """Test size calculation with OCCURS clause."""
         location = SourceLocation(1, 1)

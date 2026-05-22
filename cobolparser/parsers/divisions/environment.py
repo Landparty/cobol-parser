@@ -74,39 +74,176 @@ class EnvironmentDivisionParser(BaseDivisionParser):
     def _parse_configuration_section(
         self, token_stream: ITokenStream
     ) -> dict[str, Any]:
-        """Parse CONFIGURATION SECTION.
+        """Parse CONFIGURATION SECTION including SPECIAL-NAMES paragraph.
 
-        Format: CONFIGURATION SECTION. [configuration-content]
-
-        Args:
-            token_stream: Token stream positioned at CONFIGURATION keyword
-
-        Returns:
-            Dictionary containing configuration content
+        Recognises SPECIAL-NAMES clauses:
+        - CURRENCY SIGN IS 'x'
+        - DECIMAL-POINT IS COMMA
+        - CLASS name IS range
+        - ALPHABET name IS ...
+        Unknown clauses are consumed until the next period.
         """
         # Consume CONFIGURATION keyword
         token_stream.consume()
 
-        # Skip remaining tokens until next SECTION or division
-        section_keywords = {
-            "SECTION",
-            "INPUT-OUTPUT",
-            "DATA",
-            "PROCEDURE",
-            "IDENTIFICATION",
-        }
-        _stop_div = ("DATA", "PROCEDURE", "IDENTIFICATION")
-        while not token_stream.is_empty():
-            token = token_stream.peek(0)
-            if token and token.value.upper() in section_keywords:
-                break
-            if token and any(
-                token.value.upper() == f"{kw} DIVISION" for kw in _stop_div
-            ):
-                break
+        _stop_divs = ("DATA", "PROCEDURE", "IDENTIFICATION")
+        # "SECTION" by itself marks the next paragraph/section header — but we
+        # must first skip the current "SECTION." header before entering the body.
+        _body_stop = {"INPUT-OUTPUT", "DATA", "PROCEDURE", "IDENTIFICATION"}
+
+        # Consume the "SECTION" keyword and optional period that follow CONFIGURATION
+        pk = token_stream.peek(0)
+        if pk and pk.value.upper() == "SECTION":
+            token_stream.consume()
+        pk = token_stream.peek(0)
+        if pk and pk.value == ".":
             token_stream.consume()
 
-        return {"type": "configuration"}
+        special_names: dict[str, Any] = {}
+
+        def _at_stop() -> bool:
+            token = token_stream.peek(0)
+            if not token:
+                return True
+            v = token.value.upper()
+            if v in _body_stop:
+                return True
+            return any(v == f"{kw} DIVISION" for kw in _stop_divs)
+
+        # Scan configuration section body for SPECIAL-NAMES paragraph
+        while not token_stream.is_empty() and not _at_stop():
+            token = token_stream.peek(0)
+            if not token:
+                break
+            v = token.value.upper()
+            if v == "SPECIAL-NAMES":
+                token_stream.consume()
+                # consume optional period after paragraph header
+                pk = token_stream.peek(0)
+                if pk and pk.value == ".":
+                    token_stream.consume()
+                special_names = self._parse_special_names_paragraph(
+                    token_stream, _body_stop, _stop_divs
+                )
+            else:
+                token_stream.consume()
+
+        result: dict[str, Any] = {"type": "configuration"}
+        if special_names:
+            result["special_names"] = special_names
+        return result
+
+    def _parse_special_names_paragraph(
+        self,
+        token_stream: ITokenStream,
+        stop_sections: set[str],
+        stop_divs: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Parse clauses inside SPECIAL-NAMES paragraph."""
+        currency_sign: str | None = None
+        decimal_point_is_comma: bool = False
+        class_definitions: list[dict[str, Any]] = []
+        alphabet_definitions: list[dict[str, Any]] = []
+
+        def _at_para_end() -> bool:
+            token = token_stream.peek(0)
+            if not token:
+                return True
+            v = token.value.upper()
+            if v in stop_sections:
+                return True
+            return any(v == f"{kw} DIVISION" for kw in stop_divs)
+
+        while not token_stream.is_empty() and not _at_para_end():
+            token = token_stream.peek(0)
+            if not token:
+                break
+            v = token.value.upper()
+
+            if v == "CURRENCY":
+                token_stream.consume()
+                # skip optional SIGN / IS
+                for _kw in ("SIGN", "IS"):
+                    pk = token_stream.peek(0)
+                    if pk and pk.value.upper() == _kw:
+                        token_stream.consume()
+                pk = token_stream.peek(0)
+                if pk and pk.value:
+                    currency_sign = pk.value.strip("'\"")
+                    token_stream.consume()
+
+            elif v == "DECIMAL-POINT":
+                token_stream.consume()
+                # skip optional IS
+                pk = token_stream.peek(0)
+                if pk and pk.value.upper() == "IS":
+                    token_stream.consume()
+                pk = token_stream.peek(0)
+                if pk and pk.value.upper() == "COMMA":
+                    decimal_point_is_comma = True
+                    token_stream.consume()
+
+            elif v == "CLASS":
+                token_stream.consume()
+                name_tok = token_stream.peek(0)
+                class_name = name_tok.value if name_tok else ""
+                if name_tok:
+                    token_stream.consume()
+                # skip IS
+                pk = token_stream.peek(0)
+                if pk and pk.value.upper() == "IS":
+                    token_stream.consume()
+                # collect range values until period or next keyword
+                ranges: list[str] = []
+                while not token_stream.is_empty():
+                    pk = token_stream.peek(0)
+                    if not pk or pk.value == "." or pk.value.upper() in {
+                        "CURRENCY", "DECIMAL-POINT", "CLASS", "ALPHABET",
+                    } | stop_sections:
+                        break
+                    ranges.append(pk.value)
+                    token_stream.consume()
+                class_definitions.append({"name": class_name, "ranges": ranges})
+
+            elif v == "ALPHABET":
+                token_stream.consume()
+                name_tok = token_stream.peek(0)
+                alpha_name = name_tok.value if name_tok else ""
+                if name_tok:
+                    token_stream.consume()
+                # skip IS
+                pk = token_stream.peek(0)
+                if pk and pk.value.upper() == "IS":
+                    token_stream.consume()
+                # collect until period or next paragraph keyword
+                values: list[str] = []
+                while not token_stream.is_empty():
+                    pk = token_stream.peek(0)
+                    if not pk or pk.value == "." or pk.value.upper() in {
+                        "CURRENCY", "DECIMAL-POINT", "CLASS", "ALPHABET",
+                    } | stop_sections:
+                        break
+                    values.append(pk.value)
+                    token_stream.consume()
+                alphabet_definitions.append({"name": alpha_name, "values": values})
+
+            elif token.value == ".":
+                token_stream.consume()  # clause separator
+
+            else:
+                # Unknown clause — consume to next period
+                token_stream.consume()
+
+        result: dict[str, Any] = {}
+        if currency_sign is not None:
+            result["currency_sign"] = currency_sign
+        if decimal_point_is_comma:
+            result["decimal_point_is_comma"] = True
+        if class_definitions:
+            result["class_definitions"] = class_definitions
+        if alphabet_definitions:
+            result["alphabet_definitions"] = alphabet_definitions
+        return result
 
     def _parse_input_output_section(self, token_stream: ITokenStream) -> dict[str, Any]:
         """Parse INPUT-OUTPUT SECTION.
@@ -572,6 +709,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         # Create CONFIGURATION SECTION if present
         if "configuration" in division_content:
             config_section = CobolSection("CONFIGURATION", start_location)
+            config_data = division_content["configuration"]
+            if isinstance(config_data, dict) and "special_names" in config_data:
+                config_section.set_metadata("special_names", config_data["special_names"])
             division_node.add_section(config_section)
 
         # Create INPUT-OUTPUT SECTION if present

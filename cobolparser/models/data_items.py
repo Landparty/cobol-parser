@@ -303,6 +303,10 @@ class CobolDataItem(ASTNode):
         self.occurs_clause: OccursClause | None = None
         self.redefines: str | None = None
         self.is_filler: bool = name.upper() == "FILLER"
+        self.sign_clause: str | None = None
+        self.synchronized: bool = False
+        self.justified: bool = False
+        self.blank_when_zero: bool = False
 
     @property
     def initial_value(self) -> str | None:
@@ -376,18 +380,28 @@ class CobolDataItem(ASTNode):
 
     def calculate_size(self) -> int:
         """Calculate the size of this data item in bytes."""
+        # Pointer types are fixed-size and never carry a picture clause.
+        if self.usage in ["POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"]:
+            base_size = 4  # IBM z/OS 31-bit pointer
+            if self.occurs_clause:
+                base_size *= self.occurs_clause.max_times or 1
+            return base_size
+
         if self.is_elementary_item() and self.picture_clause:
             base_size = self.picture_clause.size or 0
 
             # Adjust for USAGE clauses
-            if self.usage == "COMP-3":
-                # COMP-3 (packed decimal): (digits + 1) / 2 rounded up
+            if self.usage in ["COMP-3", "PACKED-DECIMAL"]:
+                # COMP-3 / PACKED-DECIMAL: (digits + 1) / 2 rounded up
                 if self.picture_clause.total_digits:
                     comp3_size = (self.picture_clause.total_digits + 1) // 2
                     if (self.picture_clause.total_digits + 1) % 2:
                         comp3_size += 1
                     base_size = comp3_size
-            elif self.usage in ["COMP", "COMP-4", "COMP-5"]:
+            elif self.usage in [
+                "COMP", "COMP-4", "COMP-5",
+                "COMPUTATIONAL-4", "COMPUTATIONAL-5",
+            ]:
                 # Binary: depends on digits
                 if self.picture_clause.total_digits:
                     if self.picture_clause.total_digits <= 4:
@@ -441,6 +455,15 @@ class CobolDataItem(ASTNode):
 
         if self.occurs_clause:
             result["occurs_clause"] = self.occurs_clause.to_dict()
+
+        if self.sign_clause:
+            result["sign_clause"] = self.sign_clause
+        if self.synchronized:
+            result["synchronized"] = True
+        if self.justified:
+            result["justified"] = True
+        if self.blank_when_zero:
+            result["blank_when_zero"] = True
 
         if self.redefines:
             result["redefines"] = self.redefines

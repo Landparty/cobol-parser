@@ -30,6 +30,7 @@ from cobolparser.parsers.statements import (
     EntryStatementParser,
     EvaluateStatementParser,
     ExecCicsStatementParser,
+    ExecImsStatementParser,
     ExecSqlStatementParser,
     ExitStatementParser,
     GenerateStatementParser,
@@ -123,6 +124,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         # IBM Enterprise COBOL extensions first - more specific matching
         registry.register(ExecSqlStatementParser())
         registry.register(ExecCicsStatementParser())
+        registry.register(ExecImsStatementParser())
 
         # Core control flow statements - more specific first
         registry.register(IfStatementParser())

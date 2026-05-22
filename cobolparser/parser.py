@@ -30,7 +30,7 @@ from .plugins.core import (
     PluginManager,
     SerializationConfig,
 )
-from .preprocess import normalize_fixed_format
+from .preprocess import normalize_fixed_format, strip_compiler_directives
 from .profiling import ProfilerContext, ProfilingResult
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call)
@@ -155,6 +155,9 @@ class CobolParser:
         try:
             # Preprocess and tokenize
             cleaned_source = self._skip_to_identification_division(source)
+
+            # Strip CBL/PROCESS compiler directives before fixed-format detection
+            cleaned_source = strip_compiler_directives(cleaned_source)
 
             # Auto-detect fixed-format if not explicitly specified
             actual_free_form = self.free_form
@@ -542,6 +545,9 @@ def parse_cobol(
         if filename == "<string>":
             filename = source_str
         source_str = file_content
+
+    # Strip CBL/PROCESS compiler directives before fixed-format detection
+    source_str = strip_compiler_directives(source_str)
 
     # Auto-detect fixed-format if not explicitly specified
     if preprocess_fixed is None:
