@@ -235,6 +235,34 @@ class ASTNode(ABC):
         """Detailed string representation of the node."""
         return f"{self.__class__.__name__}(type={self.node_type}, location={self.location}, children={len(self.children)})"
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Drop the parent back-reference and the type-index cache so pickle
+        # doesn't traverse cycles or persist derived data. Parents are rebuilt
+        # by relink_parents() after unpickling; _type_cache repopulates lazily.
+        # The live node is not modified — __getstate__ returns a shallow copy.
+        state = self.__dict__.copy()
+        state["parent"] = None
+        state["_type_cache"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+
+
+def relink_parents(root: "ASTNode") -> None:
+    """Rebuild parent back-references for an AST loaded from pickle.
+
+    Walks the tree depth-first and sets ``child.parent = node`` for every
+    edge. The root's own parent is left untouched (caller's responsibility
+    if the root is being grafted into a larger tree).
+    """
+    stack: list[ASTNode] = [root]
+    while stack:
+        node = stack.pop()
+        for child in node.children:
+            child.parent = node
+            stack.append(child)
+
 
 class ValidationResult:
     """Result of AST validation with errors and warnings."""
@@ -296,4 +324,5 @@ __all__ = [
     "ASTNode",
     "ValidationResult",
     "ASTValidator",
+    "relink_parents",
 ]

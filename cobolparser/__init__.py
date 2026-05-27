@@ -109,6 +109,12 @@ from .batch import (
     parse_files,
     parse_files_with_copybooks,
 )
+from .cache import (
+    ParseCache,
+    default_cache_dir,
+    make_cache_key,
+    make_config_fingerprint,
+)
 from .dialects import (
     IBMEnterpriseCobol,
 )
@@ -272,6 +278,11 @@ __all__ = [
     # Batch parsing
     "parse_files",
     "BatchResult",
+    # Parse-result caching
+    "ParseCache",
+    "default_cache_dir",
+    "make_cache_key",
+    "make_config_fingerprint",
     # Profiling
     "ProfilingResult",
     "FunctionProfile",

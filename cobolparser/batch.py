@@ -27,6 +27,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+from cobolparser.cache import ParseCache, make_cache_key, make_config_fingerprint
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
 from cobolparser.profiling import ProfilingResult
@@ -69,11 +70,18 @@ def _parse_one(
     enable_profiling: bool,
     top_n: int,
     prof_output_dir: str | None,
+    cache_dir: str | None = None,
+    cache_compress: bool = True,
+    free_form: bool = False,
 ) -> BatchResult:
     """Read one file and parse it.
 
     Module-level (not a closure) for pickling on Windows spawn.
     Note: parse_cobol default is FAIL_FAST; we always pass error_recovery explicitly.
+
+    When *cache_dir* is set, the worker first reads the source, looks up
+    its content hash against the on-disk cache, and only invokes the
+    parser on a miss. Hits avoid the entire parse pipeline.
     """
     path = Path(path_str)
     try:
@@ -81,13 +89,34 @@ def _parse_one(
     except OSError as exc:
         return BatchResult(path=path, result=None, read_error=str(exc))
 
+    worker_cache: ParseCache | None = None
+    cache_key: str | None = None
+    if cache_dir is not None and not enable_profiling:
+        # Profiling intentionally bypasses the cache so timings reflect a
+        # real parse rather than a deserialization.
+        worker_cache = ParseCache(cache_dir, compress=cache_compress)
+        cache_key = make_cache_key(
+            source=source,
+            config_fingerprint=make_config_fingerprint(
+                dialect=dialect,
+                error_recovery=error_recovery,
+                free_form=free_form,
+            ),
+        )
+        cached = worker_cache.get(cache_key)
+        if cached is not None:
+            return BatchResult(path=path, result=cached, read_error=None)
+
     if not enable_profiling:
         result = parse_cobol(
             source,
             filename=path_str,
             error_recovery=error_recovery,
             dialect=dialect,
+            free_form=free_form,
         )
+        if worker_cache is not None and cache_key is not None:
+            worker_cache.put(cache_key, result)
         return BatchResult(path=path, result=result, read_error=None)
 
     prof_output: str | None = None
@@ -99,6 +128,7 @@ def _parse_one(
         filename=path_str,
         error_recovery=error_recovery,
         dialect=dialect,
+        free_form=free_form,
         enable_profiling=True,
         top_n=top_n,
         prof_output=prof_output,
@@ -115,6 +145,9 @@ def _parse_one_reuse(
     enable_profiling: bool,
     top_n: int,
     prof_output_dir: str | None,
+    cache_dir: str | None = None,
+    cache_compress: bool = True,
+    free_form: bool = False,
 ) -> BatchResult:
     """Parse one file reusing a module-level parser (sequential mode only).
 
@@ -126,10 +159,28 @@ def _parse_one_reuse(
     except OSError as exc:
         return BatchResult(path=path, result=None, read_error=str(exc))
 
+    worker_cache: ParseCache | None = None
+    cache_key: str | None = None
+    if cache_dir is not None and not enable_profiling:
+        worker_cache = ParseCache(cache_dir, compress=cache_compress)
+        cache_key = make_cache_key(
+            source=source,
+            config_fingerprint=make_config_fingerprint(
+                dialect=dialect,
+                error_recovery=error_recovery,
+                free_form=free_form,
+            ),
+        )
+        cached = worker_cache.get(cache_key)
+        if cached is not None:
+            return BatchResult(path=path, result=cached, read_error=None)
+
     parser = _get_reusable_parser(error_recovery, dialect)
 
     if not enable_profiling:
         result = parser.parse(source, filename=path_str, error_recovery=error_recovery)
+        if worker_cache is not None and cache_key is not None:
+            worker_cache.put(cache_key, result)
         return BatchResult(path=path, result=result, read_error=None)
 
     prof_output: str | None = None
@@ -167,6 +218,8 @@ def parse_files(
     enable_profiling: bool = False,
     top_n: int = 50,
     prof_output: str | None = None,
+    cache: ParseCache | None = None,
+    free_form: bool = False,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files in parallel.
 
@@ -182,10 +235,18 @@ def parse_files(
             provided the caller owns the executor lifecycle (shutdown/cleanup).
             Useful for amortising spawn overhead across many consecutive batches.
         enable_profiling: When True, attach a ProfilingResult to each BatchResult.
+            Bypasses the cache so timings reflect a real parse.
         top_n: Number of top functions to include in each ProfilingResult.
         prof_output: Directory path to write per-file .prof binaries. Each file
             is written as <stem>.prof inside this directory. Must not end with
             ".prof" (that would be a file path, not a directory).
+        cache: Optional :class:`~cobolparser.cache.ParseCache`. When provided,
+            cache hits short-circuit the parse pipeline entirely. Lookups
+            happen in the main process before scheduling any worker, so
+            cache-hot batches never pay process-pool overhead. Workers
+            re-open the cache to write entries on miss.
+        free_form: Whether sources are free-form COBOL. Threaded through to
+            parse_cobol; mismatches with the cache fingerprint cause a miss.
 
     Returns:
         list[BatchResult] in input order.
@@ -209,10 +270,47 @@ def parse_files(
     if not path_list:
         return []
 
+    # Cache prepass: read each file once, look up the cached AST in the
+    # main process. Hits are returned directly without scheduling any
+    # worker. Only misses go through the parser. Profiling intentionally
+    # skips the cache so timings reflect a real parse.
+    cache_dir: str | None = None
+    cache_compress: bool = True
+    prepass: dict[int, BatchResult] = {}
+    miss_indices: list[int] = list(range(len(path_list)))
+
+    if cache is not None and cache.enabled and not enable_profiling:
+        cache_dir = str(cache.root)
+        cache_compress = cache.compress
+        fingerprint = make_config_fingerprint(
+            dialect=dialect,
+            error_recovery=error_recovery,
+            free_form=free_form,
+        )
+        miss_indices = []
+        for idx, p in enumerate(path_list):
+            try:
+                source = Path(p).read_text(encoding=encoding, errors=errors)
+            except OSError as exc:
+                prepass[idx] = BatchResult(
+                    path=Path(p), result=None, read_error=str(exc)
+                )
+                continue
+            key = make_cache_key(source=source, config_fingerprint=fingerprint)
+            cached = cache.get(key)
+            if cached is not None:
+                prepass[idx] = BatchResult(path=Path(p), result=cached, read_error=None)
+            else:
+                miss_indices.append(idx)
+
+    if not miss_indices:
+        # Every file was satisfied from cache or returned a read error.
+        return [prepass[i] for i in range(len(path_list))]
+
     resolved_workers = workers if workers is not None else (os.cpu_count() or 1)
     args = [
         (
-            p,
+            path_list[i],
             encoding,
             errors,
             error_recovery,
@@ -220,24 +318,53 @@ def parse_files(
             enable_profiling,
             top_n,
             prof_output,
+            cache_dir,
+            cache_compress,
+            free_form,
         )
-        for p in path_list
+        for i in miss_indices
     ]
 
     if executor is None and resolved_workers == 1:
         # Sequential fast path: reuse parser instance, clean stack traces, no pickle overhead
-        return [_parse_one_reuse(*a) for a in args]
+        miss_results = [_parse_one_reuse(*a) for a in args]
+    else:
+        chunksize = max(1, len(miss_indices) // (resolved_workers * 4))
+        if executor is not None:
+            miss_results = list(
+                executor.map(_parse_one_packed, args, chunksize=chunksize)
+            )
+        else:
+            with ProcessPoolExecutor(max_workers=resolved_workers) as pool:
+                miss_results = list(
+                    pool.map(_parse_one_packed, args, chunksize=chunksize)
+                )
 
-    chunksize = max(1, len(path_list) // (resolved_workers * 4))
+    # Promote freshly-parsed results into the in-memory tier of the
+    # caller's cache instance so subsequent get() calls hit memory.
+    if cache is not None and cache.enabled and not enable_profiling:
+        fingerprint = make_config_fingerprint(
+            dialect=dialect,
+            error_recovery=error_recovery,
+            free_form=free_form,
+        )
+        for idx, br in zip(miss_indices, miss_results, strict=True):
+            if br.result is not None and br.read_error is None:
+                try:
+                    source = Path(path_list[idx]).read_text(
+                        encoding=encoding, errors=errors
+                    )
+                except OSError:
+                    continue
+                key = make_cache_key(source=source, config_fingerprint=fingerprint)
+                cache._mem_put(key, br.result)
 
-    if executor is not None:
-        # Caller-managed executor: use it directly without a context manager
-        results = list(executor.map(_parse_one_packed, args, chunksize=chunksize))
-        return results
-
-    with ProcessPoolExecutor(max_workers=resolved_workers) as pool:
-        results = list(pool.map(_parse_one_packed, args, chunksize=chunksize))
-    return results
+    merged: list[BatchResult] = [None] * len(path_list)  # type: ignore[list-item]
+    for idx, br in zip(miss_indices, miss_results, strict=True):
+        merged[idx] = br
+    for idx, br in prepass.items():
+        merged[idx] = br
+    return merged
 
 
 def parse_files_with_copybooks(
@@ -253,6 +380,8 @@ def parse_files_with_copybooks(
     enable_profiling: bool = False,
     top_n: int = 50,
     prof_output: str | None = None,
+    cache: ParseCache | None = None,
+    free_form: bool = False,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files with shared copybook expansion cache.
 
@@ -313,6 +442,12 @@ def parse_files_with_copybooks(
     # Reusable parser to avoid re-registering division parsers per file
     parser = CobolParser(error_recovery=error_recovery, dialect=dialect)
 
+    fingerprint = make_config_fingerprint(
+        dialect=dialect,
+        error_recovery=error_recovery,
+        free_form=free_form,
+    )
+
     results: list[BatchResult] = []
     for path_str in path_list:
         path = Path(path_str)
@@ -323,6 +458,7 @@ def parse_files_with_copybooks(
             continue
 
         # Expand copybooks with shared cache
+        included_copybooks: list[str] = []
         try:
             expansion = expand_copybooks(
                 source_code=source,
@@ -332,15 +468,31 @@ def parse_files_with_copybooks(
                 path_resolver=path_resolver,
             )
             expanded_source = expansion.expanded_source
+            included_copybooks = list(expansion.included_copybooks)
         except Exception:
             # If expansion fails, parse without expansion
             expanded_source = source
+
+        # Cache lookup keyed by source + transitive copybook closure.
+        cache_key: str | None = None
+        if cache is not None and cache.enabled and not enable_profiling:
+            cache_key = make_cache_key(
+                source=source,
+                config_fingerprint=fingerprint,
+                copybook_files=included_copybooks,
+            )
+            cached = cache.get(cache_key)
+            if cached is not None:
+                results.append(BatchResult(path=path, result=cached, read_error=None))
+                continue
 
         # Parse expanded source reusing the parser instance
         if not enable_profiling:
             result = parser.parse(
                 expanded_source, filename=path_str, error_recovery=error_recovery
             )
+            if cache is not None and cache.enabled and cache_key is not None:
+                cache.put(cache_key, result)
             results.append(BatchResult(path=path, result=result, read_error=None))
         else:
             prof_file: str | None = None
