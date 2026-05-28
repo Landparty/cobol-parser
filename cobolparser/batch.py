@@ -48,7 +48,7 @@ _REUSABLE_PARSER: CobolParser | None = None
 
 
 def _get_reusable_parser(
-    error_recovery: ErrorRecoveryMode, dialect: DialectType
+    error_recovery: ErrorRecoveryMode, dialect: DialectType, free_form: bool
 ) -> CobolParser:
     """Get or create a reusable parser instance (avoids re-registering parsers)."""
     global _REUSABLE_PARSER
@@ -56,8 +56,11 @@ def _get_reusable_parser(
         _REUSABLE_PARSER is None
         or _REUSABLE_PARSER.error_recovery != error_recovery
         or _REUSABLE_PARSER.dialect != dialect
+        or _REUSABLE_PARSER.free_form != free_form
     ):
-        _REUSABLE_PARSER = CobolParser(error_recovery=error_recovery, dialect=dialect)
+        _REUSABLE_PARSER = CobolParser(
+            error_recovery=error_recovery, dialect=dialect, free_form=free_form
+        )
     return _REUSABLE_PARSER
 
 
@@ -175,7 +178,7 @@ def _parse_one_reuse(
         if cached is not None:
             return BatchResult(path=path, result=cached, read_error=None)
 
-    parser = _get_reusable_parser(error_recovery, dialect)
+    parser = _get_reusable_parser(error_recovery, dialect, free_form)
 
     if not enable_profiling:
         result = parser.parse(source, filename=path_str, error_recovery=error_recovery)
@@ -440,7 +443,9 @@ def parse_files_with_copybooks(
     path_resolver = PathResolver(search_config)
 
     # Reusable parser to avoid re-registering division parsers per file
-    parser = CobolParser(error_recovery=error_recovery, dialect=dialect)
+    parser = CobolParser(
+        error_recovery=error_recovery, dialect=dialect, free_form=free_form
+    )
 
     fingerprint = make_config_fingerprint(
         dialect=dialect,

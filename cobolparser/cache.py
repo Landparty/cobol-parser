@@ -227,6 +227,14 @@ class ParseCache:
             self.misses += 1
             return None
 
+        # Validate that the unpickled object is actually a ParseResult
+        # before dereferencing its fields. Gracefully treat unexpected
+        # types (stale/manual writes or corruption that still unpickles)
+        # as a cache miss rather than crashing.
+        if not hasattr(result, "ast") or not hasattr(result, "errors"):
+            self.misses += 1
+            return None
+
         # Rebuild parent links stripped by ASTNode.__getstate__.
         if result.ast is not None:
             result.ast.parent = None
