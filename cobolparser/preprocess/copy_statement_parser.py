@@ -12,6 +12,7 @@ Properly handles:
 - Sequence/identification area (columns 73-80) in fixed-format COBOL
 """
 
+import bisect
 import re
 
 from .models import CopyStatement, ReplacingClause, SuppressClause
@@ -456,6 +457,7 @@ class CopyStatementLexer:
         return self.source[start_pos : self.pos] if self.pos > start_pos else None
 
     def tokenize_copy_statements(self) -> list[CopyStatement]:
+        newline_positions = [i for i, c in enumerate(self.source) if c == '\n']
         statements = []
         while not self._is_at_end():
             char = self._peek()
@@ -489,9 +491,10 @@ class CopyStatementLexer:
                 # End of statement
                 if self._peek() == "." and not self._peek(1).isalnum():
                     self._advance()
-                    text_so_far = self.source[:match_start]
-                    line_num = text_so_far.count("\n") + 1
-                    col_num = match_start - text_so_far.rfind("\n")
+                    _nl_idx = bisect.bisect_right(newline_positions, match_start)
+                    line_num = _nl_idx + 1
+                    prev_nl_idx = _nl_idx - 1
+                    col_num = match_start - (newline_positions[prev_nl_idx] if prev_nl_idx >= 0 else -1)
 
                     statements.append(
                         CopyStatement(
