@@ -28,6 +28,11 @@ FIXED_FORMAT_CODE_END_COLUMN = 72
 # Column 7 (index 6) contains '*' for full-line comments or '/' for page break comments
 COMMENT_LINE_PATTERN = re.compile(r"^.{6}[*\/]", re.MULTILINE)
 
+# Matches a single end-of-line terminator: \r\n (Windows), bare \r
+# (classic Mac / mainframe-transferred), or \n (Unix). Stored position is the
+# last char of the EOL so col_num arithmetic stays correct across conventions.
+_EOL_RE = re.compile(r"\r\n|\r|\n")
+
 # COPY statement regex patterns supporting IBM Enterprise COBOL syntax
 # Matches: COPY member, COPY "member", COPY member IN/OF library, COPY member SUPPRESS, COPY member REPLACING
 #
@@ -457,7 +462,7 @@ class CopyStatementLexer:
         return self.source[start_pos : self.pos] if self.pos > start_pos else None
 
     def tokenize_copy_statements(self) -> list[CopyStatement]:
-        newline_positions = [i for i, c in enumerate(self.source) if c == '\n']
+        newline_positions = [m.end() - 1 for m in _EOL_RE.finditer(self.source)]
         statements = []
         while not self._is_at_end():
             char = self._peek()

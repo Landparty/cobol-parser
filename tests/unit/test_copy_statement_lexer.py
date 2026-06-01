@@ -114,3 +114,37 @@ def test_copy_with_continuation_and_quotes():
     assert len(statements) == 1
     assert statements[0].member_name == "MYBOOK"
     assert len(statements[0].replacing_clauses) == 1
+
+
+def test_source_location_with_crlf_line_endings():
+    # Windows \r\n EOLs must count as one line break, not two.
+    source = "       PROCEDURE DIVISION.\r\n       COPY EMPLOYEE."
+    statements = extract_copy_statements(source)
+    assert len(statements) == 1
+    assert statements[0].source_location is not None
+    _file, line, _col = statements[0].source_location
+    assert line == 2
+
+
+def test_source_location_with_bare_cr_line_endings():
+    # Bare \r EOLs (classic Mac / mainframe-transferred sources).
+    source = "       PROCEDURE DIVISION.\r       COPY EMPLOYEE."
+    statements = extract_copy_statements(source)
+    assert len(statements) == 1
+    assert statements[0].source_location is not None
+    _file, line, _col = statements[0].source_location
+    assert line == 2
+
+
+def test_source_location_with_mixed_line_endings():
+    source = (
+        "       LINE ONE.\r\n"
+        "       LINE TWO.\r"
+        "       LINE THREE.\n"
+        "       COPY EMPLOYEE."
+    )
+    statements = extract_copy_statements(source)
+    assert len(statements) == 1
+    assert statements[0].source_location is not None
+    _file, line, _col = statements[0].source_location
+    assert line == 4
