@@ -10,6 +10,54 @@ from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import MoveStatement
 
+_STOP_TOKEN_TYPES: frozenset = frozenset(
+    getattr(TokenType, name)
+    for name in (
+        "MOVE",
+        "DISPLAY",
+        "CALL",
+        "ADD",
+        "SUBTRACT",
+        "MULTIPLY",
+        "DIVIDE",
+        "IF",
+        "PERFORM",
+        "EVALUATE",
+        "STOP",
+        "EXIT",
+        "GO",
+        "ELSE",
+        "WHEN",
+        "END_IF",
+        "END_EVALUATE",
+        "END_PERFORM",
+    )
+    if hasattr(TokenType, name)
+)
+
+_STOP_KEYWORDS: frozenset = frozenset({
+    "MOVE",
+    "DISPLAY",
+    "CALL",
+    "ADD",
+    "SUBTRACT",
+    "MULTIPLY",
+    "DIVIDE",
+    "IF",
+    "PERFORM",
+    "EVALUATE",
+    "STOP",
+    "GO",
+    "ENTRY",
+    "END-MOVE",
+    "ON",
+    "RETURNING",
+    "GIVING",
+    "END-IF",
+    "ELSE",
+    "THEN",
+})
+
 
 class MoveStatementParser(IStatementParser):
     """Parser for MOVE statements using IStatementParser interface.
@@ -73,31 +121,6 @@ class MoveStatementParser(IStatementParser):
         # Parse targets - only collect one target unless we have more TO keywords
         target_count = 0
 
-        # Build set of stop token types (only include types that exist)
-        stop_token_types = set()
-        for token_type_name in [
-            "MOVE",
-            "DISPLAY",
-            "CALL",
-            "ADD",
-            "SUBTRACT",
-            "MULTIPLY",
-            "DIVIDE",
-            "IF",
-            "PERFORM",
-            "EVALUATE",
-            "STOP",
-            "EXIT",
-            "GO",
-            "ELSE",
-            "WHEN",
-            "END_IF",
-            "END_EVALUATE",
-            "END_PERFORM",
-        ]:
-            if hasattr(TokenType, token_type_name):
-                stop_token_types.add(getattr(TokenType, token_type_name))
-
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
             token = token_stream.peek()
@@ -108,34 +131,13 @@ class MoveStatementParser(IStatementParser):
                 break
 
             # Stop at keywords - check by TokenType first
-            if token.type in stop_token_types:
+            if token.type in _STOP_TOKEN_TYPES:
                 break
 
             # Also check for keywords by value for non-statement types
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
-                if val_upper in (
-                    "MOVE",
-                    "DISPLAY",
-                    "CALL",
-                    "ADD",
-                    "SUBTRACT",
-                    "MULTIPLY",
-                    "DIVIDE",
-                    "IF",
-                    "PERFORM",
-                    "EVALUATE",
-                    "STOP",
-                    "GO",
-                    "ENTRY",
-                    "END-MOVE",
-                    "ON",
-                    "RETURNING",
-                    "GIVING",
-                    "END-IF",
-                    "ELSE",
-                    "THEN",
-                ):
+                if val_upper in _STOP_KEYWORDS:
                     break
 
             # Parse target - only collect IDENTIFIERs
