@@ -28,7 +28,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (81% minimum enforced; ~3,456 tests across 211 files)
+# Run all tests with coverage (81% minimum enforced; ~5,823 tests across 217 files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -76,7 +76,7 @@ The parser is a multi-stage pipeline: **preprocessing -> lexing -> parsing -> AS
 ```
 COBOL source (.cbl/.cob)
   -> preprocess/          (normalize_fixed_format, copybook expansion, conditional compilation)
-  -> lexer.py             (CobolLexer -> List[Token], 235 TokenType values)
+  -> lexer.py             (CobolLexer -> List[Token], 236 TokenType values)
   -> parser.py            (CobolParser -> ParseResult)
   -> models/              (AST node classes with to_dict()/to_json())
 ```
@@ -126,7 +126,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 16 static analysis modules:
+**`cobolparser/analysis/`** -- 15 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -295,7 +295,7 @@ output = generate_cobolcheck_tests(source, strategies=["paragraph", "branch", "b
 
 ## Test Structure
 
-~3,456 tests across 211 files in 5 directories:
+~5,823 tests across 217 files in 5 directories:
 
 ```
 tests/
