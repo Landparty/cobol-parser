@@ -30,10 +30,10 @@ from cobolparser import parse_cobol
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ws_program(items: str) -> str:
     """Wrap bare WORKING-STORAGE items in a minimal COBOL program."""
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. REGTEST.
         DATA DIVISION.
@@ -42,14 +42,12 @@ def _ws_program(items: str) -> str:
         {items}
         PROCEDURE DIVISION.
         STOP RUN.
-        """
-    )
+        """)
 
 
 def _proc_program(procedure_body: str) -> str:
     """Wrap bare PROCEDURE DIVISION statements in a minimal COBOL program."""
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. REGTEST.
         DATA DIVISION.
@@ -59,8 +57,7 @@ def _proc_program(procedure_body: str) -> str:
         MAIN-PARA.
         {procedure_body}
             STOP RUN.
-        """
-    )
+        """)
 
 
 def _find_item(result, name: str):
@@ -91,9 +88,9 @@ class TestSignClauseNotDropped:
         assert result.success
         item = _find_item(result, "WS-A")
         assert item is not None
-        assert item.sign_clause == "LEADING", (
-            "sign_clause must not be None/empty — was silently dropped before fix"
-        )
+        assert (
+            item.sign_clause == "LEADING"
+        ), "sign_clause must not be None/empty — was silently dropped before fix"
 
     def test_sign_trailing_separate_stored(self):
         result = parse_cobol(
@@ -144,15 +141,14 @@ class TestSignClauseNotDropped:
         """SIGN parsing must not over-consume tokens — the next sibling must survive."""
         result = parse_cobol(
             _ws_program(
-                "    05  WS-A  PIC S9(9) SIGN IS LEADING.\n"
-                "    05  WS-B  PIC X(10)."
+                "    05  WS-A  PIC S9(9) SIGN IS LEADING.\n" "    05  WS-B  PIC X(10)."
             ),
             filename="reg.cbl",
         )
         assert result.success
-        assert _find_item(result, "WS-B") is not None, (
-            "Sibling after SIGN clause must not be lost"
-        )
+        assert (
+            _find_item(result, "WS-B") is not None
+        ), "Sibling after SIGN clause must not be lost"
 
 
 class TestSynchronizedNotDropped:
@@ -165,9 +161,9 @@ class TestSynchronizedNotDropped:
         )
         assert result.success
         item = _find_item(result, "WS-A")
-        assert item.synchronized is True, (
-            "synchronized must be True — was silently dropped before fix"
-        )
+        assert (
+            item.synchronized is True
+        ), "synchronized must be True — was silently dropped before fix"
 
     def test_sync_abbreviation_stored(self):
         result = parse_cobol(
@@ -212,9 +208,9 @@ class TestJustifiedNotDropped:
         )
         assert result.success
         item = _find_item(result, "WS-A")
-        assert item.justified is True, (
-            "justified must be True — was silently dropped before fix"
-        )
+        assert (
+            item.justified is True
+        ), "justified must be True — was silently dropped before fix"
 
     def test_just_abbreviation_stored(self):
         result = parse_cobol(
@@ -243,8 +239,7 @@ class TestJustifiedNotDropped:
     def test_sibling_after_justified_parses_correctly(self):
         result = parse_cobol(
             _ws_program(
-                "    05  WS-A  PIC X(20) JUSTIFIED RIGHT.\n"
-                "    05  WS-B  PIC 9(5)."
+                "    05  WS-A  PIC X(20) JUSTIFIED RIGHT.\n" "    05  WS-B  PIC 9(5)."
             ),
             filename="reg.cbl",
         )
@@ -262,9 +257,9 @@ class TestBlankWhenZeroNotDropped:
         )
         assert result.success
         item = _find_item(result, "WS-A")
-        assert item.blank_when_zero is True, (
-            "blank_when_zero must be True — was silently dropped before fix"
-        )
+        assert (
+            item.blank_when_zero is True
+        ), "blank_when_zero must be True — was silently dropped before fix"
 
     def test_blank_when_zeros_stored(self):
         result = parse_cobol(
@@ -372,9 +367,9 @@ class TestExecCicsCommandNotDropped:
             filename="reg.cbl",
         )
         node = _find_nodes(result, "EXEC_CICS")[0]
-        assert node.cics_command != "", (
-            "cics_command must not be empty string — was silently dropped before fix"
-        )
+        assert (
+            node.cics_command != ""
+        ), "cics_command must not be empty string — was silently dropped before fix"
         assert node.cics_command == "READ"
 
     def test_cics_text_not_empty(self):
@@ -383,7 +378,9 @@ class TestExecCicsCommandNotDropped:
             filename="reg.cbl",
         )
         node = _find_nodes(result, "EXEC_CICS")[0]
-        assert node.cics_text, "cics_text must not be empty for a statement with options"
+        assert (
+            node.cics_text
+        ), "cics_text must not be empty for a statement with options"
         assert "FILE" in node.cics_text or "EMPFILE" in node.cics_text
 
     def test_to_dict_has_cics_command_key(self):
@@ -447,9 +444,9 @@ class TestExecImsNodeNotMissing:
             filename="reg.cbl",
         )
         node = _find_nodes(result, "EXEC_IMS")[0]
-        assert node.ims_command == "GU", (
-            "ims_command must be 'GU' — was silently dropped before fix"
-        )
+        assert (
+            node.ims_command == "GU"
+        ), "ims_command must be 'GU' — was silently dropped before fix"
 
     def test_ims_call_type_defaults_unknown_for_unrecognized(self):
         result = parse_cobol(
@@ -472,9 +469,9 @@ class TestExecImsNodeNotMissing:
             assert nodes, f"No EXEC_IMS node for call type {call_type}"
             node = nodes[0]
             assert node.ims_command == call_type
-            assert node.ims_call_type == call_type, (
-                f"ims_call_type should be '{call_type}' not 'UNKNOWN'"
-            )
+            assert (
+                node.ims_call_type == call_type
+            ), f"ims_call_type should be '{call_type}' not 'UNKNOWN'"
 
     def test_exec_dli_alias_creates_node(self):
         result = parse_cobol(
@@ -515,10 +512,14 @@ class TestExecImsNodeNotMissing:
     def test_ibm_extensions_sample(self):
         """The ibm_extensions.cbl sample must produce EXEC_IMS nodes for GU, etc."""
         sample = Path(__file__).parent.parent / "samples" / "ibm_extensions.cbl"
-        result = parse_cobol(sample.read_text(encoding="utf-8"), filename="ibm_extensions.cbl")
+        result = parse_cobol(
+            sample.read_text(encoding="utf-8"), filename="ibm_extensions.cbl"
+        )
         assert result.success
         nodes = _find_nodes(result, "EXEC_IMS")
-        assert nodes, "ibm_extensions.cbl must produce EXEC_IMS nodes — was zero before fix"
+        assert (
+            nodes
+        ), "ibm_extensions.cbl must produce EXEC_IMS nodes — was zero before fix"
         assert "GU" in {n.ims_command for n in nodes}
 
 
@@ -537,8 +538,7 @@ def _get_special_names(result) -> dict:
 
 
 def _env_program(special_names_body: str) -> str:
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. REGTEST.
         ENVIRONMENT DIVISION.
@@ -550,8 +550,7 @@ def _env_program(special_names_body: str) -> str:
         01 WS-X PIC X.
         PROCEDURE DIVISION.
         STOP RUN.
-        """
-    )
+        """)
 
 
 class TestSpecialNamesNotDropped:
@@ -559,26 +558,29 @@ class TestSpecialNamesNotDropped:
     with no further content; all SPECIAL-NAMES clauses were discarded."""
 
     def test_currency_sign_not_dropped(self):
-        result = parse_cobol(_env_program("    CURRENCY SIGN IS 'E'."), filename="reg.cbl")
+        result = parse_cobol(
+            _env_program("    CURRENCY SIGN IS 'E'."), filename="reg.cbl"
+        )
         assert result.success
         sn = _get_special_names(result)
         assert sn, "special_names metadata must not be empty — was discarded before fix"
-        assert sn.get("currency_sign") == "E", (
-            "currency_sign must be captured — was silently dropped before fix"
-        )
+        assert (
+            sn.get("currency_sign") == "E"
+        ), "currency_sign must be captured — was silently dropped before fix"
 
     def test_decimal_point_is_comma_not_dropped(self):
-        result = parse_cobol(_env_program("    DECIMAL-POINT IS COMMA."), filename="reg.cbl")
+        result = parse_cobol(
+            _env_program("    DECIMAL-POINT IS COMMA."), filename="reg.cbl"
+        )
         assert result.success
         sn = _get_special_names(result)
-        assert sn.get("decimal_point_is_comma") is True, (
-            "decimal_point_is_comma must be True — was silently dropped before fix"
-        )
+        assert (
+            sn.get("decimal_point_is_comma") is True
+        ), "decimal_point_is_comma must be True — was silently dropped before fix"
 
     def test_special_names_does_not_prevent_input_output_section(self):
         """SPECIAL-NAMES must not consume tokens from INPUT-OUTPUT SECTION."""
-        src = textwrap.dedent(
-            """\
+        src = textwrap.dedent("""\
             IDENTIFICATION DIVISION.
             PROGRAM-ID. REGTEST.
             ENVIRONMENT DIVISION.
@@ -593,19 +595,24 @@ class TestSpecialNamesNotDropped:
             01 WS-X PIC X.
             PROCEDURE DIVISION.
             STOP RUN.
-            """
-        )
+            """)
         result = parse_cobol(src, filename="reg.cbl")
         assert result.success
         env_div = next(
-            (d for d in result.ast.children if getattr(d, "division_name", None) == "ENVIRONMENT"),
+            (
+                d
+                for d in result.ast.children
+                if getattr(d, "division_name", None) == "ENVIRONMENT"
+            ),
             None,
         )
         assert env_div is not None
-        assert env_div.has_section("CONFIGURATION"), "CONFIGURATION section must still exist"
-        assert env_div.has_section("INPUT-OUTPUT"), (
-            "INPUT-OUTPUT section must not be consumed by SPECIAL-NAMES parser"
-        )
+        assert env_div.has_section(
+            "CONFIGURATION"
+        ), "CONFIGURATION section must still exist"
+        assert env_div.has_section(
+            "INPUT-OUTPUT"
+        ), "INPUT-OUTPUT section must not be consumed by SPECIAL-NAMES parser"
 
     def test_special_names_metadata_key_present(self):
         """The special_names metadata key must be accessible via get_metadata()."""
@@ -616,16 +623,15 @@ class TestSpecialNamesNotDropped:
             if getattr(div, "division_name", None) == "ENVIRONMENT":
                 config = div.get_section_by_name("CONFIGURATION")
                 assert config is not None
-                assert config.get_metadata("special_names") is not None, (
-                    "get_metadata('special_names') must not return None"
-                )
+                assert (
+                    config.get_metadata("special_names") is not None
+                ), "get_metadata('special_names') must not return None"
                 return
         pytest.fail("ENVIRONMENT division not found")
 
     def test_program_without_special_names_still_parses(self):
         """Removing SPECIAL-NAMES must not break programs that never had it."""
-        src = textwrap.dedent(
-            """\
+        src = textwrap.dedent("""\
             IDENTIFICATION DIVISION.
             PROGRAM-ID. REGTEST.
             DATA DIVISION.
@@ -633,8 +639,7 @@ class TestSpecialNamesNotDropped:
             01 WS-X PIC X.
             PROCEDURE DIVISION.
             STOP RUN.
-            """
-        )
+            """)
         result = parse_cobol(src, filename="reg.cbl")
         assert result.success
 
@@ -643,8 +648,7 @@ class TestSpecialNamesNotDropped:
 # Group 5 — CBL/PROCESS directives in API path
 # ===========================================================================
 
-_PROGRAM_BODY = textwrap.dedent(
-    """\
+_PROGRAM_BODY = textwrap.dedent("""\
     IDENTIFICATION DIVISION.
     PROGRAM-ID. REGTEST.
     DATA DIVISION.
@@ -652,8 +656,7 @@ _PROGRAM_BODY = textwrap.dedent(
     01 WS-X PIC X.
     PROCEDURE DIVISION.
     STOP RUN.
-    """
-)
+    """)
 
 
 class TestCblProcessDirectivesInApiPath:
@@ -693,7 +696,9 @@ class TestCblProcessDirectivesInApiPath:
         """The AST must be populated, not just result.success=True with a None ast."""
         src = "       CBL RENT,APOST\n" + _PROGRAM_BODY
         result = parse_cobol(src, filename="reg.cbl")
-        assert result.ast is not None, "ast must not be None when CBL directive is stripped"
+        assert (
+            result.ast is not None
+        ), "ast must not be None when CBL directive is stripped"
 
     def test_program_without_directive_unaffected(self):
         """The fix must not break programs that have no CBL/PROCESS lines."""

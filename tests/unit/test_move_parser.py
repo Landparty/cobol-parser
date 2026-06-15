@@ -31,5 +31,6 @@ class TestMoveParserConstants:
 
     def test_module_level_same_object_on_repeated_import(self) -> None:
         from cobolparser.parsers.statements import move_parser
+
         assert move_parser._STOP_TOKEN_TYPES is _STOP_TOKEN_TYPES
         assert move_parser._STOP_KEYWORDS is _STOP_KEYWORDS
