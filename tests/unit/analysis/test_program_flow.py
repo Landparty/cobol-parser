@@ -5241,3 +5241,132 @@ class TestBranchNodes:
         prog = _make_program([("MAIN-LOGIC", [_stop_run()])])
         report = ProgramFlowAnalyzer().analyze(prog)
         assert report.branch_nodes == []
+
+
+class TestPerformThruRange:
+    """Tests for PERFORM THRU range membership on flow edges."""
+
+    def test_thru_edges_carry_range_members(self) -> None:
+        """PERFORM A THRU C records every paragraph spanned by the range."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("STEP-A", thru="STEP-C"), _stop_run()]),
+                ("STEP-A", [_continue()]),
+                ("STEP-B", [_continue()]),
+                ("STEP-C", [_continue()]),
+            ]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+
+        perform_edge = next(
+            e
+            for e in report.edges
+            if e.source == "MAIN-LOGIC" and e.edge_type == FlowEdgeType.PERFORM
+        )
+        assert perform_edge.thru_target == "STEP-C"
+        assert perform_edge.range_members == ["STEP-A", "STEP-B", "STEP-C"]
+
+        thru_edge = next(
+            e
+            for e in report.edges
+            if e.source == "MAIN-LOGIC" and e.edge_type == FlowEdgeType.PERFORM_THRU
+        )
+        assert thru_edge.range_members == ["STEP-A", "STEP-B", "STEP-C"]
+
+    def test_range_members_in_edge_to_dict(self) -> None:
+        """range_members and thru_target are serialized in edge.to_dict()."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("STEP-A", thru="STEP-B"), _stop_run()]),
+                ("STEP-A", [_continue()]),
+                ("STEP-B", [_continue()]),
+            ]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        thru = next(
+            e.to_dict()
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.PERFORM_THRU
+        )
+        assert thru["thru_target"] == "STEP-B"
+        assert thru["range_members"] == ["STEP-A", "STEP-B"]
+
+    def test_plain_perform_has_no_range_members(self) -> None:
+        """A PERFORM without THRU carries no range data."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("STEP-A"), _stop_run()]),
+                ("STEP-A", [_continue()]),
+            ]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        edge = next(e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM)
+        assert edge.thru_target is None
+        assert edge.range_members == []
+        assert "range_members" not in edge.to_dict()
+
+
+class TestCycleClassification:
+    """Tests for classified cycle_details (kind of circular dependency)."""
+
+    def test_perform_recursion_classified(self) -> None:
+        """A → B → A via PERFORM is classified as PERFORM_RECURSION."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_perform("PARA-B")]),
+                ("PARA-B", [_perform("PARA-A")]),
+            ]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        kinds = {d["kind"] for d in report.cycle_details}
+        assert "PERFORM_RECURSION" in kinds
+        recur = next(
+            d for d in report.cycle_details if d["kind"] == "PERFORM_RECURSION"
+        )
+        assert set(recur["nodes"]) == {"PARA-A", "PARA-B"}
+        assert "PERFORM" in recur["edge_types"]
+
+    def test_self_perform_is_self_recursive(self) -> None:
+        """A paragraph that PERFORMs itself is flagged self_recursive."""
+        prog = _make_program([("LOOP-PARA", [_perform("LOOP-PARA"), _stop_run()])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        detail = next(d for d in report.cycle_details if d["nodes"] == ["LOOP-PARA"])
+        assert detail["kind"] == "PERFORM_RECURSION"
+        assert detail["self_recursive"] is True
+        assert detail["length"] == 1
+
+    def test_goto_loop_classified(self) -> None:
+        """A GO TO back-edge cycle is classified as GOTO_LOOP."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_goto("PARA-B")]),
+                ("PARA-B", [_goto("PARA-A")]),
+            ]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        kinds = {d["kind"] for d in report.cycle_details}
+        assert "GOTO_LOOP" in kinds
+
+    def test_cycle_details_in_to_dict(self) -> None:
+        """cycle_details and recursion_cycle_count are serialized."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_perform("PARA-B")]),
+                ("PARA-B", [_perform("PARA-A")]),
+            ]
+        )
+        d = ProgramFlowAnalyzer().analyze(prog).to_dict()
+        assert "cycle_details" in d
+        assert d["summary"]["recursion_cycle_count"] >= 1
+
+    def test_no_cycle_details_when_acyclic(self) -> None:
+        """An acyclic program produces no cycle_details."""
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [_perform("WORK"), _stop_run()]),
+                ("WORK", [_continue()]),
+            ]
+        )
+        report = ProgramFlowAnalyzer().analyze(prog)
+        assert report.cycle_details == []
+        assert report.to_dict()["summary"]["recursion_cycle_count"] == 0
