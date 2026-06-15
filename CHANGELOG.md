@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/analysis.md` — comprehensive reference for every analyzer
 - Test suite expanded to 3,456 tests across `unit/`, `integration/`, `contract/`, `regression/`, `performance/`
 
+### Fixed
+
+- **DATA DIVISION clause drop in the Cython fast path**: the compiled
+  `_data_fast.parse_data_item_clauses_fast` hot path did not handle the
+  `SIGN`, `SYNCHRONIZED`/`SYNC`, `JUSTIFIED`/`JUST`, `BLANK WHEN ZERO`, and
+  `POINTER` clauses (added to the pure-Python parser later), so when the
+  extension was compiled those clauses were silently dropped (e.g.
+  `blank_when_zero` stayed `False`). The fast path now mirrors the
+  pure-Python branches exactly.
+
 ## [1.0.0] - 2026-03-31
 
 ### Added
