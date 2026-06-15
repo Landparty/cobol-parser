@@ -7,8 +7,6 @@ would fail or produce parse errors.
 
 import textwrap
 
-import pytest
-
 from cobolparser import parse_cobol
 
 _PROGRAM_BODY = textwrap.dedent(

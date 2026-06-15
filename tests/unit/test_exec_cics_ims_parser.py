@@ -7,8 +7,6 @@ Prior to the fix:
 
 import textwrap
 
-import pytest
-
 from cobolparser import parse_cobol
 
 

@@ -11,8 +11,6 @@ resulting data item had usage="DISPLAY", causing wrong size calculations downstr
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from cobolparser import parse_cobol
 
 

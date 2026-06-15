@@ -6,8 +6,6 @@ returned only {"type": "configuration"}.
 
 import textwrap
 
-import pytest
-
 from cobolparser import parse_cobol
 
 
