@@ -156,9 +156,11 @@ def parse_data_item_clauses_fast(
 
         tok_type = token.type
 
-        # Period ends this data item
+        # Period ends this data item. Leave it unconsumed and hand back to
+        # the pure-Python loop, which consumes the terminator itself. This
+        # keeps the two loops symmetric whether the fast loop ran to the end
+        # of the item or bailed early on a clause it does not handle.
         if tok_type is period_type:
-            pos += 1
             break
 
         # Level number starts next item
@@ -172,18 +174,14 @@ def parse_data_item_clauses_fast(
         tok_value = token.value
         value_upper = tok_value.upper() if tok_value else ""
 
-        # PICTURE / PIC clause
+        # PICTURE / PIC clause -- delegate to the Python helper (the single
+        # source of truth for picture extraction, including edited pictures
+        # with embedded decimal points and currency/sign symbols).
         if value_upper == "PICTURE" or value_upper == "PIC":
             pos += 1  # consume PIC keyword
-            pattern, pos = parse_picture_clause_fast(
-                tokens,
-                pos,
-                pic_terminator_keywords,
-                pic_pattern_token_types,
-                comp_token_types,
-                period_type,
-                newline_type,
-            )
+            token_stream._pos = pos
+            pattern = parser_self._parse_picture_clause(token_stream)
+            pos = token_stream._pos
             if pattern:
                 data_item.set_picture_clause(picture_clause_cls(pattern, location))
             continue
@@ -327,8 +325,18 @@ def parse_data_item_clauses_fast(
                 data_item.set_occurs_clause(occurs)
             continue
 
-        # Fallback: PERIOD/LEVEL_NUMBER/DIVISION already handled above;
-        # everything else (including NEWLINE) is just consumed.
-        pos += 1
+        # NEWLINE is whitespace -- consume it cheaply and keep going.
+        if tok_type is newline_type:
+            pos += 1
+            continue
+
+        # Any other token is a clause this fast loop does not handle
+        # (SIGN, SYNCHRONIZED, JUSTIFIED, BLANK, bare POINTER, EXTERNAL,
+        # GLOBAL, ...). Stop here without consuming it and hand control
+        # back to the pure-Python loop in ``_parse_data_item``, which is
+        # the single source of truth for those clauses. This avoids
+        # duplicating (and re-drifting) the clause logic across the two
+        # implementations.
+        break
 
     return pos

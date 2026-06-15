@@ -19,10 +19,21 @@ _PIC_LEFT_V_RE = re.compile(r"S?(9+|9\((\d+)\))$")
 _PIC_RIGHT_V_RE = re.compile(r"(9+|9\((\d+)\))$")
 _PIC_SCALING_LEFT_RE = re.compile(r"S?P(\((\d+)\))?9+$")
 _PIC_SCALING_RIGHT_RE = re.compile(r"S?9+P(\((\d+)\))?$")
-_PIC_EDITED_INT_RE = re.compile(r"9(\((\d+)\))?|9+$")
 _PIC_COMPLEX_RE = re.compile(r"S?(9+)V(9+)$")
 _PIC_DIGIT_X_RE = re.compile(r"[9X]")
 _PIC_NINE_RE = re.compile(r"9")
+# Strips ``(n)`` repeat counts so editing-symbol detection isn't fooled by the
+# digits inside a repeat factor (e.g. the ``0`` in ``9(10)``).
+_PIC_PAREN_COUNT_RE = re.compile(r"\(\d+\)")
+
+# Editing/insertion symbols that only ever appear in *edited* picture clauses.
+# Plain data-description symbols (9 X A S V P) are deliberately excluded, and so
+# are the ambiguous single-character insertions B and 0 -- on their own they are
+# indistinguishable from junk letters/digits in a malformed pattern, so they only
+# count as positions once an item is already known to be edited via another symbol.
+_PIC_EDIT_SYMBOLS: frozenset[str] = frozenset("Z*+-,./$")
+# Symbols that occupy a digit position in a numeric-edited item.
+_PIC_EDIT_DIGIT_SYMBOLS: frozenset[str] = frozenset("9Z*$")
 
 
 class PictureClause(ASTNode):
@@ -39,6 +50,8 @@ class PictureClause(ASTNode):
         self.has_scaling_factor: bool = False
         self.scaling_factor: int = 0
         self.is_edited: bool = False
+        self.is_numeric_edited: bool = False
+        self.is_alphanumeric_edited: bool = False
         self._parse_pattern()
 
     def _parse_pattern(self) -> None:
@@ -148,48 +161,13 @@ class PictureClause(ASTNode):
             self.size = digit_count
             return
 
-        # 7. Display numeric edited patterns: -9(n), -9(n).9(n), -.9(n), -99.99
-        if self.pattern.startswith("-"):
-            self.is_numeric_edited = True
-            pattern_without_minus = self.pattern[1:]  # Remove leading minus
-            integer_part = 0
-            decimal_part = 0
-
-            if "." in pattern_without_minus:
-                parts = pattern_without_minus.split(".")
-                int_part = parts[0] if parts[0] else ""
-                dec_part = parts[1] if len(parts) > 1 else ""
-
-                # Parse integer part
-                if int_part:
-                    int_match = _PIC_EDITED_INT_RE.match(int_part)
-                    if int_match:
-                        if int_match.group(2):  # 9(n) format
-                            integer_part = int(int_match.group(2))
-                        else:  # 9+ format
-                            integer_part = len(_PIC_NINE_RE.findall(int_part))
-
-                # Parse decimal part
-                if dec_part:
-                    dec_match = _PIC_EDITED_INT_RE.match(dec_part)
-                    if dec_match:
-                        if dec_match.group(2):  # 9(n) format
-                            decimal_part = int(dec_match.group(2))
-                        else:  # 9+ format
-                            decimal_part = len(_PIC_NINE_RE.findall(dec_part))
-            else:
-                # No decimal point, just integer part
-                int_match = _PIC_EDITED_INT_RE.match(pattern_without_minus)
-                if int_match:
-                    if int_match.group(2):  # 9(n) format
-                        integer_part = int(int_match.group(2))
-                    else:  # 9+ format
-                        integer_part = len(_PIC_NINE_RE.findall(pattern_without_minus))
-
-            self.integer_digits = integer_part
-            self.decimal_digits = decimal_part
-            self.total_digits = integer_part + decimal_part
-            self.size = self.total_digits + 1  # +1 for the sign/decimal point
+        # 7. Edited pictures (numeric-edited and alphanumeric-edited).
+        # Covers zero-suppression (Z, *), floating/fixed insertion ($, +, -),
+        # simple insertion (B, 0, /, comma), the actual decimal point (.), and
+        # the credit/debit symbols (CR, DB). The displayed size counts every
+        # character position the picture occupies after expanding (n) repeats.
+        if self._is_edited_pattern(pattern):
+            self._parse_edited_pattern(pattern)
             return
 
         # 8. Complex patterns with repetition: S999V999, etc.
@@ -225,6 +203,97 @@ class PictureClause(ASTNode):
             # Default size if nothing else matches
             self.size = 1
 
+    @staticmethod
+    def _is_edited_pattern(pattern: str) -> bool:
+        """Return True when the pattern contains editing/insertion symbols.
+
+        Repeat factors (``(n)``) are stripped first so the digits inside them
+        (e.g. the ``0`` in ``9(10)``) are not mistaken for insertion symbols.
+        """
+        skeleton = _PIC_PAREN_COUNT_RE.sub("", pattern).upper()
+        if any(ch in _PIC_EDIT_SYMBOLS for ch in skeleton):
+            return True
+        return "CR" in skeleton or "DB" in skeleton
+
+    @staticmethod
+    def _expand_symbols(pattern: str) -> list[str]:
+        """Expand a picture string into one entry per character position.
+
+        ``9(3)`` -> ``['9', '9', '9']`` and ``$(4)`` -> ``['$', ...]``. The
+        two-character ``CR``/``DB`` credit-debit symbols are kept as single
+        entries so the caller can score them as two positions.
+        """
+        symbols: list[str] = []
+        i = 0
+        n = len(pattern)
+        while i < n:
+            ch = pattern[i]
+            upper = ch.upper()
+            # CR / DB credit-debit symbols occupy two positions but parse as one
+            if upper == "C" and i + 1 < n and pattern[i + 1].upper() == "R":
+                symbols.append("CR")
+                i += 2
+                continue
+            if upper == "D" and i + 1 < n and pattern[i + 1].upper() == "B":
+                symbols.append("DB")
+                i += 2
+                continue
+            # Expand a trailing (n) repeat factor against the preceding symbol
+            if i + 1 < n and pattern[i + 1] == "(":
+                close = pattern.find(")", i + 2)
+                if close != -1:
+                    try:
+                        count = int(pattern[i + 2 : close])
+                    except ValueError:
+                        count = 1
+                    symbols.extend([ch] * count)
+                    i = close + 1
+                    continue
+            symbols.append(ch)
+            i += 1
+        return symbols
+
+    def _parse_edited_pattern(self, pattern: str) -> None:
+        """Populate size/digit fields for an edited picture clause."""
+        self.is_edited = True
+        symbols = self._expand_symbols(pattern)
+
+        size = 0
+        integer_digits = 0
+        decimal_digits = 0
+        seen_decimal = False
+        has_alpha = False
+
+        for sym in symbols:
+            upper = sym.upper()
+            if upper in ("S", "V", "P"):
+                # Non-printing description symbols; V marks the decimal split.
+                if upper == "V":
+                    seen_decimal = True
+                continue
+            if upper in ("CR", "DB"):
+                size += 2
+                continue
+            size += 1
+            if upper in ("X", "A"):
+                has_alpha = True
+            elif upper == ".":
+                seen_decimal = True
+            elif upper in _PIC_EDIT_DIGIT_SYMBOLS:
+                if seen_decimal:
+                    decimal_digits += 1
+                else:
+                    integer_digits += 1
+
+        self.size = size
+        if has_alpha:
+            self.is_alphanumeric_edited = True
+        else:
+            self.is_numeric_edited = True
+            self.integer_digits = integer_digits
+            self.decimal_digits = decimal_digits
+            self.total_digits = integer_digits + decimal_digits
+
     def to_dict(self) -> dict[str, Any]:
         """Convert PICTURE clause to dictionary representation."""
         return {
@@ -238,6 +307,8 @@ class PictureClause(ASTNode):
             "has_scaling_factor": self.has_scaling_factor,
             "scaling_factor": self.scaling_factor,
             "is_edited": self.is_edited,
+            "is_numeric_edited": self.is_numeric_edited,
+            "is_alphanumeric_edited": self.is_alphanumeric_edited,
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }
@@ -307,6 +378,8 @@ class CobolDataItem(ASTNode):
         self.synchronized: bool = False
         self.justified: bool = False
         self.blank_when_zero: bool = False
+        self.is_external: bool = False
+        self.is_global: bool = False
 
     @property
     def initial_value(self) -> str | None:
@@ -399,8 +472,11 @@ class CobolDataItem(ASTNode):
                         comp3_size += 1
                     base_size = comp3_size
             elif self.usage in [
-                "COMP", "COMP-4", "COMP-5",
-                "COMPUTATIONAL-4", "COMPUTATIONAL-5",
+                "COMP",
+                "COMP-4",
+                "COMP-5",
+                "COMPUTATIONAL-4",
+                "COMPUTATIONAL-5",
             ]:
                 # Binary: depends on digits
                 if self.picture_clause.total_digits:
@@ -464,6 +540,10 @@ class CobolDataItem(ASTNode):
             result["justified"] = True
         if self.blank_when_zero:
             result["blank_when_zero"] = True
+        if self.is_external:
+            result["is_external"] = True
+        if self.is_global:
+            result["is_global"] = True
 
         if self.redefines:
             result["redefines"] = self.redefines
