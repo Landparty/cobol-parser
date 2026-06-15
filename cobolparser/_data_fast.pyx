@@ -109,6 +109,7 @@ def parse_data_item_clauses_fast(
     object pic_pattern_token_types,
     object comp_keywords,
     object comp_token_types,
+    object pointer_keywords,
     object division_token_types,
     object picture_clause_cls,
     object occurs_clause_cls,
@@ -146,6 +147,10 @@ def parse_data_item_clauses_fast(
     cdef object by_token
     cdef object idx_token
     cdef object redef_token
+    cdef object dir_tok
+    cdef object sep_tok
+    cdef object char_tok
+    cdef str direction
     cdef str depending_var
     cdef bint has_depending
 
@@ -219,6 +224,86 @@ def parse_data_item_clauses_fast(
         if tok_type in comp_token_types:
             data_item.set_usage(tok_value.upper())
             pos += 1
+            continue
+
+        # POINTER / PROCEDURE-POINTER / FUNCTION-POINTER without USAGE keyword
+        if value_upper in pointer_keywords:
+            data_item.set_usage(value_upper)
+            pos += 1
+            continue
+
+        # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
+        if value_upper == "SIGN":
+            pos += 1
+            if pos < n:
+                nxt = tokens[pos]
+                if nxt is not None and nxt.value and nxt.value.upper() == "IS":
+                    pos += 1
+            if pos < n:
+                dir_tok = tokens[pos]
+                if dir_tok is not None and dir_tok.value:
+                    direction = dir_tok.value.upper()
+                    pos += 1
+                    if pos < n:
+                        sep_tok = tokens[pos]
+                        if (
+                            sep_tok is not None
+                            and sep_tok.value
+                            and sep_tok.value.upper() == "SEPARATE"
+                        ):
+                            pos += 1
+                            if pos < n:
+                                char_tok = tokens[pos]
+                                if (
+                                    char_tok is not None
+                                    and char_tok.value
+                                    and char_tok.value.upper() == "CHARACTER"
+                                ):
+                                    pos += 1
+                            direction = direction + " SEPARATE"
+                    data_item.sign_clause = direction
+            continue
+
+        # SYNCHRONIZED / SYNC [LEFT|RIGHT] clause
+        if value_upper == "SYNCHRONIZED" or value_upper == "SYNC":
+            data_item.synchronized = True
+            pos += 1
+            if pos < n:
+                nxt = tokens[pos]
+                if (
+                    nxt is not None
+                    and nxt.value
+                    and nxt.value.upper() in ("LEFT", "RIGHT")
+                ):
+                    pos += 1
+            continue
+
+        # JUSTIFIED / JUST [RIGHT] clause
+        if value_upper == "JUSTIFIED" or value_upper == "JUST":
+            data_item.justified = True
+            pos += 1
+            if pos < n:
+                nxt = tokens[pos]
+                if nxt is not None and nxt.value and nxt.value.upper() == "RIGHT":
+                    pos += 1
+            continue
+
+        # BLANK WHEN ZERO clause
+        if value_upper == "BLANK":
+            pos += 1
+            if pos < n:
+                nxt = tokens[pos]
+                if nxt is not None and nxt.value and nxt.value.upper() == "WHEN":
+                    pos += 1
+            if pos < n:
+                nxt = tokens[pos]
+                if (
+                    nxt is not None
+                    and nxt.value
+                    and nxt.value.upper() in ("ZERO", "ZEROS", "ZEROES")
+                ):
+                    pos += 1
+            data_item.blank_when_zero = True
             continue
 
         # REDEFINES clause
