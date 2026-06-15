@@ -11,15 +11,12 @@ resulting data item had usage="DISPLAY", causing wrong size calculations downstr
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from cobolparser import parse_cobol
 
 
 def _parse_working_storage(items_cobol: str):
     """Wrap bare data items in a minimal valid COBOL program and parse it."""
-    source = textwrap.dedent(
-        f"""\
+    source = textwrap.dedent(f"""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TESTPROG.
         DATA DIVISION.
@@ -28,8 +25,7 @@ def _parse_working_storage(items_cobol: str):
         {items_cobol}
         PROCEDURE DIVISION.
         STOP RUN.
-        """
-    )
+        """)
     return parse_cobol(source, filename="test.cbl")
 
 
@@ -48,9 +44,7 @@ def _find_item(result, name: str):
 
 
 def test_packed_decimal_without_usage_keyword():
-    result = _parse_working_storage(
-        "    05  WS-AMT  PIC 9(7)V99 PACKED-DECIMAL."
-    )
+    result = _parse_working_storage("    05  WS-AMT  PIC 9(7)V99 PACKED-DECIMAL.")
     assert result.success
     item = _find_item(result, "WS-AMT")
     assert item is not None
@@ -58,9 +52,7 @@ def test_packed_decimal_without_usage_keyword():
 
 
 def test_packed_decimal_with_usage_keyword():
-    result = _parse_working_storage(
-        "    05  WS-AMT  PIC 9(7)V99 USAGE PACKED-DECIMAL."
-    )
+    result = _parse_working_storage("    05  WS-AMT  PIC 9(7)V99 USAGE PACKED-DECIMAL.")
     assert result.success
     item = _find_item(result, "WS-AMT")
     assert item is not None
@@ -89,9 +81,7 @@ def test_computational_5_without_usage_keyword():
 
 
 def test_computational_4_with_usage_keyword():
-    result = _parse_working_storage(
-        "    05  WS-C4  PIC 9(9) USAGE COMPUTATIONAL-4."
-    )
+    result = _parse_working_storage("    05  WS-C4  PIC 9(9) USAGE COMPUTATIONAL-4.")
     assert result.success
     item = _find_item(result, "WS-C4")
     assert item is not None
@@ -146,9 +136,7 @@ def test_function_pointer_without_usage_keyword():
 
 
 def test_sign_is_leading():
-    result = _parse_working_storage(
-        "    05  WS-AMT  PIC S9(9) COMP SIGN IS LEADING."
-    )
+    result = _parse_working_storage("    05  WS-AMT  PIC S9(9) COMP SIGN IS LEADING.")
     assert result.success
     item = _find_item(result, "WS-AMT")
     assert item is not None
@@ -176,9 +164,7 @@ def test_sign_leading_no_is():
 
 
 def test_synchronized():
-    result = _parse_working_storage(
-        "    05  WS-BIN  PIC 9(4) COMP SYNCHRONIZED."
-    )
+    result = _parse_working_storage("    05  WS-BIN  PIC 9(4) COMP SYNCHRONIZED.")
     assert result.success
     item = _find_item(result, "WS-BIN")
     assert item is not None
@@ -186,9 +172,7 @@ def test_synchronized():
 
 
 def test_sync_left():
-    result = _parse_working_storage(
-        "    05  WS-BIN  PIC 9(4) COMP SYNC LEFT."
-    )
+    result = _parse_working_storage("    05  WS-BIN  PIC 9(4) COMP SYNC LEFT.")
     assert result.success
     item = _find_item(result, "WS-BIN")
     assert item is not None
@@ -196,9 +180,7 @@ def test_sync_left():
 
 
 def test_justified_right():
-    result = _parse_working_storage(
-        "    05  WS-NAME  PIC X(20) JUSTIFIED RIGHT."
-    )
+    result = _parse_working_storage("    05  WS-NAME  PIC X(20) JUSTIFIED RIGHT.")
     assert result.success
     item = _find_item(result, "WS-NAME")
     assert item is not None
@@ -206,9 +188,7 @@ def test_justified_right():
 
 
 def test_just_bare():
-    result = _parse_working_storage(
-        "    05  WS-NAME  PIC X(20) JUST."
-    )
+    result = _parse_working_storage("    05  WS-NAME  PIC X(20) JUST.")
     assert result.success
     item = _find_item(result, "WS-NAME")
     assert item is not None
@@ -216,9 +196,7 @@ def test_just_bare():
 
 
 def test_blank_when_zero():
-    result = _parse_working_storage(
-        "    05  WS-AMT  PIC 9(7)V99 BLANK WHEN ZERO."
-    )
+    result = _parse_working_storage("    05  WS-AMT  PIC 9(7)V99 BLANK WHEN ZERO.")
     assert result.success
     item = _find_item(result, "WS-AMT")
     assert item is not None
@@ -226,9 +204,7 @@ def test_blank_when_zero():
 
 
 def test_blank_when_zeros():
-    result = _parse_working_storage(
-        "    05  WS-AMT  PIC 9(7) BLANK WHEN ZEROS."
-    )
+    result = _parse_working_storage("    05  WS-AMT  PIC 9(7) BLANK WHEN ZEROS.")
     assert result.success
     item = _find_item(result, "WS-AMT")
     assert item is not None
@@ -238,9 +214,7 @@ def test_blank_when_zeros():
 def test_ibm_extensions_sample_usage_fields():
     """The ibm_extensions.cbl sample already contains PACKED-DECIMAL and POINTER;
     verify the parser captures them correctly after the fix."""
-    sample = (
-        Path(__file__).parent.parent / "samples" / "ibm_extensions.cbl"
-    )
+    sample = Path(__file__).parent.parent / "samples" / "ibm_extensions.cbl"
     source = sample.read_text(encoding="utf-8")
     result = parse_cobol(source, filename="ibm_extensions.cbl")
 

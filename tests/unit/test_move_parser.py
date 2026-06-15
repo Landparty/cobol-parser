@@ -1,12 +1,10 @@
 """Unit tests for MoveStatementParser optimisation: module-level stop sets."""
-import pytest
 
-from cobolparser.parsers.statements.move_parser import (
-    MoveStatementParser,
-    _STOP_TOKEN_TYPES,
-    _STOP_KEYWORDS,
-)
 from cobolparser.lexer import TokenType
+from cobolparser.parsers.statements.move_parser import (
+    _STOP_KEYWORDS,
+    _STOP_TOKEN_TYPES,
+)
 
 
 class TestMoveParserConstants:
@@ -33,5 +31,6 @@ class TestMoveParserConstants:
 
     def test_module_level_same_object_on_repeated_import(self) -> None:
         from cobolparser.parsers.statements import move_parser
+
         assert move_parser._STOP_TOKEN_TYPES is _STOP_TOKEN_TYPES
         assert move_parser._STOP_KEYWORDS is _STOP_KEYWORDS
