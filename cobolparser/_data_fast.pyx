@@ -109,7 +109,6 @@ def parse_data_item_clauses_fast(
     object pic_pattern_token_types,
     object comp_keywords,
     object comp_token_types,
-    object pointer_keywords,
     object division_token_types,
     object picture_clause_cls,
     object occurs_clause_cls,
@@ -147,10 +146,6 @@ def parse_data_item_clauses_fast(
     cdef object by_token
     cdef object idx_token
     cdef object redef_token
-    cdef object dir_tok
-    cdef object sep_tok
-    cdef object char_tok
-    cdef str direction
     cdef str depending_var
     cdef bint has_depending
 
@@ -161,9 +156,11 @@ def parse_data_item_clauses_fast(
 
         tok_type = token.type
 
-        # Period ends this data item
+        # Period ends this data item. Leave it unconsumed and hand back to
+        # the pure-Python loop, which consumes the terminator itself. This
+        # keeps the two loops symmetric whether the fast loop ran to the end
+        # of the item or bailed early on a clause it does not handle.
         if tok_type is period_type:
-            pos += 1
             break
 
         # Level number starts next item
@@ -177,18 +174,14 @@ def parse_data_item_clauses_fast(
         tok_value = token.value
         value_upper = tok_value.upper() if tok_value else ""
 
-        # PICTURE / PIC clause
+        # PICTURE / PIC clause -- delegate to the Python helper (the single
+        # source of truth for picture extraction, including edited pictures
+        # with embedded decimal points and currency/sign symbols).
         if value_upper == "PICTURE" or value_upper == "PIC":
             pos += 1  # consume PIC keyword
-            pattern, pos = parse_picture_clause_fast(
-                tokens,
-                pos,
-                pic_terminator_keywords,
-                pic_pattern_token_types,
-                comp_token_types,
-                period_type,
-                newline_type,
-            )
+            token_stream._pos = pos
+            pattern = parser_self._parse_picture_clause(token_stream)
+            pos = token_stream._pos
             if pattern:
                 data_item.set_picture_clause(picture_clause_cls(pattern, location))
             continue
@@ -224,86 +217,6 @@ def parse_data_item_clauses_fast(
         if tok_type in comp_token_types:
             data_item.set_usage(tok_value.upper())
             pos += 1
-            continue
-
-        # POINTER / PROCEDURE-POINTER / FUNCTION-POINTER without USAGE keyword
-        if value_upper in pointer_keywords:
-            data_item.set_usage(value_upper)
-            pos += 1
-            continue
-
-        # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
-        if value_upper == "SIGN":
-            pos += 1
-            if pos < n:
-                nxt = tokens[pos]
-                if nxt is not None and nxt.value and nxt.value.upper() == "IS":
-                    pos += 1
-            if pos < n:
-                dir_tok = tokens[pos]
-                if dir_tok is not None and dir_tok.value:
-                    direction = dir_tok.value.upper()
-                    pos += 1
-                    if pos < n:
-                        sep_tok = tokens[pos]
-                        if (
-                            sep_tok is not None
-                            and sep_tok.value
-                            and sep_tok.value.upper() == "SEPARATE"
-                        ):
-                            pos += 1
-                            if pos < n:
-                                char_tok = tokens[pos]
-                                if (
-                                    char_tok is not None
-                                    and char_tok.value
-                                    and char_tok.value.upper() == "CHARACTER"
-                                ):
-                                    pos += 1
-                            direction = direction + " SEPARATE"
-                    data_item.sign_clause = direction
-            continue
-
-        # SYNCHRONIZED / SYNC [LEFT|RIGHT] clause
-        if value_upper == "SYNCHRONIZED" or value_upper == "SYNC":
-            data_item.synchronized = True
-            pos += 1
-            if pos < n:
-                nxt = tokens[pos]
-                if (
-                    nxt is not None
-                    and nxt.value
-                    and nxt.value.upper() in ("LEFT", "RIGHT")
-                ):
-                    pos += 1
-            continue
-
-        # JUSTIFIED / JUST [RIGHT] clause
-        if value_upper == "JUSTIFIED" or value_upper == "JUST":
-            data_item.justified = True
-            pos += 1
-            if pos < n:
-                nxt = tokens[pos]
-                if nxt is not None and nxt.value and nxt.value.upper() == "RIGHT":
-                    pos += 1
-            continue
-
-        # BLANK WHEN ZERO clause
-        if value_upper == "BLANK":
-            pos += 1
-            if pos < n:
-                nxt = tokens[pos]
-                if nxt is not None and nxt.value and nxt.value.upper() == "WHEN":
-                    pos += 1
-            if pos < n:
-                nxt = tokens[pos]
-                if (
-                    nxt is not None
-                    and nxt.value
-                    and nxt.value.upper() in ("ZERO", "ZEROS", "ZEROES")
-                ):
-                    pos += 1
-            data_item.blank_when_zero = True
             continue
 
         # REDEFINES clause
@@ -412,8 +325,18 @@ def parse_data_item_clauses_fast(
                 data_item.set_occurs_clause(occurs)
             continue
 
-        # Fallback: PERIOD/LEVEL_NUMBER/DIVISION already handled above;
-        # everything else (including NEWLINE) is just consumed.
-        pos += 1
+        # NEWLINE is whitespace -- consume it cheaply and keep going.
+        if tok_type is newline_type:
+            pos += 1
+            continue
+
+        # Any other token is a clause this fast loop does not handle
+        # (SIGN, SYNCHRONIZED, JUSTIFIED, BLANK, bare POINTER, EXTERNAL,
+        # GLOBAL, ...). Stop here without consuming it and hand control
+        # back to the pure-Python loop in ``_parse_data_item``, which is
+        # the single source of truth for those clauses. This avoids
+        # duplicating (and re-drifting) the clause logic across the two
+        # implementations.
+        break
 
     return pos

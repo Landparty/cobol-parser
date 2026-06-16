@@ -81,6 +81,8 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         "JUSTIFIED",
         "JUST",
         "BLANK",
+        "EXTERNAL",
+        "GLOBAL",
     }
 )
 _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
@@ -90,6 +92,24 @@ _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
         TokenType.STRING_LITERAL,
         TokenType.LEVEL_NUMBER,
     }
+)
+# Editing symbols that the lexer emits as their own token types (rather than
+# folding into an IDENTIFIER): currency ($), fixed/floating sign (+/-), and the
+# check-protect (*) and stroke (/) insertion characters. Collected verbatim so
+# edited pictures such as ``$$$,$$9.99`` or ``ZZ9.99-`` survive extraction.
+_PICTURE_SYMBOL_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.CURRENCY,
+        TokenType.MINUS,
+        TokenType.PLUS,
+        TokenType.MULTIPLY,
+        TokenType.DIVIDE,
+    }
+)
+# Token types that may legitimately follow an *interior* decimal point in a
+# picture (i.e. the fractional digits / edit symbols).
+_PICTURE_DECIMAL_FOLLOW_TYPES: frozenset[TokenType] = (
+    _PICTURE_PATTERN_TOKEN_TYPES | _PICTURE_SYMBOL_TOKEN_TYPES
 )
 
 # Hoisted out of _parse_section -- these were being rebuilt as set
@@ -119,6 +139,23 @@ _DIVISION_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Keywords that begin an FD/SD file-description clause. Used to segment the
+# clause tokens captured by ``_parse_fd_clauses``.
+_FD_CLAUSE_STARTS: frozenset[str] = frozenset(
+    {
+        "BLOCK",
+        "RECORD",
+        "LABEL",
+        "RECORDING",
+        "CODE-SET",
+        "DATA",
+        "LINAGE",
+        "VALUE",
+        "GLOBAL",
+        "EXTERNAL",
+    }
+)
+
 # Optional Cython acceleration for the picture-clause inner loop. The
 # pure-Python implementation in ``_parse_picture_clause`` below remains
 # the authoritative behaviour; we only delegate when the extension is
@@ -128,13 +165,9 @@ try:
     from cobolparser._data_fast import (  # type: ignore[import-not-found]
         parse_data_item_clauses_fast as _fast_data_item_clauses,
     )
-    from cobolparser._data_fast import (
-        parse_picture_clause_fast as _fast_pic,
-    )
 
     _HAS_DATA_FAST = True
 except ImportError:
-    _fast_pic = None
     _fast_data_item_clauses = None
     _HAS_DATA_FAST = False
 
@@ -233,6 +266,10 @@ class DataDivisionParser(BaseDivisionParser):
         exec_sql_items: list[ExecSQLStatement] = []
         paren_depth = 0  # Track nesting depth of parentheses
         current_fd_name: str | None = None  # FD/SD file name for FILE SECTION items
+        # FD/SD clauses (BLOCK CONTAINS, RECORD, LABEL, etc.) for the file the
+        # current 01-level records belong to. Captured rather than discarded so
+        # the record layout's physical attributes survive into the AST.
+        current_fd_clauses: dict[str, Any] = {}
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -290,17 +327,10 @@ class DataDivisionParser(BaseDivisionParser):
                 if fd_name_tok and fd_name_tok.type == TokenType.IDENTIFIER:
                     current_fd_name = fd_name_tok.value
                     token_stream.consume()  # consume file name
-                # Skip remaining FD clauses until period or level number
-                while not token_stream.is_empty():
-                    ahead = token_stream.peek()
-                    if ahead is None:
-                        break
-                    if ahead.type == TokenType.PERIOD:
-                        token_stream.consume()
-                        break
-                    if ahead.type == TokenType.LEVEL_NUMBER:
-                        break  # leave the level number for data item parsing
-                    token_stream.consume()
+                # Capture the FD/SD clauses (instead of discarding them) so the
+                # file's physical layout (block/record sizes, recording mode,
+                # labels, code set, EXTERNAL/GLOBAL) is preserved in the AST.
+                current_fd_clauses = self._parse_fd_clauses(token_stream)
                 continue
 
             # Parse EXEC SQL blocks that appear in the data division
@@ -349,6 +379,10 @@ class DataDivisionParser(BaseDivisionParser):
                             and current_fd_name is not None
                         ):
                             data_item.set_metadata("fd_file_name", current_fd_name)
+                            if current_fd_clauses:
+                                data_item.set_metadata(
+                                    "fd_clauses", dict(current_fd_clauses)
+                                )
                         data_items.append(data_item)
             else:
                 # Skip unexpected tokens
@@ -416,6 +450,179 @@ class DataDivisionParser(BaseDivisionParser):
 
         return top_level_items
 
+    @staticmethod
+    def _level_starts_record(token_stream: ITokenStream) -> bool:
+        """Return True if the LEVEL_NUMBER at the cursor begins a record entry.
+
+        A record description is a level number immediately followed by a
+        data-name (an IDENTIFIER, or FILLER), e.g. ``01 IN-REC``. A bare
+        integer that is merely a clause operand (``RECORD CONTAINS 77``) is
+        followed by a keyword or another number instead, so it must not be
+        mistaken for the start of a record. NEWLINE tokens between the level
+        and the name are skipped.
+        """
+        offset = 1
+        while True:
+            nxt = token_stream.peek(offset)
+            if nxt is None:
+                return False
+            if nxt.type == TokenType.NEWLINE:
+                offset += 1
+                continue
+            if nxt.type == TokenType.IDENTIFIER:
+                return True
+            return bool(nxt.value and nxt.value.upper() == "FILLER")
+
+    def _parse_fd_clauses(self, token_stream: ITokenStream) -> dict[str, Any]:
+        """Parse the clauses of an FD/SD file description entry.
+
+        Walks tokens from just after the file name up to (and consuming) the
+        terminating period, or up to the next level number / division header.
+        Recognized clauses (BLOCK CONTAINS, RECORD/RECORD VARYING, LABEL
+        RECORDS, RECORDING MODE, CODE-SET, DATA RECORDS, LINAGE, VALUE OF,
+        GLOBAL, EXTERNAL) are returned as a structured, JSON-serializable
+        mapping. Unrecognized tokens for a clause are preserved as raw text so
+        nothing is silently lost.
+        """
+        raw: dict[str, list[str]] = {}
+        current_key: str | None = None
+
+        while not token_stream.is_empty():
+            t = token_stream.peek()
+            if t is None:
+                break
+            if t.type == TokenType.PERIOD:
+                token_stream.consume()
+                break
+            if t.type in _DIVISION_TOKEN_TYPES:
+                break
+            # The lexer tags every bare integer as LEVEL_NUMBER, so a clause
+            # operand such as the 77 in "RECORD CONTAINS 77 CHARACTERS" or the
+            # 1 in "BLOCK CONTAINS 1 RECORDS" is indistinguishable from a record
+            # level by value alone. A real record description is a level number
+            # immediately followed by a data-name (IDENTIFIER/FILLER); operands
+            # are followed by a keyword (RECORDS/CHARACTERS/...) or a number.
+            # Only the former should stop clause capture.
+            if t.type == TokenType.LEVEL_NUMBER:
+                if self._level_starts_record(token_stream):
+                    break
+                if current_key is not None and t.value:
+                    raw[current_key].append(t.value)
+                token_stream.consume()
+                continue
+            if t.type == TokenType.NEWLINE:
+                token_stream.consume()
+                continue
+
+            value_upper = t.value.upper() if t.value else ""
+            # "RECORD" is also the second word of the LABEL RECORD / DATA RECORD
+            # clauses; don't let it start a fresh RECORD clause in that context.
+            starts_clause = value_upper in _FD_CLAUSE_STARTS and not (
+                value_upper == "RECORD" and current_key in ("LABEL", "DATA")
+            )
+            if starts_clause:
+                current_key = value_upper
+                raw.setdefault(current_key, [])
+            elif current_key is not None and t.value:
+                raw[current_key].append(t.value)
+            token_stream.consume()
+
+        return self._structure_fd_clauses(raw)
+
+    @staticmethod
+    def _structure_fd_clauses(raw: dict[str, list[str]]) -> dict[str, Any]:
+        """Normalize raw FD clause tokens into structured fields."""
+
+        def _ints(tokens: list[str]) -> list[int]:
+            out: list[int] = []
+            for tok in tokens:
+                try:
+                    out.append(int(tok))
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        clauses: dict[str, Any] = {}
+
+        for key, tokens in raw.items():
+            upper = [tok.upper() for tok in tokens]
+
+            if key in ("GLOBAL", "EXTERNAL"):
+                clauses[key.lower().replace("-", "_")] = True
+
+            elif key == "BLOCK":
+                nums = _ints(tokens)
+                unit = (
+                    "RECORDS"
+                    if "RECORDS" in upper
+                    else ("CHARACTERS" if "CHARACTERS" in upper else None)
+                )
+                clauses["block_contains"] = {
+                    "min": nums[0] if len(nums) > 1 else None,
+                    "max": nums[-1] if nums else None,
+                    "unit": unit,
+                }
+
+            elif key == "RECORD":
+                if "VARYING" in upper:
+                    nums = _ints(tokens)
+                    depending = None
+                    if "DEPENDING" in upper:
+                        # data-name follows DEPENDING [ON]
+                        idx = upper.index("DEPENDING")
+                        rest = [tok for tok in tokens[idx + 1 :] if tok.upper() != "ON"]
+                        depending = rest[0] if rest else None
+                    clauses["record"] = {
+                        "varying": True,
+                        "min": nums[0] if nums else None,
+                        "max": (
+                            nums[1] if len(nums) > 1 else (nums[0] if nums else None)
+                        ),
+                        "depending_on": depending,
+                    }
+                else:
+                    nums = _ints(tokens)
+                    clauses["record"] = {
+                        "varying": False,
+                        "min": nums[0] if len(nums) > 1 else None,
+                        "max": nums[-1] if nums else None,
+                    }
+
+            elif key == "LABEL":
+                if "OMITTED" in upper:
+                    clauses["label_records"] = "OMITTED"
+                elif "STANDARD" in upper:
+                    clauses["label_records"] = "STANDARD"
+                elif tokens:
+                    clauses["label_records"] = " ".join(tokens)
+
+            elif key == "RECORDING":
+                mode = [tok for tok in tokens if tok.upper() not in ("MODE", "IS")]
+                if mode:
+                    clauses["recording_mode"] = mode[0]
+
+            elif key == "CODE-SET":
+                names = [tok for tok in tokens if tok.upper() != "IS"]
+                if names:
+                    clauses["code_set"] = names[0]
+
+            elif key == "DATA":
+                names = [
+                    tok
+                    for tok in tokens
+                    if tok.upper() not in ("RECORD", "RECORDS", "IS", "ARE")
+                ]
+                if names:
+                    clauses["data_records"] = names
+
+            elif key == "LINAGE":
+                clauses["linage"] = " ".join(tokens)
+
+            elif key == "VALUE":
+                clauses["value_of"] = " ".join(tokens)
+
+        return clauses
+
     def _parse_data_item(self, token_stream: ITokenStream) -> CobolDataItem | None:
         """Parse a single data item definition.
 
@@ -456,10 +663,15 @@ class DataDivisionParser(BaseDivisionParser):
         # Create data item
         data_item = CobolDataItem(name, level, location)
 
-        # Fast path: drive the clause-dispatch loop in Cython. VALUE and
-        # USAGE clauses still call back into the Python helpers below
-        # via ``parser_self`` -- the fast helper handles only the
-        # token-walking orchestration.
+        # Fast path: drive the common-clause loop in Cython. VALUE and
+        # USAGE clauses call back into the Python helpers below via
+        # ``parser_self``. The fast helper handles only the hot clauses
+        # (PICTURE, VALUE, USAGE, COMP, REDEFINES, OCCURS) and bails back
+        # on any clause it does not recognize (SIGN, SYNCHRONIZED,
+        # JUSTIFIED, BLANK, POINTER, EXTERNAL, GLOBAL, ...). We then fall
+        # through to the pure-Python loop below, which is the single
+        # source of truth for those clauses -- so the two implementations
+        # can never drift on the rarer clauses.
         if _HAS_DATA_FAST:
             tokens_list = getattr(token_stream, "_tokens", None)
             if tokens_list is not None:
@@ -474,7 +686,6 @@ class DataDivisionParser(BaseDivisionParser):
                     _PICTURE_PATTERN_TOKEN_TYPES,
                     _COMP_KEYWORDS,
                     _COMP_TOKEN_TYPES,
-                    _POINTER_KEYWORDS,
                     _DIVISION_TOKEN_TYPES,
                     PictureClause,
                     OccursClause,
@@ -485,7 +696,8 @@ class DataDivisionParser(BaseDivisionParser):
                     TokenType.NEWLINE,
                 )
                 token_stream._pos = new_pos  # type: ignore[attr-defined]
-                return data_item
+                # Fall through (no early return): the Python loop below
+                # finishes any clauses the fast helper handed back.
 
         # Parse clauses until period or next item
         while not token_stream.is_empty():
@@ -600,6 +812,25 @@ class DataDivisionParser(BaseDivisionParser):
                 ):
                     token_stream.consume()
                 data_item.blank_when_zero = True
+
+            # EXTERNAL clause: [IS] EXTERNAL [AS literal]
+            elif value_upper == "EXTERNAL":
+                data_item.is_external = True
+                token_stream.consume()
+                nxt = token_stream.peek()
+                if nxt and nxt.value and nxt.value.upper() == "AS":
+                    token_stream.consume()
+                    lit = token_stream.peek()
+                    if lit and lit.type in (
+                        TokenType.STRING_LITERAL,
+                        TokenType.IDENTIFIER,
+                    ):
+                        token_stream.consume()
+
+            # GLOBAL clause: [IS] GLOBAL
+            elif value_upper == "GLOBAL":
+                data_item.is_global = True
+                token_stream.consume()
 
             # REDEFINES clause
             elif value_upper == "REDEFINES":
@@ -868,33 +1099,34 @@ class DataDivisionParser(BaseDivisionParser):
             else:
                 break
 
+    @staticmethod
+    def _period_is_picture_decimal(period: Any, nxt: Any) -> bool:
+        """Decide whether a PERIOD token is an editing decimal point.
+
+        An interior decimal point is written with no surrounding space, so the
+        next token sits on the same line in the immediately adjacent column and
+        is itself a picture symbol (e.g. the ``.`` in ``ZZ9.99``). The entry's
+        terminating period, by contrast, is followed by whitespace, a newline,
+        or a different construct.
+        """
+        if nxt is None or nxt.type in (TokenType.NEWLINE, TokenType.EOF):
+            return False
+        if nxt.type not in _PICTURE_DECIMAL_FOLLOW_TYPES:
+            return False
+        ploc = period.location
+        nloc = nxt.location
+        if ploc is None or nloc is None:
+            return False
+        return bool(nloc.line == ploc.line and nloc.column == ploc.column + 1)
+
     def _parse_picture_clause(self, token_stream: ITokenStream) -> str | None:
         """Parse PICTURE clause pattern.
 
-        Returns the picture pattern string (e.g., 'X(10)', '9(5)', '9(7)V99').
+        Returns the picture pattern string (e.g., 'X(10)', '9(5)', '9(7)V99',
+        'ZZ,ZZ9.99-', '$$$,$$9.99'). This is the single implementation used by
+        both the pure-Python and Cython-accelerated data-item paths; the fast
+        clause loop delegates here so the two can never drift.
         """
-        # Fast path: when the Cython helper is compiled and we're handed a
-        # standard ``TokenStream`` (which exposes ``_tokens`` and ``_pos``
-        # as documented internals), drive the inner loop in C and update
-        # the stream cursor in one shot. Falls through to the pure-Python
-        # walker below otherwise.
-        if _HAS_DATA_FAST:
-            tokens = getattr(token_stream, "_tokens", None)
-            if tokens is not None:
-                pattern, new_pos = _fast_pic(
-                    tokens,
-                    token_stream._pos,  # type: ignore[attr-defined]
-                    _PICTURE_TERMINATOR_KEYWORDS,
-                    _PICTURE_PATTERN_TOKEN_TYPES,
-                    _COMP_TOKEN_TYPES,
-                    TokenType.PERIOD,
-                    TokenType.NEWLINE,
-                )
-                token_stream._pos = new_pos  # type: ignore[attr-defined]
-                # The Cython helper is untyped to mypy; it returns either
-                # ``None`` or the joined pattern string.
-                return pattern  # type: ignore[no-any-return]
-
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
 
@@ -906,6 +1138,12 @@ class DataDivisionParser(BaseDivisionParser):
             # Stop at specific keywords when outside parentheses
             if paren_depth == 0:
                 if token.type == TokenType.PERIOD:
+                    # An interior '.' is an editing decimal point and stays in
+                    # the pattern; the terminating period ends the clause.
+                    if self._period_is_picture_decimal(token, token_stream.peek(1)):
+                        pattern_parts.append(".")
+                        token_stream.consume()
+                        continue
                     break
                 # Stop at keywords that follow picture clause
                 if token.value and token.value.upper() in _PICTURE_TERMINATOR_KEYWORDS:
@@ -923,6 +1161,10 @@ class DataDivisionParser(BaseDivisionParser):
                     token_stream.consume()
                     break
                 pattern_parts.append(token_value)
+                token_stream.consume()
+            # Editing symbols emitted as their own token types ($ + - * /)
+            elif token.type in _PICTURE_SYMBOL_TOKEN_TYPES:
+                pattern_parts.append(token.value)
                 token_stream.consume()
             elif token.value == "(":
                 pattern_parts.append(token.value)

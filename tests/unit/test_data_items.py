@@ -185,7 +185,8 @@ class TestPictureClause:
         )
         assert pic_minus_decimal.integer_digits == 3
         assert pic_minus_decimal.decimal_digits == 2
-        assert pic_minus_decimal.size == 6  # 5 digits + 1 for sign/decimal
+        # 5 digits + sign + decimal point = 7 character positions
+        assert pic_minus_decimal.size == 7
 
         # -.9(3) - no integer part
         pic_minus_decimal_only = PictureClause("-.9(3)", location)
@@ -195,7 +196,8 @@ class TestPictureClause:
         )
         assert pic_minus_decimal_only.integer_digits == 0
         assert pic_minus_decimal_only.decimal_digits == 3
-        assert pic_minus_decimal_only.size == 4  # 3 digits + 1 for sign
+        # sign + decimal point + 3 digits = 5 character positions
+        assert pic_minus_decimal_only.size == 5
 
     def test_picture_complex_patterns(self):
         """Test complex PICTURE patterns."""
@@ -225,9 +227,10 @@ class TestPictureClause:
         # Should still parse digits
         assert pic_complex.size is not None
 
-        # Pattern with only special characters
+        # Zero-suppression check-protect symbols: three positions, numeric-edited
         pic_special = PictureClause("***", location)
-        assert pic_special.size == 1  # Default fallback
+        assert pic_special.is_numeric_edited is True
+        assert pic_special.size == 3
 
         # Empty pattern
         pic_empty = PictureClause("", location)
@@ -326,13 +329,15 @@ class TestPictureClause:
         assert pic_sv.integer_digits == 0
         assert pic_sv.decimal_digits == 2
 
-        # Test patterns that don't match any regex (fallback case)
-        pic_fallback = PictureClause("ZZZ", location)  # Should trigger fallback
-        assert pic_fallback.size == 1  # Default fallback size
+        # Zero-suppression picture: three positions, numeric-edited
+        pic_fallback = PictureClause("ZZZ", location)
+        assert pic_fallback.is_numeric_edited is True
+        assert pic_fallback.size == 3
 
-        # Test pattern with only special characters (no 9s or Xs)
+        # Floating-sign picture: three positions, numeric-edited
         pic_no_digits = PictureClause("---", location)
-        assert pic_no_digits.size == 1  # Default fallback
+        assert pic_no_digits.is_numeric_edited is True
+        assert pic_no_digits.size == 3
 
 
 class TestOccursClause:
@@ -982,9 +987,10 @@ def test_picture_clause_additional_coverage():
         and pic_minus_no_int.is_numeric_edited is True
     )
 
-    # Test patterns with no matches in the main parsing logic
+    # Floating currency picture: three positions, numeric-edited
     pic_unmatched = PictureClause("$$$", location)
-    assert pic_unmatched.size == 1  # Should default to 1
+    assert pic_unmatched.is_numeric_edited is True
+    assert pic_unmatched.size == 3
 
     # Test V pattern with empty left side
     pic_empty_left = PictureClause("V9(3)", location)

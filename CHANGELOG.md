@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DATA DIVISION completeness**:
+  - `EXTERNAL` and `GLOBAL` data-item clauses are now recorded on
+    `CobolDataItem` (`is_external` / `is_global`, serialized in `to_dict()`)
+    instead of being silently consumed
+  - FD/SD file-description clauses are captured rather than discarded: the
+    file's `01` record carries an `fd_clauses` metadata mapping with
+    `block_contains`, `record` (fixed and `RECORD VARYING ... DEPENDING ON`),
+    `recording_mode`, `label_records`, `code_set`, `data_records`, `linage`,
+    and `value_of`
+  - Edited `PICTURE` clauses are extracted and classified correctly, including
+    embedded decimal points and currency / sign / check-protect / stroke
+    insertion symbols (`$$$,$$9.99`, `ZZ,ZZ9.99-`, `**,**9.99`, `XXX/XXX`);
+    `PictureClause` now exposes `is_numeric_edited` / `is_alphanumeric_edited`
+    and computes the displayed character size
+
+### Fixed
+
+- The Cython-accelerated data-item clause loop (`_data_fast`) had drifted out
+  of sync with the pure-Python parser and silently dropped the `SIGN`,
+  `SYNCHRONIZED`, `JUSTIFIED`, `BLANK WHEN ZERO`, and bare-`POINTER` clauses in
+  compiled builds. The fast loop now hands those clauses back to the
+  pure-Python path, which is the single source of truth, so the two
+  implementations can no longer diverge. Picture extraction is likewise
+  centralized in the Python `_parse_picture_clause`.
+
 - **Analysis toolkit**: comprehensive static and dynamic analyzers exposed via `cobolparser.analysis` and the top-level package:
   - `DeadCodeAnalyzer` — unreferenced paragraphs and sections
   - `ProgramFlowAnalyzer` — control-flow graph with typed PERFORM / GO TO / CALL / fall-through edges (also wired to the `cobol-parser program-flow` CLI). PERFORM/SORT/MERGE `... THRU ...` edges now carry `thru_target` and the ordered `range_members` of every paragraph the range spans, and detected cycles are classified in `cycle_details` by kind (`PERFORM_RECURSION` / `GOTO_LOOP` / `FALL_THROUGH` / `MIXED`) so genuine recursive dependencies are distinguishable from sequential-fall-through artifacts
