@@ -84,11 +84,29 @@ result = parse_cobol(source)
 report = ProgramFlowAnalyzer().analyze(result.ast)
 
 for edge in report.edges:
-    print(f"{edge.from_node} --[{edge.edge_type.name}]--> {edge.to_node}")
+    print(f"{edge.source} --[{edge.edge_type.value}]--> {edge.target}")
+
+# PERFORM/SORT/MERGE ... THRU ... edges expose the full range they span:
+for edge in report.edges:
+    if edge.thru_target:
+        print(f"{edge.source} performs range {edge.range_members}")
+
+# Circular dependencies are classified by kind so genuine recursion is
+# distinguishable from sequential fall-through artifacts:
+for cycle in report.cycle_details:
+    print(f"{cycle['kind']}: {' -> '.join(cycle['nodes'])}")
 ```
 
 - **CLI**: `cobol-parser program-flow program.cbl`
-- **Edge types**: `PERFORM`, `GO_TO`, `CALL`, `FALLTHROUGH`
+- **Edge types**: `PERFORM`, `PERFORM_THRU`, `GOTO`, `GOTO_DEPENDING`, `CALL`,
+  `CALL_DYNAMIC`, `SORT_*`/`MERGE_*` procedure edges, `ALTER`, `FALL_THROUGH`,
+  and `IF_*` / `EVALUATE_*` branch edges
+- **THRU ranges**: `FlowEdge.thru_target` and `FlowEdge.range_members` make the
+  paragraphs spanned by a `PERFORM A THRU C` (or SORT/MERGE THRU) explicit
+- **Cycles**: `report.cycles` lists the node groups; `report.cycle_details`
+  classifies each as `PERFORM_RECURSION`, `GOTO_LOOP`, `FALL_THROUGH`, or
+  `MIXED`, with `summary.recursion_cycle_count` flagging true recursive
+  dependencies
 - **Types**: `FlowNode`, `FlowEdge`, `FlowEdgeType`, `ProgramFlowReport`
 
 ---
