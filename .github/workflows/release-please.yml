@@ -13,13 +13,50 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      # `releases_created` is the aggregate flag for manifest mode: true on the
+      # run where the "chore: release X" PR is merged and the release is cut.
+      releases_created: ${{ steps.release.outputs.releases_created }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          # GITHUB_TOKEN works out of the box. Note: releases/tags it creates
-          # will NOT trigger other workflows. If you later add a PyPI publish
-          # workflow that should fire on the release tag, swap this for a PAT
-          # stored as a secret (e.g. secrets.RELEASE_PLEASE_TOKEN).
+          # GITHUB_TOKEN works out of the box. Releases it creates do NOT
+          # trigger other workflows -- that's why the publish job below lives
+          # in THIS same workflow (gated on the output) instead of a separate
+          # release-triggered workflow, which would never fire.
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Build the distributions and attach them to the GitHub Release that
+  # release-please just created. Only runs when a release was actually cut
+  # (release PR merged), not when the release PR is merely opened/updated.
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and pure-Python wheel
+        # Skip the Cython C extensions so the wheel is py3-none-any and installs
+        # on every platform / Python 3.11-3.13 with no C compiler. The sdist
+        # still carries the .pyx/.c sources for anyone who wants the speedup.
+        env:
+          COBOLPARSER_SKIP_EXT: "1"
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Resolve the release tag from the manifest
+        id: tag
+        # The merge commit that triggered this run already bumped the manifest
+        # to the released version; tags use the v<version> format
+        # (include-component-in-tag: false).
+        run: echo "tag=v$(jq -r '.["."]' .release-please-manifest.json)" >> "$GITHUB_OUTPUT"
+      - name: Attach distributions to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ steps.tag.outputs.tag }}" dist/* --clobber
