@@ -5335,6 +5335,15 @@ class TestCycleClassification:
         assert detail["self_recursive"] is True
         assert detail["length"] == 1
 
+    def test_goto_self_loop_is_not_self_recursive(self) -> None:
+        """A 1-node GO TO self-loop is a GOTO_LOOP, not self-PERFORM recursion."""
+        prog = _make_program([("SPIN", [_goto("SPIN")])])
+        report = ProgramFlowAnalyzer().analyze(prog)
+        detail = next(d for d in report.cycle_details if d["nodes"] == ["SPIN"])
+        assert detail["kind"] == "GOTO_LOOP"
+        assert detail["length"] == 1
+        assert detail["self_recursive"] is False
+
     def test_goto_loop_classified(self) -> None:
         """A GO TO back-edge cycle is classified as GOTO_LOOP."""
         prog = _make_program(

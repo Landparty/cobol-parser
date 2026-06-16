@@ -778,13 +778,21 @@ class ProgramFlowAnalyzer:
         out of order, the best-effort endpoints are returned instead.
         """
         order = self._ordered_procedures
-        try:
-            i = order.index(start)
-            j = order.index(end)
-        except ValueError:
-            return [start, end] if start != end else [start]
-        if j < i:
-            return [start, end] if start != end else [start]
+        if start == end:
+            return [start]
+        # Single pass over the procedure list, capturing the first occurrence
+        # of each endpoint, so a THRU expansion stays O(n) with one scan even
+        # when many THRU edges are present.
+        i = j = -1
+        for idx, name in enumerate(order):
+            if i == -1 and name == start:
+                i = idx
+            elif j == -1 and name == end:
+                j = idx
+            if i != -1 and j != -1:
+                break
+        if i == -1 or j == -1 or j < i:
+            return [start, end]
         return order[i : j + 1]
 
     def _process_perform(self, stmt: PerformStatement, source: str) -> None:
@@ -1131,7 +1139,7 @@ class ProgramFlowAnalyzer:
                     "nodes": list(cycle),
                     "kind": kind,
                     "length": n,
-                    "self_recursive": n == 1,
+                    "self_recursive": n == 1 and kind == "PERFORM_RECURSION",
                     "edge_types": sorted(t.value for t in all_types),
                 }
             )
