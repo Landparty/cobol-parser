@@ -143,6 +143,21 @@ extend-exclude = '''
 )/
 '''
 
+[tool.cibuildwheel]
+# Build CPython 3.11–3.13 only (matches requires-python)
+build = "cp311-* cp312-* cp313-*"
+# Smoke-test: verify the C extension actually loaded, not just the pure-Python fallback
+test-command = "python -c \"from cobolparser._lexer_fast import CobolLexer; print('C extension OK')\""
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64", "aarch64"]
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
