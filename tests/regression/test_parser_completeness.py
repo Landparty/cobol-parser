@@ -167,6 +167,27 @@ class TestFdClauseCapture:
         # WORKING-STORAGE item from the wrapper must survive.
         assert _find_item(result, "WS-FLAG") is not None
 
+    def test_numeric_operands_one_and_77_are_not_record_levels(self):
+        """Operands like 1 and 77 are lexed as LEVEL_NUMBER but must be captured
+        as clause operands, not mistaken for 01/77 record entries."""
+        result = parse_cobol(
+            _file_program(
+                "FD  INFILE\n"
+                "           BLOCK CONTAINS 1 RECORDS\n"
+                "           RECORD CONTAINS 77 CHARACTERS.\n"
+                "       01  IN-REC PIC X(77)."
+            ),
+            filename="reg.cbl",
+        )
+        assert result.success
+        # No bogus ANONYMOUS-1 / ANONYMOUS-77 items leaked from the operands.
+        names = [d.name for d in result.ast.find_all_by_type("DataItem")]
+        assert not any(n.startswith("ANONYMOUS") for n in names)
+        assert "IN-REC" in names
+        clauses = (_find_item(result, "IN-REC")._metadata or {})["fd_clauses"]
+        assert clauses["block_contains"]["max"] == 1
+        assert clauses["record"]["max"] == 77
+
 
 # ===========================================================================
 # Edited PICTURE clauses

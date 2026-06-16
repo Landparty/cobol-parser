@@ -450,6 +450,29 @@ class DataDivisionParser(BaseDivisionParser):
 
         return top_level_items
 
+    @staticmethod
+    def _level_starts_record(token_stream: ITokenStream) -> bool:
+        """Return True if the LEVEL_NUMBER at the cursor begins a record entry.
+
+        A record description is a level number immediately followed by a
+        data-name (an IDENTIFIER, or FILLER), e.g. ``01 IN-REC``. A bare
+        integer that is merely a clause operand (``RECORD CONTAINS 77``) is
+        followed by a keyword or another number instead, so it must not be
+        mistaken for the start of a record. NEWLINE tokens between the level
+        and the name are skipped.
+        """
+        offset = 1
+        while True:
+            nxt = token_stream.peek(offset)
+            if nxt is None:
+                return False
+            if nxt.type == TokenType.NEWLINE:
+                offset += 1
+                continue
+            if nxt.type == TokenType.IDENTIFIER:
+                return True
+            return bool(nxt.value and nxt.value.upper() == "FILLER")
+
     def _parse_fd_clauses(self, token_stream: ITokenStream) -> dict[str, Any]:
         """Parse the clauses of an FD/SD file description entry.
 
@@ -473,15 +496,15 @@ class DataDivisionParser(BaseDivisionParser):
                 break
             if t.type in _DIVISION_TOKEN_TYPES:
                 break
-            # The lexer tags bare integers as LEVEL_NUMBER. Only 01/77 begin a
-            # record description (leave those in place); any other value here is
-            # a clause operand such as the 80 in RECORD CONTAINS 80 CHARACTERS.
+            # The lexer tags every bare integer as LEVEL_NUMBER, so a clause
+            # operand such as the 77 in "RECORD CONTAINS 77 CHARACTERS" or the
+            # 1 in "BLOCK CONTAINS 1 RECORDS" is indistinguishable from a record
+            # level by value alone. A real record description is a level number
+            # immediately followed by a data-name (IDENTIFIER/FILLER); operands
+            # are followed by a keyword (RECORDS/CHARACTERS/...) or a number.
+            # Only the former should stop clause capture.
             if t.type == TokenType.LEVEL_NUMBER:
-                try:
-                    level_value = int(t.value)
-                except (TypeError, ValueError):
-                    level_value = -1
-                if level_value in (1, 77):
+                if self._level_starts_record(token_stream):
                     break
                 if current_key is not None and t.value:
                     raw[current_key].append(t.value)
