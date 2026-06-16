@@ -399,8 +399,11 @@ class CobolDataItem(ASTNode):
                         comp3_size += 1
                     base_size = comp3_size
             elif self.usage in [
-                "COMP", "COMP-4", "COMP-5",
-                "COMPUTATIONAL-4", "COMPUTATIONAL-5",
+                "COMP",
+                "COMP-4",
+                "COMP-5",
+                "COMPUTATIONAL-4",
+                "COMPUTATIONAL-5",
             ]:
                 # Binary: depends on digits
                 if self.picture_clause.total_digits:

@@ -35,28 +35,30 @@ _STOP_TOKEN_TYPES: frozenset = frozenset(
     if hasattr(TokenType, name)
 )
 
-_STOP_KEYWORDS: frozenset = frozenset({
-    "MOVE",
-    "DISPLAY",
-    "CALL",
-    "ADD",
-    "SUBTRACT",
-    "MULTIPLY",
-    "DIVIDE",
-    "IF",
-    "PERFORM",
-    "EVALUATE",
-    "STOP",
-    "GO",
-    "ENTRY",
-    "END-MOVE",
-    "ON",
-    "RETURNING",
-    "GIVING",
-    "END-IF",
-    "ELSE",
-    "THEN",
-})
+_STOP_KEYWORDS: frozenset = frozenset(
+    {
+        "MOVE",
+        "DISPLAY",
+        "CALL",
+        "ADD",
+        "SUBTRACT",
+        "MULTIPLY",
+        "DIVIDE",
+        "IF",
+        "PERFORM",
+        "EVALUATE",
+        "STOP",
+        "GO",
+        "ENTRY",
+        "END-MOVE",
+        "ON",
+        "RETURNING",
+        "GIVING",
+        "END-IF",
+        "ELSE",
+        "THEN",
+    }
+)
 
 
 class MoveStatementParser(IStatementParser):

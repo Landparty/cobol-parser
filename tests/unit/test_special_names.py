@@ -6,14 +6,11 @@ returned only {"type": "configuration"}.
 
 import textwrap
 
-import pytest
-
 from cobolparser import parse_cobol
 
 
 def _program_with_special_names(special_names_body: str) -> str:
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TESTPROG.
         ENVIRONMENT DIVISION.
@@ -25,8 +22,7 @@ def _program_with_special_names(special_names_body: str) -> str:
         01 WS-X PIC X.
         PROCEDURE DIVISION.
         STOP RUN.
-        """
-    )
+        """)
 
 
 def _get_env_div(result):
@@ -92,17 +88,14 @@ def test_multiple_special_names_clauses():
 
 
 def test_class_definition_parses_successfully():
-    src = _program_with_special_names(
-        "    CLASS NUMERIC-CLASS IS '0' THRU '9'."
-    )
+    src = _program_with_special_names("    CLASS NUMERIC-CLASS IS '0' THRU '9'.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
 
 def test_special_names_then_input_output():
     """SPECIAL-NAMES must not prevent INPUT-OUTPUT from being parsed."""
-    src = textwrap.dedent(
-        """\
+    src = textwrap.dedent("""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TESTPROG.
         ENVIRONMENT DIVISION.
@@ -117,8 +110,7 @@ def test_special_names_then_input_output():
         01 WS-X PIC X.
         PROCEDURE DIVISION.
         STOP RUN.
-        """
-    )
+        """)
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 

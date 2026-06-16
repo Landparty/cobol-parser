@@ -70,8 +70,18 @@ _POINTER_KEYWORDS: frozenset[str] = frozenset(
 _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
     _COMP_KEYWORDS
     | _POINTER_KEYWORDS
-    | {"VALUE", "USAGE", "OCCURS", "REDEFINES",
-       "SIGN", "SYNCHRONIZED", "SYNC", "JUSTIFIED", "JUST", "BLANK"}
+    | {
+        "VALUE",
+        "USAGE",
+        "OCCURS",
+        "REDEFINES",
+        "SIGN",
+        "SYNCHRONIZED",
+        "SYNC",
+        "JUSTIFIED",
+        "JUST",
+        "BLANK",
+    }
 )
 _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     {
@@ -464,6 +474,7 @@ class DataDivisionParser(BaseDivisionParser):
                     _PICTURE_PATTERN_TOKEN_TYPES,
                     _COMP_KEYWORDS,
                     _COMP_TOKEN_TYPES,
+                    _POINTER_KEYWORDS,
                     _DIVISION_TOKEN_TYPES,
                     PictureClause,
                     OccursClause,
@@ -582,7 +593,11 @@ class DataDivisionParser(BaseDivisionParser):
                 if nxt and nxt.value and nxt.value.upper() == "WHEN":
                     token_stream.consume()
                 nxt = token_stream.peek()
-                if nxt and nxt.value and nxt.value.upper() in {"ZERO", "ZEROS", "ZEROES"}:
+                if (
+                    nxt
+                    and nxt.value
+                    and nxt.value.upper() in {"ZERO", "ZEROS", "ZEROES"}
+                ):
                     token_stream.consume()
                 data_item.blank_when_zero = True
 

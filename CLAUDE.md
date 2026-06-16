@@ -256,7 +256,7 @@ DynamicCallAnalyzer().analyze(parse_result.ast)
 # uses `.resolve(ast)` instead):
 from cobolparser import (
     DeadCodeAnalyzer,           # report.dead_items
-    ProgramFlowAnalyzer,        # report.edges (typed PERFORM/GO TO/CALL/fall-through)
+    ProgramFlowAnalyzer,        # report.edges (typed PERFORM/GO TO/CALL/fall-through; THRU range_members; classified cycle_details)
     IOLogger,                   # report.operations
     IOSequenceAnalyzer,         # report.violations
     MoveTypeChecker,            # report.violations

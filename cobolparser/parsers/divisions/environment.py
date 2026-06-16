@@ -197,9 +197,18 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 ranges: list[str] = []
                 while not token_stream.is_empty():
                     pk = token_stream.peek(0)
-                    if not pk or pk.value == "." or pk.value.upper() in {
-                        "CURRENCY", "DECIMAL-POINT", "CLASS", "ALPHABET",
-                    } | stop_sections:
+                    if (
+                        not pk
+                        or pk.value == "."
+                        or pk.value.upper()
+                        in {
+                            "CURRENCY",
+                            "DECIMAL-POINT",
+                            "CLASS",
+                            "ALPHABET",
+                        }
+                        | stop_sections
+                    ):
                         break
                     ranges.append(pk.value)
                     token_stream.consume()
@@ -219,9 +228,18 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 values: list[str] = []
                 while not token_stream.is_empty():
                     pk = token_stream.peek(0)
-                    if not pk or pk.value == "." or pk.value.upper() in {
-                        "CURRENCY", "DECIMAL-POINT", "CLASS", "ALPHABET",
-                    } | stop_sections:
+                    if (
+                        not pk
+                        or pk.value == "."
+                        or pk.value.upper()
+                        in {
+                            "CURRENCY",
+                            "DECIMAL-POINT",
+                            "CLASS",
+                            "ALPHABET",
+                        }
+                        | stop_sections
+                    ):
                         break
                     values.append(pk.value)
                     token_stream.consume()
@@ -711,7 +729,9 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             config_section = CobolSection("CONFIGURATION", start_location)
             config_data = division_content["configuration"]
             if isinstance(config_data, dict) and "special_names" in config_data:
-                config_section.set_metadata("special_names", config_data["special_names"])
+                config_section.set_metadata(
+                    "special_names", config_data["special_names"]
+                )
             division_node.add_section(config_section)
 
         # Create INPUT-OUTPUT SECTION if present

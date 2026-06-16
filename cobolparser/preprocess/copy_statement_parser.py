@@ -499,7 +499,9 @@ class CopyStatementLexer:
                     _nl_idx = bisect.bisect_right(newline_positions, match_start)
                     line_num = _nl_idx + 1
                     prev_nl_idx = _nl_idx - 1
-                    col_num = match_start - (newline_positions[prev_nl_idx] if prev_nl_idx >= 0 else -1)
+                    col_num = match_start - (
+                        newline_positions[prev_nl_idx] if prev_nl_idx >= 0 else -1
+                    )
 
                     statements.append(
                         CopyStatement(

@@ -11,8 +11,9 @@ from ...models.ast_base import ASTNode, SourceLocation
 from ...models.sql_statements import parse_exec_sql
 from ._utils import collect_exec_sql_text, peek_token
 
-_IMS_CALL_TYPES = frozenset({"GU", "GN", "GNP", "ISRT", "REPL", "DLET",
-                              "CHKP", "ROLLB", "TERM", "XRST", "XDLT"})
+_IMS_CALL_TYPES = frozenset(
+    {"GU", "GN", "GNP", "ISRT", "REPL", "DLET", "CHKP", "ROLLB", "TERM", "XRST", "XDLT"}
+)
 
 
 class ExecCicsStatement(ASTNode):
@@ -148,7 +149,11 @@ class ExecCicsStatementParser(IStatementParser):
 
         # Capture command name (first non-whitespace token after EXEC CICS)
         cmd_token = token_stream.peek(0)
-        if cmd_token and cmd_token.value and cmd_token.value.upper() not in ("END-EXEC", ""):
+        if (
+            cmd_token
+            and cmd_token.value
+            and cmd_token.value.upper() not in ("END-EXEC", "")
+        ):
             stmt.cics_command = cmd_token.value.upper()
             token_stream.consume()
 
@@ -234,7 +239,12 @@ class ExecImsStatementParser(IStatementParser):
 
         # Capture IMS command (GU, GN, GNP, ISRT, REPL, DLET, …)
         cmd_token = token_stream.peek(0)
-        if cmd_token and cmd_token.value and cmd_token.value.strip() and cmd_token.value.upper() not in ("END-EXEC",):
+        if (
+            cmd_token
+            and cmd_token.value
+            and cmd_token.value.strip()
+            and cmd_token.value.upper() not in ("END-EXEC",)
+        ):
             cmd = cmd_token.value.upper()
             stmt.ims_command = cmd
             if cmd in _IMS_CALL_TYPES:

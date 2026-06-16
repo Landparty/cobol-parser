@@ -7,14 +7,11 @@ Prior to the fix:
 
 import textwrap
 
-import pytest
-
 from cobolparser import parse_cobol
 
 
 def _minimal_program(procedure_body: str) -> str:
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TESTPROG.
         DATA DIVISION.
@@ -24,8 +21,7 @@ def _minimal_program(procedure_body: str) -> str:
         MAIN-PARA.
         {procedure_body}
             STOP RUN.
-        """
-    )
+        """)
 
 
 def _find_nodes(result, node_type: str) -> list:
@@ -38,9 +34,7 @@ def _find_nodes(result, node_type: str) -> list:
 
 
 def test_exec_cics_read_command_captured():
-    src = _minimal_program(
-        "    EXEC CICS READ FILE('EMPFILE') INTO(WS-REC) END-EXEC."
-    )
+    src = _minimal_program("    EXEC CICS READ FILE('EMPFILE') INTO(WS-REC) END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -63,9 +57,7 @@ def test_exec_cics_send_map_command_captured():
 
 
 def test_exec_cics_return_command_captured():
-    src = _minimal_program(
-        "    EXEC CICS RETURN TRANSID('EMP1') END-EXEC."
-    )
+    src = _minimal_program("    EXEC CICS RETURN TRANSID('EMP1') END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -75,9 +67,7 @@ def test_exec_cics_return_command_captured():
 
 
 def test_exec_cics_text_contains_options():
-    src = _minimal_program(
-        "    EXEC CICS READ FILE('EMPFILE') INTO(WS-REC) END-EXEC."
-    )
+    src = _minimal_program("    EXEC CICS READ FILE('EMPFILE') INTO(WS-REC) END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -86,9 +76,7 @@ def test_exec_cics_text_contains_options():
 
 
 def test_exec_cics_to_dict_has_command():
-    src = _minimal_program(
-        "    EXEC CICS WRITE FILE('EMPFILE') FROM(WS-REC) END-EXEC."
-    )
+    src = _minimal_program("    EXEC CICS WRITE FILE('EMPFILE') FROM(WS-REC) END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -104,9 +92,7 @@ def test_exec_cics_to_dict_has_command():
 
 
 def test_exec_ims_gu_creates_node():
-    src = _minimal_program(
-        "    EXEC IMS GU EMPDB END-EXEC."
-    )
+    src = _minimal_program("    EXEC IMS GU EMPDB END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -115,9 +101,7 @@ def test_exec_ims_gu_creates_node():
 
 
 def test_exec_ims_command_captured():
-    src = _minimal_program(
-        "    EXEC IMS GU EMPDB END-EXEC."
-    )
+    src = _minimal_program("    EXEC IMS GU EMPDB END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -127,9 +111,7 @@ def test_exec_ims_command_captured():
 
 
 def test_exec_ims_isrt_command():
-    src = _minimal_program(
-        "    EXEC IMS ISRT EMPDB END-EXEC."
-    )
+    src = _minimal_program("    EXEC IMS ISRT EMPDB END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -139,9 +121,7 @@ def test_exec_ims_isrt_command():
 
 
 def test_exec_ims_dlet_command():
-    src = _minimal_program(
-        "    EXEC IMS DLET EMPDB END-EXEC."
-    )
+    src = _minimal_program("    EXEC IMS DLET EMPDB END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -150,9 +130,7 @@ def test_exec_ims_dlet_command():
 
 
 def test_exec_ims_to_dict():
-    src = _minimal_program(
-        "    EXEC IMS GU EMPDB END-EXEC."
-    )
+    src = _minimal_program("    EXEC IMS GU EMPDB END-EXEC.")
     result = parse_cobol(src, filename="test.cbl")
     assert result.success
 
@@ -167,7 +145,9 @@ def test_exec_ims_ibm_extensions_sample():
     from pathlib import Path
 
     sample = Path(__file__).parent.parent / "samples" / "ibm_extensions.cbl"
-    result = parse_cobol(sample.read_text(encoding="utf-8"), filename="ibm_extensions.cbl")
+    result = parse_cobol(
+        sample.read_text(encoding="utf-8"), filename="ibm_extensions.cbl"
+    )
     assert result.success
 
     nodes = _find_nodes(result, "EXEC_IMS")

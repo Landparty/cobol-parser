@@ -140,6 +140,13 @@ class FlowEdge:
     condition: str | None = None
     is_loop: bool = False
     perform_type: str | None = None  # SIMPLE, TIMES, UNTIL, VARYING
+    # For THRU ranges (PERFORM/SORT/MERGE ... THRU): the closing paragraph of
+    # the range and the ordered list of every paragraph the range spans
+    # (inclusive of both endpoints). ``range_members`` makes the implicit
+    # paragraphs between the two endpoints explicit so consumers see the range
+    # as a single unit rather than two disconnected edges.
+    thru_target: str | None = None
+    range_members: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -154,6 +161,10 @@ class FlowEdge:
             result["is_loop"] = True
         if self.perform_type:
             result["perform_type"] = self.perform_type
+        if self.thru_target:
+            result["thru_target"] = self.thru_target
+        if self.range_members:
+            result["range_members"] = self.range_members
         return result
 
 
@@ -215,6 +226,7 @@ class ProgramFlowReport:
     external_calls: list[dict[str, Any]] = field(default_factory=list)
     program_cancellations: list[dict[str, Any]] = field(default_factory=list)
     cycles: list[list[str]] = field(default_factory=list)
+    cycle_details: list[dict[str, Any]] = field(default_factory=list)
     unreachable_nodes: list[str] = field(default_factory=list)
     branch_nodes: list["BranchNode"] = field(default_factory=list)
 
@@ -236,6 +248,7 @@ class ProgramFlowReport:
             "external_calls": self.external_calls,
             "program_cancellations": self.program_cancellations,
             "cycles": self.cycles,
+            "cycle_details": self.cycle_details,
             "unreachable_nodes": self.unreachable_nodes,
             "branch_nodes": [b.to_dict() for b in self.branch_nodes],
             "summary": {
@@ -246,6 +259,11 @@ class ProgramFlowReport:
                 "external_call_count": len(self.external_calls),
                 "cancellation_count": len(self.program_cancellations),
                 "cycle_count": len(self.cycles),
+                "recursion_cycle_count": sum(
+                    1
+                    for c in self.cycle_details
+                    if c.get("kind") == "PERFORM_RECURSION"
+                ),
                 "unreachable_node_count": len(self.unreachable_nodes),
             },
         }
@@ -311,6 +329,7 @@ class ProgramFlowAnalyzer:
         self._external_calls: list[dict[str, Any]] = []
         self._program_cancellations: list[dict[str, Any]] = []
         self._cycles: list[list[str]] = []
+        self._cycle_details: list[dict[str, Any]] = []
         self._unreachable_nodes: list[str] = []
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
@@ -334,6 +353,7 @@ class ProgramFlowAnalyzer:
         self._external_calls = []
         self._program_cancellations = []
         self._cycles = []
+        self._cycle_details = []
         self._unreachable_nodes = []
         self._current_procedure = None
         self._branch_seq = 0
@@ -387,6 +407,7 @@ class ProgramFlowAnalyzer:
         report.external_calls = self._external_calls
         report.program_cancellations = self._program_cancellations
         report.cycles = self._cycles
+        report.cycle_details = self._cycle_details
         report.unreachable_nodes = self._unreachable_nodes
         report.branch_nodes = self._branch_nodes
         return report
@@ -747,6 +768,33 @@ class ProgramFlowAnalyzer:
         for stmt in para.statements:
             scan(stmt)
 
+    def _range_members(self, start: str, end: str) -> list[str]:
+        """Return the procedures spanned by a THRU range, in source order.
+
+        ``PERFORM A THRU C`` executes A, then every paragraph physically between
+        A and C in the source, then C. This expands that implicit range into the
+        explicit ordered list ``[A, ..., C]`` so consumers can see exactly which
+        procedures the range covers. If either endpoint is unknown, or they are
+        out of order, the best-effort endpoints are returned instead.
+        """
+        order = self._ordered_procedures
+        if start == end:
+            return [start]
+        # Single pass over the procedure list, capturing the first occurrence
+        # of each endpoint, so a THRU expansion stays O(n) with one scan even
+        # when many THRU edges are present.
+        i = j = -1
+        for idx, name in enumerate(order):
+            if i == -1 and name == start:
+                i = idx
+            elif j == -1 and name == end:
+                j = idx
+            if i != -1 and j != -1:
+                break
+        if i == -1 or j == -1 or j < i:
+            return [start, end]
+        return order[i : j + 1]
+
     def _process_perform(self, stmt: PerformStatement, source: str) -> None:
         """Create edges for a PERFORM statement."""
         if stmt.target_paragraph:
@@ -758,6 +806,9 @@ class ProgramFlowAnalyzer:
                 cond_dict = stmt.until_condition.to_dict()
                 condition = cond_dict.get("expression_type", str(cond_dict))
 
+            thru_target = stmt.thru_paragraph.upper() if stmt.thru_paragraph else None
+            members = self._range_members(target, thru_target) if thru_target else []
+
             self._edges.append(
                 FlowEdge(
                     source=source,
@@ -767,11 +818,12 @@ class ProgramFlowAnalyzer:
                     is_loop=is_loop,
                     perform_type=stmt.perform_type,
                     condition=condition if is_loop else None,
+                    thru_target=thru_target,
+                    range_members=list(members),
                 )
             )
 
-            if stmt.thru_paragraph:
-                thru_target = stmt.thru_paragraph.upper()
+            if thru_target:
                 self._edges.append(
                     FlowEdge(
                         source=source,
@@ -780,6 +832,8 @@ class ProgramFlowAnalyzer:
                         location=stmt.location,
                         is_loop=is_loop,
                         perform_type=stmt.perform_type,
+                        thru_target=thru_target,
+                        range_members=list(members),
                     )
                 )
 
@@ -848,12 +902,17 @@ class ProgramFlowAnalyzer:
                 )
             )
             if stmt.input_procedure_thru:
+                thru = stmt.input_procedure_thru.upper()
                 self._edges.append(
                     FlowEdge(
                         source=source,
-                        target=stmt.input_procedure_thru.upper(),
+                        target=thru,
                         edge_type=FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
                         location=stmt.location,
+                        thru_target=thru,
+                        range_members=self._range_members(
+                            stmt.input_procedure.upper(), thru
+                        ),
                     )
                 )
         if stmt.output_procedure:
@@ -866,12 +925,17 @@ class ProgramFlowAnalyzer:
                 )
             )
             if stmt.output_procedure_thru:
+                thru = stmt.output_procedure_thru.upper()
                 self._edges.append(
                     FlowEdge(
                         source=source,
-                        target=stmt.output_procedure_thru.upper(),
+                        target=thru,
                         edge_type=FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
                         location=stmt.location,
+                        thru_target=thru,
+                        range_members=self._range_members(
+                            stmt.output_procedure.upper(), thru
+                        ),
                     )
                 )
 
@@ -887,12 +951,17 @@ class ProgramFlowAnalyzer:
                 )
             )
             if stmt.output_procedure_thru:
+                thru = stmt.output_procedure_thru.upper()
                 self._edges.append(
                     FlowEdge(
                         source=source,
-                        target=stmt.output_procedure_thru.upper(),
+                        target=thru,
                         edge_type=FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
                         location=stmt.location,
+                        thru_target=thru,
+                        range_members=self._range_members(
+                            stmt.output_procedure.upper(), thru
+                        ),
                     )
                 )
 
@@ -992,6 +1061,96 @@ class ProgramFlowAnalyzer:
                     path.pop()
                     del stack_pos[node]
                     color[node] = BLACK
+
+        self._classify_cycles()
+
+    # Edge types that represent a PERFORM-style "call" (control returns to the
+    # caller when the callee finishes) versus an unconditional branch.
+    _PERFORM_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
+        {
+            FlowEdgeType.PERFORM,
+            FlowEdgeType.PERFORM_THRU,
+            FlowEdgeType.SORT_INPUT_PROCEDURE,
+            FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE,
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+        }
+    )
+    _GOTO_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
+        {FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING, FlowEdgeType.ALTER}
+    )
+
+    def _classify_cycles(self) -> None:
+        """Annotate each detected cycle with the kind of dependency it forms.
+
+        A bare list of node names does not tell a consumer whether a cycle is a
+        genuine recursive PERFORM chain (a paragraph that, directly or
+        transitively, PERFORMs itself), a GO TO loop, or merely an artifact of
+        sequential fall-through between adjacent paragraphs. ``cycle_details``
+        records, per cycle, the ``kind``:
+
+        - ``PERFORM_RECURSION`` — every edge in the loop is a PERFORM/SORT/MERGE
+          procedure call. This is the "circular dependency" worth flagging:
+          COBOL forbids a paragraph being re-entered while an earlier PERFORM of
+          it is still active.
+        - ``GOTO_LOOP`` — the loop is closed entirely by GO TO / ALTER edges.
+        - ``FALL_THROUGH`` — the loop only exists because of implicit
+          fall-through between adjacent paragraphs.
+        - ``MIXED`` — a combination of the above (e.g. a PERFORM into a range
+          that then falls through back to the performer).
+        """
+        # Map (source, target) -> set of internal edge types connecting them.
+        pair_types: dict[tuple[str, str], set[FlowEdgeType]] = {}
+        for edge in self._edges:
+            if edge.edge_type in self._INTERNAL_EDGE_TYPES:
+                pair_types.setdefault((edge.source, edge.target), set()).add(
+                    edge.edge_type
+                )
+
+        details: list[dict[str, Any]] = []
+        for cycle in self._cycles:
+            n = len(cycle)
+            # Per consecutive pair, the edge types that can connect them. A cycle
+            # is classified by whether one edge category can close *every* hop:
+            # a parallel fall-through edge must not mask a genuine PERFORM
+            # recursion, so availability is checked per pair rather than unioned.
+            pair_sets: list[set[FlowEdgeType]] = []
+            all_types: set[FlowEdgeType] = set()
+            for idx in range(n):
+                src = cycle[idx]
+                tgt = cycle[(idx + 1) % n]
+                types = pair_types.get((src, tgt), set())
+                pair_sets.append(types)
+                all_types |= types
+
+            if self._cycle_closes(pair_sets, self._PERFORM_EDGE_TYPES):
+                kind = "PERFORM_RECURSION"
+            elif self._cycle_closes(pair_sets, self._GOTO_EDGE_TYPES):
+                kind = "GOTO_LOOP"
+            elif self._cycle_closes(pair_sets, frozenset({FlowEdgeType.FALL_THROUGH})):
+                kind = "FALL_THROUGH"
+            else:
+                kind = "MIXED"
+
+            details.append(
+                {
+                    "nodes": list(cycle),
+                    "kind": kind,
+                    "length": n,
+                    "self_recursive": n == 1 and kind == "PERFORM_RECURSION",
+                    "edge_types": sorted(t.value for t in all_types),
+                }
+            )
+        self._cycle_details = details
+
+    @staticmethod
+    def _cycle_closes(
+        pair_sets: list[set[FlowEdgeType]], category: frozenset[FlowEdgeType]
+    ) -> bool:
+        """True if every hop of a cycle can be closed by an edge in ``category``."""
+        return all(bool(types & category) for types in pair_sets)
 
     def _detect_unreachable_nodes(self) -> None:
         """Find nodes not reachable from any entry point via internal edges.
