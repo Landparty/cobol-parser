@@ -1,0 +1,25 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # GITHUB_TOKEN works out of the box. Note: releases/tags it creates
+          # will NOT trigger other workflows. If you later add a PyPI publish
+          # workflow that should fire on the release tag, swap this for a PAT
+          # stored as a secret (e.g. secrets.RELEASE_PLEASE_TOKEN).
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
