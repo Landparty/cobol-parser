@@ -27,6 +27,7 @@ def test_run_as_module_shows_usage():
         [sys.executable, "-m", "cobolparser"],
         capture_output=True,
         text=True,
+        timeout=60,
     )
     # argparse prints usage to stderr/stdout and exits with a non-zero code
     # when no subcommand is supplied.
@@ -41,6 +42,7 @@ def test_run_as_module_help():
         [sys.executable, "-m", "cobolparser", "parse", "-h"],
         capture_output=True,
         text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "usage" in (result.stdout + result.stderr).lower()

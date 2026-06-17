@@ -90,18 +90,22 @@ class TestCmdRenderSummary:
         renderer.render_summary.return_value = "SUMMARY OUTPUT"
         args = argparse.Namespace(input="c.json", output=None, format="summary")
 
-        with (
-            patch("cobolparser.cli.coverage.sys.path"),
-            patch.dict(
+        # Let cmd_render mutate the real sys.path (it inserts the tools dir),
+        # then restore the original entries afterwards rather than replacing
+        # sys.path with a mock.
+        original_path = list(sys.path)
+        try:
+            with patch.dict(
                 sys.modules,
                 {
                     "render_markdown": MagicMock(
                         CoverageRenderer=MagicMock(return_value=renderer)
                     )
                 },
-            ),
-        ):
-            result = cmd_render(args)
+            ):
+                result = cmd_render(args)
+        finally:
+            sys.path[:] = original_path
 
         assert result == 0
         renderer.render_summary.assert_called_once()

@@ -69,6 +69,7 @@ class TestCachedRead:
         assert stats["size"] == 1
 
     def test_lru_eviction(self, tmp_path):
+        original_max = get_file_cache_stats()["max_size"]
         set_file_cache_size(2)
         try:
             for name in ("A", "B", "C"):
@@ -81,8 +82,8 @@ class TestCachedRead:
             assert stats["size"] == 2
             assert stats["evictions"] >= 1
         finally:
-            # Restore a generous default for subsequent tests.
-            set_file_cache_size(2048)
+            # Restore the original cache size for subsequent tests.
+            set_file_cache_size(original_max)
 
     def test_warning_replay_on_cache_hit(self, tmp_path):
         """Lossy-decode diagnostics recorded on first read replay on hit."""
@@ -110,6 +111,7 @@ class TestSetFileCacheSize:
             set_file_cache_size(0)
 
     def test_shrinking_evicts_excess(self, tmp_path):
+        original_max = get_file_cache_stats()["max_size"]
         set_file_cache_size(10)
         try:
             for name in ("A", "B", "C", "D"):
@@ -125,7 +127,7 @@ class TestSetFileCacheSize:
             assert stats["size"] == 2
             assert stats["evictions"] >= 2
         finally:
-            set_file_cache_size(2048)
+            set_file_cache_size(original_max)
 
 
 class TestConvertToUtf8Warnings:

@@ -37,7 +37,9 @@ class TestDirectoryIndex:
         config = CopybookSearchPath(directories=[str(d)])
         resolver = PathResolver(config)
         index = resolver._build_directory_index()
-        assert "REAL.cpy" in index or "REAL" in index
+        # The index records both the exact filename and the bare stem.
+        assert "REAL.cpy" in index
+        assert "REAL" in index
         assert "NESTED" not in index
 
     def test_case_insensitive_index(self, tmp_path):
