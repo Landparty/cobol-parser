@@ -5,6 +5,30 @@ All notable changes to the COBOL parser project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+* `PictureClause` now validates the PICTURE pattern and exposes `is_valid` and
+  `validation_errors` (also surfaced in `to_dict()`). Validation is
+  conservative -- it flags only unambiguously illegal pictures (empty pattern,
+  illegal characters, malformed/empty/zero repeat factors, unbalanced
+  parentheses, more than one `V`, both `V` and a decimal point, multiple
+  decimal points, and a misplaced or duplicated `S`) so valid pictures are
+  never rejected. Pattern parsing remains lenient: an invalid picture is
+  flagged but never aborts the surrounding parse.
+
+### Fixed
+
+* Lexer now recognises typed-literal prefixes (`X"1F"` hexadecimal, `N"..."`
+  national, `NX"..."` national-hex, `G"..."` DBCS/graphic, `Z"..."`
+  null-terminated, `U"..."` UTF-8, `B"..."` boolean). Previously a prefixed
+  literal was split into a separate identifier token plus a string literal
+  (e.g. `MOVE X"1F" TO WS` parsed `X` as its own operand), corrupting
+  statement operands. Such literals now produce a single `STRING_LITERAL`
+  token whose `raw_value` preserves the original prefixed source text. The
+  Cython-accelerated lexer (`_lexer_fast`) was updated to match.
+
 ## 1.0.0 (2026-06-16)
 
 
