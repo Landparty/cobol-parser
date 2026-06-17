@@ -35,6 +35,15 @@ _PIC_EDIT_SYMBOLS: frozenset[str] = frozenset("Z*+-,./$")
 # Symbols that occupy a digit position in a numeric-edited item.
 _PIC_EDIT_DIGIT_SYMBOLS: frozenset[str] = frozenset("9Z*$")
 
+# Characters that may legally appear in a PICTURE pattern (case-insensitive),
+# once repeat factors ``(n)`` and the two-letter ``CR``/``DB`` symbols have been
+# removed. ``G``/``N`` cover DBCS/national items and ``E`` the (rare) external
+# floating-point form; including them keeps validation from flagging valid
+# vendor pictures. ``(`` and ``)`` are validated separately.
+_PIC_VALID_SYMBOLS: frozenset[str] = frozenset("ABXSVPZ90/,.+-*$GNE")
+# Matches a single (possibly empty / non-numeric) repeat factor with no nesting.
+_PIC_REPEAT_RE = re.compile(r"\(([^()]*)\)")
+
 
 class PictureClause(ASTNode):
     """AST node for COBOL PICTURE clauses."""
@@ -52,7 +61,14 @@ class PictureClause(ASTNode):
         self.is_edited: bool = False
         self.is_numeric_edited: bool = False
         self.is_alphanumeric_edited: bool = False
+        # Populated by ``_validate_pattern``: ``is_valid`` is False when the
+        # pattern violates a PICTURE syntax rule, with human-readable reasons
+        # in ``validation_errors``. Parsing stays lenient regardless so a bad
+        # picture never aborts the surrounding parse.
+        self.is_valid: bool = True
+        self.validation_errors: list[str] = []
         self._parse_pattern()
+        self._validate_pattern()
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
@@ -203,6 +219,78 @@ class PictureClause(ASTNode):
             # Default size if nothing else matches
             self.size = 1
 
+    def _validate_pattern(self) -> None:
+        """Validate the PICTURE pattern, recording any rule violations.
+
+        The checks are intentionally conservative -- they only flag patterns
+        that are unambiguously illegal in standard/IBM COBOL, so valid (and
+        even unusual but legal) pictures are never rejected:
+
+        * empty pattern
+        * characters outside the legal PICTURE symbol set
+        * malformed repeat factors: unbalanced/nested ``()``, empty ``()``,
+          a non-numeric or zero count, or a ``(n)`` not following a symbol
+        * more than one ``V`` (assumed decimal point)
+        * both ``V`` and an actual decimal point ``.``
+        * more than one actual decimal point ``.``
+        * more than one ``S``, or an ``S`` that is not the leftmost symbol
+        """
+        errors: list[str] = []
+        pattern = self.pattern
+
+        if not pattern or not pattern.strip():
+            self.validation_errors = ["PICTURE clause is empty"]
+            self.is_valid = False
+            return
+
+        up = pattern.upper()
+
+        # --- repeat factors: balance, content, and placement ---------------
+        if up.count("(") != up.count(")"):
+            errors.append(f"unbalanced parentheses in PICTURE '{pattern}'")
+        for match in _PIC_REPEAT_RE.finditer(up):
+            inner = match.group(1)
+            if not inner.isdigit() or int(inner) == 0:
+                errors.append(
+                    f"invalid repeat count '({inner})' in PICTURE '{pattern}'"
+                )
+            start = match.start()
+            if start == 0 or up[start - 1] in "(),.":
+                errors.append(
+                    f"repeat count '({inner})' must follow a picture symbol "
+                    f"in PICTURE '{pattern}'"
+                )
+
+        # Skeleton with repeat factors removed, then the two-letter CR/DB
+        # symbols stripped, leaving only single-character picture symbols.
+        skeleton = _PIC_REPEAT_RE.sub("", up)
+        core = skeleton.replace("CR", "").replace("DB", "")
+
+        # --- illegal characters --------------------------------------------
+        bad = sorted({ch for ch in core if ch not in _PIC_VALID_SYMBOLS})
+        for ch in bad:
+            errors.append(f"invalid character '{ch}' in PICTURE '{pattern}'")
+
+        # --- decimal-point / sign rules ------------------------------------
+        if skeleton.count("V") > 1:
+            errors.append(f"PICTURE '{pattern}' has more than one 'V'")
+        if "V" in skeleton and "." in skeleton:
+            errors.append(
+                f"PICTURE '{pattern}' cannot contain both 'V' and a decimal point"
+            )
+        if skeleton.count(".") > 1:
+            errors.append(f"PICTURE '{pattern}' has more than one decimal point")
+
+        s_count = skeleton.count("S")
+        if s_count > 1:
+            errors.append(f"PICTURE '{pattern}' has more than one 'S'")
+        elif s_count == 1 and skeleton[0] != "S":
+            errors.append(f"'S' must be the leftmost symbol in PICTURE '{pattern}'")
+
+        if errors:
+            self.validation_errors = errors
+            self.is_valid = False
+
     @staticmethod
     def _is_edited_pattern(pattern: str) -> bool:
         """Return True when the pattern contains editing/insertion symbols.
@@ -309,6 +397,8 @@ class PictureClause(ASTNode):
             "is_edited": self.is_edited,
             "is_numeric_edited": self.is_numeric_edited,
             "is_alphanumeric_edited": self.is_alphanumeric_edited,
+            "is_valid": self.is_valid,
+            "validation_errors": self.validation_errors,
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }

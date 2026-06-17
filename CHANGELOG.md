@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+* `PictureClause` now validates the PICTURE pattern and exposes `is_valid` and
+  `validation_errors` (also surfaced in `to_dict()`). Validation is
+  conservative -- it flags only unambiguously illegal pictures (empty pattern,
+  illegal characters, malformed/empty/zero repeat factors, unbalanced
+  parentheses, more than one `V`, both `V` and a decimal point, multiple
+  decimal points, and a misplaced or duplicated `S`) so valid pictures are
+  never rejected. Pattern parsing remains lenient: an invalid picture is
+  flagged but never aborts the surrounding parse.
+
 ### Fixed
 
 * Lexer now recognises typed-literal prefixes (`X"1F"` hexadecimal, `N"..."`
