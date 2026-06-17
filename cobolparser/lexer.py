@@ -619,6 +619,16 @@ class _CobolLexerPure:
         "ALL",
     }
 
+    # Typed-literal prefixes (IBM Enterprise COBOL and ISO COBOL).
+    # A single letter (or the two-letter ``NX``) immediately followed by a
+    # quote/apostrophe introduces a typed literal rather than an identifier:
+    #   X"1F"    hexadecimal (alphanumeric)        Z"abc"   null-terminated
+    #   N"abc"   national                          U"abc"   UTF-8
+    #   NX"00C1" national hexadecimal              G"<dbcs>" DBCS / graphic
+    #   B"1010"  boolean
+    # The single-letter prefixes; ``NX`` is handled as a special two-char case.
+    LITERAL_PREFIXES = frozenset({"X", "N", "G", "Z", "U", "B"})
+
     # COBOL Fixed-Format Column Constants
     SEQUENCE_AREA_START = 0
     SEQUENCE_AREA_END = 6
@@ -1171,6 +1181,19 @@ class _CobolLexerPure:
                     pos = new_pos
                     continue
 
+            # Typed literals (X"..", N"..", G"..", Z"..", U"..", B"..", NX"..").
+            # These must be checked before the identifier path, otherwise the
+            # leading prefix letter would be consumed as a separate identifier.
+            if char.upper() in self.LITERAL_PREFIXES:
+                prefixed = self.read_prefixed_literal_from_text(
+                    text, pos, line_num, start_col
+                )
+                if prefixed is not None:
+                    token, new_pos = prefixed
+                    tokens.append(token)
+                    pos = new_pos
+                    continue
+
             # Identifiers and keywords
             if char.isalpha() or char == "_":
                 token, new_pos = self.read_word_from_text(
@@ -1200,6 +1223,49 @@ class _CobolLexerPure:
             pos += 1
 
         return tokens
+
+    def read_prefixed_literal_from_text(
+        self, text: str, start_pos: int, line_num: int, start_col: int
+    ) -> tuple[Token, int] | None:
+        """Read a typed literal such as ``X"1F"``, ``N'abc'`` or ``NX"00C1"``.
+
+        Returns ``(token, new_pos)`` when ``text[start_pos]`` begins a typed
+        literal (a recognised prefix immediately followed by a quote), or
+        ``None`` when it does not — in which case the caller falls back to the
+        normal identifier/keyword path.
+
+        The resulting token keeps the literal *content* in ``value`` (so every
+        existing consumer of ``STRING_LITERAL`` continues to work unchanged)
+        and the original prefixed source text in ``raw_value`` (e.g. ``X"1F"``)
+        so downstream analysis can still recover the literal kind.
+        """
+        length = len(text)
+        first = text[start_pos]
+        if first.upper() not in self.LITERAL_PREFIXES:
+            return None
+
+        # Determine prefix length: the two-letter ``NX`` national-hex form, or
+        # a single-letter prefix. The prefix must be immediately followed by a
+        # quote character with no intervening whitespace.
+        prefix_len = 1
+        if (
+            first.upper() == "N"
+            and start_pos + 1 < length
+            and text[start_pos + 1].upper() == "X"
+        ):
+            prefix_len = 2
+
+        quote_pos = start_pos + prefix_len
+        if quote_pos >= length or text[quote_pos] not in "\"'":
+            return None
+
+        token, new_pos = self.read_string_from_text(
+            text, quote_pos, line_num, start_col
+        )
+        prefix = text[start_pos:quote_pos]
+        token.raw_value = prefix + text[quote_pos:new_pos]
+        token.location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+        return token, new_pos
 
     def read_string_from_text(
         self, text: str, start_pos: int, line_num: int, start_col: int
