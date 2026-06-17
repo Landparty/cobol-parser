@@ -1238,6 +1238,11 @@ class _CobolLexerPure:
         existing consumer of ``STRING_LITERAL`` continues to work unchanged)
         and the original prefixed source text in ``raw_value`` (e.g. ``X"1F"``)
         so downstream analysis can still recover the literal kind.
+
+        Unterminated typed literals are handled exactly like an unterminated
+        plain string in the main loop: a ``LexerError`` is recorded only in
+        fixed-format mode, while free-form mode stays lenient (a stray quote
+        must not turn into a hard lexer failure).
         """
         length = len(text)
         first = text[start_pos]
@@ -1259,12 +1264,28 @@ class _CobolLexerPure:
         if quote_pos >= length or text[quote_pos] not in "\"'":
             return None
 
-        token, new_pos = self.read_string_from_text(
+        location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+        # Use the same fast single-line reader as the plain-string path so the
+        # error-suppression behaviour matches and we avoid the slower
+        # ``read_string_from_text``.
+        token, new_pos, unterminated = self._try_single_line_string(
             text, quote_pos, line_num, start_col
         )
-        prefix = text[start_pos:quote_pos]
-        token.raw_value = prefix + text[quote_pos:new_pos]
-        token.location = SourceLocation(line_num + 1, start_col + start_pos, 1)
+        if unterminated:
+            partial = text[quote_pos + 1 : new_pos] if new_pos > quote_pos + 1 else ""
+            if not self.free_form:
+                self.errors.append(
+                    LexerError(
+                        "Unterminated string literal",
+                        location,
+                        text[start_pos:new_pos],
+                    )
+                )
+            token = Token(TokenType.STRING_LITERAL, partial, location)
+
+        assert token is not None
+        token.raw_value = text[start_pos:new_pos]
+        token.location = location
         return token, new_pos
 
     def read_string_from_text(

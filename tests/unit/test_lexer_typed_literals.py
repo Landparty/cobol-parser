@@ -144,3 +144,21 @@ class TestTypedLiteralEscapesAndEdges:
         assert len(literals) == 1
         assert literals[0].value == ""
         assert literals[0].raw_value == 'Z""'
+
+
+class TestUnterminatedTypedLiteralMatchesPlainString:
+    """An unterminated typed literal is handled like an unterminated plain one.
+
+    The plain free-form string path intentionally suppresses the "unterminated
+    string" lexer error (a stray quote must not become a hard failure), so the
+    typed-literal path must do the same rather than always recording an error.
+    """
+
+    def test_free_form_unterminated_typed_literal_no_error(self):
+        plain = CobolLexer('MOVE "abc TO X', free_form=True)
+        plain.tokenize()
+        typed = CobolLexer('MOVE X"abc TO X', free_form=True)
+        typed.tokenize()
+        # Parity: neither records a lexer error in free-form mode.
+        assert plain.errors == []
+        assert typed.errors == []
