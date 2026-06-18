@@ -370,6 +370,19 @@ class CobolLexer(_CobolLexerBase):
                 pos = new_pos
                 continue
 
+            # ---- typed literals (X".." N".." NX".." etc.) ----------
+            # Must precede the identifier path so the prefix letter is not
+            # consumed as a separate identifier.
+            if char.upper() in self.LITERAL_PREFIXES:
+                prefixed = self.read_prefixed_literal_from_text(
+                    text, pos, line_num, start_col
+                )
+                if prefixed is not None:
+                    token, new_pos = prefixed
+                    tokens.append(token)
+                    pos = new_pos
+                    continue
+
             # ---- alpha identifiers / keywords ----------------------
             if char.isalpha() or char == "_":
                 token, new_pos = self.read_word_from_text(
