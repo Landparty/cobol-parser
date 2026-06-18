@@ -341,9 +341,10 @@ def parse_files_with_copybooks(
             # raw source. Log the failure so the silent degradation is at least
             # observable rather than swallowed entirely.
             logger.warning(
-                "Copybook expansion failed for %s; parsing without expansion: %s",
+                "Copybook expansion failed for %s; parsing without expansion: %r",
                 path_str,
                 exc,
+                exc_info=True,
             )
             expanded_source = source
 

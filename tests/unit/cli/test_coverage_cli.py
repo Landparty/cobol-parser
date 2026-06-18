@@ -77,7 +77,8 @@ class TestCmdStatus:
         assert "not found" in captured.out.lower() or "Error" in captured.out
 
     def test_status_falls_back_to_default_artifact(self, tmp_path, monkeypatch, capsys):
-        """When --artifact is missing, fall back to io-coverage.json in cwd."""
+        """Fall back to io-coverage.json in cwd when the requested artifact path
+        does not exist."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / "io-coverage.json").write_text(json.dumps(SAMPLE_ARTIFACT))
         # Point --artifact at a path that does not exist so the fallback runs.

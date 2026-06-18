@@ -156,7 +156,7 @@ def peek_token(token_stream: ITokenStream, offset: int = 0) -> Token | None:
     except Exception as exc:
         # The probe contract is to never raise; emit at debug level so a
         # misbehaving stream implementation can still be diagnosed.
-        logger.debug("peek_token(offset=%d) suppressed %r", offset, exc)
+        logger.debug("peek_token(offset=%d) suppressed %r", offset, exc, exc_info=True)
         return None
 
 
@@ -430,7 +430,7 @@ def try_parse_nested_statement(
     except Exception as exc:
         # Exploratory nested dispatch must never raise (the real error is
         # surfaced via the parse context); log at debug for diagnosability.
-        logger.debug("try_parse_nested suppressed %r", exc)
+        logger.debug("try_parse_nested suppressed %r", exc, exc_info=True)
         return None
 
 
