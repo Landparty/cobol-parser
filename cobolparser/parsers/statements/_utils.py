@@ -7,6 +7,7 @@ individual parser files.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, NoReturn
 
 from cobolparser._errors import ParseError
@@ -15,6 +16,8 @@ from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements.data import DisplayStatement, MoveStatement
 from cobolparser.plugins.core import ErrorRecoveryMode
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Token-type sets used by multiple parsers to detect statement boundaries
@@ -150,7 +153,10 @@ def peek_token(token_stream: ITokenStream, offset: int = 0) -> Token | None:
     """
     try:
         return token_stream.peek(offset)
-    except Exception:
+    except Exception as exc:
+        # The probe contract is to never raise; emit at debug level so a
+        # misbehaving stream implementation can still be diagnosed.
+        logger.debug("peek_token(offset=%d) suppressed %r", offset, exc)
         return None
 
 
@@ -421,7 +427,10 @@ def try_parse_nested_statement(
         if exclude_self is not None and parser is exclude_self:
             return None
         return parser.parse(stream)
-    except Exception:
+    except Exception as exc:
+        # Exploratory nested dispatch must never raise (the real error is
+        # surfaced via the parse context); log at debug for diagnosability.
+        logger.debug("try_parse_nested suppressed %r", exc)
         return None
 
 

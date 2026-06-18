@@ -21,6 +21,7 @@ Executor reuse example (avoids spawn overhead on large repeated batches)::
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor
@@ -30,6 +31,8 @@ from pathlib import Path
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
 from cobolparser.profiling import ProfilingResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -332,8 +335,16 @@ def parse_files_with_copybooks(
                 path_resolver=path_resolver,
             )
             expanded_source = expansion.expanded_source
-        except Exception:
-            # If expansion fails, parse without expansion
+        except Exception as exc:
+            # Copybook expansion is best-effort in batch mode: a single bad
+            # COPY must not abort the whole run, so we fall back to parsing the
+            # raw source. Log the failure so the silent degradation is at least
+            # observable rather than swallowed entirely.
+            logger.warning(
+                "Copybook expansion failed for %s; parsing without expansion: %s",
+                path_str,
+                exc,
+            )
             expanded_source = source
 
         # Parse expanded source reusing the parser instance
