@@ -84,10 +84,13 @@ class EvaluateStatementParser(IStatementParser):
                         )
                     found_when_other = True
                     stmt.default_when = WhenClause([], when_location)
-                    statements = self._skip_clause_statements(token_stream)
+                    statements, period_terminated = self._skip_clause_statements(token_stream)
                     if statements:
                         for nested_statement in statements:
                             stmt.default_when.add_statement(nested_statement)
+                    if period_terminated:
+                        found_end_evaluate = True
+                        break
                     lookahead = token_stream.peek()
                     if (
                         lookahead
@@ -125,10 +128,13 @@ class EvaluateStatementParser(IStatementParser):
 
                 when_clause = WhenClause(selectors, when_location)
                 stmt.when_clauses.append(when_clause)
-                statements = self._skip_clause_statements(token_stream)
+                statements, period_terminated = self._skip_clause_statements(token_stream)
                 if statements:
                     for nested_statement in statements:
                         when_clause.add_statement(nested_statement)
+                if period_terminated:
+                    found_end_evaluate = True
+                    break
 
             if not found_when_clause:
                 report_parse_error(
@@ -279,11 +285,22 @@ class EvaluateStatementParser(IStatementParser):
 
         return {"type": "Literal", "value": selector_text}
 
-    def _skip_clause_statements(self, token_stream: ITokenStream) -> list | None:
-        """Parse statements within WHEN clause until next WHEN or END-EVALUATE.
+    def _skip_clause_statements(self, token_stream: ITokenStream) -> tuple[list | None, bool]:
+        """Parse statements within a WHEN clause, building nested AST nodes.
 
-        Returns list of parsed statements, or None if no statements found.
+        Returns ``(statements, period_terminated)`` where:
+        - ``statements``: list of parsed nested statement nodes, or ``None`` if
+          empty.
+        - ``period_terminated``: ``True`` when the EVALUATE was closed by a
+          period rather than ``END-EVALUATE`` — valid IBM COBOL / NIST-85 style.
+
+        Period-termination is detected by checkpointing ``token_stream._pos``
+        before and after each nested parse: if any PERIOD token appears in the
+        consumed range, the EVALUATE scope has ended.  This lets us both build
+        AST nodes for nested statements *and* detect period-termination, even
+        when statement parsers consume the period internally (via skip_to_period).
         """
+        period_terminated = False
         statements = []
 
         while not token_stream.is_empty():
@@ -293,22 +310,42 @@ class EvaluateStatementParser(IStatementParser):
 
             token_val_upper = token.value.upper() if token.value else ""
 
-            # Stop at WHEN or END-EVALUATE
             if token_val_upper in ("WHEN", "END-EVALUATE"):
                 break
 
-            # Try to parse a nested statement if registry is available
-            nested_stmt = try_parse_nested_statement(token_stream)
-            if nested_stmt:
-                statements.append(nested_stmt)
-            else:
-                # Skip token if can't parse
-                if token.type == TokenType.PERIOD:
-                    token_stream.consume()
-                    break
+            if token.type == TokenType.PERIOD:
+                # Period still visible — EVALUATE closed here.
                 token_stream.consume()
+                period_terminated = True
+                break
 
-        return statements if statements else None
+            # Snapshot the stream position so we can inspect which tokens were
+            # consumed by the nested parser (including any trailing PERIOD).
+            pos_before = getattr(token_stream, "_pos", None)
+            tokens_list = getattr(token_stream, "_tokens", None)
+
+            nested = try_parse_nested_statement(token_stream)
+            if nested is not None:
+                statements.append(nested)
+                # Check whether the nested parser consumed a PERIOD (IBM-style
+                # period-terminated EVALUATE where the scope ends mid-WHEN body).
+                if pos_before is not None and tokens_list is not None:
+                    pos_after = getattr(token_stream, "_pos", 0)
+                    if any(
+                        t.type == TokenType.PERIOD
+                        for t in tokens_list[pos_before:pos_after]
+                    ):
+                        period_terminated = True
+                        break
+            else:
+                # No parser matched (NEWLINE, unrecognised token, or partial-
+                # parse failure). Consume one token only if position did not
+                # advance — partial failures may have already moved the cursor.
+                pos_after = getattr(token_stream, "_pos", None)
+                if pos_before is not None and pos_after == pos_before:
+                    token_stream.consume()
+
+        return statements if statements else None, period_terminated
 
     @staticmethod
     def _is_statement_keyword(word: str) -> bool:

@@ -685,8 +685,10 @@ class TestEvaluateParserCoverage:
         assert isinstance(stmt, EvaluateStatement)
 
     def test_evaluate_multiple_when_clauses(self):
-        """Multiple WHEN clauses -- WHEN loop lines 60-141."""
+        """Multiple WHEN clauses terminated by END-EVALUATE (no inner periods)."""
         parser = EvaluateStatementParser()
+        # In real COBOL with END-EVALUATE, nested statements have no trailing
+        # periods — the period only appears after END-EVALUATE itself.
         stream = _stream(
             (TokenType.EVALUATE, "EVALUATE"),
             (TokenType.IDENTIFIER, "WS-A"),
@@ -694,12 +696,10 @@ class TestEvaluateParserCoverage:
             (TokenType.NUMERIC_LITERAL, "1"),
             (TokenType.DISPLAY, "DISPLAY"),
             (TokenType.STRING_LITERAL, "ONE"),
-            (TokenType.PERIOD, "."),
             (TokenType.IDENTIFIER, "WHEN"),
             (TokenType.NUMERIC_LITERAL, "2"),
             (TokenType.DISPLAY, "DISPLAY"),
             (TokenType.STRING_LITERAL, "TWO"),
-            (TokenType.PERIOD, "."),
             (TokenType.IDENTIFIER, "END-EVALUATE"),
         )
         stmt = parser.parse(stream)

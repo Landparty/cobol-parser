@@ -65,33 +65,34 @@ class GoStatementParser(IStatementParser):
             else SourceLocation(0, 0)
         )
 
-        # Expect TO keyword
+        # Consume optional TO keyword — `GO label.` is valid IBM COBOL
         if token_stream.is_empty():
             report_parse_error(
-                context, "GO statement requires TO keyword", stmt.location
-            )
-            return stmt
-
-        next_token = token_stream.peek()
-        if not next_token or not next_token.value or next_token.value.upper() != "TO":
-            report_parse_error(
-                context, "GO statement requires TO keyword", stmt.location
-            )
-            return stmt
-
-        token_stream.consume()  # consume TO
-
-        # Parse target paragraph name
-        if token_stream.is_empty():
-            report_parse_error(
-                context, "GO TO statement requires a target paragraph", stmt.location
+                context, "GO statement requires a target paragraph", stmt.location
             )
             return stmt
 
         next_token = token_stream.peek()
         if not next_token or not next_token.value:
             report_parse_error(
-                context, "GO TO statement requires a target paragraph", stmt.location
+                context, "GO statement requires a target paragraph", stmt.location
+            )
+            return stmt
+
+        if next_token.value.upper() == "TO":
+            token_stream.consume()  # consume optional TO
+
+        # Parse target paragraph name
+        if token_stream.is_empty():
+            report_parse_error(
+                context, "GO statement requires a target paragraph", stmt.location
+            )
+            return stmt
+
+        next_token = token_stream.peek()
+        if not next_token or not next_token.value:
+            report_parse_error(
+                context, "GO statement requires a target paragraph", stmt.location
             )
             return stmt
 

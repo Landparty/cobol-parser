@@ -139,9 +139,38 @@ class SubtractStatementParser(IStatementParser):
             )
 
         if separator == "FROM":
-            target = consume_keyword_and_operand(token_stream, "FROM")
-            if target:
-                stmt.set_target(target)
+            # Consume FROM keyword; target may be an identifier, figurative
+            # constant (ZERO), numeric literal (FROM 100 GIVING Y), or
+            # sign-prefixed numeric (FROM -1000000 GIVING Y).
+            _skip_newlines(token_stream)
+            if peek_value_upper(token_stream) == "FROM":
+                token_stream.consume()  # consume FROM
+            _skip_newlines(token_stream)
+            tok = token_stream.peek()
+            if tok and tok.type in (
+                TokenType.MINUS, TokenType.PLUS
+            ):
+                # Sign-prefixed FROM target: e.g. FROM -1000000 GIVING Y
+                next_tok = token_stream.peek(1)
+                if next_tok and next_tok.type in (
+                    TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER
+                ) and next_tok.value:
+                    sign = tok.value or ""
+                    token_stream.consume()
+                    stmt.set_target(sign + next_tok.value)
+                    token_stream.consume()
+                else:
+                    report_or_raise(
+                        ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
+                    )
+            elif tok and tok.type in (
+                TokenType.IDENTIFIER,
+                TokenType.NUMERIC_LITERAL,
+                TokenType.LEVEL_NUMBER,
+                TokenType.FIGURATIVE_CONSTANT,
+            ) and tok.value:
+                stmt.set_target(tok.value)
+                token_stream.consume()
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
@@ -225,6 +254,9 @@ def _parse_binary_arithmetic(
     else:
         report_or_raise(ctx, f"{verb} statement requires an operand", start_loc)
 
+    # Skip NEWLINEs between the first operand and the separator keyword: the
+    # COBOL source may place BY/INTO on the continuation line.
+    _skip_newlines(token_stream)
     upper = peek_value_upper(token_stream)
     if upper in separators:
         token_stream.consume()
@@ -257,12 +289,86 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
 
     Leading NEWLINE tokens are skipped so operands written on a continuation
     line after a separator keyword (``BY``/``INTO``/``=``) are still found.
+
+    Also handles:
+    * Sign-prefixed numeric literals: ``-1.3``, ``+0.5``, ``-3`` (LEVEL_NUMBER).
+    * Subscripted identifiers: ``TABLE1 (INDEX1)`` → ``"TABLE1 ( INDEX1 )"``.
+    * Qualified identifiers: ``QUAL OF PARENT IN HIGHER`` — OF/IN consumed.
     """
     _skip_newlines(stream)
     token = stream.peek()
+    if token is None:
+        return None
+
+    # Sign-prefixed numeric literal: MINUS/PLUS followed immediately by a number.
+    # Single-digit numbers tokenize as LEVEL_NUMBER, so accept both.
+    if token.type in (TokenType.MINUS, TokenType.PLUS):
+        next_tok = stream.peek(1)
+        if next_tok and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER) and next_tok.value:
+            sign = token.value or ""
+            stream.consume()  # sign
+            value = next_tok.value
+            stream.consume()  # number
+            return sign + value
+
     if token and token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
         value = token.value
         stream.consume()
+
+        # Consume optional subscript group ``(...)`` for IDENTIFIER operands
+        if token.type == TokenType.IDENTIFIER:
+            next_tok = stream.peek()
+            if next_tok and next_tok.type == TokenType.LEFT_PAREN:
+                depth = 0
+                parts: list[str] = [value]
+                while not stream.is_empty():
+                    t = stream.peek()
+                    if not t:
+                        break
+                    if t.type == TokenType.LEFT_PAREN:
+                        depth += 1
+                        parts.append("(")
+                    elif t.type == TokenType.RIGHT_PAREN:
+                        depth -= 1
+                        parts.append(")")
+                    else:
+                        parts.append(t.value if t.value else "")
+                    stream.consume()
+                    if depth == 0:
+                        break
+                value = " ".join(p for p in parts if p)
+
+            # Consume optional subscript or OF/IN qualifier chain.
+            # Loop handles both ``QUAL OF PARENT (IDX)`` and multi-line chains
+            # like ``NAME\n    IN GROUP-48 IN GROUP-47 ...``.
+            while not stream.is_empty():
+                _skip_newlines(stream)  # qualifiers may span continuation lines
+                qt = stream.peek()
+                if qt and qt.type == TokenType.LEFT_PAREN:
+                    # Subscript group — consume ``(...)``
+                    depth = 0
+                    while not stream.is_empty():
+                        t = stream.peek()
+                        if not t:
+                            break
+                        if t.type == TokenType.LEFT_PAREN:
+                            depth += 1
+                        elif t.type == TokenType.RIGHT_PAREN:
+                            depth -= 1
+                        stream.consume()
+                        if depth == 0:
+                            break
+                elif qt and qt.type in (TokenType.OF, TokenType.IN):
+                    stream.consume()  # consume OF/IN
+                    _skip_newlines(stream)
+                    qname = stream.peek()
+                    if qname and qname.type == TokenType.IDENTIFIER and qname.value:
+                        stream.consume()
+                    else:
+                        break
+                else:
+                    break
+
         return value
     return None
 

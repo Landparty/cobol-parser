@@ -140,10 +140,16 @@ class TestEvaluateMissingWhenClause:
 
 
 class TestEvaluateMissingEndEvaluate:
-    """Tests for EVALUATE without END-EVALUATE diagnostics."""
+    """Tests for EVALUATE termination behaviour.
 
-    def test_missing_end_evaluate_reports_error(self):
-        """EVALUATE without END-EVALUATE must report an error."""
+    IBM COBOL (NIST-85 style) allows EVALUATE to be terminated by a statement-
+    scope period instead of END-EVALUATE.  Both forms are therefore valid and
+    must parse without errors.  Only genuinely unterminated constructs (no
+    period, no END-EVALUATE) produce diagnostics.
+    """
+
+    def test_period_terminated_evaluate_is_valid(self):
+        """EVALUATE closed by a period must parse without errors (IBM/NIST-85)."""
         source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST.
@@ -157,10 +163,12 @@ class TestEvaluateMissingEndEvaluate:
         """
         diagnostics = _get_evaluate_diagnostics(source)
         end_errors = [d for d in diagnostics if "END" in str(d).upper()]
-        assert len(end_errors) >= 1
+        assert len(end_errors) == 0, (
+            "Period-terminated EVALUATE is valid IBM COBOL — no END errors expected"
+        )
 
-    def test_missing_end_evaluate_message_contains_term(self):
-        """Error message for missing END-EVALUATE should mention 'END-EVALUATE'."""
+    def test_end_evaluate_terminated_evaluate_is_valid(self):
+        """EVALUATE closed by END-EVALUATE must parse without errors."""
         source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST.
@@ -170,13 +178,14 @@ class TestEvaluateMissingEndEvaluate:
         PROCEDURE DIVISION.
             EVALUATE WS-GRADE
                 WHEN 1
-                    DISPLAY 'ONE'.
+                    DISPLAY 'ONE'
+            END-EVALUATE.
         """
         diagnostics = _get_evaluate_diagnostics(source)
         end_errors = [d for d in diagnostics if "END" in str(d).upper()]
-        assert len(end_errors) >= 1
-        error_text = str(end_errors[0]).upper()
-        assert "END" in error_text
+        assert len(end_errors) == 0, (
+            "END-EVALUATE-terminated EVALUATE must parse cleanly"
+        )
 
 
 class TestEvaluateSelectorMismatch:
@@ -397,7 +406,7 @@ class TestEvaluateDiagnosticSeverity:
     """Tests for diagnostic severity classification."""
 
     def test_syntax_errors_are_errors(self):
-        """Syntax errors (missing WHEN, END-EVALUATE) should be errors."""
+        """EVALUATE without a WHEN clause is a genuine syntax error."""
         source = """
         IDENTIFICATION DIVISION.
         PROGRAM-ID. TEST.
@@ -406,8 +415,7 @@ class TestEvaluateDiagnosticSeverity:
         01  WS-GRADE PIC 9.
         PROCEDURE DIVISION.
             EVALUATE WS-GRADE
-                WHEN 1
-                    DISPLAY 'ONE'.
+                DISPLAY 'NO WHEN'.
         """
         diagnostics = _get_evaluate_diagnostics(source)
         assert len(diagnostics) >= 1

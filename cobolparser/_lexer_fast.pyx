@@ -352,12 +352,32 @@ class CobolLexer(_CobolLexerBase):
                 while lookahead_pos < length and text[lookahead_pos].isdigit():
                     lookahead_pos += 1
 
-                # Pattern "42-DATANAMES" - identifier, not numeric literal
-                if (
-                    lookahead_pos < length
-                    and text[lookahead_pos] == "-"
-                    and lookahead_pos + 1 < length
-                    and text[lookahead_pos + 1].isalpha()
+                # Patterns "42-DATANAMES" and "25COUNT" / "45A" — identifier.
+                # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
+                # a digit or sign+digit stays on the read_number_from_text path.
+                if lookahead_pos < length and (
+                    (
+                        text[lookahead_pos] == "-"
+                        and lookahead_pos + 1 < length
+                        and text[lookahead_pos + 1].isalpha()
+                    )
+                    or (
+                        text[lookahead_pos].isalpha()
+                        and not (
+                            text[lookahead_pos].upper() == "E"
+                            and (
+                                (
+                                    lookahead_pos + 1 < length
+                                    and text[lookahead_pos + 1].isdigit()
+                                )
+                                or (
+                                    lookahead_pos + 2 < length
+                                    and text[lookahead_pos + 1] in ("+", "-")
+                                    and text[lookahead_pos + 2].isdigit()
+                                )
+                            )
+                        )
+                    )
                 ):
                     token, new_pos = self.read_word_from_text(
                         text, pos, line_num, start_col
@@ -394,8 +414,14 @@ class CobolLexer(_CobolLexerBase):
 
             # ---- single-character tokens ---------------------------
             if char in self.SINGLE_CHAR_TOKENS:
-                tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
-                pos += 1
+                # Leading-decimal numeric literals: .7  .25  .003 — valid COBOL.
+                if char == "." and pos + 1 < length and text[pos + 1].isdigit():
+                    token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
+                    tokens.append(token)
+                    pos = new_pos
+                else:
+                    tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
+                    pos += 1
                 continue
 
             # ---- ampersand: benign separator -----------------------

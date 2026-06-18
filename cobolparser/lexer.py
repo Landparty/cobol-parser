@@ -1158,14 +1158,35 @@ class _CobolLexerPure:
                 while lookahead_pos < length and (text[lookahead_pos].isdigit()):
                     lookahead_pos += 1
 
-                # Check if after digits we have a dash followed by letters (identifier pattern)
-                if (
-                    lookahead_pos < length
-                    and text[lookahead_pos] == "-"
-                    and lookahead_pos + 1 < length
-                    and text[lookahead_pos + 1].isalpha()
+                # Check if after digits we have a dash-then-letter OR a direct
+                # letter (identifier patterns like 42-DATANAMES or 25COUNT, 45A).
+                # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
+                # a digit or sign+digit stays on the read_number_from_text path.
+                if lookahead_pos < length and (
+                    (
+                        text[lookahead_pos] == "-"
+                        and lookahead_pos + 1 < length
+                        and text[lookahead_pos + 1].isalpha()
+                    )
+                    or (
+                        text[lookahead_pos].isalpha()
+                        and not (
+                            text[lookahead_pos].upper() == "E"
+                            and (
+                                (
+                                    lookahead_pos + 1 < length
+                                    and text[lookahead_pos + 1].isdigit()
+                                )
+                                or (
+                                    lookahead_pos + 2 < length
+                                    and text[lookahead_pos + 1] in ("+", "-")
+                                    and text[lookahead_pos + 2].isdigit()
+                                )
+                            )
+                        )
+                    )
                 ):
-                    # This looks like an identifier starting with digits (e.g., 42-DATANAMES)
+                    # This looks like an identifier starting with digits
                     token, new_pos = self.read_word_from_text(
                         text, pos, line_num, start_col
                     )
@@ -1205,8 +1226,17 @@ class _CobolLexerPure:
 
             # Single character tokens (class-level dict for performance)
             if char in self.SINGLE_CHAR_TOKENS:
-                tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
-                pos += 1
+                # Leading-decimal numeric literals: .7  .25  .003 — valid COBOL.
+                # A period followed immediately by a digit is a number, not a
+                # statement terminator (terminators are always trailed by whitespace
+                # or end-of-line in normalised free-form text).
+                if char == "." and pos + 1 < length and text[pos + 1].isdigit():
+                    token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
+                    tokens.append(token)
+                    pos = new_pos
+                else:
+                    tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
+                    pos += 1
                 continue
 
             # Allow ampersand as a benign separator (appears in some validation suites)
