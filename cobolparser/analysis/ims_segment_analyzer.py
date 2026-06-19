@@ -98,6 +98,22 @@ class IMSDLICall:
         return next((s for s in self.segment_names if s), None)
 
 
+@dataclass
+class IMSEntryPoint:
+    """An ENTRY 'DLITCBL' declaration — the IMS batch program entry point.
+
+    Attributes:
+        entry_name:  Always ``"DLITCBL"`` (normalised to uppercase).
+        pcb_names:   PCB parameter names from the USING clause, in order
+                     (IO-PCB first, then DB-PCBs / alternate PCBs).
+        location:    Source location of the ENTRY statement.
+    """
+
+    entry_name: str
+    pcb_names: list[str] = field(default_factory=list)
+    location: SourceLocation | None = None
+
+
 # ── Analyzer ─────────────────────────────────────────────────────────────────
 
 
@@ -164,6 +180,36 @@ class IMSSegmentAnalyzer:
                 if name:
                     names.add(name)
         return sorted(names)
+
+    def get_entry_points(self, ast: CobolProgram) -> list[IMSEntryPoint]:
+        """Return all ENTRY 'DLITCBL' declarations found in *ast*.
+
+        Each returned :class:`IMSEntryPoint` captures the entry name (always
+        ``"DLITCBL"``) and the PCB parameter list from the USING clause, which
+        identifies the program as an IMS DL/I batch transaction entry point.
+
+        Args:
+            ast: Parsed COBOL program AST.
+
+        Returns:
+            List of :class:`IMSEntryPoint` objects in source order.
+        """
+        from ..models.statements import EntryStatement
+
+        points: list[IMSEntryPoint] = []
+        for stmt in ast.get_all_statements():
+            if (
+                isinstance(stmt, EntryStatement)
+                and (stmt.entry_name or "").upper() == "DLITCBL"
+            ):
+                points.append(
+                    IMSEntryPoint(
+                        entry_name=stmt.entry_name.upper(),  # type: ignore[union-attr]
+                        pcb_names=list(stmt.using_parameters),
+                        location=stmt.location,
+                    )
+                )
+        return points
 
     # ── Pass 1: collect data items ───────────────────────────────────────────
 

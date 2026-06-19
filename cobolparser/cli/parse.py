@@ -966,6 +966,7 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
     analyzer = IMSSegmentAnalyzer()
     dli_calls = analyzer.analyze(result.ast)
     all_segments = analyzer.get_all_segment_names(dli_calls)
+    entry_points_raw = analyzer.get_entry_points(result.ast)
 
     calls_out = []
     for c in dli_calls:
@@ -984,7 +985,22 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
             }
         )
 
+    entry_points_out = [
+        {
+            "entry_name": ep.entry_name,
+            "pcb_names": ep.pcb_names,
+            "location": (
+                {"line": ep.location.line, "column": ep.location.column}
+                if ep.location
+                else None
+            ),
+        }
+        for ep in entry_points_raw
+    ]
+
     output: dict[str, Any] = {
+        "is_ims_program": result.ast.has_ims(),
+        "entry_points": entry_points_out,
         "dli_call_count": len(calls_out),
         "all_segments": all_segments,
         "dli_calls": calls_out,

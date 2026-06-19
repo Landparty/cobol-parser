@@ -96,12 +96,13 @@ def __getattr__(name: str) -> object:
             "LEServiceCall": LEServiceCall,
         }
         return _map[name]
-    if name in ("IMSSegmentAnalyzer", "IMSDLICall"):
-        from .ims_segment_analyzer import IMSDLICall, IMSSegmentAnalyzer
+    if name in ("IMSSegmentAnalyzer", "IMSDLICall", "IMSEntryPoint"):
+        from .ims_segment_analyzer import IMSDLICall, IMSEntryPoint, IMSSegmentAnalyzer
 
         _map = {
             "IMSSegmentAnalyzer": IMSSegmentAnalyzer,
             "IMSDLICall": IMSDLICall,
+            "IMSEntryPoint": IMSEntryPoint,
         }
         return _map[name]
     if name in (
@@ -231,6 +232,7 @@ __all__ = [
     "DeadCodeItem",
     "DynamicCallAnalyzer",
     "IMSDLICall",
+    "IMSEntryPoint",
     "IMSSegmentAnalyzer",
     "IOLogger",
     "IOLogReport",

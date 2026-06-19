@@ -464,12 +464,12 @@ class CobolProgram(ASTNode):
         return False
 
     def has_ims(self) -> bool:
-        """Check if program uses EXEC IMS statements."""
+        """Check if program uses EXEC IMS statements or declares ENTRY 'DLITCBL'."""
         all_statements = self.get_all_statements()
         for stmt in all_statements:
             if stmt.statement_type == "EXEC-IMS":
                 return True
-        return False
+        return self.is_ims_dlitcbl_program()
 
     def get_sql_statements(self) -> list["CobolStatement"]:
         """Get all EXEC SQL statements in the program."""
@@ -517,6 +517,19 @@ class CobolProgram(ASTNode):
                         break
 
         return ims_calls
+
+    def get_entry_statements(self) -> list["CobolStatement"]:
+        """Return all ENTRY statements in the program."""
+        from .statements import EntryStatement
+
+        return [s for s in self.get_all_statements() if isinstance(s, EntryStatement)]
+
+    def is_ims_dlitcbl_program(self) -> bool:
+        """True if program declares ENTRY 'DLITCBL' (IMS DL/I batch entry point)."""
+        return any(
+            (s.entry_name or "").upper() == "DLITCBL"  # type: ignore[attr-defined]
+            for s in self.get_entry_statements()
+        )
 
     def get_le_callable_service_calls(self) -> list["CobolStatement"]:
         """Get all CALL statements targeting IBM Language Environment services.

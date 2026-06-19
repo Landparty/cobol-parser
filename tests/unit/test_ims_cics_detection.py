@@ -449,3 +449,89 @@ class TestDetectionIntegration:
         assert sql_stmts[0].sql_type == "UPDATE"
         assert cics_stmts[0].cics_command == "SEND"
         assert ims_calls[0].statement_type == "CALL"
+
+
+class TestDLITCBLEntryPoint:
+    """Tests for ENTRY 'DLITCBL' detection as an IMS transaction entry point."""
+
+    _IMS_SOURCE = """\
+IDENTIFICATION DIVISION.
+PROGRAM-ID. IMSBATCH.
+PROCEDURE DIVISION.
+    ENTRY 'DLITCBL' USING IO-PCB
+                          ALT-PCB
+                          DB-PCB.
+    STOP RUN.
+"""
+
+    def _parse(self, source: str):
+        from cobolparser import CobolParser
+
+        return CobolParser(free_form=True).parse(source)
+
+    def test_is_ims_dlitcbl_program_true(self):
+        result = self._parse(self._IMS_SOURCE)
+        assert result.ast is not None
+        assert result.ast.is_ims_dlitcbl_program() is True
+
+    def test_is_ims_dlitcbl_program_false(self):
+        source = """\
+IDENTIFICATION DIVISION.
+PROGRAM-ID. NOTIMS.
+PROCEDURE DIVISION.
+    ENTRY 'OTHERNAME' USING PARAM1.
+    STOP RUN.
+"""
+        result = self._parse(source)
+        assert result.ast is not None
+        assert result.ast.is_ims_dlitcbl_program() is False
+
+    def test_has_ims_includes_dlitcbl(self):
+        result = self._parse(self._IMS_SOURCE)
+        assert result.ast is not None
+        assert result.ast.has_ims() is True
+
+    def test_get_entry_statements(self):
+        from cobolparser.models.statements import EntryStatement
+
+        result = self._parse(self._IMS_SOURCE)
+        assert result.ast is not None
+        entries = result.ast.get_entry_statements()
+        assert len(entries) == 1
+        stmt = entries[0]
+        assert isinstance(stmt, EntryStatement)
+        assert stmt.entry_name == "DLITCBL"
+        assert stmt.using_parameters == ["IO-PCB", "ALT-PCB", "DB-PCB"]
+
+    def test_ims_segment_analyzer_entry_points(self):
+        from cobolparser.analysis.ims_segment_analyzer import (
+            IMSEntryPoint,
+            IMSSegmentAnalyzer,
+        )
+
+        result = self._parse(self._IMS_SOURCE)
+        assert result.ast is not None
+        points = IMSSegmentAnalyzer().get_entry_points(result.ast)
+        assert len(points) == 1
+        ep = points[0]
+        assert isinstance(ep, IMSEntryPoint)
+        assert ep.entry_name == "DLITCBL"
+        assert ep.pcb_names == ["IO-PCB", "ALT-PCB", "DB-PCB"]
+
+    def test_dlitcbl_case_insensitive(self):
+        source = """\
+IDENTIFICATION DIVISION.
+PROGRAM-ID. IMSLOWER.
+PROCEDURE DIVISION.
+    ENTRY 'dlitcbl' USING IO-PCB DB-PCB.
+    STOP RUN.
+"""
+        result = self._parse(source)
+        assert result.ast is not None
+        assert result.ast.is_ims_dlitcbl_program() is True
+        assert result.ast.has_ims() is True
+
+    def test_ims_entry_point_exported_from_analysis(self):
+        from cobolparser.analysis import IMSEntryPoint
+
+        assert IMSEntryPoint is not None
