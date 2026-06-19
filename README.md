@@ -1,16 +1,17 @@
 # COBOL Parser for Python
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-3456%20passing-green.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-5800%2B%20passing-green.svg)](#testing)
 [![Coverage](https://img.shields.io/badge/coverage-81%25%2B%20enforced-green.svg)](#testing)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 [![IBM COBOL](https://img.shields.io/badge/IBM%20Enterprise%20COBOL-supported-blue.svg)](docs/ibm-enterprise.md)
 
-A COBOL source code parser for Python 3.11+ that converts COBOL programs into structured ASTs. Supports IBM Enterprise COBOL, configurable memory management, JSON export, and robust error recovery. Built with TDD — 3,456 tests, 81%+ coverage enforced.
+A COBOL source code parser for Python 3.11+ that converts COBOL programs into structured ASTs. Supports IBM Enterprise COBOL, configurable memory management, JSON export, and robust error recovery. Built with TDD — 5,800+ tests, 81%+ coverage enforced, 99.1% parse success on NIST COBOL-85.
 
 ## Features
 
 - **IBM Enterprise COBOL** — COMP-3, EXEC SQL, EXEC CICS, 75+ verbs, IBM intrinsic functions
+- **Real-world validation** — 99.1% parse success on the 512-program NIST COBOL-85 corpus and 24-program shamrice/COBOL-Examples corpus
 - **Full CLI** — parse, tokenize, preprocess, expand copybooks, analyze dynamic calls, detect dead code, inspect program flow, and generate tests from the terminal
 - **Error recovery** — fail-fast or collect-all modes with detailed diagnostics
 - **JSON export** — cross-platform AST serialization with source locations and metadata

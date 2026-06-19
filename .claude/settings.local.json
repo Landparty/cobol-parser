@@ -63,7 +63,8 @@
       "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser\\\\docs\\\\superpowers\\\\plans\")",
       "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\jcl-parser\\\\docs\\\\superpowers\\\\plans\")",
       "WebSearch",
-      "Bash(Get-ChildItem *)"
+      "Bash(Get-ChildItem *)",
+      "PowerShell(gh api *)"
     ],
     "additionalDirectories": [
       "\\tmp"
