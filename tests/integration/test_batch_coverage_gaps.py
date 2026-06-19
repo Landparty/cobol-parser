@@ -9,6 +9,7 @@ Targets:
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
@@ -178,14 +179,17 @@ class TestParseFilesWithCopybooksOSError:
 
 
 class TestParseFilesWithCopybooksExpansionFallback:
-    def test_expansion_exception_falls_back_to_raw(self, tmp_path):
+    def test_expansion_exception_falls_back_to_raw(self, tmp_path, caplog):
         f = tmp_path / "prog.cbl"
         f.write_text(_MINIMAL)
 
-        # Patch expand_copybooks to raise so the except branch (line 255-257) fires
-        with patch(
-            "cobolparser.preprocess.copybook_expander.expand_copybooks",
-            side_effect=RuntimeError("boom"),
+        # Patch expand_copybooks to raise so the except branch fires
+        with (
+            patch(
+                "cobolparser.preprocess.copybook_expander.expand_copybooks",
+                side_effect=RuntimeError("boom"),
+            ),
+            caplog.at_level(logging.WARNING, logger="cobolparser.batch"),
         ):
             results = parse_files_with_copybooks([f], copybook_paths=[])
 
@@ -193,6 +197,12 @@ class TestParseFilesWithCopybooksExpansionFallback:
         assert len(results) == 1
         assert results[0].read_error is None
         # AST may or may not be None depending on the raw source — just confirm no crash
+
+        # The silent fallback must now be observable via a warning log.
+        assert any(
+            "Copybook expansion failed" in rec.message and "boom" in rec.message
+            for rec in caplog.records
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1231,7 +1231,9 @@ class _CobolLexerPure:
                 # statement terminator (terminators are always trailed by whitespace
                 # or end-of-line in normalised free-form text).
                 if char == "." and pos + 1 < length and text[pos + 1].isdigit():
-                    token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
+                    token, new_pos = self.read_number_from_text(
+                        text, pos, line_num, start_col
+                    )
                     tokens.append(token)
                     pos = new_pos
                 else:
