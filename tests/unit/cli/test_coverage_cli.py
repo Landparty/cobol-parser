@@ -76,6 +76,20 @@ class TestCmdStatus:
         captured = capsys.readouterr()
         assert "not found" in captured.out.lower() or "Error" in captured.out
 
+    def test_status_falls_back_to_default_artifact(self, tmp_path, monkeypatch, capsys):
+        """Fall back to io-coverage.json in cwd when the requested artifact path
+        does not exist."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "io-coverage.json").write_text(json.dumps(SAMPLE_ARTIFACT))
+        # Point --artifact at a path that does not exist so the fallback runs.
+        args = make_status_args(artifact=str(tmp_path / "does-not-exist.json"))
+
+        result = cmd_status(args)
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "Total variations: 3" in out
+
     def test_status_with_valid_artifact_table(self, tmp_path, capsys):
         """Exit code 0 and table output for valid artifact."""
         artifact = tmp_path / "io-coverage.json"

@@ -285,10 +285,10 @@ class CRUDMatrixGenerator:
         """Extract file organization/access mode from SELECT statements in ENVIRONMENT DIVISION."""
         from ..models.statements.misc import SelectStatement
 
-        try:
-            env_div = ast.get_division("ENVIRONMENT")
-        except Exception:
-            return
+        # ``CobolProgram.get_division`` is a plain dict lookup that returns
+        # ``None`` for a missing division and never raises, so no broad
+        # exception guard is needed here.
+        env_div = ast.get_division("ENVIRONMENT")
         if env_div is None:
             return
 

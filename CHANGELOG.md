@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never rejected. Pattern parsing remains lenient: an invalid picture is
   flagged but never aborts the surrounding parse.
 
+### Changed
+
+* Silent `except Exception` handlers that swallowed failures without a trace
+  now emit diagnostics instead. `batch.parse_files_with_copybooks()` logs a
+  `WARNING` (logger `cobolparser.batch`) when copybook expansion fails and it
+  falls back to parsing raw source, and the statement-parser probe helpers
+  `peek_token()` / `try_parse_nested()` log at `DEBUG` when their "never raise"
+  contract suppresses an exception. The fall-back behaviour itself is
+  unchanged. The dead broad-`except` around `CobolProgram.get_division()` in
+  the CRUD matrix generator (a plain dict lookup that cannot raise) was
+  removed.
+
 ### Fixed
 
 * Lexer now recognises typed-literal prefixes (`X"1F"` hexadecimal, `N"..."`

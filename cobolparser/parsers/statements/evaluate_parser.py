@@ -84,7 +84,9 @@ class EvaluateStatementParser(IStatementParser):
                         )
                     found_when_other = True
                     stmt.default_when = WhenClause([], when_location)
-                    statements, period_terminated = self._skip_clause_statements(token_stream)
+                    statements, period_terminated = self._skip_clause_statements(
+                        token_stream
+                    )
                     if statements:
                         for nested_statement in statements:
                             stmt.default_when.add_statement(nested_statement)
@@ -128,7 +130,9 @@ class EvaluateStatementParser(IStatementParser):
 
                 when_clause = WhenClause(selectors, when_location)
                 stmt.when_clauses.append(when_clause)
-                statements, period_terminated = self._skip_clause_statements(token_stream)
+                statements, period_terminated = self._skip_clause_statements(
+                    token_stream
+                )
                 if statements:
                     for nested_statement in statements:
                         when_clause.add_statement(nested_statement)
@@ -285,7 +289,9 @@ class EvaluateStatementParser(IStatementParser):
 
         return {"type": "Literal", "value": selector_text}
 
-    def _skip_clause_statements(self, token_stream: ITokenStream) -> tuple[list | None, bool]:
+    def _skip_clause_statements(
+        self, token_stream: ITokenStream
+    ) -> tuple[list | None, bool]:
         """Parse statements within a WHEN clause, building nested AST nodes.
 
         Returns ``(statements, period_terminated)`` where:

@@ -16,6 +16,7 @@ pytestmark = pytest.mark.integration
 
 SHAMRICE_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol" / "shamrice"
 
+
 def _make_param(path: Path) -> pytest.param:
     return pytest.param(path, id=path.name)
 
@@ -32,10 +33,7 @@ class TestShamriceExamples:
     def test_parses_without_errors(self, cbl_path: Path) -> None:
         parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
         result = parser.parse_file(str(cbl_path))
-        assert result.ast is not None, (
-            f"{cbl_path.name}: AST is None"
-        )
-        assert result.errors == [], (
-            f"{cbl_path.name}: parse errors:\n"
-            + "\n".join(str(e) for e in result.errors)
+        assert result.ast is not None, f"{cbl_path.name}: AST is None"
+        assert result.errors == [], f"{cbl_path.name}: parse errors:\n" + "\n".join(
+            str(e) for e in result.errors
         )

@@ -163,9 +163,9 @@ class TestEvaluateMissingEndEvaluate:
         """
         diagnostics = _get_evaluate_diagnostics(source)
         end_errors = [d for d in diagnostics if "END" in str(d).upper()]
-        assert len(end_errors) == 0, (
-            "Period-terminated EVALUATE is valid IBM COBOL — no END errors expected"
-        )
+        assert (
+            len(end_errors) == 0
+        ), "Period-terminated EVALUATE is valid IBM COBOL — no END errors expected"
 
     def test_end_evaluate_terminated_evaluate_is_valid(self):
         """EVALUATE closed by END-EVALUATE must parse without errors."""
@@ -183,9 +183,9 @@ class TestEvaluateMissingEndEvaluate:
         """
         diagnostics = _get_evaluate_diagnostics(source)
         end_errors = [d for d in diagnostics if "END" in str(d).upper()]
-        assert len(end_errors) == 0, (
-            "END-EVALUATE-terminated EVALUATE must parse cleanly"
-        )
+        assert (
+            len(end_errors) == 0
+        ), "END-EVALUATE-terminated EVALUATE must parse cleanly"
 
 
 class TestEvaluateSelectorMismatch:

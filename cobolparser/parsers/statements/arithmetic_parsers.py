@@ -147,14 +147,15 @@ class SubtractStatementParser(IStatementParser):
                 token_stream.consume()  # consume FROM
             _skip_newlines(token_stream)
             tok = token_stream.peek()
-            if tok and tok.type in (
-                TokenType.MINUS, TokenType.PLUS
-            ):
+            if tok and tok.type in (TokenType.MINUS, TokenType.PLUS):
                 # Sign-prefixed FROM target: e.g. FROM -1000000 GIVING Y
                 next_tok = token_stream.peek(1)
-                if next_tok and next_tok.type in (
-                    TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER
-                ) and next_tok.value:
+                if (
+                    next_tok
+                    and next_tok.type
+                    in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+                    and next_tok.value
+                ):
                     sign = tok.value or ""
                     token_stream.consume()
                     stmt.set_target(sign + next_tok.value)
@@ -163,12 +164,17 @@ class SubtractStatementParser(IStatementParser):
                     report_or_raise(
                         ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                     )
-            elif tok and tok.type in (
-                TokenType.IDENTIFIER,
-                TokenType.NUMERIC_LITERAL,
-                TokenType.LEVEL_NUMBER,
-                TokenType.FIGURATIVE_CONSTANT,
-            ) and tok.value:
+            elif (
+                tok
+                and tok.type
+                in (
+                    TokenType.IDENTIFIER,
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.LEVEL_NUMBER,
+                    TokenType.FIGURATIVE_CONSTANT,
+                )
+                and tok.value
+            ):
                 stmt.set_target(tok.value)
                 token_stream.consume()
             else:
@@ -304,7 +310,11 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
     # Single-digit numbers tokenize as LEVEL_NUMBER, so accept both.
     if token.type in (TokenType.MINUS, TokenType.PLUS):
         next_tok = stream.peek(1)
-        if next_tok and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER) and next_tok.value:
+        if (
+            next_tok
+            and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+            and next_tok.value
+        ):
             sign = token.value or ""
             stream.consume()  # sign
             value = next_tok.value
