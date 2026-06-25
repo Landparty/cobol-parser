@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cobolparser import __version__
 from cobolparser.cli.parse import (
     _build_parser,
     _cmd_ims_dli,
@@ -100,7 +101,7 @@ class TestVersionFlag:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "cobol-parser" in output
-        assert "1.0.0" in output
+        assert __version__ in output
 
 
 # ---------------------------------------------------------------------------
@@ -844,4 +845,4 @@ class TestVersionViaParser:
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
         output = captured.out + captured.err
-        assert "1.0.0" in output
+        assert __version__ in output
