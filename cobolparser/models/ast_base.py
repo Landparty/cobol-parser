@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional
 
 
 @dataclass(slots=True)
@@ -32,9 +32,6 @@ class SourceLocation:
         if self.length is not None:
             return f"Line {self.line}, Column {self.column} (length {self.length})"
         return f"Line {self.line}, Column {self.column}"
-
-
-T = TypeVar("T", bound="ASTNode")
 
 
 class ASTNode(ABC):

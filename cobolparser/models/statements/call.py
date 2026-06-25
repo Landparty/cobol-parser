@@ -41,8 +41,7 @@ class CallStatement(CobolStatement):
         """Set the called program name and type."""
         self.called_program = program_name
         self._is_dynamic = is_dynamic
-        if program_name not in self.operands:
-            self.add_operand(program_name)
+        self._add_unique_operand(program_name)
 
     def add_using_parameter(
         self, param_name: str, passing_mode: str = "REFERENCE"
@@ -50,20 +49,17 @@ class CallStatement(CobolStatement):
         """Add a parameter to the USING clause."""
         param = CallParameter(param_name, passing_mode)
         self.using_parameters.append(param)
-        if param_name not in self.operands:
-            self.add_operand(param_name)
+        self._add_unique_operand(param_name)
 
     def set_giving_parameter(self, param_name: str) -> None:
         """Set the GIVING parameter."""
         self.giving_parameter = param_name
-        if param_name not in self.operands:
-            self.add_operand(param_name)
+        self._add_unique_operand(param_name)
 
     def set_returning_parameter(self, param_name: str) -> None:
         """Set the RETURNING parameter."""
         self.returning_parameter = param_name
-        if param_name not in self.operands:
-            self.add_operand(param_name)
+        self._add_unique_operand(param_name)
 
     def set_is_dynamic(self, value: bool) -> None:
         """Set whether this is a dynamic CALL."""
@@ -105,10 +101,9 @@ class CallStatement(CobolStatement):
             }
         )
         # Add exception handlers if present
-        if self.on_overflow:
-            base["on_overflow"] = [s.to_dict() for s in self.on_overflow]
-        if self.on_exception:
-            base["on_exception"] = [s.to_dict() for s in self.on_exception]
+        base.update(
+            self._serialize_clauses("on_overflow", "on_exception", omit_empty=True)
+        )
 
         return base
 
@@ -132,14 +127,12 @@ class EntryStatement(CobolStatement):
     def set_entry_name(self, name: str) -> None:
         """Set the entry point name (literal)."""
         self.entry_name = name
-        if name not in self.operands:
-            self.add_operand(name)
+        self._add_unique_operand(name)
 
     def add_using_parameter(self, param_name: str) -> None:
         """Add a parameter to the USING clause."""
         self.using_parameters.append(param_name)
-        if param_name not in self.operands:
-            self.add_operand(param_name)
+        self._add_unique_operand(param_name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""

@@ -8,7 +8,55 @@ from ..ast_base import SourceLocation
 from .base import CobolStatement
 
 
-class IOReadStatement(CobolStatement):
+class InvalidKeyClauseMixin:
+    """Shared INVALID KEY / NOT INVALID KEY clause setters for IO statements.
+
+    Consolidates the identical setter bodies used by READ, WRITE, REWRITE,
+    DELETE, and START statement nodes.
+    """
+
+    invalid_key_clause: list["CobolStatement"] | None
+    not_invalid_key_clause: list["CobolStatement"] | None
+
+    def set_invalid_key_clause(self, statements: list["CobolStatement"] | None) -> None:
+        """Set the INVALID KEY clause."""
+        self.invalid_key_clause = statements
+        if statements:
+            self.metadata["has_invalid_key"] = True  # type: ignore[attr-defined]
+
+    def set_not_invalid_key_clause(
+        self, statements: list["CobolStatement"] | None
+    ) -> None:
+        """Set the NOT INVALID KEY clause."""
+        self.not_invalid_key_clause = statements
+
+
+class LockClauseMixin:
+    """Shared LOCK flag setter for IO statements (REWRITE, DELETE).
+
+    Sets the ``with_lock`` flag and the ``uses_lock`` metadata marker.
+    """
+
+    with_lock: bool
+
+    def set_lock(self, with_lock: bool = True) -> None:
+        """Set the LOCK flag."""
+        self.with_lock = with_lock
+        if with_lock:
+            self.metadata["uses_lock"] = True  # type: ignore[attr-defined]
+
+
+class RetryClauseMixin:
+    """Shared RETRY clause setter for IO statements (READ, WRITE)."""
+
+    retry_count: int | None
+
+    def set_retry(self, count: int) -> None:
+        """Set the RETRY clause count."""
+        self.retry_count = count
+
+
+class IOReadStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
     """AST node for READ statements with comprehensive IBM Enterprise COBOL variation support.
 
     Contract: contracts/io-statement-ast.md
@@ -47,20 +95,17 @@ class IOReadStatement(CobolStatement):
     def set_file_name(self, name: str) -> None:
         """Set the file name to read from."""
         self.file_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def set_record_name(self, name: str) -> None:
         """Set the record being read."""
         self.record_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def set_into(self, target: str) -> None:
         """Set the INTO clause target."""
         self.into_target = target
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def set_key(self, value: str) -> None:
         """Set the KEY IS clause value."""
@@ -88,20 +133,6 @@ class IOReadStatement(CobolStatement):
         """Set the NOT AT END clause."""
         self.not_at_end_clause = statements
 
-    def set_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the INVALID KEY clause."""
-        self.invalid_key_clause = statements
-        if statements:
-            self.metadata["has_invalid_key"] = True
-
-    def set_not_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the NOT INVALID KEY clause."""
-        self.not_invalid_key_clause = statements
-
-    def set_retry(self, count: int) -> None:
-        """Set the RETRY clause count."""
-        self.retry_count = count
-
     def to_dict(self) -> dict[str, Any]:
         """Convert READ statement to dictionary representation per contract."""
         result = super().to_dict()
@@ -116,24 +147,22 @@ class IOReadStatement(CobolStatement):
                 # Status flags
                 "with_lock": self.with_lock,
                 "with_nowait": self.with_nowait,
-                # Clauses
-                "at_end_clause": [s.to_dict() for s in (self.at_end_clause or [])],
-                "not_at_end_clause": [
-                    s.to_dict() for s in (self.not_at_end_clause or [])
-                ],
-                "invalid_key_clause": [
-                    s.to_dict() for s in (self.invalid_key_clause or [])
-                ],
-                "not_invalid_key_clause": [
-                    s.to_dict() for s in (self.not_invalid_key_clause or [])
-                ],
-                "retry_count": self.retry_count,
             }
         )
+        # Clauses
+        result.update(
+            self._serialize_clauses(
+                "at_end_clause",
+                "not_at_end_clause",
+                "invalid_key_clause",
+                "not_invalid_key_clause",
+            )
+        )
+        result["retry_count"] = self.retry_count
         return result
 
 
-class IOWriteStatement(CobolStatement):
+class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
     """AST node for WRITE statements with comprehensive IBM Enterprise COBOL variation support.
 
     Contract: contracts/io-statement-ast.md
@@ -173,14 +202,12 @@ class IOWriteStatement(CobolStatement):
     def set_record_name(self, name: str) -> None:
         """Set the record being written."""
         self.record_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def set_from(self, source: str) -> None:
         """Set the FROM clause source."""
         self.from_clause = source
-        if source not in self.operands:
-            self.operands.append(source)
+        self._add_unique_operand(source)
 
     def set_advancing(
         self, mode: str, lines: int | None = None, page: bool = False
@@ -203,20 +230,6 @@ class IOWriteStatement(CobolStatement):
         """Set the AT END-OF-PAGE clause."""
         self.at_eop_clause = statements
 
-    def set_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the INVALID KEY clause."""
-        self.invalid_key_clause = statements
-        if statements:
-            self.metadata["has_invalid_key"] = True
-
-    def set_not_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the NOT INVALID KEY clause."""
-        self.not_invalid_key_clause = statements
-
-    def set_retry(self, count: int) -> None:
-        """Set the RETRY clause count."""
-        self.retry_count = count
-
     def set_lock(self, with_lock: bool = True) -> None:
         """Set the LOCK flag."""
         self.with_lock = with_lock
@@ -237,17 +250,17 @@ class IOWriteStatement(CobolStatement):
                 # Status flags
                 "delete_record": self.delete_record,
                 "with_lock": self.with_lock,
-                # Clauses
-                "at_eop_clause": [s.to_dict() for s in (self.at_eop_clause or [])],
-                "invalid_key_clause": [
-                    s.to_dict() for s in (self.invalid_key_clause or [])
-                ],
-                "not_invalid_key_clause": [
-                    s.to_dict() for s in (self.not_invalid_key_clause or [])
-                ],
-                "retry_count": self.retry_count,
             }
         )
+        # Clauses
+        result.update(
+            self._serialize_clauses(
+                "at_eop_clause",
+                "invalid_key_clause",
+                "not_invalid_key_clause",
+            )
+        )
+        result["retry_count"] = self.retry_count
         return result
 
 
@@ -393,8 +406,7 @@ class IOAcceptStatement(CobolStatement):
     def set_target(self, name: str) -> None:
         """Set the accept target variable."""
         self.target = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def set_from(self, source: str) -> None:
         """Set the FROM source."""
@@ -447,7 +459,7 @@ class IOAcceptStatement(CobolStatement):
         return result
 
 
-class IORewriteStatement(CobolStatement):
+class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement):
     """IBM Enterprise COBOL REWRITE statement AST node."""
 
     def __init__(self, location: SourceLocation):
@@ -469,24 +481,7 @@ class IORewriteStatement(CobolStatement):
     def set_record_name(self, record_name: str) -> None:
         """Set the record name to rewrite."""
         self.record_name = record_name
-        if record_name not in self.operands:
-            self.operands.append(record_name)
-
-    def set_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the INVALID KEY clause."""
-        self.invalid_key_clause = statements
-        if statements:
-            self.metadata["has_invalid_key"] = True
-
-    def set_not_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the NOT INVALID KEY clause."""
-        self.not_invalid_key_clause = statements
-
-    def set_lock(self, with_lock: bool = True) -> None:
-        """Set the LOCK flag."""
-        self.with_lock = with_lock
-        if with_lock:
-            self.metadata["uses_lock"] = True
+        self._add_unique_operand(record_name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert REWRITE statement to dictionary representation per contract."""
@@ -495,19 +490,16 @@ class IORewriteStatement(CobolStatement):
             {
                 "file_name": self.file_name,
                 "record_name": self.record_name,
-                "invalid_key_clause": [
-                    s.to_dict() for s in (self.invalid_key_clause or [])
-                ],
-                "not_invalid_key_clause": [
-                    s.to_dict() for s in (self.not_invalid_key_clause or [])
-                ],
+                **self._serialize_clauses(
+                    "invalid_key_clause", "not_invalid_key_clause"
+                ),
                 "with_lock": self.with_lock,
             }
         )
         return result
 
 
-class IODeleteStatement(CobolStatement):
+class IODeleteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement):
     """IBM Enterprise COBOL DELETE statement AST node."""
 
     def __init__(self, location: SourceLocation):
@@ -525,41 +517,22 @@ class IODeleteStatement(CobolStatement):
         """Set the file name."""
         self.file_name = file_name
 
-    def set_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the INVALID KEY clause."""
-        self.invalid_key_clause = statements
-        if statements:
-            self.metadata["has_invalid_key"] = True
-
-    def set_not_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the NOT INVALID KEY clause."""
-        self.not_invalid_key_clause = statements
-
-    def set_lock(self, with_lock: bool = True) -> None:
-        """Set the LOCK flag."""
-        self.with_lock = with_lock
-        if with_lock:
-            self.metadata["uses_lock"] = True
-
     def to_dict(self) -> dict[str, Any]:
         """Convert DELETE statement to dictionary representation per contract."""
         result = super().to_dict()
         result.update(
             {
                 "file_name": self.file_name,
-                "invalid_key_clause": [
-                    s.to_dict() for s in (self.invalid_key_clause or [])
-                ],
-                "not_invalid_key_clause": [
-                    s.to_dict() for s in (self.not_invalid_key_clause or [])
-                ],
+                **self._serialize_clauses(
+                    "invalid_key_clause", "not_invalid_key_clause"
+                ),
                 "with_lock": self.with_lock,
             }
         )
         return result
 
 
-class IOStartStatement(CobolStatement):
+class IOStartStatement(InvalidKeyClauseMixin, CobolStatement):
     """IBM Enterprise COBOL START statement AST node."""
 
     def __init__(self, location: SourceLocation):
@@ -582,16 +555,6 @@ class IOStartStatement(CobolStatement):
         """Set the key condition (EQUAL, GREATER, LESS, etc.)."""
         self.key_condition = condition.upper()
 
-    def set_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the INVALID KEY clause."""
-        self.invalid_key_clause = statements
-        if statements:
-            self.metadata["has_invalid_key"] = True
-
-    def set_not_invalid_key_clause(self, statements: list["CobolStatement"]) -> None:
-        """Set the NOT INVALID KEY clause."""
-        self.not_invalid_key_clause = statements
-
     def to_dict(self) -> dict[str, Any]:
         """Convert START statement to dictionary representation per contract."""
         result = super().to_dict()
@@ -599,12 +562,9 @@ class IOStartStatement(CobolStatement):
             {
                 "file_name": self.file_name,
                 "key_condition": self.key_condition,
-                "invalid_key_clause": [
-                    s.to_dict() for s in (self.invalid_key_clause or [])
-                ],
-                "not_invalid_key_clause": [
-                    s.to_dict() for s in (self.not_invalid_key_clause or [])
-                ],
+                **self._serialize_clauses(
+                    "invalid_key_clause", "not_invalid_key_clause"
+                ),
             }
         )
         return result

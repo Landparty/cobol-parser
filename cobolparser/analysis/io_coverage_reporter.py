@@ -33,16 +33,6 @@ class TestType(StrEnum):
 
 
 @dataclass
-class TestReference:
-    """Reference to a test file that covers a variation."""
-
-    file_path: str
-    test_name: str
-    test_type: str
-    line_number: int | None = None
-
-
-@dataclass
 class IoVariationCoverage:
     """Coverage data for a single IO variation."""
 

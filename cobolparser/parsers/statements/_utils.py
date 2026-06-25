@@ -8,12 +8,13 @@ individual parser files.
 from __future__ import annotations
 
 import logging
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar, cast
 
 from cobolparser._errors import ParseError
+from cobolparser.core.ast_factory import get_factory
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.lexer import Token, TokenType
-from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.statements.data import DisplayStatement, MoveStatement
 from cobolparser.plugins.core import ErrorRecoveryMode
 
@@ -142,6 +143,31 @@ def token_value_upper(token: Token | None) -> str:
 def token_location(token: Token | None) -> SourceLocation:
     """Return the source location of *token*, or a zero location if absent."""
     return token.location if token else SourceLocation(0, 0)
+
+
+_StmtT = TypeVar("_StmtT", bound=ASTNode)
+
+
+def create_statement(
+    stream: ITokenStream, node_class: type[_StmtT]
+) -> tuple[_StmtT, Token | None]:
+    """Consume the leading verb token and factory-create its statement node.
+
+    Returns ``(stmt, start_token)`` where *stmt* is created via the shared
+    :func:`get_factory` at the start token's location (falling back to a zero
+    location when the stream is exhausted). This collapses the identical
+    ~8-line preamble shared by the IO statement parsers.
+    """
+    start_token = stream.consume()
+    factory = get_factory()
+    stmt = cast(
+        _StmtT,
+        factory.create(
+            node_class,
+            start_token.location if start_token else SourceLocation(0, 0),
+        ),
+    )
+    return stmt, start_token
 
 
 def peek_token(token_stream: ITokenStream, offset: int = 0) -> Token | None:
@@ -297,6 +323,60 @@ def parse_invalid_key_clauses(
                 skip_whitespace(stream)
             clause_stmts = collect_clause_stmts(stream, {end_keyword})
             stmt.set_not_invalid_key_clause(clause_stmts)
+
+
+def try_consume_keyword(stream: ITokenStream, token_type: Any, keyword: str) -> bool:
+    """Consume the next token if it is *token_type* or IDENTIFIER==*keyword*.
+
+    Mirrors :func:`matches_keyword`'s dual type-or-identifier check. On a match
+    the token is consumed and trailing whitespace skipped, and ``True`` is
+    returned; otherwise the stream is left untouched and ``False`` is returned.
+    *keyword* is matched case-insensitively against the upper-cased value.
+    """
+    token = stream.peek()
+    if token and (
+        token.type == token_type
+        or (
+            token.type == TokenType.IDENTIFIER
+            and token.value
+            and token.value.upper() == keyword.upper()
+        )
+    ):
+        stream.consume()
+        skip_whitespace(stream)
+        return True
+    return False
+
+
+def consume_key_is(stream: ITokenStream) -> bool:
+    """Consume an optional ``KEY [IS]`` clause prefix.
+
+    Handles both the ``KEY_IS`` single-token form and the ``KEY`` + optional
+    ``IS`` form (where ``IS`` may arrive as a dedicated token or as an
+    IDENTIFIER). Whitespace is skipped after each consumed token. Returns
+    ``True`` if a KEY/KEY_IS token was present and consumed, ``False``
+    otherwise (leaving the stream untouched). Shared by READ and START.
+    """
+    token = stream.peek()
+    if not token or token.type not in (TokenType.KEY_IS, TokenType.KEY):
+        return False
+    stream.consume()
+    skip_whitespace(stream)
+    # If KEY (not KEY_IS), consume optional IS keyword.
+    if token.type == TokenType.KEY:
+        nxt = stream.peek()
+        if nxt and nxt.type == TokenType.IS:
+            stream.consume()
+            skip_whitespace(stream)
+        elif (
+            nxt
+            and nxt.type == TokenType.IDENTIFIER
+            and nxt.value
+            and nxt.value.upper() == "IS"
+        ):
+            stream.consume()
+            skip_whitespace(stream)
+    return True
 
 
 def consume_end_keyword_and_period(

@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* Internal code-review cleanup removing dead code and consolidating
+  duplication (no public-API or behaviour changes; full test suite unchanged).
+  Removed unreferenced symbols (`ParserHost` protocol, `TokenStream.match_value`,
+  four unused `CobolFileDescription` builder methods, the orphaned
+  `TestReference` dataclass, a stray `TypeVar`, and ten dead fixed-format column
+  constants in the lexer that duplicated the preprocessor's). Consolidated
+  copy-pasted logic behind shared helpers: per-subcommand parse/emit/parser
+  boilerplate in the CLI (`_parse_or_fail`, `_emit_report`,
+  `_build_analyzer_parser`, `_stats_dict`); clause-list serialization and
+  clause/operand setters in the statement AST models
+  (`CobolStatement._serialize_clauses` / `_add_unique_operand` and IO clause
+  mixins); IO statement-parser preamble and INVALID KEY / KEY-IS handling
+  (`create_statement`, `consume_key_is`, `try_consume_keyword`, and reuse of
+  `parse_invalid_key_clauses`); and the duplicated unescaped-quote scan in the
+  copybook preprocessor.
 * Silent `except Exception` handlers that swallowed failures without a trace
   now emit diagnostics instead. `batch.parse_files_with_copybooks()` logs a
   `WARNING` (logger `cobolparser.batch`) when copybook expansion fails and it

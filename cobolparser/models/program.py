@@ -892,11 +892,6 @@ class CobolFileDescription(ASTNode):
         # REPORT IS clause (Report Writer)
         self.report_names: list[str] = []
 
-    def add_data_record(self, data_item: "CobolDataItem") -> None:
-        """Add a data record (01 level) to this FD."""
-        self.add_child(data_item)
-        self.data_records.append(data_item)
-
     def set_block_contains(
         self,
         count: int | None = None,
@@ -930,14 +925,6 @@ class CobolFileDescription(ASTNode):
     def set_label_records(self, value: str) -> None:
         """Set the LABEL RECORDS clause."""
         self.label_records = value
-
-    def add_value_of(self, system_name: str, value: str) -> None:
-        """Add a VALUE OF clause entry."""
-        self.value_of.append({"system_name": system_name, "value": value})
-
-    def add_data_record_name(self, name: str) -> None:
-        """Add a DATA RECORD name."""
-        self.data_record_names.append(name)
 
     def set_linage(
         self,
@@ -974,10 +961,6 @@ class CobolFileDescription(ASTNode):
     def set_global(self, is_global: bool = True) -> None:
         """Set the GLOBAL attribute."""
         self.is_global = is_global
-
-    def add_report_name(self, name: str) -> None:
-        """Add a REPORT IS clause entry."""
-        self.report_names.append(name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert FD/SD to dictionary representation."""
