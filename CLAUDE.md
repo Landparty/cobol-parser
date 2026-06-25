@@ -28,7 +28,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (81% minimum enforced; ~5,823 tests across 226 files)
+# Run all tests with coverage (81% minimum enforced; ~5,969 tests across 226 files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -295,7 +295,7 @@ output = generate_cobolcheck_tests(source, strategies=["paragraph", "branch", "b
 
 ## Test Structure
 
-~5,823 tests across 226 files in 5 directories:
+~5,969 tests across 226 files in 5 directories:
 
 ```
 tests/
@@ -366,7 +366,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 ## Example COBOL Files
 
 - `tests/samples/` -- ~48 COBOL sample programs covering all statement types (plus copybook and IO sub-directories)
-- `examples/cobol/` -- NIST COBOL-85 test suite (512 .CBL files) and copybooks (.CPY)
+- `examples/cobol/` -- NIST COBOL-85 test suite (459 .CBL files) and copybooks (.CPY)
 - `examples/cobol/shamrice/` -- 24 IBM COBOL programs from shamrice/COBOL-Examples (ACCEPT variants, COMP types, SEARCH, SORT/MERGE, SQL, JSON/XML GENERATE, sub-programs); all parse cleanly under FAIL_FAST
 
 ## Additional Directories
