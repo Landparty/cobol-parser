@@ -1,7 +1,7 @@
 """Abstract base classes and interfaces for COBOL parser components."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ..lexer import Token
@@ -146,33 +146,7 @@ class IStatementParser(ABC):
         pass
 
 
-# Parser host and context protocols
-
-
-class ParserHost(Protocol):
-    """Protocol for the main parser interface used by division and statement parsers."""
-
-    @property
-    def current_section(self) -> Any | None:
-        """Current COBOL section being parsed."""
-        ...
-
-    @property
-    def current_division(self) -> Any | None:
-        """Current COBOL division being parsed."""
-        ...
-
-    def add_error(self, error: Any) -> None:
-        """Add an error to the error list."""
-        ...
-
-    def add_warning(self, message: str) -> None:
-        """Add a warning message."""
-        ...
-
-    def create_error(self, message: str, location: Any | None = None) -> Any:
-        """Create a ParseError with optional location."""
-        ...
+# Parser context
 
 
 class ParseContext:

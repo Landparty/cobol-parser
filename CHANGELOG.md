@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* Internal code-review cleanup removing dead code and consolidating
+  duplication (no public-API or behaviour changes; full test suite unchanged).
+  Removed unreferenced symbols (`ParserHost` protocol, `TokenStream.match_value`,
+  four unused `CobolFileDescription` builder methods, the orphaned
+  `TestReference` dataclass, a stray `TypeVar`, and ten dead fixed-format column
+  constants in the lexer that duplicated the preprocessor's). Consolidated
+  copy-pasted logic behind shared helpers: per-subcommand parse/emit/parser
+  boilerplate in the CLI (`_parse_or_fail`, `_emit_report`,
+  `_build_analyzer_parser`, `_stats_dict`); clause-list serialization and
+  clause/operand setters in the statement AST models
+  (`CobolStatement._serialize_clauses` / `_add_unique_operand` and IO clause
+  mixins); IO statement-parser preamble and INVALID KEY / KEY-IS handling
+  (`create_statement`, `consume_key_is`, `try_consume_keyword`, and reuse of
+  `parse_invalid_key_clauses`); and the duplicated unescaped-quote scan in the
+  copybook preprocessor.
 * Silent `except Exception` handlers that swallowed failures without a trace
   now emit diagnostics instead. `batch.parse_files_with_copybooks()` logs a
   `WARNING` (logger `cobolparser.batch`) when copybook expansion fails and it
@@ -40,6 +55,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statement operands. Such literals now produce a single `STRING_LITERAL`
   token whose `raw_value` preserves the original prefixed source text. The
   Cython-accelerated lexer (`_lexer_fast`) was updated to match.
+
+## [1.1.0](https://github.com/Landparty/cobol-parser/compare/v1.0.0...v1.1.0) (2026-06-19)
+
+
+### Features
+
+* add shamrice/COBOL-Examples corpus with parse verification tests ([cd0b7c4](https://github.com/Landparty/cobol-parser/commit/cd0b7c40e1e5881b2f3e634bb36fff0333d5362e))
+* **ims:** add IMSEntryPoint class and integrate ENTRY 'DLITCBL' detection ([b41104c](https://github.com/Landparty/cobol-parser/commit/b41104c54b7ddddeec348f7467c483adc20b0d50))
+* **lexer:** support typed-literal prefixes (X/N/NX/G/Z/U/B) ([b3d428a](https://github.com/Landparty/cobol-parser/commit/b3d428ae7844b4441357dc0c20733946bbc1a81b))
+* **models:** validate PICTURE clause patterns ([6c9a414](https://github.com/Landparty/cobol-parser/commit/6c9a414aaa43c292d7e6181747fac7f49117ed53))
+
+
+### Bug Fixes
+
+* **docs:** update test count and success metrics in README and CLAUDE.md ([bfad610](https://github.com/Landparty/cobol-parser/commit/bfad61032d1d6d320cb24f7f11bb8e8bed295cdf))
+* **lexer:** keep unterminated typed literals lenient in free-form ([401aa4f](https://github.com/Landparty/cobol-parser/commit/401aa4f60c2616978a3af71739a91bcd1fa4e63c))
+* **logging:** include tracebacks in suppressed-exception logs; correct test docstring ([f4959c5](https://github.com/Landparty/cobol-parser/commit/f4959c569df1ed5d07df15fe8c452b8db91ef366))
+* **parser:** improve real-world COBOL parse success to 99.1% on NIST-85 corpus ([7a1a387](https://github.com/Landparty/cobol-parser/commit/7a1a3876e2e2fb87648f59a2b8aa8b3710b93e2a))
+
+
+### Documentation
+
+* add design spec for shamrice COBOL examples corpus ([98bb00b](https://github.com/Landparty/cobol-parser/commit/98bb00bbbd4659f914e866905290ef542c785489))
 
 ## 1.0.0 (2026-06-16)
 

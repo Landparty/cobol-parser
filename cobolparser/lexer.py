@@ -629,20 +629,6 @@ class _CobolLexerPure:
     # The single-letter prefixes; ``NX`` is handled as a special two-char case.
     LITERAL_PREFIXES = frozenset({"X", "N", "G", "Z", "U", "B"})
 
-    # COBOL Fixed-Format Column Constants
-    SEQUENCE_AREA_START = 0
-    SEQUENCE_AREA_END = 6
-    INDICATOR_COLUMN = 6  # 0-indexed (column 7 in 1-indexed COBOL)
-    PROGRAM_TEXT_START = 7  # 0-indexed (column 8 in 1-indexed COBOL)
-    PROGRAM_TEXT_END = 72
-    IDENTIFICATION_START = 72
-    IDENTIFICATION_END = 80
-
-    # Indicator characters
-    CONTINUATION_INDICATOR = "-"
-    COMMENT_INDICATORS = ("*", "/")
-    DEBUG_INDICATOR = "D"
-
     def __init__(
         self,
         source: str,

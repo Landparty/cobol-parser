@@ -94,15 +94,6 @@ class TokenStream(ITokenStream):
         token = self.peek()
         return token is not None and token.type in types
 
-    def match_value(self, *values: str) -> bool:
-        """Check if next token value matches (case-insensitive)."""
-        token = self.peek()
-        return bool(
-            token is not None
-            and token.value
-            and token.value.upper() in [v.upper() for v in values]
-        )
-
     def skip_whitespace_and_comments(self) -> None:
         """Skip whitespace, comment, newline, and continuation tokens."""
         while not self.is_empty():

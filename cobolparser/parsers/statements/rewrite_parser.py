@@ -1,18 +1,17 @@
 """Rewrite statement parser implementing IStatementParser interface."""
 
-from typing import Any, cast
+from typing import Any
 
 from cobolparser.parsers.statements._utils import (
     consume_end_keyword_and_period,
+    create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
     skip_whitespace,
 )
 
-from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import IORewriteStatement
 
 
@@ -31,15 +30,7 @@ class RewriteStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IORewriteStatement:
         """Parse a REWRITE statement."""
-        start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = cast(
-            IORewriteStatement,
-            factory.create(
-                IORewriteStatement,
-                start_token.location if start_token else SourceLocation(0, 0),
-            ),
-        )
+        stmt, _ = create_statement(token_stream, IORewriteStatement)
 
         skip_whitespace(token_stream)
 

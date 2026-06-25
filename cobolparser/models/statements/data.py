@@ -21,14 +21,12 @@ class MoveStatement(CobolStatement):
     def set_source(self, source: str) -> None:
         """Set the source operand for the MOVE."""
         self.source = source
-        if source not in self.operands:
-            self.operands.insert(0, source)
+        self._add_unique_operand(source, front=True)
 
     def add_target(self, target: str) -> None:
         """Add a target operand for the MOVE."""
         self.targets.append(target)
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def set_corresponding(self, is_corresponding: bool = True) -> None:
         """Set whether this is a MOVE CORRESPONDING statement."""
@@ -117,10 +115,9 @@ class StringStatement(CobolStatement):
             result["into_target"] = self.into_target
         if self.pointer_variable:
             result["pointer_variable"] = self.pointer_variable
-        if self.on_overflow:
-            result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
-        if self.not_on_overflow:
-            result["not_on_overflow"] = [s.to_dict() for s in self.not_on_overflow]
+        result.update(
+            self._serialize_clauses("on_overflow", "not_on_overflow", omit_empty=True)
+        )
         return result
 
 
@@ -178,10 +175,9 @@ class UnstringStatement(CobolStatement):
             result["into_targets"] = self.into_targets
         if self.pointer_variable:
             result["pointer_variable"] = self.pointer_variable
-        if self.on_overflow:
-            result["on_overflow"] = [s.to_dict() for s in self.on_overflow]
-        if self.not_on_overflow:
-            result["not_on_overflow"] = [s.to_dict() for s in self.not_on_overflow]
+        result.update(
+            self._serialize_clauses("on_overflow", "not_on_overflow", omit_empty=True)
+        )
         return result
 
 
@@ -196,8 +192,7 @@ class InitializeStatement(CobolStatement):
 
     def add_target(self, target: str) -> None:
         self.targets.append(target)
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def add_replacing_clause(self, category: str, by_value: str) -> None:
         self.replacing_clauses.append(
@@ -230,13 +225,11 @@ class SetStatement(CobolStatement):
 
     def add_target(self, target: str) -> None:
         self.targets.append(target)
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def set_value(self, value: str) -> None:
         self.value = value
-        if value not in self.operands:
-            self.operands.append(value)
+        self._add_unique_operand(value)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -264,8 +257,7 @@ class InspectStatement(CobolStatement):
 
     def set_target(self, target: str) -> None:
         self.target = target
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def set_inspect_type(self, inspect_type: str) -> None:
         self.inspect_type = inspect_type.upper()

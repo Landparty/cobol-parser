@@ -36,14 +36,48 @@ class CobolStatement(ASTNode):
         return None
 
     def add_operand(self, operand: str) -> None:
-        """Add an operand to the statement."""
+        """Add an operand to the statement (allowing duplicates)."""
         self.operands.append(operand)
+
+    def _add_unique_operand(self, operand: str, *, front: bool = False) -> None:
+        """Add an operand only if not already present.
+
+        Consolidates the ``if x not in self.operands: self.operands.append(x)``
+        (or ``insert(0, x)``) idiom repeated across the statement model layer.
+
+        Args:
+            operand: The operand to add.
+            front: When True, insert at the front of the list instead of
+                appending (preserves ``insert(0, ...)`` ordering semantics).
+        """
+        if operand not in self.operands:
+            if front:
+                self.operands.insert(0, operand)
+            else:
+                self.operands.append(operand)
 
     def _set_clause(self, attr: str, statements: list["CobolStatement"]) -> None:
         """Set a clause attribute and register its statements as children."""
         setattr(self, attr, statements)
         for stmt in statements:
             self.add_child(stmt)
+
+    def _serialize_clauses(
+        self, *names: str, omit_empty: bool = False
+    ) -> dict[str, Any]:
+        """Serialize one or more clause-list attributes to dicts.
+
+        For each attribute name, produces ``[s.to_dict() for s in (value or [])]``.
+        When ``omit_empty`` is True, a key is skipped entirely if its list is
+        empty or None.
+        """
+        result: dict[str, Any] = {}
+        for name in names:
+            value = getattr(self, name) or []
+            if omit_empty and not value:
+                continue
+            result[name] = [s.to_dict() for s in value]
+        return result
 
     def to_dict(self) -> dict[str, Any]:
         """Convert statement to dictionary representation."""
