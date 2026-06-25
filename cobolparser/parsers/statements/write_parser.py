@@ -1,13 +1,16 @@
 """Write statement parser implementing IStatementParser interface."""
 
-from typing import Any, cast
+from typing import Any
 
-from cobolparser.parsers.statements._utils import matches_keyword, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    create_statement,
+    matches_keyword,
+    skip_whitespace,
+    try_consume_keyword,
+)
 
-from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import IOWriteStatement
 
 
@@ -27,15 +30,7 @@ class WriteStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOWriteStatement:
         """Parse a WRITE statement."""
-        start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = cast(
-            IOWriteStatement,
-            factory.create(
-                IOWriteStatement,
-                start_token.location if start_token else SourceLocation(0, 0),
-            ),
-        )
+        stmt, _ = create_statement(token_stream, IOWriteStatement)
 
         # Skip whitespace
         skip_whitespace(token_stream)
@@ -53,18 +48,7 @@ class WriteStatementParser(IStatementParser):
         skip_whitespace(token_stream)
 
         # Check for FROM clause: lexer emits TokenType.FROM for "FROM"
-        token = token_stream.peek()
-        if token and (
-            token.type == TokenType.FROM
-            or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "FROM"
-            )
-        ):
-            token_stream.consume()
-            skip_whitespace(token_stream)
-
+        if try_consume_keyword(token_stream, TokenType.FROM, "FROM"):
             # Parse FROM source
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
@@ -91,17 +75,7 @@ class WriteStatementParser(IStatementParser):
             skip_whitespace(token_stream)
 
             # Expect ADVANCING keyword
-            token = token_stream.peek()
-            if token and (
-                token.type == TokenType.ADVANCING
-                or (
-                    token.type == TokenType.IDENTIFIER
-                    and token.value
-                    and token.value.upper() == "ADVANCING"
-                )
-            ):
-                token_stream.consume()
-                skip_whitespace(token_stream)
+            if try_consume_keyword(token_stream, TokenType.ADVANCING, "ADVANCING"):
                 stmt.advancing_mode = advancing_mode
 
                 # Consume optional count (numeric literal or level number)

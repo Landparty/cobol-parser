@@ -83,8 +83,7 @@ class SelectStatement(CobolStatement):
         """Set the file name being selected."""
         self.file_name = name
         self.is_optional = is_optional
-        if name not in self.operands:
-            self.operands.insert(0, name)
+        self._add_unique_operand(name, front=True)
 
     def set_assign_to(
         self,
@@ -96,8 +95,7 @@ class SelectStatement(CobolStatement):
         self.assign_to = assign_value
         self.assign_device_type = device_type
         self.assign_external_name = external_name
-        if assign_value not in self.operands:
-            self.operands.append(assign_value)
+        self._add_unique_operand(assign_value)
 
     def set_organization(self, org: str) -> None:
         """Set the ORGANIZATION clause."""
@@ -201,14 +199,12 @@ class CopyStatement(CobolStatement):
     def set_copybook_name(self, name: str) -> None:
         """Set the copybook name."""
         self.copybook_name = name
-        if name not in self.operands:
-            self.operands.insert(0, name)
+        self._add_unique_operand(name, front=True)
 
     def set_library_name(self, library: str) -> None:
         """Set the IN/OF library name."""
         self.library_name = library
-        if library not in self.operands:
-            self.operands.append(library)
+        self._add_unique_operand(library)
 
     def add_suppression(self, suppression: str) -> None:
         """Add a SUPPRESS phrase."""
@@ -283,8 +279,7 @@ class CancelStatement(CobolStatement):
 
     def add_program_name(self, name: str) -> None:
         self.program_names.append(name)
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -319,8 +314,7 @@ class GenerateStatement(CobolStatement):
 
     def set_report_name(self, name: str) -> None:
         self.report_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -338,8 +332,7 @@ class ReleaseStatement(CobolStatement):
 
     def set_record_name(self, name: str) -> None:
         self.record_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def set_from_source(self, source: str) -> None:
         self.from_source = source
@@ -364,8 +357,7 @@ class ReturnStatement(CobolStatement):
 
     def set_file_name(self, name: str) -> None:
         self.file_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def set_into_target(self, target: str) -> None:
         self.into_target = target
@@ -379,10 +371,11 @@ class ReturnStatement(CobolStatement):
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         result.update({"file_name": self.file_name, "into_target": self.into_target})
-        if self.at_end_clause:
-            result["at_end_clause"] = [s.to_dict() for s in self.at_end_clause]
-        if self.not_at_end_clause:
-            result["not_at_end_clause"] = [s.to_dict() for s in self.not_at_end_clause]
+        result.update(
+            self._serialize_clauses(
+                "at_end_clause", "not_at_end_clause", omit_empty=True
+            )
+        )
         return result
 
 
@@ -434,8 +427,7 @@ class SortStatement(CobolStatement):
 
     def set_file_name(self, name: str) -> None:
         self.file_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def add_key(self, field: str, order: str = "ASCENDING") -> None:
         self.keys.append({"field": field, "order": order.upper()})
@@ -488,8 +480,7 @@ class MergeStatement(CobolStatement):
 
     def set_file_name(self, name: str) -> None:
         self.file_name = name
-        if name not in self.operands:
-            self.operands.append(name)
+        self._add_unique_operand(name)
 
     def add_key(self, field: str, order: str = "ASCENDING") -> None:
         self.keys.append({"field": field, "order": order.upper()})

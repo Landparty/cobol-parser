@@ -21,14 +21,12 @@ class ArithmeticStatement(CobolStatement):
     def set_target(self, target: str) -> None:
         """Set target for TO clause (result stored in target)."""
         self.target = target
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def set_giving(self, giving: str) -> None:
         """Set result variable for GIVING clause."""
         self.giving = giving
-        if giving not in self.operands:
-            self.operands.append(giving)
+        self._add_unique_operand(giving)
 
     def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("on_size_error", statements)
@@ -42,10 +40,11 @@ class ArithmeticStatement(CobolStatement):
             result["target"] = self.target
         if self.giving:
             result["giving"] = self.giving
-        if self.on_size_error:
-            result["on_size_error"] = [s.to_dict() for s in self.on_size_error]
-        if self.not_on_size_error:
-            result["not_on_size_error"] = [s.to_dict() for s in self.not_on_size_error]
+        result.update(
+            self._serialize_clauses(
+                "on_size_error", "not_on_size_error", omit_empty=True
+            )
+        )
         return result
 
 
@@ -90,8 +89,7 @@ class ComputeStatement(CobolStatement):
     def add_target(self, target: str) -> None:
         """Add a target variable for the computation."""
         self.targets.append(target)
-        if target not in self.operands:
-            self.operands.append(target)
+        self._add_unique_operand(target)
 
     def set_expression(self, expression: Union[str, "CobolExpression"]) -> None:
         """Set the arithmetic expression for the computation.
@@ -128,8 +126,9 @@ class ComputeStatement(CobolStatement):
                 "expression": expression_dict,
             }
         )
-        if self.on_size_error:
-            result["on_size_error"] = [s.to_dict() for s in self.on_size_error]
-        if self.not_on_size_error:
-            result["not_on_size_error"] = [s.to_dict() for s in self.not_on_size_error]
+        result.update(
+            self._serialize_clauses(
+                "on_size_error", "not_on_size_error", omit_empty=True
+            )
+        )
         return result

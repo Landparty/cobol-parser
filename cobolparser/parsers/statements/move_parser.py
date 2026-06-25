@@ -2,7 +2,11 @@
 
 from typing import Any, cast
 
-from cobolparser.parsers.statements._utils import matches_keyword, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    matches_keyword,
+    skip_whitespace,
+    try_consume_keyword,
+)
 
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -104,17 +108,7 @@ class MoveStatementParser(IStatementParser):
         skip_whitespace(token_stream)
 
         # Expect TO keyword
-        token = token_stream.peek()
-        if token and (
-            token.type == TokenType.TO
-            or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "TO"
-            )
-        ):
-            token_stream.consume()
-        else:
+        if not try_consume_keyword(token_stream, TokenType.TO, "TO"):
             # Missing TO, but continue parsing
             return stmt
 

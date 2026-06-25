@@ -1,13 +1,15 @@
 """Close statement parser implementing IStatementParser interface."""
 
-from typing import Any, cast
+from typing import Any
 
-from cobolparser.parsers.statements._utils import matches_keyword, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    create_statement,
+    matches_keyword,
+    skip_whitespace,
+)
 
-from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import IOCloseStatement
 
 
@@ -25,15 +27,7 @@ class CloseStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOCloseStatement:
         """Parse a CLOSE statement."""
-        start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = cast(
-            IOCloseStatement,
-            factory.create(
-                IOCloseStatement,
-                start_token.location if start_token else SourceLocation(0, 0),
-            ),
-        )
+        stmt, _ = create_statement(token_stream, IOCloseStatement)
 
         skip_whitespace(token_stream)
 

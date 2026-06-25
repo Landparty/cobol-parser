@@ -1,13 +1,16 @@
 """Open statement parser implementing IStatementParser interface."""
 
-from typing import Any, cast
+from typing import Any
 
-from cobolparser.parsers.statements._utils import matches_keyword, skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    create_statement,
+    matches_keyword,
+    skip_whitespace,
+    try_consume_keyword,
+)
 
-from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import SourceLocation
 from ...models.statements import IOOpenStatement
 
 # Open modes recognized as IDENTIFIER tokens with these values
@@ -30,15 +33,7 @@ class OpenStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOOpenStatement:
         """Parse an OPEN statement."""
-        start_token = token_stream.consume()
-        factory = get_factory()
-        stmt = cast(
-            IOOpenStatement,
-            factory.create(
-                IOOpenStatement,
-                start_token.location if start_token else SourceLocation(0, 0),
-            ),
-        )
+        stmt, _ = create_statement(token_stream, IOOpenStatement)
 
         skip_whitespace(token_stream)
 
@@ -81,17 +76,7 @@ class OpenStatementParser(IStatementParser):
 
         # Optional WITH REPOSITION
         # Lexer emits TokenType.WITH for "WITH" (not IDENTIFIER).
-        token = token_stream.peek()
-        if token and (
-            token.type == TokenType.WITH
-            or (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() == "WITH"
-            )
-        ):
-            token_stream.consume()
-            skip_whitespace(token_stream)
+        if try_consume_keyword(token_stream, TokenType.WITH, "WITH"):
             token = token_stream.peek()
             if (
                 token

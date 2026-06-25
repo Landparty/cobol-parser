@@ -305,26 +305,9 @@ def is_within_string_literal(source: str, match_start: int, match_end: int) -> b
     line_start = source.rfind("\n", 0, match_start) + 1
     text_before_match = source[line_start:match_start]
 
-    # Count unescaped quotes before the match
-    double_quote_count = 0
-    single_quote_count = 0
-
-    i = 0
-    while i < len(text_before_match):
-        char = text_before_match[i]
-        if char == '"':
-            # Check for escaped quote (doubled quote in COBOL)
-            if i + 1 < len(text_before_match) and text_before_match[i + 1] == '"':
-                i += 2  # Skip both quotes (escaped)
-                continue
-            double_quote_count += 1
-        elif char == "'":
-            # Check for escaped quote (doubled quote in COBOL)
-            if i + 1 < len(text_before_match) and text_before_match[i + 1] == "'":
-                i += 2  # Skip both quotes (escaped)
-                continue
-            single_quote_count += 1
-        i += 1
+    # Count unescaped quotes before the match (doubled quotes are escaped)
+    double_quote_count = _count_unmatched_quotes(text_before_match, '"')
+    single_quote_count = _count_unmatched_quotes(text_before_match, "'")
 
     # If we have an odd number of quotes, we're inside a string
     # COBOL typically uses one type consistently, so check both

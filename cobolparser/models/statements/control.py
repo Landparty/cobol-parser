@@ -242,14 +242,12 @@ class PerformStatement(CobolStatement):
     def set_target_paragraph(self, paragraph: str) -> None:
         """Set the target paragraph to perform."""
         self.target_paragraph = paragraph
-        if paragraph not in self.operands:
-            self.operands.insert(0, paragraph)
+        self._add_unique_operand(paragraph, front=True)
 
     def set_thru_paragraph(self, paragraph: str) -> None:
         """Set the ending paragraph for PERFORM THRU."""
         self.thru_paragraph = paragraph
-        if paragraph not in self.operands:
-            self.operands.append(paragraph)
+        self._add_unique_operand(paragraph)
 
     def set_times_clause(self, count: int | str) -> None:
         """Set TIMES clause for the PERFORM."""
@@ -332,14 +330,12 @@ class GoStatement(CobolStatement):
     def set_target_paragraph(self, name: str) -> None:
         """Set the target paragraph name."""
         self.target_paragraph = name
-        if name not in self.operands:
-            self.add_operand(name)
+        self._add_unique_operand(name)
 
     def set_depending_on_variable(self, var_name: str) -> None:
         """Set the DEPENDING ON variable for computed GO TO."""
         self.depending_on_variable = var_name
-        if var_name not in self.operands:
-            self.add_operand(var_name)
+        self._add_unique_operand(var_name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -413,6 +409,5 @@ class SearchStatement(CobolStatement):
                 }
                 for clause in self.when_clauses
             ]
-        if self.at_end_clause:
-            result["at_end_clause"] = [s.to_dict() for s in self.at_end_clause]
+        result.update(self._serialize_clauses("at_end_clause", omit_empty=True))
         return result
