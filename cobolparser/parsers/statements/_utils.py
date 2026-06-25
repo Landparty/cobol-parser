@@ -339,7 +339,7 @@ def try_consume_keyword(stream: ITokenStream, token_type: Any, keyword: str) -> 
         or (
             token.type == TokenType.IDENTIFIER
             and token.value
-            and token.value.upper() == keyword
+            and token.value.upper() == keyword.upper()
         )
     ):
         stream.consume()
