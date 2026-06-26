@@ -7,6 +7,7 @@ This module implements parsing of the Procedure Division which contains:
 Uses StatementParserRegistry for pluggable statement parsing and dispatch.
 """
 
+import logging
 from typing import Any
 
 from cobolparser._errors import ParseError
@@ -65,6 +66,8 @@ from cobolparser.parsers.statements.write_parser import WriteStatementParser
 from cobolparser.plugins.core import ErrorRecoveryMode
 
 from .base import BaseDivisionParser
+
+logger = logging.getLogger(__name__)
 
 
 class ProcedureDivisionParser(BaseDivisionParser):
@@ -319,6 +322,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 # Try to parse the statement
                 parser = self._statement_registry.find_parser(token_stream)
                 if parser:
+                    logger.debug(
+                        "Dispatch %s -> %s",
+                        token.value,
+                        type(parser).__name__,
+                    )
                     self._attach_context(token_stream)
                     try:
                         statement = parser.parse(token_stream)
@@ -337,6 +345,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
                         )
                 else:
                     # No parser found, skip the statement
+                    logger.debug(
+                        "No statement parser matched %s=%r; skipping",
+                        token.type.name,
+                        token.value,
+                    )
                     self._skip_to_next_statement(token_stream)
 
             elif token_value not in (
@@ -437,26 +450,16 @@ class ProcedureDivisionParser(BaseDivisionParser):
             ):
                 break
 
-            # Debug: Show what we're about to parse
-            _DEBUG = False
-            if _DEBUG:
-                import sys
-
-                print(
-                    f"DEBUG PROC: Looking for parser for token: {token.type.name} = {repr(token.value)}",
-                    file=sys.stderr,
-                )
+            logger.debug(
+                "Looking for parser for token %s=%r",
+                token.type.name,
+                token.value,
+            )
 
             # Try to find and use statement parser
             parser = self._statement_registry.find_parser(token_stream)
             if parser:
-                if _DEBUG:
-                    import sys
-
-                    print(
-                        f"DEBUG PROC: Found parser: {type(parser).__name__}",
-                        file=sys.stderr,
-                    )
+                logger.debug("Dispatch %r -> %s", token.value, type(parser).__name__)
                 self._attach_context(token_stream)
                 try:
                     statement = parser.parse(token_stream)
@@ -477,14 +480,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 # Period terminates statement - consume it and continue
                 token_stream.consume()
             else:
-                if _DEBUG:
-                    import sys
-
-                    print(
-                        f"DEBUG PROC: No parser found for {token.type.name} = {repr(token.value)}",
-                        file=sys.stderr,
-                    )
                 # No parser found for this statement - skip it
+                logger.debug(
+                    "No statement parser matched %s=%r; skipping",
+                    token.type.name,
+                    token.value,
+                )
                 self._skip_to_next_statement(token_stream)
 
         return statements
@@ -634,14 +635,24 @@ class ProcedureDivisionParser(BaseDivisionParser):
         ParseError with ``_already_recorded`` so we don't double-count when
         we receive it here.
         """
+        loc = getattr(token, "location", None)
+        logger.debug(
+            "Statement error at line %s (token %r): %s",
+            getattr(loc, "line", None),
+            getattr(token, "value", None),
+            error,
+        )
+
         if self.host is not None and hasattr(self.host, "add_error"):
             if not getattr(error, "_already_recorded", False):
                 self.host.add_error(error)
 
         mode = getattr(self.host, "error_recovery", None)
         if mode == ErrorRecoveryMode.FAIL_FAST:
+            logger.debug("FAIL_FAST: re-raising statement error")
             raise error
 
+        logger.debug("COLLECT_ALL: recovering past failed statement")
         self._skip_to_next_statement(token_stream)
 
     def _skip_to_next_statement(self, token_stream: ITokenStream) -> None:

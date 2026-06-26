@@ -16,7 +16,11 @@ tokens ensures parsers that inspect lookahead-1 (e.g. EXEC SQL vs EXEC
 CICS) are always dispatched to the correct handler.
 """
 
+import logging
+
 from .interfaces import IStatementParser, ITokenStream
+
+logger = logging.getLogger(__name__)
 
 
 class StatementParserRegistry:
@@ -125,6 +129,13 @@ class StatementParserRegistry:
             except Exception as e:
                 import warnings
 
+                logger.debug(
+                    "Parser %s.matches() raised %s: %s",
+                    parser.__class__.__name__,
+                    type(e).__name__,
+                    e,
+                    exc_info=True,
+                )
                 warnings.warn(
                     f"Parser {parser.__class__.__name__}.matches() raised "
                     f"{type(e).__name__}: {e}",

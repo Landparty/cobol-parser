@@ -6,6 +6,7 @@ This module provides delegating CobolParser that orchestrates parsing through:
 - TokenStream abstraction for lookahead and error recovery
 """
 
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -32,6 +33,8 @@ from .plugins.core import (
 )
 from .preprocess import normalize_fixed_format, strip_compiler_directives
 from .profiling import ProfilerContext, ProfilingResult
+
+logger = logging.getLogger(__name__)
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call)
 _ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE)
@@ -146,6 +149,15 @@ class CobolParser:
         if error_recovery is not None:
             self.error_recovery = error_recovery
 
+        logger.info(
+            "Parsing %s: %d chars, dialect=%s, recovery=%s, free_form=%s",
+            filename,
+            len(source),
+            getattr(self.dialect, "name", self.dialect),
+            getattr(self.error_recovery, "name", self.error_recovery),
+            self.free_form,
+        )
+
         self.statistics.reset()
         self.statistics.start_timing()
         self.errors.clear()
@@ -172,14 +184,28 @@ class CobolParser:
                 else:
                     # Source is already free-form, no preprocessing needed
                     actual_free_form = False
+                logger.debug(
+                    "Format auto-detection for %s: %s",
+                    filename,
+                    (
+                        "fixed (normalized to free-form)"
+                        if detected_fixed
+                        else "free-form"
+                    ),
+                )
 
             lexer = CobolLexer(
                 cleaned_source, filename, self.dialect, free_form=actual_free_form
             )
             self.tokens = lexer.tokenize()
+            logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
 
             if lexer.has_errors():
-                for error in lexer.get_errors():
+                lexer_errors = lexer.get_errors()
+                logger.debug(
+                    "Lexer reported %d error(s) for %s", len(lexer_errors), filename
+                )
+                for error in lexer_errors:
                     self.add_error(
                         ParseError(
                             f"Lexer error: {error.message}",
@@ -198,11 +224,27 @@ class CobolParser:
             self.statistics.lines_parsed = len(source.splitlines())
             self.statistics.tokens_processed = len(self.tokens)
 
+            logger.info(
+                "Finished parsing %s: success=%s, errors=%d, warnings=%d, "
+                "divisions=%d",
+                filename,
+                program is not None and not self.errors,
+                len(self.errors),
+                len(self.warnings),
+                len(program.divisions) if program is not None else 0,
+            )
+
             return self._create_result(program)
 
         except ParseError as pe:
             # Already-located parse errors propagate verbatim so callers see
             # the original line/column rather than a generic line-1 message.
+            logger.debug(
+                "ParseError propagated to _parse_core for %s: %s",
+                filename,
+                pe,
+                exc_info=True,
+            )
             if pe not in self.errors:
                 self.add_error(pe)
             return self._create_result(None)
@@ -210,6 +252,12 @@ class CobolParser:
             # Top-level safety net: ``parse()`` must not raise unexpected
             # exceptions. Preserve the cause chain so tracebacks can be
             # recovered during debugging.
+            logger.debug(
+                "Unexpected exception caught by _parse_core safety net for %s: %s",
+                filename,
+                e,
+                exc_info=True,
+            )
             err = ParseError(f"Parser error: {e}", line_number=1, column=1)
             err.__cause__ = e
             self.add_error(err)
@@ -309,6 +357,12 @@ class CobolParser:
                         if current_token and current_token.value
                         else "EOF"
                     )
+                    logger.debug(
+                        "No division parser matched near %r (divisions parsed so "
+                        "far: %d)",
+                        current_value,
+                        len(divisions_parsed),
+                    )
                     if not divisions_parsed or current_value not in ("END", "PROGRAM"):
                         self.add_error(
                             self.create_error(
@@ -326,6 +380,7 @@ class CobolParser:
                     elif hasattr(parser, "host"):
                         parser.host = self
 
+                    logger.debug("Dispatching to %s", type(parser).__name__)
                     division_ast = parser.parse(self.stream)
                     if division_ast:
                         divisions_parsed.append(division_ast)
@@ -343,14 +398,28 @@ class CobolParser:
                 except ParseError as pe:
                     # Already-formatted parse error from a division/statement
                     # parser; record verbatim so location info is preserved.
+                    logger.debug(
+                        "ParseError from %s: %s",
+                        type(parser).__name__,
+                        pe,
+                        exc_info=True,
+                    )
                     if pe not in self.errors:
                         self.add_error(pe)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
+                        logger.debug("FAIL_FAST: aborting division loop")
                         return self.current_program if divisions_parsed else None
                 except Exception as e:
+                    logger.debug(
+                        "Unexpected exception from %s: %s",
+                        type(parser).__name__,
+                        e,
+                        exc_info=True,
+                    )
                     error = ParseError(str(e), line_number=1, column=1)
                     self.add_error(error)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
+                        logger.debug("FAIL_FAST: aborting division loop")
                         return self.current_program if divisions_parsed else None
 
         except ParseError as pe:
@@ -395,6 +464,9 @@ class CobolParser:
         max_errors = self.memory_config.max_error_count
         if self.statistics.error_count >= max_errors:
             self._error_limit_reached = True
+            logger.info(
+                "Error limit reached (%d); further errors suppressed", max_errors
+            )
             # Use the triggering error's location so users can see where
             # suppression began rather than being pointed at line 1.
             self.errors.append(
@@ -407,6 +479,12 @@ class CobolParser:
             )
             self.statistics.error_count += 1
             return
+        logger.info(
+            "Parse error at line %s, column %s: %s",
+            getattr(error, "line_number", None),
+            getattr(error, "column", None),
+            error,
+        )
         self.errors.append(error)
         self.statistics.error_count += 1
 
@@ -564,6 +642,12 @@ def parse_cobol(
             # Preprocessing failed (e.g. unterminated string literal at EOF).
             # Return a result with no AST and the preprocessing error so callers
             # can handle it gracefully under COLLECT_ALL error recovery.
+            logger.debug(
+                "Fixed-format preprocessing failed for %s: %s",
+                filename,
+                exc,
+                exc_info=True,
+            )
             err = ParseError(str(exc), line_number=0, column=0)
             stats = ParseStatistics()
             return ParseResult(ast=None, errors=[err], warnings=[], statistics=stats)

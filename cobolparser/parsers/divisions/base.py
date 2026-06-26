@@ -4,12 +4,15 @@ This module provides the abstract base class for all division parsers,
 establishing the contract that all division-specific parsers must follow.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 from cobolparser.core.exceptions import DivisionNotFoundError, ParseError
 from cobolparser.core.interfaces import IDivisionParser, ITokenStream
 from cobolparser.models.ast_base import ASTNode, SourceLocation
+
+logger = logging.getLogger(__name__)
 
 
 class BaseDivisionParser(IDivisionParser, ABC):
@@ -87,6 +90,12 @@ class BaseDivisionParser(IDivisionParser, ABC):
             first_token = token_stream.peek(0)
             token_value = first_token.value if first_token else "EOF"
             loc = first_token.location if first_token else SourceLocation(1, 1)
+            logger.debug(
+                "Expected %s division but found %r at line %s",
+                self.division_name,
+                token_value,
+                loc.line,
+            )
             raise DivisionNotFoundError(
                 f"Expected {self.division_name} division, got {token_value}",
                 file_path=None,
@@ -112,6 +121,12 @@ class BaseDivisionParser(IDivisionParser, ABC):
                     next_token.location.line
                     if next_token and hasattr(next_token, "location")
                     else 1
+                )
+                logger.debug(
+                    "Expected '.' after %s DIVISION but found %r at line %s",
+                    self.division_name,
+                    next_token.value if next_token else "EOF",
+                    line,
                 )
                 raise ParseError(
                     f"Expected '.' after {self.division_name} DIVISION",
