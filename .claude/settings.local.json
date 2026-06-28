@@ -64,7 +64,8 @@
       "Bash(mkdir -p \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\jcl-parser\\\\docs\\\\superpowers\\\\plans\")",
       "WebSearch",
       "Bash(Get-ChildItem *)",
-      "PowerShell(gh api *)"
+      "PowerShell(gh api *)",
+      "PowerShell(ls \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser\\\\docs\\\\okf\\\\\" 2>$null; if \\(-not $?\\) { \"NOT_FOUND\" })"
     ],
     "additionalDirectories": [
       "\\tmp"

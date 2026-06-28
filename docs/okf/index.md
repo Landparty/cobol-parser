@@ -1,6 +1,10 @@
 # cobol-parser — OKF Index
 
-> **AI quick-start:** Load this file first. Then load the sub-file that matches your task.
+> **Moved:** The conformant OKF bundle is now at [`.okf/`](../../.okf/index.md). This directory
+> (`docs/okf/`) is kept for reference only and is no longer the authoritative source. Load
+> `.okf/index.md` at the start of every session.
+
+> **AI quick-start:** Load `.okf/index.md` first. Then load the sub-file that matches your task.
 
 **Last Updated:** 2026-06-27
 

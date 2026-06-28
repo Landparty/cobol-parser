@@ -16,17 +16,17 @@ A Claude Code `PostToolUse` hook also prints a one-line reminder inline when Cla
 
 ## Open Knowledge Format (OKF)
 
-This repo uses a structured knowledge base at `docs/okf/`. **Load `docs/okf/index.md` at the start of every session** — it tells you which sub-file to load for your task:
+This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at the start of every session** — it tells you which sub-file to load for your task:
 
 | Task type | Load |
 |-----------|------|
-| Tokenization, `TokenType`, Cython fast-path | `docs/okf/lexer.md` |
-| Parser, `DivisionParserFactory`, statement parsers | `docs/okf/parser.md` |
-| `normalize_fixed_format`, copybook expansion | `docs/okf/preprocessing.md` |
-| `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `docs/okf/ast-models.md` |
-| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.) | `docs/okf/analysis.md` |
-| CLI subcommands and flags | `docs/okf/cli.md` |
-| Test layout, markers, coverage floor | `docs/okf/tests.md` |
+| Tokenization, `TokenType`, Cython fast-path | `.okf/lexer.md` |
+| Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` |
+| `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
+| `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
+| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.) | `.okf/analysis.md` |
+| CLI subcommands and flags | `.okf/cli.md` |
+| Test layout, markers, coverage floor | `.okf/tests.md` |
 
 The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF.
 

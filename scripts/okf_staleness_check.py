@@ -15,19 +15,19 @@ import sys
 from pathlib import Path
 
 OKF_MAP = [
-    ("cobolparser/lexer.py", ["docs/okf/lexer.md"]),
-    ("cobolparser/_lexer_fast.pyx", ["docs/okf/lexer.md"]),
-    ("cobolparser/preprocess/", ["docs/okf/preprocessing.md"]),
-    ("cobolparser/_preprocess_fast.pyx", ["docs/okf/preprocessing.md"]),
-    ("cobolparser/parsers/", ["docs/okf/parser.md"]),
-    ("cobolparser/core/", ["docs/okf/parser.md"]),
-    ("cobolparser/models/", ["docs/okf/ast-models.md"]),
-    ("cobolparser/_data_fast.pyx", ["docs/okf/ast-models.md"]),
-    ("cobolparser/analysis/", ["docs/okf/analysis.md"]),
-    ("cobolparser/batch.py", ["docs/okf/batch.md"]),
-    ("cobolparser/cli/", ["docs/okf/cli.md"]),
-    ("cobolparser/dialects/", ["docs/okf/dialects.md"]),
-    ("tests/", ["docs/okf/tests.md"]),
+    ("cobolparser/lexer.py", [".okf/lexer.md"]),
+    ("cobolparser/_lexer_fast.pyx", [".okf/lexer.md"]),
+    ("cobolparser/preprocess/", [".okf/preprocessing.md"]),
+    ("cobolparser/_preprocess_fast.pyx", [".okf/preprocessing.md"]),
+    ("cobolparser/parsers/", [".okf/parser.md"]),
+    ("cobolparser/core/", [".okf/parser.md"]),
+    ("cobolparser/models/", [".okf/ast-models.md"]),
+    ("cobolparser/_data_fast.pyx", [".okf/ast-models.md"]),
+    ("cobolparser/analysis/", [".okf/analysis.md"]),
+    ("cobolparser/batch.py", [".okf/batch.md"]),
+    ("cobolparser/cli/", [".okf/cli.md"]),
+    ("cobolparser/dialects/", [".okf/dialects.md"]),
+    ("tests/", [".okf/tests.md"]),
 ]
 
 
@@ -58,7 +58,7 @@ def _git_mode(repo_root: Path) -> int:
 
     needs_update: dict = {}
     for src in staged:
-        if src.startswith("docs/"):
+        if src.startswith("docs/") or src.startswith(".okf/"):
             continue
         for okf_file in _get_okf_files(src):
             if okf_file not in staged:
@@ -96,7 +96,7 @@ def _claude_mode(repo_root: Path) -> int:
                 rel = rel[idx:]
                 break
 
-    if rel.startswith("docs/"):
+    if rel.startswith("docs/") or rel.startswith(".okf/"):
         return 0
 
     okf_files = _get_okf_files(rel)
