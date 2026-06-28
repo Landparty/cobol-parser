@@ -39,7 +39,7 @@
 - **Method:** `.analyze(ast) -> ProgramFlowReport`
 - **Output:** `ProgramFlowReport` with `nodes: list[FlowNode]`, `edges: list[FlowEdge]`, `cycle_details`, `range_members: dict[str, list[str]]`
   - `FlowEdge`: `source: str`, `target: str`, `edge_type: FlowEdgeType`, `location: SourceLocation | None`
-  - `FlowEdgeType`: PERFORM, PERFORM_THRU, GOTO, GOTO_DEPENDING, CALL, CALL_DYNAMIC, SORT_INPUT_PROCEDURE, SORT_INPUT_PROCEDURE_THRU, SORT_OUTPUT_PROCEDURE, SORT_OUTPUT_PROCEDURE_THRU, MERGE_OUTPUT_PROCEDURE, MERGE_OUTPUT_PROCEDURE_THRU, ALTER, FALL_THROUGH, IF_BRANCH, IF_THEN, IF_ELSE, EVALUATE_BRANCH
+  - `FlowEdgeType`: PERFORM, PERFORM_THRU, GOTO, GOTO_DEPENDING, CALL, CALL_DYNAMIC, SORT_INPUT_PROCEDURE, SORT_INPUT_PROCEDURE_THRU, SORT_OUTPUT_PROCEDURE, SORT_OUTPUT_PROCEDURE_THRU, MERGE_OUTPUT_PROCEDURE, MERGE_OUTPUT_PROCEDURE_THRU, ALTER, FALL_THROUGH, IF_BRANCH, IF_THEN, IF_ELSE, EVALUATE_BRANCH, EVALUATE_WHEN, EVALUATE_WHEN_OTHER
   - `BranchNode`: a paragraph with multiple outgoing edges; includes `BranchArm` objects
 
 ### DynamicCallAnalyzer
@@ -104,9 +104,9 @@
 
 - **Input:** `CobolProgram`
 - **Method:** `.resolve(ast) -> HostVarResolutionReport` ← **Note: `.resolve()` not `.analyze()`**
-- **Output:** `HostVarResolutionReport` with `variables: list[HostVariableInfo]`
-  - `HostVariableInfo`: `name: str`, `cobol_data_item: CobolDataItem | None`, `sql_usage_locations: list[SourceLocation]`
-- **What it finds:** Correlates SQL host variables (prefixed with `:`) to their COBOL data item definitions
+- **Output:** `HostVarResolutionReport` with `resolved: dict[str, HostVariableInfo]`, `unresolved: set[str]`, `declare_tables: dict[str, DeclareTableStatement]`, `column_name_collisions: dict[str, list[str]]`
+  - `HostVariableInfo`: `name: str`, `picture: str | None`, `usage: str`, `data_item: CobolDataItem | None`, `db2_column: DB2ColumnDefinition | None`, `sql_statements: list[ExecSQLStatement]`
+- **What it finds:** Correlates SQL host variables (prefixed with `:`) to their COBOL data item definitions and optional DB2 column definitions from DECLARE TABLE blocks
 
 ### IMSSegmentAnalyzer
 
