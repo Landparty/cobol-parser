@@ -35,7 +35,7 @@ preprocess/expand_copybooks()
   │
   ▼
 CobolLexer(text).tokenize()  →  List[Token]
-  └─ TokenType enum (100+ types); Cython fast-path via _lexer_fast if compiled
+  └─ TokenType enum (236 members); Cython fast-path via _lexer_fast if compiled
   │
   ▼
 TokenStream(tokens)

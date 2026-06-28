@@ -171,6 +171,7 @@ from cobolparser import (
     # Analyzers
     DeadCodeAnalyzer,
     ProgramFlowAnalyzer,
+    DynamicCallAnalyzer,
     IOLogger,
     IOSequenceAnalyzer,
     MoveTypeChecker,
@@ -201,7 +202,6 @@ Analyzers and types exported from `cobolparser.analysis` only:
 from cobolparser.analysis import (
     IMSSegmentAnalyzer,
     HostVariableResolver,
-    DynamicCallAnalyzer,
     # Report and helper types
     IMSDLICall,
     IMSEntryPoint,

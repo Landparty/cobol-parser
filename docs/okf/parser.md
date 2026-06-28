@@ -56,7 +56,7 @@
 | Name | Location | Description |
 |------|----------|-------------|
 | `CobolParser` | `parser.py` | Top-level parser orchestrator; `.parse(source, filename) -> ParseResult` |
-| `ParseResult` | `parser.py` | Dataclass: `ast: CobolProgram \| None`, `errors: list[ParseError]`, `warnings: list[str]`, `statistics: ParseStatistics`; `.success` property |
+| `ParseResult` | `parser.py` | Dataclass: `ast: CobolProgram \| None`, `errors: list[ParseError]`, `warnings: list[str]`, `statistics: ParseStatistics`; `.success` property, `.has_warnings: bool` property |
 | `parse_cobol()` | `parser.py` | Convenience wrapper: `parse_cobol(source, filename="") -> ParseResult` (overloaded for profiling support) |
 | `TokenStream` | `core/token_stream.py` | Wraps `List[Token]` with position tracking; implements `ITokenStream` |
 | `TokenStream.peek(offset=0)` | `core/token_stream.py` | Look ahead without consuming; returns `Token \| None` |

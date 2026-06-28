@@ -140,6 +140,11 @@ Run all hooks: `pre-commit run --all-files`
 ## Gotchas and Invariants
 
 - **PreprocessingError is NOT a ParseError**: It is a separate exception hierarchy rooted in `PreprocessingError` (defined in `cobolparser/preprocess/__init__.py`), not in `ParseError`. Catch both separately.
+- **Dual LexerError classes**: There are TWO different `LexerError` classes:
+  - `cobolparser/lexer.py::LexerError` — the one exported from the public `cobolparser` API
+  - `cobolparser/plugins/core.py::LexerError` — the parent of `UnterminatedStringError` and `MemoryLimitExceededError`
+  
+  Using `except LexerError` with the public import will NOT catch `UnterminatedStringError` or other `plugins/core.py` LexerError subclasses. This is a known design artifact.
 - **NodeTypeError and FieldValidationError extend ValidationError**, which extends ParseError. They are not separate hierarchies.
 - **The pure-Python lexer/preprocessor are always fallbacks**: Even when Cython modules are available, the pure-Python paths remain the canonical implementation. Fast paths override inner loop methods only.
 - **Circular imports are prevented by zero-import _errors.py**: Never add imports to `cobolparser/_errors.py`; this module is a circular-import firewall.

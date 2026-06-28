@@ -77,7 +77,7 @@ from cobolparser.plugins import PluginManager, ParseStatistics, LexerError, Memo
 
 ## Refresh Checklist
 
-- [x] Verify `DialectType` enum values in `plugins/core.py`
-- [x] Check `IBMDataType` enum values in `dialects/ibm_enterprise.py`
-- [x] Verify `MemoryConfiguration` and `SerializationConfig` field names
-- [x] Check for new exception types in `plugins/core.py`
+- [ ] Verify `DialectType` enum values in `plugins/core.py`
+- [ ] Check `IBMDataType` enum values in `dialects/ibm_enterprise.py`
+- [ ] Verify `MemoryConfiguration` and `SerializationConfig` field names
+- [ ] Check for new exception types in `plugins/core.py`

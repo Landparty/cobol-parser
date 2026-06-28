@@ -1,6 +1,6 @@
 # Tests
 
-> 5,969 tests across 231 files in 5 directories; 81% line coverage floor.
+> 5,969 tests across 226 files in 5 directories; 81% line coverage floor.
 
 ## Files
 
@@ -41,7 +41,7 @@ tests/
 
 | Directory | Contents |
 |-----------|----------|
-| `tests/samples/` | 54 COBOL programs covering all statement types |
+| `tests/samples/` | 48 COBOL programs covering all statement types |
 | `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + copybooks) |
 | `examples/cobol/shamrice/` | 24 IBM COBOL programs (ACCEPT variants, COMP types, SEARCH, SORT/MERGE, SQL, JSON/XML GENERATE, sub-programs) |
 
