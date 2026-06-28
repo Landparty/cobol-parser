@@ -401,7 +401,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
 ## Additional Directories
 
-- `docs/` -- Markdown documentation (architecture, API reference, dialect guides, etc.)
+- `.okf/` -- OKF knowledge bundle (lexer, parser, preprocessing, AST models, analysis, CLI, tests). Load `.okf/index.md` at the start of every session.
 - `tools/` -- Utility scripts grouped by area:
   - `io_catalog/validate_catalog.py` -- Validates the IO operation catalog
   - `io_coverage/` -- `generate_artifact.py` and `render_markdown.py` for IO coverage reports

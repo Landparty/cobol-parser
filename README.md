@@ -50,7 +50,7 @@ mypy cobolparser/
 
 ## Documentation
 
-Full reference: [`docs/okf/index.md`](docs/okf/index.md)
+Full reference: [`.okf/index.md`](.okf/index.md)
 
 ## License
 
