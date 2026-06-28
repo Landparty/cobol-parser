@@ -1,0 +1,4 @@
+#!/bin/sh
+# OKF staleness check — warns when source files change without OKF updates.
+# Bypass with: git commit --no-verify
+python "$(git rev-parse --show-toplevel)/scripts/okf_staleness_check.py" --mode=git

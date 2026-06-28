@@ -2,6 +2,34 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## OKF Hooks Setup (one-time)
+
+Run this once after cloning to enable the pre-commit staleness check:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook warns (and blocks the commit) when source files change without a corresponding OKF update. Bypass with `git commit --no-verify` when you intentionally skip the OKF.
+
+A Claude Code `PostToolUse` hook also prints a one-line reminder inline when Claude edits OKF-covered source files. See `.claude/settings.json`.
+
+## Open Knowledge Format (OKF)
+
+This repo uses a structured knowledge base at `docs/okf/`. **Load `docs/okf/index.md` at the start of every session** — it tells you which sub-file to load for your task:
+
+| Task type | Load |
+|-----------|------|
+| Tokenization, `TokenType`, Cython fast-path | `docs/okf/lexer.md` |
+| Parser, `DivisionParserFactory`, statement parsers | `docs/okf/parser.md` |
+| `normalize_fixed_format`, copybook expansion | `docs/okf/preprocessing.md` |
+| `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `docs/okf/ast-models.md` |
+| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.) | `docs/okf/analysis.md` |
+| CLI subcommands and flags | `docs/okf/cli.md` |
+| Test layout, markers, coverage floor | `docs/okf/tests.md` |
+
+The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF.
+
 ## Project Overview
 
 **cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. Version 1.0.0, authored by Samuel Dion.
@@ -12,6 +40,8 @@ This library is **vendored** into `backend/_vendor/cobol-parser/` — it is not 
 ```bash
 cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/
 ```
+
+**Interface contract:** [`interface-contract.md`](interface-contract.md) — documents exactly which functions/classes the backend adapter calls, what attributes it reads off the AST, and what the `program_structure` dict it produces looks like. Read this before changing public API shapes.
 
 ## Commands
 
