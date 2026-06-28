@@ -21,7 +21,7 @@
 | `ErrorRecoveryMode` | `plugins/core.py` | Enum: `FAIL_FAST` (stop at first error), `COLLECT_ALL` (accumulate all errors) |
 | `MemoryConfiguration` | `plugins/core.py` | Dataclass: `max_memory_mb`, `enable_streaming`, `chunk_size_kb`, `max_error_count` |
 | `SerializationConfig` | `plugins/core.py` | Dataclass: `include_metadata`, `include_source_locations`, `compact_format` |
-| `ParseStatistics` | `plugins/core.py` | Dataclass: `lines_processed`, `tokens_processed`, `memory_peak_mb`, `parse_time_seconds` |
+| `ParseStatistics` | `plugins/core.py` | Dataclass: `lines_processed`, `lines_parsed`, `tokens_processed`, `memory_peak_mb`, `parse_time_seconds`, `total_time_ms`, `error_count`, `warning_count` |
 | `PluginManager` | `plugins/core.py` | Plugin registration and lifecycle management |
 | `LexerError` | `plugins/core.py` | Lexer-level error (extends `ParseError`) |
 | `UnterminatedStringError` | `plugins/core.py` | Unterminated string literal |
