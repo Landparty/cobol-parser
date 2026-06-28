@@ -58,8 +58,8 @@ from cobolparser.lexer import LexerError, tokenize_cobol
 - Comment lines (col 7 = `*` or `/`) must be stripped by `normalize_fixed_format()` BEFORE the lexer runs — if they reach the lexer, tokenization breaks or produces malformed tokens.
 - `TokenType` uses `IntEnum`, so tokens can be compared with `==` to either the enum member or its integer value; this makes membership tests and hash lookups faster on the hot path.
 - The Cython subclass is loaded transparently via try/except in `lexer.py` lines 1718–1721; never import `_lexer_fast` or `_CobolLexerPure` directly. Always use `CobolLexer`.
-- Figurative constants (`ZERO`, `ZEROS`, `ZEROES`, `SPACE`, `SPACES`, `HIGH-VALUE`, `HIGH-VALUES`, `LOW-VALUE`, `LOW-VALUES`, `QUOTE`, `QUOTES`, `ALL`) are recognized as `TokenType.FIGURATIVE_CONSTANT` keywords (via `KEYWORDS` dict), not literals.
-- `Token.location` is a `SourceLocation(line, column, offset)` tuple-like object; `line` and `column` are 1-indexed for error reporting.
+- Figurative constants (`ZERO`, `ZEROS`, `ZEROES`, `SPACE`, `SPACES`, `HIGH-VALUE`, `HIGH-VALUES`, `LOW-VALUE`, `LOW-VALUES`, `QUOTE`, `QUOTES`, `ALL`) are recognized as `TokenType.FIGURATIVE_CONSTANT` via a separate `FIGURATIVE_CONSTANTS` set (checked after the `KEYWORDS` lookup), not literals.
+- `Token.location` is a `SourceLocation(line, column, length)` tuple-like object; `line` and `column` are 1-indexed for error reporting.
 - `FUNCTION` is intentionally NOT registered as a keyword in `KEYWORDS` (see comment at `lexer.py` line 313) — this allows expressions like `DISPLAY FUNCTION CURRENT-DATE` to parse correctly, even though `FUNCTION` appears in the token stream as an `IDENTIFIER`.
 
 ## Refresh Checklist
