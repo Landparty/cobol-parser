@@ -2,12 +2,26 @@
 
 > Code style, error hierarchy, Cython fast-path pattern, import rules, and vendoring.
 
+## Files
+
+| File | Purpose |
+|------|---------|
+| `cobolparser/_errors.py` | ParseError base class (zero deps, circular-import guard) |
+| `cobolparser/core/exceptions.py` | Full exception hierarchy (TokenMismatch, UnexpectedEndOfInput, etc.) |
+| `cobolparser/core/ast_factory.py` | ASTNodeFactory; raises NodeTypeError, FieldValidationError |
+| `cobolparser/plugins/core.py` | Configuration dataclasses (ErrorRecoveryMode, DialectType, MemoryConfiguration, etc.) |
+| `cobolparser/preprocess/__init__.py` | PreprocessingError hierarchy (separate from ParseError) |
+| `cobolparser/_lexer_fast.pyx` / `_preprocess_fast.pyx` / `_data_fast.pyx` | Cython fast-path modules |
+| `setup.py` | Builds Cython extensions; `COBOLPARSER_SKIP_EXT=1` skips |
+| `pyproject.toml` | Black/Ruff/mypy configuration, dev extras |
+| `.pre-commit-config.yaml` | Pre-commit hook definitions |
+
 ## Code Style
 
 | Tool | Config | Rules |
 |------|--------|-------|
 | **Black** | `pyproject.toml` | Line length 88, target `py311` |
-| **Ruff** | `pyproject.toml` | pycodestyle (E/W), pyflakes (F), isort (I), bugbear (B), comprehensions (C4), pyupgrade (UP); **E501 ignored** |
+| **Ruff** | `pyproject.toml` | pycodestyle (E/W), pyflakes (F), isort (I), bugbear (B), comprehensions (C4), pyupgrade (UP); **E501, B008, C901 ignored** |
 | **mypy** | `pyproject.toml` | Strict: `disallow_untyped_defs`, `disallow_incomplete_defs`, `strict_equality`, `warn_return_any`; tests are **exempted** from typed def requirements |
 
 Run locally:
@@ -28,7 +42,7 @@ python -m mypy cobolparser/
 
 The core library (`cobolparser/`) has **no external dependencies**. This is a hard invariant.
 
-- `[dev]` extra: pytest, pytest-cov, ruff, black, mypy, cython
+- `[dev]` extra: pytest, pytest-cov, pytest-xdist, ruff, black, mypy, cython
 - `[fast]` extra: Cython, setuptools (for building `.pyx` extensions)
 - `[profiling]` extra: `psutil` (imported lazily; library works without it)
 - `[docs]` extra: sphinx, sphinx-rtd-theme
