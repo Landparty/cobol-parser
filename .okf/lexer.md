@@ -3,7 +3,7 @@ type: Module
 title: Lexer
 description: Tokenizes COBOL source into Token objects; 236 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-06-29T00:00:00Z
 ---
 
 # Overview

@@ -3,7 +3,7 @@ type: Integration Contract
 title: Backend Integration Contract
 description: Dict shape returned by the cobol-parser and consumed by the backend adapter
 tags: [integration, backend, contract, cobol-parser]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-06-29T00:00:00Z
 resource: ../interface-contract.md
 ---
 # Backend Integration Contract

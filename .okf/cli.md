@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-06-30T00:00:00Z
 ---
 
 # Overview
@@ -18,12 +18,17 @@ Source: `cobolparser/cli/parse.py` (all subcommands), `cobolparser/cli/coverage.
 
 ```bash
 cobol-parser parse <file.cbl> [json-path] [--compact] [--free-form] \
-    [--dialect ibm-enterprise] [--errors] [--stats]
+    [--dialect ibm-enterprise] [--errors] [--stats] [--find-type NODE_TYPE] \
+    [--profile] [--profile-top-n N] [--profile-output PATH]
 ```
 
 Parses a COBOL file and prints the AST as JSON. `json-path` (dotted) extracts
 a specific subtree. `--errors` shows parse errors only. `--stats` appends
-`ParseStatistics`.
+`ParseStatistics`. `--find-type` finds all AST nodes of the given type (e.g.
+`MoveStatement`), equivalent to `ast.find_all_by_type()`. `--profile` /
+`--profile-top-n` / `--profile-output` wrap the parse in a `ProfilerContext`
+(see [parser.md](parser.md)) and embed timing/memory metrics in the output, or
+write a binary `.prof` to `PATH`.
 
 ## Tokenize
 
@@ -31,7 +36,7 @@ a specific subtree. `--errors` shows parse errors only. `--stats` appends
 cobol-parser tokenize <file.cbl>
 ```
 
-Prints the token stream as JSON: `[{"type": "...", "value": "...", "line": N}]`.
+Prints the token stream as JSON: `[{"type": "...", "value": "...", "line": N, "column": N}]`.
 
 ## Preprocess
 
@@ -57,8 +62,11 @@ specified multiple times for multiple search directories.
 cobol-parser analyze <file.cbl>
 ```
 
-Runs all static analyzers and prints a JSON summary (dead code, IO issues,
-MOVE type violations, linkage violations, LE usage).
+Runs `DynamicCallAnalyzer` and prints a JSON summary of dynamic `CALL`
+targets only (`called_program`, `is_dynamic`, and `possible_values` when
+dynamic). Despite the generic name, this is *not* an all-analyzers summary —
+dead code, IO, MOVE-type, linkage, and LE checks each have their own
+dedicated subcommand below.
 
 ## Dead-Code
 
@@ -71,19 +79,29 @@ Runs `DeadCodeAnalyzer` and lists unreferenced paragraphs/sections.
 ## Program-Flow
 
 ```bash
-cobol-parser program-flow <file.cbl>
+cobol-parser program-flow <file.cbl> [--format json|mermaid|dot] [--profile ...]
 ```
 
-Runs `ProgramFlowAnalyzer` and emits the control-flow graph as JSON edges.
+Runs `ProgramFlowAnalyzer` and emits the control-flow graph. `--format`
+selects the output: `json` (default, raw `report.to_dict()` edges), `mermaid`
+(via `generators/flowchart.py`'s `MermaidFlowchartGenerator`), or `dot`
+(Graphviz DOT via `DotFlowchartGenerator`). Also accepts the shared
+profiling flags (`--profile`, `--profile-top-n`, `--profile-output`).
 
 ## Batch
 
 ```bash
-cobol-parser batch prog1.cbl prog2.cbl ... [--stats]
+cobol-parser batch [prog1.cbl prog2.cbl ...] [--glob PATTERN] [--workers N] \
+    [--encoding utf-8] [--stats] [--errors] [--profile ...]
 ```
 
-Parallel multi-file parsing via `ProcessPoolExecutor`. Prints one JSON result
-per file. `--stats` appends per-file `ParseStatistics`.
+Parallel multi-file parsing via `ProcessPoolExecutor`. Files may be given
+positionally and/or collected via repeatable `--glob` patterns (e.g.
+`--glob 'src/**/*.cbl'`). `--workers` sets the process-pool size (default: CPU
+count). `--encoding` sets file read encoding (default `utf-8`). Prints one
+JSON result per file. `--errors` includes parse errors/warnings per file;
+`--stats` appends per-file `ParseStatistics`. `--profile-output` in batch mode
+must be a directory (one `.prof` per file), not a single file path.
 
 ## Generate-Tests
 
