@@ -20,6 +20,10 @@ Version 1.1.0. Author: Samuel Dion.
 * [CLI](cli.md) — `cobol-parser` subcommands and flags
 * [Tests](tests.md) — Test layout, pytest markers, coverage floor (81 %)
 
+## Integration
+
+* [Integration Contract](integration.md) — Dict shape returned by `cobolparser` and consumed by `backend/src/parsers/cobol/parser.py`; critical relationship paths for graph extraction
+
 ## Change History
 
 * [log.md](log.md) — Dated update log

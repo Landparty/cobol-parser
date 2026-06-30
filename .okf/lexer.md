@@ -65,20 +65,42 @@ line merging before tokenization.
 
 Three optional extension modules live alongside the pure-Python sources:
 
-| Module | Accelerates |
-|--------|------------|
-| `cobolparser/_lexer_fast.pyx` | `CobolLexer` hot-path methods |
-| `cobolparser/_preprocess_fast.pyx` | Preprocessing inner loops |
-| `cobolparser/_data_fast.pyx` | DATA DIVISION `PICTURE`/clause loops |
+| Module | Overrides (pure-Python file) | Accelerated symbols |
+|--------|------------------------------|---------------------|
+| `cobolparser/_lexer_fast.pyx` | `cobolparser/lexer.py` (`_CobolLexerPure`) | `check_division_header`, `read_word_from_text`, `tokenize_program_text`, `_try_single_line_string`, `read_number_from_text`, `tokenize` |
+| `cobolparser/_preprocess_fast.pyx` | `cobolparser/preprocess/__init__.py` | `normalize_fixed_format` |
+| `cobolparser/_data_fast.pyx` | `cobolparser/parsers/divisions/data.py` | `parse_picture_clause_fast`, `parse_data_item_clauses_fast` |
 
-Pre-generated `.c` files are checked in — the build does **not** require Cython
-at install time:
+**Activation** — each module is imported via a guarded `try/except ImportError`
+at the bottom of its host Python file; the pure-Python path is used silently
+when the extension is absent:
+
+```python
+# lexer.py (bottom of file)
+try:
+    from cobolparser._lexer_fast import CobolLexer  # type: ignore
+except ImportError:
+    CobolLexer = _CobolLexerPure   # pure-Python fallback
+```
+
+The same pattern applies in `preprocess/__init__.py` (for `normalize_fixed_format`)
+and `parsers/divisions/data.py` (for `parse_data_item_clauses_fast`).
+
+**Performance** — approximately **~3× lexer throughput** over pure Python
+(documented in `setup.py`). Preprocessor and DATA DIVISION gains are comparable
+but are not separately benchmarked in the checked-in docs.
+
+**Building** — pre-generated `.c` files are checked in so only a C compiler
+(not Cython) is required for a normal install:
 
 ```bash
-# Build in-place
+# Build in-place (development)
 python setup.py build_ext --inplace
 
-# Skip entirely (no compiler/Cython)
+# Or via the [fast] extra (recommended)
+pip install -e ".[fast]"
+
+# Opt out entirely (no compiler or Cython needed)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 ```
 
