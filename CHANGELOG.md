@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* All CLI outputs are now properly identified. Every JSON document emitted by
+  the `cobol-parser` CLI starts with a `source_file` key (the input path as
+  given on the command line) and, for subcommands that parse the source, a
+  `program_id` key (the PROGRAM-ID from the IDENTIFICATION DIVISION, or
+  `null` when the program has none). This covers `analyze`, `dead-code`,
+  `program-flow` (JSON format), `io-sequence`, `move-type-check`,
+  `linkage-check`, `language-env`, `ims-dli`, `expand`, and `parse`
+  (`--errors`/`--stats` wrapper). `batch` entries additionally carry
+  `program_id` next to the existing `path`. Mermaid flowcharts from
+  `program-flow --format mermaid` now start with a `%% Program: <name>`
+  comment header (DOT output already named the digraph after the program).
+  The contract is pinned by `tests/unit/cli/test_output_identification.py`.
+
+### Changed
+
+* **CLI output shapes for list-style results** (part of the output
+  identification change above; library APIs are unchanged). `tokenize` now
+  emits `{"source_file": ..., "tokens": [...]}` instead of a bare token
+  list. `parse --find-type` emits `{"source_file", "program_id",
+  "node_type", "matches"}` instead of a bare node list, and dotted-path
+  extraction (`parse <file> <path>`) emits `{"source_file", "program_id",
+  "path", "result"}` instead of the bare subtree; with `--errors`/`--stats`
+  a path extraction now carries those keys directly instead of being wrapped
+  under an `"ast"` key.
+
 * `PictureClause` now validates the PICTURE pattern and exposes `is_valid` and
   `validation_errors` (also surfaced in `to_dict()`). Validation is
   conservative -- it flags only unambiguously illegal pictures (empty pattern,

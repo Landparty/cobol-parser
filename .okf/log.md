@@ -1,5 +1,18 @@
 # OKF Update Log
 
+## 2026-07-03
+
+* **Updated** [cli.md](cli.md) for the output-identification change: every
+  CLI output is now self-describing. Added an "Output Identification" section
+  (JSON documents lead with `source_file` + `program_id`; `tokenize` output
+  wrapped as `{"source_file", "tokens"}`; `parse` path/`--find-type`
+  extraction wrapped as `{"source_file", "program_id", "path"/"node_type",
+  "result"/"matches"}`; batch entries carry `program_id`; Mermaid flowcharts
+  gained a `%% Program: <name>` header) and corrected the Tokenize
+  subcommand's documented output shape. Source: `cobolparser/cli/parse.py`
+  (`_identification`, `_emit_report`), `cobolparser/generators/flowchart.py`;
+  contract pinned by `tests/unit/cli/test_output_identification.py`.
+
 ## 2026-06-30
 
 * **Logged untracked drift from commit `cad4db6` (2026-06-29, "Add integration

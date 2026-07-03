@@ -359,9 +359,11 @@ class TestMermaidFlowchartGenerator:
 
     # -- basic structure -------------------------------------------------
 
-    def test_starts_with_flowchart_td(self) -> None:
+    def test_starts_with_program_header_then_flowchart_td(self) -> None:
         out = self._gen(_simple_report())
-        assert out.startswith("flowchart TD")
+        lines = out.splitlines()
+        assert lines[0].startswith("%% Program: ")
+        assert lines[1] == "flowchart TD"
 
     def test_classdef_entry_present(self) -> None:
         out = self._gen(_simple_report())
