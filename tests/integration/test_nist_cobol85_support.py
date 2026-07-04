@@ -29,32 +29,24 @@ NIST_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol"
 # Programs the parser cannot yet handle error-free. Marked strict-xfail so
 # any improvement is flagged and this list only ever shrinks.
 KNOWN_ISSUES: dict[str, str] = {
-    "NC113M.CBL": (
-        "division header split across source lines ('DATA' on one line, "
-        "'DIVISION.' on the next) is not recognised"
-    ),
     "OBNC1M.CBL": (
-        "IDENTIFICATION DIVISION comment-entry containing the word 'DATA' "
-        "('AUTOMATIC DATA AND TELECOMMUNICATION SERVICE') is mistaken for "
-        "a DATA DIVISION header"
-    ),
-    "NC252A.CBL": (
-        "COMPUTE with multiple receiving operands including a subscripted "
-        "ROUNDED item before '=' is reported as missing the '=' operator"
+        "COBOL-74 obsolete-feature test: a REMARKS-style comment-entry "
+        "deliberately contains an entire phony program written in Area B; "
+        "distinguishing it from real divisions requires Area A/B-aware "
+        "comment-entry termination, which the column-stripping normalizer "
+        "does not preserve"
     ),
     "SM101A.CBL": (
-        "requires copybook expansion (COPY members live in the same "
-        "directory); parses clean with expansion — see "
+        "requires copybook expansion by design (its COPY members are "
+        "statement fragments that complete the surrounding code); parses "
+        "clean with expansion — see "
         "test_sm101a_parses_clean_with_copybook_expansion"
     ),
 }
 
 # Copybooks the content validator currently flags. Marked strict-xfail so a
 # validator improvement is flagged and this list only ever shrinks.
-KNOWN_COPYBOOK_ISSUES: dict[str, str] = {
-    "K1WKA.CPY": "validator flags a lone double quote inside a literal",
-    "K1WKY.CPY": "validator flags a lone double quote inside a literal",
-}
+KNOWN_COPYBOOK_ISSUES: dict[str, str] = {}
 
 
 def _read(path: Path) -> str:
@@ -129,6 +121,26 @@ class TestNistCopyStatementSupport:
         )
         assert result.ast is not None
         assert result.errors == [], "SM101A with expansion:\n" + "\n".join(
+            str(e) for e in result.errors
+        )
+
+    def test_sm207a_library_qualified_copy_expands_clean(self) -> None:
+        """COPY member OF library falls back to the plain search path when
+        the library has no subdirectory equivalent (SM207A uses
+        ``COPY ALTLB OF X1-LIB`` with ALTLB.CPY in the suite directory)."""
+        from cobolparser.preprocess.copybook_expander import (
+            parse_cobol_with_expansion,
+        )
+
+        source = _read(NIST_DIR / "SM207A.CBL")
+        result = parse_cobol_with_expansion(
+            source,
+            filename="SM207A.CBL",
+            copybook_paths=[str(NIST_DIR)],
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+        assert result.ast is not None
+        assert result.errors == [], "SM207A with expansion:\n" + "\n".join(
             str(e) for e in result.errors
         )
 

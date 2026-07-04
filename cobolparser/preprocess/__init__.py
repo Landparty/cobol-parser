@@ -682,6 +682,18 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
     effective_singles = single_quotes - (single_escaped * 2)
     effective_doubles = double_quotes - (double_escaped * 2)
 
+    # Account for fixed-format string continuation: a line with '-' in
+    # column 7 that resumes a literal re-opens it with an extra quote
+    # ('"AK' continued by '-    "BC".'), which would otherwise read as
+    # unbalanced.
+    for line in content.splitlines():
+        if len(line) > 7 and line[6] == "-":
+            resumed = line[7:72].lstrip()
+            if resumed.startswith('"'):
+                effective_doubles -= 1
+            elif resumed.startswith("'"):
+                effective_singles -= 1
+
     if effective_singles % 2 != 0:
         warnings.append(f"Possible unbalanced single quotes in '{copybook_path}'")
     if effective_doubles % 2 != 0:

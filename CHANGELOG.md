@@ -89,6 +89,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* Division headers split across source lines (`DATA` at the end of one
+  line, `DIVISION.` on the next — legal COBOL word separation) are now
+  recognised, both at the header parser (`BaseDivisionParser.parse`) and in
+  the DATA DIVISION section scanner, which previously consumed a split
+  `PROCEDURE DIVISION` header as noise and silently dropped the entire
+  procedure division. Found via NIST `NC113M.CBL`, which now parses
+  error-free with all four divisions and 111 statements.
+
+* IDENTIFICATION DIVISION comment-entries (AUTHOR, INSTALLATION, ...)
+  containing a bare division keyword (e.g. `AUTOMATIC DATA AND
+  TELECOMMUNICATION SERVICE`) are no longer mistaken for a division
+  boundary: a bare keyword only ends the division when the next significant
+  token is `DIVISION`. Shared helper `at_division_boundary()` in
+  `parsers/divisions/base.py`. Found via NIST `OBNC1M.CBL`.
+
+* COMPUTE now accepts the full receiver list syntax
+  `COMPUTE {identifier [ROUNDED]}... = expression`, including subscripted
+  receivers (`T (2, 2, 2)`). Previously only a single receiver with one
+  optional ROUNDED was parsed and anything more reported "missing '='
+  operator". Found via NIST `NC252A.CBL`, which now parses error-free.
+
+* A period after a numeric literal is now treated as a decimal point only
+  when followed by a digit (a COBOL numeric literal cannot end with a
+  decimal point). Previously `COMPUTE A = 174 / 16.` lexed `16.` as one
+  literal, so the sentence never terminated and the following statement was
+  silently swallowed into the COMPUTE expression. Fixed in both the pure-
+  Python lexer and the Cython fast path (`_lexer_fast.pyx`, regenerated
+  `.c` checked in).
+
+* `validate_copybook_content()` no longer flags copybooks that continue a
+  string literal across lines (fixed-format `-` in column 7 re-opens the
+  literal with an extra quote) as having unbalanced quotes. Found via NIST
+  `K1WKA.CPY` / `K1WKY.CPY`; genuinely unbalanced quotes are still flagged.
+
+* Library-qualified `COPY member OF library` now falls back to the plain
+  copybook search path when the library has no matching subdirectory
+  (previously an unhandled `CopybookNotFoundError` — NIST `SM207A.CBL`
+  crashed expansion even though `ALTLB.CPY` sat in the search path). A
+  `<search-dir>/<library>/` subdirectory still takes precedence when it
+  exists.
+
 * `ASTNode.find_all_by_type()` / `find_first_by_type()` now also match a
   node's concrete class name (e.g. `"MoveStatement"`, `"CallStatement"`,
   `"ExecSQLStatement"`, `"IOReadStatement"`) in addition to the `node_type`

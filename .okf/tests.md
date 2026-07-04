@@ -87,7 +87,7 @@ python -m pytest tests/performance/ -v
 | Path | Contents |
 |------|----------|
 | `tests/samples/` | ~48 COBOL programs covering all statement types |
-| `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + 51 .CPY copybooks); 455/459 parse error-free — pinned by `test_nist_cobol85_support.py` (the 4 exceptions are strict-xfail `KNOWN_ISSUES`) |
+| `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + 51 .CPY copybooks); 457/459 parse error-free — pinned by `test_nist_cobol85_support.py` (2 strict-xfail `KNOWN_ISSUES`: OBNC1M needs Area A/B awareness, SM101A needs copybook expansion by design; both SM101A and SM207A parse clean with expansion). Minimal repros for the fixed edge cases live in `tests/regression/test_nist_edge_case_fixes.py` |
 | `examples/cobol/shamrice/` | 24 IBM COBOL programs from shamrice/COBOL-Examples; all parse cleanly under FAIL_FAST |
 
 # Coverage Requirement Detail

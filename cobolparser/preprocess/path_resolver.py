@@ -209,32 +209,35 @@ def find_copybook_file(
 
     # Search in each directory
     for search_dir in search_dirs:
-        actual_search_dir = search_dir
-
-        # If library qualifier provided, add it as a subdirectory
+        # A library qualifier (COPY member OF library) maps to a
+        # subdirectory named after the library, but falls back to the plain
+        # search directory when no such subdirectory layout exists — on a
+        # filesystem the qualifier often has no directory equivalent.
+        candidate_dirs = [search_dir]
         if library_qualifier:
-            actual_search_dir = os.path.join(search_dir, library_qualifier)
+            candidate_dirs.insert(0, os.path.join(search_dir, library_qualifier))
 
-        # Try each possible filename
-        for filename in possible_names:
-            file_path = os.path.join(actual_search_dir, filename)
+        for actual_search_dir in candidate_dirs:
+            # Try each possible filename
+            for filename in possible_names:
+                file_path = os.path.join(actual_search_dir, filename)
 
-            # Normalize path
-            file_path = normalize_path(file_path)
+                # Normalize path
+                file_path = normalize_path(file_path)
 
-            # Check if file exists
-            if os.path.isfile(file_path):
-                # Validate path is within search directory
-                validate_path_within_directory(file_path, search_dir)
+                # Check if file exists
+                if os.path.isfile(file_path):
+                    # Validate path is within search directory
+                    validate_path_within_directory(file_path, search_dir)
 
-                # Check file size
-                file_size = os.path.getsize(file_path)
-                if file_size > search_config.max_file_size:
-                    raise CopybookSizeExceededError(
-                        file_path, file_size, search_config.max_file_size
-                    )
+                    # Check file size
+                    file_size = os.path.getsize(file_path)
+                    if file_size > search_config.max_file_size:
+                        raise CopybookSizeExceededError(
+                            file_path, file_size, search_config.max_file_size
+                        )
 
-                return os.path.abspath(file_path)
+                    return os.path.abspath(file_path)
 
     # Copybook not found - get suggestions
     suggestions = suggest_similar_copybooks(member_name, search_config)

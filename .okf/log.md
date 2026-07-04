@@ -1,5 +1,34 @@
 # OKF Update Log
 
+## 2026-07-04 (later)
+
+* **NIST known-issues burn-down** (parser/lexer/preprocess fixes; corpus
+  now 457/459 error-free, and both SM101A and SM207A parse clean with
+  copybook expansion):
+  - `parsers/divisions/base.py`: new shared `at_division_boundary()` —
+    composite header tokens always match; bare keywords only when the next
+    significant token is `DIVISION`. `BaseDivisionParser.parse` now skips
+    newlines inside split headers.
+  - `parsers/divisions/identification.py`: comment-entries containing bare
+    division keywords (OBNC1M's `AUTOMATIC DATA AND ...`) no longer end the
+    division; uses `at_division_boundary()`.
+  - `parsers/divisions/data.py`: section scanner stops at split division
+    headers (NC113M's three-line `PROCEDURE / DIVISION / .`) instead of
+    consuming them as noise.
+  - `parsers/statements/arithmetic_parsers.py`: COMPUTE accepts
+    `{identifier [ROUNDED]}...` receiver lists incl. subscripts (NC252A).
+  - `lexer.py` + `_lexer_fast.pyx` (`.c` regenerated, Cython 3.2.4):
+    trailing period after a numeric literal is a sentence terminator, not a
+    decimal point, unless followed by a digit.
+  - `preprocess/__init__.py` `validate_copybook_content`: continued string
+    literals (column-7 `-` re-opening quote) no longer flagged unbalanced.
+  - `preprocess/path_resolver.py`: `COPY member OF library` falls back to
+    the plain search path when no `<dir>/<library>/` subdirectory exists.
+  - Tests: `tests/regression/test_nist_edge_case_fixes.py` (minimal repros);
+    `KNOWN_ISSUES` in `test_nist_cobol85_support.py` shrunk to OBNC1M
+    (Area A/B phony-program, architectural) + SM101A (expansion by design);
+    `KNOWN_COPYBOOK_ISSUES` now empty; new SM207A expansion test.
+
 ## 2026-07-04
 
 * **Updated** [tests.md](tests.md): added
