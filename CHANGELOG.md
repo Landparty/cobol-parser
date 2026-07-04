@@ -72,6 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `ASTNode.find_all_by_type()` / `find_first_by_type()` now also match a
+  node's concrete class name (e.g. `"MoveStatement"`, `"CallStatement"`,
+  `"ExecSQLStatement"`, `"IOReadStatement"`) in addition to the `node_type`
+  attribute. All statement subclasses share the generic `node_type`
+  `"Statement"`, so lookups by statement class name silently returned nothing
+  — which meant the `analyze` CLI subcommand always printed an empty
+  `"calls"` list and `parse --find-type` could never select a specific
+  statement kind (both are documented to work this way). Lookups by
+  `node_type` (`"Statement"`, `"DataItem"`, `"ConditionNameItem"`, ...) are
+  unchanged, and serialized output is unaffected.
+
 * Lexer now recognises typed-literal prefixes (`X"1F"` hexadecimal, `N"..."`
   national, `NX"..."` national-hex, `G"..."` DBCS/graphic, `Z"..."`
   null-terminated, `U"..."` UTF-8, `B"..."` boolean). Previously a prefixed

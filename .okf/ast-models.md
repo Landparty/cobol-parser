@@ -3,7 +3,7 @@ type: Module
 title: AST Models
 description: ASTNode hierarchy — CobolProgram, data items, statement nodes, to_dict()/to_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-07-03T00:00:00Z
 ---
 
 # Overview
@@ -109,6 +109,15 @@ Raises `NodeTypeError` for unknown node types, `FieldValidationError` for bad fi
 ast: CobolProgram = result.ast
 move_stmts = ast.find_all_by_type("MoveStatement")
 ```
+
+`find_all_by_type()` / `find_first_by_type()` match either the node's
+`node_type` attribute (`"Statement"`, `"DataItem"`, ...) or its concrete
+class name (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`,
+`"IOReadStatement"`, ...). All statement subclasses share the generic
+`node_type` `"Statement"` (their `to_dict()` distinguishes them via
+`statement_type`), so the class name is the only way to select a specific
+statement kind — this is what the CLI `analyze` and `parse --find-type`
+subcommands rely on.
 
 # See Also
 

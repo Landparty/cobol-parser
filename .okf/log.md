@@ -2,6 +2,14 @@
 
 ## 2026-07-03
 
+* **Updated** [ast-models.md](ast-models.md): `find_all_by_type()` /
+  `find_first_by_type()` now also match a node's concrete class name
+  (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`, ...), not just
+  the `node_type` attribute. All statement subclasses share the generic
+  `node_type` `"Statement"`, so class-name matching is what lets the CLI
+  `analyze` subcommand list CALL statements and `--find-type` select specific
+  statement kinds (previously both silently returned nothing for statement
+  class names). Source: `cobolparser/models/ast_base.py` (`_matches_type`).
 * **Updated** [cli.md](cli.md) for the output-identification change: every
   CLI output is now self-describing. Added an "Output Identification" section
   (JSON documents lead with `source_file` + `program_id`; `tokenize` output

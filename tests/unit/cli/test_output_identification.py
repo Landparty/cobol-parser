@@ -109,6 +109,43 @@ class TestBatchIdentification:
         assert entry["program_id"] == _PROGRAM_ID
 
 
+class TestStatementTypeIdentification:
+    """Statements are identifiable by their concrete class name.
+
+    All statement nodes share the generic node_type "Statement", so
+    find_all_by_type (and therefore ``analyze`` and ``--find-type``) also
+    matches the concrete class name — otherwise CALL/SQL/IO statements could
+    never be identified in CLI output.
+    """
+
+    def test_analyze_identifies_call_statements(self, capsys):
+        sample = str(SAMPLES / "call_dynamic_programs.cbl")
+        data = _run_json(capsys, "analyze", sample)
+        assert data["source_file"] == sample
+        assert len(data["calls"]) > 0
+        for call in data["calls"]:
+            assert "called_program" in call
+            assert "is_dynamic" in call
+
+    def test_find_type_matches_statement_class(self, capsys):
+        data = _run_json(capsys, "parse", _SIMPLE, "--find-type", "DisplayStatement")
+        assert data["node_type"] == "DisplayStatement"
+        assert len(data["matches"]) > 0
+        for node in data["matches"]:
+            assert node["statement_type"] == "DISPLAY"
+
+    def test_find_type_matches_io_statement_class(self, capsys):
+        sample = str(SAMPLES / "file_operations.cbl")
+        data = _run_json(capsys, "parse", sample, "--find-type", "IOReadStatement")
+        assert len(data["matches"]) > 0
+        for node in data["matches"]:
+            assert node["statement_type"] == "READ"
+
+    def test_find_type_generic_statement_still_matches_node_type(self, capsys):
+        data = _run_json(capsys, "parse", _SIMPLE, "--find-type", "Statement")
+        assert len(data["matches"]) > 0
+
+
 class TestTextOutputIdentification:
     def test_mermaid_flowchart_has_program_header(self, capsys):
         out = _run(capsys, "program-flow", _SIMPLE, "--format", "mermaid")
