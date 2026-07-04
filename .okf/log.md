@@ -1,5 +1,17 @@
 # OKF Update Log
 
+## 2026-07-04
+
+* **Updated** [tests.md](tests.md): added
+  `tests/integration/test_nist_cobol85_support.py` to the layout and the
+  Example Corpora table. The NIST COBOL-85 corpus (459 `.CBL` + 51 `.CPY`)
+  is now strictly pinned: every program must parse error-free under
+  COLLECT_ALL; the 4 programs the parser cannot yet handle (`NC113M`,
+  `OBNC1M`, `NC252A`, `SM101A`) are strict-xfail `KNOWN_ISSUES` entries so
+  the list only ever shrinks. `SM101A` additionally must parse clean with
+  copybook expansion, and all `.CPY` files must pass
+  `validate_copybook_content` (2 strict-xfail validator limitations).
+
 ## 2026-07-03
 
 * **Updated** [ast-models.md](ast-models.md): `find_all_by_type()` /

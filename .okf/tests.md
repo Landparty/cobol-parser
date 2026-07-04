@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-07-04T00:00:00Z
 ---
 
 # Overview
@@ -26,6 +26,7 @@ tests/
     io_statements/             # IO parser unit tests
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
+    test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation
     io/                        # IO coverage reporting integration
     io_statements/             # IO statement parsing, VSAM
   contracts/                   # API contract tests — stability guarantees
@@ -86,7 +87,7 @@ python -m pytest tests/performance/ -v
 | Path | Contents |
 |------|----------|
 | `tests/samples/` | ~48 COBOL programs covering all statement types |
-| `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files) |
+| `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + 51 .CPY copybooks); 455/459 parse error-free — pinned by `test_nist_cobol85_support.py` (the 4 exceptions are strict-xfail `KNOWN_ISSUES`) |
 | `examples/cobol/shamrice/` | 24 IBM COBOL programs from shamrice/COBOL-Examples; all parse cleanly under FAIL_FAST |
 
 # Coverage Requirement Detail
