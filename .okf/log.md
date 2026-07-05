@@ -1,5 +1,14 @@
 # OKF Update Log
 
+## 2026-07-05 (program_flow typing fix)
+
+* No concept change needed: `ProgramFlowAnalyzer`'s inner `scan()` helper
+  in `analysis/program_flow.py` swapped its mypy-invalid
+  `source_id: str = proc_name` default for `str | None = None` with an
+  in-body `proc_name` fallback — behaviorally identical, `mypy
+  cobolparser/` now clean. [analysis.md](analysis.md) documents behavior,
+  not this internal signature, so only this log entry records it.
+
 ## 2026-07-05 (multi-mode OPEN file capture)
 
 * **Updated** [parser.md](parser.md): `open_parser.py` now consumes
