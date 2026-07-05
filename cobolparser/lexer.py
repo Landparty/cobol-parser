@@ -1553,7 +1553,17 @@ class _CobolLexerPure:
             char = text[pos]
             if char.isdigit():
                 pos += 1
-            elif char == "." and not has_decimal and not has_exponent:
+            elif (
+                char == "."
+                and not has_decimal
+                and not has_exponent
+                and pos + 1 < len(text)
+                and text[pos + 1].isdigit()
+            ):
+                # A period is only a decimal point when followed by a digit:
+                # a COBOL numeric literal cannot end with a decimal point, so
+                # "16." at end of sentence is the literal 16 followed by the
+                # sentence-terminating period separator.
                 has_decimal = True
                 pos += 1
             elif char in "Ee" and pos > start_pos and not has_exponent:

@@ -54,7 +54,7 @@ def _is_okf_modified(okf_file: str, repo_root: Path) -> bool:
 
 def _git_mode(repo_root: Path) -> int:
     staged_raw = _git(["diff", "--cached", "--name-only"], repo_root)
-    staged = set(f.strip() for f in staged_raw.splitlines() if f.strip())
+    staged = {f.strip() for f in staged_raw.splitlines() if f.strip()}
 
     needs_update: dict = {}
     for src in staged:
@@ -110,7 +110,8 @@ def _claude_mode(repo_root: Path) -> int:
 def main():
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return 0

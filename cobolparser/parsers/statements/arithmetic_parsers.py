@@ -439,7 +439,8 @@ class ComputeStatementParser(IStatementParser):
         stmt: ComputeStatement = create_node(ComputeStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
-        # Parse target identifier (literals/level-numbers are not valid here).
+        # Parse target identifiers: COMPUTE {identifier [ROUNDED]}... =
+        # (literals/level-numbers are not valid here).
         target = _consume_arithmetic_target(token_stream)
         if target is None:
             report_or_raise(
@@ -447,9 +448,16 @@ class ComputeStatementParser(IStatementParser):
             )
         stmt.add_target(target)
 
-        # Skip ROUNDED if present
-        if peek_value_upper(token_stream) == "ROUNDED":
-            token_stream.consume()
+        # Additional targets and per-target ROUNDED phrases, up to '='.
+        while True:
+            _skip_newlines(token_stream)
+            if peek_value_upper(token_stream) == "ROUNDED":
+                token_stream.consume()
+                continue
+            extra_target = _consume_arithmetic_target(token_stream)
+            if extra_target is None:
+                break
+            stmt.add_target(extra_target)
 
         # Check for =
         token = token_stream.peek()

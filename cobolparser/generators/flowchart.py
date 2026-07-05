@@ -134,6 +134,7 @@ class MermaidFlowchartGenerator:
             options = FlowchartOptions()
 
         lines: list[str] = []
+        lines.append(f"%% Program: {report.program_name or 'PROGRAM'}")
         lines.append("flowchart TD")
 
         # ---- class definitions -------------------------------------------------

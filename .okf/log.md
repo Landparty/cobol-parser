@@ -1,5 +1,67 @@
 # OKF Update Log
 
+## 2026-07-04 (later)
+
+* **NIST known-issues burn-down** (parser/lexer/preprocess fixes; corpus
+  now 457/459 error-free, and both SM101A and SM207A parse clean with
+  copybook expansion):
+  - `parsers/divisions/base.py`: new shared `at_division_boundary()` —
+    composite header tokens always match; bare keywords only when the next
+    significant token is `DIVISION`. `BaseDivisionParser.parse` now skips
+    newlines inside split headers.
+  - `parsers/divisions/identification.py`: comment-entries containing bare
+    division keywords (OBNC1M's `AUTOMATIC DATA AND ...`) no longer end the
+    division; uses `at_division_boundary()`.
+  - `parsers/divisions/data.py`: section scanner stops at split division
+    headers (NC113M's three-line `PROCEDURE / DIVISION / .`) instead of
+    consuming them as noise.
+  - `parsers/statements/arithmetic_parsers.py`: COMPUTE accepts
+    `{identifier [ROUNDED]}...` receiver lists incl. subscripts (NC252A).
+  - `lexer.py` + `_lexer_fast.pyx` (`.c` regenerated, Cython 3.2.4):
+    trailing period after a numeric literal is a sentence terminator, not a
+    decimal point, unless followed by a digit.
+  - `preprocess/__init__.py` `validate_copybook_content`: continued string
+    literals (column-7 `-` re-opening quote) no longer flagged unbalanced.
+  - `preprocess/path_resolver.py`: `COPY member OF library` falls back to
+    the plain search path when no `<dir>/<library>/` subdirectory exists.
+  - Tests: `tests/regression/test_nist_edge_case_fixes.py` (minimal repros);
+    `KNOWN_ISSUES` in `test_nist_cobol85_support.py` shrunk to OBNC1M
+    (Area A/B phony-program, architectural) + SM101A (expansion by design);
+    `KNOWN_COPYBOOK_ISSUES` now empty; new SM207A expansion test.
+
+## 2026-07-04
+
+* **Updated** [tests.md](tests.md): added
+  `tests/integration/test_nist_cobol85_support.py` to the layout and the
+  Example Corpora table. The NIST COBOL-85 corpus (459 `.CBL` + 51 `.CPY`)
+  is now strictly pinned: every program must parse error-free under
+  COLLECT_ALL; the 4 programs the parser cannot yet handle (`NC113M`,
+  `OBNC1M`, `NC252A`, `SM101A`) are strict-xfail `KNOWN_ISSUES` entries so
+  the list only ever shrinks. `SM101A` additionally must parse clean with
+  copybook expansion, and all `.CPY` files must pass
+  `validate_copybook_content` (2 strict-xfail validator limitations).
+
+## 2026-07-03
+
+* **Updated** [ast-models.md](ast-models.md): `find_all_by_type()` /
+  `find_first_by_type()` now also match a node's concrete class name
+  (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`, ...), not just
+  the `node_type` attribute. All statement subclasses share the generic
+  `node_type` `"Statement"`, so class-name matching is what lets the CLI
+  `analyze` subcommand list CALL statements and `--find-type` select specific
+  statement kinds (previously both silently returned nothing for statement
+  class names). Source: `cobolparser/models/ast_base.py` (`_matches_type`).
+* **Updated** [cli.md](cli.md) for the output-identification change: every
+  CLI output is now self-describing. Added an "Output Identification" section
+  (JSON documents lead with `source_file` + `program_id`; `tokenize` output
+  wrapped as `{"source_file", "tokens"}`; `parse` path/`--find-type`
+  extraction wrapped as `{"source_file", "program_id", "path"/"node_type",
+  "result"/"matches"}`; batch entries carry `program_id`; Mermaid flowcharts
+  gained a `%% Program: <name>` header) and corrected the Tokenize
+  subcommand's documented output shape. Source: `cobolparser/cli/parse.py`
+  (`_identification`, `_emit_report`), `cobolparser/generators/flowchart.py`;
+  contract pinned by `tests/unit/cli/test_output_identification.py`.
+
 ## 2026-06-30
 
 * **Logged untracked drift from commit `cad4db6` (2026-06-29, "Add integration

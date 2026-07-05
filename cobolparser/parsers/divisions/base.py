@@ -10,9 +10,66 @@ from typing import Any
 
 from cobolparser.core.exceptions import DivisionNotFoundError, ParseError
 from cobolparser.core.interfaces import IDivisionParser, ITokenStream
+from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 
 logger = logging.getLogger(__name__)
+
+DIVISION_KEYWORDS = ("IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE")
+
+# Tokens that carry no syntactic content and may separate the division
+# keyword from the DIVISION word (e.g. a header split across source lines).
+_SKIPPABLE_TYPES = (
+    TokenType.WHITESPACE,
+    TokenType.COMMENT,
+    TokenType.NEWLINE,
+    TokenType.CONTINUATION,
+)
+
+# Token types the lexer assigns when its line-based check recognises a real
+# division header — authoritative regardless of the token's value.
+_DIVISION_HEADER_TYPES = (
+    TokenType.IDENTIFICATION_DIVISION,
+    TokenType.ENVIRONMENT_DIVISION,
+    TokenType.DATA_DIVISION,
+    TokenType.PROCEDURE_DIVISION,
+)
+
+
+def at_division_boundary(
+    token_stream: ITokenStream,
+    keywords: tuple[str, ...] = DIVISION_KEYWORDS,
+) -> bool:
+    """True if the stream is positioned at the start of a division header.
+
+    A token the lexer already classified as a division header (composite
+    ``*_DIVISION`` token types, produced when the header fits on one line)
+    always marks a boundary. A bare division keyword only marks one when the
+    next significant token is ``DIVISION`` — the bare word may legitimately
+    appear inside free text (comment-entries) and, conversely, a real header
+    may be split across source lines (``DATA`` at the end of one line,
+    ``DIVISION.`` on the next), which the lexer emits as plain tokens.
+    """
+    token = token_stream.peek(0)
+    if not token or not token.value:
+        return False
+    if token.type in _DIVISION_HEADER_TYPES:
+        return True
+    value = token.value.upper()
+    if any(value == f"{kw} DIVISION" for kw in keywords):
+        return True
+    if value not in keywords:
+        return False
+    # Bare keyword: require the next significant token to be DIVISION.
+    offset = 1
+    while True:
+        nxt = token_stream.peek(offset)
+        if nxt is None:
+            return False
+        if nxt.type in _SKIPPABLE_TYPES:
+            offset += 1
+            continue
+        return (nxt.value or "").upper() == "DIVISION"
 
 
 class BaseDivisionParser(IDivisionParser, ABC):
@@ -107,11 +164,15 @@ class BaseDivisionParser(IDivisionParser, ABC):
         division_token = token_stream.consume()
         start_location = division_token.location
 
-        # Check for optional "DIVISION" keyword
+        # Check for optional "DIVISION" keyword. COBOL words may be separated
+        # by newlines, so the header can be split across source lines
+        # ("DATA" at the end of one line, "DIVISION." on the next).
+        token_stream.skip_whitespace_and_comments()
         if not token_stream.is_empty():
             next_token = token_stream.peek(0)
             if next_token and next_token.value.upper() == "DIVISION":
                 token_stream.consume()
+                token_stream.skip_whitespace_and_comments()
 
         # Identification, environment, and data division headers end immediately.
         if self.division_name != "PROCEDURE":
