@@ -152,6 +152,30 @@ def suggest_similar_copybooks(
     return get_close_matches(member_upper, available, n=max_suggestions, cutoff=cutoff)
 
 
+def _on_disk_casing(file_path: str) -> str:
+    """Return ``file_path`` with its basename replaced by the on-disk casing.
+
+    On case-insensitive filesystems (Windows/macOS) ``os.path.isfile`` matches
+    a file whose on-disk casing differs from the probed name (disk: MEM.CPY,
+    probe: MEM.cpy). Reported paths must carry the on-disk name so they are
+    stable across platforms.
+    """
+    directory, filename = os.path.split(file_path)
+    fallback: str | None = None
+    try:
+        with os.scandir(directory or os.curdir) as entries:
+            for entry in entries:
+                if entry.name == filename:
+                    return file_path
+                if fallback is None and entry.name.casefold() == filename.casefold():
+                    fallback = entry.name
+    except OSError:
+        return file_path
+    if fallback is not None:
+        return os.path.join(directory, fallback)
+    return file_path
+
+
 def find_copybook_file(
     member_name: str,
     search_config: CopybookSearchPath,
@@ -237,7 +261,7 @@ def find_copybook_file(
                             file_path, file_size, search_config.max_file_size
                         )
 
-                    return os.path.abspath(file_path)
+                    return _on_disk_casing(os.path.abspath(file_path))
 
     # Copybook not found - get suggestions
     suggestions = suggest_similar_copybooks(member_name, search_config)

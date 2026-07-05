@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-07-04T00:00:00Z
 ---
 
 # Overview
@@ -89,6 +89,15 @@ CobolParser.parse(source)
 | `environment.py` | ENVIRONMENT DIVISION |
 | `data.py` | DATA DIVISION |
 | `procedure.py` | PROCEDURE DIVISION — hosts `StatementParserRegistry` |
+
+**LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
+digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside
+`PIC 9(4)` or after `VALUE`). Any data-division clause that consumes a numeric
+must therefore accept `LEVEL_NUMBER` alongside `NUMERIC_LITERAL` —
+`_parse_value_clause`, the level-88 value collector, and the OCCURS handlers
+all do. `_parse_value_clause` also consumes an optional `IS` and a
+`MINUS`/`PLUS` sign token before the literal (`VALUE IS -5`). Regression
+suite: `tests/regression/test_numeric_value_clause.py`.
 
 # Statement Parsers (`cobolparser/parsers/statements/`)
 

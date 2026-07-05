@@ -86,6 +86,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `find_copybook_file()` now reports copybook paths with their **on-disk
+  basename casing**. On case-insensitive filesystems (Windows/macOS) the
+  extension probe order (`.cpy` before `.CPY`) could match a file whose
+  on-disk casing differs (disk: `MEM.CPY`, probe: `MEM.cpy`), and the
+  probe-cased path leaked into `CopybookExpansion.included_copybooks` and
+  warning messages, making reported paths platform-dependent. The found
+  path's basename is now canonicalised against `os.scandir` entry names.
+  The `PathResolver` directory index (tier 2) already used scandir names
+  and was unaffected. Pinned by
+  `tests/unit/test_path_resolver_gaps.py::TestOnDiskCasing`; the
+  library-qualified COPY regression tests now compare paths exactly
+  instead of via `os.path.normcase`.
+
+* Numeric `VALUE` clause literals that lex as `LEVEL_NUMBER` are no longer
+  silently dropped. The lexer types every 1-2 digit integer as
+  `TokenType.LEVEL_NUMBER` regardless of context, and
+  `DataDivisionParser._parse_value_clause` only accepted `NUMERIC_LITERAL` —
+  so `VALUE 5` / `VALUE 42` produced `value_clause=None` and the orphaned
+  token then spawned a bogus anonymous data item at that level. `VALUE IS
+  <literal>` (the `IS` was never consumed) and signed literals (`VALUE -5`,
+  `VALUE +2.5` — sign lexed as a separate `MINUS`/`PLUS` token) were dropped
+  the same way. Level-88 condition names had the parallel bug: their value
+  collector broke on `LEVEL_NUMBER`, so `88 FLAG-ON VALUE 1.` yielded
+  `values == []` plus a spurious top-level item. All forms now parse
+  correctly; pinned by `tests/regression/test_numeric_value_clause.py`.
+
 * `PerformStatementParser` now recognises `THROUGH` as a synonym for `THRU` in
   `PERFORM paragraph THRU/THROUGH paragraph` ranges. Previously only the
   literal `THRU` token set `PerformStatement.thru_paragraph`; `THROUGH` fell

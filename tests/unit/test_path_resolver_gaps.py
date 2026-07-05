@@ -8,6 +8,8 @@ Targets branches not exercised by test_path_resolver_coverage.py:
   - resolve() tier-3 fallback via library qualifier
 """
 
+import os
+
 import pytest
 
 from cobolparser.preprocess import CopybookSizeExceededError
@@ -34,7 +36,10 @@ class TestDirectoryIndex:
         # A nested directory must not be indexed as a copybook file.
         (d / "NESTED").mkdir()
 
-        config = CopybookSearchPath(directories=[str(d)])
+        # Pin case_sensitive so the exact-filename branch is exercised on
+        # every platform (the default auto-detects False on Windows/macOS,
+        # which upper-cases the index keys instead).
+        config = CopybookSearchPath(directories=[str(d)], case_sensitive=True)
         resolver = PathResolver(config)
         index = resolver._build_directory_index()
         # The index records both the exact filename and the bare stem.
@@ -57,6 +62,43 @@ class TestDirectoryIndex:
         config = CopybookSearchPath(directories=[str(tmp_path / "does-not-exist")])
         resolver = PathResolver(config)
         assert resolver._build_directory_index() == {}
+
+
+class TestOnDiskCasing:
+    """find_copybook_file() must report the on-disk basename casing, not the
+    probe casing, on case-insensitive filesystems (Windows/macOS)."""
+
+    def test_extension_probe_reports_on_disk_casing(self, tmp_path):
+        d = tmp_path / "copy"
+        d.mkdir()
+        (d / "MEM.CPY").write_text("01 M.")
+
+        # Default extension order probes ".cpy" before ".CPY"; on a
+        # case-insensitive filesystem the first probe already hits the file.
+        config = CopybookSearchPath(directories=[str(d)])
+        path = find_copybook_file("MEM", config)
+        assert os.path.basename(path) == "MEM.CPY"
+        assert path == str(d / "MEM.CPY")
+
+    def test_member_case_variant_reports_on_disk_casing(self, tmp_path):
+        d = tmp_path / "copy"
+        d.mkdir()
+        (d / "Member.cpy").write_text("01 M.")
+
+        config = CopybookSearchPath(directories=[str(d)], case_sensitive=False)
+        path = find_copybook_file("MEMBER", config)
+        assert os.path.basename(path) == "Member.cpy"
+
+    def test_library_qualifier_reports_on_disk_casing(self, tmp_path):
+        d = tmp_path / "copy"
+        lib = d / "MYLIB"
+        lib.mkdir(parents=True)
+        (lib / "MEM.CPY").write_text("01 M.")
+
+        config = CopybookSearchPath(directories=[str(d)])
+        path = find_copybook_file("MEM", config, library_qualifier="MYLIB")
+        assert os.path.basename(path) == "MEM.CPY"
+        assert path == str(lib / "MEM.CPY")
 
 
 class TestResolveTiers:

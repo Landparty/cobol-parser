@@ -970,20 +970,38 @@ class DataDivisionParser(BaseDivisionParser):
                 break
             token_stream.consume()
 
-        # Collect value literals
+        # Collect value literals. LEVEL_NUMBER is accepted as a numeric
+        # literal (the lexer types 1-2 digit integers as LEVEL_NUMBER even
+        # in value position); the item terminator is the PERIOD, so this
+        # cannot swallow a following item's level number in well-formed
+        # source. A MINUS/PLUS token followed by a numeric is a signed
+        # literal.
         while not token_stream.is_empty():
             t = token_stream.peek()
             if not t:
                 break
-            if t.type == TokenType.PERIOD or t.type == TokenType.LEVEL_NUMBER:
+            if t.type == TokenType.PERIOD:
                 break
             if t.type in (
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
                 TokenType.FIGURATIVE_CONSTANT,
+                TokenType.LEVEL_NUMBER,
             ):
                 item.add_value(t.value)
                 token_stream.consume()
+            elif t.type in (TokenType.MINUS, TokenType.PLUS):
+                sign_value = t.value
+                next_token = token_stream.peek(1)
+                if next_token and next_token.type in (
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.LEVEL_NUMBER,
+                ):
+                    item.add_value(f"{sign_value}{next_token.value}")
+                    token_stream.consume()
+                    token_stream.consume()
+                else:
+                    break
             elif t.value == ",":
                 token_stream.consume()
             elif t.type == TokenType.NEWLINE:
@@ -994,6 +1012,7 @@ class DataDivisionParser(BaseDivisionParser):
                 if end_token and end_token.type in (
                     TokenType.STRING_LITERAL,
                     TokenType.NUMERIC_LITERAL,
+                    TokenType.LEVEL_NUMBER,
                 ):
                     item.add_value(f"THROUGH:{end_token.value}")
                     token_stream.consume()
@@ -1196,20 +1215,46 @@ class DataDivisionParser(BaseDivisionParser):
         """Parse VALUE clause value.
 
         Returns the value string.
+
+        The lexer types 1-2 digit integers as LEVEL_NUMBER everywhere (even
+        after VALUE), so LEVEL_NUMBER is accepted as a numeric literal here —
+        after a consumed VALUE keyword a level number can only be a literal.
+        A MINUS/PLUS token followed by a numeric is a signed literal.
         """
         token = token_stream.peek()
         if not token:
             return None
 
+        # Optional IS: VALUE IS <literal>
+        if token.type == TokenType.IS:
+            token_stream.consume()
+            token = token_stream.peek()
+            if not token:
+                return None
+
+        sign = ""
+        if token.type in (TokenType.MINUS, TokenType.PLUS):
+            next_token = token_stream.peek(1)
+            if next_token and next_token.type in (
+                TokenType.NUMERIC_LITERAL,
+                TokenType.LEVEL_NUMBER,
+            ):
+                sign = token.value
+                token_stream.consume()
+                token = next_token
+            else:
+                return None
+
         if token.type in [
             TokenType.STRING_LITERAL,
             TokenType.NUMERIC_LITERAL,
             TokenType.FIGURATIVE_CONSTANT,
+            TokenType.LEVEL_NUMBER,
         ]:
             value = (
                 f'"{token.value}"'
                 if token.type == TokenType.STRING_LITERAL
-                else token.value
+                else f"{sign}{token.value}"
             )
             token_stream.consume()
             return value

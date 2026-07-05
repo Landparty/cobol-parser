@@ -245,6 +245,7 @@ class TestLibraryQualifiedCopy:
             self._program("COPY MEM OF NOSUCHLIB."), copybook_paths=[str(tmp_path)]
         )
         assert str(tmp_path / "MEM.CPY") in result.included_copybooks
+        assert "FROM-ROOT" in result.expanded_source
 
     def test_library_subdirectory_takes_precedence(self, tmp_path: Path):
         (tmp_path / "MEM.CPY").write_text("           02 FROM-ROOT PIC X.\n")
@@ -255,6 +256,7 @@ class TestLibraryQualifiedCopy:
             self._program("COPY MEM OF MYLIB."), copybook_paths=[str(tmp_path)]
         )
         assert str(libdir / "MEM.CPY") in result.included_copybooks
+        assert "FROM-LIB" in result.expanded_source
 
 
 @pytest.mark.integration

@@ -1,5 +1,32 @@
 # OKF Update Log
 
+## 2026-07-04 (copybook path on-disk casing)
+
+* **Updated** [preprocessing.md](preprocessing.md): `find_copybook_file()`
+  now canonicalises the found file's basename to the on-disk casing via
+  `os.scandir` (helper `_on_disk_casing` in `preprocess/path_resolver.py`).
+  Previously, on case-insensitive filesystems (Windows/macOS), the
+  extension probe order (`.cpy` before `.CPY`) leaked probe-cased paths
+  (`MEM.cpy` for an on-disk `MEM.CPY`) into
+  `CopybookExpansion.included_copybooks` and warnings. The tier-2
+  `PathResolver` directory index already used scandir entry names and was
+  unaffected. Pinned by
+  `tests/unit/test_path_resolver_gaps.py::TestOnDiskCasing`; the SM207A
+  regression tests dropped their `os.path.normcase` tolerance and compare
+  paths exactly.
+
+## 2026-07-04 (numeric VALUE clause fix)
+
+* **Updated** [parser.md](parser.md): documented the LEVEL_NUMBER-as-literal
+  gotcha in `parsers/divisions/data.py`. `_parse_value_clause` and the
+  level-88 value collector now accept `LEVEL_NUMBER` tokens as numeric
+  literals, consume an optional `IS`, and handle `MINUS`/`PLUS` sign tokens
+  — previously `VALUE 5`, `VALUE 42`, `VALUE IS <n>`, `VALUE -5`, and
+  `88 ... VALUE 1` all silently lost the literal and could spawn bogus
+  anonymous data items. Motivated by mockymock's working-storage reset,
+  which restores items to their declared VALUE clause. Regression suite:
+  `tests/regression/test_numeric_value_clause.py`.
+
 ## 2026-07-04 (later)
 
 * **NIST known-issues burn-down** (parser/lexer/preprocess fixes; corpus
