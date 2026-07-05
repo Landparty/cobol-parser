@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `PerformStatementParser` now recognises `THROUGH` as a synonym for `THRU` in
+  `PERFORM paragraph THRU/THROUGH paragraph` ranges. Previously only the
+  literal `THRU` token set `PerformStatement.thru_paragraph`; `THROUGH` fell
+  through unmatched, leaving `thru_paragraph` unset and the ending paragraph
+  name misparsed as a spurious extra paragraph in the AST.
 * Lexer now recognises typed-literal prefixes (`X"1F"` hexadecimal, `N"..."`
   national, `NX"..."` national-hex, `G"..."` DBCS/graphic, `Z"..."`
   null-terminated, `U"..."` UTF-8, `B"..."` boolean). Previously a prefixed

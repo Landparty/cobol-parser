@@ -151,15 +151,15 @@ class PerformStatementParser(IStatementParser):
             skip_whitespace(token_stream)
             token = token_stream.peek()
 
-            # Check for THRU clause
+            # Check for THRU clause (THROUGH is a standard COBOL synonym)
             if (
                 token
                 and token.type == TokenType.IDENTIFIER
                 and token.value
-                and token.value.upper() == "THRU"
+                and token.value.upper() in ("THRU", "THROUGH")
             ):
                 try:
-                    token_stream.consume()  # Skip THRU
+                    token_stream.consume()  # Skip THRU/THROUGH
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_thru_paragraph(token.value)

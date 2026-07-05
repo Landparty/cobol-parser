@@ -173,6 +173,66 @@ class TestPerformThru:
 
         print("✅ PERFORM without THRU works: thru_paragraph is None")
 
+    def test_perform_through_synonym(self):
+        """Test that THROUGH is accepted as a synonym for THRU, producing
+        results identical to the equivalent THRU-spelled PERFORM."""
+
+        def make_source(keyword: str) -> str:
+            return f"""
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. TEST-THROUGH-SYN.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                PERFORM PARA-START {keyword} PARA-END.
+                STOP RUN.
+            PARA-START.
+                DISPLAY 'Start'.
+            PARA-END.
+                DISPLAY 'End'.
+        """
+
+        def parse_and_get_perform(keyword: str):
+            parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+            result = parser.parse(make_source(keyword))
+
+            assert result is not None
+            assert result.success, f"Parse failed for {keyword}: {result.errors}"
+            assert result.ast is not None
+
+            proc_div = result.ast.get_division("PROCEDURE")
+            assert proc_div is not None
+
+            main_para = next(
+                (s for s in proc_div.sections if s.section_name == "MAIN-PARA"), None
+            )
+            assert main_para is not None, "MAIN-PARA should exist"
+
+            perform_stmts = [
+                c for c in main_para.children if hasattr(c, "target_paragraph")
+            ]
+            assert len(perform_stmts) > 0, "Should have at least one PERFORM statement"
+
+            section_names = [s.section_name for s in proc_div.sections]
+            return perform_stmts[0], section_names
+
+        thru_stmt, thru_sections = parse_and_get_perform("THRU")
+        through_stmt, through_sections = parse_and_get_perform("THROUGH")
+
+        # THROUGH must produce the exact same paragraph/section layout as
+        # THRU -- no spurious paragraph created out of the misparsed token.
+        assert through_sections == thru_sections
+        assert "PARA-START" in through_sections
+        assert "PARA-END" in through_sections
+
+        assert (
+            through_stmt.target_paragraph == thru_stmt.target_paragraph == "PARA-START"
+        )
+        assert through_stmt.thru_paragraph == thru_stmt.thru_paragraph == "PARA-END"
+
+        print(
+            f"✅ PERFORM THROUGH captured: {through_stmt.target_paragraph} THROUGH {through_stmt.thru_paragraph}"
+        )
+
     def test_perform_thru_with_nested_calls(self):
         """Test that CALL statements within PERFORM THRU paragraphs are captured."""
         source = """
