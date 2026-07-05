@@ -489,7 +489,9 @@ class ProgramFlowAnalyzer:
             if stype:
                 node.statement_types[stype] = node.statement_types.get(stype, 0) + 1
 
-        def scan(stmt: Any, source_id: str = proc_name) -> None:
+        def scan(stmt: Any, source_id: str | None = None) -> None:
+            if source_id is None:
+                source_id = proc_name
             if not hasattr(stmt, "node_type"):
                 return
             if id(stmt) in visited:

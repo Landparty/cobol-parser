@@ -1,5 +1,26 @@
 # OKF Update Log
 
+## 2026-07-05 (program_flow typing fix)
+
+* No concept change needed: `ProgramFlowAnalyzer`'s inner `scan()` helper
+  in `analysis/program_flow.py` swapped its mypy-invalid
+  `source_id: str = proc_name` default for `str | None = None` with an
+  in-body `proc_name` fallback — behaviorally identical, `mypy
+  cobolparser/` now clean. [analysis.md](analysis.md) documents behavior,
+  not this internal signature, so only this log entry records it.
+
+## 2026-07-05 (multi-mode OPEN file capture)
+
+* **Updated** [parser.md](parser.md): `open_parser.py` now consumes
+  subsequent mode keywords (`OPEN INPUT A OUTPUT B EXTEND C`) instead of
+  breaking at them, so `IOOpenStatement.file_names` captures the files of
+  every mode group; `open_mode` still reports only the first group's mode.
+  Previously every file after the second mode keyword was silently dropped
+  — mockymock's OPEN-site mock matching (which keys on `file_names`) was
+  the motivating consumer. Pinned by
+  `tests/unit/io_statements/test_open_read_parsers.py` (multi-mode-group
+  tests).
+
 ## 2026-07-04 (copybook path on-disk casing)
 
 * **Updated** [preprocessing.md](preprocessing.md): `find_copybook_file()`

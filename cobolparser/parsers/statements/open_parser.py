@@ -46,7 +46,9 @@ class OpenStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
 
-        # Parse one or more file names
+        # Parse one or more file names, possibly across several mode groups
+        # (OPEN INPUT FILE-A OUTPUT FILE-B ...). `open_mode` keeps the first
+        # group's mode; files from every group are collected.
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -58,9 +60,14 @@ class OpenStatementParser(IStatementParser):
                 break
             if token.type == TokenType.IDENTIFIER and token.value:
                 val = token.value.upper()
-                # Stop at next open mode or WITH keyword
-                if val in _OPEN_MODES or val == "I-O" or val == "WITH":
+                if val == "WITH":
                     break
+                # A subsequent open mode starts a new mode group: consume it
+                # and keep collecting its file names.
+                if val in _OPEN_MODES or val == "I-O":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    continue
                 # WITH REPOSITION for VSAM (when REPOSITION seen directly)
                 if val == "REPOSITION":
                     token_stream.consume()

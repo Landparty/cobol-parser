@@ -86,6 +86,29 @@ class TestOpenParserCoverage:
         assert len(stmts) >= 1
         assert len(stmts[0].file_names) >= 2
 
+    def test_open_multiple_mode_groups_captures_all_files(self):
+        """OPEN INPUT A OUTPUT B — one OPEN statement with two mode groups.
+
+        The files following the second (and later) mode keywords must not be
+        dropped: batch programs routinely open their input and output files
+        in a single OPEN statement. `open_mode` keeps the first mode for
+        backward compatibility.
+        """
+        result = parse_cobol(_prog("           OPEN INPUT FILE-A OUTPUT FILE-B."))
+        assert result.ast is not None
+        stmts = result.ast.find_statements("OPEN")
+        assert len(stmts) >= 1
+        assert stmts[0].file_names == ["FILE-A", "FILE-B"]
+        assert stmts[0].open_mode == "INPUT"
+
+    def test_open_three_mode_groups(self):
+        result = parse_cobol(
+            _prog("           OPEN INPUT FILE-A OUTPUT FILE-B EXTEND FILE-C.")
+        )
+        assert result.ast is not None
+        stmts = result.ast.find_statements("OPEN")
+        assert stmts[0].file_names == ["FILE-A", "FILE-B", "FILE-C"]
+
     def test_open_with_reposition(self):
         """OPEN I-O file WITH REPOSITION covers lines 82-89.
 
