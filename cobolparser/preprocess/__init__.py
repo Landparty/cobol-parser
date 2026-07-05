@@ -671,16 +671,28 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
             copybook_path, "Binary content detected (null bytes found)"
         )
 
-    # Check for unbalanced quotes (simple check)
-    single_quotes = content.count("'")
-    double_quotes = content.count('"')
-
-    # Account for escaped quotes (doubled quotes)
-    single_escaped = content.count("''")
-    double_escaped = content.count('""')
-
-    effective_singles = single_quotes - (single_escaped * 2)
-    effective_doubles = double_quotes - (double_escaped * 2)
+    # Check for unbalanced quotes (simple check). Quotes are counted per
+    # line (escaped/doubled quotes discounted) while tracking a running
+    # parity so fixed-format string continuation can be recognised: a line
+    # with '-' in column 7 whose first significant character is a quote
+    # re-opens a literal left open on the previous line ('"AK' continued by
+    # '-    "BC".') and that re-opening quote must not count. The discount
+    # only applies while a literal of that quote kind is actually open —
+    # a continuation line may also legitimately start a brand-new literal
+    # (e.g. the previous line ends with VALUE), whose quotes all count.
+    effective_singles = 0
+    effective_doubles = 0
+    for line in content.splitlines():
+        line_doubles = line.count('"') - (line.count('""') * 2)
+        line_singles = line.count("'") - (line.count("''") * 2)
+        if len(line) > 7 and line[6] == "-":
+            resumed = line[7:72].lstrip()
+            if resumed.startswith('"') and effective_doubles % 2 == 1:
+                line_doubles -= 1
+            elif resumed.startswith("'") and effective_singles % 2 == 1:
+                line_singles -= 1
+        effective_doubles += line_doubles
+        effective_singles += line_singles
 
     if effective_singles % 2 != 0:
         warnings.append(f"Possible unbalanced single quotes in '{copybook_path}'")

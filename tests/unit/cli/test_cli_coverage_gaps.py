@@ -62,18 +62,21 @@ def _expand_args(filepath: str, **kwargs: object) -> argparse.Namespace:
 
 
 class TestCmdTokenize:
-    def test_outputs_json_list(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_outputs_identified_token_list(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         _cmd_tokenize(_tokenize_args(_SIMPLE))
         data = json.loads(capsys.readouterr().out)
-        assert isinstance(data, list)
-        assert len(data) > 0
+        assert data["source_file"] == _SIMPLE
+        assert isinstance(data["tokens"], list)
+        assert len(data["tokens"]) > 0
 
     def test_token_has_required_fields(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _cmd_tokenize(_tokenize_args(_SIMPLE))
-        tokens = json.loads(capsys.readouterr().out)
-        first = tokens[0]
+        data = json.loads(capsys.readouterr().out)
+        first = data["tokens"][0]
         assert "type" in first
         assert "value" in first
         assert "line" in first
@@ -85,14 +88,15 @@ class TestCmdTokenize:
         _cmd_tokenize(_tokenize_args(_SIMPLE, compact=True))
         out = capsys.readouterr().out.strip()
         assert "\n" not in out
-        assert isinstance(json.loads(out), list)
+        assert isinstance(json.loads(out)["tokens"], list)
 
     def test_output_to_file(self, tmp_path: Path) -> None:
         out_file = str(tmp_path / "tokens.json")
         _cmd_tokenize(_tokenize_args(_SIMPLE, output=out_file))
         data = json.loads(Path(out_file).read_text())
-        assert isinstance(data, list)
-        assert len(data) > 0
+        assert data["source_file"] == _SIMPLE
+        assert isinstance(data["tokens"], list)
+        assert len(data["tokens"]) > 0
 
     def test_free_form_flag_accepted(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -106,7 +110,7 @@ class TestCmdTokenize:
         )
         _cmd_tokenize(_tokenize_args(str(src), free_form=True))
         data = json.loads(capsys.readouterr().out)
-        assert isinstance(data, list)
+        assert isinstance(data["tokens"], list)
 
 
 # ---------------------------------------------------------------------------

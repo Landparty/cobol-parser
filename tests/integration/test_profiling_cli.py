@@ -104,7 +104,7 @@ def test_parse_find_type_with_profile_includes_profiling_key(cobol_file):
     )
     data = json.loads(out)
     assert "profiling" in data
-    assert isinstance(data["result"], list)
+    assert isinstance(data["matches"], list)
 
 
 def test_parse_path_with_profile_includes_profiling_key(cobol_file):

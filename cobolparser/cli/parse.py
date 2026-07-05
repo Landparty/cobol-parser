@@ -168,13 +168,37 @@ def _json_out(data: Any, compact: bool, output_path: str | None = None) -> None:
         print(text)
 
 
+def _identification(
+    args: argparse.Namespace, ast: CobolProgram | None = None
+) -> dict[str, Any]:
+    """Build the identification header included in every JSON output.
+
+    Every JSON document the CLI emits starts with ``source_file`` (the input
+    path as given on the command line) and, when the source was parsed,
+    ``program_id`` (the PROGRAM-ID from the IDENTIFICATION DIVISION, or null
+    if the program has none).
+    """
+    ident: dict[str, Any] = {"source_file": args.file}
+    if ast is not None:
+        ident["program_id"] = ast.program_name or None
+    return ident
+
+
 def _emit_report(
-    data: dict[str, Any], args: argparse.Namespace, prof: Any = None
+    data: dict[str, Any],
+    args: argparse.Namespace,
+    prof: Any = None,
+    ast: CobolProgram | None = None,
 ) -> None:
-    """Emit an analyzer report dict as JSON, splicing in profiling if present."""
+    """Emit an analyzer report dict as JSON, splicing in profiling if present.
+
+    The report is prefixed with the standard identification header so the
+    output is self-describing (see :func:`_identification`).
+    """
+    output = {**_identification(args, ast), **data}
     if prof is not None:
-        data["profiling"] = prof.to_dict()
-    _json_out(data, args.compact, getattr(args, "output", None))
+        output["profiling"] = prof.to_dict()
+    _json_out(output, args.compact, getattr(args, "output", None))
 
 
 def _text_out(text: str, output_path: str | None = None) -> None:
@@ -323,33 +347,38 @@ def _cmd_parse(args: argparse.Namespace) -> None:
     # --find-type: query AST by node type
     if args.find_type:
         matched = result.ast.find_all_by_type(args.find_type)
-        output: Any = [n.to_dict() for n in matched]
+        output: dict[str, Any] = {
+            **_identification(args, result.ast),
+            "node_type": args.find_type,
+            "matches": [n.to_dict() for n in matched],
+        }
         if prof is not None:
-            output = {"result": output, "profiling": prof.to_dict()}
+            output["profiling"] = prof.to_dict()
         _json_out(output, args.compact, getattr(args, "output", None))
         return
 
     # Resolve path or output full AST
     if args.path:
-        output = _resolve_path(result.ast, args.path)
+        output = {
+            **_identification(args, result.ast),
+            "path": args.path,
+            "result": _resolve_path(result.ast, args.path),
+        }
+    elif args.errors or args.stats:
+        output = {**_identification(args, result.ast), "ast": result.ast.to_dict()}
     else:
-        output = result.ast.to_dict()
+        # The AST dict already carries program_name; only the source file
+        # needs to be spliced in for identification.
+        output = {"source_file": args.file, **result.ast.to_dict()}
 
-    # Wrap with errors/stats if requested
-    if args.errors or args.stats:
-        wrapper: dict[str, Any] = {"ast": output}
-        if args.errors:
-            wrapper["errors"] = [str(e) for e in result.errors]
-            wrapper["warnings"] = result.warnings
-        if args.stats:
-            wrapper["statistics"] = _stats_dict(result.statistics)
-        output = wrapper
+    if args.errors:
+        output["errors"] = [str(e) for e in result.errors]
+        output["warnings"] = result.warnings
+    if args.stats:
+        output["statistics"] = _stats_dict(result.statistics)
 
     if prof is not None:
-        if isinstance(output, dict):
-            output["profiling"] = prof.to_dict()
-        else:
-            output = {"result": output, "profiling": prof.to_dict()}
+        output["profiling"] = prof.to_dict()
 
     _json_out(output, args.compact, getattr(args, "output", None))
 
@@ -462,6 +491,7 @@ def _cmd_batch(args: argparse.Namespace) -> None:
         elif br.result is not None:
             entry["success"] = br.result.success
             if br.result.ast is not None:
+                entry["program_id"] = br.result.ast.program_name or None
                 entry["ast"] = br.result.ast.to_dict()
             if args.errors:
                 entry["errors"] = [str(e) for e in br.result.errors]
@@ -499,15 +529,18 @@ def _cmd_tokenize(args: argparse.Namespace) -> None:
     lexer = CobolLexer(source, args.file, dialect, free_form=args.free_form)
     tokens = lexer.tokenize()
 
-    output = [
-        {
-            "type": t.type.name,
-            "value": t.value,
-            "line": t.location.line,
-            "column": t.location.column,
-        }
-        for t in tokens
-    ]
+    output = {
+        "source_file": args.file,
+        "tokens": [
+            {
+                "type": t.type.name,
+                "value": t.value,
+                "line": t.location.line,
+                "column": t.location.column,
+            }
+            for t in tokens
+        ],
+    }
 
     _json_out(output, args.compact, getattr(args, "output", None))
 
@@ -594,7 +627,11 @@ def _cmd_expand(args: argparse.Namespace) -> None:
         defined_symbols=defines,
     )
 
-    _json_out(result.to_dict(), args.compact, getattr(args, "output", None))
+    _json_out(
+        {"source_file": args.file, **result.to_dict()},
+        args.compact,
+        getattr(args, "output", None),
+    )
 
 
 # -- Shared analyzer subcommand builder ---------------------------------------
@@ -648,7 +685,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             entry["possible_values"] = stmt.possible_values
         calls.append(entry)
 
-    _emit_report({"calls": calls}, args, prof)
+    _emit_report({"calls": calls}, args, prof, ast)
 
 
 # -- Subcommand: dead-code ----------------------------------------------------
@@ -662,7 +699,7 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
     analyzer = DeadCodeAnalyzer()
     report = analyzer.analyze(ast)
 
-    _emit_report(report.to_dict(), args, prof)
+    _emit_report(report.to_dict(), args, prof, ast)
 
 
 # -- Subcommand: program-flow -------------------------------------------------
@@ -716,7 +753,7 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
         gen = DotFlowchartGenerator()  # type: ignore[assignment]
         _text_out(gen.generate(report, FlowchartOptions()), output_path)
     else:
-        _emit_report(report.to_dict(), args, prof)
+        _emit_report(report.to_dict(), args, prof, ast)
 
 
 # -- Subcommand: generate-tests -----------------------------------------------
@@ -787,7 +824,7 @@ def _cmd_io_sequence(args: argparse.Namespace) -> None:
     analyzer = IOSequenceAnalyzer()
     report = analyzer.analyze(ast)
 
-    _emit_report(report.to_dict(), args)
+    _emit_report(report.to_dict(), args, ast=ast)
 
 
 # -- Subcommand: move-type-check ----------------------------------------------
@@ -801,7 +838,7 @@ def _cmd_move_type_check(args: argparse.Namespace) -> None:
     checker = MoveTypeChecker()
     report = checker.check(ast)
 
-    _emit_report(report.to_dict(), args)
+    _emit_report(report.to_dict(), args, ast=ast)
 
 
 # -- Subcommand: linkage-check ------------------------------------------------
@@ -815,7 +852,7 @@ def _cmd_linkage_check(args: argparse.Namespace) -> None:
     checker = LinkageChecker()
     report = checker.check(ast)
 
-    _emit_report(report.to_dict(), args)
+    _emit_report(report.to_dict(), args, ast=ast)
 
 
 # -- Subcommand: language-env -------------------------------------------------
@@ -833,7 +870,7 @@ def _cmd_language_env(args: argparse.Namespace) -> None:
     analyzer = LanguageEnvironmentAnalyzer()
     report = analyzer.analyze(ast)
 
-    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+    _emit_report(report.to_dict(), args, ast=ast)
 
 
 # -- Subcommand: ims-dli ------------------------------------------------------
@@ -881,7 +918,7 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
         "dli_calls": calls_out,
     }
 
-    _json_out(output, args.compact, getattr(args, "output", None))
+    _emit_report(output, args, ast=ast)
 
 
 # -- Path resolution ---------------------------------------------------------

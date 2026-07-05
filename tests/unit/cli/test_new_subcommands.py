@@ -369,9 +369,10 @@ class TestOutputFlag:
         with patch("sys.argv", ["cobol-parser", "tokenize", _SIMPLE, "-o", out_file]):
             main()
         assert Path(out_file).exists()
-        tokens = json.loads(Path(out_file).read_text())
-        assert isinstance(tokens, list)
-        assert len(tokens) > 0
+        data = json.loads(Path(out_file).read_text())
+        assert data["source_file"] == _SIMPLE
+        assert isinstance(data["tokens"], list)
+        assert len(data["tokens"]) > 0
 
     def test_dead_code_output_to_file(self, tmp_path, capsys):
         out_file = str(tmp_path / "dead.json")

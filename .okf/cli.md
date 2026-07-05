@@ -2,8 +2,8 @@
 type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
-tags: [cli, command-line, subcommands]
-timestamp: 2026-06-30T00:00:00Z
+tags: [cli, command-line, subcommands, output-identification]
+timestamp: 2026-07-03T00:00:00Z
 ---
 
 # Overview
@@ -11,6 +11,33 @@ timestamp: 2026-06-30T00:00:00Z
 Entry point: `cobol-parser` → `cobolparser.cli:main`
 
 Source: `cobolparser/cli/parse.py` (all subcommands), `cobolparser/cli/coverage.py` (IO coverage tools).
+
+# Output Identification
+
+Every output the CLI emits is self-describing — it identifies the source it
+was produced from (helper: `_identification()` in `cobolparser/cli/parse.py`;
+pinned by `tests/unit/cli/test_output_identification.py`):
+
+* **JSON documents** start with `"source_file"` (the input path as given on
+  the command line). Subcommands that parse the source also emit
+  `"program_id"` (the PROGRAM-ID, or `null` if the program has none) as the
+  second key. Analyzer reports get both via `_emit_report(..., ast=ast)`.
+* **`parse`** — full-AST output gets `"source_file"` spliced in (the AST dict
+  already carries `program_name`). With `--errors`/`--stats` the wrapper is
+  `{"source_file", "program_id", "ast", ...}`. Dotted-path extraction emits
+  `{"source_file", "program_id", "path", "result"}`; `--find-type` emits
+  `{"source_file", "program_id", "node_type", "matches"}`.
+* **`tokenize`** — `{"source_file": ..., "tokens": [...]}` (previously a bare
+  token list).
+* **`expand`** — expansion dict prefixed with `"source_file"` (no
+  `program_id`: the source is not parsed).
+* **`batch`** — a JSON list; each entry carries `"path"` and, when the parse
+  produced an AST, `"program_id"`.
+* **Text outputs** — Mermaid flowcharts start with a `%% Program: <name>`
+  comment; DOT names the digraph after the program; generated CobolCheck
+  `.cut` files carry the program name in their header comment. `preprocess`
+  output is deliberately unidentified (it is transformed source meant to be
+  fed onward).
 
 # Subcommand Reference
 
@@ -36,7 +63,8 @@ write a binary `.prof` to `PATH`.
 cobol-parser tokenize <file.cbl>
 ```
 
-Prints the token stream as JSON: `[{"type": "...", "value": "...", "line": N, "column": N}]`.
+Prints the token stream as JSON:
+`{"source_file": "...", "tokens": [{"type": "...", "value": "...", "line": N, "column": N}]}`.
 
 ## Preprocess
 

@@ -148,18 +148,30 @@ class ASTNode(ABC):
             yield node
             queue.extend(node.children)
 
+    def _matches_type(self, node_type: str) -> bool:
+        """True if this node is identified by *node_type*.
+
+        A node matches either its ``node_type`` attribute (e.g. ``"Statement"``,
+        ``"DataItem"``) or its concrete class name (e.g. ``"MoveStatement"``,
+        ``"CallStatement"``). Statement subclasses all share the generic
+        ``node_type`` ``"Statement"``, so the class name is the only way to
+        select a specific statement kind.
+        """
+        return self.node_type == node_type or type(self).__name__ == node_type
+
     def find_first_by_type(self, node_type: str) -> Optional["ASTNode"]:
         """Find the first node of a specific type in the subtree."""
         for node in self.traverse_depth_first():
-            if node.node_type == node_type:
+            if node._matches_type(node_type):
                 return node
         return None
 
     def find_all_by_type(self, node_type: str) -> list["ASTNode"]:
         """Find all nodes of a specific type in the subtree.
 
-        Results are cached per node_type; the cache is invalidated automatically
-        when children are added or removed.
+        Matches the ``node_type`` attribute or the concrete class name (see
+        :meth:`_matches_type`). Results are cached per node_type; the cache is
+        invalidated automatically when children are added or removed.
         """
         if self._type_cache is None:
             self._type_cache = {}
@@ -167,7 +179,7 @@ class ASTNode(ABC):
             self._type_cache[node_type] = [
                 node
                 for node in self.traverse_depth_first()
-                if node.node_type == node_type
+                if node._matches_type(node_type)
             ]
         return self._type_cache[node_type]
 

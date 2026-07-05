@@ -34,6 +34,14 @@ def _run_cli_json(*args: str) -> dict | list:
     return json.loads(_run_cli(*args))
 
 
+def _run_cli_path(*args: str) -> dict | list:
+    """Run CLI with a dot-path and return the identified extraction result."""
+    output = _run_cli_json(*args)
+    assert "source_file" in output
+    assert "program_id" in output
+    return output["result"]
+
+
 def _run_cli_expect_fail(*args: str) -> int:
     """Run CLI expecting SystemExit, return exit code."""
     with patch("sys.argv", ["cobol-parser", *args]):
@@ -66,49 +74,49 @@ class TestCLIPathResolution:
     """Test dot-path navigation into the AST."""
 
     def test_division_path(self):
-        output = _run_cli_json(SAMPLE_FILE, "procedure")
+        output = _run_cli_path(SAMPLE_FILE, "procedure")
         assert output["node_type"] == "Division"
         assert output["division_name"] == "PROCEDURE"
 
     def test_division_case_insensitive(self):
-        output = _run_cli_json(SAMPLE_FILE, "PROCEDURE")
+        output = _run_cli_path(SAMPLE_FILE, "PROCEDURE")
         assert output["division_name"] == "PROCEDURE"
 
     def test_division_mixed_case(self):
-        output = _run_cli_json(SAMPLE_FILE, "Procedure")
+        output = _run_cli_path(SAMPLE_FILE, "Procedure")
         assert output["division_name"] == "PROCEDURE"
 
     def test_paragraph_path(self):
-        output = _run_cli_json(SAMPLE_FILE, "procedure.MAIN-LOGIC")
+        output = _run_cli_path(SAMPLE_FILE, "procedure.MAIN-LOGIC")
         assert output["paragraph_name"] == "MAIN-LOGIC"
 
     def test_paragraph_case_insensitive(self):
-        output = _run_cli_json(SAMPLE_FILE, "procedure.main-logic")
+        output = _run_cli_path(SAMPLE_FILE, "procedure.main-logic")
         assert output["paragraph_name"] == "MAIN-LOGIC"
 
     def test_statement_type_filter(self):
-        output = _run_cli_json(SAMPLE_FILE, "procedure.MAIN-LOGIC.display")
+        output = _run_cli_path(SAMPLE_FILE, "procedure.MAIN-LOGIC.display")
         assert isinstance(output, list)
         assert len(output) > 0
         for stmt in output:
             assert stmt["statement_type"] == "DISPLAY"
 
     def test_statement_type_case_insensitive(self):
-        output = _run_cli_json(SAMPLE_FILE, "procedure.MAIN-LOGIC.DISPLAY")
+        output = _run_cli_path(SAMPLE_FILE, "procedure.MAIN-LOGIC.DISPLAY")
         assert isinstance(output, list)
         assert len(output) > 0
 
     def test_data_division_path(self):
-        output = _run_cli_json(SAMPLE_FILE, "data")
+        output = _run_cli_path(SAMPLE_FILE, "data")
         assert output["division_name"] == "DATA"
 
     def test_data_division_section(self):
-        output = _run_cli_json(SAMPLE_FILE, "data.WORKING-STORAGE")
+        output = _run_cli_path(SAMPLE_FILE, "data.WORKING-STORAGE")
         assert output["node_type"] == "Section"
         assert output["section_name"] == "WORKING-STORAGE"
 
     def test_identification_division(self):
-        output = _run_cli_json(SAMPLE_FILE, "identification")
+        output = _run_cli_path(SAMPLE_FILE, "identification")
         assert output["division_name"] == "IDENTIFICATION"
 
 
@@ -122,17 +130,17 @@ class TestCLIPathEdgeCases:
 
     def test_trailing_dot(self):
         # "procedure." → ["procedure", ""] → empty filtered out → ["procedure"]
-        output = _run_cli_json(SAMPLE_FILE, "procedure.")
+        output = _run_cli_path(SAMPLE_FILE, "procedure.")
         assert output["division_name"] == "PROCEDURE"
 
     def test_leading_dot(self):
         # ".procedure" → ["", "procedure"] → empty filtered out → ["procedure"]
-        output = _run_cli_json(SAMPLE_FILE, ".procedure")
+        output = _run_cli_path(SAMPLE_FILE, ".procedure")
         assert output["division_name"] == "PROCEDURE"
 
     def test_multiple_dots(self):
         # "procedure..MAIN-LOGIC" → empty components filtered → ["procedure", "MAIN-LOGIC"]
-        output = _run_cli_json(SAMPLE_FILE, "procedure..MAIN-LOGIC")
+        output = _run_cli_path(SAMPLE_FILE, "procedure..MAIN-LOGIC")
         assert output["paragraph_name"] == "MAIN-LOGIC"
 
     def test_only_dots(self):
@@ -144,7 +152,7 @@ class TestCLIPathEdgeCases:
 
     def test_path_with_whitespace(self):
         # Whitespace around components is stripped
-        output = _run_cli_json(SAMPLE_FILE, " procedure . MAIN-LOGIC ")
+        output = _run_cli_path(SAMPLE_FILE, " procedure . MAIN-LOGIC ")
         assert output["paragraph_name"] == "MAIN-LOGIC"
 
 
@@ -220,14 +228,14 @@ class TestCLIFlags:
 
     def test_errors_flag_with_path(self):
         output = _run_cli_json(SAMPLE_FILE, "procedure", "--errors")
-        assert "ast" in output
-        assert output["ast"]["division_name"] == "PROCEDURE"
+        assert "result" in output
+        assert output["result"]["division_name"] == "PROCEDURE"
         assert "errors" in output
 
     def test_stats_flag_with_path(self):
         output = _run_cli_json(SAMPLE_FILE, "procedure", "--stats")
-        assert "ast" in output
-        assert output["ast"]["division_name"] == "PROCEDURE"
+        assert "result" in output
+        assert output["result"]["division_name"] == "PROCEDURE"
         assert "statistics" in output
 
     def test_compact_with_errors(self):
@@ -242,17 +250,17 @@ class TestCLISectionNavigation:
     """Test navigation into sections that contain paragraphs."""
 
     def test_section_in_procedure_division(self):
-        output = _run_cli_json(DECLARATIVES_FILE, "procedure.MAIN-LOGIC")
+        output = _run_cli_path(DECLARATIVES_FILE, "procedure.MAIN-LOGIC")
         assert output["node_type"] == "Section"
         assert output["section_name"] == "MAIN-LOGIC"
 
     def test_multiple_paragraphs_different_file(self):
         # control_flow.cbl has many paragraphs, verify a few are reachable
-        output = _run_cli_json(CONTROL_FLOW_FILE, "procedure.IF-TESTS")
+        output = _run_cli_path(CONTROL_FLOW_FILE, "procedure.IF-TESTS")
         assert output["paragraph_name"] == "IF-TESTS"
 
     def test_statement_filter_on_paragraph(self):
-        output = _run_cli_json(CONTROL_FLOW_FILE, "procedure.GOTO-TARGET.display")
+        output = _run_cli_path(CONTROL_FLOW_FILE, "procedure.GOTO-TARGET.display")
         assert isinstance(output, list)
         assert len(output) > 0
         for stmt in output:
@@ -274,7 +282,7 @@ class TestCLISubcommandDispatch:
         assert output["program_name"] == "CALC-DEMO"
 
     def test_explicit_parse_with_path(self):
-        output = _run_cli_json("parse", SAMPLE_FILE, "procedure")
+        output = _run_cli_path("parse", SAMPLE_FILE, "procedure")
         assert output["division_name"] == "PROCEDURE"
 
     def test_explicit_parse_with_flags(self):
@@ -297,14 +305,15 @@ class TestCLIParseNewFlags:
 
     def test_find_type_display(self):
         output = _run_cli_json(SAMPLE_FILE, "--find-type", "DisplayStatement")
-        assert isinstance(output, list)
-        for node in output:
+        assert output["node_type"] == "DisplayStatement"
+        assert isinstance(output["matches"], list)
+        for node in output["matches"]:
             assert node["statement_type"] == "DISPLAY"
 
     def test_find_type_no_matches(self):
         output = _run_cli_json(SAMPLE_FILE, "--find-type", "NonexistentType")
-        assert isinstance(output, list)
-        assert len(output) == 0
+        assert isinstance(output["matches"], list)
+        assert len(output["matches"]) == 0
 
     def test_find_type_with_compact(self):
         raw = _run_cli(
@@ -312,7 +321,7 @@ class TestCLIParseNewFlags:
         ).strip()
         assert "\n" not in raw
         output = json.loads(raw)
-        assert isinstance(output, list)
+        assert isinstance(output["matches"], list)
 
     def test_copybook_path_flag(self):
         output = _run_cli_json(
@@ -412,14 +421,15 @@ class TestCLIBatch:
 class TestCLITokenize:
     """Test the tokenize subcommand."""
 
-    def test_tokenize_outputs_json_array(self):
+    def test_tokenize_outputs_identified_tokens(self):
         output = _run_cli_json("tokenize", SAMPLE_FILE)
-        assert isinstance(output, list)
-        assert len(output) > 0
+        assert output["source_file"] == SAMPLE_FILE
+        assert isinstance(output["tokens"], list)
+        assert len(output["tokens"]) > 0
 
     def test_tokenize_token_structure(self):
         output = _run_cli_json("tokenize", SAMPLE_FILE)
-        token = output[0]
+        token = output["tokens"][0]
         assert "type" in token
         assert "value" in token
         assert "line" in token
@@ -429,18 +439,18 @@ class TestCLITokenize:
         raw = _run_cli("tokenize", SAMPLE_FILE, "--compact").strip()
         assert "\n" not in raw
         output = json.loads(raw)
-        assert isinstance(output, list)
+        assert isinstance(output["tokens"], list)
 
     def test_tokenize_free_form(self):
         output = _run_cli_json("tokenize", SAMPLE_FILE, "--free-form")
-        assert isinstance(output, list)
+        assert isinstance(output["tokens"], list)
 
     def test_tokenize_file_not_found(self):
         assert _run_cli_expect_fail("tokenize", "/nonexistent/file.cbl") == 1
 
     def test_tokenize_has_expected_types(self):
         output = _run_cli_json("tokenize", SAMPLE_FILE)
-        types = {t["type"] for t in output}
+        types = {t["type"] for t in output["tokens"]}
         # Should have at least identifiers and periods
         assert "IDENTIFIER" in types or "PERIOD" in types
 

@@ -23,7 +23,7 @@ from cobolparser.models.program import CobolDivision, CobolSection
 from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
 from cobolparser.parsers.statements._utils import collect_exec_sql_text
 
-from .base import BaseDivisionParser
+from .base import BaseDivisionParser, at_division_boundary
 
 # Constants for COMP/COMPUTATIONAL usage keywords and token types.
 # These appear in multiple parsing methods; keeping them in one place avoids
@@ -310,6 +310,13 @@ class DataDivisionParser(BaseDivisionParser):
             # Also check for section keywords that appear as identifiers
             if value_upper in _SECTION_KEYWORDS and tok_type != TokenType.IDENTIFIER:
                 break
+
+            # A division header split across source lines ("PROCEDURE" at the
+            # end of one line, "DIVISION." on the next) reaches this scanner
+            # as plain IDENTIFIER tokens — stop without consuming it.
+            if value_upper in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
+                if at_division_boundary(token_stream):
+                    break
 
             # In FILE SECTION, detect FD/SD declarations to build record-to-file mapping
             if (

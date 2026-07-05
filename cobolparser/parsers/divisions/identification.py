@@ -17,7 +17,7 @@ from cobolparser.core.interfaces import ITokenStream
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision
 
-from .base import BaseDivisionParser
+from .base import BaseDivisionParser, at_division_boundary
 
 
 class IdentificationDivisionParser(BaseDivisionParser):
@@ -77,13 +77,10 @@ class IdentificationDivisionParser(BaseDivisionParser):
 
             token_value = token.value.upper()
 
-            # Check if we've reached next division
-            # Handle both bare keywords ("ENVIRONMENT") and composite tokens
-            # ("ENVIRONMENT DIVISION") produced by the lexer in free-form mode
-            _div_keywords = ("ENVIRONMENT", "DATA", "PROCEDURE")
-            if token_value in _div_keywords:
-                break
-            if any(token_value == f"{kw} DIVISION" for kw in _div_keywords):
+            # Check if we've reached the next division. A bare keyword such
+            # as DATA only counts when actually followed by DIVISION — the
+            # word may appear inside a comment-entry.
+            if at_division_boundary(token_stream):
                 break
 
             # Parse specific clauses
@@ -229,19 +226,16 @@ class IdentificationDivisionParser(BaseDivisionParser):
         # Collect value tokens until period
         # Also stop at division boundaries to avoid consuming the next division header
         value_tokens = []
-        _div_keywords = ("IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE")
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if token and token.value == ".":
                 token_stream.consume()
                 break
-            # Stop at division boundaries without consuming them
-            if token:
-                tv = token.value.upper()
-                if tv in _div_keywords:
-                    break
-                if any(tv == f"{kw} DIVISION" for kw in _div_keywords):
-                    break
+            # Stop at division boundaries without consuming them. A bare
+            # keyword such as DATA only counts when actually followed by
+            # DIVISION — comment-entries are free text and may contain it.
+            if token and at_division_boundary(token_stream):
+                break
             if token:
                 value_tokens.append(token.value)
                 token_stream.consume()

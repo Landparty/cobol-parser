@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* Strict support tests for the real-life NIST COBOL-85 corpus
+  (`tests/integration/test_nist_cobol85_support.py`). All 459 `.CBL`
+  programs in `examples/cobol/` must now parse **error-free** (the
+  pre-existing corpus test only checked that parsing does not crash).
+  457/459 currently pass (455 when the tests were introduced; `NC113M` and
+  `NC252A` were then fixed — see *Fixed* below). The 2 remaining are pinned
+  as strict-xfail `KNOWN_ISSUES` with documented causes, so any parser
+  improvement must remove the entry and the list only ever shrinks:
+  `OBNC1M` (a COBOL-74 obsolete-feature test that embeds a phony program in
+  a comment-entry, requiring Area A/B-aware parsing) and `SM101A` (requires
+  copybook expansion by design). `SM101A` and `SM207A` must additionally
+  parse clean with copybook expansion against the suite's own copybooks,
+  and all 51 `.CPY` copybooks must pass `validate_copybook_content`.
+
+* All CLI outputs are now properly identified. Every JSON document emitted by
+  the `cobol-parser` CLI starts with a `source_file` key (the input path as
+  given on the command line) and, for subcommands that parse the source, a
+  `program_id` key (the PROGRAM-ID from the IDENTIFICATION DIVISION, or
+  `null` when the program has none). This covers `analyze`, `dead-code`,
+  `program-flow` (JSON format), `io-sequence`, `move-type-check`,
+  `linkage-check`, `language-env`, `ims-dli`, `expand`, and `parse`
+  (`--errors`/`--stats` wrapper). `batch` entries additionally carry
+  `program_id` next to the existing `path`. Mermaid flowcharts from
+  `program-flow --format mermaid` now start with a `%% Program: <name>`
+  comment header (DOT output already named the digraph after the program).
+  The contract is pinned by `tests/unit/cli/test_output_identification.py`.
+
+### Changed
+
+* **CLI output shapes for list-style results** (part of the output
+  identification change above; library APIs are unchanged). `tokenize` now
+  emits `{"source_file": ..., "tokens": [...]}` instead of a bare token
+  list. `parse --find-type` emits `{"source_file", "program_id",
+  "node_type", "matches"}` instead of a bare node list, and dotted-path
+  extraction (`parse <file> <path>`) emits `{"source_file", "program_id",
+  "path", "result"}` instead of the bare subtree; with `--errors`/`--stats`
+  a path extraction now carries those keys directly instead of being wrapped
+  under an `"ast"` key.
+
 * `PictureClause` now validates the PICTURE pattern and exposes `is_valid` and
   `validation_errors` (also surfaced in `to_dict()`). Validation is
   conservative -- it flags only unambiguously illegal pictures (empty pattern,
@@ -46,6 +85,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed.
 
 ### Fixed
+
+* Division headers split across source lines (`DATA` at the end of one
+  line, `DIVISION.` on the next — legal COBOL word separation) are now
+  recognised, both at the header parser (`BaseDivisionParser.parse`) and in
+  the DATA DIVISION section scanner, which previously consumed a split
+  `PROCEDURE DIVISION` header as noise and silently dropped the entire
+  procedure division. Found via NIST `NC113M.CBL`, which now parses
+  error-free with all four divisions and 111 statements.
+
+* IDENTIFICATION DIVISION comment-entries (AUTHOR, INSTALLATION, ...)
+  containing a bare division keyword (e.g. `AUTOMATIC DATA AND
+  TELECOMMUNICATION SERVICE`) are no longer mistaken for a division
+  boundary: a bare keyword only ends the division when the next significant
+  token is `DIVISION`. Shared helper `at_division_boundary()` in
+  `parsers/divisions/base.py`. Found via NIST `OBNC1M.CBL`.
+
+* COMPUTE now accepts the full receiver list syntax
+  `COMPUTE {identifier [ROUNDED]}... = expression`, including subscripted
+  receivers (`T (2, 2, 2)`). Previously only a single receiver with one
+  optional ROUNDED was parsed and anything more reported "missing '='
+  operator". Found via NIST `NC252A.CBL`, which now parses error-free.
+
+* A period after a numeric literal is now treated as a decimal point only
+  when followed by a digit (a COBOL numeric literal cannot end with a
+  decimal point). Previously `COMPUTE A = 174 / 16.` lexed `16.` as one
+  literal, so the sentence never terminated and the following statement was
+  silently swallowed into the COMPUTE expression. Fixed in both the pure-
+  Python lexer and the Cython fast path (`_lexer_fast.pyx`, regenerated
+  `.c` checked in).
+
+* `validate_copybook_content()` no longer flags copybooks that continue a
+  string literal across lines (fixed-format `-` in column 7 re-opens the
+  literal with an extra quote) as having unbalanced quotes. Found via NIST
+  `K1WKA.CPY` / `K1WKY.CPY`; genuinely unbalanced quotes are still flagged.
+
+* Library-qualified `COPY member OF library` now falls back to the plain
+  copybook search path when the library has no matching subdirectory
+  (previously an unhandled `CopybookNotFoundError` — NIST `SM207A.CBL`
+  crashed expansion even though `ALTLB.CPY` sat in the search path). A
+  `<search-dir>/<library>/` subdirectory still takes precedence when it
+  exists.
+
+* `ASTNode.find_all_by_type()` / `find_first_by_type()` now also match a
+  node's concrete class name (e.g. `"MoveStatement"`, `"CallStatement"`,
+  `"ExecSQLStatement"`, `"IOReadStatement"`) in addition to the `node_type`
+  attribute. All statement subclasses share the generic `node_type`
+  `"Statement"`, so lookups by statement class name silently returned nothing
+  — which meant the `analyze` CLI subcommand always printed an empty
+  `"calls"` list and `parse --find-type` could never select a specific
+  statement kind (both are documented to work this way). Lookups by
+  `node_type` (`"Statement"`, `"DataItem"`, `"ConditionNameItem"`, ...) are
+  unchanged, and serialized output is unaffected.
 
 * Lexer now recognises typed-literal prefixes (`X"1F"` hexadecimal, `N"..."`
   national, `NX"..."` national-hex, `G"..."` DBCS/graphic, `Z"..."`
