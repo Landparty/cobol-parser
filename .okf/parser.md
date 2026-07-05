@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-04T00:00:00Z
+timestamp: 2026-07-05T00:00:00Z
 ---
 
 # Overview
@@ -130,6 +130,14 @@ suite: `tests/regression/test_numeric_value_clause.py`.
 | `unlock_parser.py` | UNLOCK |
 | `write_parser.py` | WRITE |
 | `_utils.py` | Shared clause-collection utilities |
+
+**Multi-mode OPEN (`open_parser.py`):** one OPEN statement may carry several
+mode groups (`OPEN INPUT FILE-A OUTPUT FILE-B EXTEND FILE-C`). The parser
+collects the file names of *every* group into `IOOpenStatement.file_names`;
+`open_mode` keeps only the **first** group's mode (backward-compatible
+single-mode field). Before 2026-07-05 the file-name loop broke at the second
+mode keyword and silently dropped all later files — pinned by
+`tests/unit/io_statements/test_open_read_parsers.py::TestOpenParserCoverage::test_open_multiple_mode_groups_captures_all_files`.
 
 # Adding a New Statement Parser
 
