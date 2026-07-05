@@ -205,6 +205,22 @@ class TestCopybookValidatorContinuedLiterals:
         issues = validate_copybook_content('01 X PIC X VALUE "A.\n', "bad.cpy")
         assert any("unbalanced double quotes" in i for i in issues)
 
+    def test_continuation_line_starting_a_new_literal_counts_normally(self):
+        # The '-' line does NOT resume an open literal (line 1 has no
+        # quotes), so its balanced literal must not be discounted.
+        content = "000100     02 WSTR-2A PICTURE X(2) VALUE\n" '000200-    "BC".\n'
+        assert validate_copybook_content(content, "newlit.cpy") == []
+
+    def test_unbalanced_continuation_resume_still_flagged(self):
+        # Literal opened on line 1 and re-opened on the '-' line but never
+        # closed — still unbalanced overall.
+        content = (
+            '000100     02 WSTR-2A PICTURE X(3) VALUE                              "A\n'
+            '000200-    "BC.\n'
+        )
+        issues = validate_copybook_content(content, "openlit.cpy")
+        assert any("unbalanced double quotes" in i for i in issues)
+
 
 class TestLibraryQualifiedCopy:
     """SM207A: COPY member OF library resolves via a library subdirectory

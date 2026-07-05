@@ -13,18 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/integration/test_nist_cobol85_support.py`). All 459 `.CBL`
   programs in `examples/cobol/` must now parse **error-free** (the
   pre-existing corpus test only checked that parsing does not crash).
-  455/459 currently pass; the 4 the parser cannot yet handle (`NC113M`,
-  `OBNC1M`, `NC252A`, `SM101A`) are pinned as strict-xfail `KNOWN_ISSUES`
-  with documented causes, so any parser improvement must remove the entry
-  and the list only ever shrinks. `SM101A` (the COPY test program) must
-  additionally parse clean with copybook expansion against the suite's own
-  copybooks, and all 51 `.CPY` copybooks must pass
-  `validate_copybook_content`. Known remaining gaps documented by the
-  xfails: division headers split across source lines, IDENTIFICATION
-  DIVISION comment-entries containing the word `DATA`, COMPUTE with
-  subscripted ROUNDED receiving operands, and library-qualified
-  `COPY member OF library` resolution (SM207A crashes the expander when
-  expansion is enabled).
+  457/459 currently pass (455 when the tests were introduced; `NC113M` and
+  `NC252A` were then fixed — see *Fixed* below). The 2 remaining are pinned
+  as strict-xfail `KNOWN_ISSUES` with documented causes, so any parser
+  improvement must remove the entry and the list only ever shrinks:
+  `OBNC1M` (a COBOL-74 obsolete-feature test that embeds a phony program in
+  a comment-entry, requiring Area A/B-aware parsing) and `SM101A` (requires
+  copybook expansion by design). `SM101A` and `SM207A` must additionally
+  parse clean with copybook expansion against the suite's own copybooks,
+  and all 51 `.CPY` copybooks must pass `validate_copybook_content`.
 
 * All CLI outputs are now properly identified. Every JSON document emitted by
   the `cobol-parser` CLI starts with a `source_file` key (the input path as
