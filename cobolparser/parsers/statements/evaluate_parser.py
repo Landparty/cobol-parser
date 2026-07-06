@@ -304,7 +304,8 @@ class EvaluateStatementParser(IStatementParser):
         before and after each nested parse: if any PERIOD token appears in the
         consumed range, the EVALUATE scope has ended.  This lets us both build
         AST nodes for nested statements *and* detect period-termination, even
-        when statement parsers consume the period internally (via skip_to_period).
+        when statement parsers consume the period internally (e.g. via
+        parse_size_error_clauses).
         """
         period_terminated = False
         statements = []

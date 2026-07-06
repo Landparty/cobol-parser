@@ -4,6 +4,8 @@ from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
+    STATEMENT_KEYWORDS,
+    STATEMENT_TOKEN_TYPES,
     matches_keyword,
     skip_whitespace,
     try_consume_keyword,
@@ -15,21 +17,17 @@ from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import MoveStatement
 
-_STOP_TOKEN_TYPES: frozenset = frozenset(
+# Union of the canonical statement-start sets (single source of truth in
+# _utils.py — covers every registered statement verb, including EXEC/EXECUTE)
+# with MOVE-specific clause/scope boundaries that aren't statement starts
+# themselves (ELSE/WHEN/END-xxx, and the AT/INVALID/NOT clause-boundary
+# keywords inside IO statement bodies). Without the canonical sets, a MOVE
+# with no trailing period immediately followed by a statement type missing
+# from a hand-rolled local list (e.g. EXEC SQL) would silently swallow that
+# statement's leading tokens as bogus MOVE targets.
+_STOP_TOKEN_TYPES: frozenset = STATEMENT_TOKEN_TYPES | frozenset(
     getattr(TokenType, name)
     for name in (
-        "MOVE",
-        "DISPLAY",
-        "CALL",
-        "ADD",
-        "SUBTRACT",
-        "MULTIPLY",
-        "DIVIDE",
-        "IF",
-        "PERFORM",
-        "EVALUATE",
-        "STOP",
-        "EXIT",
         "GO",
         "ELSE",
         "WHEN",
@@ -45,21 +43,8 @@ _STOP_TOKEN_TYPES: frozenset = frozenset(
     if hasattr(TokenType, name)
 )
 
-_STOP_KEYWORDS: frozenset = frozenset(
+_STOP_KEYWORDS: frozenset = STATEMENT_KEYWORDS | frozenset(
     {
-        "MOVE",
-        "DISPLAY",
-        "CALL",
-        "ADD",
-        "SUBTRACT",
-        "MULTIPLY",
-        "DIVIDE",
-        "IF",
-        "PERFORM",
-        "EVALUATE",
-        "STOP",
-        "GO",
-        "ENTRY",
         "END-MOVE",
         "ON",
         "RETURNING",

@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-05T00:00:00Z
+timestamp: 2026-07-06T00:00:00Z
 ---
 
 # Overview
@@ -174,6 +174,71 @@ collects the file names of *every* group into `IOOpenStatement.file_names`;
 single-mode field). Before 2026-07-05 the file-name loop broke at the second
 mode keyword and silently dropped all later files — pinned by
 `tests/unit/io_statements/test_open_read_parsers.py::TestOpenParserCoverage::test_open_multiple_mode_groups_captures_all_files`.
+
+**MOVE / SUBTRACT / MULTIPLY / DIVIDE swallowing a following statement
+(`move_parser.py`, `arithmetic_parsers.py`, `_utils.py`):** a statement with
+no trailing period, immediately followed by another statement, must stop at
+the boundary rather than consume the next statement's leading tokens.
+- `MoveStatementParser`'s target-collection loop now stops on the shared
+  `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` (`_utils.py`) unioned with its
+  own clause-boundary extras (`GO`, `ELSE`/`WHEN`/`END-*`, and the IO-clause
+  `NOT`/`INVALID`/`AT` tokens), instead of a hand-rolled, incomplete local
+  list. The local list omitted `EXEC`/`EXECUTE` (among other verbs), so
+  `MOVE X TO Y` immediately followed by `EXEC SQL ... END-EXEC` (no period
+  after the MOVE) silently swallowed `EXEC SQL <table-qualifier>` as bogus
+  MOVE targets and the whole EXEC SQL block vanished from the AST.
+- `SubtractStatementParser` and the shared `_parse_binary_arithmetic` helper
+  (MULTIPLY/DIVIDE) ended their parse with `skip_to_period()` — a crude "eat
+  every token until the next period" helper — instead of `parse_size_error_clauses`
+  (already used by ADD/COMPUTE), which properly parses ON SIZE ERROR / NOT ON
+  SIZE ERROR and stops without consuming at the first unrecognized token.
+  `skip_to_period()` has been deleted (dead code once nothing called it).
+  Because a following EXEC SQL block's leading text is not
+  period-terminated, `skip_to_period` walked past the entire block, stopping
+  only at a coincidental period inside a qualified table name (e.g.
+  `BANK.ACCOUNT`) — the remaining SQL `SET` clause was then misparsed as a
+  COBOL `SET` statement.
+- Fixing that swap exposed two previously-unreachable bugs in
+  `_parse_size_error_stmts` (`_utils.py`), both now fixed:
+  1. Its inline DISPLAY mini-parser collected display items until a period
+     or literal `MOVE`/`DISPLAY`, so `ON SIZE ERROR DISPLAY '...' NOT ON
+     SIZE ERROR ...` swallowed `NOT ON SIZE ERROR` as bogus display items
+     instead of recognizing it as the next clause. It now also stops (without
+     consuming) at `TokenType.NOT` and any non-string-literal token whose
+     value is in `STATEMENT_KEYWORDS`/`SCOPE_TERMINATORS`/
+     `CONTROL_FLOW_BOUNDARIES` (the `STRING_LITERAL` exclusion also fixes a
+     latent truncation bug for `DISPLAY 'ADD'`-style literals that predates
+     this change).
+  2. Its own outer dispatch loop's `else` branch (for verbs other than
+     DISPLAY/MOVE) unconditionally called `stream.consume()` — violating its
+     own docstring ("the next clause boundary is NOT consumed"). A `NOT`
+     token (or a scope/control-flow boundary like `END-SUBTRACT`) reaching
+     this branch — e.g. right after the DISPLAY fix above correctly stopped
+     without consuming it — was silently eaten one token at a time instead
+     of ending the clause, so `NOT ON SIZE ERROR`'s own DISPLAY got merged
+     into the *first* clause's nested-statement list and `not_on_size_error`
+     stayed `None`. The `else` branch now breaks (without consuming) on
+     `TokenType.NOT` or a `SCOPE_TERMINATORS`/`CONTROL_FLOW_BOUNDARIES`
+     value; other verbs are still skipped token-by-token, per the documented
+     "DISPLAY and MOVE are the only inline mini-parsers" design.
+- `ARITHMETIC_OPERAND_TOKEN_TYPES` (`_utils.py`) gained
+  `TokenType.FIGURATIVE_CONSTANT` — figurative constants (`ZERO`, `SPACES`,
+  ...) are valid operands anywhere a literal is allowed (e.g. `MULTIPLY A BY
+  ZERO GIVING B`); the SUBTRACT `FROM` target already special-cased this
+  token type, so the general operand set was inconsistent with it. This
+  surfaced only once the swallow-bug fixes above stopped masking
+  `tests/samples/arithmetic_operations.cbl`'s `DIVIDE ... BY ZERO ...`
+  statement (previously never reached — the *preceding* DIVIDE statement's
+  `skip_to_period` had swallowed it as part of a much larger silently
+  discarded block).
+Originally found via a real ACCTMNT.cbl banking program (mockymock e2e
+work): two EXEC SQL `UPDATE`/`INSERT` blocks vanished from the AST with
+`result.success == True` and no errors reported. The same bug class also
+hit a `CALL 'CBLTDLI' USING DLI-REPL` in an IMS sample's `ELSE` branch (see
+`tests/unit/test_ims_segment_analyzer.py::TestRealWorldBankingAccounts`) —
+previously misattributed to "ELSE branches aren't traversed" when the real
+cause was an un-punctuated `SUBTRACT` swallowing the branch. Pinned by
+`tests/regression/test_tier2_silent_drop_regressions.py` (Group 6).
 
 # Adding a New Statement Parser
 

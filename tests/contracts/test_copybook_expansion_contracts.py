@@ -269,20 +269,21 @@ class TestProcedureDivisionCopybookContracts:
         assert result is not None
         assert hasattr(result, "ast")
         assert hasattr(result, "success")
+        assert result.success, f"Parsing failed: {result.errors}"
+        assert result.ast is not None
 
         # Contract: AST contains statements from expanded copybook
-        if result.success and result.ast:
-            all_statements = result.ast.get_all_statements()
-            statement_types = [
-                stmt.statement_type
-                for stmt in all_statements
-                if hasattr(stmt, "statement_type")
-            ]
+        all_statements = result.ast.get_all_statements()
+        statement_types = [
+            stmt.statement_type
+            for stmt in all_statements
+            if hasattr(stmt, "statement_type")
+        ]
 
-            # Contract: MOVE statement from STANDARD-PROCEDURES.cpy is in AST
-            assert (
-                "MOVE" in statement_types
-            ), "MOVE statement from copybook not found in AST"
+        # Contract: MOVE statement from STANDARD-PROCEDURES.cpy is in AST
+        assert (
+            "MOVE" in statement_types
+        ), "MOVE statement from copybook not found in AST"
 
     def test_procedure_copybook_preserves_order(self):
         """Test statements from COPY maintain order in AST."""
@@ -306,30 +307,32 @@ class TestProcedureDivisionCopybookContracts:
         )
 
         # Contract: statements maintain order
-        if result.success and result.ast:
-            all_statements = result.ast.get_all_statements()
+        assert result.success, f"Parsing failed: {result.errors}"
+        assert result.ast is not None
 
-            # Should have multiple statements in order
-            assert len(all_statements) >= 3, "Expected at least 3 statements"
+        all_statements = result.ast.get_all_statements()
 
-            # First should be DISPLAY "Start"
-            # Middle should be from copybook (MOVE, DISPLAY, PERFORM)
-            # Last should be DISPLAY "End" (and optionally STOP RUN if parser supports it)
-            statement_types = [
-                stmt.statement_type
-                for stmt in all_statements
-                if hasattr(stmt, "statement_type")
-            ]
+        # Should have multiple statements in order
+        assert len(all_statements) >= 3, "Expected at least 3 statements"
 
-            # Verify we have expected statement types from copybook
-            assert "DISPLAY" in statement_types, "Expected DISPLAY statements"
-            assert "MOVE" in statement_types, "Expected MOVE statement from copybook"
-            assert (
-                "PERFORM" in statement_types
-            ), "Expected PERFORM statement from copybook"
+        # First should be DISPLAY "Start"
+        # Middle should be from copybook (MOVE, DISPLAY, PERFORM)
+        # Last should be DISPLAY "End" (and optionally STOP RUN if parser supports it)
+        statement_types = [
+            stmt.statement_type
+            for stmt in all_statements
+            if hasattr(stmt, "statement_type")
+        ]
 
-            # Verify we have at least 3 DISPLAY statements (Start, Processing started, End)
-            display_count = statement_types.count("DISPLAY")
-            assert (
-                display_count >= 3
-            ), f"Expected at least 3 DISPLAY statements, got {display_count}"
+        # Verify we have expected statement types from copybook
+        assert "DISPLAY" in statement_types, "Expected DISPLAY statements"
+        assert "MOVE" in statement_types, "Expected MOVE statement from copybook"
+        assert (
+            "PERFORM" in statement_types
+        ), "Expected PERFORM statement from copybook"
+
+        # Verify we have at least 3 DISPLAY statements (Start, Processing started, End)
+        display_count = statement_types.count("DISPLAY")
+        assert (
+            display_count >= 3
+        ), f"Expected at least 3 DISPLAY statements, got {display_count}"

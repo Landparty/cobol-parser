@@ -1,5 +1,35 @@
 # OKF Update Log
 
+## 2026-07-06 (MOVE/SUBTRACT/MULTIPLY/DIVIDE swallowing a following statement)
+
+* **Updated** [parser.md](parser.md): `MoveStatementParser`'s target loop
+  now stops on the shared `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS`
+  (`_utils.py`) instead of a hand-rolled list missing `EXEC`/`EXECUTE`;
+  `SubtractStatementParser` and the shared MULTIPLY/DIVIDE helper now call
+  `parse_size_error_clauses` instead of the deleted `skip_to_period()`.
+  Also fixed two more bugs this exposed in `_parse_size_error_stmts`: its
+  DISPLAY mini-parser didn't stop at `NOT ON SIZE ERROR` or other
+  boundaries (also fixed a latent `DISPLAY 'ADD'`-style truncation), and its
+  outer dispatch loop's fallback branch unconditionally consumed tokens
+  instead of stopping at `NOT`/scope-terminators, so a `NOT ON SIZE ERROR`
+  clause was merged into the preceding `ON SIZE ERROR` clause instead of
+  populating `not_on_size_error`. Also added `TokenType.FIGURATIVE_CONSTANT`
+  to
+  `ARITHMETIC_OPERAND_TOKEN_TYPES` (a pre-existing, previously-unreached gap
+  the fix surfaced via `tests/samples/arithmetic_operations.cbl`'s
+  `DIVIDE ... BY ZERO`). Previously, a MOVE/SUBTRACT/MULTIPLY/DIVIDE
+  statement with no trailing period, immediately followed by another
+  statement (most notably `EXEC SQL`), silently swallowed that statement's
+  leading tokens — `result.success` stayed `True` with zero errors reported.
+  Found via a real ACCTMNT.cbl banking program (mockymock e2e work): two
+  EXEC SQL blocks vanished from the AST. The same class also hit a `CALL
+  'CBLTDLI' USING DLI-REPL` in an IMS sample's `ELSE` branch, previously
+  misattributed to "ELSE branches aren't traversed" —
+  `tests/unit/test_ims_segment_analyzer.py::TestRealWorldBankingAccounts`
+  updated (4 → 5 expected calls, new `test_repl_detected_in_else_branch`).
+  Pinned by `tests/regression/test_tier2_silent_drop_regressions.py`
+  (Group 6).
+
 ## 2026-07-05 (IO clause bodies parsed into the AST)
 
 * **Updated** [parser.md](parser.md): documented the new "IO clause bodies"

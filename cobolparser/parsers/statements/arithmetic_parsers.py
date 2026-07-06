@@ -29,7 +29,6 @@ from ._utils import (
     parse_size_error_clauses,
     peek_value_upper,
     report_or_raise,
-    skip_to_period,
     token_location,
 )
 
@@ -194,7 +193,7 @@ class SubtractStatementParser(IStatementParser):
                 ctx, "SUBTRACT statement missing FROM or GIVING clause", start_loc
             )
 
-        skip_to_period(token_stream)
+        parse_size_error_clauses(token_stream, stmt)
         return stmt
 
 
@@ -286,7 +285,7 @@ def _parse_binary_arithmetic(
     if giving:
         stmt.set_giving(giving)
 
-    skip_to_period(token_stream)
+    parse_size_error_clauses(token_stream, stmt)
     return stmt
 
 

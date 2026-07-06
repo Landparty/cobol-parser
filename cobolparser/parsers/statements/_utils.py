@@ -272,17 +272,6 @@ def consume_period(stream: ITokenStream) -> None:
             stream.consume()
 
 
-def skip_to_period(stream: ITokenStream) -> None:
-    """Skip (consume) tokens until a period is found, then consume it."""
-    while not stream.is_empty():
-        token = stream.peek()
-        if not token or token.type == TokenType.PERIOD:
-            if token:
-                stream.consume()
-            break
-        stream.consume()
-
-
 # ---------------------------------------------------------------------------
 # Clause-token collector (used by IO statement parsers)
 # ---------------------------------------------------------------------------
@@ -579,9 +568,18 @@ def try_parse_nested_statement(
 #:
 #: ``LEVEL_NUMBER`` is included because the lexer eagerly classifies bare
 #: integers 01-99 as level numbers regardless of context, so ``ADD 1 TO A``
-#: would otherwise lose its first operand.
+#: would otherwise lose its first operand. ``FIGURATIVE_CONSTANT`` is
+#: included because ZERO/ZEROS/SPACES/etc. are valid COBOL operands anywhere
+#: a literal is allowed, including arithmetic statements (e.g. ``MULTIPLY A
+#: BY ZERO GIVING B``); the SUBTRACT ``FROM`` target already special-cased
+#: this token type, so this keeps the shared operand set consistent with it.
 ARITHMETIC_OPERAND_TOKEN_TYPES: frozenset[TokenType] = frozenset(
-    {TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER}
+    {
+        TokenType.IDENTIFIER,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.LEVEL_NUMBER,
+        TokenType.FIGURATIVE_CONSTANT,
+    }
 )
 
 
@@ -847,8 +845,22 @@ def _parse_size_error_stmts(stream: ITokenStream) -> list:
                 if t.type == TokenType.NEWLINE:
                     stream.consume()
                     continue
-                if t.type == TokenType.PERIOD or (
-                    t.value and t.value.upper() in ("MOVE", "DISPLAY")
+                # Stop at a period, the start of a NOT ON SIZE ERROR clause,
+                # or any other statement/scope/control-flow boundary keyword
+                # (e.g. END-SUBTRACT, ELSE) — otherwise the clause boundary
+                # gets silently swallowed as a bogus display item.
+                if (
+                    t.type == TokenType.PERIOD
+                    or t.type == TokenType.NOT
+                    or (
+                        t.type != TokenType.STRING_LITERAL
+                        and t.value
+                        and (
+                            t.value.upper() in STATEMENT_KEYWORDS
+                            or t.value.upper() in SCOPE_TERMINATORS
+                            or t.value.upper() in CONTROL_FLOW_BOUNDARIES
+                        )
+                    )
                 ):
                     break
                 if t.type in (
@@ -889,6 +901,18 @@ def _parse_size_error_stmts(stream: ITokenStream) -> list:
                 stream.consume()
             nested.append(move_stmt)
         else:
+            # Any other verb is skipped one token at a time (documented
+            # limitation — DISPLAY/MOVE are the only inline mini-parsers).
+            # But NOT (the start of NOT ON SIZE ERROR) and any scope/
+            # control-flow boundary (END-SUBTRACT, ELSE, WHEN, ...) must NOT
+            # be swallowed here, or the enclosing clause boundary silently
+            # vanishes along with everything after it.
+            if (
+                token.type == TokenType.NOT
+                or token_upper in SCOPE_TERMINATORS
+                or token_upper in CONTROL_FLOW_BOUNDARIES
+            ):
+                break
             stream.consume()
 
     return nested

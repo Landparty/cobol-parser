@@ -17,6 +17,24 @@ Broken behaviors fixed (Tier 2):
               SPECIAL-NAMES clauses were never stored.
     Group 5 — strip_compiler_directives() was only called from the CLI;
               programs with CBL/PROCESS lines failed via the library API.
+    Group 6 — A MOVE (or SUBTRACT/MULTIPLY/DIVIDE) statement with no trailing
+              period, immediately followed by another statement, silently
+              swallowed that statement's leading tokens instead of stopping
+              at the boundary:
+                * MoveStatementParser's target-collection loop used a
+                  hand-rolled stop-keyword list that didn't include
+                  EXEC/EXECUTE (unlike the shared STATEMENT_TOKEN_TYPES /
+                  STATEMENT_KEYWORDS every other statement parser uses), so
+                  an EXEC SQL block right after a MOVE vanished from the AST
+                  entirely and its leading tokens were misread as bogus MOVE
+                  targets.
+                * SUBTRACT/MULTIPLY/DIVIDE ended their parse by calling
+                  skip_to_period(), which blindly consumed every token up to
+                  the next period regardless of statement boundaries —
+                  eating an entire following statement (or, worse, only part
+                  of one, up to a coincidental period inside a qualified SQL
+                  table name like BANK.ACCOUNT) whenever the SUBTRACT/
+                  MULTIPLY/DIVIDE statement itself had no trailing period.
 """
 
 import textwrap
@@ -704,4 +722,152 @@ class TestCblProcessDirectivesInApiPath:
         """The fix must not break programs that have no CBL/PROCESS lines."""
         result = parse_cobol(_PROGRAM_BODY, filename="reg.cbl")
         assert result.success
-        assert result.ast is not None
+
+
+# ===========================================================================
+# Group 6 — MOVE / SUBTRACT swallowing a following un-punctuated statement
+# ===========================================================================
+
+
+def _statement_type_names(result) -> list:
+    return [type(s).__name__ for s in result.ast.get_all_statements()]
+
+
+class TestMoveDoesNotSwallowFollowingExecSql:
+    """Before the fix, MoveStatementParser's target-collection loop used a
+    hand-rolled stop-keyword list that didn't include EXEC/EXECUTE (unlike
+    the shared STATEMENT_TOKEN_TYPES/STATEMENT_KEYWORDS every other
+    statement parser uses). A MOVE with no trailing period, immediately
+    followed by EXEC SQL, had the EXEC/SQL tokens silently swallowed as
+    bogus MOVE targets — the whole EXEC SQL...END-EXEC block vanished from
+    the AST with no error reported."""
+
+    _SRC = (
+        "    MOVE WS-X TO WS-X\n"
+        "    EXEC SQL\n"
+        "        UPDATE T SET COL = :WS-X\n"
+        "        WHERE ID = :WS-X\n"
+        "    END-EXEC\n"
+    )
+
+    def test_exec_sql_statement_exists(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success
+        names = _statement_type_names(result)
+        assert "ExecSQLStatement" in names, (
+            "EXEC SQL statement must exist — was dropped before fix. "
+            f"Statements found: {names}"
+        )
+
+    def test_no_bogus_set_statement(self):
+        """The SQL SET clause must not be misparsed as a COBOL SET statement."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert "SetStatement" not in _statement_type_names(result)
+
+    def test_move_targets_not_contaminated(self):
+        """The MOVE's own targets must be exactly what was written — no
+        leaked EXEC SQL tokens."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        move_stmts = [
+            s
+            for s in result.ast.get_all_statements()
+            if type(s).__name__ == "MoveStatement"
+        ]
+        assert len(move_stmts) == 1
+        assert move_stmts[0].targets == ["WS-X"]
+
+
+class TestSubtractDoesNotSwallowFollowingExecSql:
+    """Before the fix, SUBTRACT (and MULTIPLY/DIVIDE, which share the same
+    helper) ended their parse with skip_to_period(), which blindly consumed
+    every token up to the next period regardless of statement boundaries.
+    A SUBTRACT with no trailing period, immediately followed by EXEC SQL,
+    had the entire EXEC SQL block eaten — stopping only at a coincidental
+    period inside a qualified SQL table name (e.g. BANK.ACCOUNT) — after
+    which the remaining SQL SET clause was misparsed as a COBOL SET
+    statement."""
+
+    _SRC = (
+        "    SUBTRACT WS-X FROM WS-X\n"
+        "    EXEC SQL\n"
+        "        UPDATE BANK.ACCOUNT\n"
+        "        SET COL = :WS-X\n"
+        "        WHERE ID = :WS-X\n"
+        "    END-EXEC\n"
+    )
+
+    def test_exec_sql_statement_exists(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success
+        names = _statement_type_names(result)
+        assert "ExecSQLStatement" in names, (
+            "EXEC SQL statement must exist — was dropped before fix. "
+            f"Statements found: {names}"
+        )
+
+    def test_no_bogus_set_statement(self):
+        """The SQL SET clause must not be misparsed as a COBOL SET statement."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert "SetStatement" not in _statement_type_names(result)
+
+
+class TestArithmeticSizeErrorClausesNowCaptured:
+    """SUBTRACT/MULTIPLY/DIVIDE now call parse_size_error_clauses (as
+    ADD/COMPUTE already did) instead of the deleted skip_to_period(), so
+    they correctly populate on_size_error/not_on_size_error instead of
+    silently discarding the clause content."""
+
+    def test_subtract_on_size_error_and_not_on_size_error_both_captured(self):
+        """Regression for the _parse_size_error_stmts DISPLAY-boundary bug:
+        before the fix, a DISPLAY inside ON SIZE ERROR swallowed the
+        following NOT ON SIZE ERROR keywords as bogus display items, so the
+        NOT ON SIZE ERROR clause was never recognized as a separate clause."""
+        result = parse_cobol(
+            _proc_program(
+                "    SUBTRACT WS-X FROM WS-X\n"
+                "        ON SIZE ERROR\n"
+                "            DISPLAY 'OVERFLOW'\n"
+                "        NOT ON SIZE ERROR\n"
+                "            DISPLAY 'OK'\n"
+                "    END-SUBTRACT\n"
+            ),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        stmt = next(
+            s
+            for s in result.ast.get_all_statements()
+            if type(s).__name__ == "SubtractStatement"
+        )
+        assert stmt.on_size_error is not None
+        assert stmt.not_on_size_error is not None
+
+    def test_multiply_on_size_error_captured(self):
+        result = parse_cobol(
+            _proc_program(
+                "    MULTIPLY WS-X BY WS-X GIVING WS-X\n"
+                "        ON SIZE ERROR\n"
+                "            DISPLAY 'OVERFLOW'\n"
+                "    END-MULTIPLY\n"
+            ),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        stmt = next(
+            s
+            for s in result.ast.get_all_statements()
+            if type(s).__name__ == "MultiplyStatement"
+        )
+        assert stmt.on_size_error is not None
+
+    def test_divide_by_zero_figurative_constant_parses(self):
+        """Regression for ARITHMETIC_OPERAND_TOKEN_TYPES missing
+        FIGURATIVE_CONSTANT — DIVIDE ... BY ZERO previously failed with
+        'DIVIDE BY requires a second operand' (only ever reached once the
+        swallow-bug fixes above stopped an earlier statement from silently
+        eating past it)."""
+        result = parse_cobol(
+            _proc_program("    DIVIDE WS-X BY ZERO GIVING WS-X\n"),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"

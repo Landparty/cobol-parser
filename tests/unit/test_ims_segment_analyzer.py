@@ -1196,8 +1196,14 @@ class TestRealWorldBankingAccounts:
     IMS hierarchy: CUSTOMER -> ACCOUNT -> TRANSACT  (CUST-PCB / BANKDB)
                    AUDITENT                          (AUDIT-PCB / AUDITDB)
     Interface: CBLTDLI
-    Operations: GHU, ISRT (×2, two different PCBs), CHKP
-    Note: REPL is in an ELSE branch and is not reached by get_all_statements().
+    Operations: GHU, REPL (in an ELSE branch), ISRT (×2, two different PCBs), CHKP
+
+    REPL sits right after an un-punctuated ``SUBTRACT ... FROM ACCT-BALANCE``
+    (DEBIT-ACCOUNT paragraph, ELSE branch): before the SubtractStatementParser
+    fix, its trailing ``skip_to_period()`` call blindly consumed every token
+    up to the next period, silently swallowing the CALL, the nested IF, and
+    both END-IF terminators. REPL is correctly present in the ELSE branch now
+    that the parser stops at the next statement boundary instead.
     """
 
     @pytest.fixture(scope="class")
@@ -1217,8 +1223,15 @@ class TestRealWorldBankingAccounts:
 
     def test_call_count(self, results):
         _, calls = results
-        # GHU, ISRT (CUST-PCB), ISRT (AUDIT-PCB), CHKP
-        assert len(calls) == 4
+        # GHU, REPL, ISRT (CUST-PCB), ISRT (AUDIT-PCB), CHKP
+        assert len(calls) == 5
+
+    def test_repl_detected_in_else_branch(self, results):
+        """REPL must not vanish when it follows an un-punctuated SUBTRACT."""
+        _, calls = results
+        repl_calls = [c for c in calls if c.function_code == "REPL"]
+        assert repl_calls, "REPL call was silently dropped from the ELSE branch"
+        assert repl_calls[0].pcb_name == "CUST-PCB"
 
     def test_ghu_resolves_customer_and_account(self, results):
         _, calls = results
