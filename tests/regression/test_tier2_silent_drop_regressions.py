@@ -871,3 +871,75 @@ class TestArithmeticSizeErrorClausesNowCaptured:
             filename="reg.cbl",
         )
         assert result.success, f"Errors: {result.errors}"
+
+
+class TestComputeDoesNotSwallowFollowingCall:
+    """ComputeStatementParser's expression-collection loop only stopped at a
+    period or at ON/NOT/END-COMPUTE (paren_depth == 0) — unlike the shared
+    parse_arithmetic_operands() helper used by ADD/SUBTRACT/MULTIPLY/DIVIDE,
+    it never checked STATEMENT_KEYWORDS/CONTROL_FLOW_BOUNDARIES. A COMPUTE
+    with no trailing period, immediately followed by another statement
+    (e.g. a multi-line CALL), had that statement's tokens silently
+    swallowed into the COMPUTE expression string — the following statement
+    vanished from the AST entirely."""
+
+    _SRC = (
+        "    COMPUTE WS-X = WS-X + WS-X\n"
+        "    CALL 'MQOPEN' USING\n"
+        "        WS-X\n"
+        "        WS-X\n"
+        "    END-CALL\n"
+    )
+
+    def test_call_statement_exists(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "CallStatement" in names, (
+            "CALL statement must exist — was swallowed into the COMPUTE "
+            f"expression before fix. Statements found: {names}"
+        )
+
+    def test_compute_expression_not_contaminated(self):
+        """The COMPUTE's own expression must be exactly what was written —
+        no leaked CALL tokens."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        stmt = next(
+            s
+            for s in result.ast.get_all_statements()
+            if type(s).__name__ == "ComputeStatement"
+        )
+        assert "CALL" not in stmt.expression.upper()
+
+
+class TestComputeDoesNotSwallowEnclosingScopeTerminator:
+    """Same bug class as above, different trigger: a COMPUTE nested inside a
+    clause body (e.g. READ ... AT END) with no trailing period before the
+    enclosing scope terminator had that terminator (and the fact that the
+    clause ever ended) silently swallowed into the expression string,
+    because the expression loop checked STATEMENT_KEYWORDS/
+    CONTROL_FLOW_BOUNDARIES but not SCOPE_TERMINATORS."""
+
+    _SRC = (
+        "    READ WS-X\n"
+        "        AT END\n"
+        "            COMPUTE WS-X = WS-X + WS-X\n"
+        "    END-READ\n"
+    )
+
+    def test_read_statement_exists(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "IOReadStatement" in names, (
+            "READ statement must exist. " f"Statements found: {names}"
+        )
+
+    def test_compute_expression_not_contaminated_by_end_read(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        stmt = next(
+            s
+            for s in result.ast.get_all_statements()
+            if type(s).__name__ == "ComputeStatement"
+        )
+        assert "END-READ" not in stmt.expression.upper()

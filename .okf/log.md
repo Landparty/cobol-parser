@@ -1,5 +1,34 @@
 # OKF Update Log
 
+## 2026-07-06 (COMPUTE swallowing a following statement)
+
+* **Updated** [parser.md](parser.md): the prior same-day fix (below)
+  explicitly covered MOVE/SUBTRACT/MULTIPLY/DIVIDE but not COMPUTE.
+  `ComputeStatementParser.parse()`'s expression-token-collection loop is a
+  standalone inline loop (not `parse_arithmetic_operands()`), so it never
+  inherited the boundary check: at `paren_depth == 0` it only stopped at a
+  `PERIOD` or a value in `("ON", "NOT", "END-COMPUTE")`, with no check
+  against `STATEMENT_KEYWORDS`/`CONTROL_FLOW_BOUNDARIES`. A `COMPUTE` with
+  no trailing period, immediately followed by another statement (e.g. a
+  multi-line `CALL ... USING`), had that statement's tokens silently
+  appended to the COMPUTE expression string — the following statement
+  vanished from the AST with `result.success == True` and no error
+  reported. Found via a real DEPTMQP program (mockymock e2e work):
+  `COMPUTE MQ-OPEN-OPTIONS = ...` directly followed by `CALL 'MQOPEN'
+  USING ...`, which blocked all DEPTMQP/DEPTMQC testcases since mockymock
+  rejects a whole compiled test file if any one testcase's MOCK doesn't
+  match a boundary. Fixed by adding a `STATEMENT_KEYWORDS`/
+  `CONTROL_FLOW_BOUNDARIES`/`SCOPE_TERMINATORS` check to the expression
+  loop. The `SCOPE_TERMINATORS` half of that check fixes a second,
+  distinct trigger of the same gap: a COMPUTE nested inside a clause body
+  (e.g. `READ ... AT END COMPUTE X = Y + 1 END-READ`) with no trailing
+  period before the *enclosing* scope terminator had that terminator
+  folded into the expression string instead of ending the clause —
+  `STATEMENT_KEYWORDS`/`CONTROL_FLOW_BOUNDARIES` alone don't cover
+  `END-READ`/`END-CALL`/etc. Pinned by
+  `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
+  and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
+
 ## 2026-07-06 (MOVE/SUBTRACT/MULTIPLY/DIVIDE swallowing a following statement)
 
 * **Updated** [parser.md](parser.md): `MoveStatementParser`'s target loop

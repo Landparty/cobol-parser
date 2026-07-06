@@ -240,6 +240,32 @@ previously misattributed to "ELSE branches aren't traversed" when the real
 cause was an un-punctuated `SUBTRACT` swallowing the branch. Pinned by
 `tests/regression/test_tier2_silent_drop_regressions.py` (Group 6).
 
+**COMPUTE also swallowed a following statement (`arithmetic_parsers.py`,
+2026-07-06):** the 2026-07-05 fix above explicitly covered MOVE/SUBTRACT/
+MULTIPLY/DIVIDE but not COMPUTE — `ComputeStatementParser.parse()`'s
+expression-token-collection loop is its own inline loop, not
+`parse_arithmetic_operands()`, so it didn't inherit that fix. At
+`paren_depth == 0` it only stopped at a `PERIOD` or a value in `("ON",
+"NOT", "END-COMPUTE")`; it never checked `STATEMENT_KEYWORDS` /
+`CONTROL_FLOW_BOUNDARIES`. A `COMPUTE` with no trailing period, immediately
+followed by another statement (e.g. a multi-line `CALL 'MQOPEN' USING
+...`), had that statement's tokens silently appended to the COMPUTE
+expression string — the following statement vanished from the AST with
+`result.success == True` and no error reported. Found via a real DEPTMQP
+program (mockymock e2e work): `COMPUTE MQ-OPEN-OPTIONS = ... ` directly
+followed by `CALL 'MQOPEN' USING ...` with no separating period. Fixed by
+adding a `STATEMENT_KEYWORDS`/`CONTROL_FLOW_BOUNDARIES`/`SCOPE_TERMINATORS`
+check to the expression loop (mirrors `parse_arithmetic_operands()`'s stop
+set, plus `SCOPE_TERMINATORS` for the nested-clause trigger below). The
+same gap also swallowed an *enclosing* scope terminator when COMPUTE sits
+inside a clause body with no trailing period before it — e.g. `READ ... AT
+END COMPUTE X = Y + 1 END-READ` had `END-READ` folded into the expression
+string (`"Y + 1 END-READ"`) instead of ending the clause, which the
+`STATEMENT_KEYWORDS`/`CONTROL_FLOW_BOUNDARIES` check alone did not catch
+(`END-READ` is in neither set — only `SCOPE_TERMINATORS`). Pinned by
+`tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
+and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
+
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)

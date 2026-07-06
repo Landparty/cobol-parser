@@ -21,6 +21,9 @@ from ...models.statements import (
 )
 from ._utils import (
     ARITHMETIC_OPERAND_TOKEN_TYPES,
+    CONTROL_FLOW_BOUNDARIES,
+    SCOPE_TERMINATORS,
+    STATEMENT_KEYWORDS,
     _skip_newlines,
     consume_keyword_and_operand,
     get_parse_context,
@@ -485,8 +488,24 @@ class ComputeStatementParser(IStatementParser):
             elif paren_depth == 0:
                 if tok_type == TokenType.PERIOD:
                     break
-                if token.value and token.value.upper() in ("ON", "NOT", "END-COMPUTE"):
-                    break
+                if token.value:
+                    upper = token.value.upper()
+                    if upper in ("ON", "NOT", "END-COMPUTE"):
+                        break
+                    # Without this check, a COMPUTE with no trailing period
+                    # immediately followed by another statement (e.g. a
+                    # multi-line CALL), or nested inside a clause body ending
+                    # in a scope terminator (e.g. ``READ ... AT END COMPUTE
+                    # ... END-READ``), has those tokens silently swallowed
+                    # into the expression string — mirrors the stop set
+                    # parse_arithmetic_operands() uses for ADD/SUBTRACT/
+                    # MULTIPLY/DIVIDE.
+                    if (
+                        upper in STATEMENT_KEYWORDS
+                        or upper in CONTROL_FLOW_BOUNDARIES
+                        or upper in SCOPE_TERMINATORS
+                    ):
+                        break
 
             expr_tokens.append(token.value if token.value else "")
             token_stream.consume()
