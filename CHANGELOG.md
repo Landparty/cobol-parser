@@ -86,6 +86,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* IO-statement conditional clause bodies are now parsed into the AST instead
+  of being silently discarded. `collect_clause_stmts` (shared by READ,
+  WRITE, REWRITE, DELETE, and START) previously consumed the tokens of
+  `AT END` / `NOT AT END` / `INVALID KEY` / `NOT INVALID KEY` bodies and
+  always returned `[]`, so an inner statement such as
+  `READ F AT END CALL "EOFH" USING WS-AMT END-READ.` vanished from the AST
+  entirely — `at_end_clause` was `[]` and the CALL appeared nowhere
+  (breaking downstream boundary-statement detection, e.g. mockymock's
+  mock-surface analysis). Clause bodies are now dispatched through the
+  statement registry (the same nesting mechanism IF/PERFORM/EVALUATE use),
+  attached to the owning IO node's clause lists with correct
+  `SourceLocation`s, added as AST children (visible to `find_all_by_type`
+  and `to_dict()`), and terminated correctly at periods, the next clause
+  keyword, and `END-xxx` scope terminators. Supporting fixes:
+  `WriteStatementParser` now parses `INVALID KEY` / `NOT INVALID KEY`
+  (previously unsupported); `StartStatementParser` matches `KEY IS`
+  comparison keywords by value (they lex as dedicated token types, not
+  IDENTIFIERs) and consumes the trailing key data-name; the MOVE-target,
+  DISPLAY-item, and CALL-USING collection loops stop at scope terminators
+  (`END-READ` etc.) instead of capturing them as operands. Pinned by
+  `tests/unit/io_statements/test_clause_bodies.py`.
+
 * `find_copybook_file()` now reports copybook paths with their **on-disk
   basename casing**. On case-insensitive filesystems (Windows/macOS) the
   extension probe order (`.cpy` before `.CPY`) could match a file whose

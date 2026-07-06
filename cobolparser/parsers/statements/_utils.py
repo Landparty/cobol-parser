@@ -82,6 +82,35 @@ CONTROL_FLOW_BOUNDARIES: frozenset = frozenset(
     }
 )
 
+#: Explicit scope terminators (END-xxx). These can never begin a statement or
+#: act as an operand, so operand/parameter collection loops must stop on them
+#: rather than swallow them (e.g. ``CALL "X" USING WS-AMT END-READ``).
+SCOPE_TERMINATORS: frozenset = frozenset(
+    {
+        "END-ACCEPT",
+        "END-ADD",
+        "END-CALL",
+        "END-COMPUTE",
+        "END-DELETE",
+        "END-DISPLAY",
+        "END-DIVIDE",
+        "END-EVALUATE",
+        "END-EXEC",
+        "END-IF",
+        "END-MULTIPLY",
+        "END-PERFORM",
+        "END-READ",
+        "END-RETURN",
+        "END-REWRITE",
+        "END-SEARCH",
+        "END-START",
+        "END-STRING",
+        "END-SUBTRACT",
+        "END-UNSTRING",
+        "END-WRITE",
+    }
+)
+
 STATEMENT_KEYWORDS: frozenset = frozenset(
     {
         "ACCEPT",
@@ -259,30 +288,58 @@ def skip_to_period(stream: ITokenStream) -> None:
 # ---------------------------------------------------------------------------
 
 
-def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
-    """Consume tokens belonging to a conditional clause until a boundary.
+def previous_meaningful_token(stream: ITokenStream) -> Token | None:
+    """Return the last non-whitespace token consumed from *stream*, or None."""
+    offset = -1
+    while True:
+        token = stream.peek(offset)
+        if token is None:
+            return None
+        if token.type not in (
+            TokenType.WHITESPACE,
+            TokenType.COMMENT,
+            TokenType.NEWLINE,
+            TokenType.CONTINUATION,
+        ):
+            return token
+        offset -= 1
 
-    Always returns an empty list — the tokens are discarded because full
-    clause parsing is not yet implemented.  The boundary token is NOT consumed.
+
+def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
+    """Parse the imperative statements of a conditional IO clause body.
+
+    Dispatches through the statement registry attached to *stream* (the same
+    mechanism IF/PERFORM/EVALUATE use for nested statements) until a clause
+    boundary: a period, NOT / INVALID (the start of the next clause), a value
+    in *stop_at*, or any scope terminator / control-flow boundary.  The
+    boundary token is NOT consumed.  A nested statement that consumed the
+    statement-terminating period ends the clause.  Tokens that no registered
+    parser accepts are consumed one at a time so the loop always progresses.
     """
+    stmts: list = []
     while not stream.is_empty():
+        skip_whitespace(stream)
         token = stream.peek()
         if not token:
             break
-        if token.type == TokenType.PERIOD:
+        if token.type in (TokenType.PERIOD, TokenType.NOT, TokenType.INVALID):
             break
-        if token.type == TokenType.NOT:
-            break
-        if token.type == TokenType.INVALID:
-            break
+        value = token_value_upper(token)
         if (
-            token.type == TokenType.IDENTIFIER
-            and token.value
-            and token.value.upper() in stop_at
+            value in stop_at
+            or value in SCOPE_TERMINATORS
+            or value in CONTROL_FLOW_BOUNDARIES
         ):
             break
-        stream.consume()
-    return []
+        nested = try_parse_nested_statement(stream)
+        if nested is None:
+            stream.consume()
+            continue
+        stmts.append(nested)
+        prev = previous_meaningful_token(stream)
+        if prev is not None and prev.type == TokenType.PERIOD:
+            break
+    return stmts
 
 
 def parse_invalid_key_clauses(

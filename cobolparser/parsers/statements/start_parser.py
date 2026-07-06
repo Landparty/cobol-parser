@@ -3,11 +3,13 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    SCOPE_TERMINATORS,
     consume_end_keyword_and_period,
     consume_key_is,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
+    peek_value_upper,
     skip_whitespace,
 )
 
@@ -68,47 +70,44 @@ class StartStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
 
-            token = token_stream.peek()
-            if token and token.type == TokenType.IDENTIFIER and token.value:
-                val = token.value.upper()
-                if val in _COMPARISON_OPS or val in ("THAN", "TO"):
+            # Comparison keywords may arrive as dedicated token types
+            # (TokenType.EQUAL, TokenType.TO, ...) or as IDENTIFIERs, so
+            # match by upper-cased value only.
+            val = peek_value_upper(token_stream)
+            if val in _COMPARISON_OPS or val in ("THAN", "TO"):
+                condition_parts.append(val)
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                # Parse THAN or TO
+                val = peek_value_upper(token_stream)
+                if val in ("THAN", "TO"):
                     condition_parts.append(val)
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    # Parse THAN or TO
-                    token = token_stream.peek()
-                    if (
-                        token
-                        and token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() in ("THAN", "TO")
-                    ):
-                        condition_parts.append(token.value.upper())
+                    # Optional OR EQUAL
+                    if peek_value_upper(token_stream) == "OR":
                         token_stream.consume()
                         skip_whitespace(token_stream)
-                        # Optional OR EQUAL
-                        token = token_stream.peek()
-                        if (
-                            token
-                            and token.type == TokenType.IDENTIFIER
-                            and token.value
-                            and token.value.upper() == "OR"
-                        ):
+                        if peek_value_upper(token_stream) in ("EQUAL", "EQUALS"):
+                            condition_parts.append("OR EQUAL")
                             token_stream.consume()
                             skip_whitespace(token_stream)
-                            token = token_stream.peek()
-                            if (
-                                token
-                                and token.type == TokenType.IDENTIFIER
-                                and token.value
-                                and token.value.upper() in ("EQUAL", "EQUALS")
-                            ):
-                                condition_parts.append("OR EQUAL")
-                                token_stream.consume()
-                                skip_whitespace(token_stream)
 
             if condition_parts:
                 stmt.set_key_condition(" ".join(condition_parts))
+
+            # Consume the key data-name that closes the KEY clause (e.g.
+            # START F KEY IS EQUAL TO IDX-KEY ...); leaving it in the stream
+            # would prevent the INVALID KEY clause from being reached.
+            token = token_stream.peek()
+            if (
+                token
+                and token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() not in SCOPE_TERMINATORS
+            ):
+                token_stream.consume()
+                skip_whitespace(token_stream)
 
         parse_invalid_key_clauses(token_stream, stmt, "END-START")
         consume_end_keyword_and_period(token_stream, "END-START")

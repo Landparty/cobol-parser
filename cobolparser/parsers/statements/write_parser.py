@@ -3,8 +3,10 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    consume_end_keyword_and_period,
     create_statement,
     matches_keyword,
+    parse_invalid_key_clauses,
     skip_whitespace,
     try_consume_keyword,
 )
@@ -21,6 +23,7 @@ class WriteStatementParser(IStatementParser):
     - WRITE record-name
     - WRITE record-name FROM source-data
     - WRITE record-name [FROM source] [BEFORE/AFTER ADVANCING [n LINES|PAGE]]
+    - WRITE record-name [INVALID KEY stmts] [NOT INVALID KEY stmts] [END-WRITE]
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -102,10 +105,10 @@ class WriteStatementParser(IStatementParser):
                     token_stream.consume()
                     skip_whitespace(token_stream)
 
-        # Skip whitespace and consume period if present
+        # Optional INVALID KEY / NOT INVALID KEY clauses
         skip_whitespace(token_stream)
-        token = token_stream.peek()
-        if token and token.type == TokenType.PERIOD:
-            token_stream.consume()
+        parse_invalid_key_clauses(token_stream, stmt, "END-WRITE")
+
+        consume_end_keyword_and_period(token_stream, "END-WRITE")
 
         return stmt

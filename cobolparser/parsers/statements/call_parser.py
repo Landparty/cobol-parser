@@ -3,9 +3,11 @@
 from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
+    SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
     matches_keyword,
+    previous_meaningful_token,
     skip_whitespace,
 )
 
@@ -173,7 +175,7 @@ class CallStatementParser(IStatementParser):
                         stmt.on_overflow = nested if nested else []
                     else:
                         break
-                elif (
+                elif token.type == TokenType.NOT or (
                     token.type == TokenType.IDENTIFIER
                     and token.value
                     and token.value.upper() == "NOT"
@@ -235,6 +237,11 @@ class CallStatementParser(IStatementParser):
                     try:
                         nested_stmt = parser.parse(token_stream)
                         stmts.append(nested_stmt)
+                        # A nested statement that consumed the sentence-
+                        # terminating period ends the handler body.
+                        prev = previous_meaningful_token(token_stream)
+                        if prev is not None and prev.type == TokenType.PERIOD:
+                            break
                     except ParseError:
                         token_stream.consume()
                 else:
@@ -262,6 +269,10 @@ class CallStatementParser(IStatementParser):
                     break
                 # Check for statement keywords
                 if val_upper in STATEMENT_KEYWORDS:
+                    break
+                # Scope terminators of an enclosing statement (e.g. END-READ
+                # when this CALL is an AT END clause body) end the parameters.
+                if val_upper in SCOPE_TERMINATORS:
                     break
             # Check for statement token types
             elif token.type in STATEMENT_TOKEN_TYPES:
