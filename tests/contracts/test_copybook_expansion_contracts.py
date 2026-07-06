@@ -327,9 +327,7 @@ class TestProcedureDivisionCopybookContracts:
         # Verify we have expected statement types from copybook
         assert "DISPLAY" in statement_types, "Expected DISPLAY statements"
         assert "MOVE" in statement_types, "Expected MOVE statement from copybook"
-        assert (
-            "PERFORM" in statement_types
-        ), "Expected PERFORM statement from copybook"
+        assert "PERFORM" in statement_types, "Expected PERFORM statement from copybook"
 
         # Verify we have at least 3 DISPLAY statements (Start, Processing started, End)
         display_count = statement_types.count("DISPLAY")
