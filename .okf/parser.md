@@ -131,6 +131,42 @@ suite: `tests/regression/test_numeric_value_clause.py`.
 | `write_parser.py` | WRITE |
 | `_utils.py` | Shared clause-collection utilities |
 
+**IO clause bodies (`_utils.py` / `read_parser.py` / `write_parser.py` /
+`rewrite_parser.py` / `delete_parser.py` / `start_parser.py`):** the
+statements inside `AT END` / `NOT AT END` / `INVALID KEY` / `NOT INVALID
+KEY` clauses are parsed by `collect_clause_stmts` in `_utils.py`, which
+dispatches through the statement registry attached to the token stream
+(same mechanism as IF/PERFORM/EVALUATE nesting). The parsed statements are
+attached to the IO node's clause list (`at_end_clause`, `invalid_key_clause`,
+…) **and** added as AST children, so `find_all_by_type` and `to_dict()` see
+them. Clause collection stops at a period, `NOT`/`INVALID` (next clause), a
+caller-supplied stop value (e.g. `END-READ`), any `SCOPE_TERMINATORS` /
+`CONTROL_FLOW_BOUNDARIES` value, or when a nested parser consumed the
+sentence period (`previous_meaningful_token` check). The MOVE-target,
+DISPLAY-item, and CALL-USING collection loops stop at `SCOPE_TERMINATORS`
+(and MOVE additionally at `NOT`/`INVALID`/`AT` token types) so clause
+boundaries are never swallowed as operands. `WriteStatementParser` parses
+`INVALID KEY` / `NOT INVALID KEY` via the shared `parse_invalid_key_clauses`,
+and `StartStatementParser` matches comparison keywords by value (they lex as
+dedicated token types, not IDENTIFIERs) and consumes the KEY data-name.
+Before 2026-07-05 `collect_clause_stmts` **discarded** clause tokens and
+returned `[]` — an inner `CALL` in `AT END` vanished from the AST entirely,
+blinding mockymock's boundary detection. Pinned by
+`tests/unit/io_statements/test_clause_bodies.py`.
+
+**CALL handler-body termination (`call_parser.py`):** the ON EXCEPTION /
+NOT ON EXCEPTION / ON OVERFLOW bodies are parsed by `_parse_nested_stmts`,
+which dispatches through the statement registry. Termination is three-fold:
+a `NOT` / `END-CALL` boundary value, a period seen between statements, or —
+because a nested statement parser may itself consume the sentence period —
+a check after every nested parse that the last consumed meaningful token was
+a `PERIOD` (`previous_meaningful_token` from `_utils.py`, same pattern as
+`if_parser.py`). `_parse_using_clause` additionally stops at any
+`SCOPE_TERMINATORS` value so `END-CALL` is never captured as a USING
+parameter. Before 2026-07-05 the handler body swallowed following top-level
+statements (e.g. `STOP RUN` after `END-CALL.`) — pinned by
+`tests/regression/test_call_handler_body_termination.py`.
+
 **Multi-mode OPEN (`open_parser.py`):** one OPEN statement may carry several
 mode groups (`OPEN INPUT FILE-A OUTPUT FILE-B EXTEND FILE-C`). The parser
 collects the file names of *every* group into `IOOpenStatement.file_names`;

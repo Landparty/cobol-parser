@@ -3,6 +3,7 @@
 from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
+    SCOPE_TERMINATORS,
     matches_keyword,
     skip_whitespace,
     try_consume_keyword,
@@ -35,6 +36,11 @@ _STOP_TOKEN_TYPES: frozenset = frozenset(
         "END_IF",
         "END_EVALUATE",
         "END_PERFORM",
+        # Clause boundaries inside IO statements (AT END / INVALID KEY):
+        # a MOVE in a clause body must not devour the next clause's keywords.
+        "NOT",
+        "INVALID",
+        "AT",
     )
     if hasattr(TokenType, name)
 )
@@ -133,7 +139,7 @@ class MoveStatementParser(IStatementParser):
             # Also check for keywords by value for non-statement types
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
-                if val_upper in _STOP_KEYWORDS:
+                if val_upper in _STOP_KEYWORDS or val_upper in SCOPE_TERMINATORS:
                     break
 
             # Parse target - only collect IDENTIFIERs

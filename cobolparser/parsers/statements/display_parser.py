@@ -13,7 +13,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
-from ._utils import matches_keyword, skip_whitespace
+from ._utils import SCOPE_TERMINATORS, matches_keyword, skip_whitespace
 
 
 class DisplayStatementParser(IStatementParser):
@@ -90,6 +90,15 @@ class DisplayStatementParser(IStatementParser):
                 if device_token:
                     token_stream.consume()
                     stmt.set_output_device(device_token.value or "")
+                break
+
+            # Scope terminators of an enclosing statement (e.g. END-READ when
+            # this DISPLAY is an AT END clause body) end the item list.
+            if (
+                token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() in SCOPE_TERMINATORS
+            ):
                 break
 
             # Collect display item

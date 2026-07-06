@@ -13,6 +13,7 @@ Targets uncovered lines in models/statements/io.py (79.15%):
 """
 
 from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.statements.base import CobolStatement
 from cobolparser.models.statements.io import (
     IOAcceptStatement,
     IOCloseStatement,
@@ -26,6 +27,11 @@ from cobolparser.models.statements.io import (
 )
 
 LOC = SourceLocation(1, 1)
+
+
+def _stmt() -> CobolStatement:
+    """A minimal real statement node for clause-list setters."""
+    return CobolStatement("DISPLAY", LOC)
 
 
 class TestIOReadStatementSerialization:
@@ -77,23 +83,31 @@ class TestIOReadStatementSerialization:
         stmt = IOReadStatement(LOC)
         stmt.set_at_end_clause([])
         assert stmt.metadata["has_at_end"] is False
-        stmt.set_at_end_clause(["display-stmt"])
+        inner = _stmt()
+        stmt.set_at_end_clause([inner])
         assert stmt.metadata["has_at_end"] is True
+        assert inner.parent is stmt
 
     def test_set_not_at_end_clause(self):
         stmt = IOReadStatement(LOC)
-        stmt.set_not_at_end_clause(["stmt"])
-        assert stmt.not_at_end_clause == ["stmt"]
+        inner = _stmt()
+        stmt.set_not_at_end_clause([inner])
+        assert stmt.not_at_end_clause == [inner]
+        assert inner.parent is stmt
 
     def test_set_invalid_key_clause(self):
         stmt = IOReadStatement(LOC)
-        stmt.set_invalid_key_clause(["err-stmt"])
+        inner = _stmt()
+        stmt.set_invalid_key_clause([inner])
         assert stmt.metadata["has_invalid_key"] is True
+        assert inner.parent is stmt
 
     def test_set_not_invalid_key_clause(self):
         stmt = IOReadStatement(LOC)
-        stmt.set_not_invalid_key_clause(["ok-stmt"])
-        assert stmt.not_invalid_key_clause == ["ok-stmt"]
+        inner = _stmt()
+        stmt.set_not_invalid_key_clause([inner])
+        assert stmt.not_invalid_key_clause == [inner]
+        assert inner.parent is stmt
 
     def test_to_dict_complete(self):
         stmt = IOReadStatement(LOC)
@@ -141,18 +155,24 @@ class TestIOWriteStatementSerialization:
 
     def test_set_at_eop_clause(self):
         stmt = IOWriteStatement(LOC)
-        stmt.set_at_eop_clause(["display-stmt"])
-        assert stmt.at_eop_clause == ["display-stmt"]
+        inner = _stmt()
+        stmt.set_at_eop_clause([inner])
+        assert stmt.at_eop_clause == [inner]
+        assert inner.parent is stmt
 
     def test_set_invalid_key_clause(self):
         stmt = IOWriteStatement(LOC)
-        stmt.set_invalid_key_clause(["err-stmt"])
+        inner = _stmt()
+        stmt.set_invalid_key_clause([inner])
         assert stmt.metadata["has_invalid_key"] is True
+        assert inner.parent is stmt
 
     def test_set_not_invalid_key_clause(self):
         stmt = IOWriteStatement(LOC)
-        stmt.set_not_invalid_key_clause(["ok-stmt"])
-        assert stmt.not_invalid_key_clause == ["ok-stmt"]
+        inner = _stmt()
+        stmt.set_not_invalid_key_clause([inner])
+        assert stmt.not_invalid_key_clause == [inner]
+        assert inner.parent is stmt
 
     def test_set_retry(self):
         stmt = IOWriteStatement(LOC)
@@ -357,13 +377,17 @@ class TestIORewriteStatementSerialization:
 
     def test_set_invalid_key_clause(self):
         stmt = IORewriteStatement(LOC)
-        stmt.set_invalid_key_clause(["err"])
+        inner = _stmt()
+        stmt.set_invalid_key_clause([inner])
         assert stmt.metadata["has_invalid_key"] is True
+        assert inner.parent is stmt
 
     def test_set_not_invalid_key_clause(self):
         stmt = IORewriteStatement(LOC)
-        stmt.set_not_invalid_key_clause(["ok"])
-        assert stmt.not_invalid_key_clause == ["ok"]
+        inner = _stmt()
+        stmt.set_not_invalid_key_clause([inner])
+        assert stmt.not_invalid_key_clause == [inner]
+        assert inner.parent is stmt
 
     def test_set_lock(self):
         stmt = IORewriteStatement(LOC)
@@ -394,13 +418,17 @@ class TestIODeleteStatementSerialization:
 
     def test_set_invalid_key_clause(self):
         stmt = IODeleteStatement(LOC)
-        stmt.set_invalid_key_clause(["err"])
+        inner = _stmt()
+        stmt.set_invalid_key_clause([inner])
         assert stmt.metadata["has_invalid_key"] is True
+        assert inner.parent is stmt
 
     def test_set_not_invalid_key_clause(self):
         stmt = IODeleteStatement(LOC)
-        stmt.set_not_invalid_key_clause(["ok"])
-        assert stmt.not_invalid_key_clause == ["ok"]
+        inner = _stmt()
+        stmt.set_not_invalid_key_clause([inner])
+        assert stmt.not_invalid_key_clause == [inner]
+        assert inner.parent is stmt
 
     def test_set_lock(self):
         stmt = IODeleteStatement(LOC)
@@ -427,13 +455,17 @@ class TestIOStartStatementSerialization:
 
     def test_set_invalid_key_clause(self):
         stmt = IOStartStatement(LOC)
-        stmt.set_invalid_key_clause(["err"])
+        inner = _stmt()
+        stmt.set_invalid_key_clause([inner])
         assert stmt.metadata["has_invalid_key"] is True
+        assert inner.parent is stmt
 
     def test_set_not_invalid_key_clause(self):
         stmt = IOStartStatement(LOC)
-        stmt.set_not_invalid_key_clause(["ok"])
-        assert stmt.not_invalid_key_clause == ["ok"]
+        inner = _stmt()
+        stmt.set_not_invalid_key_clause([inner])
+        assert stmt.not_invalid_key_clause == [inner]
+        assert inner.parent is stmt
 
     def test_to_dict(self):
         stmt = IOStartStatement(LOC)

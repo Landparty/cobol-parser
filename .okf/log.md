@@ -1,5 +1,32 @@
 # OKF Update Log
 
+## 2026-07-05 (IO clause bodies parsed into the AST)
+
+* **Updated** [parser.md](parser.md): documented the new "IO clause bodies"
+  behaviour — `collect_clause_stmts` in
+  `cobolparser/parsers/statements/_utils.py` now parses the statements
+  inside `AT END` / `NOT AT END` / `INVALID KEY` / `NOT INVALID KEY` clause
+  bodies via the statement registry instead of discarding the tokens and
+  returning `[]`. Clause statements land on the IO node's clause lists and
+  as AST children (traversal + serialization). WRITE gained INVALID KEY
+  parsing; START now matches comparison keywords by value and consumes the
+  KEY data-name; MOVE/DISPLAY/CALL-USING operand loops stop at scope
+  terminators. Pinned by `tests/unit/io_statements/test_clause_bodies.py`.
+
+## 2026-07-05 (CALL handler-body termination)
+
+* **Updated** [parser.md](parser.md): documented how
+  `CallStatementParser._parse_nested_stmts` terminates ON EXCEPTION /
+  NOT ON EXCEPTION / ON OVERFLOW bodies — boundary values (`NOT`,
+  `END-CALL`), an inter-statement period, and a post-nested-parse
+  `previous_meaningful_token` PERIOD check (a nested statement may consume
+  the sentence period itself). `_parse_using_clause` stops at
+  `SCOPE_TERMINATORS` so `END-CALL` is not captured as a USING parameter.
+  Previously the handler body swallowed following top-level statements
+  (`STOP RUN` after `END-CALL.` ended up inside `on_exception`) —
+  mockymock then refused to mock them as nested-in-boundary. Pinned by
+  `tests/regression/test_call_handler_body_termination.py`.
+
 ## 2026-07-05 (program_flow typing fix)
 
 * No concept change needed: `ProgramFlowAnalyzer`'s inner `scan()` helper

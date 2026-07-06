@@ -21,6 +21,8 @@ class InvalidKeyClauseMixin:
     def set_invalid_key_clause(self, statements: list["CobolStatement"] | None) -> None:
         """Set the INVALID KEY clause."""
         self.invalid_key_clause = statements
+        for stmt in statements or []:
+            self.add_child(stmt)  # type: ignore[attr-defined]
         if statements:
             self.metadata["has_invalid_key"] = True  # type: ignore[attr-defined]
 
@@ -29,6 +31,8 @@ class InvalidKeyClauseMixin:
     ) -> None:
         """Set the NOT INVALID KEY clause."""
         self.not_invalid_key_clause = statements
+        for stmt in statements or []:
+            self.add_child(stmt)  # type: ignore[attr-defined]
 
 
 class LockClauseMixin:
@@ -126,12 +130,16 @@ class IOReadStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
     def set_at_end_clause(self, statements: list["CobolStatement"]) -> None:
         """Set the AT END clause."""
         self.at_end_clause = statements
+        for stmt in statements or []:
+            self.add_child(stmt)
         if statements:
             self.metadata["has_at_end"] = True
 
     def set_not_at_end_clause(self, statements: list["CobolStatement"]) -> None:
         """Set the NOT AT END clause."""
         self.not_at_end_clause = statements
+        for stmt in statements or []:
+            self.add_child(stmt)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert READ statement to dictionary representation per contract."""
@@ -229,6 +237,8 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
     def set_at_eop_clause(self, statements: list["CobolStatement"]) -> None:
         """Set the AT END-OF-PAGE clause."""
         self.at_eop_clause = statements
+        for stmt in statements or []:
+            self.add_child(stmt)
 
     def set_lock(self, with_lock: bool = True) -> None:
         """Set the LOCK flag."""
