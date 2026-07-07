@@ -249,6 +249,73 @@ class TestUnterminatedStringAtEOF:
         assert "IDENTIFICATION DIVISION" in result
 
 
+class TestUnterminatedLiteralDoesNotAbortParse:
+    """H5: one unterminated literal must not defeat COLLECT_ALL recovery.
+
+    A fixed-format program whose only defect is a trailing unterminated
+    literal must still yield a (partial) AST under COLLECT_ALL, with the
+    unterminated-literal error recorded, rather than losing the whole
+    program to ``ast=None``.
+    """
+
+    # Complete program; the only defect is the trailing unterminated literal.
+    BAD_LITERAL = """\
+000100 IDENTIFICATION DIVISION.
+000200 PROGRAM-ID. TESTH5.
+000300 DATA DIVISION.
+000400 WORKING-STORAGE SECTION.
+000500 01  WS-COUNT  PIC 9(4) VALUE ZERO.
+000600 PROCEDURE DIVISION.
+000700 MAIN-PARA.
+000800     DISPLAY "Unterminated literal
+"""
+
+    def _has_unterminated_error(self, result):
+        return any(
+            "unterminated string literal" in str(e).lower() for e in result.errors
+        )
+
+    def test_parse_cobol_collect_all_produces_ast(self):
+        result = parse_cobol(
+            self.BAD_LITERAL, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
+        assert result.ast is not None, "COLLECT_ALL must not lose the whole program"
+        # Content defined before the bad literal must survive.
+        items = result.ast.find_all_by_type("DataItem")
+        assert any(getattr(i, "name", "") == "WS-COUNT" for i in items)
+        assert self._has_unterminated_error(result)
+
+    def test_cobolparser_parse_collect_all_produces_ast(self):
+        from cobolparser import CobolParser
+
+        parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parser.parse(self.BAD_LITERAL)
+        assert result.ast is not None
+        items = result.ast.find_all_by_type("DataItem")
+        assert any(getattr(i, "name", "") == "WS-COUNT" for i in items)
+        assert self._has_unterminated_error(result)
+
+    def test_fail_fast_still_aborts(self):
+        result = parse_cobol(
+            self.BAD_LITERAL, error_recovery=ErrorRecoveryMode.FAIL_FAST
+        )
+        assert result.ast is None
+        assert self._has_unterminated_error(result)
+
+    def test_collect_all_records_error_even_when_free_form_true(self):
+        # Even if the caller (incorrectly) passes free_form=True for a
+        # fixed-format program, deferring to the parser must still run the
+        # recovery path and record the unterminated-literal error rather than
+        # silently mis-parsing the un-normalized source as free-form.
+        result = parse_cobol(
+            self.BAD_LITERAL,
+            free_form=True,
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+        assert result.ast is not None
+        assert self._has_unterminated_error(result)
+
+
 class TestIfConditionTree:
     SIMPLE_IF = """\
 000100 IDENTIFICATION DIVISION.

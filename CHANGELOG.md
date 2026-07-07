@@ -111,6 +111,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conditions are handled more robustly for the same reason. Pinned by
   `tests/unit/test_if_parser_comprehensive.py::TestIfConditionPrecedence`.
 
+* An unterminated string literal at end of input no longer aborts the whole
+  parse under `ErrorRecoveryMode.COLLECT_ALL` (audit finding H5). Fixed-format
+  normalization (`normalize_fixed_format`) raises `ValueError` on a literal
+  still open at EOF; that raise was reached before error recovery was active,
+  so a single bad literal collapsed the entire program to `ast=None` — in
+  `CobolParser._parse_core` (via the generic exception safety net) and in the
+  `parse_cobol` convenience function (which caught it but returned `ast=None`
+  regardless of mode). `_parse_core` now records the unterminated-literal error
+  and, unless in `FAIL_FAST`, re-normalizes with `merge_continued_literals=False`
+  (a non-raising best-effort path the lexer already tokenizes permissively) so a
+  partial AST survives; `parse_cobol` defers to the parser for this recovery.
+  `FAIL_FAST` still aborts with the error, and calling `normalize_fixed_format`
+  directly still raises by default. Pinned by
+  `tests/unit/test_critical_fixes.py::TestUnterminatedLiteralDoesNotAbortParse`.
 * **Malformed `MOVE` statements no longer parse silently (audit finding H3).**
   The MOVE parser accepted incomplete input and produced a plausible-but-wrong
   node with `errors == 0`: `MOVE A TO.` yielded a `MoveStatement` with
