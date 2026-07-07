@@ -86,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `normalize_fixed_format` now joins **non-literal fixed-format continuation
+  lines** (indicator `-` in column 7) with no intervening space, matching the
+  COBOL rule that the first non-blank character of a continuation line is the
+  successor of the last non-blank character of the continued line. Previously a
+  space was injected before every such chunk, so a numeric literal split across
+  continuation lines (one character per line, as in NIST `NC205A.CBL`'s
+  `-999.777`) normalised to `- 9  9  9  .  7  7  7` — spaced-out digits plus a
+  free-standing `.` that the lexer treated as a statement terminator, silently
+  truncating the enclosing `MOVE` (the AST lost the `MOVE -999.777 TO CONT-B`
+  entirely, yet `result.success` stayed `True`). Words split mid-token rejoin
+  correctly for the same reason; alphanumeric literals split with `-` were
+  already handled via the open-quote continuation path. The fix is applied to
+  both the pure-Python implementation and the Cython `_preprocess_fast`
+  fast-path (the checked-in `.c` is regenerated). Pinned by
+  `tests/regression/test_continued_literal_normalization.py`, which exercises
+  both code paths and the real `NC205A.CBL`.
+
 * `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
   API. `EvaluateStatementParser` attached WHEN clauses by mutating the model
   directly (`stmt.when_clauses.append(...)` and `stmt.default_when = ...`),

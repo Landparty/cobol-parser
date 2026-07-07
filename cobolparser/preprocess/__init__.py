@@ -508,7 +508,16 @@ def normalize_fixed_format(
                 if merge_continued_literals:
                     _update_quote_state(stripped)
             else:
-                stripped = " " + text_slice.lstrip()
+                # Non-literal continuation: '-' in column 7 with no
+                # alphanumeric literal currently open. Per COBOL fixed-format
+                # rules the first non-blank character of the continuation line
+                # is the successor of the last non-blank character of the
+                # continued line, with NO intervening space. This is how a
+                # numeric literal (or a word) split mid-token across lines
+                # rejoins — e.g. '-999.777' written one character per line.
+                # Strip both ends so the chunk butts directly onto the buffer
+                # instead of injecting a space that would break the token.
+                stripped = text_slice.strip()
                 parts.append(stripped)
                 if merge_continued_literals:
                     _update_quote_state(stripped)
@@ -791,6 +800,11 @@ from .copybook_expander import (  # noqa: E402
 # Optional Cython fast path for normalize_fixed_format.
 # Falls back to the pure-Python implementation silently when not compiled.
 # ---------------------------------------------------------------------------
+# Keep the pure-Python implementation reachable under a private name even when
+# the Cython extension overrides the public one (mirrors lexer._CobolLexerPure),
+# so both code paths can be exercised by the test suite.
+_normalize_fixed_format_pure = normalize_fixed_format
+
 try:
     from cobolparser._preprocess_fast import (  # type: ignore[import-not-found,no-redef]
         normalize_fixed_format,

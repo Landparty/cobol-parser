@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-07-04T00:00:00Z
+timestamp: 2026-07-06T00:00:00Z
 ---
 
 # Overview
@@ -71,6 +71,25 @@ def normalize_fixed_format(lines: list[str] | str) -> str: ...
 Extracts columns 8–72 from each line, silently drops comment lines (column-7 is
 `*` or `/`), and merges continuation lines (column-7 is `-`). Returns a single
 free-form text string.
+
+Continuation-line joining follows the COBOL rule that a continuation line's
+first non-blank character is the successor of the continued line's last
+non-blank character, **without an intervening space**:
+
+* **Alphanumeric literal open at the split** (a quote is unbalanced on the
+  continued line) → the continuation line's leading quote is dropped and the
+  remainder is appended directly, resuming the literal (`pending_literal` path).
+* **Any other continuation** (numeric literal or a word split mid-token, e.g.
+  `-999.777` written one digit per line) → the continuation chunk is
+  `strip()`-ped and appended with no leading space, so the token rejoins
+  intact. Injecting a space here (the pre-2026-07-06 behaviour) spaced out the
+  digits and left the decimal point as a free-standing `.` that the lexer read
+  as a statement terminator — see the [log](log.md) entry and
+  `tests/regression/test_continued_literal_normalization.py`.
+
+The optional Cython `_preprocess_fast` fast-path mirrors this logic; the
+pure-Python implementation stays reachable as `_normalize_fixed_format_pure`
+for testing both paths.
 
 # Copybook Expansion
 
