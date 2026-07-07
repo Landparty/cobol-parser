@@ -122,3 +122,35 @@ class TestEvaluateChildRegistration:
         # Statements inside WHEN OTHER must be reachable too.
         assert len(result.ast.find_all_by_type("MoveStatement")) == 1
         assert len(result.ast.find_all_by_type("PerformStatement")) == 1
+
+    def test_duplicate_when_other_does_not_orphan_children(self):
+        # Malformed input: two WHEN OTHER branches. set_default_when always
+        # calls add_child, so attaching a fresh clause each time would leave an
+        # orphaned default WhenClause child that the tree-walk APIs surface but
+        # default_when / to_dict() (which reference only the last) do not. The
+        # parser must reuse the single default clause so traversal and to_dict
+        # stay consistent -- while still reporting the error.
+        result = _parse("""\
+            EVALUATE WS-X
+              WHEN 1
+                DISPLAY 'ONE'
+              WHEN OTHER
+                MOVE A TO B
+              WHEN OTHER
+                MOVE C TO D
+            END-EVALUATE.
+            """)
+        # Error is still reported.
+        assert any(
+            "Multiple WHEN OTHER" in str(e) for e in result.errors
+        ), "duplicate WHEN OTHER should be reported"
+        evaluate = result.ast.find_first_by_type("EvaluateStatement")
+        # Exactly one WHEN branch + one default clause == 2 children (no orphan).
+        assert len(evaluate.children) == 2
+        assert evaluate.children.count(evaluate.default_when) == 1
+        # Traversal and to_dict must agree on the default-clause statements.
+        moves_via_traversal = len(result.ast.find_all_by_type("MoveStatement"))
+        default_when = evaluate.to_dict().get("default_when") or {}
+        moves_in_to_dict = len(default_when.get("statements", []))
+        assert moves_via_traversal == 2
+        assert moves_in_to_dict == 2

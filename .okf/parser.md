@@ -166,7 +166,12 @@ every statement nested in a WHEN branch was invisible to `find_all_by_type` /
 recurses the `when_clauses` / `default_when` attributes and dedupes by `id`).
 Because `get_all_statements` dedupes, registering the clauses as children does
 not double-count. `EvaluateStatement.to_dict()` serializes the `when_clauses`
-attribute, not `children`, so its output is unchanged. Pinned by
+attribute, not `children`, so its output is unchanged. Because
+`set_default_when` always calls `add_child`, a malformed program with two
+`WHEN OTHER` branches reuses the existing `default_when` clause (still
+reporting the error) rather than attaching a second one — otherwise the
+orphaned first default clause's statements would be surfaced by the tree-walk
+APIs but not by `default_when` / `to_dict()`. Pinned by
 `tests/regression/test_evaluate_traversal_regression.py`.
 
 **CALL handler-body termination (`call_parser.py`):** the ON EXCEPTION /
