@@ -733,6 +733,12 @@ def _statement_type_names(result) -> list:
     return [type(s).__name__ for s in result.ast.get_all_statements()]
 
 
+def _first_of_type(result, type_name: str):
+    return next(
+        s for s in result.ast.get_all_statements() if type(s).__name__ == type_name
+    )
+
+
 class TestMoveDoesNotSwallowFollowingExecSql:
     """Before the fix, MoveStatementParser's target-collection loop used a
     hand-rolled stop-keyword list that didn't include EXEC/EXECUTE (unlike
@@ -943,3 +949,208 @@ class TestComputeDoesNotSwallowEnclosingScopeTerminator:
             if type(s).__name__ == "ComputeStatement"
         )
         assert "END-READ" not in stmt.expression.upper()
+
+
+# ===========================================================================
+# Group 7 — INSPECT / STRING / UNSTRING swallowing a following statement
+# ===========================================================================
+#
+# When these statements are not terminated by a period (a legal COBOL
+# sentence may contain several statements with no separating period), the
+# parser consumed the *following* statement instead of stopping at its
+# boundary — INSPECT's trailing "consume to period" loop, and the STRING /
+# UNSTRING main-loop `else: consume()` fall-through, never consulted the
+# STATEMENT_KEYWORDS / SCOPE_TERMINATORS / CONTROL_FLOW_BOUNDARIES guards
+# that MOVE / arithmetic parsers already use. Audit 2026-07-06 H2.
+
+
+class TestInspectDoesNotSwallowFollowingStatement:
+    """INSPECT with no trailing period, immediately followed by another
+    statement, previously ran its trailing "consume to period" loop straight
+    through the following statement (and every statement up to the next
+    period), so both the DISPLAY and the STOP RUN vanished from the AST with
+    errors=0."""
+
+    _SRC = "    INSPECT WS-X TALLYING WS-X FOR ALL 'A'\n" "    DISPLAY 'SENTINEL'\n"
+
+    def test_following_display_survives(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "DisplayStatement" in names, (
+            "DISPLAY after an un-punctuated INSPECT must survive — was "
+            f"swallowed before fix. Statements found: {names}"
+        )
+
+    def test_stop_run_after_it_also_survives(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert "StopStatement" in _statement_type_names(result)
+
+    def test_inspect_still_parsed(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert "InspectStatement" in _statement_type_names(result)
+
+    def test_inspect_content_not_contaminated(self):
+        """The INSPECT must not have absorbed any fragment of the following
+        DISPLAY (it breaks *before* consuming the boundary token)."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        stmt = _first_of_type(result, "InspectStatement")
+        blob = str(stmt.to_dict()).upper()
+        assert "SENTINEL" not in blob
+        assert "DISPLAY" not in blob
+
+    def test_tallying_replacing_combined_form_stops_at_boundary(self):
+        """The combined TALLYING ... REPLACING form (which re-enters
+        _parse_replacing via the trailing loop's `continue`) must still stop
+        at a following statement rather than swallow it."""
+        src = (
+            "    INSPECT WS-X TALLYING WS-X FOR ALL 'A' "
+            "REPLACING ALL 'B' BY 'C'\n"
+            "    DISPLAY 'SENTINEL'\n"
+        )
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "InspectStatement" in names
+        assert "DisplayStatement" in names, (
+            "DISPLAY after a combined TALLYING/REPLACING INSPECT must survive. "
+            f"Found: {names}"
+        )
+        stmt = _first_of_type(result, "InspectStatement")
+        assert "SENTINEL" not in str(stmt.to_dict()).upper()
+
+
+class TestStringDoesNotSwallowFollowingStatement:
+    """STRING with no trailing period / END-STRING, immediately followed by
+    another statement, previously fell to the main loop's `else: consume()`
+    and ate the following statement's tokens up to the next period."""
+
+    _SRC = "    STRING WS-X DELIMITED BY SIZE INTO WS-X\n" "    DISPLAY 'SENTINEL'\n"
+
+    def test_following_display_survives(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "DisplayStatement" in names, (
+            "DISPLAY after an un-punctuated STRING must survive — was "
+            f"swallowed before fix. Statements found: {names}"
+        )
+
+    def test_string_still_parsed(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert "StringStatement" in _statement_type_names(result)
+
+    def test_string_content_not_contaminated(self):
+        """The STRING must not have absorbed any fragment of the following
+        DISPLAY as a bogus operand / target."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        stmt = _first_of_type(result, "StringStatement")
+        blob = str(stmt.to_dict()).upper()
+        assert "SENTINEL" not in blob
+        assert "DISPLAY" not in blob
+
+    def test_string_does_not_swallow_enclosing_end_if(self):
+        """A STRING as the last statement of an IF THEN branch (no period)
+        must not swallow the END-IF that closes the IF."""
+        src = (
+            "    IF WS-X = 'Y'\n"
+            "        STRING WS-X DELIMITED BY SIZE INTO WS-X\n"
+            "    END-IF\n"
+            "    DISPLAY 'AFTER'\n"
+        )
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "IfStatement" in names
+        assert "DisplayStatement" in names, (
+            "DISPLAY after the END-IF must survive — the STRING swallowed "
+            f"END-IF and everything after it before fix. Found: {names}"
+        )
+
+
+class TestUnstringDoesNotSwallowFollowingStatement:
+    """UNSTRING with no trailing period / END-UNSTRING, immediately followed
+    by another statement, previously ate it via the main loop's
+    `else: consume()` fall-through."""
+
+    _SRC = "    UNSTRING WS-X DELIMITED BY ',' INTO WS-X\n" "    DISPLAY 'SENTINEL'\n"
+
+    def test_following_display_survives(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        names = _statement_type_names(result)
+        assert "DisplayStatement" in names, (
+            "DISPLAY after an un-punctuated UNSTRING must survive — was "
+            f"swallowed before fix. Statements found: {names}"
+        )
+
+    def test_unstring_still_parsed(self):
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        assert "UnstringStatement" in _statement_type_names(result)
+
+    def test_unstring_content_not_contaminated(self):
+        """The UNSTRING must not have absorbed any fragment of the following
+        DISPLAY as a bogus INTO target."""
+        result = parse_cobol(_proc_program(self._SRC), filename="reg.cbl")
+        stmt = _first_of_type(result, "UnstringStatement")
+        blob = str(stmt.to_dict()).upper()
+        assert "SENTINEL" not in blob
+        assert "DISPLAY" not in blob
+
+
+# ===========================================================================
+# Group 8 — EXEC SQL/CICS/IMS missing END-EXEC now reports an error
+# ===========================================================================
+#
+# END-EXEC is the mandatory delimiter of an embedded EXEC block. Without it,
+# collect_exec_sql_text() consumed the entire rest of the program as SQL text
+# and returned errors=0 (silent, catastrophic data loss). Embedded SQL text
+# legitimately contains COBOL statement keywords (SET / DELETE / UPDATE /
+# CALL / OPEN / CLOSE), so the block cannot be bounded by a content heuristic
+# the way INSPECT/STRING/UNSTRING are — the correct behavior for the
+# malformed case is to surface a parse error. Well-formed blocks (with
+# END-EXEC) are unaffected. Audit 2026-07-06 H2.
+
+
+class TestExecMissingEndExecReportsError:
+    def test_exec_sql_missing_end_exec_reports_error(self):
+        src = "    EXEC SQL SELECT COL INTO :WS-X FROM T\n" "    DISPLAY 'AFTER'.\n"
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert not result.success, "missing END-EXEC must not report success"
+        assert result.errors, "missing END-EXEC must produce a parse error"
+        assert any(
+            "END-EXEC" in str(e) for e in result.errors
+        ), f"error must name END-EXEC; got {[str(e) for e in result.errors]}"
+
+    def test_exec_cics_missing_end_exec_reports_error(self):
+        src = "    EXEC CICS READ FILE('F') INTO(WS-X)\n" "    DISPLAY 'AFTER'.\n"
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert not result.success
+        assert result.errors
+
+    def test_exec_ims_missing_end_exec_reports_error(self):
+        src = "    EXEC IMS GU EMPDB\n" "    DISPLAY 'AFTER'.\n"
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert not result.success
+        assert result.errors
+
+    def test_well_formed_exec_sql_still_succeeds(self):
+        """The fix must not flag correctly-terminated EXEC blocks."""
+        src = (
+            "    EXEC SQL SELECT COL INTO :WS-X FROM T END-EXEC\n"
+            "    DISPLAY 'AFTER'\n"
+        )
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert result.success, f"well-formed EXEC must not error: {result.errors}"
+
+    def test_well_formed_exec_sql_with_sql_keywords_survives(self):
+        """A terminated block whose SQL contains COBOL-keyword-like words
+        (SET/UPDATE) must be collected in full and report no error."""
+        src = (
+            "    EXEC SQL UPDATE BANK.ACCOUNT SET COL = 1 END-EXEC\n"
+            "    DISPLAY 'AFTER'\n"
+        )
+        result = parse_cobol(_proc_program(src), filename="reg.cbl")
+        assert result.success, f"Errors: {result.errors}"
+        exec_nodes = result.ast.find_all_by_type("ExecSQLStatement")
+        assert exec_nodes, "EXEC SQL node must exist"
