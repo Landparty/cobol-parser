@@ -22,10 +22,34 @@
   already correct via the open-quote (`pending_literal`) path. The
   pure-Python impl is now reachable as
   `cobolparser.preprocess._normalize_fixed_format_pure` (mirrors
-  `lexer._CobolLexerPure`) so both paths can be tested. Full NIST suite and
-  the preprocess/lexer/continuation unit tests show zero pass→fail change
-  (513 pass / 2 xfail; 193 pass / 1 xfail before and after). Pinned by
-  `tests/regression/test_continued_literal_normalization.py`.
+  `lexer._CobolLexerPure`) so both paths can be tested. This resolves the
+  `NC205A.CBL` strict-xfail `KNOWN_ISSUES` entry that the same-day H3 MOVE
+  fix (below) had just added — NC205A now parses error-free, so its entry is
+  removed from `tests/integration/test_nist_cobol85_support.py`
+  (`SM206A`/`SM208A`, distinct `COPY REPLACING`/`REPLACE` gaps, remain).
+  Pinned by `tests/regression/test_continued_literal_normalization.py`.
+
+## 2026-07-06 (MOVE silently accepted malformed input — audit H3)
+
+* **Updated** [parser.md](parser.md): the MOVE parser accepted incomplete
+  input and produced a plausible-but-wrong node with `errors == 0` — `MOVE A
+  TO.` gave a `MoveStatement` with `targets: []`; `MOVE A` (no `TO`) and a
+  stream truncated at `MOVE A TO` were also accepted (audit finding H3).
+  `MoveStatementParser.parse` now pulls the active `ParseContext` via
+  `_utils.get_parse_context` and calls `report_parse_error` (the same
+  record-and-continue path GO/CALL use) when `TO` is missing or when zero
+  receiving fields follow `TO` (`target_count == 0`). Well-formed MOVEs stay
+  clean, including multi-target, subscripted targets, literals, figurative
+  constants, and `MOVE CORRESPONDING`. A missing **source** (`MOVE TO X`) is
+  intentionally not flagged — indistinguishable from stray `*>`-comment /
+  `REPLACE` pseudo-text the preprocessor does not strip; an earlier
+  missing-source check faulted a valid shamrice program. Pinned by
+  `tests/unit/test_move_malformed_diagnostics.py`. The stricter check exposed
+  three NIST programs previously passing the error-free guarantee *only* via
+  this silent acceptance, now strict-xfail `KNOWN_ISSUES`: `SM206A` /`SM208A`
+  (`COPY REPLACING` / `REPLACE` pseudo-text substitution not implemented) and
+  `NC205A` (continuation-line handling shatters the split literal `-999.777`
+  — a preprocessing defect, filed separately).
 
 ## 2026-07-06 (COMPUTE swallowing a following statement)
 

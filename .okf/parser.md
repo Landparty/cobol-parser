@@ -286,6 +286,34 @@ string (`"Y + 1 END-READ"`) instead of ending the clause, which the
 `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
 and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
 
+**MOVE silently accepted malformed/incomplete input (`move_parser.py`,
+2026-07-06, audit finding H3):** the MOVE parser produced a
+plausible-but-wrong node with `errors == 0` for incomplete input — `MOVE A
+TO.` yielded a `MoveStatement` with `targets: []`; `MOVE A` (no `TO`) and a
+stream truncated at `MOVE A TO` were also accepted. `MoveStatementParser.parse`
+now pulls the active `ParseContext` (via `_utils.get_parse_context`) and calls
+`report_parse_error` — the same record-and-continue path GO/CALL use, so the
+error lands in `ParseResult.errors` under both `COLLECT_ALL` and (the default)
+`FAIL_FAST` without dropping the node or forcing `_skip_to_next_statement`
+recovery — in two spots: when `TO` is absent, and when zero receiving fields
+follow `TO` (`target_count == 0`). Well-formed MOVEs stay error-free, including
+multi-target (`MOVE A TO B C`), subscripted targets (`MOVE A TO B(I)`),
+literals, figurative constants, and `MOVE CORRESPONDING`. A missing **source**
+(`MOVE TO X`) is deliberately *not* flagged: it is indistinguishable from stray
+`*>`-comment / `REPLACE` pseudo-text the preprocessor does not yet strip
+(`normalize_fixed_format` leaves `*>` inline comments in place), and an earlier
+missing-source check faulted a valid shamrice program
+(`read_specific_cmd_line_args.cbl`, whose line-25 `*>` comment contains the
+word "move to"). Pinned by `tests/unit/test_move_malformed_diagnostics.py`.
+The stricter check revealed three NIST programs that were passing the
+error-free guarantee *only* through this silent acceptance, now strict-xfail
+`KNOWN_ISSUES` in `tests/integration/test_nist_cobol85_support.py`: `SM206A`
+(`COPY REPLACING` pseudo-text with a bare `MOVE` token leaks in), `SM208A`
+(30x `REPLACE` + `==...==` pseudo-text leaks in as `MOVE "*" AO ...` /
+`==MOVE "FAIL" TO==`), and `NC205A` (a continuation-line bug that shatters the
+split literal `-999.777` into `- 9 9 9 . 7 7 7`, the embedded `.` truncating
+the MOVE source — a preprocessing defect, filed separately).
+
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)

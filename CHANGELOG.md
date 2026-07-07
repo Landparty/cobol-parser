@@ -13,13 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/integration/test_nist_cobol85_support.py`). All 459 `.CBL`
   programs in `examples/cobol/` must now parse **error-free** (the
   pre-existing corpus test only checked that parsing does not crash).
-  457/459 currently pass (455 when the tests were introduced; `NC113M` and
-  `NC252A` were then fixed — see *Fixed* below). The 2 remaining are pinned
+  455/459 currently pass. The 4 remaining are pinned
   as strict-xfail `KNOWN_ISSUES` with documented causes, so any parser
   improvement must remove the entry and the list only ever shrinks:
   `OBNC1M` (a COBOL-74 obsolete-feature test that embeds a phony program in
-  a comment-entry, requiring Area A/B-aware parsing) and `SM101A` (requires
-  copybook expansion by design). `SM101A` and `SM207A` must additionally
+  a comment-entry, requiring Area A/B-aware parsing), `SM101A` (requires
+  copybook expansion by design), and `SM206A`/`SM208A` (need `COPY REPLACING` /
+  `REPLACE` pseudo-text substitution — uncovered by the H3 MOVE fix, see
+  *Fixed* below). (`NC205A`, also uncovered by the H3 fix, was a
+  continuation-line bug that shattered a split numeric literal and is now
+  fixed — see *Fixed* below.) `SM101A` and `SM207A` must additionally
   parse clean with copybook expansion against the suite's own copybooks,
   and all 51 `.CPY` copybooks must pass `validate_copybook_content`.
 
@@ -86,6 +89,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Malformed `MOVE` statements no longer parse silently (audit finding H3).**
+  The MOVE parser accepted incomplete input and produced a plausible-but-wrong
+  node with `errors == 0`: `MOVE A TO.` yielded a `MoveStatement` with
+  `targets: []`, `MOVE A` (no `TO`) and a stream truncated at `MOVE A TO` were
+  likewise accepted. The parser now reports a diagnostic (via the parse
+  context, the same path GO/CALL use) when `TO` is missing or when no receiving
+  field follows `TO`; well-formed MOVEs — including multi-target
+  (`MOVE A TO B C`), subscripted targets (`MOVE A TO B(I)`), literals, figurative
+  constants, and `MOVE CORRESPONDING` — stay error-free. A missing *source*
+  (`MOVE TO X`) is intentionally not flagged, because it is indistinguishable
+  from stray `*>`-comment / pseudo-text the preprocessor does not yet strip and
+  flagging it faulted otherwise-valid programs. Pinned by
+  `tests/unit/test_move_malformed_diagnostics.py`. This surfaced that three NIST
+  programs were previously passing the error-free guarantee *only* by way of
+  this silent acceptance — `SM206A`/`SM208A` (need `COPY REPLACING` /`REPLACE`
+  pseudo-text substitution) and `NC205A` (the continuation-line bug fixed
+  below); `SM206A`/`SM208A` are now pinned as strict-xfail `KNOWN_ISSUES`,
+  while `NC205A` is fixed in this same release.
+
 * `normalize_fixed_format` now joins **non-literal fixed-format continuation
   lines** (indicator `-` in column 7) with no intervening space, matching the
   COBOL rule that the first non-blank character of a continuation line is the
@@ -99,9 +121,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correctly for the same reason; alphanumeric literals split with `-` were
   already handled via the open-quote continuation path. The fix is applied to
   both the pure-Python implementation and the Cython `_preprocess_fast`
-  fast-path (the checked-in `.c` is regenerated). Pinned by
-  `tests/regression/test_continued_literal_normalization.py`, which exercises
-  both code paths and the real `NC205A.CBL`.
+  fast-path (the checked-in `.c` is regenerated). Because the H3 MOVE fix
+  (above) had just pinned `NC205A` as strict-xfail for exactly this defect,
+  that `KNOWN_ISSUES` entry is removed here — NC205A parses error-free again.
+  Pinned by `tests/regression/test_continued_literal_normalization.py`, which
+  exercises both code paths and the real `NC205A.CBL`.
 
 * `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
   API. `EvaluateStatementParser` attached WHEN clauses by mutating the model
