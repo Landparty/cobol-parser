@@ -247,7 +247,15 @@ class EvaluateStatementParser(IStatementParser):
                 continue
 
             if token.type != TokenType.NEWLINE:
-                current_selector.append(token.value if token.value else "")
+                value = token.value if token.value else ""
+                # The lexer strips quotes off string literals, so a blank
+                # literal (WHEN '  ' — the IMS DL/I "call succeeded" status
+                # idiom) arrives as whitespace-only text that _build_selector
+                # would filter out as an empty artifact, collapsing the WHEN
+                # to zero selectors. Re-quote it so the value survives.
+                if token.type == TokenType.STRING_LITERAL and not value.strip():
+                    value = f"'{value}'"
+                current_selector.append(value)
                 expecting_selector = False
                 saw_separator = False
             token_stream.consume()

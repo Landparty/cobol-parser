@@ -176,6 +176,16 @@ returned `[]` — an inner `CALL` in `AT END` vanished from the AST entirely,
 blinding mockymock's boundary detection. Pinned by
 `tests/unit/io_statements/test_clause_bodies.py`.
 
+**EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
+the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I
+status-code idiom) arrives as a whitespace-only token that `_build_selector`
+would filter out as an empty artifact, collapsing the clause to zero
+selectors and reporting "WHEN clause must have at least one selector" on
+valid programs. `_parse_selectors` re-quotes whitespace-only
+`STRING_LITERAL` tokens (selector value `"'  '"`); non-blank literals keep
+their unquoted representation. Pinned by
+`tests/regression/test_evaluate_space_literal_when.py`.
+
 **EVALUATE WHEN-clause child registration (`evaluate_parser.py`):** the
 `WhenClause` nodes (both regular `WHEN` branches and the `WHEN OTHER`
 `default_when`) must be attached via the model's `add_when_clause` /

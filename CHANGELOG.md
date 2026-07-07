@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`EVALUATE ... WHEN '  '` (blank string-literal selector) parses again.**
+  The lexer strips quotes off string literals, so a blank literal's token
+  value is whitespace-only; the WHEN selector builder filtered it out as an
+  empty artifact and reported "WHEN clause must have at least one selector"
+  on valid programs. Blank literals are now re-quoted (`selector value
+  "'  '"`) so they survive; non-blank literals are unchanged. This is the
+  standard IMS DL/I status-code idiom and blocked 5/17 programs in the
+  legacy-application corpus. Pinned by
+  `tests/regression/test_evaluate_space_literal_when.py`.
+
 * **`GO TO a b c DEPENDING ON x` no longer collapses to `GO TO a`** (audit
   2026-07-07 C4). All targets are kept (`GoStatement.target_paragraphs`)
   and the `DEPENDING ON` variable is captured. The extra targets are only
