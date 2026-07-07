@@ -334,6 +334,14 @@ def _parse_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
         _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
+    if result.errors:
+        # Analyzer subcommands proceed on a partial AST, but the degradation
+        # must be visible rather than silent.
+        print(
+            f"warning: {args.file} parsed with {len(result.errors)} error(s); "
+            "analysis may be incomplete",
+            file=sys.stderr,
+        )
     return result.ast, prof
 
 
@@ -381,6 +389,18 @@ def _cmd_parse(args: argparse.Namespace) -> None:
         output["profiling"] = prof.to_dict()
 
     _json_out(output, args.compact, getattr(args, "output", None))
+
+    # A recovered-but-errored parse must not report success to the shell:
+    # scripts and CI gate on the exit code, and exiting 0 here silently
+    # promoted every partial parse to a clean one.
+    if result.errors:
+        print(
+            f"warning: parse of {args.file} completed with "
+            f"{len(result.errors)} error(s); AST may be incomplete "
+            "(re-run with --errors to include them in the JSON output)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 # -- Subcommand: batch --------------------------------------------------------
@@ -503,6 +523,22 @@ def _cmd_batch(args: argparse.Namespace) -> None:
         output.append(entry)
 
     _json_out(output, args.compact, getattr(args, "output", None))
+
+    # Surface per-file failures in the process exit code — the batch JSON
+    # already records them, but scripts gating on $? previously saw 0 even
+    # when every file failed.
+    failed = [
+        br
+        for br in results
+        if br.read_error or (br.result is not None and not br.result.success)
+    ]
+    if failed:
+        print(
+            f"warning: {len(failed)} of {len(results)} file(s) failed to "
+            "parse cleanly (see JSON output for details)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 # -- Subcommand: tokenize -----------------------------------------------------

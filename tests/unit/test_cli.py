@@ -176,8 +176,16 @@ class TestCLIErrorHandling:
             f.write("")
             fname = f.name
         try:
-            # Empty file parses to a minimal program — should not crash
-            output = _run_cli_json(fname)
+            # Empty file parses to a minimal program — should not crash, but
+            # the parse collects an error so the CLI must exit non-zero
+            # (2026-07-07 audit C7: no more exit 0 on an errored parse).
+            with patch("sys.argv", ["cobol-parser", fname]):
+                buf = StringIO()
+                with patch("sys.stdout", buf):
+                    with pytest.raises(SystemExit) as exc_info:
+                        main()
+            assert exc_info.value.code == 2
+            output = json.loads(buf.getvalue())
             assert output["node_type"] == "Program"
         finally:
             os.unlink(fname)
@@ -409,7 +417,15 @@ class TestCLIBatch:
         assert len(output) == 2
 
     def test_batch_nonexistent_file(self):
-        output = _run_cli_json("batch", "/nonexistent/file.cbl")
+        # A failed file is reported in the JSON AND in the exit code
+        # (2026-07-07 audit C7: batch no longer exits 0 when files fail).
+        with patch("sys.argv", ["cobol-parser", "batch", "/nonexistent/file.cbl"]):
+            buf = StringIO()
+            with patch("sys.stdout", buf):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+        assert exc_info.value.code == 2
+        output = json.loads(buf.getvalue())
         assert len(output) == 1
         assert "read_error" in output[0]
 

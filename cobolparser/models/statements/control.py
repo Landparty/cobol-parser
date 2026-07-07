@@ -325,11 +325,23 @@ class GoStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("GOTO", location)
         self.target_paragraph: str | None = None
+        # All targets in order — a computed GO TO (DEPENDING ON) has several.
+        self.target_paragraphs: list[str] = []
         self.depending_on_variable: str | None = None
 
     def set_target_paragraph(self, name: str) -> None:
-        """Set the target paragraph name."""
+        """Set the (first) target paragraph name."""
         self.target_paragraph = name
+        if name not in self.target_paragraphs:
+            self.target_paragraphs.append(name)
+        self._add_unique_operand(name)
+
+    def add_target_paragraph(self, name: str) -> None:
+        """Append an additional target for computed GO TO ... DEPENDING ON."""
+        if self.target_paragraph is None:
+            self.target_paragraph = name
+        if name not in self.target_paragraphs:
+            self.target_paragraphs.append(name)
         self._add_unique_operand(name)
 
     def set_depending_on_variable(self, var_name: str) -> None:
@@ -343,6 +355,7 @@ class GoStatement(CobolStatement):
         base.update(
             {
                 "target_paragraph": self.target_paragraph,
+                "target_paragraphs": self.target_paragraphs,
                 "depending_on_variable": self.depending_on_variable,
             }
         )

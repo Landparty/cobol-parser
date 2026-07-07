@@ -166,6 +166,8 @@ class CallStatementParser(IStatementParser):
                             token_stream, stop_at={"NOT", "END-CALL"}
                         )
                         stmt.on_exception = nested if nested else None
+                        for _nested_stmt in nested or []:
+                            stmt.add_child(_nested_stmt)
                     elif next_val == "OVERFLOW":
                         token_stream.consume()  # ON
                         token_stream.consume()  # OVERFLOW
@@ -173,6 +175,8 @@ class CallStatementParser(IStatementParser):
                             token_stream, stop_at={"END-CALL"}
                         )
                         stmt.on_overflow = nested if nested else []
+                        for _nested_stmt in nested or []:
+                            stmt.add_child(_nested_stmt)
                     else:
                         break
                 elif token.type == TokenType.NOT or (
@@ -198,6 +202,8 @@ class CallStatementParser(IStatementParser):
                             token_stream, stop_at={"END-CALL"}
                         )
                         stmt.not_on_exception = nested if nested else None
+                        for _nested_stmt in nested or []:
+                            stmt.add_child(_nested_stmt)
                     else:
                         break
                 elif (

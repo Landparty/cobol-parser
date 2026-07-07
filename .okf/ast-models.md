@@ -54,6 +54,27 @@ class CobolParagraph(ASTNode):
 `CobolProgram.to_json()` exports the full tree as JSON for cross-platform
 interoperability.
 
+Serialization fidelity notes (2026-07-07):
+
+* `CobolProgram.contained_programs` holds additional program units from the
+  same compilation unit (stacked/nested programs); serialized as
+  `contained_programs` and included in `get_all_statements()`.
+* `CobolDataItem.to_dict()` serializes level-88 children as
+  `condition_names`; `CobolSection.to_dict()` serializes level-66 children as
+  `renames_items`. Both were previously captured in-memory but dropped at the
+  JSON boundary.
+* `CallStatement.to_dict()` serializes `not_on_exception` (previously
+  omitted), and CALL handler statements are registered as AST children so
+  `find_all_by_type()` agrees with `get_all_statements()`.
+* `GoStatement` carries `target_paragraphs` (all computed-GO-TO targets) in
+  addition to `target_paragraph` (the first).
+* `XmlJsonStatement` (`models/statements/misc.py`) models XML/JSON
+  GENERATE/PARSE with `verb`, `action`, `primary_operand`, `from_item`, and
+  raw `clause_text`.
+* `IOWriteStatement.advancing_clause` is populated by the WRITE parser
+  (`{"type": "AFTER", "value": 2, "unit": "LINES"}`), not just
+  `advancing_mode`.
+
 # Data Items (`models/data_items.py`)
 
 ```python

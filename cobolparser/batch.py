@@ -81,32 +81,45 @@ def _parse_one(
     path = Path(path_str)
     try:
         source = path.read_text(encoding=encoding, errors=errors)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError covers UnicodeDecodeError under errors="strict" — before
+        # this, a single undecodable file aborted the entire batch instead of
+        # becoming a per-file failure.
         return BatchResult(path=path, result=None, read_error=str(exc))
 
-    if not enable_profiling:
-        result = parse_cobol(
+    try:
+        if not enable_profiling:
+            result = parse_cobol(
+                source,
+                filename=path_str,
+                error_recovery=error_recovery,
+                dialect=dialect,
+            )
+            return BatchResult(path=path, result=result, read_error=None)
+
+        prof_output: str | None = None
+        if prof_output_dir is not None:
+            prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
+
+        parse_result, prof = parse_cobol(
             source,
             filename=path_str,
             error_recovery=error_recovery,
             dialect=dialect,
+            enable_profiling=True,
+            top_n=top_n,
+            prof_output=prof_output,
         )
-        return BatchResult(path=path, result=result, read_error=None)
-
-    prof_output: str | None = None
-    if prof_output_dir is not None:
-        prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
-
-    parse_result, prof = parse_cobol(
-        source,
-        filename=path_str,
-        error_recovery=error_recovery,
-        dialect=dialect,
-        enable_profiling=True,
-        top_n=top_n,
-        prof_output=prof_output,
-    )
-    return BatchResult(path=path, result=parse_result, read_error=None, profiling=prof)
+        return BatchResult(
+            path=path, result=parse_result, read_error=None, profiling=prof
+        )
+    except Exception as exc:  # noqa: BLE001 — one poisoned file must not
+        # abort the batch; the exception is recorded per-file instead.
+        return BatchResult(
+            path=path,
+            result=None,
+            read_error=f"parse error: {type(exc).__name__}: {exc}",
+        )
 
 
 def _parse_one_reuse(
@@ -126,28 +139,39 @@ def _parse_one_reuse(
     path = Path(path_str)
     try:
         source = path.read_text(encoding=encoding, errors=errors)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return BatchResult(path=path, result=None, read_error=str(exc))
 
-    parser = _get_reusable_parser(error_recovery, dialect)
+    try:
+        parser = _get_reusable_parser(error_recovery, dialect)
 
-    if not enable_profiling:
-        result = parser.parse(source, filename=path_str, error_recovery=error_recovery)
-        return BatchResult(path=path, result=result, read_error=None)
+        if not enable_profiling:
+            result = parser.parse(
+                source, filename=path_str, error_recovery=error_recovery
+            )
+            return BatchResult(path=path, result=result, read_error=None)
 
-    prof_output: str | None = None
-    if prof_output_dir is not None:
-        prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
+        prof_output: str | None = None
+        if prof_output_dir is not None:
+            prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
 
-    parse_result, prof = parser.parse(
-        source,
-        filename=path_str,
-        error_recovery=error_recovery,
-        enable_profiling=True,
-        top_n=top_n,
-        prof_output=prof_output,
-    )
-    return BatchResult(path=path, result=parse_result, read_error=None, profiling=prof)
+        parse_result, prof = parser.parse(
+            source,
+            filename=path_str,
+            error_recovery=error_recovery,
+            enable_profiling=True,
+            top_n=top_n,
+            prof_output=prof_output,
+        )
+        return BatchResult(
+            path=path, result=parse_result, read_error=None, profiling=prof
+        )
+    except Exception as exc:  # noqa: BLE001 — record per-file, don't abort batch
+        return BatchResult(
+            path=path,
+            result=None,
+            read_error=f"parse error: {type(exc).__name__}: {exc}",
+        )
 
 
 def _parse_one_packed(args: tuple) -> BatchResult:

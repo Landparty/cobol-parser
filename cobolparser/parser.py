@@ -354,7 +354,8 @@ class CobolParser:
         program_location = self.get_current_location()
 
         # Create initial program (will be updated with metadata from ID division)
-        self.current_program = CobolProgram(program_name, program_location)
+        primary_program = CobolProgram(program_name, program_location)
+        self.current_program = primary_program
 
         # Parse divisions in order: IDENTIFICATION -> ENVIRONMENT -> DATA -> PROCEDURE
         divisions_parsed: list[Any] = []
@@ -384,6 +385,22 @@ class CobolParser:
                         current_value,
                         len(divisions_parsed),
                     )
+                    # END PROGRAM closes the current program unit; consume it
+                    # and keep parsing — the compilation unit may contain more
+                    # (stacked or nested) programs. Historically the loop
+                    # broke here and everything after the first END PROGRAM
+                    # was silently dropped.
+                    if (
+                        divisions_parsed
+                        and current_value == "END"
+                        and self._peek_is_end_program()
+                    ):
+                        self._consume_end_program_marker()
+                        continue
+                    # Only the end-of-input marker remains after at least one
+                    # division parsed — a clean end, not an error.
+                    if divisions_parsed and current_value == "EOF":
+                        break
                     if not divisions_parsed or current_value not in ("END", "PROGRAM"):
                         self.add_error(
                             self.create_error(
@@ -392,6 +409,17 @@ class CobolParser:
                             )
                         )
                     break
+
+                # A second IDENTIFICATION DIVISION starts a new program unit
+                # in the same compilation unit. Parse it into its own
+                # CobolProgram attached to the primary program instead of
+                # merging (and mostly discarding) its content.
+                if isinstance(
+                    parser, IdentificationDivisionParser
+                ) and self.current_program.has_division("IDENTIFICATION"):
+                    new_program = CobolProgram("UNKNOWN", self.get_current_location())
+                    primary_program.add_contained_program(new_program)
+                    self.current_program = new_program
 
                 try:
                     # Set host on ProcedureDivisionParser for ParseContext creation
@@ -429,7 +457,7 @@ class CobolParser:
                         self.add_error(pe)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                         logger.debug("FAIL_FAST: aborting division loop")
-                        return self.current_program if divisions_parsed else None
+                        return primary_program if divisions_parsed else None
                 except Exception as e:
                     logger.debug(
                         "Unexpected exception from %s: %s",
@@ -441,21 +469,65 @@ class CobolParser:
                     self.add_error(error)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                         logger.debug("FAIL_FAST: aborting division loop")
-                        return self.current_program if divisions_parsed else None
+                        return primary_program if divisions_parsed else None
 
         except ParseError as pe:
             if pe not in self.errors:
                 self.add_error(pe)
             if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                return self.current_program if divisions_parsed else None
+                return primary_program if divisions_parsed else None
         except Exception as e:
             self.add_error(
                 ParseError(f"Division parsing error: {str(e)}", line_number=1, column=1)
             )
             if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                return self.current_program if divisions_parsed else None
+                return primary_program if divisions_parsed else None
 
-        return self.current_program
+        if primary_program.contained_programs:
+            names = ", ".join(
+                p.program_name for p in primary_program.contained_programs
+            )
+            self.add_warning(
+                f"Compilation unit contains "
+                f"{len(primary_program.contained_programs) + 1} program units; "
+                f"additional program(s) [{names}] attached to "
+                f"contained_programs of '{primary_program.program_name}'"
+            )
+
+        return primary_program
+
+    def _peek_is_end_program(self) -> bool:
+        """True if the stream is at an ``END PROGRAM`` marker."""
+        if not self.stream:
+            return False
+        idx = 1
+        while idx < 8:
+            token = self.stream.peek(idx)
+            if token is None:
+                return False
+            if token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
+                idx += 1
+                continue
+            return bool(token.value) and token.value.upper() == "PROGRAM"
+        return False
+
+    def _consume_end_program_marker(self) -> None:
+        """Consume ``END PROGRAM [name] [.]`` from the stream."""
+        if not self.stream:
+            return
+        self.stream.consume()  # END
+        self.stream.skip_whitespace_and_comments()
+        token = self.stream.peek()
+        if token and token.value and token.value.upper() == "PROGRAM":
+            self.stream.consume()
+        self.stream.skip_whitespace_and_comments()
+        token = self.stream.peek()
+        if token and token.value and token.value != ".":
+            self.stream.consume()  # program name (identifier or literal)
+        self.stream.skip_whitespace_and_comments()
+        token = self.stream.peek()
+        if token and token.value == ".":
+            self.stream.consume()
 
     def get_current_location(self) -> SourceLocation:
         """Get current source location."""

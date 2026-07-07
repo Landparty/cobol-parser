@@ -754,4 +754,13 @@ def parse_cobol_with_expansion(
         source=expansion.expanded_source, filename=filename, **parser_kwargs
     )
 
+    # Propagate expansion warnings (lossy encoding decodes, copybook content
+    # validation, level-number mismatches). They lived only on the discarded
+    # CopybookExpansion object before, so callers of this convenience entry
+    # point never saw them.
+    expansion_warnings = list(getattr(expansion.statistics, "warnings", []) or [])
+    for warning in expansion_warnings:
+        if warning not in parse_result.warnings:
+            parse_result.warnings.append(warning)
+
     return parse_result

@@ -77,6 +77,7 @@ from .string_unstring_parsers import (
     UnstringStatementParser,
 )
 from .unlock_parser import UnlockStatementParser
+from .xml_json_parser import XmlJsonStatementParser
 
 __all__ = [
     "DisplayStatementParser",
@@ -119,6 +120,7 @@ __all__ = [
     "InspectStatementParser",
     "SetStatementParser",
     "SortStatementParser",
+    "XmlJsonStatementParser",
     "MergeStatementParser",
     "UnlockStatementParser",
     "CommitStatementParser",

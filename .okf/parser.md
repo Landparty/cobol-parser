@@ -51,6 +51,27 @@ class ParseResult:
     def has_warnings(self) -> bool:
 ```
 
+`warnings` is the "recognized but degraded" channel (2026-07-07): the parser
+populates it when it skips an unsupported verb (no registered statement
+parser — e.g. `INVOKE`, `EXHIBIT`; see
+`ProcedureDivisionParser._UNSUPPORTED_VERBS`), when it skips leftover clause
+tokens a statement parser did not understand ("Unparsed tokens" warnings),
+and when a compilation unit contains more than one program (see below).
+Unknown statements were previously consumed with only a `logger.debug`, so
+`errors=0, warnings=0` did not guarantee a complete AST.
+
+## Multi-program compilation units (2026-07-07)
+
+`parse_program()` no longer stops at the first `END PROGRAM`. Stacked or
+nested programs in one source member are each parsed into their own
+`CobolProgram`; the first is returned as `ParseResult.ast` and the rest are
+attached to `ast.contained_programs` (also reachable via `get_all_statements()`
+and `to_dict()["contained_programs"]`), with one summary warning. Helpers:
+`_peek_is_end_program()` / `_consume_end_program_marker()` consume
+`END PROGRAM [name] [.]` between units. Previously everything after the first
+program was silently dropped (NIST `IC228A` retained ~3% of statements with
+`errors=0`).
+
 # Architecture
 
 ```
@@ -128,6 +149,7 @@ suite: `tests/regression/test_numeric_value_clause.py`.
 | `stop_parser.py` | STOP |
 | `string_unstring_parsers.py` | STRING, UNSTRING |
 | `unlock_parser.py` | UNLOCK |
+| `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE |
 | `write_parser.py` | WRITE |
 | `_utils.py` | Shared clause-collection utilities |
 

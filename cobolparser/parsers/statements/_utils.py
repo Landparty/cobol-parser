@@ -115,6 +115,7 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
     {
         "ACCEPT",
         "ADD",
+        "ALLOCATE",
         "ALTER",
         "CALL",
         "CANCEL",
@@ -128,13 +129,17 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "EVALUATE",
         "EXEC",
         "EXECUTE",
+        "EXHIBIT",
         "EXIT",
+        "FREE",
         "GENERATE",
         "GO",
         "GOBACK",
         "IF",
         "INITIALIZE",
         "INSPECT",
+        "INVOKE",
+        "JSON",
         "MERGE",
         "MOVE",
         "MULTIPLY",
@@ -155,6 +160,7 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "UNSTRING",
         "USE",
         "WRITE",
+        "XML",
     }
 )
 

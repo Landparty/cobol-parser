@@ -55,7 +55,7 @@ class CobolSection(ASTNode):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert section to dictionary representation."""
-        return {
+        result = {
             "node_type": self.node_type,
             "section_name": self.section_name,  # Use property
             "location": self.location.to_dict(),
@@ -63,6 +63,17 @@ class CobolSection(ASTNode):
             "data_items": [d.to_dict() for d in self.data_items],
             "metadata": self._metadata or {},
         }
+        # Level-66 RENAMES items are attached as plain children (they are not
+        # CobolDataItem instances) and were historically dropped at the JSON
+        # boundary.
+        renames_items = [
+            child.to_dict()
+            for child in self.children
+            if getattr(child, "node_type", None) == "RenamesItem"
+        ]
+        if renames_items:
+            result["renames_items"] = renames_items
+        return result
 
 
 class CobolDivision(ASTNode):
@@ -212,6 +223,10 @@ class CobolProgram(ASTNode):
         self.program_name = program_name
         # Internal mapping of division name -> division object
         self._divisions: dict[str, CobolDivision] = {}
+        # Additional program units from the same compilation unit (stacked or
+        # nested programs delimited by END PROGRAM). Historically everything
+        # after the first program was silently dropped.
+        self.contained_programs: list[CobolProgram] = []
         # Cached statistics
         self._statistics: dict[str, Any] | None = None
         # S1 optimization: cache get_all_statements() result. Multiple
@@ -250,6 +265,13 @@ class CobolProgram(ASTNode):
         self.add_child(division)
         self._divisions[division.division_name] = division
         # Invalidate S1 statement cache — a new division may add statements.
+        self._cached_all_statements = None
+
+    def add_contained_program(self, program: "CobolProgram") -> None:
+        """Attach an additional program unit from the same compilation unit."""
+        self.add_child(program)
+        self.contained_programs.append(program)
+        # A contained program brings its own statements.
         self._cached_all_statements = None
 
     def get_division(self, name: str) -> CobolDivision | None:
@@ -407,6 +429,11 @@ class CobolProgram(ASTNode):
         proc_division = self.get_division("PROCEDURE")
         if proc_division:
             traverse(proc_division)
+
+        # Include statements from additional program units in this
+        # compilation unit (stacked/nested programs).
+        for contained in self.contained_programs:
+            statements.extend(contained.get_all_statements())
 
         self._cached_all_statements = statements
         return statements
@@ -748,13 +775,18 @@ class CobolProgram(ASTNode):
         if config is None:
             config = SerializationConfig()
 
-        result = {
+        result: dict[str, Any] = {
             "node_type": self.node_type,
             "program_name": self.program_name,
             "divisions": {
                 name: division.to_dict() for name, division in self._divisions.items()
             },
         }
+
+        if self.contained_programs:
+            result["contained_programs"] = [
+                p.to_dict(config) for p in self.contained_programs
+            ]
 
         if config.include_source_locations:
             result["location"] = self.location.to_dict()

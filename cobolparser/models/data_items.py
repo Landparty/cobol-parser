@@ -647,6 +647,17 @@ class CobolDataItem(ASTNode):
         if child_data_items:
             result["children"] = child_data_items
 
+        # Include level-88 condition names. These are parsed into
+        # ConditionNameItem children but were historically dropped at the
+        # JSON boundary.
+        condition_names = [
+            child.to_dict()
+            for child in self.children
+            if isinstance(child, ConditionNameItem)
+        ]
+        if condition_names:
+            result["condition_names"] = condition_names
+
         return result
 
 
