@@ -86,6 +86,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`INSPECT`, `STRING`, and `UNSTRING` no longer swallow the following
+  statement**, and a **missing `END-EXEC` on `EXEC SQL`/`CICS`/`IMS` blocks is
+  now reported instead of silently consuming the rest of the program** (audit
+  2026-07-06 H2 — the last four verbs in the "swallow the next statement"
+  class after MOVE/arithmetic/COMPUTE). A COBOL sentence may legally contain
+  several statements with no separating period; previously an un-punctuated
+  `INSPECT`/`STRING`/`UNSTRING` immediately followed by another statement (e.g.
+  `INSPECT WS-X TALLYING WS-C FOR ALL 'A'  DISPLAY 'X'`) consumed that
+  statement — INSPECT's trailing "consume to period" loop and the
+  STRING/UNSTRING main-loop `else: consume()` fall-throughs never checked a
+  statement boundary. A new shared `is_statement_boundary()` predicate
+  (`parsers/statements/_utils.py`, unioning `STATEMENT_TOKEN_TYPES` /
+  `STATEMENT_KEYWORDS` / `SCOPE_TERMINATORS` / `CONTROL_FLOW_BOUNDARIES`) now
+  stops all three at the boundary; behavior stays `errors=0`. `EXEC` blocks
+  can't use a content boundary (embedded SQL legitimately contains
+  SET/DELETE/UPDATE/CALL/OPEN/CLOSE), so `collect_exec_sql_text` instead
+  detects a missing `END-EXEC` and records an "Unterminated EXEC block" parse
+  error, changing that malformed case from a silent `errors=0`,
+  `success=True` swallow to a reported error (`success=False`); well-formed
+  blocks are unchanged. Pinned by `TestInspectDoesNotSwallowFollowingStatement`,
+  `TestStringDoesNotSwallowFollowingStatement`,
+  `TestUnstringDoesNotSwallowFollowingStatement`, and
+  `TestExecMissingEndExecReportsError` in
+  `tests/regression/test_tier2_silent_drop_regressions.py`.
+
 * `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
   API. `EvaluateStatementParser` attached WHEN clauses by mutating the model
   directly (`stmt.when_clauses.append(...)` and `stmt.default_when = ...`),

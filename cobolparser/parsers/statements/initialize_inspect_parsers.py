@@ -5,7 +5,13 @@ from typing import Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import InitializeStatement, InspectStatement
-from ._utils import consume_period, matches_keyword, skip_whitespace, token_location
+from ._utils import (
+    consume_period,
+    is_statement_boundary,
+    matches_keyword,
+    skip_whitespace,
+    token_location,
+)
 from ._utils import token_value_upper as _val
 
 _REPLACING_CATEGORIES = frozenset(
@@ -175,6 +181,11 @@ class InspectStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
                 self._parse_replacing(token_stream, stmt)
                 continue
+            # No trailing period before the next statement: stop rather than
+            # swallow it (audit 2026-07-06 H2). Without this, the loop ran to
+            # the next period and ate every intervening statement.
+            if is_statement_boundary(t):
+                break
             token_stream.consume()
             skip_whitespace(token_stream)
 

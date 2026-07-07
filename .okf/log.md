@@ -1,5 +1,40 @@
 # OKF Update Log
 
+## 2026-07-06 (INSPECT/STRING/UNSTRING swallow + EXEC missing-END-EXEC — audit H2)
+
+* **Updated** [parser.md](parser.md): closed the last four rows of audit
+  2026-07-06 H2's "swallow the following statement" class.
+  - Added a shared `is_statement_boundary(token)` predicate in
+    `parsers/statements/_utils.py` (unions `STATEMENT_TOKEN_TYPES` /
+    `STATEMENT_KEYWORDS` / `SCOPE_TERMINATORS` / `CONTROL_FLOW_BOUNDARIES`)
+    so INSPECT/STRING/UNSTRING share one boundary check instead of the
+    per-parser inline copies MOVE/arithmetic use.
+  - `InspectStatementParser`'s trailing "consume to period" loop and the
+    `StringStatementParser`/`UnstringStatementParser` main-loop
+    `else: consume()` fall-throughs now `break` on that predicate, so an
+    un-punctuated INSPECT/STRING/UNSTRING immediately followed by another
+    statement (or an enclosing `END-IF`/`ELSE`) no longer devours it up to
+    the next period. Behavior stays `errors=0` (a legal COBOL sentence may
+    hold several statements without separating periods).
+  - EXEC SQL/CICS/IMS is intentionally left off that predicate: embedded
+    SQL/CICS text legitimately contains COBOL keywords (SET/DELETE/UPDATE/
+    CALL/OPEN/CLOSE), so a content boundary would truncate valid SQL. The
+    mandatory `END-EXEC` is the only safe delimiter, so
+    `collect_exec_sql_text` now detects a missing `END-EXEC` (stream
+    exhausted first) and records a non-fatal "Unterminated EXEC block"
+    parse error via the stream's parse context — turning the previous
+    silent "consume the rest of the program with `errors=0`" into a
+    reported error (`result.success == False`). Well-formed blocks and the
+    NIST/shamrice/sample corpora (all `END-EXEC`-terminated) are unaffected.
+  - Pinned by four new classes in
+    `tests/regression/test_tier2_silent_drop_regressions.py`
+    (`TestInspectDoesNotSwallowFollowingStatement`,
+    `TestStringDoesNotSwallowFollowingStatement`,
+    `TestUnstringDoesNotSwallowFollowingStatement`,
+    `TestExecMissingEndExecReportsError`). Full suite: 6579 passed.
+  - Still-open H2 row: MOVE *source* path (`MOVE A` with no `TO`) — not part
+    of this change.
+
 ## 2026-07-06 (COMPUTE swallowing a following statement)
 
 * **Updated** [parser.md](parser.md): the prior same-day fix (below)

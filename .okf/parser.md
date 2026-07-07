@@ -286,6 +286,45 @@ string (`"Y + 1 END-READ"`) instead of ending the clause, which the
 `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
 and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
 
+**INSPECT / STRING / UNSTRING also swallowed a following statement, and EXEC
+SQL/CICS/IMS silently ate the rest of the program on a missing `END-EXEC`
+(`initialize_inspect_parsers.py`, `string_unstring_parsers.py`,
+`ibm_exec_statements.py` + `_utils.py`, audit 2026-07-06 H2):** the same
+un-punctuated-statement swallow class as MOVE/arithmetic above, in the last
+four verbs that never consulted the boundary guards.
+- A new shared predicate `is_statement_boundary(token)` (`_utils.py`)
+  centralises the four-way check (`STATEMENT_TOKEN_TYPES` /
+  `STATEMENT_KEYWORDS` / `SCOPE_TERMINATORS` / `CONTROL_FLOW_BOUNDARIES`) that
+  MOVE/arithmetic perform inline. `InspectStatementParser`'s trailing
+  "consume to period" loop and the `StringStatementParser` /
+  `UnstringStatementParser` main-loop `else: consume()` fall-throughs now
+  `break` (without consuming) on it, so a following statement with no period
+  (or `END-STRING`/`END-UNSTRING`) before it survives instead of being eaten
+  up to the next period. None of the three verbs' own clause keywords
+  (DELIMITED/BY/INTO/WITH/POINTER/ON/OVERFLOW/NOT/REPLACING/TALLYING/
+  CONVERTING) collide with the boundary sets.
+- **EXEC-* is deliberately NOT routed through `is_statement_boundary`.**
+  Embedded SQL/CICS/IMS text legitimately contains COBOL statement keywords
+  (SET, DELETE, UPDATE, CALL, OPEN, CLOSE), so a content-keyword boundary
+  would truncate valid SQL — the highest-traffic embedded construct. The only
+  safe end marker is the mandatory `END-EXEC`. `collect_exec_sql_text`
+  (`_utils.py`) now tracks whether it actually saw `END-EXEC`; if the stream
+  is exhausted first (malformed block), it records a non-fatal
+  "Unterminated EXEC block: missing END-EXEC" error via the parse context
+  attached to the stream (`get_parse_context` + `report_parse_error`), so the
+  block no longer swallows the rest of the program with `errors=0` — it now
+  reports the error and `result.success` is `False`. Well-formed blocks (with
+  `END-EXEC`) are unaffected; the DATA-division caller
+  (`data.py::_parse_exec_sql_in_data`) does not attach a context, so it
+  degrades to the prior silent behavior rather than raising. Every EXEC block
+  in the NIST + shamrice + `tests/samples` corpora is `END-EXEC`-terminated,
+  so no clean-parse test regressed. Pinned by
+  `tests/regression/test_tier2_silent_drop_regressions.py`
+  `::TestInspectDoesNotSwallowFollowingStatement`,
+  `::TestStringDoesNotSwallowFollowingStatement`,
+  `::TestUnstringDoesNotSwallowFollowingStatement`, and
+  `::TestExecMissingEndExecReportsError`.
+
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)

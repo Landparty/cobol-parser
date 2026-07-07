@@ -174,6 +174,33 @@ def token_location(token: Token | None) -> SourceLocation:
     return token.location if token else SourceLocation(0, 0)
 
 
+def is_statement_boundary(token: Token | None) -> bool:
+    """Return True if *token* begins a new statement or closes an enclosing scope.
+
+    A statement or clause-collection loop that has no explicit terminator (e.g.
+    the sentence period) must *stop* — rather than consume — when it reaches
+    such a token, or it silently swallows the statement that follows. This
+    consolidates the four-way check (:data:`STATEMENT_TOKEN_TYPES` /
+    :data:`STATEMENT_KEYWORDS` / :data:`SCOPE_TERMINATORS` /
+    :data:`CONTROL_FLOW_BOUNDARIES`) that the MOVE / arithmetic parsers already
+    perform inline, so the INSPECT / STRING / UNSTRING parsers share one source
+    of truth. It is intentionally *not* used for EXEC SQL/CICS/IMS text
+    collection: embedded SQL legitimately contains COBOL statement keywords
+    (SET, DELETE, CALL, OPEN, CLOSE, UPDATE), which this predicate would
+    misread as a boundary.
+    """
+    if token is None:
+        return False
+    if token.type in STATEMENT_TOKEN_TYPES:
+        return True
+    value = token_value_upper(token)
+    return (
+        value in STATEMENT_KEYWORDS
+        or value in SCOPE_TERMINATORS
+        or value in CONTROL_FLOW_BOUNDARIES
+    )
+
+
 _StmtT = TypeVar("_StmtT", bound=ASTNode)
 
 
@@ -772,6 +799,17 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
     Punctuation tokens (comma, period, semicolon) are similarly attached to
     avoid spurious spaces.
 
+    ``END-EXEC`` is the *mandatory* delimiter of an embedded EXEC block. If it
+    is never found (the stream is exhausted first), the block is malformed and
+    this collector would otherwise silently swallow the entire remainder of the
+    program as SQL text. Unlike INSPECT/STRING/UNSTRING, an EXEC block cannot be
+    bounded by a statement-keyword heuristic — embedded SQL/CICS/IMS text
+    legitimately contains COBOL keywords (SET, DELETE, UPDATE, CALL, OPEN,
+    CLOSE) — so the only safe response to a missing ``END-EXEC`` is to surface a
+    parse error. When a parse context is reachable off *stream* (the procedure
+    division attaches one via ``_attach_context``), an "unterminated EXEC block"
+    error is recorded so the failure is visible instead of ``errors=0``.
+
     Args:
         stream: Token stream positioned at the first SQL token after ``SQL``.
 
@@ -781,6 +819,8 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
     """
     sql_parts: list[str] = []
     prev_was_colon = False
+    terminated = False
+    first_token = stream.peek(0)
     while not stream.is_empty():
         token = stream.peek(0)
         if not token:
@@ -793,6 +833,7 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
         )
         if is_end_exec:
             stream.consume()
+            terminated = True
             break
 
         if token.value:
@@ -805,6 +846,16 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
                 sql_parts.append(token.value)
             prev_was_colon = token.type == TokenType.COLON
         stream.consume()
+
+    if not terminated:
+        context = get_parse_context(stream)
+        if context is not None:
+            report_parse_error(
+                context,
+                "Unterminated EXEC block: missing END-EXEC "
+                "(the rest of the program was consumed as embedded text)",
+                token_location(first_token),
+            )
 
     return " ".join(sql_parts)
 
