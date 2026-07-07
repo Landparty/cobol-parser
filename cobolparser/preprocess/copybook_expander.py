@@ -754,4 +754,17 @@ def parse_cobol_with_expansion(
         source=expansion.expanded_source, filename=filename, **parser_kwargs
     )
 
+    # With enable_profiling=True, parse_cobol returns
+    # (ParseResult, ProfilingResult) — the warnings live on the first element.
+    result_obj = parse_result[0] if isinstance(parse_result, tuple) else parse_result
+
+    # Propagate expansion warnings (lossy encoding decodes, copybook content
+    # validation, level-number mismatches). They lived only on the discarded
+    # CopybookExpansion object before, so callers of this convenience entry
+    # point never saw them.
+    expansion_warnings = list(getattr(expansion.statistics, "warnings", []) or [])
+    for warning in expansion_warnings:
+        if warning not in result_obj.warnings:
+            result_obj.warnings.append(warning)
+
     return parse_result

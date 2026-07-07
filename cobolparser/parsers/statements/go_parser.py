@@ -3,6 +3,7 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    STATEMENT_KEYWORDS,
     get_parse_context,
     matches_keyword,
     report_parse_error,
@@ -101,6 +102,63 @@ class GoStatementParser(IStatementParser):
         stmt.set_target_paragraph(target_name)
         token_stream.consume()  # consume target name
 
+        # Computed GO TO: several targets before DEPENDING ON. Historically
+        # only the first target was kept and the rest — including the
+        # DEPENDING ON variable — were silently skipped, turning a jump
+        # table into an unconditional branch to the first label.
+        #
+        # Scan ahead WITHOUT consuming: additional identifiers are only
+        # targets if a DEPENDING follows; otherwise they belong to the next
+        # sentence (e.g. a paragraph name after a missing period) and must
+        # be left in the stream.
+        extra_targets: list[str] = []
+        found_depending = False
+        idx = 0
+        while True:
+            look = token_stream.peek(idx)
+            if look is None:
+                break
+            if look.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
+                idx += 1
+                continue
+            look_upper = (look.value or "").upper()
+            if look_upper == "DEPENDING":
+                found_depending = True
+                break
+            if (
+                not look.value
+                or look_upper == "."
+                or look_upper in STATEMENT_KEYWORDS
+                or look.type is not TokenType.IDENTIFIER
+            ):
+                break
+            extra_targets.append(look.value)
+            idx += 1
+
+        if found_depending:
+            consumed_targets = 0
+            while consumed_targets < len(extra_targets):
+                next_token = token_stream.peek()
+                if next_token is None:
+                    break
+                if next_token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
+                    token_stream.consume()
+                    continue
+                stmt.add_target_paragraph(next_token.value)
+                token_stream.consume()
+                consumed_targets += 1
+            # Position at the DEPENDING keyword (skip layout tokens)
+            while not token_stream.is_empty():
+                next_token = token_stream.peek()
+                if next_token and next_token.type.name in (
+                    "NEWLINE",
+                    "WHITESPACE",
+                    "COMMENT",
+                ):
+                    token_stream.consume()
+                    continue
+                break
+
         # Check for DEPENDING ON clause
         self._parse_depending_on_clause(token_stream, stmt)
 
@@ -120,28 +178,42 @@ class GoStatementParser(IStatementParser):
             token_stream: Token stream positioned after target paragraph
             stmt: GoStatement to populate with DEPENDING ON variable
         """
+
+        def _skip_layout() -> None:
+            while not token_stream.is_empty():
+                tok = token_stream.peek()
+                if tok and tok.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
+                    token_stream.consume()
+                    continue
+                break
+
         # Check for DEPENDING keyword
+        _skip_layout()
         if token_stream.is_empty():
             return
 
         next_token = token_stream.peek()
-        if not next_token or next_token.value.upper() != "DEPENDING":
+        if not next_token or not next_token.value:
+            return
+        if next_token.value.upper() != "DEPENDING":
             return
 
         # Consume DEPENDING keyword
         token_stream.consume()
 
         # Expect ON keyword
+        _skip_layout()
         if token_stream.is_empty():
             return
 
         next_token = token_stream.peek()
-        if not next_token or next_token.value.upper() != "ON":
+        if not next_token or not next_token.value or next_token.value.upper() != "ON":
             return
 
         token_stream.consume()  # consume ON
 
         # Parse variable name
+        _skip_layout()
         if token_stream.is_empty():
             return
 

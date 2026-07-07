@@ -82,6 +82,7 @@ from .misc import (
     SelectStatement,
     SortStatement,
     UseStatement,
+    XmlJsonStatement,
 )
 
 # Module exports — preserved from original statements.py
@@ -123,6 +124,7 @@ __all__ = [
     "SetStatement",
     "InspectStatement",
     "SortStatement",
+    "XmlJsonStatement",
     "MergeStatement",
     # Other exports
     "CobolExpression",

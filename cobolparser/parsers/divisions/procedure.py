@@ -59,6 +59,7 @@ from cobolparser.parsers.statements import (
     UnlockStatementParser,
     UnstringStatementParser,
     UseStatementParser,
+    XmlJsonStatementParser,
 )
 from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS, skip_whitespace
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
@@ -128,6 +129,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         registry.register(ExecSqlStatementParser())
         registry.register(ExecCicsStatementParser())
         registry.register(ExecImsStatementParser())
+        registry.register(XmlJsonStatementParser())
 
         # Core control flow statements - more specific first
         registry.register(IfStatementParser())
@@ -344,12 +346,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
                             self._wrap_unexpected(e, token), token, token_stream
                         )
                 else:
-                    # No parser found, skip the statement
+                    # No parser found, skip the statement — but tell the
+                    # caller about it so the drop is not silent.
                     logger.debug(
                         "No statement parser matched %s=%r; skipping",
                         token.type.name,
                         token.value,
                     )
+                    self._warn_unsupported_statement(token)
                     self._skip_to_next_statement(token_stream)
 
             elif token_value not in (
@@ -480,15 +484,109 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 # Period terminates statement - consume it and continue
                 token_stream.consume()
             else:
-                # No parser found for this statement - skip it
+                # No parser found for this statement - skip it, but record a
+                # warning so callers can tell content was dropped.
                 logger.debug(
                     "No statement parser matched %s=%r; skipping",
                     token.type.name,
                     token.value,
                 )
+                self._warn_unsupported_statement(token)
                 self._skip_to_next_statement(token_stream)
 
         return statements
+
+    # Stray scope/control markers left behind by error recovery; skipping
+    # these is routine resynchronization, not a dropped statement, so they
+    # do not deserve an "unsupported statement" warning.
+    _STRAY_MARKERS: frozenset = frozenset(
+        {
+            "ELSE",
+            "WHEN",
+            "THEN",
+            "END-IF",
+            "END-PERFORM",
+            "END-EVALUATE",
+            "END-READ",
+            "END-WRITE",
+            "END-SEARCH",
+            "END-CALL",
+            "END-ADD",
+            "END-SUBTRACT",
+            "END-MULTIPLY",
+            "END-DIVIDE",
+            "END-COMPUTE",
+            "END-STRING",
+            "END-UNSTRING",
+            "END-START",
+            "END-DELETE",
+            "END-REWRITE",
+            "END-RETURN",
+            "END-ACCEPT",
+            "END-DISPLAY",
+            "END-XML",
+            "END-JSON",
+        }
+    )
+
+    # Real verbs (IBM Enterprise and dialect extensions) that have no
+    # registered statement parser yet. These get a specific "unsupported
+    # statement" warning; anything else that reaches the skip path is
+    # leftover clause content from a partially-parsed statement.
+    _UNSUPPORTED_VERBS: frozenset = frozenset(
+        {
+            "ALLOCATE",
+            "DISABLE",
+            "ENABLE",
+            "EXECUTE",
+            "EXHIBIT",
+            "FREE",
+            "INVOKE",
+            "PURGE",
+            "RAISE",
+            "READY",
+            "RECEIVE",
+            "RESET",
+            "RESUME",
+            "SEND",
+            "SERVICE",
+            "TRANSFORM",
+        }
+    )
+
+    def _warn_unsupported_statement(self, token: Any) -> None:
+        """Record a caller-visible warning for content skipped without a parser.
+
+        Historically unrecognized statements were consumed with only a
+        ``logger.debug`` — real IBM verbs like INVOKE or EXHIBIT vanished
+        from the AST with ``errors=0, warnings=0``, and clause tokens a
+        statement parser did not understand were dropped just as silently.
+        Route both through the host's warning channel so a "clean" parse
+        actually means a complete AST.
+        """
+        value = (token.value or "").upper() if token is not None else ""
+        if not value or value in self._STRAY_MARKERS:
+            return
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        if value in self._UNSUPPORTED_VERBS:
+            message = (
+                f"Unsupported statement '{value}'{where} skipped: "
+                "no parser is registered for this verb; its tokens were "
+                "discarded up to the next statement boundary"
+            )
+        else:
+            message = (
+                f"Unparsed tokens starting at '{value}'{where} skipped: "
+                "clause or statement not fully supported; content dropped "
+                "from the AST up to the next statement boundary"
+            )
+        host = getattr(self, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(message)
+        else:
+            logger.warning(message)
 
     def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
         """Check if current position starts a new paragraph or section.

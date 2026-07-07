@@ -9,6 +9,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Multi-program compilation units are now parsed** (audit 2026-07-07 C1).
+  Stacked or nested programs delimited by `END PROGRAM` are each parsed into
+  their own `CobolProgram`; the first is `ParseResult.ast` and the rest are
+  attached to `ast.contained_programs` (serialized as `contained_programs`,
+  included in `get_all_statements()`), with a summary warning. Previously
+  everything after the first program was silently dropped with `errors=0`
+  (NIST `IC228A` retained ~3% of its statements).
+
+* **XML/JSON GENERATE/PARSE statement support** (audit 2026-07-07 C3). New
+  `XmlJsonStatementParser` + `XmlJsonStatement` AST node capture verb,
+  action, primary operands, and raw trailing-clause text. Previously the
+  `XML`/`JSON` keyword was silently skipped and the remainder mis-parsed as
+  a Report Writer `GENERATE`.
+
+* **Unsupported-statement and unparsed-token warnings** (audit 2026-07-07
+  C2). When no statement parser matches, the skip is now recorded on
+  `ParseResult.warnings` with the token and line instead of only
+  `logger.debug`: known unsupported verbs (`INVOKE`, `EXHIBIT`, `SEND`,
+  `ENABLE`, ...) get an "Unsupported statement" warning; leftover clause
+  tokens from partially-supported statements get an "Unparsed tokens"
+  warning. `ALLOCATE`, `FREE`, `EXHIBIT`, `INVOKE`, `XML`, and `JSON` were
+  added to `STATEMENT_KEYWORDS` so they are treated as statement starts
+  rather than becoming phantom paragraph names. Note: programs that
+  previously parsed with `warnings == []` may now carry warnings — that is
+  the fix working, not a regression; each warning marks content that was
+  already being dropped silently.
+
+### Fixed
+
+* **`GO TO a b c DEPENDING ON x` no longer collapses to `GO TO a`** (audit
+  2026-07-07 C4). All targets are kept (`GoStatement.target_paragraphs`)
+  and the `DEPENDING ON` variable is captured. The extra targets are only
+  consumed when a `DEPENDING` clause actually follows (peek-ahead), so an
+  identifier after a missing sentence period is still treated as the next
+  paragraph rather than swallowed. Previously the extra targets and the
+  variable were silently skipped — and the variable could become a phantom
+  paragraph.
+
+* **Level-88 condition names and level-66 RENAMES survive `to_dict()`**
+  (audit 2026-07-07 C5). `CobolDataItem.to_dict()` emits `condition_names`;
+  `CobolSection.to_dict()` emits `renames_items`. Both node types were
+  parsed in-memory but dropped from every JSON export.
+
+* **`CALL ... NOT ON EXCEPTION` handler serialization and traversal** (audit
+  2026-07-07 C6). `CallStatement.to_dict()` now includes
+  `not_on_exception`, and all CALL handler statements are registered as AST
+  children so `find_all_by_type()` agrees with `get_all_statements()`.
+
+* **CLI exit codes are honest** (audit 2026-07-07 C7). `cobol-parser parse`
+  exits `2` (with a stderr summary) when the parse completed with collected
+  errors; `batch` exits `2` when any file has a `read_error` or
+  `success=false`; analyzer subcommands print a stderr warning when
+  analyzing a partial AST. Previously every command exited `0` as long as
+  an AST existed.
+
+* **A poisoned file no longer aborts an entire batch** (audit 2026-07-07
+  C8). Batch workers catch parse-time exceptions (and `UnicodeDecodeError`
+  under `errors="strict"`) and record them as per-file
+  `BatchResult.read_error` instead of propagating out of the pool and
+  losing every other file's result.
+
+* **`WRITE ... ADVANCING n LINES/PAGE` keeps the count and unit** (audit
+  2026-07-07 H3). The WRITE parser now populates
+  `IOWriteStatement.advancing_clause`; previously the count/unit tokens
+  were consumed and dropped.
+
+* **Copybook expansion warnings propagate** (audit 2026-07-07 H6).
+  `parse_cobol_with_expansion` copies `expansion.statistics.warnings`
+  (lossy encoding decodes, content validation, level-number mismatches)
+  onto `ParseResult.warnings`; they were previously discarded with the
+  `CopybookExpansion` object.
+
+### Added (pre-2026-07-07)
+
 * Strict support tests for the real-life NIST COBOL-85 corpus
   (`tests/integration/test_nist_cobol85_support.py`). All 459 `.CBL`
   programs in `examples/cobol/` must now parse **error-free** (the

@@ -57,6 +57,14 @@ a specific subtree. `--errors` shows parse errors only. `--stats` appends
 (see [parser.md](parser.md)) and embed timing/memory metrics in the output, or
 write a binary `.prof` to `PATH`.
 
+Exit codes (2026-07-07): `0` clean parse; `1` hard failure (`ast is None`,
+bad arguments); `2` recovered-but-errored parse — the JSON is still printed,
+a summary goes to stderr. Previously the CLI exited `0` whenever an AST
+existed, even with collected errors, so scripts gating on `$?` saw every
+partial parse as success. `batch` likewise exits `2` when any file has a
+`read_error` or `success=false`. Analyzer subcommands still exit `0` on a
+partial parse but print a stderr warning that analysis may be incomplete.
+
 ## Tokenize
 
 ```bash

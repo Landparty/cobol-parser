@@ -175,22 +175,25 @@ class TestParseFilesEncoding:
 
 
 class TestParseOneInternal:
-    def test_parse_cobol_exception_propagates(self, tmp_path):
-        """If parse_cobol() raises unexpectedly, the exception surfaces from _parse_one."""
+    def test_parse_cobol_exception_contained(self, tmp_path):
+        """If parse_cobol() raises unexpectedly, _parse_one records a per-file
+        read_error instead of propagating and aborting the whole batch
+        (2026-07-07 audit C8)."""
         cobl = tmp_path / "boom.cbl"
         cobl.write_text("IDENTIFICATION DIVISION.\nPROGRAM-ID. BOOM.\n")
 
         with patch(
             "cobolparser.batch.parse_cobol", side_effect=RuntimeError("unexpected")
         ):
-            with pytest.raises(RuntimeError, match="unexpected"):
-                _parse_one(
-                    str(cobl),
-                    "utf-8",
-                    "replace",
-                    ErrorRecoveryMode.COLLECT_ALL,
-                    DialectType.IBM_ENTERPRISE,
-                    False,
-                    10,
-                    None,
-                )
+            result = _parse_one(
+                str(cobl),
+                "utf-8",
+                "replace",
+                ErrorRecoveryMode.COLLECT_ALL,
+                DialectType.IBM_ENTERPRISE,
+                False,
+                10,
+                None,
+            )
+        assert result.result is None
+        assert "unexpected" in (result.read_error or "")

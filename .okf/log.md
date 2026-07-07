@@ -1,5 +1,36 @@
 # OKF Update Log
 
+## 2026-07-07 (audit critical silent-drop fixes: C1–C8, H3, H6)
+
+* **Updated** [parser.md](parser.md): multi-program compilation units are now
+  parsed — `parse_program()` consumes `END PROGRAM [name] [.]` and starts a
+  new `CobolProgram` at each subsequent IDENTIFICATION DIVISION, attaching
+  extras to `ast.contained_programs` with a summary warning (C1). Unknown
+  verbs (no registered statement parser) now emit a `ParseResult.warnings`
+  entry instead of a silent `logger.debug` skip
+  (`procedure.py:_warn_unsupported_statement`, C2). New
+  `xml_json_parser.py` handles XML/JSON GENERATE/PARSE (C3) — previously
+  mis-parsed as Report Writer GENERATE. `STATEMENT_KEYWORDS` gained
+  ALLOCATE/EXHIBIT/FREE/INVOKE/JSON/XML.
+* **Updated** [ast-models.md](ast-models.md): `CobolProgram.contained_programs`;
+  `condition_names` (level-88) on `CobolDataItem.to_dict()` and
+  `renames_items` (level-66) on `CobolSection.to_dict()` (C5);
+  `CallStatement.to_dict()` includes `not_on_exception` and handler
+  statements are AST children so `find_all_by_type()` sees them (C6);
+  `GoStatement.target_paragraphs` keeps all computed-GO-TO targets plus the
+  DEPENDING ON variable (C4); new `XmlJsonStatement` node;
+  `IOWriteStatement.advancing_clause` populated by the WRITE parser (H3).
+* **Updated** [cli.md](cli.md): `parse` exits 2 on a recovered-but-errored
+  parse, `batch` exits 2 when any file failed, analyzer subcommands warn on
+  stderr when analyzing a partial AST (C7). Batch workers contain
+  parse-time exceptions as per-file `read_error` instead of aborting the
+  pool (C8).
+* **Updated** [preprocessing.md](preprocessing.md):
+  `parse_cobol_with_expansion` propagates `expansion.statistics.warnings`
+  onto `ParseResult.warnings` (H6).
+* Pinned by `tests/regression/test_tier3_silent_drop_fixes.py` (31 tests).
+  Full audit: `reports/audit-2026-07-07.md`.
+
 ## 2026-07-06 (fixed-format numeric-literal continuation mangled)
 
 * **Updated** [preprocessing.md](preprocessing.md): documented that

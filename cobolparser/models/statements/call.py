@@ -100,9 +100,13 @@ class CallStatement(CobolStatement):
                 "possible_values": self.possible_values,
             }
         )
-        # Add exception handlers if present
+        # Add exception handlers if present. not_on_exception was
+        # historically omitted here, silently dropping its statements from
+        # every JSON export.
         base.update(
-            self._serialize_clauses("on_overflow", "on_exception", omit_empty=True)
+            self._serialize_clauses(
+                "on_overflow", "on_exception", "not_on_exception", omit_empty=True
+            )
         )
 
         return base

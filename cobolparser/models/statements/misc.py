@@ -322,6 +322,52 @@ class GenerateStatement(CobolStatement):
         return result
 
 
+class XmlJsonStatement(CobolStatement):
+    """AST node for XML/JSON GENERATE and PARSE statements (IBM Enterprise).
+
+    Historically the leading XML/JSON keyword was silently skipped and the
+    remainder mis-parsed as a Report Writer GENERATE. This node preserves the
+    verb (``XML``/``JSON``), the action (``GENERATE``/``PARSE``), the primary
+    operands, and the raw text of any trailing clauses (COUNT IN, WITH
+    ENCODING, NAMESPACE, PROCESSING PROCEDURE, ON EXCEPTION, ...).
+    """
+
+    def __init__(self, verb: str, action: str, location: SourceLocation):
+        super().__init__(f"{verb} {action}", location)
+        self.verb = verb  # "XML" | "JSON"
+        self.action = action  # "GENERATE" | "PARSE"
+        # GENERATE: receiving item; PARSE: the item being parsed
+        self.primary_operand: str | None = None
+        # GENERATE only: the FROM source item
+        self.from_item: str | None = None
+        # Raw text of trailing clauses, preserved rather than dropped
+        self.clause_text: str | None = None
+
+    def set_primary_operand(self, name: str) -> None:
+        self.primary_operand = name
+        self._add_unique_operand(name)
+
+    def set_from_item(self, name: str) -> None:
+        self.from_item = name
+        self._add_unique_operand(name)
+
+    def set_clause_text(self, text: str) -> None:
+        self.clause_text = text or None
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "verb": self.verb,
+                "action": self.action,
+                "primary_operand": self.primary_operand,
+                "from_item": self.from_item,
+                "clause_text": self.clause_text,
+            }
+        )
+        return result
+
+
 class ReleaseStatement(CobolStatement):
     """AST node for RELEASE statements (sort input)."""
 

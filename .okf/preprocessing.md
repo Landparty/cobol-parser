@@ -120,6 +120,12 @@ Features:
 - LRU file cache (configurable via `set_file_cache_size`)
 - REPLACING clause support including multi-token substitution
 
+`parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
+encoding decodes, content-validation and level-number warnings) onto the
+returned `ParseResult.warnings` (2026-07-07). Previously they lived only on
+the discarded `CopybookExpansion` object, so this entry point's callers never
+saw them.
+
 # Error Hierarchy
 
 All preprocessing errors extend `PreprocessingError` which extends `ParseError`:
