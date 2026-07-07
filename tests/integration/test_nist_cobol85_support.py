@@ -58,14 +58,9 @@ KNOWN_ISSUES: dict[str, str] = {
         "Surfaced by the H3 fix; was previously masked by silent acceptance. "
         "Resolve by implementing the REPLACE statement."
     ),
-    "NC205A.CBL": (
-        "continuation-line normalization shatters the continued numeric "
-        "literal `-999.777` into `- 9 9 9 . 7 7 7`; the embedded `.` "
-        "prematurely terminates the MOVE source, leaving a MOVE with no TO. "
-        "This is a continuation-handling bug (not a missing feature) — see the "
-        "separately filed defect. Surfaced by the H3 fix; was previously masked "
-        "by silent acceptance."
-    ),
+    # NC205A.CBL removed: its continued numeric literal `-999.777` now
+    # normalizes correctly (fixed-format continuation-line join no longer
+    # injects a space). See tests/regression/test_continued_literal_normalization.py.
 }
 
 # Copybooks the content validator currently flags. Marked strict-xfail so a

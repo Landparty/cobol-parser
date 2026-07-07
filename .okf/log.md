@@ -1,5 +1,34 @@
 # OKF Update Log
 
+## 2026-07-06 (fixed-format numeric-literal continuation mangled)
+
+* **Updated** [preprocessing.md](preprocessing.md): documented that
+  `normalize_fixed_format` joins non-literal continuation lines (indicator
+  `-` in column 7) with **no** intervening space, per the COBOL rule that a
+  continuation line's first non-blank character is the successor of the
+  continued line's last non-blank character. The `else` branch (taken when
+  no alphanumeric literal is open) previously did `" " + text_slice.lstrip()`,
+  injecting a space before every chunk. A numeric literal split one character
+  per continuation line — NIST `NC205A.CBL` writes `-999.777` and `45678`
+  this way — normalised to `- 9  9  9  .  7  7  7`: spaced digits plus a
+  free-standing `.` that the free-form lexer read as a statement terminator,
+  truncating the `MOVE` source and dropping the `TO CONT-B` target. The AST
+  silently lost the whole `MOVE -999.777 TO CONT-B` while `result.success`
+  stayed `True` (no error surfaced). Changed both branches to
+  `text_slice.strip()` (no leading space, both ends trimmed) in the
+  pure-Python `preprocess/__init__.py` **and** the Cython
+  `_preprocess_fast.pyx` (checked-in `.c` regenerated via
+  `setup.py build_ext --inplace`). Alphanumeric literals split with `-` were
+  already correct via the open-quote (`pending_literal`) path. The
+  pure-Python impl is now reachable as
+  `cobolparser.preprocess._normalize_fixed_format_pure` (mirrors
+  `lexer._CobolLexerPure`) so both paths can be tested. This resolves the
+  `NC205A.CBL` strict-xfail `KNOWN_ISSUES` entry that the same-day H3 MOVE
+  fix (below) had just added — NC205A now parses error-free, so its entry is
+  removed from `tests/integration/test_nist_cobol85_support.py`
+  (`SM206A`/`SM208A`, distinct `COPY REPLACING`/`REPLACE` gaps, remain).
+  Pinned by `tests/regression/test_continued_literal_normalization.py`.
+
 ## 2026-07-06 (INSPECT/STRING/UNSTRING swallow + EXEC missing-END-EXEC — audit H2)
 
 * **Updated** [parser.md](parser.md): closed the last four rows of audit

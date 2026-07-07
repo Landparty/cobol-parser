@@ -92,7 +92,14 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
                         i += 1
                 pending_literal = quote_open
             else:
-                stripped = " " + text_slice.lstrip()
+                # Non-literal continuation: '-' in column 7 with no
+                # alphanumeric literal open. Per COBOL fixed-format rules the
+                # first non-blank char of the continuation line is the
+                # successor of the last non-blank char of the continued line,
+                # with NO intervening space (numeric literals / words split
+                # mid-token, e.g. '-999.777' one character per line). Strip
+                # both ends so the chunk butts directly onto the buffer.
+                stripped = text_slice.strip()
                 parts.append(stripped)
                 if merge_continued_literals:
                     n = len(stripped)
