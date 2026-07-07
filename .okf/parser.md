@@ -190,17 +190,30 @@ generate clean, zero refusals):
   *between* a keyword and its operand, not *before* checking whether the
   keyword was present at all — so an optional clause keyword (`GIVING`,
   etc.) on its own continuation line (ordinary free-form COBOL layout) was
-  missed. Now skips leading newlines too; fixes the same class of bug for
-  `ADD ... TO ... GIVING` when `GIVING` is on a continuation line.
+  missed. Now calls `skip_whitespace` (not the narrower `_skip_newlines`)
+  before *and* after the keyword check, so a leading `WHITESPACE`/
+  `COMMENT`/`CONTINUATION` token doesn't hide the keyword either — a
+  review comment flagged that fixed-format continuation lines carry a
+  `CONTINUATION` token (column-7 `-`), not just `NEWLINE`, though in the
+  standard `parse_cobol` pipeline `normalize_fixed_format` already merges
+  those textually before the lexer runs, so this is defensive-in-depth
+  rather than a reachable gap through today's entry point. Fixes the same
+  class of bug for `ADD ... TO ... GIVING` when `GIVING` is on a
+  continuation line.
 - `DisplayStatementParser`'s item loop only accepted
   `STRING_LITERAL`/`IDENTIFIER`/`NUMERIC_LITERAL` tokens, so a subscripted
   operand like `SQLERRD(3)` hit the bare `LEFT_PAREN` token and aborted
   the whole item list. `_consume_subscript` now folds a following
-  `( ... )` into the preceding identifier as one display item.
+  `( ... )` into the preceding identifier as one display item, tracking
+  paren depth so a nested subscript/function call (`TAB(FUNCTION
+  MOD(3 2))`) keeps its inner parens literally instead of flattening them
+  into a single space-joined pair (a review comment on the first version
+  of this fix caught that flattening bug).
 - `WriteStatementParser`'s `FROM` clause only accepted `IDENTIFIER`; a
   literal source (`WRITE rec FROM 'text'`, an IBM/GnuCOBOL extension) was
   left unconsumed. Now accepted and stored quoted.
 Pinned by `tests/unit/test_arithmetic_size_error_branches.py`,
+`tests/unit/test_utils_clause_collection.py`,
 `tests/unit/test_display_parser.py`, and
 `tests/unit/io_statements/test_write_close_parsers.py`.
 

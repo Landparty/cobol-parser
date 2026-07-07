@@ -21,8 +21,17 @@
   `WriteStatementParser`'s `FROM` clause now also accepts a string literal
   source, not just an identifier (`GLRECON.cbl`'s `WRITE rec FROM
   'literal text'`).
-* **Updated** [tests.md](tests.md): test count refreshed to ~6,704 tests
+* **Updated** [tests.md](tests.md): test count refreshed to ~6,709 tests
   across 239 files (new `tests/unit/test_display_parser.py`).
+* **Addressed PR #80 review comments:** `_consume_subscript` now preserves
+  nested parens literally (`TAB(FUNCTION MOD(3 2))` no longer flattens to
+  `TAB(FUNCTION MOD 3 2)`) instead of only tracking paren depth without
+  recording the parens; `consume_keyword_and_operand` now calls
+  `skip_whitespace` (covers `WHITESPACE`/`COMMENT`/`CONTINUATION` too, not
+  just `NEWLINE`) so a fixed-format continuation token before an optional
+  clause keyword can't hide it, even though `normalize_fixed_format`
+  already merges continuation lines before today's standard entry point
+  reaches the lexer.
 
 ## 2026-07-07 (audit HIGH/MEDIUM remediation: H1, H2, H4, H5, H6a/c, H7, M5, M8, M10)
 

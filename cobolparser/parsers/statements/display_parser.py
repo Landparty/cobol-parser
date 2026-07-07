@@ -139,14 +139,16 @@ class DisplayStatementParser(IStatementParser):
     def _consume_subscript(token_stream: ITokenStream) -> str:
         """Consume a following `( subscript-expr )` if present, returning its
         text (including the parens) for appending to the preceding
-        identifier, or "" if the next token isn't a LEFT_PAREN. Tracks
-        paren depth so a nested/qualified subscript like `TAB(I + 1)` is
-        consumed as one unit (mirrors move_parser._parse_source)."""
+        identifier, or "" if the next token isn't a LEFT_PAREN. Tracks paren
+        depth so a nested subscript/function call like `TAB(FUNCTION
+        MOD(X 3))` is consumed as one unit and its inner parens are kept
+        literally (mirrors move_parser._parse_source, which also tracks
+        depth rather than assuming a single paren pair)."""
         token = token_stream.peek()
         if not token or token.type != TokenType.LEFT_PAREN:
             return ""
 
-        inner_parts: list[str] = []
+        parts: list[str] = []
         paren_depth = 0
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -154,20 +156,32 @@ class DisplayStatementParser(IStatementParser):
                 break
             if token.type == TokenType.LEFT_PAREN:
                 paren_depth += 1
+                parts.append("(")
                 token_stream.consume()
                 continue
             if token.type == TokenType.RIGHT_PAREN:
                 paren_depth -= 1
+                parts.append(")")
                 token_stream.consume()
                 if paren_depth == 0:
                     break
                 continue
             value = token.value or ""
-            inner_parts.append(
+            parts.append(
                 f'"{value}"' if token.type == TokenType.STRING_LITERAL else value
             )
             token_stream.consume()
-        return "(" + " ".join(inner_parts) + ")"
+
+        # Join without a space around parens (`SQLERRD(3)`, `MOD(X 3)`) but
+        # with one between adjacent non-paren tokens (`TAB(I J)`'s
+        # multi-dimension subscript), so nested parens round-trip literally
+        # instead of being flattened into a single space-joined pair.
+        out: list[str] = []
+        for i, part in enumerate(parts):
+            if i > 0 and part not in ("(", ")") and parts[i - 1] != "(":
+                out.append(" ")
+            out.append(part)
+        return "".join(out)
 
     @staticmethod
     def _is_keyword(token: Any, keyword: str) -> bool:

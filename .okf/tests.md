@@ -8,7 +8,7 @@ timestamp: 2026-07-07T00:00:00Z
 
 # Overview
 
-~6,704 tests across 239 files in 5 directories. Coverage floor: **81% line coverage**
+~6,709 tests across 239 files in 5 directories. Coverage floor: **81% line coverage**
 enforced by `--cov-fail-under=81` in `pyproject.toml`. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.

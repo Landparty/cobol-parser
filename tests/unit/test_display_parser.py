@@ -56,3 +56,21 @@ class TestDisplaySubscriptedOperand:
         assert not result.warnings
         stmts = result.ast.find_statements("DISPLAY")
         assert stmts[0].display_items == ["WS-TABLE(1)", '" - "', "WS-TABLE(2)"]
+
+    def test_display_subscript_with_nested_function_call(self):
+        """A subscript containing its own parens (an intrinsic function
+        call, e.g. `TAB(FUNCTION MOD(3 2))`) must round-trip its nested
+        parens literally rather than flattening them into a single space-
+        joined pair -- a real gap flagged in review of the initial fix."""
+        result = parse_cobol(_prog("           DISPLAY WS-TABLE(FUNCTION MOD(3 2))."))
+        assert not result.warnings
+        stmts = result.ast.find_statements("DISPLAY")
+        assert stmts[0].display_items == ["WS-TABLE(FUNCTION MOD(3 2))"]
+
+    def test_display_multi_dimension_subscript(self):
+        """A two-dimension subscript (`TAB(I J)`) keeps a single space
+        between the two index tokens (not glued together, not dropped)."""
+        result = parse_cobol(_prog("           DISPLAY WS-TABLE(WS-IDX WS-IDX)."))
+        assert not result.warnings
+        stmts = result.ast.find_statements("DISPLAY")
+        assert stmts[0].display_items == ["WS-TABLE(WS-IDX WS-IDX)"]
