@@ -558,7 +558,14 @@ def preprocess_conditional_compilation(
     - >>IF symbol IS DEFINED / IS NOT DEFINED
     - >>ELSE
     - >>END-IF
-    - >>EVALUATE (basic support)
+
+    Any other ``>>`` directive (including ``>>EVALUATE``, which is NOT
+    implemented despite superficially resembling a conditional-compilation
+    construct) falls through to the generic "unknown compiler directive"
+    path: it is passed through to the lexer unprocessed and, when
+    *warnings* is provided, recorded there (audit 2026-07-07 H7 review —
+    this docstring previously claimed "basic support" for >>EVALUATE that
+    was never implemented).
 
     Args:
         source: COBOL source code containing directives
@@ -566,9 +573,10 @@ def preprocess_conditional_compilation(
         warnings: Optional list that receives diagnostics for directives this
             preprocessor cannot evaluate (unknown ``>>IF`` conditions,
             malformed ``>>DEFINE``, stray ``>>ELSE``/``>>END-IF``, an
-            unclosed ``>>IF`` at end of input) — previously all silent
-            (audit 2026-07-07 H7), even though an unknown ``>>IF`` condition
-            deletes the whole guarded block.
+            unclosed ``>>IF`` at end of input, and any other unrecognized
+            ``>>`` directive such as ``>>EVALUATE``) — previously all
+            silent (audit 2026-07-07 H7), even though an unknown ``>>IF``
+            condition deletes the whole guarded block.
 
     Returns:
         Source code with conditional sections processed

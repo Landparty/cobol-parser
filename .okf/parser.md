@@ -403,7 +403,11 @@ consumed), or a nested parser consuming the sentence period. Pinned by
 dimension into `PerformStatement.after_clauses`, then the inline body is
 parsed. `_collect_until_condition_tokens` stops (without consuming) at
 `AFTER` so the second dimension is never absorbed into the first UNTIL
-condition string. Pinned by `::TestH2PerformVaryingAfter`.
+condition string — but only when `for_varying=True` (the VARYING call
+site): a plain, non-VARYING `PERFORM UNTIL` has no AFTER clause of its own,
+so gating the stop on `for_varying` avoids truncating a condition that
+happens to contain an `AFTER` token (Copilot review on PR #79 caught the
+original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH

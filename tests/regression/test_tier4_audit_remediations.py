@@ -178,6 +178,62 @@ class TestH2PerformVaryingAfter:
         assert perform.after_clauses == []
         assert "after_clauses" not in perform.to_dict()
 
+    def test_non_varying_until_condition_does_not_stop_at_after_token(self):
+        """A plain (non-VARYING) PERFORM UNTIL has no AFTER clause of its
+        own, so the AFTER-stop guard added for the AFTER-dimension fix must
+        only apply in the VARYING context (Copilot review on PR #79) --
+        otherwise a condition/expression containing an AFTER token is
+        truncated and the remainder misparsed as inline statements."""
+        from cobolparser.core.token_stream import TokenStream
+        from cobolparser.lexer import Token, TokenType
+        from cobolparser.models.ast_base import SourceLocation
+        from cobolparser.parsers.statements.perform_parser import (
+            PerformStatementParser,
+        )
+
+        loc = SourceLocation(1, 1)
+        # UNTIL WS-A = 1 AFTER . -- "AFTER" appearing as an operand token in
+        # a non-VARYING UNTIL condition must be collected, not treated as
+        # the start of a VARYING AFTER dimension.
+        tokens = [
+            Token(TokenType.IDENTIFIER, "WS-A", loc),
+            Token(TokenType.EQUAL, "=", loc),
+            Token(TokenType.NUMERIC_LITERAL, "1", loc),
+            Token(TokenType.AFTER, "AFTER", loc),
+            Token(TokenType.PERIOD, ".", loc),
+        ]
+        stream = TokenStream(tokens)
+        parser = PerformStatementParser()
+        condition_tokens = parser._collect_until_condition_tokens(
+            stream, for_varying=False
+        )
+        assert condition_tokens == ["WS-A", "=", "1", "AFTER"]
+
+    def test_varying_until_condition_still_stops_at_after(self):
+        from cobolparser.core.token_stream import TokenStream
+        from cobolparser.lexer import Token, TokenType
+        from cobolparser.models.ast_base import SourceLocation
+        from cobolparser.parsers.statements.perform_parser import (
+            PerformStatementParser,
+        )
+
+        loc = SourceLocation(1, 1)
+        tokens = [
+            Token(TokenType.IDENTIFIER, "WS-I", loc),
+            Token(TokenType.GREATER, ">", loc),
+            Token(TokenType.NUMERIC_LITERAL, "5", loc),
+            Token(TokenType.AFTER, "AFTER", loc),
+            Token(TokenType.IDENTIFIER, "WS-J", loc),
+        ]
+        stream = TokenStream(tokens)
+        parser = PerformStatementParser()
+        condition_tokens = parser._collect_until_condition_tokens(
+            stream, for_varying=True
+        )
+        assert condition_tokens == ["WS-I", ">", "5"]
+        # AFTER (and what follows) is left unconsumed for the caller
+        assert stream.peek().value == "AFTER"
+
 
 class TestH4DecimalPointIsCommaWarns:
     """H4: the unhonored SPECIAL-NAMES clause is caller-visible."""
@@ -413,6 +469,16 @@ class TestH7ConditionalCompilationWarnings:
     def test_unknown_directive_warns_but_passes_through(self):
         out, warnings = self._preprocess(">>CALLINTERFACE DYNAMIC\nDISPLAY 'X'.\n")
         assert ">>CALLINTERFACE DYNAMIC" in out
+        assert any("unknown compiler directive" in w for w in warnings)
+
+    def test_evaluate_directive_is_not_actually_supported(self):
+        """>>EVALUATE is NOT implemented despite resembling a conditional-
+        compilation construct (Copilot review on PR #79 caught the
+        docstring overstating "basic support"); it falls through the
+        generic unknown-directive path like any other unrecognized >>
+        directive."""
+        out, warnings = self._preprocess(">>EVALUATE TRUE\nDISPLAY 'X'.\n")
+        assert ">>EVALUATE TRUE" in out
         assert any("unknown compiler directive" in w for w in warnings)
 
     def test_supported_directives_stay_silent(self):

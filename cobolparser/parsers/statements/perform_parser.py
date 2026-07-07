@@ -437,11 +437,15 @@ class PerformStatementParser(IStatementParser):
             if token.type == TokenType.END_PERFORM:
                 break
             # AFTER starts the next dimension of a PERFORM VARYING ... AFTER
-            # loop — it can never be part of an UNTIL condition, so stop
-            # without consuming (otherwise the whole AFTER phrase is absorbed
-            # into the condition string and the second dimension is lost).
-            if token.type == TokenType.AFTER or (
-                token.value and token.value.upper() == "AFTER"
+            # loop — stop without consuming so the whole AFTER phrase isn't
+            # absorbed into the condition string. Only applies in the
+            # VARYING context (for_varying=True): a plain PERFORM UNTIL has
+            # no AFTER clause of its own, so gating this on for_varying
+            # avoids truncating a condition that happens to reference an
+            # AFTER-named identifier or reserved word elsewhere.
+            if for_varying and (
+                token.type == TokenType.AFTER
+                or (token.value and token.value.upper() == "AFTER")
             ):
                 break
             if token.type in STATEMENT_TOKEN_TYPES:
