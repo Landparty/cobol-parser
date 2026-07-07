@@ -272,8 +272,7 @@ class TestUnterminatedLiteralDoesNotAbortParse:
 
     def _has_unterminated_error(self, result):
         return any(
-            "unterminated" in str(e).lower() or "literal" in str(e).lower()
-            for e in result.errors
+            "unterminated string literal" in str(e).lower() for e in result.errors
         )
 
     def test_parse_cobol_collect_all_produces_ast(self):
@@ -301,6 +300,19 @@ class TestUnterminatedLiteralDoesNotAbortParse:
             self.BAD_LITERAL, error_recovery=ErrorRecoveryMode.FAIL_FAST
         )
         assert result.ast is None
+        assert self._has_unterminated_error(result)
+
+    def test_collect_all_records_error_even_when_free_form_true(self):
+        # Even if the caller (incorrectly) passes free_form=True for a
+        # fixed-format program, deferring to the parser must still run the
+        # recovery path and record the unterminated-literal error rather than
+        # silently mis-parsing the un-normalized source as free-form.
+        result = parse_cobol(
+            self.BAD_LITERAL,
+            free_form=True,
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+        assert result.ast is not None
         assert self._has_unterminated_error(result)
 
 

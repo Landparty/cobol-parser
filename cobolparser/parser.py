@@ -196,6 +196,7 @@ class CobolParser:
                             )
                         )
                         if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
+                            self.statistics.end_timing()
                             return self._create_result(None)
                         cleaned_source = normalize_fixed_format(
                             source_lines, merge_continued_literals=False
@@ -665,6 +666,10 @@ def parse_cobol(
             # and let CobolParser re-detect fixed format and normalize with
             # best-effort recovery. That records the error once and, under
             # COLLECT_ALL, still yields a partial AST; FAIL_FAST still aborts.
+            # Force free_form=False so the parser's fixed-format auto-detection
+            # (and hence the recovery path) actually runs even if the caller
+            # passed free_form=True; otherwise the error would go unrecorded.
+            free_form = False
             logger.debug(
                 "Deferring fixed-format preprocessing recovery to parser for %s: %s",
                 filename,
