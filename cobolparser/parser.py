@@ -178,8 +178,29 @@ class CobolParser:
             ):  # Only auto-detect if not explicitly set to free-form
                 detected_fixed = _detect_fixed_format(cleaned_source)
                 if detected_fixed:
-                    # Preprocess fixed-format source to free-form
-                    cleaned_source = normalize_fixed_format(cleaned_source.splitlines())
+                    # Preprocess fixed-format source to free-form. An
+                    # unterminated literal at EOF makes normalization raise; in
+                    # that case record the error and, unless failing fast, fall
+                    # back to a best-effort normalization that never raises
+                    # (merge_continued_literals=False) so a single bad literal
+                    # no longer loses the whole program under COLLECT_ALL.
+                    source_lines = cleaned_source.splitlines()
+                    try:
+                        cleaned_source = normalize_fixed_format(source_lines)
+                    except ValueError as ve:
+                        self.add_error(
+                            ParseError(
+                                str(ve),
+                                line_number=len(source_lines),
+                                column=1,
+                            )
+                        )
+                        if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
+                            self.statistics.end_timing()
+                            return self._create_result(None)
+                        cleaned_source = normalize_fixed_format(
+                            source_lines, merge_continued_literals=False
+                        )
                     actual_free_form = True
                 else:
                     # Source is already free-form, no preprocessing needed
@@ -638,20 +659,23 @@ def parse_cobol(
     if preprocess_fixed:
         try:
             source_str = normalize_fixed_format(source_str.splitlines())
+            free_form = True
         except ValueError as exc:
-            # Preprocessing failed (e.g. unterminated string literal at EOF).
-            # Return a result with no AST and the preprocessing error so callers
-            # can handle it gracefully under COLLECT_ALL error recovery.
+            # Preprocessing hit an unterminated string literal at EOF. Rather
+            # than losing the whole program here, leave the source un-normalized
+            # and let CobolParser re-detect fixed format and normalize with
+            # best-effort recovery. That records the error once and, under
+            # COLLECT_ALL, still yields a partial AST; FAIL_FAST still aborts.
+            # Force free_form=False so the parser's fixed-format auto-detection
+            # (and hence the recovery path) actually runs even if the caller
+            # passed free_form=True; otherwise the error would go unrecorded.
+            free_form = False
             logger.debug(
-                "Fixed-format preprocessing failed for %s: %s",
+                "Deferring fixed-format preprocessing recovery to parser for %s: %s",
                 filename,
                 exc,
                 exc_info=True,
             )
-            err = ParseError(str(exc), line_number=0, column=0)
-            stats = ParseStatistics()
-            return ParseResult(ast=None, errors=[err], warnings=[], statistics=stats)
-        free_form = True
 
     parser = CobolParser(
         dialect=dialect, error_recovery=error_recovery, free_form=free_form

@@ -65,7 +65,9 @@ from cobolparser.preprocess import (
 # normalize_fixed_format
 
 ```python
-def normalize_fixed_format(lines: list[str] | str) -> str: ...
+def normalize_fixed_format(
+    lines: list[str] | str, *, merge_continued_literals: bool = True
+) -> str: ...
 ```
 
 Extracts columns 8–72 from each line, silently drops comment lines (column-7 is
@@ -90,6 +92,17 @@ non-blank character, **without an intervening space**:
 The optional Cython `_preprocess_fast` fast-path mirrors this logic; the
 pure-Python implementation stays reachable as `_normalize_fixed_format_pure`
 for testing both paths.
+
+**Unterminated literals.** With the default `merge_continued_literals=True`, a
+string literal still open at end of input raises `ValueError` ("Unterminated
+string literal…"). Passing `merge_continued_literals=False` disables
+continuation-literal merging and never raises — it is the best-effort fallback.
+`CobolParser._parse_core` relies on this: on the raise it records the error and,
+unless in `FAIL_FAST`, re-normalizes with `merge_continued_literals=False` so one
+bad literal no longer collapses the whole parse to `ast=None` under
+`COLLECT_ALL`. `parse_cobol` defers to the parser for this recovery rather than
+returning early. Both the pure-Python and Cython (`_preprocess_fast`) paths accept
+`merge_continued_literals` identically.
 
 # Copybook Expansion
 

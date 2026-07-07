@@ -8,6 +8,7 @@ from ...models.statements import StringStatement, UnstringStatement
 from ._utils import (
     STATEMENT_KEYWORDS,
     consume_period,
+    is_statement_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
@@ -79,6 +80,10 @@ class StringStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 consume_period(token_stream)
+                break
+            if is_statement_boundary(token):
+                # No period / END-STRING terminator before the next statement:
+                # stop rather than swallow it (audit 2026-07-06 H2).
                 break
             if val == "DELIMITED":
                 token_stream.consume()
@@ -198,6 +203,10 @@ class UnstringStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 consume_period(token_stream)
+                break
+            if is_statement_boundary(token):
+                # No period / END-UNSTRING terminator before the next
+                # statement: stop rather than swallow it (audit 2026-07-06 H2).
                 break
             if val == "DELIMITED":
                 token_stream.consume()
