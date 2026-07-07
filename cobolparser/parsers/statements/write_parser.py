@@ -52,11 +52,17 @@ class WriteStatementParser(IStatementParser):
 
         # Check for FROM clause: lexer emits TokenType.FROM for "FROM"
         if try_consume_keyword(token_stream, TokenType.FROM, "FROM"):
-            # Parse FROM source
+            # Parse FROM source: an identifier (the common case) or a
+            # literal -- `WRITE rec FROM 'some text'` is a real IBM/
+            # GnuCOBOL extension seen in production batch programs (e.g.
+            # writing a fixed exception-message record).
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
                 source = token.value
                 stmt.set_from(source)
+                token_stream.consume()
+            elif token and token.type == TokenType.STRING_LITERAL:
+                stmt.set_from(f'"{token.value or ""}"')
                 token_stream.consume()
 
             skip_whitespace(token_stream)

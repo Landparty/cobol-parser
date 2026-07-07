@@ -183,6 +183,12 @@ class SubtractStatementParser(IStatementParser):
                 report_or_raise(
                     ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                 )
+            # SUBTRACT a FROM b GIVING c: the 3-operand form stores the
+            # result in c instead of back into b (mirrors ADD's TO branch,
+            # which already checks for a trailing GIVING the same way).
+            giving = consume_keyword_and_operand(token_stream, "GIVING")
+            if giving:
+                stmt.set_giving(giving)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:

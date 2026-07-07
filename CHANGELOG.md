@@ -117,6 +117,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legacy-application corpus. Pinned by
   `tests/regression/test_evaluate_space_literal_when.py`.
 
+* **Three real-world parse-content-drop bugs found by mockymock's refreshed
+  corpus sweep against `legacy-application`** (all 26 corpus programs now
+  parse and generate clean, zero refusals — up from 3 `PARSE_WARNING`s):
+  - `SUBTRACT a FROM b GIVING c` silently dropped the `GIVING c` clause
+    whenever it appeared (the 3-operand form's target was always `b`,
+    never `c`) — the `FROM` branch never checked for a trailing `GIVING`
+    the way the `ADD ... TO` branch already did. Fixed by mirroring that
+    check. Also fixed the more general root cause in
+    `consume_keyword_and_operand`: it only skipped `NEWLINE` tokens
+    *between* a keyword and its operand, not *before* checking whether the
+    keyword was even present, so `GIVING` (or any such optional clause) on
+    its own continuation line — ordinary free-form COBOL layout — was
+    missed entirely. This also fixes the same class of bug for `ADD ... TO
+    ... GIVING` when `GIVING` is on a continuation line.
+  - `DISPLAY` stopped at a subscripted operand like `SQLERRD(3)`: the item
+    loop only accepted `STRING_LITERAL`/`IDENTIFIER`/`NUMERIC_LITERAL`
+    tokens, so the bare `(` token after the identifier fell through to the
+    "unknown token, stop parsing" branch, dropping the subscript and
+    everything after it. Subscripted identifiers are now folded into a
+    single display item (`SQLERRD(3)`).
+  - `WRITE record FROM 'literal'` (an IBM/GnuCOBOL extension for writing a
+    fixed message record) wasn't recognized — the `FROM` source only
+    accepted `IDENTIFIER`; a string literal was left unconsumed. Now
+    accepted and stored quoted, matching how other operand literals are
+    serialized.
+  Pinned by `tests/unit/test_arithmetic_size_error_branches.py`,
+  `tests/unit/test_display_parser.py`, and
+  `tests/unit/io_statements/test_write_close_parsers.py`.
+
 * **`GO TO a b c DEPENDING ON x` no longer collapses to `GO TO a`** (audit
   2026-07-07 C4). All targets are kept (`GoStatement.target_paragraphs`)
   and the `DEPENDING ON` variable is captured. The extra targets are only

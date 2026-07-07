@@ -71,6 +71,23 @@ class TestWriteParserCoverage:
         assert stmt.from_clause == "WS-DATA"
         assert stmt.record_name == "OUT-REC"
 
+    def test_write_from_string_literal(self):
+        """WRITE rec FROM 'literal text' -- an IBM/GnuCOBOL extension seen
+        in production batch programs (e.g. legacy-application/cobol/
+        GLRECON.cbl's `WRITE GLEXCPT-RECORD FROM 'GENERAL LEDGER OUT OF
+        BALANCE...'`). Before the fix, a literal FROM source wasn't
+        consumed at all -- the token type check only accepted IDENTIFIER --
+        leaving the literal dangling and triggering a PARSE_WARNING
+        ("Unparsed tokens...") on the next statement boundary."""
+        result = parse_cobol(
+            _prog("           WRITE OUT-REC FROM 'SOME MESSAGE TEXT'.")
+        )
+        assert not result.warnings
+        stmts = result.ast.find_statements("WRITE")
+        assert len(stmts) == 1
+        assert stmts[0].from_clause == '"SOME MESSAGE TEXT"'
+        assert stmts[0].record_name == "OUT-REC"
+
     def test_write_before_advancing(self):
         """WRITE rec BEFORE ADVANCING hits advancing branch (lines 69-87)."""
         stream = _stream(

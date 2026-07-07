@@ -111,6 +111,43 @@ class TestSubtractFromGiving:
         stmts, _ = parse_procedure("           SUBTRACT A FROM B GIVING C.")
         stmt = _find_stmt(stmts, SubtractStatement)
         assert "A" in stmt.operands
+        assert stmt.target == "B"
+        assert stmt.giving == "C"
+
+    def test_subtract_from_giving_on_continuation_line(self):
+        """SUBTRACT A FROM B\\n    GIVING C. -- GIVING on its own line is
+        ordinary free-form layout (this is the exact shape that appeared in
+        legacy-application/cobol/LOANPMT.cbl and silently dropped the GIVING
+        clause, producing a PARSE_WARNING when nested and a silent AST gap
+        at top level)."""
+        stmts, result = parse_procedure(
+            "           SUBTRACT A FROM B\n" "               GIVING C."
+        )
+        stmt = _find_stmt(stmts, SubtractStatement)
+        assert stmt.giving == "C"
+        assert not result.warnings
+
+    def test_subtract_from_giving_nested_in_if_else(self):
+        """The real-world trigger: SUBTRACT ... FROM ... GIVING (split
+        across lines) nested inside an IF/ELSE body, with no period until
+        END-IF. Before the fix this produced a PARSE_WARNING ("Unparsed
+        tokens starting at 'GIVING'") because the dangling GIVING clause
+        was left for the next statement boundary to trip over."""
+        stmts, result = parse_procedure(
+            "           IF A = 1\n"
+            '               DISPLAY "X"\n'
+            "           ELSE\n"
+            "               SUBTRACT A FROM B\n"
+            "                   GIVING C\n"
+            "           END-IF."
+        )
+        assert not result.warnings
+        # The SUBTRACT lives inside the ELSE branch of the IfStatement.
+        from cobolparser.models.statements import IfStatement
+
+        if_stmt = _find_stmt(stmts, IfStatement)
+        subtract = _find_stmt(if_stmt.else_statements, SubtractStatement)
+        assert subtract.giving == "C"
 
     def test_subtract_giving_without_from(self):
         """SUBTRACT A GIVING C (direct GIVING path) - line 336-341."""

@@ -684,16 +684,29 @@ def consume_keyword_and_operand(
 ) -> str | None:
     """Consume *keyword* and the following IDENTIFIER, returning its value.
 
-    Whitespace and NEWLINE tokens between the keyword and the identifier are
-    skipped so that COBOL line continuations don't break clause recognition.
+    WHITESPACE/COMMENT/NEWLINE/CONTINUATION tokens before the keyword itself
+    are also skipped (not just between the keyword and its operand): a
+    clause like `SUBTRACT A FROM B\\n    GIVING C` puts GIVING on its own
+    continuation line, which is ordinary free-form COBOL layout, not a
+    statement boundary -- and in fixed-format source that continuation line
+    can carry a leading CONTINUATION token (column-7 `-`), not just NEWLINE,
+    so `skip_whitespace` (not the narrower `_skip_newlines`) is used here.
+    Skipping unconditionally is safe because none of these token types carry
+    clause-boundary meaning elsewhere in this parser (only PERIOD/scope-
+    terminator tokens do), and every other optional-clause lookahead in this
+    module already tolerates them.
+
+    The same tokens between the keyword and the identifier are also skipped
+    so that COBOL line continuations don't break clause recognition.
 
     Returns ``None`` if the keyword is not present at the current position or
     if no identifier follows it. The keyword check is case-insensitive.
     """
+    skip_whitespace(stream)
     if peek_value_upper(stream) != keyword.upper():
         return None
     stream.consume()
-    _skip_newlines(stream)
+    skip_whitespace(stream)
     token = stream.peek()
     if token and token.type == TokenType.IDENTIFIER and token.value:
         value = token.value

@@ -13,6 +13,7 @@ from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.parsers.statements._utils import (
     collect_clause_stmts,
+    consume_keyword_and_operand,
     get_parse_context,
     report_parse_error,
     skip_whitespace,
@@ -22,6 +23,52 @@ from cobolparser.parsers.statements._utils import (
 
 def _make_token(ttype, value, line=1, col=1):
     return Token(ttype, value, SourceLocation(line, col))
+
+
+class TestConsumeKeywordAndOperand:
+    """consume_keyword_and_operand must tolerate layout tokens (not just
+    NEWLINE) before the keyword itself, not only between the keyword and
+    its operand -- a review comment on the SUBTRACT-GIVING fix flagged
+    that the narrower `_skip_newlines` helper doesn't cover a fixed-format
+    CONTINUATION token (column-7 `-`), which `skip_whitespace` does."""
+
+    def test_skips_continuation_token_before_keyword(self):
+        """A CONTINUATION token directly before GIVING (as would precede a
+        fixed-format continuation line, if one ever reached this parser
+        without having already been merged by normalize_fixed_format) must
+        not hide the keyword."""
+        tokens = [
+            _make_token(TokenType.CONTINUATION, "-"),
+            _make_token(TokenType.IDENTIFIER, "GIVING"),
+            _make_token(TokenType.IDENTIFIER, "C"),
+            _make_token(TokenType.PERIOD, "."),
+        ]
+        stream = TokenStream(tokens)
+        assert consume_keyword_and_operand(stream, "GIVING") == "C"
+
+    def test_skips_newline_before_keyword(self):
+        """A NEWLINE token directly before GIVING (GIVING on its own
+        continuation line) is also skipped -- the original trigger found
+        in legacy-application/cobol/LOANPMT.cbl."""
+        tokens = [
+            _make_token(TokenType.NEWLINE, "\n"),
+            _make_token(TokenType.IDENTIFIER, "GIVING"),
+            _make_token(TokenType.IDENTIFIER, "C"),
+            _make_token(TokenType.PERIOD, "."),
+        ]
+        stream = TokenStream(tokens)
+        assert consume_keyword_and_operand(stream, "GIVING") == "C"
+
+    def test_returns_none_when_keyword_absent(self):
+        """Skipping leading layout tokens must not make the function
+        falsely match some other keyword/operand pair."""
+        tokens = [
+            _make_token(TokenType.NEWLINE, "\n"),
+            _make_token(TokenType.IDENTIFIER, "C"),
+            _make_token(TokenType.PERIOD, "."),
+        ]
+        stream = TokenStream(tokens)
+        assert consume_keyword_and_operand(stream, "GIVING") is None
 
 
 class TestCollectClauseStmts:
