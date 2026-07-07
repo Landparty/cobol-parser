@@ -1,5 +1,31 @@
 # OKF Update Log
 
+## 2026-07-06 (H5 — unterminated literal no longer aborts the whole parse)
+
+* **Updated** [preprocessing.md](preprocessing.md): documented that
+  `normalize_fixed_format(..., merge_continued_literals=False)` is a
+  non-raising best-effort fallback and how the parser uses it for recovery.
+  Audit finding H5 (`reports/audit-2026-07-06.md`): a single unterminated
+  string literal at EOF made `normalize_fixed_format` raise `ValueError`,
+  which — called unconditionally before error recovery was active — collapsed
+  the whole parse to `ast=None` even under `ErrorRecoveryMode.COLLECT_ALL`.
+  Two entry points were affected: `CobolParser._parse_core` (the raise fell
+  through to the generic `except Exception` safety net) and the `parse_cobol`
+  convenience function (which caught the raise but returned `ast=None`
+  regardless of mode, despite a comment claiming graceful COLLECT_ALL
+  handling). Fixed by making `_parse_core` the single owner of
+  normalize-and-recover: it records the unterminated-literal error and, unless
+  `FAIL_FAST`, re-normalizes with `merge_continued_literals=False` (which the
+  lexer already tokenizes permissively) so a partial AST survives. `parse_cobol`
+  now defers to the parser on the raise instead of returning early — which also
+  sidesteps a latent bug where injecting into the result would crash on the
+  `(ParseResult, ProfilingResult)` tuple returned when `enable_profiling=True`.
+  The direct-call contract (`normalize_fixed_format` still raises by default) is
+  unchanged. Pinned by
+  `tests/unit/test_critical_fixes.py::TestUnterminatedLiteralDoesNotAbortParse`
+  (COLLECT_ALL via both `parse_cobol` and `CobolParser.parse`; FAIL_FAST still
+  aborts). No `.pyx`/`.c` change was needed — both paths already accept
+  `merge_continued_literals`.
 ## 2026-07-06 (MOVE silently accepted malformed input — audit H3)
 
 * **Updated** [parser.md](parser.md): the MOVE parser accepted incomplete
