@@ -42,6 +42,30 @@ KNOWN_ISSUES: dict[str, str] = {
         "clean with expansion — see "
         "test_sm101a_parses_clean_with_copybook_expansion"
     ),
+    "SM206A.CBL": (
+        "COPY ... REPLACING with pseudo-text is not applied before parsing, "
+        "so the replacement text — which contains a bare MOVE token "
+        "(`BY MOVE ==DELETE==`) — leaks into the statement stream as a MOVE "
+        "with no TO. Surfaced by the H3 fix (MOVE malformed-input diagnostics); "
+        "was previously masked by silent acceptance. Resolve by implementing "
+        "COPY REPLACING pseudo-text substitution."
+    ),
+    "SM208A.CBL": (
+        "uses the REPLACE compiler-directing statement (30x) and `==...==` "
+        "pseudo-text, which the parser does not apply; the raw pseudo-text "
+        '(`MOVE "*" AO WRK-XN-00001`, `==MOVE "FAIL" TO==`) leaks into the '
+        "statement stream as malformed MOVEs (missing TO / missing target). "
+        "Surfaced by the H3 fix; was previously masked by silent acceptance. "
+        "Resolve by implementing the REPLACE statement."
+    ),
+    "NC205A.CBL": (
+        "continuation-line normalization shatters the continued numeric "
+        "literal `-999.777` into `- 9 9 9 . 7 7 7`; the embedded `.` "
+        "prematurely terminates the MOVE source, leaving a MOVE with no TO. "
+        "This is a continuation-handling bug (not a missing feature) — see the "
+        "separately filed defect. Surfaced by the H3 fix; was previously masked "
+        "by silent acceptance."
+    ),
 }
 
 # Copybooks the content validator currently flags. Marked strict-xfail so a
