@@ -1,5 +1,27 @@
 # OKF Update Log
 
+## 2026-07-06 (MOVE silently accepted malformed input — audit H3)
+
+* **Updated** [parser.md](parser.md): the MOVE parser accepted incomplete
+  input and produced a plausible-but-wrong node with `errors == 0` — `MOVE A
+  TO.` gave a `MoveStatement` with `targets: []`; `MOVE A` (no `TO`) and a
+  stream truncated at `MOVE A TO` were also accepted (audit finding H3).
+  `MoveStatementParser.parse` now pulls the active `ParseContext` via
+  `_utils.get_parse_context` and calls `report_parse_error` (the same
+  record-and-continue path GO/CALL use) when `TO` is missing or when zero
+  receiving fields follow `TO` (`target_count == 0`). Well-formed MOVEs stay
+  clean, including multi-target, subscripted targets, literals, figurative
+  constants, and `MOVE CORRESPONDING`. A missing **source** (`MOVE TO X`) is
+  intentionally not flagged — indistinguishable from stray `*>`-comment /
+  `REPLACE` pseudo-text the preprocessor does not strip; an earlier
+  missing-source check faulted a valid shamrice program. Pinned by
+  `tests/unit/test_move_malformed_diagnostics.py`. The stricter check exposed
+  three NIST programs previously passing the error-free guarantee *only* via
+  this silent acceptance, now strict-xfail `KNOWN_ISSUES`: `SM206A` /`SM208A`
+  (`COPY REPLACING` / `REPLACE` pseudo-text substitution not implemented) and
+  `NC205A` (continuation-line handling shatters the split literal `-999.777`
+  — a preprocessing defect, filed separately).
+
 ## 2026-07-06 (COMPUTE swallowing a following statement)
 
 * **Updated** [parser.md](parser.md): the prior same-day fix (below)
