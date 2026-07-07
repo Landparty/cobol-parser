@@ -39,11 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 * **`GO TO a b c DEPENDING ON x` no longer collapses to `GO TO a`** (audit
-  2026-07-07 C4). All targets are kept (`GoStatement.target_paragraphs`),
-  the `DEPENDING ON` variable is captured, and multiple targets without
-  `DEPENDING ON` is reported as an error. Previously the extra targets and
-  the variable were silently skipped — and the variable could become a
-  phantom paragraph.
+  2026-07-07 C4). All targets are kept (`GoStatement.target_paragraphs`)
+  and the `DEPENDING ON` variable is captured. The extra targets are only
+  consumed when a `DEPENDING` clause actually follows (peek-ahead), so an
+  identifier after a missing sentence period is still treated as the next
+  paragraph rather than swallowed. Previously the extra targets and the
+  variable were silently skipped — and the variable could become a phantom
+  paragraph.
 
 * **Level-88 condition names and level-66 RENAMES survive `to_dict()`**
   (audit 2026-07-07 C5). `CobolDataItem.to_dict()` emits `condition_names`;

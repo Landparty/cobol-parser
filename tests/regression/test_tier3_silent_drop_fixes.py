@@ -415,6 +415,31 @@ class TestExpansionWarningsPropagate:
         )
         assert any("replacement characters" in w for w in result.warnings)
 
+    def test_profiled_parse_returns_tuple_with_warnings(self, monkeypatch):
+        # With enable_profiling=True parse_cobol returns
+        # (ParseResult, ProfilingResult); warning propagation must not
+        # AttributeError on the tuple and must land on the ParseResult.
+        from cobolparser.preprocess import copybook_expander as ce
+
+        class FakeStats:
+            warnings = ["copybook FOO decoded with replacement characters"]
+
+        class FakeExpansion:
+            expanded_source = PROG_TEMPLATE.format(proc="           DISPLAY 'X'.")
+            statistics = FakeStats()
+
+        monkeypatch.setattr(ce, "expand_copybooks", lambda **kwargs: FakeExpansion())
+        result = ce.parse_cobol_with_expansion(
+            source_code="ignored",
+            filename="probe.cbl",
+            copybook_paths=["/none"],
+            enable_profiling=True,
+        )
+        assert isinstance(result, tuple)
+        parse_result, profiling = result
+        assert any("replacement characters" in w for w in parse_result.warnings)
+        assert profiling is not None
+
 
 class TestCliExitCodes:
     """C7 — the CLI must not exit 0 on an errored parse."""

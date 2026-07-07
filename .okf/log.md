@@ -28,7 +28,7 @@
 * **Updated** [preprocessing.md](preprocessing.md):
   `parse_cobol_with_expansion` propagates `expansion.statistics.warnings`
   onto `ParseResult.warnings` (H6).
-* Pinned by `tests/regression/test_tier3_silent_drop_fixes.py` (29 tests).
+* Pinned by `tests/regression/test_tier3_silent_drop_fixes.py` (31 tests).
   Full audit: `reports/audit-2026-07-07.md`.
 
 ## 2026-07-06 (fixed-format numeric-literal continuation mangled)
