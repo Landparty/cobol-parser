@@ -86,6 +86,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `IF` condition trees now honour COBOL AND/OR precedence (audit finding H4).
+  `IfStatementParser._build_condition_expression` split on the first of
+  `("AND", "OR")` it found, making `AND` the tree root — so
+  `IF A = 1 OR B = 2 AND C = 3` parsed as `(A OR B) AND C` instead of the
+  correct `A OR (B AND C)`, silently inverting the logic for any analyzer that
+  reads the condition tree. The split now runs `OR` before `AND` (OR binds
+  loosest, so it becomes the root and `AND` nests beneath it) and is
+  parenthesis-aware: it strips a fully-enclosing `( ... )` wrapper and only
+  splits on operators at the top paren level, so explicit grouping such as
+  `IF (A = 1 OR B = 2) AND C = 3` correctly keeps `AND` as the root. As a
+  side effect, parenthesised operands no longer leak stray `(`/`)` tokens into
+  the comparison strings. The split now picks the rightmost top-level operator,
+  making repeated same-precedence chains (`A OR B OR C`) left-associative to
+  match COBOL's left-to-right evaluation. Pinned by
+  `tests/unit/test_if_parser_comprehensive.py::TestIfConditionPrecedence`.
+
 * `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
   API. `EvaluateStatementParser` attached WHEN clauses by mutating the model
   directly (`stmt.when_clauses.append(...)` and `stmt.default_when = ...`),
