@@ -388,9 +388,10 @@ def expand_copybooks(
     start_time = time.time()
 
     # Pre-process conditional compilation if requested
+    conditional_warnings: list[str] = []
     if process_conditionals:
         source_code = preprocess_conditional_compilation(
-            source_code, defined_symbols or {}
+            source_code, defined_symbols or {}, warnings=conditional_warnings
         )
 
     # Create search configuration
@@ -419,6 +420,8 @@ def expand_copybooks(
     stats = ExpansionStatistics()
     stats.file_count = 1  # Count main program
     stats.total_bytes_processed = len(source_code.encode("utf-8"))
+    if conditional_warnings:
+        stats.warnings.extend(conditional_warnings)
 
     # Track included copybooks
     included_copybooks: list[str] = []
@@ -532,6 +535,11 @@ def _expand_source_recursive(
     # Extract COPY statements using the robust lexer on normalized source
     lexer = CopyStatementLexer(normalized_source, source_file)
     copy_statements = lexer.tokenize_copy_statements()
+    # Surface COPY statements the lexer recognized but had to drop (missing
+    # terminating period, unterminated pseudo-text) — they are never expanded
+    # and used to vanish silently (audit 2026-07-07 H6a/H6c).
+    if stats is not None and lexer.warnings:
+        stats.warnings.extend(lexer.warnings)
 
     # If no COPY statements, return source unchanged to preserve full fidelity
     if not copy_statements:
@@ -606,7 +614,9 @@ def _expand_source_recursive(
             # Process conditional compilation directives if requested
             if process_conditionals:
                 copybook_content = preprocess_conditional_compilation(
-                    copybook_content, context.defined_symbols
+                    copybook_content,
+                    context.defined_symbols,
+                    warnings=stats.warnings if stats is not None else None,
                 )
 
             # Track this copybook

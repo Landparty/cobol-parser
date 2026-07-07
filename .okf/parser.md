@@ -385,6 +385,45 @@ error-free guarantee *only* through this silent acceptance, now strict-xfail
 split literal `-999.777` into `- 9 9 9 . 7 7 7`, the embedded `.` truncating
 the MOVE source — a preprocessing defect, filed separately).
 
+**ON SIZE ERROR / NOT ON SIZE ERROR bodies (`_utils.py::_parse_size_error_stmts`,
+audit 2026-07-07 H1):** handler bodies dispatch through the statement
+registry (same mechanism as `collect_clause_stmts` for IO clauses), so any
+verb — PERFORM, CALL, IF, nested arithmetic — is captured, registered as an
+AST child via the model's `_set_clause`, and serialized. Before 2026-07-07
+only DISPLAY and MOVE were mini-parsed inline; every other verb was skipped
+token-by-token and the handler vanished with `errors=0`. Termination: period
+(consumed), `NOT` / scope terminators / control-flow boundaries (not
+consumed), or a nested parser consuming the sentence period. Pinned by
+`tests/regression/test_tier4_audit_remediations.py::TestH1SizeErrorBodiesKeepAllVerbs`.
+
+**PERFORM VARYING ... AFTER (`perform_parser.py`, audit 2026-07-07 H2):**
+`_parse_varying_clause` collects the UNTIL condition via
+`_collect_until_expression` (no inline-body parsing), then
+`_parse_after_clauses` parses each `AFTER var FROM x BY y [UNTIL cond]`
+dimension into `PerformStatement.after_clauses`, then the inline body is
+parsed. `_collect_until_condition_tokens` stops (without consuming) at
+`AFTER` so the second dimension is never absorbed into the first UNTIL
+condition string — but only when `for_varying=True` (the VARYING call
+site): a plain, non-VARYING `PERFORM UNTIL` has no AFTER clause of its own,
+so gating the stop on `for_varying` avoids truncating a condition that
+happens to contain an `AFTER` token (Copilot review on PR #79 caught the
+original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
+
+**ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
+H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
+DUPLICATES), PADDING CHARACTER, RESERVE n AREAS, SHARING WITH, LOCK MODE
+(LOCK ON / WITH ROLLBACK), PASSWORD, RECORD DELIMITER (disambiguated from
+RECORD KEY), and a second FILE STATUS (VSAM) variable — all mapped onto the
+`SelectStatement` model fields that already existed. `assign_device_type`
+is populated for device words and IBM `UT-`/`UR-`/`DA-` prefixed names.
+Unknown SELECT clause tokens produce an "Unparsed token ... in SELECT"
+warning instead of a silent `consume()`. The ASSIGN collector stops at the
+shared `_SELECT_CLAUSE_KEYWORDS` set (previously it swallowed unknown
+following clauses into `assign_to`). `DECIMAL-POINT IS COMMA` in
+SPECIAL-NAMES emits a warning that the clause is recorded but not honored
+by the lexer (H4). All division parsers can reach the host warning channel:
+`BaseDivisionParser.host` is set by the division loop (`parser.py`).
+
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)

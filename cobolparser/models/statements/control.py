@@ -237,6 +237,10 @@ class PerformStatement(CobolStatement):
         self.until_condition: CobolExpression | None = None
         self.test_timing: str = "BEFORE"  # BEFORE or AFTER for WITH TEST clause
         self.varying_clause: dict[str, Any] | None = None
+        # Additional dimensions of PERFORM VARYING ... AFTER ... (2-D/3-D
+        # table loops). Each entry: {"variable", "from_value", "by_value",
+        # "until_condition": CobolExpression | None}.
+        self.after_clauses: list[dict[str, Any]] = []
         self.inline_statements: list[CobolStatement] = []
 
     def set_target_paragraph(self, paragraph: str) -> None:
@@ -277,6 +281,25 @@ class PerformStatement(CobolStatement):
         self.until_condition = until_condition
         self.add_child(until_condition)
 
+    def add_after_clause(
+        self,
+        variable: str,
+        from_value: str,
+        by_value: str,
+        until_condition: "CobolExpression | None" = None,
+    ) -> None:
+        """Add an AFTER dimension of a PERFORM VARYING ... AFTER ... loop."""
+        self.after_clauses.append(
+            {
+                "variable": variable,
+                "from_value": from_value,
+                "by_value": by_value,
+                "until_condition": until_condition,
+            }
+        )
+        if until_condition is not None:
+            self.add_child(until_condition)
+
     def set_test_timing(self, test_timing: str) -> "PerformStatement":
         """Set the test timing clause (BEFORE or AFTER)."""
         if test_timing.upper() not in ["BEFORE", "AFTER"]:
@@ -308,6 +331,18 @@ class PerformStatement(CobolStatement):
                 ],
             }
         )
+        if self.after_clauses:
+            result["after_clauses"] = [
+                {
+                    **clause,
+                    "until_condition": (
+                        clause["until_condition"].to_dict()
+                        if clause["until_condition"] is not None
+                        else None
+                    ),
+                }
+                for clause in self.after_clauses
+            ]
         return result
 
 

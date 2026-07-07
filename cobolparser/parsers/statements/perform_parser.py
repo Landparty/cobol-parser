@@ -340,18 +340,84 @@ class PerformStatementParser(IStatementParser):
             # Parse UNTIL condition
             token = stream.peek()
             if token and token.type == TokenType.UNTIL:
-                self._parse_until_conditional(stream, stmt)
-                # Now set the varying clause with the collected values and the until condition
-                until_condition = stmt.until_condition
+                until_condition = self._collect_until_expression(stream)
                 if until_condition:
                     stmt.set_varying_clause(
                         variable_name, from_value, by_value, until_condition
                     )
-            else:
-                # Parse inline statements without UNTIL
-                self._parse_inline_statements(stream, stmt)
+
+            # Parse AFTER dimensions (PERFORM VARYING ... AFTER ... — 2-D/3-D
+            # table loops). Each AFTER phrase repeats var FROM x BY y [UNTIL c].
+            self._parse_after_clauses(stream, stmt)
+
+            # Parse the inline body (up to END-PERFORM or period)
+            self._parse_inline_statements(stream, stmt)
         except ParseError:
             pass
+
+    def _parse_after_clauses(
+        self, stream: ITokenStream, stmt: PerformStatement
+    ) -> None:
+        """Parse zero or more AFTER dimensions of a PERFORM VARYING clause."""
+        while True:
+            skip_whitespace(stream)
+            token = stream.peek()
+            if not token or not (
+                token.type == TokenType.AFTER
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "AFTER"
+                )
+            ):
+                return
+            stream.consume()  # Skip AFTER
+            skip_whitespace(stream)
+
+            # Variable name
+            token = stream.peek()
+            if not token or token.type != TokenType.IDENTIFIER:
+                return
+            variable_name = token.value
+            stream.consume()
+            skip_whitespace(stream)
+
+            # Expect FROM
+            token = stream.peek()
+            if not token or not token.value or token.value.upper() != "FROM":
+                stmt.add_after_clause(variable_name, "", "")
+                return
+            stream.consume()
+            skip_whitespace(stream)
+            token = stream.peek()
+            if not token or not token.value:
+                stmt.add_after_clause(variable_name, "", "")
+                return
+            from_value = token.value
+            stream.consume()
+            skip_whitespace(stream)
+
+            # Expect BY
+            token = stream.peek()
+            if not token or not token.value or token.value.upper() != "BY":
+                stmt.add_after_clause(variable_name, from_value, "")
+                return
+            stream.consume()
+            skip_whitespace(stream)
+            token = stream.peek()
+            if not token or not token.value:
+                stmt.add_after_clause(variable_name, from_value, "")
+                return
+            by_value = token.value
+            stream.consume()
+            skip_whitespace(stream)
+
+            # Optional UNTIL condition for this dimension
+            until_condition = None
+            token = stream.peek()
+            if token and token.type == TokenType.UNTIL:
+                until_condition = self._collect_until_expression(stream)
+            stmt.add_after_clause(variable_name, from_value, by_value, until_condition)
 
     def _collect_until_condition_tokens(
         self, stream: ITokenStream, for_varying: bool = False
@@ -369,6 +435,18 @@ class PerformStatementParser(IStatementParser):
             if token.type == TokenType.PERIOD:
                 break
             if token.type == TokenType.END_PERFORM:
+                break
+            # AFTER starts the next dimension of a PERFORM VARYING ... AFTER
+            # loop — stop without consuming so the whole AFTER phrase isn't
+            # absorbed into the condition string. Only applies in the
+            # VARYING context (for_varying=True): a plain PERFORM UNTIL has
+            # no AFTER clause of its own, so gating this on for_varying
+            # avoids truncating a condition that happens to reference an
+            # AFTER-named identifier or reserved word elsewhere.
+            if for_varying and (
+                token.type == TokenType.AFTER
+                or (token.value and token.value.upper() == "AFTER")
+            ):
                 break
             if token.type in STATEMENT_TOKEN_TYPES:
                 break
@@ -397,10 +475,13 @@ class PerformStatementParser(IStatementParser):
         except ParseError:
             pass
 
-    def _parse_until_conditional(
-        self, stream: ITokenStream, stmt: PerformStatement
-    ) -> None:
-        """Parse UNTIL condition within a VARYING clause."""
+    def _collect_until_expression(self, stream: ITokenStream) -> CobolExpression | None:
+        """Consume an UNTIL keyword + condition and return it as an expression.
+
+        Unlike :meth:`_parse_until_clause`, this does NOT parse the inline
+        body — the caller decides what follows (an AFTER dimension may
+        intervene in PERFORM VARYING ... AFTER ... loops).
+        """
         try:
             stream.consume()  # Skip UNTIL
             skip_whitespace(stream)
@@ -411,10 +492,10 @@ class PerformStatementParser(IStatementParser):
                 condition_str = " ".join(condition_tokens).strip()
                 condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
                 condition_expr.operands = [condition_str]
-                stmt.until_condition = condition_expr
-            self._parse_inline_statements(stream, stmt)
+                return condition_expr
         except ParseError:
             pass
+        return None
 
     def _parse_until_condition_only(
         self, stream: ITokenStream, stmt: PerformStatement

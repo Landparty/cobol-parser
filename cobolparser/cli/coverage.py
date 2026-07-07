@@ -33,8 +33,19 @@ def cmd_status(args: argparse.Namespace) -> int:
             print("Error: io-coverage.json not found. Run 'generate' first.")
             return 1
 
-    with open(artifact_path) as f:
-        artifact = json.load(f)
+    try:
+        with open(artifact_path) as f:
+            artifact = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: {artifact_path} is not valid JSON: {e}")
+        return 1
+    except OSError as e:
+        print(f"Error: cannot read {artifact_path}: {e}")
+        return 1
+
+    if not isinstance(artifact, dict):
+        print(f"Error: {artifact_path} does not contain a coverage artifact object")
+        return 1
 
     # Filter by verb if specified
     variations = artifact.get("variations", [])

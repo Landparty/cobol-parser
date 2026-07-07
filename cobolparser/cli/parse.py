@@ -273,7 +273,12 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     if defines:
         from ..preprocess import preprocess_conditional_compilation
 
-        source = preprocess_conditional_compilation(source, defines)
+        conditional_warnings: list[str] = []
+        source = preprocess_conditional_compilation(
+            source, defines, warnings=conditional_warnings
+        )
+        for cw in conditional_warnings:
+            print(f"warning: {cw}", file=sys.stderr)
 
     parse_kwargs: dict[str, Any] = {
         "dialect": dialect,
@@ -615,7 +620,12 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
 
     defines = _parse_defines(args.define)
     if defines:
-        source = preprocess_conditional_compilation(source, defines)
+        conditional_warnings: list[str] = []
+        source = preprocess_conditional_compilation(
+            source, defines, warnings=conditional_warnings
+        )
+        for cw in conditional_warnings:
+            print(f"warning: {cw}", file=sys.stderr)
 
     if not args.free_form:
         source = normalize_fixed_format(source.splitlines())
@@ -653,7 +663,12 @@ def _cmd_expand(args: argparse.Namespace) -> None:
 
     defines = _parse_defines(args.define)
     if defines:
-        source = preprocess_conditional_compilation(source, defines)
+        conditional_warnings: list[str] = []
+        source = preprocess_conditional_compilation(
+            source, defines, warnings=conditional_warnings
+        )
+        for cw in conditional_warnings:
+            print(f"warning: {cw}", file=sys.stderr)
 
     result = expand_copybooks(
         source,

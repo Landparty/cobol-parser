@@ -31,8 +31,8 @@ Returns a `ParseResult` object. The adapter accesses:
 
 | Attribute | Type | Notes |
 |-----------|------|-------|
-| `parse_result.success` | `bool` | True = AST was built |
-| `parse_result.ast` | `CobolProgram \| None` | None when `success` is False |
+| `parse_result.success` | `bool` | True = AST was built **and** `errors` is empty |
+| `parse_result.ast` | `CobolProgram \| None` | May be **non-None even when `success` is False**: under `COLLECT_ALL` recovery (and after partial `FAIL_FAST` parses) a partial AST is returned alongside populated `errors`. `ast is None` only when nothing could be parsed. Check `success` for "complete and error-free", check `ast is not None` for "something usable exists". |
 | `parse_result.errors` | `list` | Each item must have `.line_number` (int or None) and `.message` (str) |
 | `parse_result.warnings` | `list` | Items are stringified with `str()` |
 | `parse_result.statistics` | object or None | Must have `.to_dict() -> dict` if not None |

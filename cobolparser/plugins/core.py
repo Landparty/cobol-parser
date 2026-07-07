@@ -30,7 +30,18 @@ class DialectType(Enum):
 
 @dataclass
 class MemoryConfiguration:
-    """Configuration for memory management during parsing."""
+    """Configuration for memory management during parsing.
+
+    .. warning::
+        ``max_memory_mb``, ``enable_streaming`` and ``chunk_size_kb`` are
+        currently **validated and stored but not enforced** (audit 2026-07-07
+        M5): no parse path reads them, ``MemoryLimitExceededError`` is never
+        raised, and ``ParseStatistics.memory_peak_mb`` stays ``0.0``. Do not
+        rely on them to bound memory — use
+        :class:`cobolparser.profiling.ProfilerContext` to measure real peak
+        memory. ``max_error_count`` **is** honored (``CobolParser.add_error``
+        stops recording once the limit is reached).
+    """
 
     MINIMUM_MEMORY_MB = 64
     MAXIMUM_MEMORY_MB = 8192

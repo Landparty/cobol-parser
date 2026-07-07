@@ -86,6 +86,11 @@ class BaseDivisionParser(IDivisionParser, ABC):
     division_name: str | None = None  # e.g., "IDENTIFICATION", "DATA", "PROCEDURE"
     division_keywords: tuple = ()  # e.g., ("IDENTIFICATION", "ID")
 
+    #: Host parser (CobolParser). Set by the division loop before dispatch so
+    #: division parsers can reach the errors/warnings channels (add_error /
+    #: add_warning). None when the parser is used standalone.
+    host: Any | None = None
+
     def __init__(self) -> None:
         """Initialize the base division parser."""
         if not self.division_name:

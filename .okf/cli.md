@@ -83,6 +83,15 @@ cobol-parser preprocess <file.cbl> [--define DEBUG]
 Runs fixed-format normalisation and conditional compilation; prints the resulting
 free-form text. `--define` sets compiler flags for conditional blocks.
 
+All subcommands that run conditional compilation (`parse`, `preprocess`,
+`expand` with `--define`) print any conditional-compilation diagnostics
+(unknown `>>IF` conditions, stray `>>ELSE`/`>>END-IF`, malformed
+`>>DEFINE`, unclosed `>>IF` — audit 2026-07-07 H7) to **stderr** as
+`warning: ...` lines, so deleted guarded blocks are no longer silent.
+`coverage status` reports malformed artifact JSON (or a non-object
+artifact) with a clean error and exit code 1 instead of an uncaught
+traceback (M10).
+
 ## Expand
 
 ```bash
