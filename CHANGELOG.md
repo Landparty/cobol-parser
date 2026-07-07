@@ -89,6 +89,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `IF` condition trees now honour COBOL AND/OR precedence (audit finding H4).
+  `IfStatementParser._build_condition_expression` split on the first of
+  `("AND", "OR")` it found, making `AND` the tree root — so
+  `IF A = 1 OR B = 2 AND C = 3` parsed as `(A OR B) AND C` instead of the
+  correct `A OR (B AND C)`, silently inverting the logic for any analyzer that
+  reads the condition tree. The split now runs `OR` before `AND` (OR binds
+  loosest, so it becomes the root and `AND` nests beneath it) and is
+  parenthesis-aware: it strips a fully-enclosing `( ... )` wrapper and only
+  splits on operators at the top paren level, so explicit grouping such as
+  `IF (A = 1 OR B = 2) AND C = 3` correctly keeps `AND` as the root. As a
+  side effect, parenthesised operands no longer leak stray `(`/`)` tokens into
+  the comparison strings. The split now picks the rightmost top-level operator,
+  making repeated same-precedence chains (`A OR B OR C`) left-associative to
+  match COBOL's left-to-right evaluation. Layout tokens (whitespace, end-of-line,
+  continuation, comments) are now stripped from the condition token list before
+  the tree is built, so a fully-parenthesised condition such as
+  `IF (A = 1 OR B = 2)` is no longer defeated by the trailing end-of-line token
+  (which previously left `tokens[-1] != ")"`, blocking the enclosing-paren strip
+  and collapsing the whole condition into a bogus comparison); multi-line
+  conditions are handled more robustly for the same reason. Pinned by
+  `tests/unit/test_if_parser_comprehensive.py::TestIfConditionPrecedence`.
+
 * An unterminated string literal at end of input no longer aborts the whole
   parse under `ErrorRecoveryMode.COLLECT_ALL` (audit finding H5). Fixed-format
   normalization (`normalize_fixed_format`) raises `ValueError` on a literal
