@@ -154,6 +154,26 @@ returned `[]` — an inner `CALL` in `AT END` vanished from the AST entirely,
 blinding mockymock's boundary detection. Pinned by
 `tests/unit/io_statements/test_clause_bodies.py`.
 
+**EVALUATE WHEN-clause child registration (`evaluate_parser.py`):** the
+`WhenClause` nodes (both regular `WHEN` branches and the `WHEN OTHER`
+`default_when`) must be attached via the model's `add_when_clause` /
+`set_default_when` methods, which call `add_child`. Before 2026-07-07 the
+parser mutated the model directly (`stmt.when_clauses.append(...)`,
+`stmt.default_when = ...`), so the clauses were **never** AST children and
+every statement nested in a WHEN branch was invisible to `find_all_by_type` /
+`find_first_by_type` / `traverse_depth_first` (which only walk `node.children`)
+— though still reachable via `CobolProgram.get_all_statements` (which also
+recurses the `when_clauses` / `default_when` attributes and dedupes by `id`).
+Because `get_all_statements` dedupes, registering the clauses as children does
+not double-count. `EvaluateStatement.to_dict()` serializes the `when_clauses`
+attribute, not `children`, so its output is unchanged. Because
+`set_default_when` always calls `add_child`, a malformed program with two
+`WHEN OTHER` branches reuses the existing `default_when` clause (still
+reporting the error) rather than attaching a second one — otherwise the
+orphaned first default clause's statements would be surfaced by the tree-walk
+APIs but not by `default_when` / `to_dict()`. Pinned by
+`tests/regression/test_evaluate_traversal_regression.py`.
+
 **CALL handler-body termination (`call_parser.py`):** the ON EXCEPTION /
 NOT ON EXCEPTION / ON OVERFLOW bodies are parsed by `_parse_nested_stmts`,
 which dispatches through the statement registry. Termination is three-fold:

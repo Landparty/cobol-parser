@@ -76,20 +76,33 @@ class EvaluateStatementParser(IStatementParser):
                     and next_token.value.upper() == "OTHER"
                 ):
                     token_stream.consume()
-                    if found_when_other:
+                    if found_when_other and stmt.default_when is not None:
                         report_parse_error(
                             context,
                             "Multiple WHEN OTHER clauses not allowed",
                             when_location,
                         )
+                        # Malformed input: reuse the existing default clause
+                        # instead of attaching a second one. set_default_when
+                        # always calls add_child, so a fresh clause each time
+                        # would leave orphaned WhenClause children that the
+                        # tree-walk APIs surface but default_when / to_dict()
+                        # (which reference only the last) do not.
+                        default_clause = stmt.default_when
+                    else:
+                        default_clause = WhenClause([], when_location)
+                        # Use set_default_when (not direct assignment) so the
+                        # clause is registered as an AST child and its nested
+                        # statements are reachable via find_all_by_type /
+                        # traverse_depth_first.
+                        stmt.set_default_when(default_clause)
                     found_when_other = True
-                    stmt.default_when = WhenClause([], when_location)
                     statements, period_terminated = self._skip_clause_statements(
                         token_stream
                     )
                     if statements:
                         for nested_statement in statements:
-                            stmt.default_when.add_statement(nested_statement)
+                            default_clause.add_statement(nested_statement)
                     if period_terminated:
                         found_end_evaluate = True
                         break
@@ -129,7 +142,10 @@ class EvaluateStatementParser(IStatementParser):
                     )
 
                 when_clause = WhenClause(selectors, when_location)
-                stmt.when_clauses.append(when_clause)
+                # Use add_when_clause (not direct list append) so the clause is
+                # registered as an AST child and its nested statements are
+                # reachable via find_all_by_type / traverse_depth_first.
+                stmt.add_when_clause(when_clause)
                 statements, period_terminated = self._skip_clause_statements(
                     token_stream
                 )
