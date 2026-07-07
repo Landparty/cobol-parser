@@ -89,6 +89,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`INSPECT`, `STRING`, and `UNSTRING` no longer swallow the following
+  statement**, and a **missing `END-EXEC` on `EXEC SQL`/`CICS`/`IMS` blocks is
+  now reported instead of silently consuming the rest of the program** (audit
+  2026-07-06 H2 — the last four verbs in the "swallow the next statement"
+  class after MOVE/arithmetic/COMPUTE). A COBOL sentence may legally contain
+  several statements with no separating period; previously an un-punctuated
+  `INSPECT`/`STRING`/`UNSTRING` immediately followed by another statement (e.g.
+  `INSPECT WS-X TALLYING WS-C FOR ALL 'A'  DISPLAY 'X'`) consumed that
+  statement — INSPECT's trailing "consume to period" loop and the
+  STRING/UNSTRING main-loop `else: consume()` fall-throughs never checked a
+  statement boundary. A new shared `is_statement_boundary()` predicate
+  (`parsers/statements/_utils.py`, unioning `STATEMENT_TOKEN_TYPES` /
+  `STATEMENT_KEYWORDS` / `SCOPE_TERMINATORS` / `CONTROL_FLOW_BOUNDARIES`) now
+  stops all three at the boundary; behavior stays `errors=0`. `EXEC` blocks
+  can't use a content boundary (embedded SQL legitimately contains
+  SET/DELETE/UPDATE/CALL/OPEN/CLOSE), so `collect_exec_sql_text` instead
+  detects a missing `END-EXEC` and records an "Unterminated EXEC block" parse
+  error, changing that malformed case from a silent `errors=0`,
+  `success=True` swallow to a reported error (`success=False`); well-formed
+  blocks are unchanged. Pinned by `TestInspectDoesNotSwallowFollowingStatement`,
+  `TestStringDoesNotSwallowFollowingStatement`,
+  `TestUnstringDoesNotSwallowFollowingStatement`, and
+  `TestExecMissingEndExecReportsError` in
+  `tests/regression/test_tier2_silent_drop_regressions.py`.
+
+* `IF` condition trees now honour COBOL AND/OR precedence (audit finding H4).
+  `IfStatementParser._build_condition_expression` split on the first of
+  `("AND", "OR")` it found, making `AND` the tree root — so
+  `IF A = 1 OR B = 2 AND C = 3` parsed as `(A OR B) AND C` instead of the
+  correct `A OR (B AND C)`, silently inverting the logic for any analyzer that
+  reads the condition tree. The split now runs `OR` before `AND` (OR binds
+  loosest, so it becomes the root and `AND` nests beneath it) and is
+  parenthesis-aware: it strips a fully-enclosing `( ... )` wrapper and only
+  splits on operators at the top paren level, so explicit grouping such as
+  `IF (A = 1 OR B = 2) AND C = 3` correctly keeps `AND` as the root. As a
+  side effect, parenthesised operands no longer leak stray `(`/`)` tokens into
+  the comparison strings. The split now picks the rightmost top-level operator,
+  making repeated same-precedence chains (`A OR B OR C`) left-associative to
+  match COBOL's left-to-right evaluation. Layout tokens (whitespace, end-of-line,
+  continuation, comments) are now stripped from the condition token list before
+  the tree is built, so a fully-parenthesised condition such as
+  `IF (A = 1 OR B = 2)` is no longer defeated by the trailing end-of-line token
+  (which previously left `tokens[-1] != ")"`, blocking the enclosing-paren strip
+  and collapsing the whole condition into a bogus comparison); multi-line
+  conditions are handled more robustly for the same reason. Pinned by
+  `tests/unit/test_if_parser_comprehensive.py::TestIfConditionPrecedence`.
+
+* An unterminated string literal at end of input no longer aborts the whole
+  parse under `ErrorRecoveryMode.COLLECT_ALL` (audit finding H5). Fixed-format
+  normalization (`normalize_fixed_format`) raises `ValueError` on a literal
+  still open at EOF; that raise was reached before error recovery was active,
+  so a single bad literal collapsed the entire program to `ast=None` — in
+  `CobolParser._parse_core` (via the generic exception safety net) and in the
+  `parse_cobol` convenience function (which caught it but returned `ast=None`
+  regardless of mode). `_parse_core` now records the unterminated-literal error
+  and, unless in `FAIL_FAST`, re-normalizes with `merge_continued_literals=False`
+  (a non-raising best-effort path the lexer already tokenizes permissively) so a
+  partial AST survives; `parse_cobol` defers to the parser for this recovery.
+  `FAIL_FAST` still aborts with the error, and calling `normalize_fixed_format`
+  directly still raises by default. Pinned by
+  `tests/unit/test_critical_fixes.py::TestUnterminatedLiteralDoesNotAbortParse`.
 * **Malformed `MOVE` statements no longer parse silently (audit finding H3).**
   The MOVE parser accepted incomplete input and produced a plausible-but-wrong
   node with `errors == 0`: `MOVE A TO.` yielded a `MoveStatement` with

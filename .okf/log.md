@@ -29,6 +29,67 @@
   (`SM206A`/`SM208A`, distinct `COPY REPLACING`/`REPLACE` gaps, remain).
   Pinned by `tests/regression/test_continued_literal_normalization.py`.
 
+## 2026-07-06 (INSPECT/STRING/UNSTRING swallow + EXEC missing-END-EXEC — audit H2)
+
+* **Updated** [parser.md](parser.md): closed the last four rows of audit
+  2026-07-06 H2's "swallow the following statement" class.
+  - Added a shared `is_statement_boundary(token)` predicate in
+    `parsers/statements/_utils.py` (unions `STATEMENT_TOKEN_TYPES` /
+    `STATEMENT_KEYWORDS` / `SCOPE_TERMINATORS` / `CONTROL_FLOW_BOUNDARIES`)
+    so INSPECT/STRING/UNSTRING share one boundary check instead of the
+    per-parser inline copies MOVE/arithmetic use.
+  - `InspectStatementParser`'s trailing "consume to period" loop and the
+    `StringStatementParser`/`UnstringStatementParser` main-loop
+    `else: consume()` fall-throughs now `break` on that predicate, so an
+    un-punctuated INSPECT/STRING/UNSTRING immediately followed by another
+    statement (or an enclosing `END-IF`/`ELSE`) no longer devours it up to
+    the next period. Behavior stays `errors=0` (a legal COBOL sentence may
+    hold several statements without separating periods).
+  - EXEC SQL/CICS/IMS is intentionally left off that predicate: embedded
+    SQL/CICS text legitimately contains COBOL keywords (SET/DELETE/UPDATE/
+    CALL/OPEN/CLOSE), so a content boundary would truncate valid SQL. The
+    mandatory `END-EXEC` is the only safe delimiter, so
+    `collect_exec_sql_text` now detects a missing `END-EXEC` (stream
+    exhausted first) and records a non-fatal "Unterminated EXEC block"
+    parse error via the stream's parse context — turning the previous
+    silent "consume the rest of the program with `errors=0`" into a
+    reported error (`result.success == False`). Well-formed blocks and the
+    NIST/shamrice/sample corpora (all `END-EXEC`-terminated) are unaffected.
+  - Pinned by four new classes in
+    `tests/regression/test_tier2_silent_drop_regressions.py`
+    (`TestInspectDoesNotSwallowFollowingStatement`,
+    `TestStringDoesNotSwallowFollowingStatement`,
+    `TestUnstringDoesNotSwallowFollowingStatement`,
+    `TestExecMissingEndExecReportsError`). Full suite: 6579 passed.
+  - Still-open H2 row: MOVE *source* path (`MOVE A` with no `TO`) — not part
+    of this change.
+
+## 2026-07-06 (H5 — unterminated literal no longer aborts the whole parse)
+
+* **Updated** [preprocessing.md](preprocessing.md): documented that
+  `normalize_fixed_format(..., merge_continued_literals=False)` is a
+  non-raising best-effort fallback and how the parser uses it for recovery.
+  Audit finding H5 (`reports/audit-2026-07-06.md`): a single unterminated
+  string literal at EOF made `normalize_fixed_format` raise `ValueError`,
+  which — called unconditionally before error recovery was active — collapsed
+  the whole parse to `ast=None` even under `ErrorRecoveryMode.COLLECT_ALL`.
+  Two entry points were affected: `CobolParser._parse_core` (the raise fell
+  through to the generic `except Exception` safety net) and the `parse_cobol`
+  convenience function (which caught the raise but returned `ast=None`
+  regardless of mode, despite a comment claiming graceful COLLECT_ALL
+  handling). Fixed by making `_parse_core` the single owner of
+  normalize-and-recover: it records the unterminated-literal error and, unless
+  `FAIL_FAST`, re-normalizes with `merge_continued_literals=False` (which the
+  lexer already tokenizes permissively) so a partial AST survives. `parse_cobol`
+  now defers to the parser on the raise instead of returning early — which also
+  sidesteps a latent bug where injecting into the result would crash on the
+  `(ParseResult, ProfilingResult)` tuple returned when `enable_profiling=True`.
+  The direct-call contract (`normalize_fixed_format` still raises by default) is
+  unchanged. Pinned by
+  `tests/unit/test_critical_fixes.py::TestUnterminatedLiteralDoesNotAbortParse`
+  (COLLECT_ALL via both `parse_cobol` and `CobolParser.parse`; FAIL_FAST still
+  aborts). No `.pyx`/`.c` change was needed — both paths already accept
+  `merge_continued_literals`.
 ## 2026-07-06 (MOVE silently accepted malformed input — audit H3)
 
 * **Updated** [parser.md](parser.md): the MOVE parser accepted incomplete

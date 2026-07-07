@@ -272,6 +272,138 @@ class TestIfConditions:
         assert result.success
 
 
+class TestIfConditionPrecedence:
+    """Test AND/OR operator precedence in IF condition trees.
+
+    COBOL binds AND tighter than OR, so ``A OR B AND C`` must parse as
+    ``A OR (B AND C)`` -- the root logical operator is OR, not AND.
+    """
+
+    @staticmethod
+    def _condition(source: str):
+        result = parse_cobol(source)
+        assert result.success
+        ifs = result.ast.find_statements("IF")
+        assert len(ifs) >= 1
+        return ifs[0].condition
+
+    def test_or_binds_looser_than_and_root_is_or(self):
+        """``A OR B AND C`` -> root OR with AND on the right branch."""
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF A = 1 OR B = 2 AND C = 3
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        # Left branch is the bare A = 1 comparison
+        assert cond.left_condition.operator == "EQUAL"
+        # Right branch is the tighter-binding B = 2 AND C = 3
+        assert cond.right_condition.expression_type == "LOGICAL"
+        assert cond.right_condition.operator == "AND"
+
+    def test_and_before_or_still_roots_at_or(self):
+        """``A AND B OR C`` -> root OR with AND on the left branch."""
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF A = 1 AND B = 2 OR C = 3
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        assert cond.left_condition.expression_type == "LOGICAL"
+        assert cond.left_condition.operator == "AND"
+        assert cond.right_condition.operator == "EQUAL"
+
+    def test_explicit_parentheses_group_under_and(self):
+        """``(A OR B) AND C`` -> parentheses force AND as the root."""
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF (A = 1 OR B = 2) AND C = 3
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "AND"
+        assert cond.left_condition.expression_type == "LOGICAL"
+        assert cond.left_condition.operator == "OR"
+        assert cond.right_condition.operator == "EQUAL"
+
+    def test_or_is_left_associative(self):
+        """``A OR B OR C`` -> left-associative: ((A OR B) OR C)."""
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF A = 1 OR B = 2 OR C = 3
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        # Left-associative: the outermost OR's left branch is itself an OR
+        assert cond.left_condition.expression_type == "LOGICAL"
+        assert cond.left_condition.operator == "OR"
+        assert cond.right_condition.operator == "EQUAL"
+
+    def test_fully_parenthesized_condition(self):
+        """A whole condition wrapped in parens strips down to its contents.
+
+        The trailing end-of-line token must not defeat the enclosing-paren
+        strip -- ``IF (A = 1 OR B = 2)`` must still root at OR.
+        """
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF (A = 1 OR B = 2)
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        assert cond.left_condition.operator == "EQUAL"
+        assert cond.right_condition.operator == "EQUAL"
+
+    def test_multiline_condition_precedence(self):
+        """A condition split across lines keeps correct AND/OR precedence."""
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF A = 1 OR
+               B = 2 AND
+               C = 3
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        assert cond.left_condition.operator == "EQUAL"
+        assert cond.right_condition.expression_type == "LOGICAL"
+        assert cond.right_condition.operator == "AND"
+
+
 class TestIfInline:
     """Test inline IF statements (one-liner COBOL style)."""
 

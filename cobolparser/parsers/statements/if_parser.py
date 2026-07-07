@@ -55,6 +55,20 @@ class IfStatementParser(IStatementParser):
             if not token or not token.value:
                 break
 
+            # Skip layout tokens (whitespace, end-of-line, continuation,
+            # comments) so they never enter the condition token list. A
+            # trailing "\n" would otherwise defeat the enclosing-paren strip in
+            # _build_condition_expression (making tokens[-1] != ")"), and stray
+            # tokens muddy operand strings for multi-line conditions.
+            if token.type in (
+                TokenType.WHITESPACE,
+                TokenType.NEWLINE,
+                TokenType.CONTINUATION,
+                TokenType.COMMENT,
+            ):
+                token_stream.consume()
+                continue
+
             token_upper = token.value.upper()
 
             # Stop at explicit THEN
@@ -253,11 +267,19 @@ class IfStatementParser(IStatementParser):
             cleaned.append(tokens[i])
             i += 1
 
-        # Split on AND / OR (left-to-right, lowest precedence)
-        for logical_op in ("AND", "OR"):
-            upper_cleaned = [t.upper() for t in cleaned]
-            if logical_op in upper_cleaned:
-                idx = upper_cleaned.index(logical_op)
+        # Drop a fully-enclosing pair of parentheses so ( X ) recurses as X.
+        cleaned = self._strip_enclosing_parens(cleaned)
+
+        # Split on the lowest-precedence logical operator at the top paren
+        # level. COBOL binds AND tighter than OR, so OR is split first (it
+        # becomes the tree root) and AND stays nested beneath it. Split on the
+        # rightmost operator so the tree is left-associative, matching COBOL's
+        # left-to-right evaluation. Parenthesised sub-conditions are skipped
+        # here and resolved by the recursive call, e.g. (A OR B) AND C keeps
+        # AND as the root.
+        for logical_op in ("OR", "AND"):
+            idx = self._find_top_level_operator(cleaned, logical_op)
+            if idx is not None:
                 left_expr = self._build_condition_expression(cleaned[:idx], location)
                 right_expr = self._build_condition_expression(
                     cleaned[idx + 1 :], location
@@ -301,6 +323,53 @@ class IfStatementParser(IStatementParser):
             return expr
 
         return None
+
+    @staticmethod
+    def _strip_enclosing_parens(tokens: list[str]) -> list[str]:
+        """Strip pair(s) of parentheses that wrap the whole token list.
+
+        ``( A OR B )`` -> ``A OR B`` and ``(( A ))`` -> ``A`` , but a pair that
+        closes before the end is left untouched: ``( A ) OR ( B )`` and
+        ``( A OR B ) AND C`` keep their parentheses so the split logic can see
+        the top-level operator. Unbalanced input is returned unchanged.
+        """
+        while len(tokens) >= 2 and tokens[0] == "(" and tokens[-1] == ")":
+            depth = 0
+            encloses = True
+            for i, tok in enumerate(tokens):
+                if tok == "(":
+                    depth += 1
+                elif tok == ")":
+                    depth -= 1
+                    # Opening paren closes before the final token -> it does
+                    # not enclose the whole expression.
+                    if depth == 0 and i != len(tokens) - 1:
+                        encloses = False
+                        break
+            if encloses and depth == 0:
+                tokens = tokens[1:-1]
+            else:
+                break
+        return tokens
+
+    @staticmethod
+    def _find_top_level_operator(tokens: list[str], op: str) -> int | None:
+        """Index of the rightmost ``op`` token outside any parentheses.
+
+        Returns the rightmost match so the resulting tree is left-associative.
+        Operators nested inside parentheses are ignored. Returns ``None`` when
+        no top-level occurrence exists.
+        """
+        depth = 0
+        found: int | None = None
+        for i, tok in enumerate(tokens):
+            if tok == "(":
+                depth += 1
+            elif tok == ")":
+                depth -= 1
+            elif depth == 0 and tok.upper() == op:
+                found = i
+        return found
 
     def _is_statement_keyword(self, token_upper: str) -> bool:
         """Check if token is a COBOL statement keyword."""
