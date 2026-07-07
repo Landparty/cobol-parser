@@ -86,6 +86,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
+  API. `EvaluateStatementParser` attached WHEN clauses by mutating the model
+  directly (`stmt.when_clauses.append(...)` and `stmt.default_when = ...`),
+  bypassing `add_when_clause` / `set_default_when` and so never registering the
+  `WhenClause` nodes as AST children. Because `find_all_by_type`,
+  `find_first_by_type`, and `traverse_depth_first` only descend `node.children`,
+  every statement nested in a `WHEN` or `WHEN OTHER` branch was invisible to
+  them (e.g. `ast.find_all_by_type("MoveStatement")` returned `0` for a MOVE
+  that lived only inside an EVALUATE), even though the data was present in the
+  `when_clauses` attribute and reachable via the separate `get_all_statements`
+  traversal. The parser now routes both paths through the model methods so the
+  clauses are real children; `get_all_statements` dedupes by `id` (visited set)
+  so the now-registered children are not double-counted, and `to_dict()` output
+  is unchanged (it serializes attributes, not `children`). Pinned by
+  `tests/regression/test_evaluate_traversal_regression.py`.
+
 * IO-statement conditional clause bodies are now parsed into the AST instead
   of being silently discarded. `collect_clause_stmts` (shared by READ,
   WRITE, REWRITE, DELETE, and START) previously consumed the tokens of

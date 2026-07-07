@@ -83,13 +83,17 @@ class EvaluateStatementParser(IStatementParser):
                             when_location,
                         )
                     found_when_other = True
-                    stmt.default_when = WhenClause([], when_location)
+                    default_clause = WhenClause([], when_location)
+                    # Use set_default_when (not direct assignment) so the clause
+                    # is registered as an AST child and its nested statements are
+                    # reachable via find_all_by_type / traverse_depth_first.
+                    stmt.set_default_when(default_clause)
                     statements, period_terminated = self._skip_clause_statements(
                         token_stream
                     )
                     if statements:
                         for nested_statement in statements:
-                            stmt.default_when.add_statement(nested_statement)
+                            default_clause.add_statement(nested_statement)
                     if period_terminated:
                         found_end_evaluate = True
                         break
@@ -129,7 +133,10 @@ class EvaluateStatementParser(IStatementParser):
                     )
 
                 when_clause = WhenClause(selectors, when_location)
-                stmt.when_clauses.append(when_clause)
+                # Use add_when_clause (not direct list append) so the clause is
+                # registered as an AST child and its nested statements are
+                # reachable via find_all_by_type / traverse_depth_first.
+                stmt.add_when_clause(when_clause)
                 statements, period_terminated = self._skip_clause_statements(
                     token_stream
                 )

@@ -32,6 +32,9 @@ tests/
   contracts/                   # API contract tests — stability guarantees
     io_statements/
   regression/                  # backward compatibility
+                               #   test_evaluate_traversal_regression.py:
+                               #   EVALUATE WHEN branches must be AST children
+                               #   (find_all_by_type reaches nested statements)
   performance/                 # benchmarks (factory, parser)
   samples/                     # shared COBOL fixtures
     copybook_programs/         # programs with COPY statements
