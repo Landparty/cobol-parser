@@ -13,13 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/integration/test_nist_cobol85_support.py`). All 459 `.CBL`
   programs in `examples/cobol/` must now parse **error-free** (the
   pre-existing corpus test only checked that parsing does not crash).
-  457/459 currently pass (455 when the tests were introduced; `NC113M` and
-  `NC252A` were then fixed — see *Fixed* below). The 2 remaining are pinned
+  454/459 currently pass (455 when the tests were introduced; `NC113M` and
+  `NC252A` were then fixed — see *Fixed* below). The 5 remaining are pinned
   as strict-xfail `KNOWN_ISSUES` with documented causes, so any parser
   improvement must remove the entry and the list only ever shrinks:
   `OBNC1M` (a COBOL-74 obsolete-feature test that embeds a phony program in
-  a comment-entry, requiring Area A/B-aware parsing) and `SM101A` (requires
-  copybook expansion by design). `SM101A` and `SM207A` must additionally
+  a comment-entry, requiring Area A/B-aware parsing), `SM101A` (requires
+  copybook expansion by design), `SM206A`/`SM208A` (need `COPY REPLACING` /
+  `REPLACE` pseudo-text substitution), and `NC205A` (a continuation-line bug
+  that shatters a split numeric literal) — the last three uncovered by the H3
+  MOVE fix (see *Fixed* below). `SM101A` and `SM207A` must additionally
   parse clean with copybook expansion against the suite's own copybooks,
   and all 51 `.CPY` copybooks must pass `validate_copybook_content`.
 
@@ -100,6 +103,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FAIL_FAST` still aborts with the error, and calling `normalize_fixed_format`
   directly still raises by default. Pinned by
   `tests/unit/test_critical_fixes.py::TestUnterminatedLiteralDoesNotAbortParse`.
+* **Malformed `MOVE` statements no longer parse silently (audit finding H3).**
+  The MOVE parser accepted incomplete input and produced a plausible-but-wrong
+  node with `errors == 0`: `MOVE A TO.` yielded a `MoveStatement` with
+  `targets: []`, `MOVE A` (no `TO`) and a stream truncated at `MOVE A TO` were
+  likewise accepted. The parser now reports a diagnostic (via the parse
+  context, the same path GO/CALL use) when `TO` is missing or when no receiving
+  field follows `TO`; well-formed MOVEs — including multi-target
+  (`MOVE A TO B C`), subscripted targets (`MOVE A TO B(I)`), literals, figurative
+  constants, and `MOVE CORRESPONDING` — stay error-free. A missing *source*
+  (`MOVE TO X`) is intentionally not flagged, because it is indistinguishable
+  from stray `*>`-comment / pseudo-text the preprocessor does not yet strip and
+  flagging it faulted otherwise-valid programs. Pinned by
+  `tests/unit/test_move_malformed_diagnostics.py`. This surfaced that three NIST
+  programs were previously passing the error-free guarantee *only* by way of
+  this silent acceptance — `SM206A`/`SM208A` (need `COPY REPLACING` /`REPLACE`
+  pseudo-text substitution) and `NC205A` (a continuation-line bug that shatters
+  the split literal `-999.777`); all three are now pinned as strict-xfail
+  `KNOWN_ISSUES`.
 
 * `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
   API. `EvaluateStatementParser` attached WHEN clauses by mutating the model
