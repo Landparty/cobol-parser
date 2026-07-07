@@ -55,6 +55,20 @@ class IfStatementParser(IStatementParser):
             if not token or not token.value:
                 break
 
+            # Skip layout tokens (whitespace, end-of-line, continuation,
+            # comments) so they never enter the condition token list. A
+            # trailing "\n" would otherwise defeat the enclosing-paren strip in
+            # _build_condition_expression (making tokens[-1] != ")"), and stray
+            # tokens muddy operand strings for multi-line conditions.
+            if token.type in (
+                TokenType.WHITESPACE,
+                TokenType.NEWLINE,
+                TokenType.CONTINUATION,
+                TokenType.COMMENT,
+            ):
+                token_stream.consume()
+                continue
+
             token_upper = token.value.upper()
 
             # Stop at explicit THEN

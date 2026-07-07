@@ -362,6 +362,47 @@ class TestIfConditionPrecedence:
         assert cond.left_condition.operator == "OR"
         assert cond.right_condition.operator == "EQUAL"
 
+    def test_fully_parenthesized_condition(self):
+        """A whole condition wrapped in parens strips down to its contents.
+
+        The trailing end-of-line token must not defeat the enclosing-paren
+        strip -- ``IF (A = 1 OR B = 2)`` must still root at OR.
+        """
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF (A = 1 OR B = 2)
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        assert cond.left_condition.operator == "EQUAL"
+        assert cond.right_condition.operator == "EQUAL"
+
+    def test_multiline_condition_precedence(self):
+        """A condition split across lines keeps correct AND/OR precedence."""
+        source = """
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            IF A = 1 OR
+               B = 2 AND
+               C = 3
+                DISPLAY "HIT"
+            END-IF.
+            STOP RUN.
+        """
+        cond = self._condition(source)
+        assert cond.expression_type == "LOGICAL"
+        assert cond.operator == "OR"
+        assert cond.left_condition.operator == "EQUAL"
+        assert cond.right_condition.expression_type == "LOGICAL"
+        assert cond.right_condition.operator == "AND"
+
 
 class TestIfInline:
     """Test inline IF statements (one-liner COBOL style)."""

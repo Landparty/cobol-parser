@@ -99,7 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   side effect, parenthesised operands no longer leak stray `(`/`)` tokens into
   the comparison strings. The split now picks the rightmost top-level operator,
   making repeated same-precedence chains (`A OR B OR C`) left-associative to
-  match COBOL's left-to-right evaluation. Pinned by
+  match COBOL's left-to-right evaluation. Layout tokens (whitespace, end-of-line,
+  continuation, comments) are now stripped from the condition token list before
+  the tree is built, so a fully-parenthesised condition such as
+  `IF (A = 1 OR B = 2)` is no longer defeated by the trailing end-of-line token
+  (which previously left `tokens[-1] != ")"`, blocking the enclosing-paren strip
+  and collapsing the whole condition into a bogus comparison); multi-line
+  conditions are handled more robustly for the same reason. Pinned by
   `tests/unit/test_if_parser_comprehensive.py::TestIfConditionPrecedence`.
 
 * `EVALUATE` WHEN-branch statements are now reachable via the public tree-walk
