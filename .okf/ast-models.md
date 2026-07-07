@@ -113,6 +113,26 @@ AST nodes for EXEC SQL, EXEC CICS, and EXEC IMS DLI blocks captured by
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
 | `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement` |
 
+Notes (2026-07-07 audit remediation):
+
+* `PerformStatement.after_clauses` — list of AFTER dimensions of a
+  `PERFORM VARYING ... AFTER ...` loop, each
+  `{"variable", "from_value", "by_value", "until_condition":
+  CobolExpression | None}`; populated via `add_after_clause()` (which also
+  registers the condition as a child) and serialized as `after_clauses`
+  only when non-empty (H2).
+* `CobolExpression.to_dict()` includes `operands` — condition/expression
+  text (e.g. PERFORM UNTIL conditions) previously vanished at the JSON
+  boundary.
+* `SelectStatement`'s long-standing fields (`alternate_keys`,
+  `file_status_vsam`, `reserve_areas`, `padding_character`,
+  `record_delimiter`, `password`, `lock_mode`/`lock_on`/
+  `lock_with_rollback`, `sharing_mode`, `assign_device_type`) are now
+  actually populated by the ENVIRONMENT division parser (H5).
+* Arithmetic statements' `on_size_error` / `not_on_size_error` lists can
+  contain any statement type (registry-dispatched), all registered as AST
+  children (H1).
+
 # ASTNodeFactory
 
 ```python

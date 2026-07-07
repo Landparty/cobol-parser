@@ -9,6 +9,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`PERFORM VARYING ... AFTER ...` multi-dimension support** (audit
+  2026-07-07 H2). The `AFTER var FROM x BY y [UNTIL cond]` dimensions of a
+  2-D/3-D table loop are parsed into `PerformStatement.after_clauses`
+  (serialized as `after_clauses` when present). Previously the whole AFTER
+  phrase was absorbed into the first UNTIL condition string (with token-type
+  names leaking into it) and the second dimension was lost.
+
+* **SELECT clause capture: `ALTERNATE RECORD KEY` (with `WITH DUPLICATES`),
+  `PADDING CHARACTER`, `RESERVE n AREAS`, `SHARING WITH`, `LOCK MODE`
+  (with `LOCK ON` / `WITH ROLLBACK`), `PASSWORD`, `RECORD DELIMITER`, and
+  the second (VSAM) `FILE STATUS` variable** (audit 2026-07-07 H5). The
+  `SelectStatement` model already had the fields; the parser now populates
+  them. `assign_device_type` is populated for recognizable device words
+  (`DISK`, `PRINTER`, ...) and IBM `UT-S-`/`UR-`/`DA-` prefixed assignment
+  names. Unknown SELECT clause tokens now produce an "Unparsed token ... in
+  SELECT" warning instead of being silently consumed.
+
+* **Conditional-compilation diagnostics** (audit 2026-07-07 H7).
+  `preprocess_conditional_compilation()` accepts a `warnings` list and
+  reports: unsupported `>>IF` conditions (which delete the guarded block),
+  malformed `>>DEFINE`, stray `>>ELSE`/`>>END-IF`, unknown `>>` directives
+  passed through, and unclosed `>>IF` at end of input. The copybook
+  expansion path routes these into `ExpansionStatistics.warnings` (and from
+  there into `ParseResult.warnings` via `parse_cobol_with_expansion`); the
+  CLI prints them to stderr. Previously all of these were completely silent.
+
+* **Dropped-COPY diagnostics** (audit 2026-07-07 H6a/H6c). A `COPY` whose
+  clause scan never reaches a terminating period (e.g. `COPY FOO` with no
+  `.`, or `COPY FOO BAR.`) is never expanded — this now produces a "COPY
+  ... was NOT expanded" warning on `ExpansionStatistics.warnings` instead
+  of the copybook's content silently not existing. An unterminated
+  `==pseudo-text==` REPLACING operand likewise warns instead of silently
+  abandoning the clause. `extract_copy_statements()` accepts an optional
+  `warnings` list. The COPY scanner also gained a left-side word-boundary
+  check so `GOODCOPY.` is no longer probed as a COPY statement.
+
+### Changed
+
+* **`ON SIZE ERROR` / `NOT ON SIZE ERROR` bodies now parse every verb**
+  (audit 2026-07-07 H1). The handler-body parser dispatches through the
+  statement registry (same mechanism as IF/EVALUATE/IO clause bodies), so
+  `ON SIZE ERROR PERFORM ERR-PARA` (or CALL, IF, ADD, ...) is captured,
+  serialized, and visible to `find_all_by_type`. Previously only DISPLAY
+  and MOVE were mini-parsed and every other verb was skipped token-by-token
+  — the handler vanished with `errors=0`. Affects
+  ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE.
+
+* **`DECIMAL-POINT IS COMMA` now warns** (audit 2026-07-07 H4). The clause
+  is recorded in division metadata but the lexer does not honor it (comma
+  decimal literals misparse), so parsing a program that declares it now
+  produces an explicit `ParseResult.warnings` entry instead of silent
+  misparsing. (Actually honoring the clause remains open.)
+
+* **`CobolExpression.to_dict()` now includes `operands`** — condition/
+  expression text (e.g. PERFORM UNTIL conditions) previously vanished at
+  the JSON boundary.
+
+* **`MemoryConfiguration` documents its no-op fields** (audit 2026-07-07
+  M5): `max_memory_mb`, `enable_streaming` and `chunk_size_kb` are
+  validated but not enforced; `max_error_count` is enforced.
+  `interface-contract.md` now states the real `success`/`ast` semantics
+  (audit 2026-07-07 M8): `ast` can be non-None while `success` is False.
+
+* **`cobol-parser coverage status` handles malformed artifacts** (audit
+  2026-07-07 M10): invalid JSON or a non-object artifact reports a clean
+  error and exit code 1 instead of an uncaught traceback.
+
+### Added (2026-07-07 C1-C8 remediation)
+
 * **Multi-program compilation units are now parsed** (audit 2026-07-07 C1).
   Stacked or nested programs delimited by `END PROGRAM` are each parsed into
   their own `CobolProgram`; the first is `ParseResult.ast` and the rest are

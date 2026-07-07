@@ -103,6 +103,7 @@ class CobolExpression(ASTNode):
         return {
             "node_type": self.node_type,
             "expression_type": self.expression_type,
+            "operands": self.operands,
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }

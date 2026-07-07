@@ -163,14 +163,18 @@ class TestCmdStatus:
         assert data["gap"] == 1
         assert data["partial"] == 1
 
-    def test_status_corrupt_json(self, tmp_path):
-        """JSONDecodeError on corrupt artifact raises or returns error."""
+    def test_status_corrupt_json(self, tmp_path, capsys):
+        """Corrupt artifact JSON is reported cleanly, not an uncaught traceback.
+
+        Audit 2026-07-07 M10: this used to let JSONDecodeError propagate out
+        of cmd_status uncaught, unlike cmd_render's try/except.
+        """
         artifact = tmp_path / "bad.json"
         artifact.write_text("{not valid json")
         args = make_status_args(artifact=str(artifact))
 
-        with pytest.raises(json.JSONDecodeError):
-            cmd_status(args)
+        assert cmd_status(args) == 1
+        assert "not valid JSON" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

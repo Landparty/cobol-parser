@@ -126,6 +126,31 @@ returned `ParseResult.warnings` (2026-07-07). Previously they lived only on
 the discarded `CopybookExpansion` object, so this entry point's callers never
 saw them.
 
+**Dropped-COPY diagnostics (audit 2026-07-07 H6a/H6c):**
+`CopyStatementLexer` records on `lexer.warnings` any COPY it recognized but
+could not tokenize into a complete `CopyStatement` — a missing terminating
+period (`COPY FOO` with no `.`, or `COPY FOO BAR.`) means the COPY is never
+appended and therefore **never expanded**; an unterminated `==pseudo-text==`
+REPLACING operand abandons the clause. Both used to be fully silent — the
+copybook's data items simply did not exist. `_expand_source_recursive`
+routes them into `ExpansionStatistics.warnings`;
+`extract_copy_statements(source, source_file, warnings=None)` exposes the
+same channel. The scanner also checks the **left** word boundary so
+`GOODCOPY.` is not probed as a COPY statement (previously only the right
+boundary was checked).
+
+**Conditional-compilation diagnostics (audit 2026-07-07 H7):**
+`preprocess_conditional_compilation(source, defined_symbols, warnings=None)`
+appends to *warnings*: unsupported `>>IF` conditions (only
+`sym IS [NOT] DEFINED` is evaluated — anything else **deletes the guarded
+block**, now loudly), malformed `>>DEFINE`, stray `>>ELSE`/`>>END-IF`,
+unknown `>>` directives (passed through to the lexer), and unclosed `>>IF`
+at end of input. The copybook expansion path (`process_conditionals=True`)
+routes these into `ExpansionStatistics.warnings`; the CLI (`--define`)
+prints them to stderr. Pinned by
+`tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
+/ `::TestH7ConditionalCompilationWarnings`.
+
 # Error Hierarchy
 
 All preprocessing errors extend `PreprocessingError` which extends `ParseError`:

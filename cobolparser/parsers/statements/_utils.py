@@ -15,7 +15,6 @@ from cobolparser.core.ast_factory import get_factory
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
-from cobolparser.models.statements.data import DisplayStatement, MoveStatement
 from cobolparser.plugins.core import ErrorRecoveryMode
 
 logger = logging.getLogger(__name__)
@@ -869,8 +868,14 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
 def _parse_size_error_stmts(stream: ITokenStream) -> list:
     """Parse imperative statements inside an ON SIZE ERROR / NOT ON SIZE ERROR clause.
 
-    Handles DISPLAY and MOVE as inline mini-parsers; all other verbs are skipped.
-    The trailing period (or next clause boundary) is NOT consumed.
+    Dispatches every verb through the statement registry attached to *stream*
+    (the same mechanism as :func:`collect_clause_stmts` for IO clause bodies),
+    so a handler body may contain any statement — PERFORM, ADD, IF, CALL, ...
+    — not just DISPLAY and MOVE. The clause ends at a period (consumed), at
+    ``NOT`` (the start of the NOT ON SIZE ERROR clause, not consumed), at any
+    scope terminator / control-flow boundary (not consumed), or when a nested
+    parser consumed the sentence period itself. Tokens no registered parser
+    accepts are consumed one at a time so the loop always progresses.
     """
     nested: list = []
 
@@ -881,95 +886,25 @@ def _parse_size_error_stmts(stream: ITokenStream) -> list:
                 stream.consume()
             break
 
-        if token.type == TokenType.NEWLINE:
-            stream.consume()
-            continue
-
-        if not token.value:
+        if token.type == TokenType.NEWLINE or not token.value:
             stream.consume()
             continue
 
         token_upper = token.value.upper()
+        if (
+            token.type == TokenType.NOT
+            or token_upper in SCOPE_TERMINATORS
+            or token_upper in CONTROL_FLOW_BOUNDARIES
+        ):
+            break
 
-        if token_upper == "DISPLAY":
-            start = stream.consume()
-            start_loc = start.location if start else SourceLocation(0, 0)
-            display_stmt = DisplayStatement(start_loc)
-            while not stream.is_empty():
-                t = stream.peek()
-                if not t:
-                    break
-                if t.type == TokenType.NEWLINE:
-                    stream.consume()
-                    continue
-                # Stop at a period, the start of a NOT ON SIZE ERROR clause,
-                # or any other statement/scope/control-flow boundary keyword
-                # (e.g. END-SUBTRACT, ELSE) — otherwise the clause boundary
-                # gets silently swallowed as a bogus display item.
-                if (
-                    t.type == TokenType.PERIOD
-                    or t.type == TokenType.NOT
-                    or (
-                        t.type != TokenType.STRING_LITERAL
-                        and t.value
-                        and (
-                            t.value.upper() in STATEMENT_KEYWORDS
-                            or t.value.upper() in SCOPE_TERMINATORS
-                            or t.value.upper() in CONTROL_FLOW_BOUNDARIES
-                        )
-                    )
-                ):
-                    break
-                if t.type in (
-                    TokenType.STRING_LITERAL,
-                    TokenType.IDENTIFIER,
-                    TokenType.NUMERIC_LITERAL,
-                ):
-                    display_stmt.add_display_item(t.value)
-                stream.consume()
-            nested.append(display_stmt)
-
-        elif token_upper == "MOVE":
-            start = stream.consume()
-            start_loc = start.location if start else SourceLocation(0, 0)
-            move_stmt = MoveStatement(start_loc)
-            while not stream.is_empty():
-                t = stream.peek()
-                if not t:
-                    break
-                if t.type == TokenType.NEWLINE:
-                    stream.consume()
-                    continue
-                if t.type == TokenType.PERIOD:
-                    break
-                if t.value and t.value.upper() == "TO":
-                    stream.consume()
-                    target_token = _skip_newlines(stream)
-                    if target_token and target_token.type == TokenType.IDENTIFIER:
-                        move_stmt.add_target(target_token.value)
-                        stream.consume()
-                    break
-                if t.type in (
-                    TokenType.IDENTIFIER,
-                    TokenType.NUMERIC_LITERAL,
-                    TokenType.STRING_LITERAL,
-                ):
-                    move_stmt.add_operand(t.value)
-                stream.consume()
-            nested.append(move_stmt)
-        else:
-            # Any other verb is skipped one token at a time (documented
-            # limitation — DISPLAY/MOVE are the only inline mini-parsers).
-            # But NOT (the start of NOT ON SIZE ERROR) and any scope/
-            # control-flow boundary (END-SUBTRACT, ELSE, WHEN, ...) must NOT
-            # be swallowed here, or the enclosing clause boundary silently
-            # vanishes along with everything after it.
-            if (
-                token.type == TokenType.NOT
-                or token_upper in SCOPE_TERMINATORS
-                or token_upper in CONTROL_FLOW_BOUNDARIES
-            ):
-                break
+        parsed = try_parse_nested_statement(stream)
+        if parsed is None:
             stream.consume()
+            continue
+        nested.append(parsed)
+        prev = previous_meaningful_token(stream)
+        if prev is not None and prev.type == TokenType.PERIOD:
+            break
 
     return nested

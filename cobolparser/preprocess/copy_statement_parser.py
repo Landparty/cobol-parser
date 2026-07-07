@@ -349,6 +349,12 @@ class CopyStatementLexer:
         self.source_file = source_file
         self.pos = 0
         self.length = len(source)
+        #: Diagnostics for COPY statements that were recognized but could not
+        #: be tokenized into a complete CopyStatement (and are therefore never
+        #: expanded). Callers surface these via ExpansionStatistics.warnings /
+        #: ParseResult.warnings so the drop is not silent (audit 2026-07-07
+        #: H6a/H6c).
+        self.warnings: list[str] = []
 
     def _peek(self, offset: int = 0) -> str:
         idx = self.pos + offset
@@ -402,6 +408,11 @@ class CopyStatementLexer:
                     self._advance(2)
                     return text
                 self._advance()
+            self.warnings.append(
+                f"{self.source_file}: unterminated ==pseudo-text== operand "
+                "(missing closing '==') — the REPLACING clause was abandoned "
+                "and its COPY statement will not be expanded"
+            )
             return None
 
         # 2. String literal "..." or '...'
@@ -446,7 +457,7 @@ class CopyStatementLexer:
 
     def tokenize_copy_statements(self) -> list[CopyStatement]:
         newline_positions = [m.end() - 1 for m in _EOL_RE.finditer(self.source)]
-        statements = []
+        statements: list[CopyStatement] = []
         while not self._is_at_end():
             char = self._peek()
 
@@ -461,12 +472,24 @@ class CopyStatementLexer:
                 continue
 
             match_start = self.pos - 4
+            # Word-boundary check on the LEFT side: "GOODCOPY." must not be
+            # treated as an identifier followed by a COPY statement.
+            if match_start > 0:
+                prev_char = self.source[match_start - 1]
+                if prev_char.isalnum() or prev_char in ("-", "_"):
+                    continue
             self._skip_separators()
 
             # 3. Read Member Name
             member_name = self._read_operand()
             if not member_name:
+                self.warnings.append(
+                    f"{self.source_file}: COPY statement at line "
+                    f"{self._line_of(match_start, newline_positions)} has no "
+                    "member name and was ignored"
+                )
                 continue
+            stmt_count_before = len(statements)
 
             library_qualifier = None
             suppress_clause = None
@@ -569,11 +592,31 @@ class CopyStatementLexer:
 
                 self._advance()
 
+            # A COPY whose clause scan ended without reaching a terminating
+            # period is never appended — and therefore never expanded. That
+            # used to be completely silent (audit 2026-07-07 H6a): the
+            # copybook's data items simply did not exist in the AST.
+            if len(statements) == stmt_count_before:
+                self.warnings.append(
+                    f"{self.source_file}: COPY {member_name.strip()} at line "
+                    f"{self._line_of(match_start, newline_positions)} has no "
+                    "terminating period (or is followed by unexpected tokens) "
+                    "and was NOT expanded — its content is missing from the "
+                    "parsed program"
+                )
+
         return statements
+
+    @staticmethod
+    def _line_of(index: int, newline_positions: list[int]) -> int:
+        """Return the 1-based line number of a character *index*."""
+        return bisect.bisect_right(newline_positions, index) + 1
 
 
 def extract_copy_statements(
-    source_code: str, source_file: str = "<main>"
+    source_code: str,
+    source_file: str = "<main>",
+    warnings: list[str] | None = None,
 ) -> list[CopyStatement]:
     """
     Extract all COPY statements from COBOL source code using a robust shallow lexer.
@@ -587,6 +630,9 @@ def extract_copy_statements(
     Args:
         source_code: COBOL source code to parse
         source_file: Source file name for location tracking
+        warnings: Optional list that receives diagnostics for COPY statements
+            that were recognized but dropped (no terminating period,
+            unterminated pseudo-text) and will therefore never be expanded
 
     Returns:
         List of CopyStatement objects representing each COPY statement found
@@ -604,7 +650,10 @@ def extract_copy_statements(
 
     # Step 4: Use CopyStatementLexer for extraction
     lexer = CopyStatementLexer(normalized_source, source_file)
-    return lexer.tokenize_copy_statements()
+    statements = lexer.tokenize_copy_statements()
+    if warnings is not None and lexer.warnings:
+        warnings.extend(lexer.warnings)
+    return statements
 
 
 def parse_suppress_clause(suppress_text: str | None) -> SuppressClause:

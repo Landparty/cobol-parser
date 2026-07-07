@@ -546,7 +546,9 @@ def normalize_fixed_format(
 
 
 def preprocess_conditional_compilation(
-    source: str, defined_symbols: dict[str, str] | None = None
+    source: str,
+    defined_symbols: dict[str, str] | None = None,
+    warnings: list[str] | None = None,
 ) -> str:
     """
     Process IBM >>IF/>>DEFINE conditional compilation directives.
@@ -561,6 +563,12 @@ def preprocess_conditional_compilation(
     Args:
         source: COBOL source code containing directives
         defined_symbols: Pre-defined symbols (optional)
+        warnings: Optional list that receives diagnostics for directives this
+            preprocessor cannot evaluate (unknown ``>>IF`` conditions,
+            malformed ``>>DEFINE``, stray ``>>ELSE``/``>>END-IF``, an
+            unclosed ``>>IF`` at end of input) — previously all silent
+            (audit 2026-07-07 H7), even though an unknown ``>>IF`` condition
+            deletes the whole guarded block.
 
     Returns:
         Source code with conditional sections processed
@@ -579,7 +587,11 @@ def preprocess_conditional_compilation(
     result_lines = []
     skip_stack = [False]  # Stack of skip states (False = include lines)
 
-    for line in source.splitlines():
+    def _warn(message: str) -> None:
+        if warnings is not None:
+            warnings.append(message)
+
+    for line_no, line in enumerate(source.splitlines(), start=1):
         stripped = line.strip().upper()
 
         # >>DEFINE symbol [AS value]
@@ -589,6 +601,11 @@ def preprocess_conditional_compilation(
                 symbol = match.group(1)
                 value = match.group(2).strip() if match.group(2) else "TRUE"
                 defined[symbol] = value
+            else:
+                _warn(
+                    f"Line {line_no}: malformed >>DEFINE directive "
+                    f"'{line.strip()}' ignored — no symbol was defined"
+                )
             continue
 
         # >>IF condition
@@ -610,7 +627,14 @@ def preprocess_conditional_compilation(
                 else:
                     skip_stack.append(not condition_met)
             else:
-                # Unknown condition - default to skipping
+                # Unknown condition - default to skipping, but say so: the
+                # entire guarded block is deleted from the source.
+                _warn(
+                    f"Line {line_no}: unsupported >>IF condition "
+                    f"'{condition_text}' — only 'symbol IS [NOT] DEFINED' is "
+                    "supported; the guarded block was SKIPPED (source lines "
+                    "deleted)"
+                )
                 skip_stack.append(True)
             continue
 
@@ -621,17 +645,36 @@ def preprocess_conditional_compilation(
                 parent_skip = any(skip_stack[:-1])
                 if not parent_skip:
                     skip_stack[-1] = not skip_stack[-1]
+            else:
+                _warn(f"Line {line_no}: >>ELSE without a matching >>IF ignored")
             continue
 
         # >>END-IF
         elif stripped.startswith(">>END-IF"):
             if len(skip_stack) > 1:
                 skip_stack.pop()
+            else:
+                _warn(f"Line {line_no}: >>END-IF without a matching >>IF ignored")
             continue
+
+        # Any other >> compiler directive is not understood: it is passed
+        # through and will reach the lexer as tokens.
+        elif stripped.startswith(">>"):
+            _warn(
+                f"Line {line_no}: unknown compiler directive "
+                f"'{line.strip()}' passed through unprocessed"
+            )
 
         # Regular line - include if not skipping
         if not any(skip_stack):
             result_lines.append(line)
+
+    if len(skip_stack) > 1:
+        _warn(
+            f"{len(skip_stack) - 1} unclosed >>IF directive(s) at end of "
+            "input — every line after the unclosed >>IF may have been "
+            "included or skipped incorrectly"
+        )
 
     return "\n".join(result_lines)
 

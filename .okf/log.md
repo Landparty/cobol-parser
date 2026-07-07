@@ -1,5 +1,38 @@
 # OKF Update Log
 
+## 2026-07-07 (audit HIGH/MEDIUM remediation: H1, H2, H4, H5, H6a/c, H7, M5, M8, M10)
+
+* **Updated** [parser.md](parser.md): `_parse_size_error_stmts` now
+  dispatches ON SIZE ERROR / NOT ON SIZE ERROR bodies through the statement
+  registry — every verb is captured, not just DISPLAY/MOVE (H1).
+  `perform_parser.py` parses `PERFORM VARYING ... AFTER ...` dimensions
+  into `PerformStatement.after_clauses` (H2). ENVIRONMENT division SELECT
+  parsing captures ALTERNATE RECORD KEY / PADDING / RESERVE / SHARING /
+  LOCK MODE / PASSWORD / RECORD DELIMITER / second FILE STATUS variable,
+  populates `assign_device_type`, and warns on unknown SELECT clause
+  tokens (H5). `DECIMAL-POINT IS COMMA` warns that it is not honored (H4).
+  `BaseDivisionParser` gained a `host` attribute so all division parsers
+  can reach `add_warning`/`add_error`.
+* **Updated** [ast-models.md](ast-models.md):
+  `PerformStatement.after_clauses` (+ `add_after_clause`, serialized when
+  non-empty); `CobolExpression.to_dict()` now includes `operands`.
+* **Updated** [preprocessing.md](preprocessing.md): the COPY statement
+  lexer records warnings for COPY statements it recognizes but drops
+  (missing terminating period → never expanded, H6a; unterminated
+  `==pseudo-text==`, H6c) and gained a left-side word-boundary check;
+  `extract_copy_statements(..., warnings=)` and
+  `preprocess_conditional_compilation(..., warnings=)` surface diagnostics
+  (unknown `>>IF` conditions, stray `>>ELSE`/`>>END-IF`, malformed
+  `>>DEFINE`, unclosed `>>IF`, unknown `>>` directives — H7) into
+  `ExpansionStatistics.warnings` / `ParseResult.warnings`.
+* **Updated** [cli.md](cli.md): `--define` conditional-compilation warnings
+  print to stderr; `coverage status` reports malformed artifact JSON with
+  exit 1 instead of a traceback (M10).
+* Regression suite: `tests/regression/test_tier4_audit_remediations.py`
+  (29 tests). `interface-contract.md` documents real `success`/`ast`
+  semantics (M8); `MemoryConfiguration` docstring flags its no-op fields
+  (M5).
+
 ## 2026-07-07 (audit critical silent-drop fixes: C1–C8, H3, H6)
 
 * **Updated** [parser.md](parser.md): multi-program compilation units are now
