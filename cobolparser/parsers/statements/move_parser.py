@@ -6,7 +6,9 @@ from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    get_parse_context,
     matches_keyword,
+    report_parse_error,
     skip_whitespace,
     try_consume_keyword,
 )
@@ -80,6 +82,7 @@ class MoveStatementParser(IStatementParser):
                 start_token.location if start_token else SourceLocation(0, 0),
             ),
         )
+        context = get_parse_context(token_stream)
 
         # Skip whitespace
         skip_whitespace(token_stream)
@@ -98,9 +101,17 @@ class MoveStatementParser(IStatementParser):
 
         skip_whitespace(token_stream)
 
-        # Expect TO keyword
+        # Expect TO keyword. Its absence (e.g. `MOVE A` or `MOVE A B.`) is a
+        # syntax error — COBOL requires TO between the source and its targets.
+        # (A missing *source* is deliberately not flagged here: `MOVE TO x` is
+        # indistinguishable from stray `*>`-comment text that the preprocessor
+        # does not yet strip, so flagging it would fault valid programs.)
         if not try_consume_keyword(token_stream, TokenType.TO, "TO"):
-            # Missing TO, but continue parsing
+            report_parse_error(
+                context,
+                "MOVE statement requires TO before its target(s)",
+                stmt.location,
+            )
             return stmt
 
         skip_whitespace(token_stream)
@@ -137,6 +148,15 @@ class MoveStatementParser(IStatementParser):
             else:
                 # Skip non-identifier tokens (operators, comparisons, etc)
                 token_stream.consume()
+
+        # A MOVE that reached TO but collected no receiving field (e.g.
+        # `MOVE A TO.` or a stream truncated right after TO) is invalid.
+        if target_count == 0:
+            report_parse_error(
+                context,
+                "MOVE statement requires at least one target after TO",
+                stmt.location,
+            )
 
         return stmt
 
