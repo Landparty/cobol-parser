@@ -1,5 +1,29 @@
 # OKF Update Log
 
+## 2026-07-07 (mockymock corpus-sweep fixes: SUBTRACT GIVING, DISPLAY subscript, WRITE FROM literal)
+
+* **Updated** [parser.md](parser.md): fixed three content-drop bugs found
+  by re-running mocky-mock's corpus sweep (`scripts/corpus_sweep.py`)
+  against `legacy-application` now that the EVALUATE blank-selector fix
+  (below) is on `main` — all 26 corpus/fixture/example programs now parse
+  and `mockymock generate` cleanly with zero refusals (previously 3
+  programs carried a `PARSE_WARNING`: `ACCTMNT.cbl`, `GLRECON.cbl`,
+  `LOANPMT.cbl`). `SubtractStatementParser`'s `FROM` branch now checks for
+  a trailing `GIVING` (mirroring `AddStatementParser`'s `TO` branch), so
+  `SUBTRACT a FROM b GIVING c` no longer drops `c`.
+  `_utils.consume_keyword_and_operand` now skips leading `NEWLINE` tokens
+  before checking for its keyword, not just after, so a clause keyword on
+  its own continuation line is no longer missed (this was the actual
+  trigger in `LOANPMT.cbl` — `GIVING` on the line after `FROM`).
+  `DisplayStatementParser` now folds a following `(subscript)` into the
+  preceding identifier as one item instead of aborting the item list on
+  the bare `LEFT_PAREN` (`ACCTMNT.cbl`'s `DISPLAY ... SQLERRD(3)`).
+  `WriteStatementParser`'s `FROM` clause now also accepts a string literal
+  source, not just an identifier (`GLRECON.cbl`'s `WRITE rec FROM
+  'literal text'`).
+* **Updated** [tests.md](tests.md): test count refreshed to ~6,704 tests
+  across 239 files (new `tests/unit/test_display_parser.py`).
+
 ## 2026-07-07 (audit HIGH/MEDIUM remediation: H1, H2, H4, H5, H6a/c, H7, M5, M8, M10)
 
 * **Updated** [parser.md](parser.md): `_parse_size_error_stmts` now

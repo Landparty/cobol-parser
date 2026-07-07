@@ -3,12 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-07-04T00:00:00Z
+timestamp: 2026-07-07T00:00:00Z
 ---
 
 # Overview
 
-~5,969 tests across 226 files in 5 directories. Coverage floor: **81% line coverage**
+~6,704 tests across 239 files in 5 directories. Coverage floor: **81% line coverage**
 enforced by `--cov-fail-under=81` in `pyproject.toml`. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
