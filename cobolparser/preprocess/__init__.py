@@ -484,15 +484,22 @@ def normalize_fixed_format(
     for raw in lines:
         line = raw.rstrip("\n")
         if len(line) < TEXT_START_COL - 1:
+            # Blank/short line: flush whatever logical line was in progress,
+            # then emit an empty placeholder for this physical line so later
+            # lines keep their true line number (a dropped line here would
+            # silently shift every subsequent error/warning location).
             flush_parts()
+            result.append("")
             continue
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else " "
         text_slice = line[TEXT_START_COL - 1 : TEXT_END_COL]
         if indicator in ("*", "/"):  # comment (including page eject)
-            # Comment lines: flush pending buffer but do not emit comment text.
-            # Emitting comment text causes the free-form lexer to tokenize it as code.
+            # Comment lines: flush pending buffer but do not emit comment text
+            # (emitting it would let the free-form lexer tokenize it as code).
+            # Still emit an empty placeholder to preserve line numbering.
             flush_parts()
             pending_literal = False
+            result.append("")
             continue
         is_cont = indicator == "-"
 
@@ -576,20 +583,18 @@ def preprocess_conditional_compilation(
             unclosed ``>>IF`` at end of input, and any other unrecognized
             ``>>`` directive such as ``>>EVALUATE``) — previously all
             silent (audit 2026-07-07 H7), even though an unknown ``>>IF``
-            condition deletes the whole guarded block.
+            condition blanks out the whole guarded block.
 
     Returns:
-        Source code with conditional sections processed
+        Source code with conditional sections processed. Directive lines and
+        lines inside a skipped (or unrecognized-condition) ``>>IF`` block are
+        blanked out rather than removed, so every surviving line keeps its
+        original line number for error/warning reporting.
 
     Example:
-        >>> source = '''
-        ... >>DEFINE DEBUG
-        ... >>IF DEBUG IS DEFINED
-        ...        DISPLAY "Debug mode".
-        ... >>END-IF
-        ... '''
+        >>> source = '>>DEFINE DEBUG\\n>>IF DEBUG IS DEFINED\\n       DISPLAY "Debug mode".\\n>>END-IF\\n'
         >>> preprocess_conditional_compilation(source)
-        '       DISPLAY "Debug mode".\\n'
+        '\\n\\n       DISPLAY "Debug mode".\\n'
     """
     defined = dict(defined_symbols) if defined_symbols else {}
     result_lines = []
@@ -614,6 +619,10 @@ def preprocess_conditional_compilation(
                     f"Line {line_no}: malformed >>DEFINE directive "
                     f"'{line.strip()}' ignored — no symbol was defined"
                 )
+            # A directive line consumes no output, but still occupies a
+            # source line: emit a blank placeholder so later lines keep
+            # their true line number instead of silently shifting.
+            result_lines.append("")
             continue
 
         # >>IF condition
@@ -636,14 +645,15 @@ def preprocess_conditional_compilation(
                     skip_stack.append(not condition_met)
             else:
                 # Unknown condition - default to skipping, but say so: the
-                # entire guarded block is deleted from the source.
+                # entire guarded block is blanked out of the source.
                 _warn(
                     f"Line {line_no}: unsupported >>IF condition "
                     f"'{condition_text}' — only 'symbol IS [NOT] DEFINED' is "
                     "supported; the guarded block was SKIPPED (source lines "
-                    "deleted)"
+                    "blanked out)"
                 )
                 skip_stack.append(True)
+            result_lines.append("")
             continue
 
         # >>ELSE
@@ -655,6 +665,7 @@ def preprocess_conditional_compilation(
                     skip_stack[-1] = not skip_stack[-1]
             else:
                 _warn(f"Line {line_no}: >>ELSE without a matching >>IF ignored")
+            result_lines.append("")
             continue
 
         # >>END-IF
@@ -663,6 +674,7 @@ def preprocess_conditional_compilation(
                 skip_stack.pop()
             else:
                 _warn(f"Line {line_no}: >>END-IF without a matching >>IF ignored")
+            result_lines.append("")
             continue
 
         # Any other >> compiler directive is not understood: it is passed
@@ -673,9 +685,13 @@ def preprocess_conditional_compilation(
                 f"'{line.strip()}' passed through unprocessed"
             )
 
-        # Regular line - include if not skipping
+        # Regular line - include if not skipping. A skipped line still
+        # occupies a source line, so emit a blank placeholder rather than
+        # dropping it outright, to keep every later line's number accurate.
         if not any(skip_stack):
             result_lines.append(line)
+        else:
+            result_lines.append("")
 
     if len(skip_stack) > 1:
         _warn(

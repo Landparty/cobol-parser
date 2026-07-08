@@ -3,12 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-07-07T00:00:00Z
+timestamp: 2026-07-08T00:00:00Z
 ---
 
 # Overview
 
-~6,709 tests across 239 files in 5 directories. Coverage floor: **81% line coverage**
+~6,725 tests across 241 files in 5 directories. Coverage floor: **81% line coverage**
 enforced by `--cov-fail-under=81` in `pyproject.toml`. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
@@ -36,6 +36,12 @@ tests/
                                #   EVALUATE WHEN branches must be AST children
                                #   (find_all_by_type reaches nested statements;
                                #   duplicate WHEN OTHER reuses one default clause)
+                               #   test_tier5_silent_drip_audit.py: SORT/MERGE/
+                               #   ENTRY/CALL-handler silent-drop fixes (2026-07-08)
+                               #   test_normalize_line_number_preservation.py:
+                               #   normalize_fixed_format / preprocess_conditional_
+                               #   compilation line-number preservation + Cython
+                               #   parity (2026-07-08)
   performance/                 # benchmarks (factory, parser)
   samples/                     # shared COBOL fixtures
     copybook_programs/         # programs with COPY statements

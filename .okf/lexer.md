@@ -3,7 +3,7 @@ type: Module
 title: Lexer
 description: Tokenizes COBOL source into Token objects; 236 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-06-29T00:00:00Z
+timestamp: 2026-07-08T00:00:00Z
 ---
 
 # Overview
@@ -103,6 +103,17 @@ pip install -e ".[fast]"
 # Opt out entirely (no compiler or Cython needed)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 ```
+
+**Pure/Cython parity (audit 2026-07-08):** `_lexer_fast.pyx`'s
+`is_line_start_quote` check (used to decide whether an unterminated string
+could be a continuation of a preceding VALUE clause) used `text[:pos].strip()
+== ""`, a broader whitespace definition (`str.isspace()` — `\v`, `\f`, NBSP,
+…) than the pure-Python version's explicit `char not in " \t"` loop. A
+control byte other than space/tab immediately before the quote made the
+compiled build classify the line differently from the fallback path for the
+same input. Fixed by replacing the Cython `.strip()` call with the same
+explicit `" \t"`-only loop the pure-Python lexer uses. Pinned by
+`tests/regression/test_normalize_line_number_preservation.py::TestLexerLineStartQuoteWhitespaceParity`.
 
 # Errors
 

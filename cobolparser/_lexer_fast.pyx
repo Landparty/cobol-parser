@@ -286,7 +286,19 @@ class CobolLexer(_CobolLexerBase):
 
             # ---- string literals -----------------------------------
             if char == '"' or char == "'":
-                is_line_start_quote = pos == 0 or text[:pos].strip() == ""
+                # Must match the pure-Python " \t"-only whitespace definition
+                # exactly (not str.strip(), which is broader — e.g. "\v"/"\f"
+                # /NBSP — and would let the compiled build classify a
+                # continuation candidate differently from the fallback path
+                # for the same input).
+                if pos == 0:
+                    is_line_start_quote = True
+                else:
+                    is_line_start_quote = True
+                    for _ws_i in range(pos):
+                        if text[_ws_i] != " " and text[_ws_i] != "\t":
+                            is_line_start_quote = False
+                            break
 
                 token, new_pos, unterminated = self._try_single_line_string(
                     text, pos, line_num, start_col

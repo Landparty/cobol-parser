@@ -5,7 +5,12 @@ from typing import Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import MergeStatement, SortStatement
-from ._utils import matches_keyword, skip_whitespace, token_location
+from ._utils import (
+    is_statement_boundary,
+    matches_keyword,
+    skip_whitespace,
+    token_location,
+)
 from ._utils import token_value_upper as _val
 
 
@@ -138,6 +143,10 @@ class SortStatementParser(IStatementParser):
 
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
+                break
+            if is_statement_boundary(token):
+                # No period before the next statement: stop rather than
+                # swallow it as a bogus SORT clause token.
                 break
             elif val == "WITH":
                 token_stream.consume()
@@ -281,6 +290,10 @@ class MergeStatementParser(IStatementParser):
 
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
+                break
+            if is_statement_boundary(token):
+                # No period before the next statement: stop rather than
+                # swallow it as a bogus MERGE clause token.
                 break
             elif val == "COLLATING":
                 token_stream.consume()

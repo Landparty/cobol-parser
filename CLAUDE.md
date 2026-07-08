@@ -25,6 +25,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
 | Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.) | `.okf/analysis.md` |
+| `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
 | CLI subcommands and flags | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 

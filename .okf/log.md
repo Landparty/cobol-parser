@@ -1,5 +1,57 @@
 # OKF Update Log
 
+## 2026-07-08 (silent-drops-and-gaps audit: SORT/MERGE/ENTRY/CALL swallows, line-number drift, batch/CLI fault isolation)
+
+* **Updated** [parser.md](parser.md): SORT/MERGE's "remaining clauses" loop
+  and ENTRY's USING-clause loop now stop at `is_statement_boundary()` instead
+  of an `else: consume()` fallback that swallowed a following un-punctuated
+  statement (same bug class as the 2026-07-06 INSPECT/STRING/UNSTRING fix,
+  but these three parsers were missed at the time). `CallStatementParser`'s
+  ON EXCEPTION/NOT ON EXCEPTION/ON OVERFLOW handler-body dispatch
+  (`_parse_nested_stmts`) now warns on an unsupported verb via the new
+  `_warn_and_skip_handler_statement`, matching the top-level
+  `_warn_unsupported_statement` behavior from the 2026-07-07 C2 fix, which
+  this nested dispatch loop had never received.
+* **Updated** [preprocessing.md](preprocessing.md): `normalize_fixed_format`
+  and `preprocess_conditional_compilation` both used to drop certain
+  physical lines from their output entirely (blank/comment lines; `>>DEFINE`/
+  `>>IF`/`>>ELSE`/`>>END-IF` directive lines; lines inside a skipped `>>IF`
+  block) instead of emitting an empty placeholder — silently shifting every
+  later line's number in lexer/parser error and warning locations. Every
+  real COBOL program has blank/comment lines, so this affected essentially
+  all diagnostics past the first one, not just an edge case. Fixed in both
+  the pure-Python implementation and the Cython `_preprocess_fast.pyx`
+  mirror (checked-in `.c` regenerated).
+* **Updated** [lexer.md](lexer.md): `_lexer_fast.pyx`'s `is_line_start_quote`
+  check used `str.strip()` (broad whitespace definition) where the
+  pure-Python lexer used an explicit `" \t"`-only loop — a stray control
+  byte before an unterminated quote could make the compiled build classify
+  a VALUE-clause-continuation candidate differently from the fallback path.
+  Aligned to the narrower pure-Python check.
+* **Produced** [batch.md](batch.md): new OKF concept file (was referenced by
+  `scripts/okf_staleness_check.py`'s `OKF_MAP` but never created). Documents
+  `parse_files`/`parse_files_with_copybooks` and their per-file fault
+  isolation, including two gaps fixed today:
+  `parse_files_with_copybooks` had no exception guard around
+  `parser.parse(...)` (one poisoned file could abort the whole batch,
+  discarding every other file's result — the 2026-07-07 C8 fix only
+  reached `parse_files`'s workers) and only caught `OSError` (not
+  `ValueError`/`UnicodeDecodeError` under `errors="strict"`) on file reads.
+* **Updated** [analysis.md](analysis.md): `IOCoverageReporter.load_pytest_results`
+  now raises `ValueError` for a non-dict JSON root instead of an uncaught
+  `AttributeError` from the unconditional `data.get("tests", [])` that
+  followed.
+* **Updated** [cli.md](cli.md): `coverage generate` now catches
+  `json.JSONDecodeError`/`ValueError` from the reporter (the same M10 bug
+  class already fixed for `coverage status`, but missed here);
+  `generate-tests -o` write failures now go through the standard
+  `_fail(...)` path instead of an uncaught traceback (it was the one
+  output-writing subcommand that bypassed the shared `_text_out()` helper).
+* **Updated** [tests.md](tests.md): test count refreshed to ~6,725 tests
+  across 241 files (two new regression files:
+  `test_tier5_silent_drip_audit.py`, `test_normalize_line_number_preservation.py`).
+* Full audit: `reports/audit-2026-07-08.md`.
+
 ## 2026-07-07 (mockymock corpus-sweep fixes: SUBTRACT GIVING, DISPLAY subscript, WRITE FROM literal)
 
 * **Updated** [parser.md](parser.md): fixed three content-drop bugs found

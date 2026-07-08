@@ -143,6 +143,22 @@ DISPLAY-TO-CONSOLE,DISPLAY,N/A,N/A,,N/A,SC27-8949-30,PENDING,Display output to c
         with pytest.raises(FileNotFoundError):
             reporter.load_pytest_results("/nonexistent/results.json")
 
+    def test_load_pytest_results_non_object_json_raises_value_error(
+        self, tmp_path, sample_catalog
+    ):
+        """A pytest-results file whose JSON root isn't an object must raise a
+        clean ValueError, not an AttributeError from ``data.get(...)`` deep
+        inside the loader (audit finding: CLI `coverage generate` crashed with
+        a raw traceback on this input)."""
+        reporter = IOCoverageReporter(catalog_path=sample_catalog)
+        reporter.load_catalog()
+
+        bad_results = tmp_path / "results.json"
+        bad_results.write_text("[1, 2, 3]")
+
+        with pytest.raises(ValueError, match="pytest-results JSON object"):
+            reporter.load_pytest_results(str(bad_results))
+
     def test_determine_test_type_unit(self):
         """Test unit test type detection."""
         reporter = IOCoverageReporter()

@@ -6,6 +6,8 @@ from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    get_parse_context,
+    is_statement_boundary,
     matches_keyword,
     previous_meaningful_token,
     skip_whitespace,
@@ -251,10 +253,44 @@ class CallStatementParser(IStatementParser):
                     except ParseError:
                         token_stream.consume()
                 else:
-                    token_stream.consume()
+                    self._warn_and_skip_handler_statement(token_stream, token, stop_at)
             else:
-                token_stream.consume()
+                self._warn_and_skip_handler_statement(token_stream, token, stop_at)
         return stmts
+
+    def _warn_and_skip_handler_statement(
+        self, token_stream: ITokenStream, token: Any, stop_at: set
+    ) -> None:
+        """Surface one warning per dropped statement, then skip its tokens.
+
+        Mirrors ``ProcedureDivisionParser._warn_unsupported_statement`` /
+        ``_skip_to_next_statement`` (audit C2): without this, an unknown verb
+        inside ON EXCEPTION / NOT ON EXCEPTION / ON OVERFLOW was silently
+        dropped one token at a time with ``errors=0, warnings=0``, unlike the
+        identical verb at top level.
+        """
+        value = (token.value or "").upper() if token is not None else ""
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        context = get_parse_context(token_stream)
+        host = getattr(context, "host", None) if context is not None else None
+        add_warning = getattr(host, "add_warning", None)
+        if value and callable(add_warning):
+            add_warning(
+                f"Unsupported statement '{value}'{where} skipped inside a CALL "
+                "exception/overflow handler: no parser is registered for this "
+                "verb; its tokens were discarded up to the next statement "
+                "boundary"
+            )
+        token_stream.consume()
+        while not token_stream.is_empty():
+            nxt = token_stream.peek()
+            if not nxt:
+                break
+            nxt_val = nxt.value.upper() if nxt.value else ""
+            if nxt_val in stop_at or nxt_val == "." or is_statement_boundary(nxt):
+                break
+            token_stream.consume()
 
     def _parse_using_clause(
         self, token_stream: ITokenStream, stmt: CallStatement
