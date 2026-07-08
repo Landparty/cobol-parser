@@ -37,6 +37,22 @@ from ..models.statements.misc import (
     SortStatement,
 )
 
+# Conditional clause-body attributes that may hold nested statements on IO /
+# arithmetic / STRING statements the ``scan()`` dispatch does not special-case.
+# Kept in sync with ``coverage_analyzer._nested_statements``.
+_CLAUSE_BODY_ATTRS: tuple[str, ...] = (
+    "at_end_clause",
+    "not_at_end_clause",
+    "invalid_key_clause",
+    "not_invalid_key_clause",
+    "at_eop_clause",
+    "not_at_eop_clause",
+    "on_size_error",
+    "not_on_size_error",
+    "on_overflow",
+    "not_on_overflow",
+)
+
 
 class FlowEdgeType(Enum):
     """Types of control flow edges between procedures."""
@@ -766,6 +782,19 @@ class ProgramFlowAnalyzer:
                 elif exit_type.startswith("PERFORM"):
                     # Covers both "PERFORM" and "PERFORM CYCLE"
                     node.has_exit_perform = True
+            else:
+                # Any other statement may still host nested control flow in a
+                # conditional clause body: IO statements (READ AT END / WRITE
+                # INVALID KEY / ...), arithmetic (ON SIZE ERROR), and
+                # STRING/UNSTRING (ON OVERFLOW). Without descending here, a
+                # PERFORM/GO TO/CALL living inside such a clause produced no
+                # edge, cascading into false "unreachable" reports and missing
+                # flowchart arrows. Mirrors coverage_analyzer._nested_statements.
+                for attr in _CLAUSE_BODY_ATTRS:
+                    clause = getattr(stmt, attr, None)
+                    if isinstance(clause, list):
+                        for s in clause:
+                            scan(s, source_id)
 
         for stmt in para.statements:
             scan(stmt)

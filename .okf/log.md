@@ -1,5 +1,50 @@
 # OKF Update Log
 
+## 2026-07-09 (silent-drops-and-gaps audit: OCCURS KEY, program-flow clause bodies, REWRITE/START/ACCEPT/STOP operands, DATA warn channel)
+
+Follow-up to the 2026-07-08 audit. Four parallel re-audits (DATA division,
+analysis modules, statement parsers, AST serialization) each briefed on the
+prior fix lists. AST-serialization review found nothing new; the other three
+each surfaced genuine, runtime-reproduced silent drops. Full audit:
+`reports/audit-2026-07-09.md`.
+
+* **Updated** [parser.md](parser.md) / [ast-models.md](ast-models.md):
+  OCCURS `ASCENDING/DESCENDING KEY IS ...` was dropped entirely, and because
+  the OCCURS parser looked for `INDEXED` immediately after DEPENDING, a KEY
+  clause sitting between them (standard COBOL order) also caused the following
+  `INDEXED BY` to be eaten by the clause loop's `else: consume()`. `INDEXED BY
+  a b` also kept only the last index name. Now parsed in both `data.py` and the
+  `_data_fast.pyx` mirror (`.c` regenerated with Cython 3.2.4); `OccursClause`
+  gained `key_clauses` (list of `{direction, keys}`) and `index_names` (all
+  indexes; `indexed_by` keeps the first for compatibility), both serialized.
+* **Updated** [analysis.md](analysis.md): `ProgramFlowAnalyzer`'s hand-rolled
+  `scan()` recursed only into a subset of container statements (PERFORM inline,
+  CALL handlers, IF/EVALUATE/SEARCH/RETURN) and never descended into IO
+  (`AT END`/`INVALID KEY`/`AT EOP`), arithmetic (`ON SIZE ERROR`), or
+  STRING/UNSTRING (`ON OVERFLOW`) clause bodies. A PERFORM/GO TO/CALL nested
+  there produced no edge, cascading into **false `unreachable_nodes`** reports
+  and missing flowchart arrows (contrast `DeadCodeAnalyzer`, which uses
+  `get_all_statements()`). Fixed with a final `else` branch mirroring
+  `coverage_analyzer._nested_statements`'s clause-attribute list.
+* **Updated** [parser.md](parser.md) / [ast-models.md](ast-models.md): four
+  statement-parser operand drops — `REWRITE rec FROM data` dropped the FROM
+  source (`IORewriteStatement` gained `from_clause`); `START f KEY IS ...
+  data-name` dropped the KEY data-name (`IOStartStatement` gained `key_name`);
+  `ACCEPT x FROM DATE YYYYMMDD` dropped the format phrase and re-parsed it as a
+  **phantom paragraph** (now captured into `from_source`); `STOP RUN RETURNING
+  x` dropped the return code (`StopStatement` gained `returning`, and a bare
+  numeric `STOP n` operand is now captured). `ACCEPT`/`UNLOCK` with a missing
+  operand no longer consume the following statement's verb (`is_statement_
+  boundary` guard).
+* **Updated** [parser.md](parser.md): the DATA division clause loop's
+  `else: consume()` fallback now emits an "Unparsed token ... in data item"
+  warning for meaningful (non-whitespace) tokens — symmetric with the
+  ENVIRONMENT division's SELECT handling. Previously any unsupported data-item
+  clause (GROUP-USAGE, VOLATILE, DYNAMIC LENGTH, DESCENDING KEY, ...) vanished
+  with `warnings=[]`.
+* **Updated** [tests.md](tests.md): +13 tests
+  (`tests/regression/test_tier6_silent_drop_audit.py`).
+
 ## 2026-07-08 (silent-drops-and-gaps audit: SORT/MERGE/ENTRY/CALL swallows, line-number drift, batch/CLI fault isolation)
 
 * **Updated** [parser.md](parser.md): SORT/MERGE's "remaining clauses" loop

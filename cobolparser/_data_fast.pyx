@@ -299,7 +299,49 @@ def parse_data_item_clauses_fast(
                             has_depending = True
                             pos += 1
 
-            # INDEXED BY clause
+            # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses (may
+            # repeat). These sit between DEPENDING ON and INDEXED BY and are
+            # what make a table valid for SEARCH ALL; dropping them lost real
+            # semantics and previously also cascaded into dropping INDEXED BY.
+            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                pos += 1
+            while (
+                pos < n
+                and tokens[pos] is not None
+                and tokens[pos].value
+                and tokens[pos].value.upper() in ("ASCENDING", "DESCENDING")
+            ):
+                direction = tokens[pos].value.upper()
+                pos += 1  # consume ASCENDING/DESCENDING
+                while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                    pos += 1
+                if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "KEY":
+                    pos += 1
+                while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                    pos += 1
+                if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "IS":
+                    pos += 1
+                keys = []
+                while True:
+                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                        pos += 1
+                    if (
+                        pos < n
+                        and tokens[pos] is not None
+                        and tokens[pos].type is identifier_type
+                        and tokens[pos].value
+                        and tokens[pos].value.upper() not in ("ASCENDING", "DESCENDING", "INDEXED", "KEY")
+                    ):
+                        keys.append(tokens[pos].value)
+                        pos += 1
+                    else:
+                        break
+                if keys:
+                    occurs.add_key_clause(direction, keys)
+                while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                    pos += 1
+
+            # INDEXED BY clause (one or more index names)
             while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                 pos += 1
             if pos < n:
@@ -310,11 +352,14 @@ def parse_data_item_clauses_fast(
                         by_token = tokens[pos]
                         if by_token is not None and by_token.value and by_token.value.upper() == "BY":
                             pos += 1
-                    if pos < n:
-                        idx_token = tokens[pos]
-                        if idx_token is not None and idx_token.type is identifier_type:
-                            occurs.set_indexed_by(idx_token.value)
+                    while True:
+                        while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                             pos += 1
+                        if pos < n and tokens[pos] is not None and tokens[pos].type is identifier_type:
+                            occurs.add_index_name(tokens[pos].value)
+                            pos += 1
+                        else:
+                            break
 
             if has_depending:
                 occurs.set_variable_occurs(min_count, max_count, depending_var)

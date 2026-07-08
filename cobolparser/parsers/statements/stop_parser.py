@@ -31,15 +31,32 @@ class StopStatementParser(IStatementParser):
         location = getattr(start_token, "location", None) or SourceLocation(0, 0)
         stmt = StopStatement(location)
 
-        # Parse STOP type: STOP RUN or STOP "literal"
+        # Parse STOP type: STOP RUN or STOP "literal" (or STOP <numeric>)
         if not token_stream.is_empty():
             next_token = token_stream.peek()
             if next_token and next_token.value:
                 if next_token.value.upper() == "RUN":
                     stmt.stop_type = "RUN"
                     token_stream.consume()  # consume RUN
-                elif next_token.type.name == "STRING_LITERAL":
+                elif next_token.type.name in ("STRING_LITERAL", "NUMERIC_LITERAL"):
                     stmt.stop_type = next_token.value
                     token_stream.consume()  # consume literal
+
+        # Optional RETURNING / GIVING return-code (STOP RUN RETURNING x). The
+        # operand was previously left in the stream and dropped.
+        if not token_stream.is_empty():
+            nxt = token_stream.peek()
+            if nxt and nxt.value and nxt.value.upper() in ("RETURNING", "GIVING"):
+                token_stream.consume()  # consume RETURNING/GIVING
+                if not token_stream.is_empty():
+                    val = token_stream.peek()
+                    if (
+                        val
+                        and val.value
+                        and val.type
+                        in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL)
+                    ):
+                        stmt.returning = val.value
+                        token_stream.consume()
 
         return stmt

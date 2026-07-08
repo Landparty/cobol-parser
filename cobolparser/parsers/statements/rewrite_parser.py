@@ -44,13 +44,18 @@ class RewriteStatementParser(IStatementParser):
 
         skip_whitespace(token_stream)
 
-        # Optional FROM clause (consume but no setter on this node)
+        # Optional FROM clause (REWRITE rec FROM data / FROM 'literal')
         token = token_stream.peek()
         if token and token.type == TokenType.FROM:
             token_stream.consume()
             skip_whitespace(token_stream)
             token = token_stream.peek()
-            if token and token.type == TokenType.IDENTIFIER:
+            if token and token.type in (
+                TokenType.IDENTIFIER,
+                TokenType.STRING_LITERAL,
+                TokenType.NUMERIC_LITERAL,
+            ):
+                stmt.set_from(token.value or "")
                 token_stream.consume()
                 skip_whitespace(token_stream)
 

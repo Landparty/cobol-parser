@@ -61,6 +61,19 @@ Produces a control-flow graph. Edge types:
 
 THRU ranges expand to `range_members`; cycles are classified in `cycle_details`.
 
+Unlike most analyzers (which walk `get_all_statements()`), the flow graph is
+built by a hand-rolled `scan()` that recurses statement-by-statement. Audit
+2026-07-09: `scan()` special-cased only PERFORM inline blocks, CALL handlers,
+and IF/EVALUATE/SEARCH/RETURN — it never descended into IO clause bodies
+(`AT END` / `INVALID KEY` / `AT EOP`), arithmetic `ON SIZE ERROR`, or
+STRING/UNSTRING `ON OVERFLOW`. A PERFORM/GO TO/CALL nested in one of those
+produced no edge, cascading into **false `unreachable_nodes`** and missing
+flowchart arrows. Fixed with a final `else` branch iterating
+`_CLAUSE_BODY_ATTRS` (same clause-attribute set as
+`coverage_analyzer._nested_statements`); the `id`-based `visited` set keeps the
+generic pass from double-counting statements the specialized branches already
+handled. Pinned by `tests/regression/test_tier6_silent_drop_audit.py`.
+
 ## IOLogger
 
 ```python

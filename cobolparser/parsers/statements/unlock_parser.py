@@ -6,7 +6,12 @@ from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOUnlockStatement
-from ._utils import matches_keyword, skip_whitespace, token_location
+from ._utils import (
+    is_statement_boundary,
+    matches_keyword,
+    skip_whitespace,
+    token_location,
+)
 
 
 class UnlockStatementParser(IStatementParser):
@@ -29,9 +34,15 @@ class UnlockStatementParser(IStatementParser):
             stmt = IOUnlockStatement(loc)
         skip_whitespace(token_stream)
 
-        # File name
+        # File name. Guard against a missing operand: if the next token
+        # already starts a new statement, do not consume its verb as the
+        # file name (that silently destroyed the following statement).
         token = token_stream.peek()
-        if token and token.type not in (TokenType.PERIOD, None):
+        if (
+            token
+            and token.type not in (TokenType.PERIOD, None)
+            and not is_statement_boundary(token)
+        ):
             token_stream.consume()
             stmt.set_file_name(token.value or "")
 
