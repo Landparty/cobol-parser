@@ -413,6 +413,13 @@ class OccursClause(ASTNode):
         self.max_times: int | None = None
         self.depending_on: str | None = None
         self.indexed_by: str | None = None
+        # INDEXED BY may name several indexes; ``indexed_by`` keeps the first
+        # for backward compatibility, ``index_names`` keeps them all.
+        self.index_names: list[str] = []
+        # ASCENDING/DESCENDING KEY IS ... — required for SEARCH ALL (binary
+        # search). Each entry: {"direction": "ASCENDING"|"DESCENDING",
+        # "keys": [data-name, ...]}.
+        self.key_clauses: list[dict[str, Any]] = []
 
     @property
     def times(self) -> int | None:
@@ -435,12 +442,22 @@ class OccursClause(ASTNode):
         self.depending_on = depending_on
 
     def set_indexed_by(self, index_name: str) -> None:
-        """Set INDEXED BY clause."""
+        """Set INDEXED BY clause (records the first index name)."""
         self.indexed_by = index_name
+
+    def add_index_name(self, index_name: str) -> None:
+        """Append an INDEXED BY index name (supports multiple indexes)."""
+        self.index_names.append(index_name)
+        if self.indexed_by is None:
+            self.indexed_by = index_name
+
+    def add_key_clause(self, direction: str, keys: list[str]) -> None:
+        """Record an ASCENDING/DESCENDING KEY clause for the table."""
+        self.key_clauses.append({"direction": direction.upper(), "keys": list(keys)})
 
     def to_dict(self) -> dict[str, Any]:
         """Convert OCCURS clause to dictionary representation."""
-        return {
+        result: dict[str, Any] = {
             "node_type": self.node_type,
             "min_times": self.min_times,
             "max_times": self.max_times,
@@ -449,6 +466,11 @@ class OccursClause(ASTNode):
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }
+        if self.index_names:
+            result["index_names"] = list(self.index_names)
+        if self.key_clauses:
+            result["key_clauses"] = [dict(kc) for kc in self.key_clauses]
+        return result
 
 
 class CobolDataItem(ASTNode):

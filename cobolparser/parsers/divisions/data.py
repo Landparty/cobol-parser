@@ -139,6 +139,17 @@ _DIVISION_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Non-meaningful tokens (layout only) that the clause loop skips silently —
+# warning on these would be noise.
+_WHITESPACE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.NEWLINE,
+        TokenType.WHITESPACE,
+        TokenType.COMMENT,
+        TokenType.CONTINUATION,
+    }
+)
+
 # Keywords that begin an FD/SD file-description clause. Used to segment the
 # clause tokens captured by ``_parse_fd_clauses``.
 _FD_CLAUSE_STARTS: frozenset[str] = frozenset(
@@ -902,7 +913,54 @@ class DataDivisionParser(BaseDivisionParser):
                         depending_var = dep_token.value
                         token_stream.consume()
 
-                # INDEXED BY clause
+                # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses
+                # (may repeat). These sit between DEPENDING ON and INDEXED BY
+                # in standard COBOL and are what makes a table valid for
+                # SEARCH ALL (binary search), so dropping them loses real
+                # semantics — and previously it also cascaded into dropping a
+                # following INDEXED BY clause.
+                self._skip_newlines(token_stream)
+                nxt = token_stream.peek()
+                while (
+                    nxt
+                    and nxt.value
+                    and nxt.value.upper()
+                    in (
+                        "ASCENDING",
+                        "DESCENDING",
+                    )
+                ):
+                    direction = nxt.value.upper()
+                    token_stream.consume()  # consume ASCENDING/DESCENDING
+                    self._skip_newlines(token_stream)
+                    key_kw = token_stream.peek()
+                    if key_kw and key_kw.value and key_kw.value.upper() == "KEY":
+                        token_stream.consume()  # consume KEY
+                    self._skip_newlines(token_stream)
+                    is_kw = token_stream.peek()
+                    if is_kw and is_kw.value and is_kw.value.upper() == "IS":
+                        token_stream.consume()  # consume optional IS
+                    keys: list[str] = []
+                    while True:
+                        self._skip_newlines(token_stream)
+                        key_token = token_stream.peek()
+                        if (
+                            key_token
+                            and key_token.type == TokenType.IDENTIFIER
+                            and key_token.value
+                            and key_token.value.upper()
+                            not in ("ASCENDING", "DESCENDING", "INDEXED", "KEY")
+                        ):
+                            keys.append(key_token.value)
+                            token_stream.consume()
+                        else:
+                            break
+                    if keys:
+                        occurs.add_key_clause(direction, keys)
+                    self._skip_newlines(token_stream)
+                    nxt = token_stream.peek()
+
+                # INDEXED BY clause (one or more index names)
                 self._skip_newlines(token_stream)
                 nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() == "INDEXED":
@@ -910,10 +968,14 @@ class DataDivisionParser(BaseDivisionParser):
                     by_token = token_stream.peek()
                     if by_token and by_token.value and by_token.value.upper() == "BY":
                         token_stream.consume()  # consume BY
-                    idx_token = token_stream.peek()
-                    if idx_token and idx_token.type == TokenType.IDENTIFIER:
-                        occurs.set_indexed_by(idx_token.value)
-                        token_stream.consume()
+                    while True:
+                        self._skip_newlines(token_stream)
+                        idx_token = token_stream.peek()
+                        if idx_token and idx_token.type == TokenType.IDENTIFIER:
+                            occurs.add_index_name(idx_token.value)
+                            token_stream.consume()
+                        else:
+                            break
 
                 if depending_var:
                     occurs.set_variable_occurs(min_count, max_count, depending_var)
@@ -927,10 +989,33 @@ class DataDivisionParser(BaseDivisionParser):
                 # Skip unknown tokens/clauses. PERIOD, LEVEL_NUMBER, and
                 # division tokens are already handled at the top of the
                 # loop (they ``break`` before we get here), so the only
-                # remaining case is "consume and continue".
+                # remaining case is "consume and continue". Record a warning
+                # for meaningful (non-whitespace) tokens so a data-item clause
+                # this parser does not yet support (GROUP-USAGE, VOLATILE,
+                # DYNAMIC LENGTH, ...) is not dropped completely silently —
+                # symmetric with the ENVIRONMENT division's SELECT handling.
+                self._warn_dropped_data_token(token, data_item)
                 token_stream.consume()
 
         return data_item
+
+    def _warn_dropped_data_token(self, token: Any, data_item: Any) -> None:
+        """Record a warning for an unrecognized data-item clause token."""
+        if token is None or token.type in _WHITESPACE_TOKEN_TYPES:
+            return
+        value = (token.value or "").strip() if token.value else ""
+        if not value:
+            return
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        item_name = getattr(data_item, "name", None) or "?"
+        host = getattr(self, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(
+                f"Unparsed token '{value}'{where} in data item '{item_name}' "
+                "skipped: clause not fully supported; content dropped from the AST"
+            )
 
     def _parse_condition_name_item(
         self, token_stream: ITokenStream

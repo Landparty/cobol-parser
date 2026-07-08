@@ -476,6 +476,7 @@ class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement)
         super().__init__("REWRITE_STATEMENT", location)
         self.file_name: str | None = None
         self.record_name: str | None = None
+        self.from_clause: str | None = None
         self.invalid_key_clause: list[CobolStatement] = []
         self.not_invalid_key_clause: list[CobolStatement] = []
         self.with_lock: bool = False
@@ -493,6 +494,10 @@ class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement)
         self.record_name = record_name
         self._add_unique_operand(record_name)
 
+    def set_from(self, source: str) -> None:
+        """Set the FROM source (``REWRITE rec FROM data``)."""
+        self.from_clause = source
+
     def to_dict(self) -> dict[str, Any]:
         """Convert REWRITE statement to dictionary representation per contract."""
         result = super().to_dict()
@@ -500,6 +505,7 @@ class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement)
             {
                 "file_name": self.file_name,
                 "record_name": self.record_name,
+                "from_clause": self.from_clause,
                 **self._serialize_clauses(
                     "invalid_key_clause", "not_invalid_key_clause"
                 ),
@@ -551,6 +557,7 @@ class IOStartStatement(InvalidKeyClauseMixin, CobolStatement):
         self.key_condition: str | None = (
             None  # EQUAL, GREATER, LESS, GREATER THAN, etc.
         )
+        self.key_name: str | None = None  # the data-name named by KEY IS ...
         self.invalid_key_clause: list[CobolStatement] = []
         self.not_invalid_key_clause: list[CobolStatement] = []
         self._metadata = {
@@ -565,6 +572,10 @@ class IOStartStatement(InvalidKeyClauseMixin, CobolStatement):
         """Set the key condition (EQUAL, GREATER, LESS, etc.)."""
         self.key_condition = condition.upper()
 
+    def set_key_name(self, key_name: str) -> None:
+        """Set the KEY data-name the browse is positioned on."""
+        self.key_name = key_name
+
     def to_dict(self) -> dict[str, Any]:
         """Convert START statement to dictionary representation per contract."""
         result = super().to_dict()
@@ -572,6 +583,7 @@ class IOStartStatement(InvalidKeyClauseMixin, CobolStatement):
             {
                 "file_name": self.file_name,
                 "key_condition": self.key_condition,
+                "key_name": self.key_name,
                 **self._serialize_clauses(
                     "invalid_key_clause", "not_invalid_key_clause"
                 ),

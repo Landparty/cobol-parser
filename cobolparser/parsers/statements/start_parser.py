@@ -96,9 +96,11 @@ class StartStatementParser(IStatementParser):
             if condition_parts:
                 stmt.set_key_condition(" ".join(condition_parts))
 
-            # Consume the key data-name that closes the KEY clause (e.g.
+            # Capture the key data-name that closes the KEY clause (e.g.
             # START F KEY IS EQUAL TO IDX-KEY ...); leaving it in the stream
-            # would prevent the INVALID KEY clause from being reached.
+            # would prevent the INVALID KEY clause from being reached, and
+            # dropping it loses the core semantics of the START (the key the
+            # browse is positioned on).
             token = token_stream.peek()
             if (
                 token
@@ -106,6 +108,7 @@ class StartStatementParser(IStatementParser):
                 and token.value
                 and token.value.upper() not in SCOPE_TERMINATORS
             ):
+                stmt.set_key_name(token.value)
                 token_stream.consume()
                 skip_whitespace(token_stream)
 

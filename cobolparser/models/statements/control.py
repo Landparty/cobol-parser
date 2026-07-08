@@ -403,11 +403,13 @@ class StopStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("STOP", location)
         self.stop_type: str = "RUN"  # RUN or literal
+        # STOP RUN [RETURNING|GIVING x] — the return/exit code, if given.
+        self.returning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert STOP statement to dictionary representation."""
         result = super().to_dict()
-        result.update({"stop_type": self.stop_type})
+        result.update({"stop_type": self.stop_type, "returning": self.returning})
         return result
 
 

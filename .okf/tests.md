@@ -8,7 +8,8 @@ timestamp: 2026-07-08T00:00:00Z
 
 # Overview
 
-~6,725 tests across 241 files in 5 directories. Coverage floor: **81% line coverage**
+~6,738 tests across 242 files in 5 directories (2026-07-09: +13 in
+`tests/regression/test_tier6_silent_drop_audit.py`). Coverage floor: **81% line coverage**
 enforced by `--cov-fail-under=81` in `pyproject.toml`. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.

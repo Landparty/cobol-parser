@@ -74,6 +74,12 @@ Serialization fidelity notes (2026-07-07):
 * `IOWriteStatement.advancing_clause` is populated by the WRITE parser
   (`{"type": "AFTER", "value": 2, "unit": "LINES"}`), not just
   `advancing_mode`.
+* `IORewriteStatement.from_clause` (2026-07-09) — the `REWRITE rec FROM data`
+  source (previously consumed and discarded).
+* `IOStartStatement.key_name` (2026-07-09) — the `START f KEY IS ... data-name`
+  key (previously discarded; `key_condition` kept only the operator).
+* `StopStatement.returning` (2026-07-09) — `STOP RUN RETURNING x` return code
+  (previously dropped).
 
 # Data Items (`models/data_items.py`)
 
@@ -91,10 +97,18 @@ class PictureClause(ASTNode):
 
 class OccursClause(ASTNode):
     min_times: int
-    max_times: int | None    # None = fixed-size OCCURS
-    key_fields: list[str]
-    index_names: list[str]
+    max_times: int | None      # None = fixed-size OCCURS
+    depending_on: str | None
+    indexed_by: str | None     # first index (backward-compatible)
+    index_names: list[str]     # all INDEXED BY names (2026-07-09)
+    key_clauses: list[dict]    # {"direction": "ASCENDING"|"DESCENDING",
+                               #  "keys": [...]} — SEARCH ALL keys (2026-07-09)
 ```
+
+`index_names` and `key_clauses` are serialized only when non-empty. Before
+2026-07-09 `ASCENDING/DESCENDING KEY` was dropped and `INDEXED BY` kept only
+its last name (and was lost entirely when a KEY clause preceded it). See
+[parser.md](parser.md) Silent-Drop Audit (2026-07-09).
 
 # SQL Statement Nodes (`models/sql_statements.py`)
 

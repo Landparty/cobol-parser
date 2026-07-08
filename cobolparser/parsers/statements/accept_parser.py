@@ -6,7 +6,12 @@ from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOAcceptStatement
-from ._utils import matches_keyword, skip_whitespace, token_location
+from ._utils import (
+    is_statement_boundary,
+    matches_keyword,
+    skip_whitespace,
+    token_location,
+)
 
 
 class AcceptStatementParser(IStatementParser):
@@ -31,9 +36,16 @@ class AcceptStatementParser(IStatementParser):
             stmt = IOAcceptStatement(loc)
         skip_whitespace(token_stream)
 
-        # Target identifier
+        # Target identifier. Guard against a missing operand: if the next
+        # token already starts a new statement (no operand was given), do not
+        # consume it as the target — that silently destroyed the following
+        # statement's verb.
         token = token_stream.peek()
-        if token and token.type not in (TokenType.PERIOD, None):
+        if (
+            token
+            and token.type not in (TokenType.PERIOD, None)
+            and not is_statement_boundary(token)
+        ):
             token_stream.consume()
             stmt.set_target(token.value or "")
 
@@ -49,9 +61,24 @@ class AcceptStatementParser(IStatementParser):
             skip_whitespace(token_stream)
 
             src = token_stream.peek()
-            if src and src.type != TokenType.PERIOD:
+            if src and src.type != TokenType.PERIOD and not is_statement_boundary(src):
                 token_stream.consume()
-                stmt.set_from(src.value or "")
+                from_parts = [src.value or ""]
+                skip_whitespace(token_stream)
+                # Capture a trailing format phrase (e.g. ACCEPT x FROM DATE
+                # YYYYMMDD / FROM DAY YYYYDDD). Without this the format word
+                # was left in the stream and re-parsed as a phantom paragraph.
+                nxt = token_stream.peek()
+                while (
+                    nxt
+                    and nxt.type == TokenType.IDENTIFIER
+                    and not is_statement_boundary(nxt)
+                ):
+                    token_stream.consume()
+                    from_parts.append(nxt.value or "")
+                    skip_whitespace(token_stream)
+                    nxt = token_stream.peek()
+                stmt.set_from(" ".join(p for p in from_parts if p))
 
         skip_whitespace(token_stream)
 

@@ -497,6 +497,44 @@ fixes), found by re-auditing every statement parser's clause-collection loop:
 
 Pinned by `tests/regression/test_tier5_silent_drip_audit.py`.
 
+# Silent-Drop Audit (2026-07-09)
+
+Further instances found by re-auditing the DATA division and the
+statement parsers prior sweeps had not covered in depth. All pinned by
+`tests/regression/test_tier6_silent_drop_audit.py`; full report
+`reports/audit-2026-07-09.md`.
+
+* **OCCURS `ASCENDING/DESCENDING KEY` (`data.py` + `_data_fast.pyx`):** the
+  OCCURS parser jumped from the DEPENDING check straight to `INDEXED`, so a
+  KEY clause in the standard position (between DEPENDING and INDEXED BY) was
+  dropped *and* pushed the following `INDEXED BY` into the clause loop's
+  `else: consume()`, losing the index too. Now parses one-or-more
+  `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` clauses (repeatable) before
+  `INDEXED BY`, and `INDEXED BY` collects **all** index names. See
+  `OccursClause.key_clauses` / `index_names` in [ast-models.md](ast-models.md).
+* **`REWRITE ... FROM` (`rewrite_parser.py`):** the FROM source was consumed
+  and discarded (`IORewriteStatement` had no field). Now stored in
+  `from_clause` (identifier or literal), mirroring `IOWriteStatement`.
+* **`START ... KEY IS <data-name>` (`start_parser.py`):** the KEY data-name —
+  the key the browse is positioned on — was consumed and discarded. Now stored
+  in `IOStartStatement.key_name` (the pre-existing `key_condition` kept the
+  operator only).
+* **`ACCEPT ... FROM DATE/TIME <format>` (`accept_parser.py`):** a trailing
+  format phrase (`YYYYMMDD`, `YYYYDDD`) was left in the stream and re-parsed by
+  the procedure parser as a **phantom paragraph**. Now folded into
+  `from_source`. `ACCEPT`/`UNLOCK` also guard their operand with
+  `is_statement_boundary()` so a missing operand no longer eats the next
+  statement's verb.
+* **`STOP RUN RETURNING <x>` / `STOP <numeric>` (`stop_parser.py`):** the
+  return code was dropped; now stored in `StopStatement.returning`, and a bare
+  numeric STOP operand is captured as `stop_type`.
+* **DATA division drop warning (`data.py`):** the clause loop's
+  `else: consume()` now emits an "Unparsed token ... in data item" warning for
+  meaningful tokens (skips NEWLINE/WHITESPACE/COMMENT/CONTINUATION), symmetric
+  with `environment.py`'s `_warn_dropped_select_token`. Unsupported data-item
+  clauses (GROUP-USAGE, VOLATILE, DYNAMIC LENGTH, ...) are no longer fully
+  silent.
+
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)

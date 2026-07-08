@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **OCCURS `ASCENDING/DESCENDING KEY` and multi-index `INDEXED BY` capture**
+  (audit 2026-07-09). `OccursClause` gained `key_clauses` (a list of
+  `{"direction", "keys"}`, serialized when present) and `index_names` (all
+  `INDEXED BY` names; `indexed_by` still holds the first for backward
+  compatibility). Previously the `ASCENDING/DESCENDING KEY` clause was dropped
+  entirely — and, because it sits before `INDEXED BY` in standard COBOL, its
+  presence also caused the following `INDEXED BY` to be silently consumed and
+  lost. `INDEXED BY a b` also kept only the last index. Mirrored in the Cython
+  `_data_fast` fast-path.
+
+* **`REWRITE ... FROM`, `START ... KEY IS <data-name>`, `STOP RUN RETURNING
+  <x>` operands, and the `ACCEPT ... FROM DATE/TIME <format>` phrase are now
+  captured** (audit 2026-07-09). New fields: `IORewriteStatement.from_clause`,
+  `IOStartStatement.key_name`, `StopStatement.returning`; the ACCEPT format
+  phrase folds into `from_source`. All were previously consumed and discarded
+  with `errors=[]`/`warnings=[]`; the ACCEPT format word was additionally
+  re-parsed as a phantom paragraph.
+
+* **DATA division drop warnings** (audit 2026-07-09). Unrecognized data-item
+  clause tokens (GROUP-USAGE, VOLATILE, DYNAMIC LENGTH, ...) now emit an
+  "Unparsed token ... in data item" warning instead of being consumed
+  silently — symmetric with the ENVIRONMENT division's SELECT handling.
+
 * **`PERFORM VARYING ... AFTER ...` multi-dimension support** (audit
   2026-07-07 H2). The `AFTER var FROM x BY y [UNTIL cond]` dimensions of a
   2-D/3-D table loop are parsed into `PerformStatement.after_clauses`
@@ -106,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already being dropped silently.
 
 ### Fixed
+
+* **`ProgramFlowAnalyzer` missed control-flow edges nested in clause bodies**
+  (audit 2026-07-09). PERFORM/GO TO/CALL statements inside a `READ ... AT END`,
+  `WRITE ... INVALID KEY`, `... ON SIZE ERROR`, or `STRING ... ON OVERFLOW`
+  clause produced no edge, cascading into false `unreachable_nodes` reports and
+  missing arrows in generated flowcharts. `scan()` now recurses into those
+  clause bodies (matching `coverage_analyzer`). `ACCEPT`/`UNLOCK` with a
+  missing operand no longer swallow the following statement's verb.
 
 * **`EVALUATE ... WHEN '  '` (blank string-literal selector) parses again.**
   The lexer strips quotes off string literals, so a blank literal's token
