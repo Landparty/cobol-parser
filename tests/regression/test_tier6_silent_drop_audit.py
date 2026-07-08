@@ -152,7 +152,11 @@ class TestRewriteFromSource:
         result = _parse_proc("           REWRITE WS-REC FROM WS-DATA.")
         nodes = result.ast.find_all_by_type("IORewriteStatement")
         assert nodes
-        assert nodes[0].to_dict().get("from_clause") == "WS-DATA"
+        d = nodes[0].to_dict()
+        assert d.get("from_clause") == "WS-DATA"
+        # The FROM source is also tracked in ``operands`` for identifier
+        # discovery, matching IOWriteStatement.set_from.
+        assert "WS-DATA" in d.get("operands", [])
 
 
 class TestStartKeyName:
@@ -163,6 +167,8 @@ class TestStartKeyName:
         d = nodes[0].to_dict()
         assert d.get("key_condition") == "EQUAL TO"
         assert d.get("key_name") == "WS-KEY"
+        # KEY data-name is also tracked in ``operands`` for analyzers.
+        assert "WS-KEY" in d.get("operands", [])
 
 
 class TestAcceptFromFormatPhrase:

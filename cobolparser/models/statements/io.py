@@ -497,6 +497,7 @@ class IORewriteStatement(InvalidKeyClauseMixin, LockClauseMixin, CobolStatement)
     def set_from(self, source: str) -> None:
         """Set the FROM source (``REWRITE rec FROM data``)."""
         self.from_clause = source
+        self._add_unique_operand(source)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert REWRITE statement to dictionary representation per contract."""
@@ -575,6 +576,7 @@ class IOStartStatement(InvalidKeyClauseMixin, CobolStatement):
     def set_key_name(self, key_name: str) -> None:
         """Set the KEY data-name the browse is positioned on."""
         self.key_name = key_name
+        self._add_unique_operand(key_name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert START statement to dictionary representation per contract."""

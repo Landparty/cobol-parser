@@ -75,9 +75,12 @@ Serialization fidelity notes (2026-07-07):
   (`{"type": "AFTER", "value": 2, "unit": "LINES"}`), not just
   `advancing_mode`.
 * `IORewriteStatement.from_clause` (2026-07-09) — the `REWRITE rec FROM data`
-  source (previously consumed and discarded).
+  source (previously consumed and discarded). Also added to `operands` via
+  `_add_unique_operand`, matching `IOWriteStatement.set_from`, so
+  identifier-discovery consumers that read `operands` see it.
 * `IOStartStatement.key_name` (2026-07-09) — the `START f KEY IS ... data-name`
-  key (previously discarded; `key_condition` kept only the operator).
+  key (previously discarded; `key_condition` kept only the operator). Also
+  tracked in `operands` for the same reason.
 * `StopStatement.returning` (2026-07-09) — `STOP RUN RETURNING x` return code
   (previously dropped).
 
