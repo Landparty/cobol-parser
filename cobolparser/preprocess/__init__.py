@@ -583,7 +583,7 @@ def preprocess_conditional_compilation(
             unclosed ``>>IF`` at end of input, and any other unrecognized
             ``>>`` directive such as ``>>EVALUATE``) — previously all
             silent (audit 2026-07-07 H7), even though an unknown ``>>IF``
-            condition deletes the whole guarded block.
+            condition blanks out the whole guarded block.
 
     Returns:
         Source code with conditional sections processed. Directive lines and
@@ -592,14 +592,9 @@ def preprocess_conditional_compilation(
         original line number for error/warning reporting.
 
     Example:
-        >>> source = '''
-        ... >>DEFINE DEBUG
-        ... >>IF DEBUG IS DEFINED
-        ...        DISPLAY "Debug mode".
-        ... >>END-IF
-        ... '''
+        >>> source = '>>DEFINE DEBUG\\n>>IF DEBUG IS DEFINED\\n       DISPLAY "Debug mode".\\n>>END-IF\\n'
         >>> preprocess_conditional_compilation(source)
-        '\\n\\n\\n       DISPLAY "Debug mode".\\n'
+        '\\n\\n       DISPLAY "Debug mode".\\n'
     """
     defined = dict(defined_symbols) if defined_symbols else {}
     result_lines = []
@@ -650,12 +645,12 @@ def preprocess_conditional_compilation(
                     skip_stack.append(not condition_met)
             else:
                 # Unknown condition - default to skipping, but say so: the
-                # entire guarded block is deleted from the source.
+                # entire guarded block is blanked out of the source.
                 _warn(
                     f"Line {line_no}: unsupported >>IF condition "
                     f"'{condition_text}' — only 'symbol IS [NOT] DEFINED' is "
                     "supported; the guarded block was SKIPPED (source lines "
-                    "deleted)"
+                    "blanked out)"
                 )
                 skip_stack.append(True)
             result_lines.append("")
