@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-07-03T00:00:00Z
+timestamp: 2026-07-08T00:00:00Z
 ---
 
 # Overview
@@ -90,7 +90,10 @@ All subcommands that run conditional compilation (`parse`, `preprocess`,
 `warning: ...` lines, so deleted guarded blocks are no longer silent.
 `coverage status` reports malformed artifact JSON (or a non-object
 artifact) with a clean error and exit code 1 instead of an uncaught
-traceback (M10).
+traceback (M10). `coverage generate` had the same gap (a malformed or
+non-object pytest-results JSON file raised uncaught inside
+`IOCoverageReporter.load_pytest_results`) — fixed the same way, audit
+2026-07-08.
 
 ## Expand
 
@@ -156,6 +159,11 @@ cobol-parser generate-tests <file.cbl> -o <file.cut>
 
 Runs the three-stage test-generation pipeline (`CoverageAnalyzer` →
 `TestPlanGenerator` → `CobolCheckGenerator`) and writes a CobolCheck `.cut` file.
+`-o`/`--output` write failures (bad path, permission denied) now go through
+the standard `_fail("Cannot write output file: ...")` path instead of an
+uncaught traceback (audit 2026-07-08) — this subcommand's file write was the
+one place that bypassed the shared `_text_out()` error handling every other
+output-writing subcommand uses.
 
 ## IO-Sequence
 

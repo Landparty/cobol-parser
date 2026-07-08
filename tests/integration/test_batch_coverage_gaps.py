@@ -206,6 +206,65 @@ class TestParseFilesWithCopybooksExpansionFallback:
 
 
 # ---------------------------------------------------------------------------
+# parse_files_with_copybooks() — a poisoned file must not abort the batch
+# ---------------------------------------------------------------------------
+
+
+class TestParseFilesWithCopybooksParseException:
+    def test_parse_exception_recorded_per_file_not_raised(self, tmp_path):
+        """Audit finding: unlike parse_files()/_parse_one(), the copybook-aware
+        path called parser.parse() with no exception guard, so one file
+        raising during parse aborted the whole batch and lost every other
+        file's already-computed result."""
+        good = tmp_path / "good.cbl"
+        bad = tmp_path / "bad.cbl"
+        good.write_text(_MINIMAL)
+        bad.write_text(_MINIMAL)
+
+        real_parse = None
+        calls = {"n": 0}
+
+        def flaky_parse(self, source, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("boom")
+            return real_parse(self, source, **kwargs)
+
+        from cobolparser.parser import CobolParser
+
+        real_parse = CobolParser.parse
+        with patch.object(CobolParser, "parse", flaky_parse):
+            results = parse_files_with_copybooks([good, bad], copybook_paths=[])
+
+        assert len(results) == 2
+        assert results[0].read_error is None
+        assert results[0].result is not None
+        assert results[1].read_error is not None
+        assert "boom" in results[1].read_error
+
+
+# ---------------------------------------------------------------------------
+# parse_files_with_copybooks() — non-OSError read failures (strict decoding)
+# ---------------------------------------------------------------------------
+
+
+class TestParseFilesWithCopybooksDecodeError:
+    def test_invalid_utf8_with_strict_errors_recorded_not_raised(self, tmp_path):
+        """Audit finding: the file-read except clause only caught OSError, so
+        a UnicodeDecodeError under errors='strict' (a documented use of the
+        errors= parameter) propagated out of the function instead of being
+        recorded as a per-file read_error."""
+        bad = tmp_path / "bad_encoding.cbl"
+        bad.write_bytes(b"\xff\xfe not valid utf-8 \x80\x81")
+
+        results = parse_files_with_copybooks([bad], copybook_paths=[], errors="strict")
+
+        assert len(results) == 1
+        assert results[0].read_error is not None
+        assert results[0].result is None
+
+
+# ---------------------------------------------------------------------------
 # parse_files_with_copybooks() — with actual sample files
 # ---------------------------------------------------------------------------
 

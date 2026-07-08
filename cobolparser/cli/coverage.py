@@ -113,6 +113,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
     except FileNotFoundError as e:
         print(f"Error: {e}")
         return 1
+    except json.JSONDecodeError as e:
+        print(f"Error: {args.pytest_results} is not valid JSON: {e}")
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
 
     if result["success"]:
         print(f"Coverage artifact generated: {args.output}")

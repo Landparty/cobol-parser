@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 15 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, test generation, and more.
 tags: [analysis, dead-code, program-flow, io, crud, test-generation]
-timestamp: 2026-06-28T00:00:00Z
+timestamp: 2026-07-08T00:00:00Z
 ---
 
 # Overview
@@ -192,6 +192,18 @@ cut_content = generate_cobolcheck_tests(source, strategies=["paragraph","branch"
 | `move_type_checker.py` | `MoveTypeChecker` |
 | `program_flow.py` | `ProgramFlowAnalyzer` |
 | `test_plan.py` | `TestPlanGenerator` |
+
+# Silent-Failure Audit (2026-07-08)
+
+`IOCoverageReporter.load_pytest_results` (`io_coverage_reporter.py`) called
+`json.load()` on the pytest-results file and then unconditionally
+`data.get("tests", [])` — a syntactically valid JSON file whose root wasn't
+an object (e.g. a bare list) raised an uncaught `AttributeError` deep inside
+the loader instead of a clean error. Now raises `ValueError` immediately
+after the `json.load()` if `data` isn't a `dict`, matching the "artifact
+must be a JSON object" check `IOCoverageReporter`'s CLI callers already
+apply elsewhere (see [cli.md](cli.md) M10). Pinned by
+`tests/unit/analysis/test_io_coverage_reporter.py::test_load_pytest_results_non_object_json_raises_value_error`.
 
 # See Also
 

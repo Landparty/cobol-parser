@@ -6,7 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import EntryStatement
-from ._utils import matches_keyword
+from ._utils import is_statement_boundary, matches_keyword
 
 
 class EntryStatementParser(IStatementParser):
@@ -129,6 +129,11 @@ class EntryStatementParser(IStatementParser):
 
             # Stop if we hit a period or another keyword
             if next_token.value == "." or token_val_upper in ("BY", "GIVING", "ON"):
+                break
+
+            # No period/keyword before the next statement: stop rather than
+            # swallow it as a bogus USING parameter.
+            if is_statement_boundary(next_token):
                 break
 
             # Parse parameter name (should be identifier)

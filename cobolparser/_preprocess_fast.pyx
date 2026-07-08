@@ -39,10 +39,15 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
         line = raw.rstrip("\n")
 
         if len(line) < _TEXT_START:
-            # Flush accumulated parts for this logical line
+            # Flush accumulated parts for this logical line, then emit an
+            # empty placeholder for this physical line so later lines keep
+            # their true line number (mirrors the pure-Python fix — a
+            # dropped line here would silently shift every subsequent
+            # error/warning location).
             combined = "".join(parts)
             if combined:
                 result.append(combined)
+            result.append("")
             parts         = []
             quote_open    = False
             quote_ch      = None
@@ -53,10 +58,12 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
         text_slice = line[_TEXT_START : _TEXT_END]
 
         if indicator == "*" or indicator == "/":
-            # Comment line: flush buffer, discard comment text
+            # Comment line: flush buffer, discard comment text, but still
+            # emit an empty placeholder to preserve line numbering.
             combined = "".join(parts)
             if combined:
                 result.append(combined)
+            result.append("")
             parts         = []
             quote_open    = False
             quote_ch      = None

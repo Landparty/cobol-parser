@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-07T00:00:00Z
+timestamp: 2026-07-08T00:00:00Z
 ---
 
 # Overview
@@ -464,6 +464,38 @@ following clauses into `assign_to`). `DECIMAL-POINT IS COMMA` in
 SPECIAL-NAMES emits a warning that the clause is recorded but not honored
 by the lexer (H4). All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
+
+# Silent-Drop Audit (2026-07-08)
+
+Three more instances of the "no boundary check → swallows the following
+statement" bug class (same family as the 2026-07-06 INSPECT/STRING/UNSTRING
+fixes), found by re-auditing every statement parser's clause-collection loop:
+
+* **`sort_merge_parsers.py`:** SORT's and MERGE's "remaining clauses" loop
+  recognized only a fixed keyword list (`WITH`/`COLLATING`/`USING`/`GIVING`/
+  `INPUT`/`OUTPUT`); any other token fell to an `else: consume()` fallback
+  with no boundary check, so `SORT f ... GIVING g` immediately followed by
+  another un-punctuated statement had that statement's tokens silently
+  folded into the SORT/MERGE clause loop. Both loops now call the shared
+  `is_statement_boundary()` (from `_utils.py`) right after the period check
+  and `break` instead of falling through to `else`.
+* **`entry_parser.py`:** `_parse_using_clause`'s fallback branch
+  (`else: stmt.add_using_parameter(next_token.value)`) accepted *any* token
+  as a USING parameter, including a following statement's verb and operand
+  tokens when no period terminated the ENTRY statement. Now checks
+  `is_statement_boundary()` before falling through to the catch-all.
+* **`call_parser.py`:** `_parse_nested_stmts` (used for ON EXCEPTION / NOT ON
+  EXCEPTION / ON OVERFLOW handler bodies) silently consumed one token at a
+  time when the registry had no parser for a verb — unlike the identical
+  situation at the top level of PROCEDURE DIVISION, which has emitted an
+  "Unsupported statement" warning since the 2026-07-07 C2 fix. Added
+  `_warn_and_skip_handler_statement`, mirroring
+  `ProcedureDivisionParser._warn_unsupported_statement` /
+  `_skip_to_next_statement`: one warning per dropped statement (reached via
+  `get_parse_context(stream).host.add_warning`), then the tokens are skipped
+  up to the next statement boundary in one pass (not one warning per token).
+
+Pinned by `tests/regression/test_tier5_silent_drip_audit.py`.
 
 # Adding a New Statement Parser
 

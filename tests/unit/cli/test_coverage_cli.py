@@ -255,6 +255,54 @@ class TestCmdGenerate:
         out = capsys.readouterr().out
         assert "Error" in out
 
+    def test_generate_malformed_json_returns_error_not_traceback(
+        self, tmp_path, capsys
+    ):
+        """cmd_generate returns 1 on malformed JSON instead of crashing (audit)."""
+        args = argparse.Namespace(
+            pytest_results="results.json",
+            output=str(tmp_path / "out.json"),
+            catalog=None,
+            schema=None,
+        )
+        mock_reporter = MagicMock()
+        mock_reporter.generate_report.side_effect = json.JSONDecodeError(
+            "Expecting value", "not json", 0
+        )
+
+        with patch(
+            "cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter
+        ):
+            result = cmd_generate(args)
+
+        assert result == 1
+        out = capsys.readouterr().out
+        assert "not valid JSON" in out
+
+    def test_generate_non_object_json_returns_error_not_traceback(
+        self, tmp_path, capsys
+    ):
+        """cmd_generate returns 1 when the pytest-results root isn't a dict."""
+        args = argparse.Namespace(
+            pytest_results="results.json",
+            output=str(tmp_path / "out.json"),
+            catalog=None,
+            schema=None,
+        )
+        mock_reporter = MagicMock()
+        mock_reporter.generate_report.side_effect = ValueError(
+            "results.json does not contain a pytest-results JSON object"
+        )
+
+        with patch(
+            "cobolparser.cli.coverage.IOCoverageReporter", return_value=mock_reporter
+        ):
+            result = cmd_generate(args)
+
+        assert result == 1
+        out = capsys.readouterr().out
+        assert "Error" in out
+
 
 # ---------------------------------------------------------------------------
 # cmd_render tests

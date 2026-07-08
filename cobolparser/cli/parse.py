@@ -857,8 +857,11 @@ def _cmd_generate_tests(args: argparse.Namespace) -> None:
     output = generator.generate(test_plan)
 
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(output)
+        try:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(output)
+        except OSError as e:
+            _fail(f"Cannot write output file: {e}")
         print(f"Generated {test_plan.total_test_cases} test cases -> {args.output}")
     else:
         print(output, end="")

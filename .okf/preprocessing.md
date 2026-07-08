@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-07-06T00:00:00Z
+timestamp: 2026-07-08T00:00:00Z
 ---
 
 # Overview
@@ -16,7 +16,7 @@ and optionally inlines COPY statements recursively.
 
 ```
 raw COBOL (fixed format)
-  ──► normalize_fixed_format()   # columns 8-72, drops comment lines, merges continuations
+  ──► normalize_fixed_format()   # columns 8-72, blanks comment/blank lines (preserving line numbers), merges continuations
   ──► expand_copybooks()         # optionally: inline COPY … REPLACING … statements
   ──► strip_compiler_directives()# drop compiler control statements (used inside CobolParser)
   ──► CobolLexer.tokenize()
@@ -150,6 +150,28 @@ routes these into `ExpansionStatistics.warnings`; the CLI (`--define`)
 prints them to stderr. Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
 / `::TestH7ConditionalCompilationWarnings`.
+
+# Line-Number Preservation (audit 2026-07-08)
+
+`normalize_fixed_format` used to silently *drop* blank/short lines and
+comment lines (indicator `*`/`/`) — no placeholder was appended for them —
+so every subsequent line's number shifted by however many such lines
+preceded it. Every real COBOL program has blank/comment lines, so a "clean"
+parse could report an error several lines away from the actual problem.
+Fixed by appending an empty string to `result` for each dropped line instead
+of a bare `continue`, in both the pure-Python implementation and
+`_preprocess_fast.pyx` (checked-in `.c` regenerated). `output.count("\n")`
+now always equals the input line count.
+
+`preprocess_conditional_compilation` had the same gap for `>>DEFINE`/`>>IF`/
+`>>ELSE`/`>>END-IF` directive lines *and* for source lines inside a skipped
+`>>IF` block (deleted outright rather than blanked) — fixed the same way:
+every non-included physical line contributes an empty placeholder to
+`result_lines`, so `len(output.split("\n"))` always equals the input's
+`splitlines()` length.
+
+Pinned by `tests/regression/test_normalize_line_number_preservation.py`,
+which also confirms the Cython/pure-Python paths agree.
 
 # Error Hierarchy
 

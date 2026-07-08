@@ -194,6 +194,11 @@ class IOCoverageReporter:
         with open(results_path, encoding="utf-8") as f:
             data = json.load(f)
 
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"{results_path} does not contain a pytest-results JSON object"
+            )
+
         self.test_results = {}
         for test in data.get("tests", []):
             test_id = test.get("id", test.get("nodeid", ""))

@@ -345,7 +345,8 @@ def parse_files_with_copybooks(
         path = Path(path_str)
         try:
             source = path.read_text(encoding=encoding, errors=errors)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError covers UnicodeDecodeError under errors="strict".
             results.append(BatchResult(path=path, result=None, read_error=str(exc)))
             continue
 
@@ -372,27 +373,39 @@ def parse_files_with_copybooks(
             )
             expanded_source = source
 
-        # Parse expanded source reusing the parser instance
-        if not enable_profiling:
-            result = parser.parse(
-                expanded_source, filename=path_str, error_recovery=error_recovery
-            )
-            results.append(BatchResult(path=path, result=result, read_error=None))
-        else:
-            prof_file: str | None = None
-            if prof_output is not None:
-                prof_file = str(Path(prof_output) / (path.stem + ".prof"))
-            parse_result, prof = parser.parse(
-                expanded_source,
-                filename=path_str,
-                error_recovery=error_recovery,
-                enable_profiling=True,
-                top_n=top_n,
-                prof_output=prof_file,
-            )
+        # Parse expanded source reusing the parser instance. Guarded the same
+        # way as _parse_one/_parse_one_reuse: one poisoned file must not abort
+        # the whole batch, so a parse-time exception is recorded per-file
+        # instead of propagating out of the function.
+        try:
+            if not enable_profiling:
+                result = parser.parse(
+                    expanded_source, filename=path_str, error_recovery=error_recovery
+                )
+                results.append(BatchResult(path=path, result=result, read_error=None))
+            else:
+                prof_file: str | None = None
+                if prof_output is not None:
+                    prof_file = str(Path(prof_output) / (path.stem + ".prof"))
+                parse_result, prof = parser.parse(
+                    expanded_source,
+                    filename=path_str,
+                    error_recovery=error_recovery,
+                    enable_profiling=True,
+                    top_n=top_n,
+                    prof_output=prof_file,
+                )
+                results.append(
+                    BatchResult(
+                        path=path, result=parse_result, read_error=None, profiling=prof
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 — record per-file, don't abort batch
             results.append(
                 BatchResult(
-                    path=path, result=parse_result, read_error=None, profiling=prof
+                    path=path,
+                    result=None,
+                    read_error=f"parse error: {type(exc).__name__}: {exc}",
                 )
             )
 
