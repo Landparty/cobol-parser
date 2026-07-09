@@ -86,18 +86,14 @@ class TestH1SetAddressOf:
     """
 
     def test_set_address_of_populates_target_and_value(self):
-        result = parse_cobol(
-            _proc_program("    SET ADDRESS OF WS-PTR TO WS-TARGET.\n")
-        )
+        result = parse_cobol(_proc_program("    SET ADDRESS OF WS-PTR TO WS-TARGET.\n"))
         set_stmts = [s for s in _statements(result) if isinstance(s, SetStatement)]
         assert len(set_stmts) == 1
         stmt = set_stmts[0]
         assert stmt.targets == ["WS-PTR"]
         assert stmt.set_type == "TO"
         assert stmt.value == "WS-TARGET"
-        assert not any(
-            "Unparsed tokens" in w for w in result.warnings
-        ), result.warnings
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
 
 
 class TestH2ComputeUnbalancedParens:
@@ -135,9 +131,7 @@ class TestH2ComputeUnbalancedParens:
         ), compute_stmts
 
     def test_balanced_parens_still_parse_cleanly(self):
-        result = parse_cobol(
-            _compute_program("    COMPUTE X = ((A + B) * 2).\n")
-        )
+        result = parse_cobol(_compute_program("    COMPUTE X = ((A + B) * 2).\n"))
         assert result.success is True
         assert result.errors == []
 
@@ -216,14 +210,14 @@ class TestH4PerformBareExceptLogging:
     def test_inline_statement_parse_failure_is_logged_at_debug(
         self, monkeypatch, caplog
     ):
-        from cobolparser.parsers.statements import perform_parser as perform_parser_module
+        from cobolparser.parsers.statements import (
+            perform_parser as perform_parser_module,
+        )
 
         def _raise(*args, **kwargs):
             raise ParseError("synthetic failure for H4 regression test")
 
-        monkeypatch.setattr(
-            perform_parser_module, "try_parse_nested_statement", _raise
-        )
+        monkeypatch.setattr(perform_parser_module, "try_parse_nested_statement", _raise)
 
         caplog.set_level(logging.DEBUG, logger=perform_parser_module.__name__)
 
@@ -319,9 +313,7 @@ class TestH8CloseCombinedOptions:
         assert options["no_rewind"] is True
 
     def test_multiple_files_with_distinct_combined_options(self):
-        program = _close_program(
-            "    CLOSE F1 REEL WITH NO REWIND F2 WITH LOCK.\n"
-        )
+        program = _close_program("    CLOSE F1 REEL WITH NO REWIND F2 WITH LOCK.\n")
         result = parse_cobol(program)
         assert result.warnings == []
         close_stmts = [
@@ -418,7 +410,10 @@ class TestH6PathResolverContainment:
     """
 
     def test_tier2_fast_path_rejects_index_entry_outside_search_dir(self):
-        with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory() as inside:
+        with (
+            tempfile.TemporaryDirectory() as outside,
+            tempfile.TemporaryDirectory() as inside,
+        ):
             outside_file = os.path.join(outside, "SECRET.CPY")
             with open(outside_file, "w") as f:
                 f.write("01 SECRET PIC X.\n")

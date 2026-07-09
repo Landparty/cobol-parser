@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)
+
+
+### Features
+
+* Add integration contract documentation for backend API ([cad4db6](https://github.com/Landparty/cobol-parser/commit/cad4db6b83e891496885b4dc6edc676dcab9c81c))
+* **cli:** identify every CLI output with source_file and program_id ([94b1e98](https://github.com/Landparty/cobol-parser/commit/94b1e9844c5e3164a910200a4cca09674651bf3c))
+* Create OKF knowledge bundle with lexer, parser, preprocessing, AST models, analysis, CLI, and tests documentation ([b2f8eeb](https://github.com/Landparty/cobol-parser/commit/b2f8eeb3b387bbaae3e1d1d186931c146e0c66e1))
+* enhance copybook path resolution and numeric VALUE clause handling ([5111096](https://github.com/Landparty/cobol-parser/commit/511109675d9f48911f81c4c401a6e6ff9cb5aa4c))
+* Initialize OKF v0.1 bundle with comprehensive documentation ([741a3f0](https://github.com/Landparty/cobol-parser/commit/741a3f0ceb335cd1ba5294d70b307cbf4e7c5bc2))
+* **logging:** add detailed logging for parsing and error handling in COBOL parser ([6343f18](https://github.com/Landparty/cobol-parser/commit/6343f18fed1dc76097a2aa0db70557bacc688ae3))
+
+
+### Bug Fixes
+
+* address review — quote-parity tracking in copybook validator, CHANGELOG consistency ([b8267b1](https://github.com/Landparty/cobol-parser/commit/b8267b1b32b4f645735c6f666fcdb8f04b686040))
+* address review feedback on H5 unterminated-literal recovery ([4c67876](https://github.com/Landparty/cobol-parser/commit/4c67876f50d58085b772047f2bfd66712717de28))
+* **docs:** update test count and examples in CLAUDE.md ([150f2c3](https://github.com/Landparty/cobol-parser/commit/150f2c3497e9ee8b99ebd75055661a654d505051))
+* honour COBOL AND/OR precedence in IF condition trees ([031b492](https://github.com/Landparty/cobol-parser/commit/031b492170d004427712c4d2c48d37c08d079a47))
+* honour COBOL AND/OR precedence in IF condition trees (H4) ([5ebc346](https://github.com/Landparty/cobol-parser/commit/5ebc346a90fdc7b325b59c3ca2781e8e156066c6))
+* join fixed-format numeric-literal continuation lines without a space ([f4dc2b3](https://github.com/Landparty/cobol-parser/commit/f4dc2b35e2eaf48546aab1d95c9afbd0e777c128))
+* join fixed-format numeric-literal continuation lines without a space ([0bcf0cf](https://github.com/Landparty/cobol-parser/commit/0bcf0cf4fc00e3119017ebd7233d58d15cea16e5))
+* **models:** match statement class names in find_all_by_type so CALL/SQL/IO statements are identifiable ([92e50c8](https://github.com/Landparty/cobol-parser/commit/92e50c80631855187801dbf5048bf20dc35b1f96))
+* OPEN parser captures file names from every mode group ([f7b39b6](https://github.com/Landparty/cobol-parser/commit/f7b39b662da5b33017c2610590d14da7a0e2d23e))
+* OPEN parser captures file names from every mode group ([b9f7595](https://github.com/Landparty/cobol-parser/commit/b9f7595fa704c4fa0d8cf7809f106493555bc87a))
+* parse blank string-literal WHEN selectors (EVALUATE ... WHEN '  ') ([d8ad880](https://github.com/Landparty/cobol-parser/commit/d8ad880f4c7106d215ed65dd89f1ceadad3ea4a4))
+* parse IO-statement clause bodies into the AST ([4a04b4e](https://github.com/Landparty/cobol-parser/commit/4a04b4ec8f83dc5330ae28b8f64452bfbca08eab))
+* parse IO-statement clause bodies into the AST ([28f1de8](https://github.com/Landparty/cobol-parser/commit/28f1de8b7ab0a726228e079a44aa30580f65cd56))
+* **parser:** resolve H9 issue where missing period absorbs following paragraph header ([7405700](https://github.com/Landparty/cobol-parser/commit/7405700748e54d23d03536d726298c11717639bd))
+* prevent COMPUTE from swallowing following statements and improve expression boundary checks ([3e0493f](https://github.com/Landparty/cobol-parser/commit/3e0493f22862daa2c3e129ca2622059bf127a9cc))
+* prevent MOVE/SUBTRACT/MULTIPLY/DIVIDE from swallowing following statements and improve size error clause handling ([c68a8ff](https://github.com/Landparty/cobol-parser/commit/c68a8ff9f45e2304d2dfb5aed49bed4437814622))
+* recover from unterminated literal instead of aborting whole parse (H5) ([bf057e5](https://github.com/Landparty/cobol-parser/commit/bf057e526339ecd2085ff74bd05ccbac8c935754))
+* register EVALUATE WHEN clauses as AST children ([f8f7877](https://github.com/Landparty/cobol-parser/commit/f8f787706dcbcf07d3f9fd9dd08ebb4f98d9768a))
+* register EVALUATE WHEN clauses as AST children ([d37cec5](https://github.com/Landparty/cobol-parser/commit/d37cec57d47ce06dcdb06fee2c5b2f07ee0b33bc))
+* report errors for malformed MOVE statements (audit H3) ([1b9886c](https://github.com/Landparty/cobol-parser/commit/1b9886c9fdfa3938498df9962120099a1359ac1a))
+* report errors for malformed MOVE statements (audit H3) ([38ea9c6](https://github.com/Landparty/cobol-parser/commit/38ea9c6e538f123df3c9b8dfa22d3b78c152670b))
+* resolve NIST corpus known issues — split headers, comment-entries, COMPUTE receivers, literal periods, COPY OF libraries ([6e2e33c](https://github.com/Landparty/cobol-parser/commit/6e2e33c478237fadd8933c9373de3be10ec360ba))
+* reuse default clause on duplicate WHEN OTHER in EVALUATE ([2f597c2](https://github.com/Landparty/cobol-parser/commit/2f597c222a00c8bc344c154c1061bf40c403cf77))
+* stop INSPECT/STRING/UNSTRING/EXEC-* from swallowing the next statement ([c6e030e](https://github.com/Landparty/cobol-parser/commit/c6e030e5bad4960b5cefed15b76dc1e2955d4368))
+* stop INSPECT/STRING/UNSTRING/EXEC-* from swallowing the next statement ([066230a](https://github.com/Landparty/cobol-parser/commit/066230a9c1f2c3866a52bdd36ca464b189f777c8))
+* strip layout tokens from IF condition before building the tree ([56e52c6](https://github.com/Landparty/cobol-parser/commit/56e52c6de8155083f231ecf71dc02388abf4aed8))
+* type-safe source_id default in ProgramFlowAnalyzer.scan ([e676066](https://github.com/Landparty/cobol-parser/commit/e6760668dfdc51ee5b9a10c53f759ca1a3eae3da))
+* unterminated literal no longer aborts whole parse, defeating COLLECT_ALL (H5) ([b87a654](https://github.com/Landparty/cobol-parser/commit/b87a6547bccac8ca450c23dab090b99b5f884320))
+* Update timestamps in cli.md, integration.md, and lexer.md to reflect accurate commit dates ([177ac45](https://github.com/Landparty/cobol-parser/commit/177ac4511fe086f7996af0bf0a266f56f8424fca))
+
+
+### Documentation
+
+* add cobolparser gap-analysis audit report ([abbb3d1](https://github.com/Landparty/cobol-parser/commit/abbb3d18ecdf45801a2108133761e54f1f1602c4))
+* add OKF docs, drift-prevention hooks, and homogenize README ([d178448](https://github.com/Landparty/cobol-parser/commit/d178448388246e60faf50d8467715a5ff85ca3c1))
+* cobolparser gap-analysis audit ([2d88c83](https://github.com/Landparty/cobol-parser/commit/2d88c83d9f5cc1c08f1f33dff94a9a943101e1e6))
+* **okf:** add analysis subsystem file ([3275545](https://github.com/Landparty/cobol-parser/commit/32755451ce7ce9e035781a5e1874dc6f05ccef62))
+* **okf:** add ast-models subsystem file ([9222125](https://github.com/Landparty/cobol-parser/commit/922212538f8f5b3f638f1f454b8b0bd236acbde3))
+* **okf:** add batch and profiling subsystem file ([7e23d7e](https://github.com/Landparty/cobol-parser/commit/7e23d7e80968255783c3e2eebbd9672a3c3c9807))
+* **okf:** add CLI subsystem file ([c518d12](https://github.com/Landparty/cobol-parser/commit/c518d122a56a5aa078b2996bb2ba827622587dd8))
+* **okf:** add conventions subsystem file ([f7c0921](https://github.com/Landparty/cobol-parser/commit/f7c0921b14f5681e14fb0f6b1ebe6c97f41fe845))
+* **okf:** add dialects and configuration subsystem file ([6d3bec2](https://github.com/Landparty/cobol-parser/commit/6d3bec22605100c51b19f726bfd8307dc19daa1b))
+* **okf:** add lexer subsystem file ([20482f7](https://github.com/Landparty/cobol-parser/commit/20482f796c1d6a91705c5ac8ee460d7262e56d5c))
+* **okf:** add OKF design spec ([dab92e8](https://github.com/Landparty/cobol-parser/commit/dab92e8e721be6f7dea96a1b127193469e3bde97))
+* **okf:** add OKF implementation plan ([6d7599d](https://github.com/Landparty/cobol-parser/commit/6d7599ddaef3e56a95583842a01b9f9e31169883))
+* **okf:** add OKF master index ([a9d364f](https://github.com/Landparty/cobol-parser/commit/a9d364f0329a84e4387b51a082459668697a2cf3))
+* **okf:** add parser subsystem file ([fcacac2](https://github.com/Landparty/cobol-parser/commit/fcacac2e44b810d9e20685d396770e5294f65d9c))
+* **okf:** add preprocessing subsystem file ([c5bb598](https://github.com/Landparty/cobol-parser/commit/c5bb598dbf89dfba9d9a20a2fdc41baf7cdf2263))
+* **okf:** add tests subsystem file ([531b112](https://github.com/Landparty/cobol-parser/commit/531b1123717c7d480310a37f842f2a3718cdb2c2))
+* **okf:** apply final review fixes — export bucket, counts, dual LexerError, minor ([9eba638](https://github.com/Landparty/cobol-parser/commit/9eba6389f50f968b1ad0bdf09e0e829464b6d9e3))
+* **okf:** fix analysis.md — correct FlowEdgeType enum and HostVariableResolver API ([e95fdb3](https://github.com/Landparty/cobol-parser/commit/e95fdb3a38185e4fafd8b7e66dfc0ef5611f6975))
+* **okf:** fix Files section, Ruff ignores, dev deps in conventions.md ([8a9d1c7](https://github.com/Landparty/cobol-parser/commit/8a9d1c752c963291dd68d4674e1281c4cdc446d1))
+* **okf:** fix minor field-name inaccuracies in lexer.md ([e7277ed](https://github.com/Landparty/cobol-parser/commit/e7277ed81f3d600d85b000c46dfac8f2f54c8a98))
+* **okf:** fix ParseStatistics fields in dialects.md ([815d1e4](https://github.com/Landparty/cobol-parser/commit/815d1e4a627dc432d04f16d21e35b6c63d7232e2))
+* **okf:** remove outdated OKF design spec — no longer needed ([b091747](https://github.com/Landparty/cobol-parser/commit/b09174736c1af244cccaeb6c3fd0b36807d6224b))
+
 ### Added
 
 * **OCCURS `ASCENDING/DESCENDING KEY` and multi-index `INDEXED BY` capture**
