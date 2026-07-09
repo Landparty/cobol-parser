@@ -370,3 +370,45 @@ class TestM2DisplayWithNoAdvancing:
         result = parse_cobol(_proc_program('    DISPLAY "X".\n'))
         stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
         assert stmts[0].with_no_advancing is False
+
+
+class TestM3aDisplayAtPositioning:
+    """M3a -- DISPLAY ... AT LINE/COLUMN (and the corpus-dominant bare
+    combined-numeric AT nnnn form) were dropped entirely.
+    """
+
+    def test_combined_numeric_at_form_decodes_line_and_column(self):
+        # AT 0330 -> line 3, column 30 (confirmed real-world form, e.g.
+        # examples/cobol/shamrice/accept.cbl's `AT 0330`).
+        result = parse_cobol(_proc_program('    DISPLAY "X" AT 0330.\n'))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].at_line == 3
+        assert stmts[0].at_column == 30
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
+
+    def test_at_line_column_keyword_form(self):
+        result = parse_cobol(_proc_program('    DISPLAY "X" AT LINE 5 COLUMN 10.\n'))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].at_line == 5
+        assert stmts[0].at_column == 10
+
+    def test_at_line_only(self):
+        result = parse_cobol(_proc_program('    DISPLAY "X" AT LINE 5.\n'))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].at_line == 5
+        assert stmts[0].at_column is None
+
+    def test_multiple_items_each_with_their_own_at_clause(self):
+        # examples/cobol/shamrice/accept_from.cbl-style:
+        # DISPLAY "a" AT 0201 ws-input AT 0214.
+        # Only the LAST AT clause's position is retained on the single
+        # DisplayStatement node (the AST models one position per
+        # statement, matching IOAcceptStatement's existing shape).
+        result = parse_cobol(
+            _proc_program('    DISPLAY "a" AT 0201 WS-X AT 0214.\n')
+        )
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].display_items == ['"a"', "WS-X"]
+        assert stmts[0].at_line == 2
+        assert stmts[0].at_column == 14
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings

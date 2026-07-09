@@ -98,6 +98,12 @@ class DisplayStatementParser(IStatementParser):
                     stmt.set_output_device(device_token.value or "")
                 break
 
+            # Check for AT LINE/COLUMN positioning (M3a)
+            if token.type == TokenType.AT:
+                self._parse_at_clause(token_stream, stmt)
+                skip_whitespace(token_stream)
+                continue
+
             # Check for WITH NO ADVANCING (M2) -- WITH is an optional
             # filler word; NO ADVANCING is the fixed phrase. Neither
             # currently introduces any other DISPLAY clause, so once we
@@ -172,6 +178,68 @@ class DisplayStatementParser(IStatementParser):
             if isinstance(stmt, DisplayStatement)
             else DisplayStatement(start_location)
         )
+
+    @staticmethod
+    def _parse_at_clause(token_stream: ITokenStream, stmt: DisplayStatement) -> None:
+        """Parse an ``AT`` positioning clause and call ``stmt.set_position``.
+
+        Supports both forms confirmed in real-world usage (see
+        reports/open-findings.md M3): the combined 4-digit numeric form
+        (``AT 0330`` -> line 3, column 30, where the low-order two digits
+        are the column and the remainder is the line) and the explicit
+        ``AT LINE n [COLUMN m]`` / ``AT COLUMN m [LINE n]`` keyword form.
+        Assumes the ``AT`` token itself has already been peeked but not
+        consumed.
+        """
+        token_stream.consume()  # AT
+        skip_whitespace(token_stream)
+        token = token_stream.peek()
+        if not token:
+            return
+
+        line: int | None = None
+        column: int | None = None
+
+        if (
+            token.type == TokenType.NUMERIC_LITERAL
+            and token.value
+            and token.value.isdigit()
+        ):
+            token_stream.consume()
+            value = int(token.value)
+            line, column = divmod(value, 100)
+            stmt.set_position(line, column)
+            return
+
+        # Keyword form: LINE and/or COLUMN, in either order.
+        for _ in range(2):
+            token = token_stream.peek()
+            if token and token.type == TokenType.LINE:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                num = token_stream.peek()
+                if num and num.value and num.value.lstrip("-").isdigit():
+                    token_stream.consume()
+                    line = int(num.value)
+                skip_whitespace(token_stream)
+            elif (
+                token
+                and token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "COLUMN"
+            ):
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                num = token_stream.peek()
+                if num and num.value and num.value.lstrip("-").isdigit():
+                    token_stream.consume()
+                    column = int(num.value)
+                skip_whitespace(token_stream)
+            else:
+                break
+
+        if line is not None or column is not None:
+            stmt.set_position(line, column)
 
     @staticmethod
     def _consume_subscript(token_stream: ITokenStream) -> str:
