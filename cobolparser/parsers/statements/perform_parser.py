@@ -335,7 +335,9 @@ class PerformStatementParser(IStatementParser):
                     # diagnosability (H4 -- these catches previously had no
                     # trace at all).
                     logger.debug(
-                        "PERFORM UNTIL condition parse suppressed %r", exc, exc_info=True
+                        "PERFORM UNTIL condition parse suppressed %r",
+                        exc,
+                        exc_info=True,
                     )
 
         # Expect period or END-PERFORM
