@@ -1320,6 +1320,30 @@ class _CobolLexerPure:
         assert token is not None
         token.raw_value = text[start_pos:new_pos]
         token.location = location
+
+        # Hex-content validation for X'..'/NX'..' typed literals only
+        # (G'..'/N'..' have different, codepage-dependent validity rules
+        # that this parser does not attempt to decode -- M7 scopes this
+        # fix to the unambiguous hex case).
+        is_hex_prefix = (first.upper() == "X" and prefix_len == 1) or (
+            first.upper() == "N" and prefix_len == 2
+        )
+        if is_hex_prefix and not unterminated:
+            hex_content = token.value or ""
+            if hex_content:
+                invalid_chars = set(hex_content) - set("0123456789ABCDEFabcdef")
+                if invalid_chars:
+                    self.warnings.append(
+                        f"Invalid hex digit(s) {sorted(invalid_chars)!r} in "
+                        f"typed literal {token.raw_value} at line "
+                        f"{location.line}, column {location.column}"
+                    )
+                elif len(hex_content) % 2 != 0:
+                    self.warnings.append(
+                        f"Typed literal {token.raw_value} at line "
+                        f"{location.line}, column {location.column} has an "
+                        "odd number of hex digits (each byte needs two)"
+                    )
         return token, new_pos
 
     def read_string_from_text(

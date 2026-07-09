@@ -210,3 +210,23 @@ class TestM9NestedStatementSwallowedException:
 
         assert result is None
         assert collected_warnings == []
+
+
+class TestM7TypedLiteralHexValidation:
+    """M7 -- typed X'..'/NX'..' literals had no hex-validity or
+    even-length check; malformed hex was accepted with no diagnostic.
+    """
+
+    def test_odd_length_hex_literal_warns(self):
+        result = parse_cobol(_proc_program("    MOVE X'ABC' TO WS-X.\n"))
+        assert any(
+            "odd" in w.lower() or "hex" in w.lower() for w in result.warnings
+        ), result.warnings
+
+    def test_invalid_hex_digit_warns(self):
+        result = parse_cobol(_proc_program("    MOVE X'ZZ' TO WS-X.\n"))
+        assert any("hex" in w.lower() for w in result.warnings), result.warnings
+
+    def test_valid_hex_literal_does_not_warn(self):
+        result = parse_cobol(_proc_program("    MOVE X'1F2A' TO WS-X.\n"))
+        assert not any("hex" in w.lower() for w in result.warnings), result.warnings
