@@ -412,3 +412,79 @@ class TestM3aDisplayAtPositioning:
         assert stmts[0].at_line == 2
         assert stmts[0].at_column == 14
         assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
+
+
+class TestM3bAcceptExtendedClauses:
+    """M3b -- ACCEPT's AT positioning and extended clauses (SECURE,
+    NO-ECHO, TIMEOUT, AUTO-SKIP, UPPER) were dropped. Grammar shapes below
+    are taken verbatim from examples/cobol/shamrice/accept.cbl and
+    accept-secure.cbl, the corpus the original audit's hit-counts came
+    from.
+    """
+
+    def test_combined_numeric_at_form(self):
+        result = parse_cobol(_proc_program("    ACCEPT WS-X AT 0117.\n"))
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].at_line == 1
+        assert stmts[0].at_column == 17
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
+
+    def test_secure_is_distinct_from_no_echo(self):
+        result = parse_cobol(_proc_program("    ACCEPT WS-X SECURE AT 0117.\n"))
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].secure is True
+        assert stmts[0].with_no_echo is False
+
+    def test_no_echo_hyphenated_token(self):
+        result = parse_cobol(_proc_program("    ACCEPT WS-X NO-ECHO AT 0526.\n"))
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].with_no_echo is True
+        assert stmts[0].secure is False
+
+    def test_timeout_with_numeric_value(self):
+        result = parse_cobol(_proc_program("    ACCEPT WS-X TIMEOUT 3 AT 0132.\n"))
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].timeout_value == 3
+        assert stmts[0].at_line == 1
+        assert stmts[0].at_column == 32
+
+    def test_auto_skip(self):
+        result = parse_cobol(_proc_program("    ACCEPT WS-X AUTO-SKIP AT 0330.\n"))
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].auto_skip is True
+
+    def test_upper(self):
+        result = parse_cobol(_proc_program("    ACCEPT WS-X UPPER AT 0716.\n"))
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].upper is True
+
+    def test_combined_with_prefix_form(self):
+        # examples/cobol/shamrice/mouse_example.cbl: `with auto-skip no-echo`
+        result = parse_cobol(
+            _proc_program("    ACCEPT WS-X WITH AUTO-SKIP NO-ECHO.\n")
+        )
+        stmts = [
+            s for s in _statements(result)
+            if s.__class__.__name__ == "IOAcceptStatement"
+        ]
+        assert stmts[0].auto_skip is True
+        assert stmts[0].with_no_echo is True
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings

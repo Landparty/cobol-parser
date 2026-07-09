@@ -82,6 +82,70 @@ class AcceptStatementParser(IStatementParser):
 
         skip_whitespace(token_stream)
 
+        # Extended ACCEPT clauses (M3b): AT positioning, SECURE, NO-ECHO,
+        # TIMEOUT, AUTO-SKIP, UPPER, optionally introduced by WITH and in
+        # any order/combination (grammar shapes taken from
+        # examples/cobol/shamrice/accept.cbl and accept-secure.cbl -- only
+        # the combined-numeric AT form is handled here since that's the
+        # only form confirmed in real ACCEPT usage; DISPLAY additionally
+        # supports the AT LINE/COLUMN keyword form since DISPLAY's own
+        # corpus usage is also 100% numeric and that form is speculative
+        # IBM-grammar coverage there, not corpus-driven).
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+            if token.type == TokenType.PERIOD:
+                break
+            if token.type == TokenType.WITH:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
+            if token.type == TokenType.AT:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                num = token_stream.peek()
+                if num and num.value and num.value.isdigit():
+                    token_stream.consume()
+                    line, column = divmod(int(num.value), 100)
+                    stmt.set_position(line, column)
+                skip_whitespace(token_stream)
+                continue
+            if token.type == TokenType.IDENTIFIER and token.value:
+                upper_value = token.value.upper()
+                if upper_value == "SECURE":
+                    token_stream.consume()
+                    stmt.set_secure(True)
+                    skip_whitespace(token_stream)
+                    continue
+                if upper_value == "NO-ECHO":
+                    token_stream.consume()
+                    stmt.set_no_echo(True)
+                    skip_whitespace(token_stream)
+                    continue
+                if upper_value == "AUTO-SKIP":
+                    token_stream.consume()
+                    stmt.set_auto_skip(True)
+                    skip_whitespace(token_stream)
+                    continue
+                if upper_value == "UPPER":
+                    token_stream.consume()
+                    stmt.set_upper(True)
+                    skip_whitespace(token_stream)
+                    continue
+                if upper_value == "TIMEOUT":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    num = token_stream.peek()
+                    if num and num.value and num.value.isdigit():
+                        token_stream.consume()
+                        stmt.set_timeout(int(num.value))
+                    skip_whitespace(token_stream)
+                    continue
+            # Unrecognized clause token: stop rather than silently
+            # consuming (matches the rest of this file's convention).
+            break
+
         # Consume period if present
         if not token_stream.is_empty():
             p = token_stream.peek()

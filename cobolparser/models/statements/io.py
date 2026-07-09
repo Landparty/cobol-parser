@@ -408,6 +408,10 @@ class IOAcceptStatement(CobolStatement):
         self.color_attribute: str | None = None
         self.with_beep: bool = False
         self.with_no_echo: bool = False
+        self.secure: bool = False
+        self.timeout_value: int | None = None
+        self.auto_skip: bool = False
+        self.upper: bool = False
         self._metadata = {
             "has_environment_name": False,
             "has_position": False,
@@ -450,6 +454,23 @@ class IOAcceptStatement(CobolStatement):
         """Set the NO ECHO flag."""
         self.with_no_echo = with_no_echo
 
+    def set_secure(self, secure: bool = True) -> None:
+        """Set the SECURE flag (asterisk-masked input; distinct from
+        NO-ECHO, which shows nothing -- see reports/open-findings.md M3)."""
+        self.secure = secure
+
+    def set_timeout(self, seconds: int) -> None:
+        """Set the TIMEOUT clause value, in seconds."""
+        self.timeout_value = seconds
+
+    def set_auto_skip(self, auto_skip: bool = True) -> None:
+        """Set the AUTO-SKIP flag."""
+        self.auto_skip = auto_skip
+
+    def set_upper(self, upper: bool = True) -> None:
+        """Set the UPPER flag (force uppercase input)."""
+        self.upper = upper
+
     def to_dict(self) -> dict[str, Any]:
         """Convert ACCEPT statement to dictionary representation per contract."""
         result = super().to_dict()
@@ -464,6 +485,10 @@ class IOAcceptStatement(CobolStatement):
                 "color_attribute": self.color_attribute,
                 "with_beep": self.with_beep,
                 "with_no_echo": self.with_no_echo,
+                "secure": self.secure,
+                "timeout_value": self.timeout_value,
+                "auto_skip": self.auto_skip,
+                "upper": self.upper,
             }
         )
         return result
