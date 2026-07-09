@@ -10,6 +10,7 @@ import textwrap
 
 from cobolparser import parse_cobol
 from cobolparser.models.statements import DisplayStatement
+from cobolparser.preprocess import normalize_fixed_format
 
 
 def _data_program(data_item_line: str) -> str:
@@ -230,3 +231,98 @@ class TestM7TypedLiteralHexValidation:
     def test_valid_hex_literal_does_not_warn(self):
         result = parse_cobol(_proc_program("    MOVE X'1F2A' TO WS-X.\n"))
         assert not any("hex" in w.lower() for w in result.warnings), result.warnings
+
+
+class TestM4DebugLineHandling:
+    """M4 -- D/d in column 7 fell through as live code in
+    normalize_fixed_format, disagreeing with copy_statement_parser's
+    is_comment_line() (which already treats D/d as comment). Default
+    behavior now matches is_comment_line(); a debug_lines_as_comments=False
+    override is available for callers that need D-lines compiled as code.
+    """
+
+    def _line(self, indicator: str, text: str) -> str:
+        # cols 1-6 seq area, col 7 indicator, cols 8+ text
+        return " " * 6 + indicator + text
+
+    def test_d_line_is_dropped_by_default(self):
+        lines = [
+            self._line(" ", "       DISPLAY 'BEFORE'."),
+            self._line("D", "       DISPLAY 'DEBUG-ONLY'."),
+            self._line(" ", "       DISPLAY 'AFTER'."),
+        ]
+        out = normalize_fixed_format(lines)
+        assert "DEBUG-ONLY" not in out
+        assert "BEFORE" in out
+        assert "AFTER" in out
+
+    def test_d_line_kept_as_code_when_opted_in(self):
+        lines = [
+            self._line(" ", "       DISPLAY 'BEFORE'."),
+            self._line("D", "       DISPLAY 'DEBUG-ONLY'."),
+        ]
+        out = normalize_fixed_format(lines, debug_lines_as_comments=False)
+        assert "DEBUG-ONLY" in out
+
+
+class TestM5ContinuedLiteralTrailingBlanks:
+    """M5 -- trailing blanks that are part of a literal's value (per
+    fixed-format continuation rules) were stripped from the opening line
+    before we knew the literal would continue.
+    """
+
+    def _line(self, indicator: str, text: str) -> str:
+        return " " * 6 + indicator + text
+
+    def test_opening_line_trailing_blanks_preserved_when_continued(self):
+        lines = [
+            self._line(" ", '       VALUE "ABC   '),
+            self._line("-", '           "DEF".'),
+        ]
+        out = normalize_fixed_format(lines)
+        assert '"ABC   DEF"' in out, out
+
+    def test_trailing_blanks_still_stripped_when_not_continued(self):
+        lines = [
+            self._line(" ", "       DISPLAY 'X'          "),
+        ]
+        out = normalize_fixed_format(lines)
+        first_line = out.splitlines()[0]
+        assert first_line == "       DISPLAY 'X'"
+
+
+class TestM8TabHandling:
+    """M8 -- no tab-expansion logic in normalize_fixed_format; a leading
+    tab shifted every subsequent column.
+    """
+
+    def test_leading_tab_does_not_shift_columns(self):
+        # A literal tab at column 1 expands to exactly 8 spaces (the next
+        # tab stop from position 0) before column-sensitive slicing, so it
+        # must produce the same result as those 8 spaces written literally.
+        untabbed = normalize_fixed_format(
+            [" " * 8 + "       DISPLAY 'OK'."]
+        )
+        tabbed = normalize_fixed_format(["\t" + "       DISPLAY 'OK'."])
+        assert tabbed == untabbed
+
+
+def test_fast_and_pure_normalize_fixed_format_agree_on_m4_m5_m8_cases():
+    """Parity check: the Cython fast path must match the pure-Python
+    implementation on every new behavior introduced by M4/M5/M8 (mirrors
+    the existing test_fast_preprocess_is_active precedent)."""
+    from cobolparser.preprocess import _normalize_fixed_format_pure
+
+    cases = [
+        [
+            " " * 6 + " " + "       DISPLAY 'BEFORE'.",
+            " " * 6 + "D" + "       DISPLAY 'DEBUG-ONLY'.",
+        ],
+        [
+            " " * 6 + " " + '       VALUE "ABC   ',
+            " " * 6 + "-" + '           "DEF".',
+        ],
+        ["\t" + "       DISPLAY 'OK'."],
+    ]
+    for lines in cases:
+        assert normalize_fixed_format(lines) == _normalize_fixed_format_pure(lines)

@@ -401,13 +401,20 @@ def strip_compiler_directives(
 
 
 def normalize_fixed_format(
-    lines: Iterable[str], *, merge_continued_literals: bool = True
+    lines: Iterable[str],
+    *,
+    merge_continued_literals: bool = True,
+    debug_lines_as_comments: bool = True,
 ) -> str:
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
     Steps:
     - Strip sequence area (cols 1-6).
+    - Expand tabs (8-column stops) before any column-sensitive slicing.
     - Capture indicator column; treat '*' and '/' lines as comments (preserve as-is).
+      Optionally treat 'D'/'d' in the indicator column as a comment too
+      (debug_lines_as_comments, default True) -- matches
+      copy_statement_parser.is_comment_line().
     - Extract program text cols 8-72.
     - If a continuation line (indicator '-') occurs and previous line ended inside a literal,
       merge without inserting a newline.
@@ -482,7 +489,7 @@ def normalize_fixed_format(
         quote_char = None
 
     for raw in lines:
-        line = raw.rstrip("\n")
+        line = raw.rstrip("\n").expandtabs(8)
         if len(line) < TEXT_START_COL - 1:
             # Blank/short line: flush whatever logical line was in progress,
             # then emit an empty placeholder for this physical line so later
@@ -493,7 +500,8 @@ def normalize_fixed_format(
             continue
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else " "
         text_slice = line[TEXT_START_COL - 1 : TEXT_END_COL]
-        if indicator in ("*", "/"):  # comment (including page eject)
+        is_debug_comment = debug_lines_as_comments and indicator in ("D", "d")
+        if indicator in ("*", "/") or is_debug_comment:  # comment (incl. page eject, debug lines)
             # Comment lines: flush pending buffer but do not emit comment text
             # (emitting it would let the free-form lexer tokenize it as code).
             # Still emit an empty placeholder to preserve line numbering.
@@ -510,10 +518,13 @@ def normalize_fixed_format(
                 chunk = text_slice.lstrip()
                 if chunk and chunk[0] == quote_char:
                     chunk = chunk[1:]
-                stripped = chunk.rstrip()
-                parts.append(stripped)
-                if merge_continued_literals:
-                    _update_quote_state(stripped)
+                _update_quote_state(chunk)
+                # Trailing blanks up to column 72 are part of a literal's
+                # value when it remains open at end of line (COBOL
+                # fixed-format continuation rule) -- only strip them once
+                # we know no literal is left dangling (M5).
+                out_chunk = chunk if pending_literal else chunk.rstrip()
+                parts.append(out_chunk)
             else:
                 # Non-literal continuation: '-' in column 7 with no
                 # alphanumeric literal currently open. Per COBOL fixed-format
@@ -531,10 +542,14 @@ def normalize_fixed_format(
         else:
             # Non-continuation line - start new logical line
             flush_parts()
-            stripped = text_slice.rstrip()
-            parts.append(stripped)
             if merge_continued_literals:
-                _update_quote_state(stripped)
+                _update_quote_state(text_slice)
+                # Same M5 fix as the continuation branch above: only strip
+                # trailing blanks once we know no literal is left open.
+                chunk = text_slice if pending_literal else text_slice.rstrip()
+            else:
+                chunk = text_slice.rstrip()
+            parts.append(chunk)
 
     # Save state before final flush
     final_pending_literal = pending_literal

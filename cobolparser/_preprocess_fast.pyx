@@ -20,7 +20,7 @@ _TEXT_START = 7   # TEXT_START_COL - 1
 _TEXT_END   = 72  # TEXT_END_COL
 
 
-def normalize_fixed_format(lines, *, merge_continued_literals=True):
+def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True):
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
     Identical contract to the pure-Python version; see that function for
@@ -31,12 +31,13 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
     cdef bint pending_literal = False
     cdef str  quote_ch      = None
     cdef str  ch
+    cdef bint is_debug_comment
 
     result = []
     parts  = []
 
     for raw in lines:
-        line = raw.rstrip("\n")
+        line = raw.rstrip("\n").expandtabs(8)
 
         if len(line) < _TEXT_START:
             # Flush accumulated parts for this logical line, then emit an
@@ -57,9 +58,11 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
         indicator  = line[_IND_IDX] if len(line) > _IND_IDX else " "
         text_slice = line[_TEXT_START : _TEXT_END]
 
-        if indicator == "*" or indicator == "/":
-            # Comment line: flush buffer, discard comment text, but still
-            # emit an empty placeholder to preserve line numbering.
+        is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")
+        if indicator == "*" or indicator == "/" or is_debug_comment:
+            # Comment line (incl. page eject, debug lines): flush buffer,
+            # discard comment text, but still emit an empty placeholder to
+            # preserve line numbering.
             combined = "".join(parts)
             if combined:
                 result.append(combined)
@@ -77,16 +80,16 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
                 chunk = text_slice.lstrip()
                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
                     chunk = chunk[1:]
-                stripped = chunk.rstrip()
-                parts.append(stripped)
-                # Inline quote-state update
-                n = len(stripped)
+                # Inline quote-state update (scan the un-rstripped chunk so
+                # trailing blanks aren't discarded before we know whether
+                # the literal is still open -- M5).
+                n = len(chunk)
                 i = 0
                 while i < n:
-                    ch = stripped[i]
+                    ch = chunk[i]
                     if quote_open:
                         if ch == quote_ch:
-                            if i + 1 < n and stripped[i + 1] == quote_ch:
+                            if i + 1 < n and chunk[i + 1] == quote_ch:
                                 i += 2
                                 continue
                             quote_open = False
@@ -98,6 +101,11 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
                             quote_ch   = ch
                         i += 1
                 pending_literal = quote_open
+                # Trailing blanks up to column 72 are part of a literal's
+                # value when it remains open at end of line (COBOL
+                # fixed-format continuation rule) -- only strip them once
+                # we know no literal is left dangling (M5).
+                parts.append(chunk if pending_literal else chunk.rstrip())
             else:
                 # Non-literal continuation: '-' in column 7 with no
                 # alphanumeric literal open. Per COBOL fixed-format rules the
@@ -137,16 +145,14 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
             quote_ch      = None
             pending_literal = False
 
-            stripped = text_slice.rstrip()
-            parts.append(stripped)
             if merge_continued_literals:
-                n = len(stripped)
+                n = len(text_slice)
                 i = 0
                 while i < n:
-                    ch = stripped[i]
+                    ch = text_slice[i]
                     if quote_open:
                         if ch == quote_ch:
-                            if i + 1 < n and stripped[i + 1] == quote_ch:
+                            if i + 1 < n and text_slice[i + 1] == quote_ch:
                                 i += 2
                                 continue
                             quote_open = False
@@ -158,6 +164,11 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True):
                             quote_ch   = ch
                         i += 1
                 pending_literal = quote_open
+                # M5: trailing blanks are part of the literal's value when
+                # it remains open at end of line -- only strip once closed.
+                parts.append(text_slice if pending_literal else text_slice.rstrip())
+            else:
+                parts.append(text_slice.rstrip())
 
     combined = "".join(parts)
     if combined:
