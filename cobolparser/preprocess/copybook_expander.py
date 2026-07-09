@@ -571,6 +571,18 @@ def _expand_source_recursive(
         expanded_copybook = context.cache_get(full_cache_key)
         if expanded_copybook is not None:
             nested_depth = context.current_depth + 1
+            # A cache hit still inserts real content into the expansion
+            # (diamond dependency: same member COPYd multiple times) -- it
+            # must count toward total_bytes the same as a miss does, or
+            # max_total_size silently under-enforces (M14).
+            content_size = len(expanded_copybook.encode("utf-8"))
+            context.total_bytes += content_size
+            if stats:
+                stats.total_bytes_processed = context.total_bytes
+            if context.total_bytes > path_resolver.search_config.max_total_size:
+                raise TotalExpansionSizeExceededError(
+                    context.total_bytes, path_resolver.search_config.max_total_size
+                )
         else:
             # Read copybook content with encoding detection (or forced override).
             # Lossy decodes are recorded in ExpansionStatistics.warnings so

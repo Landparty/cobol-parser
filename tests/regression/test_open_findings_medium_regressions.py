@@ -82,3 +82,55 @@ class TestM16SlashEditedPicture:
         field = next(i for i in items if i.name == "WS-AMT")
         assert field.picture_clause.pattern == "$***,**9.99"
         assert not any("Unparsed token" in w for w in result.warnings), result.warnings
+
+
+class TestM14CacheHitBytesAccounting:
+    """M14 -- copybook cache hits bypassed total_bytes accounting.
+
+    context.total_bytes was only incremented on a cache miss; a copybook
+    served from the intra-expansion cache (diamond dependency: the same
+    member COPYd multiple times) contributed zero bytes to the running
+    total, so max_total_size was never enforced against the true expanded
+    content size.
+    """
+
+    def test_repeated_copy_of_same_member_counts_every_inclusion(self, tmp_path):
+        from cobolparser.preprocess import (
+            TotalExpansionSizeExceededError,
+            expand_copybooks,
+        )
+
+        copybook_dir = tmp_path / "copybooks"
+        copybook_dir.mkdir()
+        payload = "01 WS-FIELD-" + "X" * 60 + " PIC X.\n"
+        content_size = len(payload.encode("utf-8"))
+        (copybook_dir / "MEMBER.cpy").write_text(payload)
+
+        source = (
+            "IDENTIFICATION DIVISION.\n"
+            "PROGRAM-ID. REGTEST.\n"
+            "DATA DIVISION.\n"
+            "WORKING-STORAGE SECTION.\n"
+            "       COPY MEMBER.\n"
+            "       COPY MEMBER.\n"
+            "       COPY MEMBER.\n"
+        )
+        # Limit set strictly between 1x and 3x the single-copybook size:
+        # under the M14 bug, only the first (cache-miss) inclusion counted,
+        # so 3 inclusions never tripped a limit sized for ~1.5 copies.
+        limit = int(content_size * 1.5)
+
+        raised = False
+        try:
+            expand_copybooks(
+                source,
+                copybook_paths=[str(copybook_dir)],
+                max_total_size=limit,
+            )
+        except TotalExpansionSizeExceededError:
+            raised = True
+        assert raised, (
+            "3x inclusion of a copybook whose combined size exceeds "
+            "max_total_size must raise, even when later inclusions are "
+            "served from the intra-expansion cache"
+        )
