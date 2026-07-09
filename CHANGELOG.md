@@ -130,6 +130,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Eight HIGH-severity findings from `reports/open-findings.md` (2026-07-08
+  re-verification pass), all pinned by
+  `tests/regression/test_open_findings_high_regressions.py`:**
+  - **H1** — `SET ADDRESS OF x TO y` produced an empty `SetStatement`
+    (`targets: []`, `set_type: null`, `value: null`) because the
+    target-collection loop only accepted `IDENTIFIER`/`STRING_LITERAL`
+    tokens; `OF` lexes as its own dedicated `TokenType.OF`, not
+    `IDENTIFIER`, so the loop broke immediately on it. `OF` is now
+    recognized and skipped so the pointer/`TO`/target tokens are reached.
+  - **H2** — `COMPUTE` with unbalanced parentheses was silently accepted,
+    and once `paren_depth` was left non-zero by a stray `(` the
+    statement-boundary check (gated on `paren_depth == 0`) never re-armed,
+    silently folding a well-formed following statement into the
+    expression string. A boundary check now fires regardless of
+    `paren_depth`, and a final `paren_depth != 0` check now reports
+    "COMPUTE statement has unbalanced parentheses in expression" instead
+    of accepting silently.
+  - **H3** — `PERFORM para-name JUNK-TOKEN.` speculatively consumed a
+    trailing `IDENTIFIER` as a candidate TIMES value and discarded it with
+    **no warning at all** when `TIMES`/`TIME` didn't follow
+    (`errors=[], warnings=[]`, `times_count: null`). The TIMES-clause
+    lookahead now peeks past the candidate token before committing to
+    consuming it, and emits a warning identifying the discarded token when
+    it isn't a valid TIMES clause.
+  - **H4** — `perform_parser.py` had 5 bare `except ParseError: pass`
+    sites (VARYING/UNTIL/inline-body parsing) with no logging at all, not
+    even DEBUG — a nested-parse failure could vanish completely
+    untraceable. All 5 sites now log the suppressed exception at DEBUG.
+  - **H5** — `MoveTypeChecker` silently skipped every MOVE whose source or
+    target category couldn't be resolved (`UNKNOWN`/`FIGURATIVE`), with no
+    counter anywhere on `MoveTypeReport` — 3 MOVEs on undeclared
+    identifiers (e.g. an unexpanded copybook) produced
+    `violations: [], error_count: 0, warning_count: 0`, a false all-clear.
+    `MoveTypeReport` gained an `unresolved_count` field (serialized in
+    `to_dict()`) that counts every operand the checker couldn't resolve.
+  - **H6** — the Tier-2 (directory-index) copybook resolver fast path in
+    `PathResolver.resolve()` returned an indexed path after only an
+    `os.path.getsize()` check, never calling `validate_path_within_directory()`
+    (which the Tier-3 path does call). Since the index is built via
+    `os.scandir()` + `entry.is_file()` (which follows symlinks), a symlink
+    inside a search directory pointing outside it would be served with no
+    containment check. Both Tier-2 fast-path hits (exact and
+    extension-suffixed) now validate containment before returning.
+    Separately, the `".." in file_path` guard was naive substring
+    matching, false-flagging filenames like `weird..name.cpy`; it's now a
+    path-segment check (`.. ` as a whole segment only).
+  - **H7** — an unterminated string literal in the default parse path was
+    fully silent: the lexer's error was gated on `if not self.free_form`,
+    and `parse_cobol()` always lexes with `free_form=True` after
+    normalization, so `DISPLAY "UNCLOSED` followed by a well-formed
+    statement parsed clean with the literal silently closed at the line
+    boundary. The lexer (both the pure-Python path and the `_lexer_fast`
+    Cython path) now records a warning — surfaced via
+    `ParseResult.warnings` — instead of staying silent, without promoting
+    it to a hard error (a lone quote can legitimately appear in a
+    free-form comment). Separately investigated the report's "unclosed
+    `IF`s with no bodies" sub-claim: confirmed this is legal, correctly
+    scope-nested COBOL (period-terminated or nesting-closed IFs need no
+    `END-IF`), not a bug — no change made for that sub-case.
+  - **H8** — `CLOSE` used an if/elif chain across `REEL`/`UNIT`/`WITH`
+    (one branch per file, applied only once), and the outer per-file loop
+    required the next token to be a plain `IDENTIFIER` to continue, so
+    `CLOSE F REEL WITH NO REWIND.` kept only `reel: true` and dropped
+    `no_rewind` (only warn-masked via the generic "unparsed tokens"
+    fallback). The per-file option parse is now a loop that keeps applying
+    options until none match, so combined options on one file (and across
+    multiple files in one CLOSE) all survive.
+
+  Also fixed while verifying H2: `tests/samples/arithmetic_operations.cbl`
+  had a `FUNCTION MAX(WS-NUM-1, WS-NUM-2, WS-NUM-3)` line that overflowed
+  fixed-format column 72 (the closing `)` landed in column 73 and was
+  silently truncated by `normalize_fixed_format`) — previously masked by
+  the very H2 bug (the truncated, unbalanced expression silently absorbed
+  the next statement); now correctly surfaced by the H2 fix and corrected
+  in the sample by removing the space after each comma.
+
+  Noted but intentionally not fixed here (out of scope of the 8 listed
+  findings, and higher blast-radius core-parser surgery): a statement with
+  no terminating period, immediately followed by what should be a new
+  paragraph header, causes the paragraph-name identifier to be absorbed as
+  a trailing operand of the preceding statement instead of starting a new
+  paragraph (`errors=[], warnings=[]`; reproduces with a bare `DISPLAY`,
+  not just `IF`). Distinct root cause from H7's "unclosed IF" sub-claim;
+  flagged for a follow-up finding rather than folded into this pass.
+
 * **A period-less statement could silently swallow an unsupported (or even a
   fully-supported) following verb** (residual of audit 2026-07-07 C2). C2
   taught the top-level PROCEDURE DIVISION dispatch loop to warn when it

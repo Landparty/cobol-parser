@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-07-08T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
@@ -150,6 +150,48 @@ routes these into `ExpansionStatistics.warnings`; the CLI (`--define`)
 prints them to stderr. Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
 / `::TestH7ConditionalCompilationWarnings`.
+
+# Copybook Path Resolution (`path_resolver.py`)
+
+`PathResolver.resolve(member_name)` finds a copybook file across
+`CopybookSearchPath.directories`, in three tiers of increasing cost:
+
+1. **Tier 1** — a resolution cache keyed by `member_name` (exact repeat
+   lookups are O(1) with no filesystem access).
+2. **Tier 2** — a per-directory index (`_dir_index`, built once via
+   `os.scandir()`) keyed by uppercased basename-without-extension, for
+   O(1) lookup against every directory without re-scanning.
+3. **Tier 3** — a full filesystem search (`find_copybook_file`) as the
+   fallback when the index misses.
+
+All three tiers funnel through `validate_path_within_directory(path,
+search_dir)`, which resolves symlinks (`Path.resolve()`) and confirms the
+resolved path is still inside `search_dir` before it can be returned —
+this is the directory-traversal containment check.
+
+**Tier-2 containment gap (audit 2026-07-08, finding H6, fixed
+2026-07-09):** the Tier-2 fast path returned `self._dir_index[lookup_key]`
+after only an `os.path.getsize()` check — it never called
+`validate_path_within_directory()`, unlike Tier 3. Since the index is
+built via `os.scandir()` + `entry.is_file()` (which follows symlinks), a
+symlink inside a search directory pointing outside the search root would
+have been served with no containment check. Fixed by a new
+`PathResolver._validate_indexed_result(result)` method (iterates
+`search_config.directories`, validating against each, raising
+`PathTraversalError` if none contain the result) called at both Tier-2
+hit points (exact `lookup_key` match and extension-suffixed `ext_key`
+match). A live Windows symlink needs elevated privilege to create in CI,
+so the regression test seeds `_dir_index` directly with an
+escaping absolute path instead — exactly what a followed symlink would
+produce.
+
+Separately (same finding, H6), the `".." in file_path` traversal guard
+(`preprocess/__init__.py`'s `validate_path_within_directory`) was naive
+substring matching — a filename merely *containing* `".."` (e.g.
+`weird..name.cpy`) triggered `PathTraversalError` despite not being a
+traversal attempt. Now a path-segment check: `.replace("\\", "/").split
+("/")` and reject only when a whole segment equals `".."`. Both pinned by
+`tests/regression/test_open_findings_high_regressions.py::TestH6PathResolverContainment`.
 
 # Line-Number Preservation (audit 2026-07-08)
 

@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-08T14:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
@@ -56,9 +56,12 @@ populates it when it skips an unsupported verb (no registered statement
 parser — e.g. `INVOKE`, `EXHIBIT`; see
 `ProcedureDivisionParser._UNSUPPORTED_VERBS`), when it skips leftover clause
 tokens a statement parser did not understand ("Unparsed tokens" warnings),
-and when a compilation unit contains more than one program (see below).
-Unknown statements were previously consumed with only a `logger.debug`, so
-`errors=0, warnings=0` did not guarantee a complete AST.
+when a compilation unit contains more than one program (see below), and
+(2026-07-09) when the lexer itself recorded a non-fatal diagnostic — see
+the "Warnings (non-fatal diagnostics)" section of [lexer.md](lexer.md).
+Unknown statements
+were previously consumed with only a `logger.debug`, so `errors=0,
+warnings=0` did not guarantee a complete AST.
 
 ## Multi-program compilation units (2026-07-07)
 
@@ -713,6 +716,71 @@ already stops correctly. `EvaluateStatementParser._parse_selectors` (the
 per-`WHEN` selector list) already called `self._is_statement_keyword()`
 before this fix — only `_parse_subjects` and the outer clause-scan loop were
 missing it.
+
+# open-findings.md HIGH-severity fixes (2026-07-09, H1-H8)
+
+Eight HIGH findings from `reports/open-findings.md`'s 2026-07-08
+re-verification pass, all fixed and pinned by
+`tests/regression/test_open_findings_high_regressions.py` (one test class
+per finding ID). Full per-finding writeup in `CHANGELOG.md`'s Unreleased →
+Fixed section; only the parser-relevant ones are summarized here (H5
+MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
+[preprocessing.md](preprocessing.md), H7 lexer warning →
+[lexer.md](lexer.md) above).
+
+* **H1 — `set_parser.py`:** the `SET ADDRESS OF x TO y` target-collection
+  loop only accepted `IDENTIFIER`/`STRING_LITERAL` tokens; `OF` lexes as
+  its own dedicated `TokenType.OF`, not `IDENTIFIER`, so the loop's
+  `else: break` fired immediately on `OF` and never reached the pointer/
+  `TO`/target tokens (`targets: [], set_type: null, value: null`). `OF` is
+  now explicitly recognized and skipped in that loop.
+* **H2 — `arithmetic_parsers.py`:** `paren_depth` in the COMPUTE
+  expression loop was only used to gate the `paren_depth == 0` boundary
+  check; once left non-zero by a stray `(` with no matching `)`, the
+  boundary check never re-armed for the rest of the token stream, so a
+  well-formed following statement got silently folded into the expression
+  string. A new check (`if paren_depth != 0 and is_statement_boundary(token):
+  break`) now applies *regardless* of `paren_depth`, and a final
+  `if paren_depth != 0` check after the loop reports "COMPUTE statement
+  has unbalanced parentheses in expression" instead of accepting silently.
+  This is additive to the pre-existing 2026-07-06 COMPUTE-swallow fix
+  documented above (that fix covered the `paren_depth == 0` case; this one
+  covers the never-returns-to-zero case the `paren_depth == 0` gate
+  couldn't reach).
+* **H3/H4 — `perform_parser.py`:** the TIMES-clause lookahead after a
+  PERFORM target paragraph speculatively consumed a following
+  `IDENTIFIER`/`NUMERIC_LITERAL` as a candidate TIMES value and discarded
+  it with **zero trace** (no warning, no log) if `TIMES`/`TIME` didn't
+  follow — worse than the sibling boundary-swallow bugs elsewhere in this
+  file, since even `errors=[]`/`warnings=[]` gave no signal. A new
+  `_peek_next_meaningful()` helper looks past whitespace/comment/newline/
+  continuation tokens *before* committing to consume the candidate; if it
+  isn't a valid TIMES clause, `_warn_stray_trailing_token()` emits a
+  warning identifying the discarded token instead of silently dropping
+  it. Separately, all 5 bare `except ParseError: pass` sites in this file
+  (VARYING/UNTIL/inline-body parsing) had **no logging at all**, unlike
+  the shared `try_parse_nested_statement` helper in `_utils.py` (see M9 in
+  `reports/open-findings.md`) — all 5 now log the suppressed exception at
+  DEBUG.
+* **H8 — `close_parser.py`:** `REEL`/`UNIT`/`WITH` per-file options were
+  parsed via a single if/elif chain (applied at most once per file), and
+  the outer per-file loop required the next token to be a plain
+  `IDENTIFIER` to continue — so `CLOSE F REEL WITH NO REWIND.` consumed
+  `REEL`, set `reel: true`, then hit `WITH` (not an `IDENTIFIER`) and
+  ended the whole per-file loop, leaving `WITH NO REWIND` dangling
+  (warn-masked by the generic "unparsed tokens" fallback, `no_rewind`
+  silently lost). The option parse is now a `while True` loop that keeps
+  applying options until none match, so combined options on one file (and
+  across multiple files in one `CLOSE`) all survive together.
+* **H9 (not fixed, tracked in `reports/open-findings.md`) — a distinct,
+  more general silent-drop found while verifying H7's "unclosed IF"
+  sub-claim:** a statement with no terminating period, immediately
+  followed by what should be a new paragraph header, causes the paragraph
+  name to be absorbed as a trailing operand of the preceding statement
+  instead of starting a new paragraph (`errors=[], warnings=[]`,
+  reproduces with a bare `DISPLAY`, not IF-specific). High blast-radius
+  paragraph-boundary-detection surgery — deliberately out of scope for the
+  bounded H1-H8 pass; needs its own investigation.
 
 # Adding a New Statement Parser
 

@@ -183,13 +183,13 @@
            END-COMPUTE
            
       *    COMPUTE with intrinsic functions
-           COMPUTE WS-RESULT = FUNCTION MAX(WS-NUM-1, WS-NUM-2, WS-NUM-3)
+           COMPUTE WS-RESULT = FUNCTION MAX(WS-NUM-1,WS-NUM-2,WS-NUM-3)
            DISPLAY 'Max value: ' WS-RESULT
-           
-           COMPUTE WS-RESULT = FUNCTION MIN(WS-NUM-1, WS-NUM-2, WS-NUM-3)
+
+           COMPUTE WS-RESULT = FUNCTION MIN(WS-NUM-1,WS-NUM-2,WS-NUM-3)
            DISPLAY 'Min value: ' WS-RESULT
-           
-           COMPUTE WS-RESULT = FUNCTION SUM(WS-NUM-1, WS-NUM-2, WS-NUM-3)
+
+           COMPUTE WS-RESULT = FUNCTION SUM(WS-NUM-1,WS-NUM-2,WS-NUM-3)
            DISPLAY 'Sum: ' WS-RESULT
            
            COMPUTE WS-RESULT = FUNCTION SQRT(WS-NUM-1)

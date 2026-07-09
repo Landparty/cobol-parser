@@ -57,9 +57,11 @@ class SetStatementParser(IStatementParser):
             # be folded into the target list when SET has no trailing period.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
                 break
-            if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
+            if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.OF):
                 token_stream.consume()
-                # Skip ADDRESS and OF keywords
+                # Skip ADDRESS and OF keywords (OF lexes as its own dedicated
+                # TokenType, not IDENTIFIER, so it must be listed explicitly
+                # above or this branch never reaches it).
                 if val in ("ADDRESS", "OF"):
                     pass
                 else:

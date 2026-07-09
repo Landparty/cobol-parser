@@ -5,7 +5,7 @@
     "distutils": {
         "name": "cobolparser._lexer_fast",
         "sources": [
-            "cobolparser/_lexer_fast.pyx"
+            "cobolparser\\_lexer_fast.pyx"
         ]
     },
     "module_name": "cobolparser._lexer_fast"
@@ -2059,6 +2059,44 @@ static PyObject* __Pyx_PyObject_CallMethod1(PyObject* obj, PyObject* method_name
 /* append.proto */
 static CYTHON_INLINE int __Pyx_PyObject_Append(PyObject* L, PyObject* x);
 
+/* BuildPyUnicode.proto (used by COrdinalToPyUnicode) */
+static PyObject* __Pyx_PyUnicode_BuildFromAscii(Py_ssize_t ulength, const char* chars, int clength,
+                                                int prepend_sign, char padding_char);
+
+/* COrdinalToPyUnicode.proto (used by CIntToPyUnicode) */
+static CYTHON_INLINE int __Pyx_CheckUnicodeValue(int value);
+static CYTHON_INLINE PyObject* __Pyx_PyUnicode_FromOrdinal_Padded(int value, Py_ssize_t width, char padding_char);
+
+/* GCCDiagnostics.proto (used by CIntToPyUnicode) */
+#if !defined(__INTEL_COMPILER) && defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#define __Pyx_HAS_GCC_DIAGNOSTIC
+#endif
+
+/* IncludeStdlibH.proto (used by CIntToPyUnicode) */
+#include <stdlib.h>
+
+/* CIntToPyUnicode.proto */
+#define __Pyx_PyUnicode_From_long(value, width, padding_char, format_char) (\
+    ((format_char) == ('c')) ?\
+        __Pyx_uchar___Pyx_PyUnicode_From_long(value, width, padding_char) :\
+        __Pyx____Pyx_PyUnicode_From_long(value, width, padding_char, format_char)\
+    )
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_long(long value, Py_ssize_t width, char padding_char);
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_long(long value, Py_ssize_t width, char padding_char, char format_char);
+
+/* CIntToPyUnicode.proto */
+#define __Pyx_PyUnicode_From_int(value, width, padding_char, format_char) (\
+    ((format_char) == ('c')) ?\
+        __Pyx_uchar___Pyx_PyUnicode_From_int(value, width, padding_char) :\
+        __Pyx____Pyx_PyUnicode_From_int(value, width, padding_char, format_char)\
+    )
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_int(int value, Py_ssize_t width, char padding_char);
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_int(int value, Py_ssize_t width, char padding_char, char format_char);
+
+/* JoinPyUnicode.export */
+static PyObject* __Pyx_PyUnicode_Join(PyObject** values, Py_ssize_t value_count, Py_ssize_t result_ulength,
+                                      Py_UCS4 max_char);
+
 /* py_unicode_predicate.proto */
 #if CYTHON_COMPILING_IN_LIMITED_API
 static int __Pyx_Py_UNICODE_ISALPHA(Py_UCS4 uchar);
@@ -2304,11 +2342,6 @@ static void __pyx_insert_code_object(int code_line, __Pyx_CachedCodeObjectType* 
 static void __Pyx_AddTraceback(const char *funcname, int c_line,
                                int py_line, const char *filename);
 
-/* GCCDiagnostics.proto */
-#if !defined(__INTEL_COMPILER) && defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
-#define __Pyx_HAS_GCC_DIAGNOSTIC
-#endif
-
 /* CIntFromPy.proto */
 static CYTHON_INLINE int __Pyx_PyLong_As_int(PyObject *);
 
@@ -2488,7 +2521,7 @@ typedef struct {
   __Pyx_CachedCFunction __pyx_umethod_PyDict_Type_values;
   __Pyx_CachedCFunction __pyx_umethod_PyUnicode_Type__upper;
   PyObject *__pyx_codeobj_tab[6];
-  PyObject *__pyx_string_tab[162];
+  PyObject *__pyx_string_tab[166];
   PyObject *__pyx_number_tab[2];
 /* #### Code section: module_state_contents ### */
 /* CommonTypesMetaclass.module_state_decls */
@@ -2540,158 +2573,162 @@ static __pyx_mstatetype * const __pyx_mstate_global = &__pyx_mstate_global_stati
 #define __pyx_kp_u_Note_that_Cython_is_deliberately __pyx_string_tab[7]
 #define __pyx_kp_u_PROCEDURE_DIVISION __pyx_string_tab[8]
 #define __pyx_kp_u_Unterminated_string_literal __pyx_string_tab[9]
-#define __pyx_kp_u__10 __pyx_string_tab[10]
-#define __pyx_kp_u__11 __pyx_string_tab[11]
-#define __pyx_kp_u__3 __pyx_string_tab[12]
-#define __pyx_kp_u__4 __pyx_string_tab[13]
-#define __pyx_kp_u__5 __pyx_string_tab[14]
-#define __pyx_kp_u__6 __pyx_string_tab[15]
-#define __pyx_kp_u__7 __pyx_string_tab[16]
-#define __pyx_kp_u__8 __pyx_string_tab[17]
-#define __pyx_kp_u__9 __pyx_string_tab[18]
-#define __pyx_kp_u_add_note __pyx_string_tab[19]
-#define __pyx_kp_u_cobolparser__lexer_fast_pyx __pyx_string_tab[20]
-#define __pyx_n_u_COMMENT __pyx_string_tab[21]
-#define __pyx_n_u_CobolLexer __pyx_string_tab[22]
-#define __pyx_n_u_CobolLexerBase __pyx_string_tab[23]
-#define __pyx_n_u_CobolLexerPure __pyx_string_tab[24]
-#define __pyx_n_u_CobolLexer__try_single_line_stri __pyx_string_tab[25]
-#define __pyx_n_u_CobolLexer_check_division_header __pyx_string_tab[26]
-#define __pyx_n_u_CobolLexer_read_number_from_text __pyx_string_tab[27]
-#define __pyx_n_u_CobolLexer_read_word_from_text __pyx_string_tab[28]
-#define __pyx_n_u_CobolLexer_tokenize __pyx_string_tab[29]
-#define __pyx_n_u_CobolLexer_tokenize_program_text __pyx_string_tab[30]
-#define __pyx_n_u_DATA __pyx_string_tab[31]
-#define __pyx_n_u_DATA_DIVISION_2 __pyx_string_tab[32]
-#define __pyx_n_u_DIVISION_FIRST __pyx_string_tab[33]
-#define __pyx_n_u_DIV_DATA_LEN __pyx_string_tab[34]
-#define __pyx_n_u_DIV_ENVIRONMENT_LEN __pyx_string_tab[35]
-#define __pyx_n_u_DIV_IDENTIFICATION_LEN __pyx_string_tab[36]
-#define __pyx_n_u_DIV_ID_LEN __pyx_string_tab[37]
-#define __pyx_n_u_DIV_PROCEDURE_LEN __pyx_string_tab[38]
-#define __pyx_n_u_E __pyx_string_tab[39]
-#define __pyx_n_u_ENVIRONMENT __pyx_string_tab[40]
-#define __pyx_n_u_ENVIRONMENT_DIVISION_2 __pyx_string_tab[41]
-#define __pyx_n_u_EOF __pyx_string_tab[42]
-#define __pyx_n_u_FF_INDICATOR __pyx_string_tab[43]
-#define __pyx_n_u_FIGURATIVE_CONSTANT __pyx_string_tab[44]
-#define __pyx_n_u_FIGURATIVE_CONSTANTS __pyx_string_tab[45]
-#define __pyx_n_u_ID __pyx_string_tab[46]
-#define __pyx_n_u_IDENTIFICATION __pyx_string_tab[47]
-#define __pyx_n_u_IDENTIFICATION_DIVISION_2 __pyx_string_tab[48]
-#define __pyx_n_u_IDENTIFIER __pyx_string_tab[49]
-#define __pyx_n_u_KEYWORDS __pyx_string_tab[50]
-#define __pyx_n_u_LEVEL_NUMBER __pyx_string_tab[51]
-#define __pyx_n_u_LEVEL_NUMBER_1_2DIGIT_RE __pyx_string_tab[52]
-#define __pyx_n_u_LEVEL_NUM_RE __pyx_string_tab[53]
-#define __pyx_n_u_LITERAL_PREFIXES __pyx_string_tab[54]
-#define __pyx_n_u_LexerError __pyx_string_tab[55]
-#define __pyx_n_u_NEWLINE __pyx_string_tab[56]
-#define __pyx_n_u_NUMERIC_LITERAL __pyx_string_tab[57]
-#define __pyx_n_u_PROCEDURE __pyx_string_tab[58]
-#define __pyx_n_u_PROCEDURE_DIVISION_2 __pyx_string_tab[59]
-#define __pyx_n_u_Pyx_PyDict_NextRef __pyx_string_tab[60]
-#define __pyx_n_u_SINGLE_CHAR_TOKENS __pyx_string_tab[61]
-#define __pyx_n_u_STRING_LITERAL __pyx_string_tab[62]
-#define __pyx_n_u_SourceLocation __pyx_string_tab[63]
-#define __pyx_n_u_Token __pyx_string_tab[64]
-#define __pyx_n_u_TokenType __pyx_string_tab[65]
-#define __pyx_n_u_VALUE __pyx_string_tab[66]
-#define __pyx_n_u__2 __pyx_string_tab[67]
-#define __pyx_n_u_append __pyx_string_tab[68]
-#define __pyx_n_u_asyncio_coroutines __pyx_string_tab[69]
-#define __pyx_n_u_ch __pyx_string_tab[70]
-#define __pyx_n_u_char __pyx_string_tab[71]
-#define __pyx_n_u_chars __pyx_string_tab[72]
-#define __pyx_n_u_check_division_header __pyx_string_tab[73]
-#define __pyx_n_u_class_getitem __pyx_string_tab[74]
-#define __pyx_n_u_cline_in_traceback __pyx_string_tab[75]
-#define __pyx_n_u_cobolparser__lexer_fast __pyx_string_tab[76]
-#define __pyx_n_u_cobolparser_lexer __pyx_string_tab[77]
-#define __pyx_n_u_cobolparser_models_ast_base __pyx_string_tab[78]
-#define __pyx_n_u_current_line __pyx_string_tab[79]
-#define __pyx_n_u_current_line_upper __pyx_string_tab[80]
-#define __pyx_n_u_division_end __pyx_string_tab[81]
-#define __pyx_n_u_division_type __pyx_string_tab[82]
-#define __pyx_n_u_division_word __pyx_string_tab[83]
-#define __pyx_n_u_doc __pyx_string_tab[84]
-#define __pyx_n_u_e __pyx_string_tab[85]
-#define __pyx_n_u_err_location __pyx_string_tab[86]
-#define __pyx_n_u_errors __pyx_string_tab[87]
-#define __pyx_n_u_free_form __pyx_string_tab[88]
-#define __pyx_n_u_func __pyx_string_tab[89]
-#define __pyx_n_u_handle_cobol_line_format __pyx_string_tab[90]
-#define __pyx_n_u_has_decimal __pyx_string_tab[91]
-#define __pyx_n_u_has_exponent __pyx_string_tab[92]
-#define __pyx_n_u_intern __pyx_string_tab[93]
-#define __pyx_n_u_is_coroutine __pyx_string_tab[94]
-#define __pyx_n_u_is_line_start_quote __pyx_string_tab[95]
-#define __pyx_n_u_isalnum __pyx_string_tab[96]
-#define __pyx_n_u_isalpha __pyx_string_tab[97]
-#define __pyx_n_u_isdigit __pyx_string_tab[98]
-#define __pyx_n_u_items __pyx_string_tab[99]
-#define __pyx_n_u_length __pyx_string_tab[100]
-#define __pyx_n_u_line __pyx_string_tab[101]
-#define __pyx_n_u_line_num __pyx_string_tab[102]
-#define __pyx_n_u_lines __pyx_string_tab[103]
-#define __pyx_n_u_location __pyx_string_tab[104]
-#define __pyx_n_u_lookahead_pos __pyx_string_tab[105]
-#define __pyx_n_u_main __pyx_string_tab[106]
-#define __pyx_n_u_match __pyx_string_tab[107]
-#define __pyx_n_u_metaclass __pyx_string_tab[108]
-#define __pyx_n_u_module __pyx_string_tab[109]
-#define __pyx_n_u_mro_entries __pyx_string_tab[110]
-#define __pyx_n_u_n_lines __pyx_string_tab[111]
-#define __pyx_n_u_name __pyx_string_tab[112]
-#define __pyx_n_u_new_pos __pyx_string_tab[113]
-#define __pyx_n_u_next_line __pyx_string_tab[114]
-#define __pyx_n_u_next_line_index __pyx_string_tab[115]
-#define __pyx_n_u_open_string_location __pyx_string_tab[116]
-#define __pyx_n_u_open_string_quote __pyx_string_tab[117]
-#define __pyx_n_u_open_string_value __pyx_string_tab[118]
-#define __pyx_n_u_out_tokens __pyx_string_tab[119]
-#define __pyx_n_u_partial_value __pyx_string_tab[120]
-#define __pyx_n_u_parts __pyx_string_tab[121]
-#define __pyx_n_u_pop __pyx_string_tab[122]
-#define __pyx_n_u_pos __pyx_string_tab[123]
-#define __pyx_n_u_prefixed __pyx_string_tab[124]
-#define __pyx_n_u_prepare __pyx_string_tab[125]
-#define __pyx_n_u_program_text __pyx_string_tab[126]
-#define __pyx_n_u_qualname __pyx_string_tab[127]
-#define __pyx_n_u_quote __pyx_string_tab[128]
-#define __pyx_n_u_read_number_from_text __pyx_string_tab[129]
-#define __pyx_n_u_read_prefixed_literal_from_text __pyx_string_tab[130]
-#define __pyx_n_u_read_word_from_text __pyx_string_tab[131]
-#define __pyx_n_u_remaining __pyx_string_tab[132]
-#define __pyx_n_u_self __pyx_string_tab[133]
-#define __pyx_n_u_set_name __pyx_string_tab[134]
-#define __pyx_n_u_setdefault __pyx_string_tab[135]
-#define __pyx_n_u_start_col __pyx_string_tab[136]
-#define __pyx_n_u_start_continuation __pyx_string_tab[137]
-#define __pyx_n_u_start_pos __pyx_string_tab[138]
-#define __pyx_n_u_strip __pyx_string_tab[139]
-#define __pyx_n_u_sys __pyx_string_tab[140]
-#define __pyx_n_u_test __pyx_string_tab[141]
-#define __pyx_n_u_text __pyx_string_tab[142]
-#define __pyx_n_u_token __pyx_string_tab[143]
-#define __pyx_n_u_token_type __pyx_string_tab[144]
-#define __pyx_n_u_tokenize __pyx_string_tab[145]
-#define __pyx_n_u_tokenize_program_text __pyx_string_tab[146]
-#define __pyx_n_u_tokens __pyx_string_tab[147]
-#define __pyx_n_u_try_single_line_string __pyx_string_tab[148]
-#define __pyx_n_u_type __pyx_string_tab[149]
-#define __pyx_n_u_unterminated __pyx_string_tab[150]
-#define __pyx_n_u_upper __pyx_string_tab[151]
-#define __pyx_n_u_upper_value __pyx_string_tab[152]
-#define __pyx_n_u_value __pyx_string_tab[153]
-#define __pyx_n_u_values __pyx_string_tab[154]
-#define __pyx_n_u_ws_i __pyx_string_tab[155]
-#define __pyx_kp_b_iso88591_A_1A_2S_Kq_d_A_4q_t81_q_S_D_D_D __pyx_string_tab[156]
-#define __pyx_kp_b_iso88591_A_1A_d_A_4q_uCt3e3a_q_Qir_Jb_Q_u __pyx_string_tab[157]
-#define __pyx_kp_b_iso88591_A_Qa_2S_Kq_4r_D_c_DAV1_WA_AZ_F_F __pyx_string_tab[158]
-#define __pyx_kp_b_iso88591_A_Qa_S_6_4q_7_6_D_Rs_9Kq_9_6j_9K __pyx_string_tab[159]
-#define __pyx_kp_b_iso88591_A_Qa_z_1_Qa_2S_Kq_d_A_Qa_s_Q_4r __pyx_string_tab[160]
-#define __pyx_kp_b_iso88591_A_d_a_q_Ja_Ja_Qa_L_Qa_5_q_4y_4s __pyx_string_tab[161]
+#define __pyx_kp_u_Unterminated_string_literal_at_l __pyx_string_tab[10]
+#define __pyx_kp_u__10 __pyx_string_tab[11]
+#define __pyx_kp_u__11 __pyx_string_tab[12]
+#define __pyx_kp_u__3 __pyx_string_tab[13]
+#define __pyx_kp_u__4 __pyx_string_tab[14]
+#define __pyx_kp_u__5 __pyx_string_tab[15]
+#define __pyx_kp_u__6 __pyx_string_tab[16]
+#define __pyx_kp_u__7 __pyx_string_tab[17]
+#define __pyx_kp_u__8 __pyx_string_tab[18]
+#define __pyx_kp_u__9 __pyx_string_tab[19]
+#define __pyx_kp_u_add_note __pyx_string_tab[20]
+#define __pyx_kp_u_closed_at_end_of_line_instead_o __pyx_string_tab[21]
+#define __pyx_kp_u_cobolparser__lexer_fast_pyx __pyx_string_tab[22]
+#define __pyx_kp_u_column __pyx_string_tab[23]
+#define __pyx_n_u_COMMENT __pyx_string_tab[24]
+#define __pyx_n_u_CobolLexer __pyx_string_tab[25]
+#define __pyx_n_u_CobolLexerBase __pyx_string_tab[26]
+#define __pyx_n_u_CobolLexerPure __pyx_string_tab[27]
+#define __pyx_n_u_CobolLexer__try_single_line_stri __pyx_string_tab[28]
+#define __pyx_n_u_CobolLexer_check_division_header __pyx_string_tab[29]
+#define __pyx_n_u_CobolLexer_read_number_from_text __pyx_string_tab[30]
+#define __pyx_n_u_CobolLexer_read_word_from_text __pyx_string_tab[31]
+#define __pyx_n_u_CobolLexer_tokenize __pyx_string_tab[32]
+#define __pyx_n_u_CobolLexer_tokenize_program_text __pyx_string_tab[33]
+#define __pyx_n_u_DATA __pyx_string_tab[34]
+#define __pyx_n_u_DATA_DIVISION_2 __pyx_string_tab[35]
+#define __pyx_n_u_DIVISION_FIRST __pyx_string_tab[36]
+#define __pyx_n_u_DIV_DATA_LEN __pyx_string_tab[37]
+#define __pyx_n_u_DIV_ENVIRONMENT_LEN __pyx_string_tab[38]
+#define __pyx_n_u_DIV_IDENTIFICATION_LEN __pyx_string_tab[39]
+#define __pyx_n_u_DIV_ID_LEN __pyx_string_tab[40]
+#define __pyx_n_u_DIV_PROCEDURE_LEN __pyx_string_tab[41]
+#define __pyx_n_u_E __pyx_string_tab[42]
+#define __pyx_n_u_ENVIRONMENT __pyx_string_tab[43]
+#define __pyx_n_u_ENVIRONMENT_DIVISION_2 __pyx_string_tab[44]
+#define __pyx_n_u_EOF __pyx_string_tab[45]
+#define __pyx_n_u_FF_INDICATOR __pyx_string_tab[46]
+#define __pyx_n_u_FIGURATIVE_CONSTANT __pyx_string_tab[47]
+#define __pyx_n_u_FIGURATIVE_CONSTANTS __pyx_string_tab[48]
+#define __pyx_n_u_ID __pyx_string_tab[49]
+#define __pyx_n_u_IDENTIFICATION __pyx_string_tab[50]
+#define __pyx_n_u_IDENTIFICATION_DIVISION_2 __pyx_string_tab[51]
+#define __pyx_n_u_IDENTIFIER __pyx_string_tab[52]
+#define __pyx_n_u_KEYWORDS __pyx_string_tab[53]
+#define __pyx_n_u_LEVEL_NUMBER __pyx_string_tab[54]
+#define __pyx_n_u_LEVEL_NUMBER_1_2DIGIT_RE __pyx_string_tab[55]
+#define __pyx_n_u_LEVEL_NUM_RE __pyx_string_tab[56]
+#define __pyx_n_u_LITERAL_PREFIXES __pyx_string_tab[57]
+#define __pyx_n_u_LexerError __pyx_string_tab[58]
+#define __pyx_n_u_NEWLINE __pyx_string_tab[59]
+#define __pyx_n_u_NUMERIC_LITERAL __pyx_string_tab[60]
+#define __pyx_n_u_PROCEDURE __pyx_string_tab[61]
+#define __pyx_n_u_PROCEDURE_DIVISION_2 __pyx_string_tab[62]
+#define __pyx_n_u_Pyx_PyDict_NextRef __pyx_string_tab[63]
+#define __pyx_n_u_SINGLE_CHAR_TOKENS __pyx_string_tab[64]
+#define __pyx_n_u_STRING_LITERAL __pyx_string_tab[65]
+#define __pyx_n_u_SourceLocation __pyx_string_tab[66]
+#define __pyx_n_u_Token __pyx_string_tab[67]
+#define __pyx_n_u_TokenType __pyx_string_tab[68]
+#define __pyx_n_u_VALUE __pyx_string_tab[69]
+#define __pyx_n_u__2 __pyx_string_tab[70]
+#define __pyx_n_u_append __pyx_string_tab[71]
+#define __pyx_n_u_asyncio_coroutines __pyx_string_tab[72]
+#define __pyx_n_u_ch __pyx_string_tab[73]
+#define __pyx_n_u_char __pyx_string_tab[74]
+#define __pyx_n_u_chars __pyx_string_tab[75]
+#define __pyx_n_u_check_division_header __pyx_string_tab[76]
+#define __pyx_n_u_class_getitem __pyx_string_tab[77]
+#define __pyx_n_u_cline_in_traceback __pyx_string_tab[78]
+#define __pyx_n_u_cobolparser__lexer_fast __pyx_string_tab[79]
+#define __pyx_n_u_cobolparser_lexer __pyx_string_tab[80]
+#define __pyx_n_u_cobolparser_models_ast_base __pyx_string_tab[81]
+#define __pyx_n_u_current_line __pyx_string_tab[82]
+#define __pyx_n_u_current_line_upper __pyx_string_tab[83]
+#define __pyx_n_u_division_end __pyx_string_tab[84]
+#define __pyx_n_u_division_type __pyx_string_tab[85]
+#define __pyx_n_u_division_word __pyx_string_tab[86]
+#define __pyx_n_u_doc __pyx_string_tab[87]
+#define __pyx_n_u_e __pyx_string_tab[88]
+#define __pyx_n_u_err_location __pyx_string_tab[89]
+#define __pyx_n_u_errors __pyx_string_tab[90]
+#define __pyx_n_u_free_form __pyx_string_tab[91]
+#define __pyx_n_u_func __pyx_string_tab[92]
+#define __pyx_n_u_handle_cobol_line_format __pyx_string_tab[93]
+#define __pyx_n_u_has_decimal __pyx_string_tab[94]
+#define __pyx_n_u_has_exponent __pyx_string_tab[95]
+#define __pyx_n_u_intern __pyx_string_tab[96]
+#define __pyx_n_u_is_coroutine __pyx_string_tab[97]
+#define __pyx_n_u_is_line_start_quote __pyx_string_tab[98]
+#define __pyx_n_u_isalnum __pyx_string_tab[99]
+#define __pyx_n_u_isalpha __pyx_string_tab[100]
+#define __pyx_n_u_isdigit __pyx_string_tab[101]
+#define __pyx_n_u_items __pyx_string_tab[102]
+#define __pyx_n_u_length __pyx_string_tab[103]
+#define __pyx_n_u_line __pyx_string_tab[104]
+#define __pyx_n_u_line_num __pyx_string_tab[105]
+#define __pyx_n_u_lines __pyx_string_tab[106]
+#define __pyx_n_u_location __pyx_string_tab[107]
+#define __pyx_n_u_lookahead_pos __pyx_string_tab[108]
+#define __pyx_n_u_main __pyx_string_tab[109]
+#define __pyx_n_u_match __pyx_string_tab[110]
+#define __pyx_n_u_metaclass __pyx_string_tab[111]
+#define __pyx_n_u_module __pyx_string_tab[112]
+#define __pyx_n_u_mro_entries __pyx_string_tab[113]
+#define __pyx_n_u_n_lines __pyx_string_tab[114]
+#define __pyx_n_u_name __pyx_string_tab[115]
+#define __pyx_n_u_new_pos __pyx_string_tab[116]
+#define __pyx_n_u_next_line __pyx_string_tab[117]
+#define __pyx_n_u_next_line_index __pyx_string_tab[118]
+#define __pyx_n_u_open_string_location __pyx_string_tab[119]
+#define __pyx_n_u_open_string_quote __pyx_string_tab[120]
+#define __pyx_n_u_open_string_value __pyx_string_tab[121]
+#define __pyx_n_u_out_tokens __pyx_string_tab[122]
+#define __pyx_n_u_partial_value __pyx_string_tab[123]
+#define __pyx_n_u_parts __pyx_string_tab[124]
+#define __pyx_n_u_pop __pyx_string_tab[125]
+#define __pyx_n_u_pos __pyx_string_tab[126]
+#define __pyx_n_u_prefixed __pyx_string_tab[127]
+#define __pyx_n_u_prepare __pyx_string_tab[128]
+#define __pyx_n_u_program_text __pyx_string_tab[129]
+#define __pyx_n_u_qualname __pyx_string_tab[130]
+#define __pyx_n_u_quote __pyx_string_tab[131]
+#define __pyx_n_u_read_number_from_text __pyx_string_tab[132]
+#define __pyx_n_u_read_prefixed_literal_from_text __pyx_string_tab[133]
+#define __pyx_n_u_read_word_from_text __pyx_string_tab[134]
+#define __pyx_n_u_remaining __pyx_string_tab[135]
+#define __pyx_n_u_self __pyx_string_tab[136]
+#define __pyx_n_u_set_name __pyx_string_tab[137]
+#define __pyx_n_u_setdefault __pyx_string_tab[138]
+#define __pyx_n_u_start_col __pyx_string_tab[139]
+#define __pyx_n_u_start_continuation __pyx_string_tab[140]
+#define __pyx_n_u_start_pos __pyx_string_tab[141]
+#define __pyx_n_u_strip __pyx_string_tab[142]
+#define __pyx_n_u_sys __pyx_string_tab[143]
+#define __pyx_n_u_test __pyx_string_tab[144]
+#define __pyx_n_u_text __pyx_string_tab[145]
+#define __pyx_n_u_token __pyx_string_tab[146]
+#define __pyx_n_u_token_type __pyx_string_tab[147]
+#define __pyx_n_u_tokenize __pyx_string_tab[148]
+#define __pyx_n_u_tokenize_program_text __pyx_string_tab[149]
+#define __pyx_n_u_tokens __pyx_string_tab[150]
+#define __pyx_n_u_try_single_line_string __pyx_string_tab[151]
+#define __pyx_n_u_type __pyx_string_tab[152]
+#define __pyx_n_u_unterminated __pyx_string_tab[153]
+#define __pyx_n_u_upper __pyx_string_tab[154]
+#define __pyx_n_u_upper_value __pyx_string_tab[155]
+#define __pyx_n_u_value __pyx_string_tab[156]
+#define __pyx_n_u_values __pyx_string_tab[157]
+#define __pyx_n_u_warnings __pyx_string_tab[158]
+#define __pyx_n_u_ws_i __pyx_string_tab[159]
+#define __pyx_kp_b_iso88591_A_1A_2S_Kq_d_A_4q_t81_q_S_D_D_D __pyx_string_tab[160]
+#define __pyx_kp_b_iso88591_A_1A_d_A_4q_uCt3e3a_q_Qir_Jb_Q_u __pyx_string_tab[161]
+#define __pyx_kp_b_iso88591_A_Qa_2S_Kq_4r_D_c_DAV1_WA_AZ_F_F __pyx_string_tab[162]
+#define __pyx_kp_b_iso88591_A_Qa_S_6_4q_7_6_D_Rs_9Kq_9_6j_9K __pyx_string_tab[163]
+#define __pyx_kp_b_iso88591_A_Qa_z_1_Qa_2S_Kq_d_A_Qa_s_Q_4r __pyx_string_tab[164]
+#define __pyx_kp_b_iso88591_A_d_a_q_Ja_Ja_Qa_L_Qa_5_q_4y_4s __pyx_string_tab[165]
 #define __pyx_int_1 __pyx_number_tab[0]
 #define __pyx_int_99 __pyx_number_tab[1]
 /* #### Code section: module_state_clear ### */
@@ -2709,7 +2746,7 @@ static CYTHON_SMALL_CODE int __pyx_m_clear(PyObject *m) {
   __Pyx_State_RemoveModule(NULL);
   #endif
   for (int i=0; i<6; ++i) { Py_CLEAR(clear_module_state->__pyx_codeobj_tab[i]); }
-  for (int i=0; i<162; ++i) { Py_CLEAR(clear_module_state->__pyx_string_tab[i]); }
+  for (int i=0; i<166; ++i) { Py_CLEAR(clear_module_state->__pyx_string_tab[i]); }
   for (int i=0; i<2; ++i) { Py_CLEAR(clear_module_state->__pyx_number_tab[i]); }
 /* #### Code section: module_state_clear_contents ### */
 /* CommonTypesMetaclass.module_state_clear */
@@ -2734,7 +2771,7 @@ static CYTHON_SMALL_CODE int __pyx_m_traverse(PyObject *m, visitproc visit, void
   __Pyx_VISIT_CONST(traverse_module_state->__pyx_empty_bytes);
   __Pyx_VISIT_CONST(traverse_module_state->__pyx_empty_unicode);
   for (int i=0; i<6; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_codeobj_tab[i]); }
-  for (int i=0; i<162; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_string_tab[i]); }
+  for (int i=0; i<166; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_string_tab[i]); }
   for (int i=0; i<2; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_number_tab[i]); }
 /* #### Code section: module_state_traverse_contents ### */
 /* CommonTypesMetaclass.module_state_traverse */
@@ -6393,9 +6430,10 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
   PyObject *(*__pyx_t_14)(PyObject *);
   Py_ssize_t __pyx_t_15;
   int __pyx_t_16;
-  long __pyx_t_17;
-  int __pyx_t_18;
+  PyObject *__pyx_t_17[5];
+  long __pyx_t_18;
   int __pyx_t_19;
+  int __pyx_t_20;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -7477,66 +7515,121 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
  *                             self.errors.append(
  *                                 LexerError(
 */
+            goto __pyx_L36;
           }
 
-          /* "cobolparser/_lexer_fast.pyx":360
+          /* "cobolparser/_lexer_fast.pyx":364
+ *                             # appear in a free-form comment), but no longer
+ *                             # fully silent either.
+ *                             self.warnings.append(             # <<<<<<<<<<<<<<
+ *                                 f"Unterminated string literal at line "
+ *                                 f"{line_num + 1}, column {start_col + pos}: "
+*/
+          /*else*/ {
+            __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_warnings); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 364, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_9);
+
+            /* "cobolparser/_lexer_fast.pyx":366
+ *                             self.warnings.append(
+ *                                 f"Unterminated string literal at line "
+ *                                 f"{line_num + 1}, column {start_col + pos}: "             # <<<<<<<<<<<<<<
+ *                                 "closed at end of line instead of a matching "
+ *                                 "quote"
+*/
+            __pyx_t_2 = __Pyx_PyUnicode_From_long((__pyx_v_line_num + 1), 0, ' ', 'd'); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 366, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_2);
+            __pyx_t_6 = __Pyx_PyUnicode_From_int((__pyx_v_start_col + __pyx_v_pos), 0, ' ', 'd'); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 366, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_6);
+            __pyx_t_17[0] = __pyx_mstate_global->__pyx_kp_u_Unterminated_string_literal_at_l;
+            __pyx_t_17[1] = __pyx_t_2;
+            __pyx_t_17[2] = __pyx_mstate_global->__pyx_kp_u_column;
+            __pyx_t_17[3] = __pyx_t_6;
+            __pyx_t_17[4] = __pyx_mstate_global->__pyx_kp_u_closed_at_end_of_line_instead_o;
+
+            /* "cobolparser/_lexer_fast.pyx":365
+ *                             # fully silent either.
+ *                             self.warnings.append(
+ *                                 f"Unterminated string literal at line "             # <<<<<<<<<<<<<<
+ *                                 f"{line_num + 1}, column {start_col + pos}: "
+ *                                 "closed at end of line instead of a matching "
+*/
+            __pyx_t_7 = __Pyx_PyUnicode_Join(__pyx_t_17, 5, 36 + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_2) + 9 + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_6) + 51, 127);
+            if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 365, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_7);
+            __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+            __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+
+            /* "cobolparser/_lexer_fast.pyx":364
+ *                             # appear in a free-form comment), but no longer
+ *                             # fully silent either.
+ *                             self.warnings.append(             # <<<<<<<<<<<<<<
+ *                                 f"Unterminated string literal at line "
+ *                                 f"{line_num + 1}, column {start_col + pos}: "
+*/
+            __pyx_t_16 = __Pyx_PyObject_Append(__pyx_t_9, __pyx_t_7); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 364, __pyx_L1_error)
+            __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+            __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          }
+          __pyx_L36:;
+
+          /* "cobolparser/_lexer_fast.pyx":371
  *                             )
  *                         tokens.append(
  *                             Token(TokenType.STRING_LITERAL, partial_value, err_location)             # <<<<<<<<<<<<<<
  *                         )
  *                         pos = new_pos
 */
-          __pyx_t_2 = NULL;
-          __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_mstate_global->__pyx_n_u_Token); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 360, __pyx_L1_error)
+          __pyx_t_9 = NULL;
+          __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_mstate_global->__pyx_n_u_Token); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 371, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_6);
-          __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_TokenType); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 360, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
-          __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_STRING_LITERAL); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 360, __pyx_L1_error)
+          __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_TokenType); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 371, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_2);
+          __pyx_t_8 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_STRING_LITERAL); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 371, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_8);
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           __pyx_t_10 = 1;
           #if CYTHON_UNPACK_METHODS
           if (unlikely(PyMethod_Check(__pyx_t_6))) {
-            __pyx_t_2 = PyMethod_GET_SELF(__pyx_t_6);
-            assert(__pyx_t_2);
+            __pyx_t_9 = PyMethod_GET_SELF(__pyx_t_6);
+            assert(__pyx_t_9);
             PyObject* __pyx__function = PyMethod_GET_FUNCTION(__pyx_t_6);
-            __Pyx_INCREF(__pyx_t_2);
+            __Pyx_INCREF(__pyx_t_9);
             __Pyx_INCREF(__pyx__function);
             __Pyx_DECREF_SET(__pyx_t_6, __pyx__function);
             __pyx_t_10 = 0;
           }
           #endif
           {
-            PyObject *__pyx_callargs[4] = {__pyx_t_2, __pyx_t_8, __pyx_v_partial_value, __pyx_v_err_location};
-            __pyx_t_9 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_6, __pyx_callargs+__pyx_t_10, (4-__pyx_t_10) | (__pyx_t_10*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-            __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
+            PyObject *__pyx_callargs[4] = {__pyx_t_9, __pyx_t_8, __pyx_v_partial_value, __pyx_v_err_location};
+            __pyx_t_7 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_6, __pyx_callargs+__pyx_t_10, (4-__pyx_t_10) | (__pyx_t_10*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+            __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
             __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
             __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-            if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 360, __pyx_L1_error)
-            __Pyx_GOTREF(__pyx_t_9);
+            if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 371, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_7);
           }
 
-          /* "cobolparser/_lexer_fast.pyx":359
- *                                 )
+          /* "cobolparser/_lexer_fast.pyx":370
+ *                                 "quote"
  *                             )
  *                         tokens.append(             # <<<<<<<<<<<<<<
  *                             Token(TokenType.STRING_LITERAL, partial_value, err_location)
  *                         )
 */
-          __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_t_9); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 359, __pyx_L1_error)
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_t_7); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 370, __pyx_L1_error)
+          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-          /* "cobolparser/_lexer_fast.pyx":362
+          /* "cobolparser/_lexer_fast.pyx":373
  *                             Token(TokenType.STRING_LITERAL, partial_value, err_location)
  *                         )
  *                         pos = new_pos             # <<<<<<<<<<<<<<
  *                         continue
  *                 else:
 */
-          __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 362, __pyx_L1_error)
+          __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 373, __pyx_L1_error)
           __pyx_v_pos = __pyx_t_11;
 
-          /* "cobolparser/_lexer_fast.pyx":363
+          /* "cobolparser/_lexer_fast.pyx":374
  *                         )
  *                         pos = new_pos
  *                         continue             # <<<<<<<<<<<<<<
@@ -7555,7 +7648,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       }
 
-      /* "cobolparser/_lexer_fast.pyx":365
+      /* "cobolparser/_lexer_fast.pyx":376
  *                         continue
  *                 else:
  *                     if token is not None:             # <<<<<<<<<<<<<<
@@ -7566,16 +7659,16 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         __pyx_t_3 = (__pyx_v_token != Py_None);
         if (__pyx_t_3) {
 
-          /* "cobolparser/_lexer_fast.pyx":366
+          /* "cobolparser/_lexer_fast.pyx":377
  *                 else:
  *                     if token is not None:
  *                         tokens.append(token)             # <<<<<<<<<<<<<<
  *                     pos = new_pos
  *                     continue
 */
-          __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 366, __pyx_L1_error)
+          __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 377, __pyx_L1_error)
 
-          /* "cobolparser/_lexer_fast.pyx":365
+          /* "cobolparser/_lexer_fast.pyx":376
  *                         continue
  *                 else:
  *                     if token is not None:             # <<<<<<<<<<<<<<
@@ -7584,17 +7677,17 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
         }
 
-        /* "cobolparser/_lexer_fast.pyx":367
+        /* "cobolparser/_lexer_fast.pyx":378
  *                     if token is not None:
  *                         tokens.append(token)
  *                     pos = new_pos             # <<<<<<<<<<<<<<
  *                     continue
  * 
 */
-        __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 367, __pyx_L1_error)
+        __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 378, __pyx_L1_error)
         __pyx_v_pos = __pyx_t_11;
 
-        /* "cobolparser/_lexer_fast.pyx":368
+        /* "cobolparser/_lexer_fast.pyx":379
  *                         tokens.append(token)
  *                     pos = new_pos
  *                     continue             # <<<<<<<<<<<<<<
@@ -7613,7 +7706,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
     }
 
-    /* "cobolparser/_lexer_fast.pyx":371
+    /* "cobolparser/_lexer_fast.pyx":382
  * 
  *             # ---- digit-initial tokens ------------------------------
  *             if char.isdigit():             # <<<<<<<<<<<<<<
@@ -7625,16 +7718,16 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
     __pyx_t_10 = 0;
     {
       PyObject *__pyx_callargs[2] = {__pyx_t_6, NULL};
-      __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isdigit, __pyx_callargs+__pyx_t_10, (1-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      __pyx_t_7 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isdigit, __pyx_callargs+__pyx_t_10, (1-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
       __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 371, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_9);
+      if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 382, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_7);
     }
-    __pyx_t_3 = __Pyx_PyObject_IsTrue(__pyx_t_9); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 371, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+    __pyx_t_3 = __Pyx_PyObject_IsTrue(__pyx_t_7); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 382, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
     if (__pyx_t_3) {
 
-      /* "cobolparser/_lexer_fast.pyx":373
+      /* "cobolparser/_lexer_fast.pyx":384
  *             if char.isdigit():
  *                 # Advance past all leading digits (string result unused)
  *                 lookahead_pos = pos             # <<<<<<<<<<<<<<
@@ -7643,7 +7736,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       __pyx_v_lookahead_pos = __pyx_v_pos;
 
-      /* "cobolparser/_lexer_fast.pyx":374
+      /* "cobolparser/_lexer_fast.pyx":385
  *                 # Advance past all leading digits (string result unused)
  *                 lookahead_pos = pos
  *                 while lookahead_pos < length and text[lookahead_pos].isdigit():             # <<<<<<<<<<<<<<
@@ -7657,13 +7750,13 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
           __pyx_t_3 = __pyx_t_5;
           goto __pyx_L41_bool_binop_done;
         }
-        __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 374, __pyx_L1_error)
+        __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 385, __pyx_L1_error)
         __pyx_t_5 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
         __pyx_t_3 = __pyx_t_5;
         __pyx_L41_bool_binop_done:;
         if (!__pyx_t_3) break;
 
-        /* "cobolparser/_lexer_fast.pyx":375
+        /* "cobolparser/_lexer_fast.pyx":386
  *                 lookahead_pos = pos
  *                 while lookahead_pos < length and text[lookahead_pos].isdigit():
  *                     lookahead_pos += 1             # <<<<<<<<<<<<<<
@@ -7673,7 +7766,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         __pyx_v_lookahead_pos = (__pyx_v_lookahead_pos + 1);
       }
 
-      /* "cobolparser/_lexer_fast.pyx":380
+      /* "cobolparser/_lexer_fast.pyx":391
  *                 # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
  *                 # a digit or sign+digit stays on the read_number_from_text path.
  *                 if lookahead_pos < length and (             # <<<<<<<<<<<<<<
@@ -7687,21 +7780,21 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         goto __pyx_L44_bool_binop_done;
       }
 
-      /* "cobolparser/_lexer_fast.pyx":382
+      /* "cobolparser/_lexer_fast.pyx":393
  *                 if lookahead_pos < length and (
  *                     (
  *                         text[lookahead_pos] == "-"             # <<<<<<<<<<<<<<
  *                         and lookahead_pos + 1 < length
  *                         and text[lookahead_pos + 1].isalpha()
 */
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 382, __pyx_L1_error)
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 393, __pyx_L1_error)
       __pyx_t_5 = (__pyx_t_4 == 45);
       if (!__pyx_t_5) {
         goto __pyx_L46_next_or;
       } else {
       }
 
-      /* "cobolparser/_lexer_fast.pyx":383
+      /* "cobolparser/_lexer_fast.pyx":394
  *                     (
  *                         text[lookahead_pos] == "-"
  *                         and lookahead_pos + 1 < length             # <<<<<<<<<<<<<<
@@ -7714,15 +7807,15 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
       } else {
       }
 
-      /* "cobolparser/_lexer_fast.pyx":384
+      /* "cobolparser/_lexer_fast.pyx":395
  *                         text[lookahead_pos] == "-"
  *                         and lookahead_pos + 1 < length
  *                         and text[lookahead_pos + 1].isalpha()             # <<<<<<<<<<<<<<
  *                     )
  *                     or (
 */
-      __pyx_t_17 = (__pyx_v_lookahead_pos + 1);
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_17, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 384, __pyx_L1_error)
+      __pyx_t_18 = (__pyx_v_lookahead_pos + 1);
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_18, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 395, __pyx_L1_error)
       __pyx_t_5 = __Pyx_Py_UNICODE_ISALPHA(__pyx_t_4); 
       if (!__pyx_t_5) {
       } else {
@@ -7731,14 +7824,14 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
       }
       __pyx_L46_next_or:;
 
-      /* "cobolparser/_lexer_fast.pyx":387
+      /* "cobolparser/_lexer_fast.pyx":398
  *                     )
  *                     or (
  *                         text[lookahead_pos].isalpha()             # <<<<<<<<<<<<<<
  *                         and not (
  *                             text[lookahead_pos].upper() == "E"
 */
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 387, __pyx_L1_error)
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 398, __pyx_L1_error)
       __pyx_t_5 = __Pyx_Py_UNICODE_ISALPHA(__pyx_t_4); 
       if (__pyx_t_5) {
       } else {
@@ -7746,129 +7839,129 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         goto __pyx_L44_bool_binop_done;
       }
 
-      /* "cobolparser/_lexer_fast.pyx":389
+      /* "cobolparser/_lexer_fast.pyx":400
  *                         text[lookahead_pos].isalpha()
  *                         and not (
  *                             text[lookahead_pos].upper() == "E"             # <<<<<<<<<<<<<<
  *                             and (
  *                                 (
 */
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 389, __pyx_L1_error)
-      __pyx_t_8 = __Pyx_PyUnicode_FromOrdinal(__pyx_t_4); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 389, __pyx_L1_error)
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_v_lookahead_pos, int, 1, __Pyx_PyLong_From_int, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 400, __pyx_L1_error)
+      __pyx_t_8 = __Pyx_PyUnicode_FromOrdinal(__pyx_t_4); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 400, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
       __pyx_t_6 = __pyx_t_8;
       __Pyx_INCREF(__pyx_t_6);
       __pyx_t_10 = 0;
       {
         PyObject *__pyx_callargs[2] = {__pyx_t_6, NULL};
-        __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_upper, __pyx_callargs+__pyx_t_10, (1-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+        __pyx_t_7 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_upper, __pyx_callargs+__pyx_t_10, (1-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
         __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 389, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_9);
+        if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 400, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_7);
       }
-      __pyx_t_18 = (__Pyx_PyUnicode_Equals(__pyx_t_9, __pyx_mstate_global->__pyx_n_u_E, Py_EQ)); if (unlikely((__pyx_t_18 < 0))) __PYX_ERR(0, 389, __pyx_L1_error)
-      __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-      if (__pyx_t_18) {
-      } else {
-        __pyx_t_5 = __pyx_t_18;
-        goto __pyx_L50_bool_binop_done;
-      }
-
-      /* "cobolparser/_lexer_fast.pyx":392
- *                             and (
- *                                 (
- *                                     lookahead_pos + 1 < length             # <<<<<<<<<<<<<<
- *                                     and text[lookahead_pos + 1].isdigit()
- *                                 )
-*/
-      __pyx_t_18 = ((__pyx_v_lookahead_pos + 1) < __pyx_v_length);
-      if (!__pyx_t_18) {
-        goto __pyx_L52_next_or;
-      } else {
-      }
-
-      /* "cobolparser/_lexer_fast.pyx":393
- *                                 (
- *                                     lookahead_pos + 1 < length
- *                                     and text[lookahead_pos + 1].isdigit()             # <<<<<<<<<<<<<<
- *                                 )
- *                                 or (
-*/
-      __pyx_t_17 = (__pyx_v_lookahead_pos + 1);
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_17, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 393, __pyx_L1_error)
-      __pyx_t_18 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
-      if (!__pyx_t_18) {
-      } else {
-        __pyx_t_5 = __pyx_t_18;
-        goto __pyx_L50_bool_binop_done;
-      }
-      __pyx_L52_next_or:;
-
-      /* "cobolparser/_lexer_fast.pyx":396
- *                                 )
- *                                 or (
- *                                     lookahead_pos + 2 < length             # <<<<<<<<<<<<<<
- *                                     and text[lookahead_pos + 1] in ("+", "-")
- *                                     and text[lookahead_pos + 2].isdigit()
-*/
-      __pyx_t_18 = ((__pyx_v_lookahead_pos + 2) < __pyx_v_length);
-      if (__pyx_t_18) {
-      } else {
-        __pyx_t_5 = __pyx_t_18;
-        goto __pyx_L50_bool_binop_done;
-      }
-
-      /* "cobolparser/_lexer_fast.pyx":397
- *                                 or (
- *                                     lookahead_pos + 2 < length
- *                                     and text[lookahead_pos + 1] in ("+", "-")             # <<<<<<<<<<<<<<
- *                                     and text[lookahead_pos + 2].isdigit()
- *                                 )
-*/
-      __pyx_t_17 = (__pyx_v_lookahead_pos + 1);
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_17, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 397, __pyx_L1_error)
-      __pyx_t_19 = (__pyx_t_4 == 43);
-      if (!__pyx_t_19) {
-      } else {
-        __pyx_t_18 = __pyx_t_19;
-        goto __pyx_L56_bool_binop_done;
-      }
-      __pyx_t_19 = (__pyx_t_4 == 45);
-      __pyx_t_18 = __pyx_t_19;
-      __pyx_L56_bool_binop_done:;
-      __pyx_t_19 = __pyx_t_18;
+      __pyx_t_19 = (__Pyx_PyUnicode_Equals(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_E, Py_EQ)); if (unlikely((__pyx_t_19 < 0))) __PYX_ERR(0, 400, __pyx_L1_error)
+      __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
       if (__pyx_t_19) {
       } else {
         __pyx_t_5 = __pyx_t_19;
         goto __pyx_L50_bool_binop_done;
       }
 
-      /* "cobolparser/_lexer_fast.pyx":398
+      /* "cobolparser/_lexer_fast.pyx":403
+ *                             and (
+ *                                 (
+ *                                     lookahead_pos + 1 < length             # <<<<<<<<<<<<<<
+ *                                     and text[lookahead_pos + 1].isdigit()
+ *                                 )
+*/
+      __pyx_t_19 = ((__pyx_v_lookahead_pos + 1) < __pyx_v_length);
+      if (!__pyx_t_19) {
+        goto __pyx_L52_next_or;
+      } else {
+      }
+
+      /* "cobolparser/_lexer_fast.pyx":404
+ *                                 (
+ *                                     lookahead_pos + 1 < length
+ *                                     and text[lookahead_pos + 1].isdigit()             # <<<<<<<<<<<<<<
+ *                                 )
+ *                                 or (
+*/
+      __pyx_t_18 = (__pyx_v_lookahead_pos + 1);
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_18, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 404, __pyx_L1_error)
+      __pyx_t_19 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
+      if (!__pyx_t_19) {
+      } else {
+        __pyx_t_5 = __pyx_t_19;
+        goto __pyx_L50_bool_binop_done;
+      }
+      __pyx_L52_next_or:;
+
+      /* "cobolparser/_lexer_fast.pyx":407
+ *                                 )
+ *                                 or (
+ *                                     lookahead_pos + 2 < length             # <<<<<<<<<<<<<<
+ *                                     and text[lookahead_pos + 1] in ("+", "-")
+ *                                     and text[lookahead_pos + 2].isdigit()
+*/
+      __pyx_t_19 = ((__pyx_v_lookahead_pos + 2) < __pyx_v_length);
+      if (__pyx_t_19) {
+      } else {
+        __pyx_t_5 = __pyx_t_19;
+        goto __pyx_L50_bool_binop_done;
+      }
+
+      /* "cobolparser/_lexer_fast.pyx":408
+ *                                 or (
+ *                                     lookahead_pos + 2 < length
+ *                                     and text[lookahead_pos + 1] in ("+", "-")             # <<<<<<<<<<<<<<
+ *                                     and text[lookahead_pos + 2].isdigit()
+ *                                 )
+*/
+      __pyx_t_18 = (__pyx_v_lookahead_pos + 1);
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_18, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 408, __pyx_L1_error)
+      __pyx_t_20 = (__pyx_t_4 == 43);
+      if (!__pyx_t_20) {
+      } else {
+        __pyx_t_19 = __pyx_t_20;
+        goto __pyx_L56_bool_binop_done;
+      }
+      __pyx_t_20 = (__pyx_t_4 == 45);
+      __pyx_t_19 = __pyx_t_20;
+      __pyx_L56_bool_binop_done:;
+      __pyx_t_20 = __pyx_t_19;
+      if (__pyx_t_20) {
+      } else {
+        __pyx_t_5 = __pyx_t_20;
+        goto __pyx_L50_bool_binop_done;
+      }
+
+      /* "cobolparser/_lexer_fast.pyx":409
  *                                     lookahead_pos + 2 < length
  *                                     and text[lookahead_pos + 1] in ("+", "-")
  *                                     and text[lookahead_pos + 2].isdigit()             # <<<<<<<<<<<<<<
  *                                 )
  *                             )
 */
-      __pyx_t_17 = (__pyx_v_lookahead_pos + 2);
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_17, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 398, __pyx_L1_error)
-      __pyx_t_19 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
-      __pyx_t_5 = __pyx_t_19;
+      __pyx_t_18 = (__pyx_v_lookahead_pos + 2);
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_18, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 409, __pyx_L1_error)
+      __pyx_t_20 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
+      __pyx_t_5 = __pyx_t_20;
       __pyx_L50_bool_binop_done:;
 
-      /* "cobolparser/_lexer_fast.pyx":388
+      /* "cobolparser/_lexer_fast.pyx":399
  *                     or (
  *                         text[lookahead_pos].isalpha()
  *                         and not (             # <<<<<<<<<<<<<<
  *                             text[lookahead_pos].upper() == "E"
  *                             and (
 */
-      __pyx_t_19 = (!__pyx_t_5);
-      __pyx_t_3 = __pyx_t_19;
+      __pyx_t_20 = (!__pyx_t_5);
+      __pyx_t_3 = __pyx_t_20;
       __pyx_L44_bool_binop_done:;
 
-      /* "cobolparser/_lexer_fast.pyx":380
+      /* "cobolparser/_lexer_fast.pyx":391
  *                 # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
  *                 # a digit or sign+digit stays on the read_number_from_text path.
  *                 if lookahead_pos < length and (             # <<<<<<<<<<<<<<
@@ -7877,7 +7970,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       if (__pyx_t_3) {
 
-        /* "cobolparser/_lexer_fast.pyx":404
+        /* "cobolparser/_lexer_fast.pyx":415
  *                     )
  *                 ):
  *                     token, new_pos = self.read_word_from_text(             # <<<<<<<<<<<<<<
@@ -7887,70 +7980,70 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         __pyx_t_8 = __pyx_v_self;
         __Pyx_INCREF(__pyx_t_8);
 
-        /* "cobolparser/_lexer_fast.pyx":405
+        /* "cobolparser/_lexer_fast.pyx":416
  *                 ):
  *                     token, new_pos = self.read_word_from_text(
  *                         text, pos, line_num, start_col             # <<<<<<<<<<<<<<
  *                     )
  *                 else:
 */
-        __pyx_t_6 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 405, __pyx_L1_error)
+        __pyx_t_6 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 416, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
-        __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 405, __pyx_L1_error)
+        __pyx_t_9 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 416, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_9);
+        __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 416, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_2);
-        __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 405, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
         __pyx_t_10 = 0;
         {
-          PyObject *__pyx_callargs[5] = {__pyx_t_8, __pyx_v_text, __pyx_t_6, __pyx_t_2, __pyx_t_7};
-          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_word_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          PyObject *__pyx_callargs[5] = {__pyx_t_8, __pyx_v_text, __pyx_t_6, __pyx_t_9, __pyx_t_2};
+          __pyx_t_7 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_word_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
           __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
           __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 404, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_9);
+          if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 415, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_7);
         }
-        if ((likely(PyTuple_CheckExact(__pyx_t_9))) || (PyList_CheckExact(__pyx_t_9))) {
-          PyObject* sequence = __pyx_t_9;
+        if ((likely(PyTuple_CheckExact(__pyx_t_7))) || (PyList_CheckExact(__pyx_t_7))) {
+          PyObject* sequence = __pyx_t_7;
           Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
           if (unlikely(size != 2)) {
             if (size > 2) __Pyx_RaiseTooManyValuesError(2);
             else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-            __PYX_ERR(0, 404, __pyx_L1_error)
+            __PYX_ERR(0, 415, __pyx_L1_error)
           }
           #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
           if (likely(PyTuple_CheckExact(sequence))) {
-            __pyx_t_7 = PyTuple_GET_ITEM(sequence, 0);
-            __Pyx_INCREF(__pyx_t_7);
-            __pyx_t_2 = PyTuple_GET_ITEM(sequence, 1);
+            __pyx_t_2 = PyTuple_GET_ITEM(sequence, 0);
             __Pyx_INCREF(__pyx_t_2);
+            __pyx_t_9 = PyTuple_GET_ITEM(sequence, 1);
+            __Pyx_INCREF(__pyx_t_9);
           } else {
-            __pyx_t_7 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 404, __pyx_L1_error)
-            __Pyx_XGOTREF(__pyx_t_7);
-            __pyx_t_2 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 404, __pyx_L1_error)
+            __pyx_t_2 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
+            if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 415, __pyx_L1_error)
             __Pyx_XGOTREF(__pyx_t_2);
+            __pyx_t_9 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
+            if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 415, __pyx_L1_error)
+            __Pyx_XGOTREF(__pyx_t_9);
           }
           #else
-          __pyx_t_7 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 404, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
-          __pyx_t_2 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 404, __pyx_L1_error)
+          __pyx_t_2 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 415, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
+          __pyx_t_9 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 415, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
           #endif
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
         } else {
           Py_ssize_t index = -1;
-          __pyx_t_6 = PyObject_GetIter(__pyx_t_9); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 404, __pyx_L1_error)
+          __pyx_t_6 = PyObject_GetIter(__pyx_t_7); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 415, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_6);
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
           __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_6);
-          index = 0; __pyx_t_7 = __pyx_t_14(__pyx_t_6); if (unlikely(!__pyx_t_7)) goto __pyx_L58_unpacking_failed;
-          __Pyx_GOTREF(__pyx_t_7);
-          index = 1; __pyx_t_2 = __pyx_t_14(__pyx_t_6); if (unlikely(!__pyx_t_2)) goto __pyx_L58_unpacking_failed;
+          index = 0; __pyx_t_2 = __pyx_t_14(__pyx_t_6); if (unlikely(!__pyx_t_2)) goto __pyx_L58_unpacking_failed;
           __Pyx_GOTREF(__pyx_t_2);
-          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_6), 2) < (0)) __PYX_ERR(0, 404, __pyx_L1_error)
+          index = 1; __pyx_t_9 = __pyx_t_14(__pyx_t_6); if (unlikely(!__pyx_t_9)) goto __pyx_L58_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_9);
+          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_6), 2) < (0)) __PYX_ERR(0, 415, __pyx_L1_error)
           __pyx_t_14 = NULL;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
           goto __pyx_L59_unpacking_done;
@@ -7958,23 +8051,23 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
           __pyx_t_14 = NULL;
           if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-          __PYX_ERR(0, 404, __pyx_L1_error)
+          __PYX_ERR(0, 415, __pyx_L1_error)
           __pyx_L59_unpacking_done:;
         }
 
-        /* "cobolparser/_lexer_fast.pyx":404
+        /* "cobolparser/_lexer_fast.pyx":415
  *                     )
  *                 ):
  *                     token, new_pos = self.read_word_from_text(             # <<<<<<<<<<<<<<
  *                         text, pos, line_num, start_col
  *                     )
 */
-        __Pyx_XDECREF_SET(__pyx_v_token, __pyx_t_7);
-        __pyx_t_7 = 0;
-        __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_2);
+        __Pyx_XDECREF_SET(__pyx_v_token, __pyx_t_2);
         __pyx_t_2 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_9);
+        __pyx_t_9 = 0;
 
-        /* "cobolparser/_lexer_fast.pyx":380
+        /* "cobolparser/_lexer_fast.pyx":391
  *                 # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
  *                 # a digit or sign+digit stays on the read_number_from_text path.
  *                 if lookahead_pos < length and (             # <<<<<<<<<<<<<<
@@ -7984,7 +8077,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         goto __pyx_L43;
       }
 
-      /* "cobolparser/_lexer_fast.pyx":408
+      /* "cobolparser/_lexer_fast.pyx":419
  *                     )
  *                 else:
  *                     token, new_pos = self.read_number_from_text(             # <<<<<<<<<<<<<<
@@ -7992,40 +8085,40 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
  *                     )
 */
       /*else*/ {
-        __pyx_t_2 = __pyx_v_self;
-        __Pyx_INCREF(__pyx_t_2);
+        __pyx_t_9 = __pyx_v_self;
+        __Pyx_INCREF(__pyx_t_9);
 
-        /* "cobolparser/_lexer_fast.pyx":409
+        /* "cobolparser/_lexer_fast.pyx":420
  *                 else:
  *                     token, new_pos = self.read_number_from_text(
  *                         text, pos, line_num, start_col             # <<<<<<<<<<<<<<
  *                     )
  *                 tokens.append(token)
 */
-        __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 409, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
-        __pyx_t_6 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 409, __pyx_L1_error)
+        __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 420, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_2);
+        __pyx_t_6 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 420, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
-        __pyx_t_8 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 409, __pyx_L1_error)
+        __pyx_t_8 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 420, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_8);
         __pyx_t_10 = 0;
         {
-          PyObject *__pyx_callargs[5] = {__pyx_t_2, __pyx_v_text, __pyx_t_7, __pyx_t_6, __pyx_t_8};
-          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_number_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          PyObject *__pyx_callargs[5] = {__pyx_t_9, __pyx_v_text, __pyx_t_2, __pyx_t_6, __pyx_t_8};
+          __pyx_t_7 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_number_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
           __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 408, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_9);
+          if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 419, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_7);
         }
-        if ((likely(PyTuple_CheckExact(__pyx_t_9))) || (PyList_CheckExact(__pyx_t_9))) {
-          PyObject* sequence = __pyx_t_9;
+        if ((likely(PyTuple_CheckExact(__pyx_t_7))) || (PyList_CheckExact(__pyx_t_7))) {
+          PyObject* sequence = __pyx_t_7;
           Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
           if (unlikely(size != 2)) {
             if (size > 2) __Pyx_RaiseTooManyValuesError(2);
             else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-            __PYX_ERR(0, 408, __pyx_L1_error)
+            __PYX_ERR(0, 419, __pyx_L1_error)
           }
           #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
           if (likely(PyTuple_CheckExact(sequence))) {
@@ -8035,42 +8128,42 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
             __Pyx_INCREF(__pyx_t_6);
           } else {
             __pyx_t_8 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 408, __pyx_L1_error)
+            if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 419, __pyx_L1_error)
             __Pyx_XGOTREF(__pyx_t_8);
             __pyx_t_6 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 408, __pyx_L1_error)
+            if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 419, __pyx_L1_error)
             __Pyx_XGOTREF(__pyx_t_6);
           }
           #else
-          __pyx_t_8 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 408, __pyx_L1_error)
+          __pyx_t_8 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 419, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_8);
-          __pyx_t_6 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 408, __pyx_L1_error)
+          __pyx_t_6 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 419, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_6);
           #endif
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
         } else {
           Py_ssize_t index = -1;
-          __pyx_t_7 = PyObject_GetIter(__pyx_t_9); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 408, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-          __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_7);
-          index = 0; __pyx_t_8 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_8)) goto __pyx_L60_unpacking_failed;
-          __Pyx_GOTREF(__pyx_t_8);
-          index = 1; __pyx_t_6 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_6)) goto __pyx_L60_unpacking_failed;
-          __Pyx_GOTREF(__pyx_t_6);
-          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_7), 2) < (0)) __PYX_ERR(0, 408, __pyx_L1_error)
-          __pyx_t_14 = NULL;
+          __pyx_t_2 = PyObject_GetIter(__pyx_t_7); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 419, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_2);
           __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_2);
+          index = 0; __pyx_t_8 = __pyx_t_14(__pyx_t_2); if (unlikely(!__pyx_t_8)) goto __pyx_L60_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_8);
+          index = 1; __pyx_t_6 = __pyx_t_14(__pyx_t_2); if (unlikely(!__pyx_t_6)) goto __pyx_L60_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_6);
+          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_2), 2) < (0)) __PYX_ERR(0, 419, __pyx_L1_error)
+          __pyx_t_14 = NULL;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           goto __pyx_L61_unpacking_done;
           __pyx_L60_unpacking_failed:;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           __pyx_t_14 = NULL;
           if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-          __PYX_ERR(0, 408, __pyx_L1_error)
+          __PYX_ERR(0, 419, __pyx_L1_error)
           __pyx_L61_unpacking_done:;
         }
 
-        /* "cobolparser/_lexer_fast.pyx":408
+        /* "cobolparser/_lexer_fast.pyx":419
  *                     )
  *                 else:
  *                     token, new_pos = self.read_number_from_text(             # <<<<<<<<<<<<<<
@@ -8084,26 +8177,26 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
       }
       __pyx_L43:;
 
-      /* "cobolparser/_lexer_fast.pyx":411
+      /* "cobolparser/_lexer_fast.pyx":422
  *                         text, pos, line_num, start_col
  *                     )
  *                 tokens.append(token)             # <<<<<<<<<<<<<<
  *                 pos = new_pos
  *                 continue
 */
-      __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 411, __pyx_L1_error)
+      __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 422, __pyx_L1_error)
 
-      /* "cobolparser/_lexer_fast.pyx":412
+      /* "cobolparser/_lexer_fast.pyx":423
  *                     )
  *                 tokens.append(token)
  *                 pos = new_pos             # <<<<<<<<<<<<<<
  *                 continue
  * 
 */
-      __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 412, __pyx_L1_error)
+      __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 423, __pyx_L1_error)
       __pyx_v_pos = __pyx_t_11;
 
-      /* "cobolparser/_lexer_fast.pyx":413
+      /* "cobolparser/_lexer_fast.pyx":424
  *                 tokens.append(token)
  *                 pos = new_pos
  *                 continue             # <<<<<<<<<<<<<<
@@ -8112,7 +8205,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       goto __pyx_L3_continue;
 
-      /* "cobolparser/_lexer_fast.pyx":371
+      /* "cobolparser/_lexer_fast.pyx":382
  * 
  *             # ---- digit-initial tokens ------------------------------
  *             if char.isdigit():             # <<<<<<<<<<<<<<
@@ -8121,60 +8214,60 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
     }
 
-    /* "cobolparser/_lexer_fast.pyx":418
+    /* "cobolparser/_lexer_fast.pyx":429
  *             # Must precede the identifier path so the prefix letter is not
  *             # consumed as a separate identifier.
  *             if char.upper() in self.LITERAL_PREFIXES:             # <<<<<<<<<<<<<<
  *                 prefixed = self.read_prefixed_literal_from_text(
  *                     text, pos, line_num, start_col
 */
-    __pyx_t_9 = __Pyx_CallUnboundCMethod0(&__pyx_mstate_global->__pyx_umethod_PyUnicode_Type__upper, __pyx_v_char); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 418, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_9);
-    __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_LITERAL_PREFIXES); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 418, __pyx_L1_error)
+    __pyx_t_7 = __Pyx_CallUnboundCMethod0(&__pyx_mstate_global->__pyx_umethod_PyUnicode_Type__upper, __pyx_v_char); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 429, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_7);
+    __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_LITERAL_PREFIXES); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 429, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_6);
-    __pyx_t_3 = (__Pyx_PySequence_ContainsTF(__pyx_t_9, __pyx_t_6, Py_EQ)); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 418, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+    __pyx_t_3 = (__Pyx_PySequence_ContainsTF(__pyx_t_7, __pyx_t_6, Py_EQ)); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 429, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
     __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
     if (__pyx_t_3) {
 
-      /* "cobolparser/_lexer_fast.pyx":419
+      /* "cobolparser/_lexer_fast.pyx":430
  *             # consumed as a separate identifier.
  *             if char.upper() in self.LITERAL_PREFIXES:
  *                 prefixed = self.read_prefixed_literal_from_text(             # <<<<<<<<<<<<<<
  *                     text, pos, line_num, start_col
  *                 )
 */
-      __pyx_t_9 = __pyx_v_self;
-      __Pyx_INCREF(__pyx_t_9);
+      __pyx_t_7 = __pyx_v_self;
+      __Pyx_INCREF(__pyx_t_7);
 
-      /* "cobolparser/_lexer_fast.pyx":420
+      /* "cobolparser/_lexer_fast.pyx":431
  *             if char.upper() in self.LITERAL_PREFIXES:
  *                 prefixed = self.read_prefixed_literal_from_text(
  *                     text, pos, line_num, start_col             # <<<<<<<<<<<<<<
  *                 )
  *                 if prefixed is not None:
 */
-      __pyx_t_8 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 420, __pyx_L1_error)
+      __pyx_t_8 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 431, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
-      __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 420, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
-      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 420, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 431, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
+      __pyx_t_9 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 431, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_9);
       __pyx_t_10 = 0;
       {
-        PyObject *__pyx_callargs[5] = {__pyx_t_9, __pyx_v_text, __pyx_t_8, __pyx_t_7, __pyx_t_2};
+        PyObject *__pyx_callargs[5] = {__pyx_t_7, __pyx_v_text, __pyx_t_8, __pyx_t_2, __pyx_t_9};
         __pyx_t_6 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_prefixed_literal_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-        __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
         __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
         __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-        if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 419, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 430, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
       }
       __Pyx_XDECREF_SET(__pyx_v_prefixed, __pyx_t_6);
       __pyx_t_6 = 0;
 
-      /* "cobolparser/_lexer_fast.pyx":422
+      /* "cobolparser/_lexer_fast.pyx":433
  *                     text, pos, line_num, start_col
  *                 )
  *                 if prefixed is not None:             # <<<<<<<<<<<<<<
@@ -8184,7 +8277,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
       __pyx_t_3 = (__pyx_v_prefixed != Py_None);
       if (__pyx_t_3) {
 
-        /* "cobolparser/_lexer_fast.pyx":423
+        /* "cobolparser/_lexer_fast.pyx":434
  *                 )
  *                 if prefixed is not None:
  *                     token, new_pos = prefixed             # <<<<<<<<<<<<<<
@@ -8197,73 +8290,73 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
           if (unlikely(size != 2)) {
             if (size > 2) __Pyx_RaiseTooManyValuesError(2);
             else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-            __PYX_ERR(0, 423, __pyx_L1_error)
+            __PYX_ERR(0, 434, __pyx_L1_error)
           }
           #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
           if (likely(PyTuple_CheckExact(sequence))) {
             __pyx_t_6 = PyTuple_GET_ITEM(sequence, 0);
             __Pyx_INCREF(__pyx_t_6);
-            __pyx_t_2 = PyTuple_GET_ITEM(sequence, 1);
-            __Pyx_INCREF(__pyx_t_2);
+            __pyx_t_9 = PyTuple_GET_ITEM(sequence, 1);
+            __Pyx_INCREF(__pyx_t_9);
           } else {
             __pyx_t_6 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 423, __pyx_L1_error)
+            if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 434, __pyx_L1_error)
             __Pyx_XGOTREF(__pyx_t_6);
-            __pyx_t_2 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 423, __pyx_L1_error)
-            __Pyx_XGOTREF(__pyx_t_2);
+            __pyx_t_9 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
+            if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 434, __pyx_L1_error)
+            __Pyx_XGOTREF(__pyx_t_9);
           }
           #else
-          __pyx_t_6 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 423, __pyx_L1_error)
+          __pyx_t_6 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 434, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_2 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 423, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
+          __pyx_t_9 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 434, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
           #endif
         } else {
           Py_ssize_t index = -1;
-          __pyx_t_7 = PyObject_GetIter(__pyx_v_prefixed); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 423, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
-          __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_7);
-          index = 0; __pyx_t_6 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_6)) goto __pyx_L64_unpacking_failed;
-          __Pyx_GOTREF(__pyx_t_6);
-          index = 1; __pyx_t_2 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_2)) goto __pyx_L64_unpacking_failed;
+          __pyx_t_2 = PyObject_GetIter(__pyx_v_prefixed); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 434, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_2);
-          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_7), 2) < (0)) __PYX_ERR(0, 423, __pyx_L1_error)
+          __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_2);
+          index = 0; __pyx_t_6 = __pyx_t_14(__pyx_t_2); if (unlikely(!__pyx_t_6)) goto __pyx_L64_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_6);
+          index = 1; __pyx_t_9 = __pyx_t_14(__pyx_t_2); if (unlikely(!__pyx_t_9)) goto __pyx_L64_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_9);
+          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_2), 2) < (0)) __PYX_ERR(0, 434, __pyx_L1_error)
           __pyx_t_14 = NULL;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           goto __pyx_L65_unpacking_done;
           __pyx_L64_unpacking_failed:;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           __pyx_t_14 = NULL;
           if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-          __PYX_ERR(0, 423, __pyx_L1_error)
+          __PYX_ERR(0, 434, __pyx_L1_error)
           __pyx_L65_unpacking_done:;
         }
         __Pyx_XDECREF_SET(__pyx_v_token, __pyx_t_6);
         __pyx_t_6 = 0;
-        __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_2);
-        __pyx_t_2 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_9);
+        __pyx_t_9 = 0;
 
-        /* "cobolparser/_lexer_fast.pyx":424
+        /* "cobolparser/_lexer_fast.pyx":435
  *                 if prefixed is not None:
  *                     token, new_pos = prefixed
  *                     tokens.append(token)             # <<<<<<<<<<<<<<
  *                     pos = new_pos
  *                     continue
 */
-        __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 424, __pyx_L1_error)
+        __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 435, __pyx_L1_error)
 
-        /* "cobolparser/_lexer_fast.pyx":425
+        /* "cobolparser/_lexer_fast.pyx":436
  *                     token, new_pos = prefixed
  *                     tokens.append(token)
  *                     pos = new_pos             # <<<<<<<<<<<<<<
  *                     continue
  * 
 */
-        __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 425, __pyx_L1_error)
+        __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 436, __pyx_L1_error)
         __pyx_v_pos = __pyx_t_11;
 
-        /* "cobolparser/_lexer_fast.pyx":426
+        /* "cobolparser/_lexer_fast.pyx":437
  *                     tokens.append(token)
  *                     pos = new_pos
  *                     continue             # <<<<<<<<<<<<<<
@@ -8272,7 +8365,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
         goto __pyx_L3_continue;
 
-        /* "cobolparser/_lexer_fast.pyx":422
+        /* "cobolparser/_lexer_fast.pyx":433
  *                     text, pos, line_num, start_col
  *                 )
  *                 if prefixed is not None:             # <<<<<<<<<<<<<<
@@ -8281,7 +8374,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       }
 
-      /* "cobolparser/_lexer_fast.pyx":418
+      /* "cobolparser/_lexer_fast.pyx":429
  *             # Must precede the identifier path so the prefix letter is not
  *             # consumed as a separate identifier.
  *             if char.upper() in self.LITERAL_PREFIXES:             # <<<<<<<<<<<<<<
@@ -8290,7 +8383,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
     }
 
-    /* "cobolparser/_lexer_fast.pyx":429
+    /* "cobolparser/_lexer_fast.pyx":440
  * 
  *             # ---- alpha identifiers / keywords ----------------------
  *             if char.isalpha() or char == "_":             # <<<<<<<<<<<<<<
@@ -8302,24 +8395,24 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
     __pyx_t_10 = 0;
     {
       PyObject *__pyx_callargs[2] = {__pyx_t_6, NULL};
-      __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isalpha, __pyx_callargs+__pyx_t_10, (1-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isalpha, __pyx_callargs+__pyx_t_10, (1-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
       __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
-      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 429, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_2);
+      if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 440, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_9);
     }
-    __pyx_t_19 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely((__pyx_t_19 < 0))) __PYX_ERR(0, 429, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (!__pyx_t_19) {
+    __pyx_t_20 = __Pyx_PyObject_IsTrue(__pyx_t_9); if (unlikely((__pyx_t_20 < 0))) __PYX_ERR(0, 440, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+    if (!__pyx_t_20) {
     } else {
-      __pyx_t_3 = __pyx_t_19;
+      __pyx_t_3 = __pyx_t_20;
       goto __pyx_L67_bool_binop_done;
     }
-    __pyx_t_19 = (__Pyx_PyUnicode_Equals(__pyx_v_char, __pyx_mstate_global->__pyx_n_u__2, Py_EQ)); if (unlikely((__pyx_t_19 < 0))) __PYX_ERR(0, 429, __pyx_L1_error)
-    __pyx_t_3 = __pyx_t_19;
+    __pyx_t_20 = (__Pyx_PyUnicode_Equals(__pyx_v_char, __pyx_mstate_global->__pyx_n_u__2, Py_EQ)); if (unlikely((__pyx_t_20 < 0))) __PYX_ERR(0, 440, __pyx_L1_error)
+    __pyx_t_3 = __pyx_t_20;
     __pyx_L67_bool_binop_done:;
     if (__pyx_t_3) {
 
-      /* "cobolparser/_lexer_fast.pyx":430
+      /* "cobolparser/_lexer_fast.pyx":441
  *             # ---- alpha identifiers / keywords ----------------------
  *             if char.isalpha() or char == "_":
  *                 token, new_pos = self.read_word_from_text(             # <<<<<<<<<<<<<<
@@ -8329,113 +8422,113 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
       __pyx_t_6 = __pyx_v_self;
       __Pyx_INCREF(__pyx_t_6);
 
-      /* "cobolparser/_lexer_fast.pyx":431
+      /* "cobolparser/_lexer_fast.pyx":442
  *             if char.isalpha() or char == "_":
  *                 token, new_pos = self.read_word_from_text(
  *                     text, pos, line_num, start_col             # <<<<<<<<<<<<<<
  *                 )
  *                 tokens.append(token)
 */
-      __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 431, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
-      __pyx_t_8 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 431, __pyx_L1_error)
+      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 442, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_2);
+      __pyx_t_8 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 442, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_8);
-      __pyx_t_9 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 431, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_9);
+      __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 442, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_7);
       __pyx_t_10 = 0;
       {
-        PyObject *__pyx_callargs[5] = {__pyx_t_6, __pyx_v_text, __pyx_t_7, __pyx_t_8, __pyx_t_9};
-        __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_word_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+        PyObject *__pyx_callargs[5] = {__pyx_t_6, __pyx_v_text, __pyx_t_2, __pyx_t_8, __pyx_t_7};
+        __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_word_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
-        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 430, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
+        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+        if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 441, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_9);
       }
-      if ((likely(PyTuple_CheckExact(__pyx_t_2))) || (PyList_CheckExact(__pyx_t_2))) {
-        PyObject* sequence = __pyx_t_2;
+      if ((likely(PyTuple_CheckExact(__pyx_t_9))) || (PyList_CheckExact(__pyx_t_9))) {
+        PyObject* sequence = __pyx_t_9;
         Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
         if (unlikely(size != 2)) {
           if (size > 2) __Pyx_RaiseTooManyValuesError(2);
           else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-          __PYX_ERR(0, 430, __pyx_L1_error)
+          __PYX_ERR(0, 441, __pyx_L1_error)
         }
         #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
         if (likely(PyTuple_CheckExact(sequence))) {
-          __pyx_t_9 = PyTuple_GET_ITEM(sequence, 0);
-          __Pyx_INCREF(__pyx_t_9);
+          __pyx_t_7 = PyTuple_GET_ITEM(sequence, 0);
+          __Pyx_INCREF(__pyx_t_7);
           __pyx_t_8 = PyTuple_GET_ITEM(sequence, 1);
           __Pyx_INCREF(__pyx_t_8);
         } else {
-          __pyx_t_9 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
-          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 430, __pyx_L1_error)
-          __Pyx_XGOTREF(__pyx_t_9);
+          __pyx_t_7 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
+          if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 441, __pyx_L1_error)
+          __Pyx_XGOTREF(__pyx_t_7);
           __pyx_t_8 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
-          if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 430, __pyx_L1_error)
+          if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 441, __pyx_L1_error)
           __Pyx_XGOTREF(__pyx_t_8);
         }
         #else
-        __pyx_t_9 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 430, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_9);
-        __pyx_t_8 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 430, __pyx_L1_error)
+        __pyx_t_7 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 441, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_7);
+        __pyx_t_8 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 441, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_8);
         #endif
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
       } else {
         Py_ssize_t index = -1;
-        __pyx_t_7 = PyObject_GetIter(__pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 430, __pyx_L1_error)
+        __pyx_t_2 = PyObject_GetIter(__pyx_t_9); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 441, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_2);
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_2);
+        index = 0; __pyx_t_7 = __pyx_t_14(__pyx_t_2); if (unlikely(!__pyx_t_7)) goto __pyx_L69_unpacking_failed;
         __Pyx_GOTREF(__pyx_t_7);
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-        __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_7);
-        index = 0; __pyx_t_9 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_9)) goto __pyx_L69_unpacking_failed;
-        __Pyx_GOTREF(__pyx_t_9);
-        index = 1; __pyx_t_8 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_8)) goto __pyx_L69_unpacking_failed;
+        index = 1; __pyx_t_8 = __pyx_t_14(__pyx_t_2); if (unlikely(!__pyx_t_8)) goto __pyx_L69_unpacking_failed;
         __Pyx_GOTREF(__pyx_t_8);
-        if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_7), 2) < (0)) __PYX_ERR(0, 430, __pyx_L1_error)
+        if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_2), 2) < (0)) __PYX_ERR(0, 441, __pyx_L1_error)
         __pyx_t_14 = NULL;
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         goto __pyx_L70_unpacking_done;
         __pyx_L69_unpacking_failed:;
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __pyx_t_14 = NULL;
         if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-        __PYX_ERR(0, 430, __pyx_L1_error)
+        __PYX_ERR(0, 441, __pyx_L1_error)
         __pyx_L70_unpacking_done:;
       }
 
-      /* "cobolparser/_lexer_fast.pyx":430
+      /* "cobolparser/_lexer_fast.pyx":441
  *             # ---- alpha identifiers / keywords ----------------------
  *             if char.isalpha() or char == "_":
  *                 token, new_pos = self.read_word_from_text(             # <<<<<<<<<<<<<<
  *                     text, pos, line_num, start_col
  *                 )
 */
-      __Pyx_XDECREF_SET(__pyx_v_token, __pyx_t_9);
-      __pyx_t_9 = 0;
+      __Pyx_XDECREF_SET(__pyx_v_token, __pyx_t_7);
+      __pyx_t_7 = 0;
       __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_8);
       __pyx_t_8 = 0;
 
-      /* "cobolparser/_lexer_fast.pyx":433
+      /* "cobolparser/_lexer_fast.pyx":444
  *                     text, pos, line_num, start_col
  *                 )
  *                 tokens.append(token)             # <<<<<<<<<<<<<<
  *                 pos = new_pos
  *                 continue
 */
-      __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 433, __pyx_L1_error)
+      __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 444, __pyx_L1_error)
 
-      /* "cobolparser/_lexer_fast.pyx":434
+      /* "cobolparser/_lexer_fast.pyx":445
  *                 )
  *                 tokens.append(token)
  *                 pos = new_pos             # <<<<<<<<<<<<<<
  *                 continue
  * 
 */
-      __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 434, __pyx_L1_error)
+      __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 445, __pyx_L1_error)
       __pyx_v_pos = __pyx_t_11;
 
-      /* "cobolparser/_lexer_fast.pyx":435
+      /* "cobolparser/_lexer_fast.pyx":446
  *                 tokens.append(token)
  *                 pos = new_pos
  *                 continue             # <<<<<<<<<<<<<<
@@ -8444,7 +8537,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       goto __pyx_L3_continue;
 
-      /* "cobolparser/_lexer_fast.pyx":429
+      /* "cobolparser/_lexer_fast.pyx":440
  * 
  *             # ---- alpha identifiers / keywords ----------------------
  *             if char.isalpha() or char == "_":             # <<<<<<<<<<<<<<
@@ -8453,46 +8546,46 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
     }
 
-    /* "cobolparser/_lexer_fast.pyx":438
+    /* "cobolparser/_lexer_fast.pyx":449
  * 
  *             # ---- single-character tokens ---------------------------
  *             if char in self.SINGLE_CHAR_TOKENS:             # <<<<<<<<<<<<<<
  *                 # Leading-decimal numeric literals: .7  .25  .003  valid COBOL.
  *                 if char == "." and pos + 1 < length and text[pos + 1].isdigit():
 */
-    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_SINGLE_CHAR_TOKENS); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 438, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_2);
-    __pyx_t_3 = (__Pyx_PySequence_ContainsTF(__pyx_v_char, __pyx_t_2, Py_EQ)); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 438, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_SINGLE_CHAR_TOKENS); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 449, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_9);
+    __pyx_t_3 = (__Pyx_PySequence_ContainsTF(__pyx_v_char, __pyx_t_9, Py_EQ)); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 449, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
     if (__pyx_t_3) {
 
-      /* "cobolparser/_lexer_fast.pyx":440
+      /* "cobolparser/_lexer_fast.pyx":451
  *             if char in self.SINGLE_CHAR_TOKENS:
  *                 # Leading-decimal numeric literals: .7  .25  .003  valid COBOL.
  *                 if char == "." and pos + 1 < length and text[pos + 1].isdigit():             # <<<<<<<<<<<<<<
  *                     token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
  *                     tokens.append(token)
 */
-      __pyx_t_19 = (__Pyx_PyUnicode_Equals(__pyx_v_char, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_19 < 0))) __PYX_ERR(0, 440, __pyx_L1_error)
-      if (__pyx_t_19) {
+      __pyx_t_20 = (__Pyx_PyUnicode_Equals(__pyx_v_char, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_20 < 0))) __PYX_ERR(0, 451, __pyx_L1_error)
+      if (__pyx_t_20) {
       } else {
-        __pyx_t_3 = __pyx_t_19;
+        __pyx_t_3 = __pyx_t_20;
         goto __pyx_L73_bool_binop_done;
       }
-      __pyx_t_19 = ((__pyx_v_pos + 1) < __pyx_v_length);
-      if (__pyx_t_19) {
+      __pyx_t_20 = ((__pyx_v_pos + 1) < __pyx_v_length);
+      if (__pyx_t_20) {
       } else {
-        __pyx_t_3 = __pyx_t_19;
+        __pyx_t_3 = __pyx_t_20;
         goto __pyx_L73_bool_binop_done;
       }
-      __pyx_t_17 = (__pyx_v_pos + 1);
-      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_17, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 440, __pyx_L1_error)
-      __pyx_t_19 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
-      __pyx_t_3 = __pyx_t_19;
+      __pyx_t_18 = (__pyx_v_pos + 1);
+      __pyx_t_4 = __Pyx_GetItemInt_Unicode(__pyx_v_text, __pyx_t_18, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_FunctionArgument); if (unlikely(__pyx_t_4 == (Py_UCS4)-1)) __PYX_ERR(0, 451, __pyx_L1_error)
+      __pyx_t_20 = __Pyx_Py_UNICODE_ISDIGIT(__pyx_t_4); 
+      __pyx_t_3 = __pyx_t_20;
       __pyx_L73_bool_binop_done:;
       if (__pyx_t_3) {
 
-        /* "cobolparser/_lexer_fast.pyx":441
+        /* "cobolparser/_lexer_fast.pyx":452
  *                 # Leading-decimal numeric literals: .7  .25  .003  valid COBOL.
  *                 if char == "." and pos + 1 < length and text[pos + 1].isdigit():
  *                     token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)             # <<<<<<<<<<<<<<
@@ -8501,98 +8594,98 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
         __pyx_t_8 = __pyx_v_self;
         __Pyx_INCREF(__pyx_t_8);
-        __pyx_t_9 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 441, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_9);
-        __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 441, __pyx_L1_error)
+        __pyx_t_7 = __Pyx_PyLong_From_int(__pyx_v_pos); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 452, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_7);
-        __pyx_t_6 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 441, __pyx_L1_error)
+        __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_line_num); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 452, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_2);
+        __pyx_t_6 = __Pyx_PyLong_From_int(__pyx_v_start_col); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 452, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
         __pyx_t_10 = 0;
         {
-          PyObject *__pyx_callargs[5] = {__pyx_t_8, __pyx_v_text, __pyx_t_9, __pyx_t_7, __pyx_t_6};
-          __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_number_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          PyObject *__pyx_callargs[5] = {__pyx_t_8, __pyx_v_text, __pyx_t_7, __pyx_t_2, __pyx_t_6};
+          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_read_number_from_text, __pyx_callargs+__pyx_t_10, (5-__pyx_t_10) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
           __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
           __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 441, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
+          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 452, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
         }
-        if ((likely(PyTuple_CheckExact(__pyx_t_2))) || (PyList_CheckExact(__pyx_t_2))) {
-          PyObject* sequence = __pyx_t_2;
+        if ((likely(PyTuple_CheckExact(__pyx_t_9))) || (PyList_CheckExact(__pyx_t_9))) {
+          PyObject* sequence = __pyx_t_9;
           Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
           if (unlikely(size != 2)) {
             if (size > 2) __Pyx_RaiseTooManyValuesError(2);
             else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-            __PYX_ERR(0, 441, __pyx_L1_error)
+            __PYX_ERR(0, 452, __pyx_L1_error)
           }
           #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
           if (likely(PyTuple_CheckExact(sequence))) {
             __pyx_t_6 = PyTuple_GET_ITEM(sequence, 0);
             __Pyx_INCREF(__pyx_t_6);
-            __pyx_t_7 = PyTuple_GET_ITEM(sequence, 1);
-            __Pyx_INCREF(__pyx_t_7);
+            __pyx_t_2 = PyTuple_GET_ITEM(sequence, 1);
+            __Pyx_INCREF(__pyx_t_2);
           } else {
             __pyx_t_6 = __Pyx_PyList_GetItemRefFast(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 441, __pyx_L1_error)
+            if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 452, __pyx_L1_error)
             __Pyx_XGOTREF(__pyx_t_6);
-            __pyx_t_7 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
-            if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 441, __pyx_L1_error)
-            __Pyx_XGOTREF(__pyx_t_7);
+            __pyx_t_2 = __Pyx_PyList_GetItemRefFast(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
+            if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 452, __pyx_L1_error)
+            __Pyx_XGOTREF(__pyx_t_2);
           }
           #else
-          __pyx_t_6 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 441, __pyx_L1_error)
+          __pyx_t_6 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 452, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_7 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 441, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
+          __pyx_t_2 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 452, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_2);
           #endif
-          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
         } else {
           Py_ssize_t index = -1;
-          __pyx_t_9 = PyObject_GetIter(__pyx_t_2); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 441, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_9);
-          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-          __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_9);
-          index = 0; __pyx_t_6 = __pyx_t_14(__pyx_t_9); if (unlikely(!__pyx_t_6)) goto __pyx_L76_unpacking_failed;
-          __Pyx_GOTREF(__pyx_t_6);
-          index = 1; __pyx_t_7 = __pyx_t_14(__pyx_t_9); if (unlikely(!__pyx_t_7)) goto __pyx_L76_unpacking_failed;
+          __pyx_t_7 = PyObject_GetIter(__pyx_t_9); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 452, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_7);
-          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_9), 2) < (0)) __PYX_ERR(0, 441, __pyx_L1_error)
-          __pyx_t_14 = NULL;
           __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __pyx_t_14 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_7);
+          index = 0; __pyx_t_6 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_6)) goto __pyx_L76_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_6);
+          index = 1; __pyx_t_2 = __pyx_t_14(__pyx_t_7); if (unlikely(!__pyx_t_2)) goto __pyx_L76_unpacking_failed;
+          __Pyx_GOTREF(__pyx_t_2);
+          if (__Pyx_IternextUnpackEndCheck(__pyx_t_14(__pyx_t_7), 2) < (0)) __PYX_ERR(0, 452, __pyx_L1_error)
+          __pyx_t_14 = NULL;
+          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
           goto __pyx_L77_unpacking_done;
           __pyx_L76_unpacking_failed:;
-          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
           __pyx_t_14 = NULL;
           if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-          __PYX_ERR(0, 441, __pyx_L1_error)
+          __PYX_ERR(0, 452, __pyx_L1_error)
           __pyx_L77_unpacking_done:;
         }
         __Pyx_XDECREF_SET(__pyx_v_token, __pyx_t_6);
         __pyx_t_6 = 0;
-        __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_7);
-        __pyx_t_7 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_new_pos, __pyx_t_2);
+        __pyx_t_2 = 0;
 
-        /* "cobolparser/_lexer_fast.pyx":442
+        /* "cobolparser/_lexer_fast.pyx":453
  *                 if char == "." and pos + 1 < length and text[pos + 1].isdigit():
  *                     token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
  *                     tokens.append(token)             # <<<<<<<<<<<<<<
  *                     pos = new_pos
  *                 else:
 */
-        __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 442, __pyx_L1_error)
+        __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_v_token); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 453, __pyx_L1_error)
 
-        /* "cobolparser/_lexer_fast.pyx":443
+        /* "cobolparser/_lexer_fast.pyx":454
  *                     token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
  *                     tokens.append(token)
  *                     pos = new_pos             # <<<<<<<<<<<<<<
  *                 else:
  *                     tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
 */
-        __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 443, __pyx_L1_error)
+        __pyx_t_11 = __Pyx_PyLong_As_int(__pyx_v_new_pos); if (unlikely((__pyx_t_11 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 454, __pyx_L1_error)
         __pyx_v_pos = __pyx_t_11;
 
-        /* "cobolparser/_lexer_fast.pyx":440
+        /* "cobolparser/_lexer_fast.pyx":451
  *             if char in self.SINGLE_CHAR_TOKENS:
  *                 # Leading-decimal numeric literals: .7  .25  .003  valid COBOL.
  *                 if char == "." and pos + 1 < length and text[pos + 1].isdigit():             # <<<<<<<<<<<<<<
@@ -8602,7 +8695,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
         goto __pyx_L72;
       }
 
-      /* "cobolparser/_lexer_fast.pyx":445
+      /* "cobolparser/_lexer_fast.pyx":456
  *                     pos = new_pos
  *                 else:
  *                     tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))             # <<<<<<<<<<<<<<
@@ -8610,39 +8703,39 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
  *                 continue
 */
       /*else*/ {
-        __pyx_t_7 = NULL;
-        __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_mstate_global->__pyx_n_u_Token); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 445, __pyx_L1_error)
+        __pyx_t_2 = NULL;
+        __Pyx_GetModuleGlobalName(__pyx_t_6, __pyx_mstate_global->__pyx_n_u_Token); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 456, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_6);
-        __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_SINGLE_CHAR_TOKENS); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 445, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_9);
-        __pyx_t_8 = __Pyx_PyObject_Dict_GetItem(__pyx_t_9, __pyx_v_char); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 445, __pyx_L1_error)
+        __pyx_t_7 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_SINGLE_CHAR_TOKENS); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 456, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_7);
+        __pyx_t_8 = __Pyx_PyObject_Dict_GetItem(__pyx_t_7, __pyx_v_char); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 456, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_8);
-        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
         __pyx_t_10 = 1;
         #if CYTHON_UNPACK_METHODS
         if (unlikely(PyMethod_Check(__pyx_t_6))) {
-          __pyx_t_7 = PyMethod_GET_SELF(__pyx_t_6);
-          assert(__pyx_t_7);
+          __pyx_t_2 = PyMethod_GET_SELF(__pyx_t_6);
+          assert(__pyx_t_2);
           PyObject* __pyx__function = PyMethod_GET_FUNCTION(__pyx_t_6);
-          __Pyx_INCREF(__pyx_t_7);
+          __Pyx_INCREF(__pyx_t_2);
           __Pyx_INCREF(__pyx__function);
           __Pyx_DECREF_SET(__pyx_t_6, __pyx__function);
           __pyx_t_10 = 0;
         }
         #endif
         {
-          PyObject *__pyx_callargs[4] = {__pyx_t_7, __pyx_t_8, __pyx_v_char, __pyx_v_location};
-          __pyx_t_2 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_6, __pyx_callargs+__pyx_t_10, (4-__pyx_t_10) | (__pyx_t_10*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
+          PyObject *__pyx_callargs[4] = {__pyx_t_2, __pyx_t_8, __pyx_v_char, __pyx_v_location};
+          __pyx_t_9 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_6, __pyx_callargs+__pyx_t_10, (4-__pyx_t_10) | (__pyx_t_10*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
           __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
           __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 445, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
+          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 456, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
         }
-        __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_t_2); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 445, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+        __pyx_t_16 = __Pyx_PyList_Append(__pyx_v_tokens, __pyx_t_9); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 456, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
 
-        /* "cobolparser/_lexer_fast.pyx":446
+        /* "cobolparser/_lexer_fast.pyx":457
  *                 else:
  *                     tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
  *                     pos += 1             # <<<<<<<<<<<<<<
@@ -8653,7 +8746,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
       }
       __pyx_L72:;
 
-      /* "cobolparser/_lexer_fast.pyx":447
+      /* "cobolparser/_lexer_fast.pyx":458
  *                     tokens.append(Token(self.SINGLE_CHAR_TOKENS[char], char, location))
  *                     pos += 1
  *                 continue             # <<<<<<<<<<<<<<
@@ -8662,7 +8755,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       goto __pyx_L3_continue;
 
-      /* "cobolparser/_lexer_fast.pyx":438
+      /* "cobolparser/_lexer_fast.pyx":449
  * 
  *             # ---- single-character tokens ---------------------------
  *             if char in self.SINGLE_CHAR_TOKENS:             # <<<<<<<<<<<<<<
@@ -8671,17 +8764,17 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
     }
 
-    /* "cobolparser/_lexer_fast.pyx":450
+    /* "cobolparser/_lexer_fast.pyx":461
  * 
  *             # ---- ampersand: benign separator -----------------------
  *             if char == "&":             # <<<<<<<<<<<<<<
  *                 pos += 1
  *                 continue
 */
-    __pyx_t_3 = (__Pyx_PyUnicode_Equals(__pyx_v_char, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 450, __pyx_L1_error)
+    __pyx_t_3 = (__Pyx_PyUnicode_Equals(__pyx_v_char, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 461, __pyx_L1_error)
     if (__pyx_t_3) {
 
-      /* "cobolparser/_lexer_fast.pyx":451
+      /* "cobolparser/_lexer_fast.pyx":462
  *             # ---- ampersand: benign separator -----------------------
  *             if char == "&":
  *                 pos += 1             # <<<<<<<<<<<<<<
@@ -8690,7 +8783,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       __pyx_v_pos = (__pyx_v_pos + 1);
 
-      /* "cobolparser/_lexer_fast.pyx":452
+      /* "cobolparser/_lexer_fast.pyx":463
  *             if char == "&":
  *                 pos += 1
  *                 continue             # <<<<<<<<<<<<<<
@@ -8699,7 +8792,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
       goto __pyx_L3_continue;
 
-      /* "cobolparser/_lexer_fast.pyx":450
+      /* "cobolparser/_lexer_fast.pyx":461
  * 
  *             # ---- ampersand: benign separator -----------------------
  *             if char == "&":             # <<<<<<<<<<<<<<
@@ -8708,46 +8801,46 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
 */
     }
 
-    /* "cobolparser/_lexer_fast.pyx":455
+    /* "cobolparser/_lexer_fast.pyx":466
  * 
  *             # ---- unknown character ---------------------------------
  *             self.errors.append(LexerError(f"Invalid character: {char}", location, char))             # <<<<<<<<<<<<<<
  *             pos += 1
  * 
 */
-    __pyx_t_2 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_errors); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 455, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_2);
-    __pyx_t_8 = NULL;
-    __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_LexerError); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 455, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_7);
-    __pyx_t_9 = __Pyx_PyUnicode_Concat(__pyx_mstate_global->__pyx_kp_u_Invalid_character, __pyx_v_char); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 455, __pyx_L1_error)
+    __pyx_t_9 = __Pyx_PyObject_GetAttrStr(__pyx_v_self, __pyx_mstate_global->__pyx_n_u_errors); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 466, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_9);
+    __pyx_t_8 = NULL;
+    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_LexerError); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 466, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __pyx_t_7 = __Pyx_PyUnicode_Concat(__pyx_mstate_global->__pyx_kp_u_Invalid_character, __pyx_v_char); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 466, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_7);
     __pyx_t_10 = 1;
     #if CYTHON_UNPACK_METHODS
-    if (unlikely(PyMethod_Check(__pyx_t_7))) {
-      __pyx_t_8 = PyMethod_GET_SELF(__pyx_t_7);
+    if (unlikely(PyMethod_Check(__pyx_t_2))) {
+      __pyx_t_8 = PyMethod_GET_SELF(__pyx_t_2);
       assert(__pyx_t_8);
-      PyObject* __pyx__function = PyMethod_GET_FUNCTION(__pyx_t_7);
+      PyObject* __pyx__function = PyMethod_GET_FUNCTION(__pyx_t_2);
       __Pyx_INCREF(__pyx_t_8);
       __Pyx_INCREF(__pyx__function);
-      __Pyx_DECREF_SET(__pyx_t_7, __pyx__function);
+      __Pyx_DECREF_SET(__pyx_t_2, __pyx__function);
       __pyx_t_10 = 0;
     }
     #endif
     {
-      PyObject *__pyx_callargs[4] = {__pyx_t_8, __pyx_t_9, __pyx_v_location, __pyx_v_char};
-      __pyx_t_6 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_7, __pyx_callargs+__pyx_t_10, (4-__pyx_t_10) | (__pyx_t_10*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      PyObject *__pyx_callargs[4] = {__pyx_t_8, __pyx_t_7, __pyx_v_location, __pyx_v_char};
+      __pyx_t_6 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_2, __pyx_callargs+__pyx_t_10, (4-__pyx_t_10) | (__pyx_t_10*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
       __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
-      __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
       __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-      if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 455, __pyx_L1_error)
+      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+      if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 466, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
     }
-    __pyx_t_16 = __Pyx_PyObject_Append(__pyx_t_2, __pyx_t_6); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 455, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __pyx_t_16 = __Pyx_PyObject_Append(__pyx_t_9, __pyx_t_6); if (unlikely(__pyx_t_16 == ((int)-1))) __PYX_ERR(0, 466, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
     __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
 
-    /* "cobolparser/_lexer_fast.pyx":456
+    /* "cobolparser/_lexer_fast.pyx":467
  *             # ---- unknown character ---------------------------------
  *             self.errors.append(LexerError(f"Invalid character: {char}", location, char))
  *             pos += 1             # <<<<<<<<<<<<<<
@@ -8758,7 +8851,7 @@ static PyObject *__pyx_pf_11cobolparser_11_lexer_fast_10CobolLexer_10tokenize_pr
     __pyx_L3_continue:;
   }
 
-  /* "cobolparser/_lexer_fast.pyx":458
+  /* "cobolparser/_lexer_fast.pyx":469
  *             pos += 1
  * 
  *         return tokens             # <<<<<<<<<<<<<<
@@ -9493,34 +9586,42 @@ static int __Pyx_InitCachedConstants(__pyx_mstatetype *__pyx_mstate) {
 static int __Pyx_InitConstants(__pyx_mstatetype *__pyx_mstate) {
   CYTHON_UNUSED_VAR(__pyx_mstate);
   {
-    const struct { const unsigned int length: 11; } index[] = {{1},{80},{13},{20},{23},{11},{19},{179},{18},{27},{1},{1},{0},{1},{1},{1},{1},{1},{1},{8},{27},{7},{10},{15},{15},{34},{32},{32},{30},{19},{32},{4},{13},{15},{13},{20},{23},{11},{18},{1},{11},{20},{3},{13},{19},{20},{2},{14},{23},{10},{8},{12},{25},{13},{16},{10},{7},{15},{9},{18},{20},{18},{14},{14},{5},{9},{5},{1},{6},{18},{2},{4},{5},{21},{17},{18},{23},{17},{27},{12},{18},{12},{13},{13},{7},{1},{12},{6},{9},{8},{24},{11},{12},{6},{13},{19},{7},{7},{7},{5},{6},{4},{8},{5},{8},{13},{8},{5},{13},{10},{15},{7},{8},{7},{9},{15},{21},{18},{18},{10},{13},{5},{3},{3},{8},{11},{12},{12},{5},{21},{31},{19},{9},{4},{12},{10},{9},{18},{9},{5},{3},{8},{4},{5},{10},{8},{21},{6},{23},{4},{12},{5},{11},{5},{6},{5},{316},{1220},{294},{200},{189},{300}};
-    #if (CYTHON_COMPRESS_STRINGS) == 2 /* compression: bz2 (2612 bytes) */
-const char* const cstring = "BZh91AY&SY\032\335\001\377\000\001\300\177\377\377\377\377\377\377\377\377\377\377\377\377\365\277\377\377\373@@@@@@@@@@@@@\000@\000`\t\275\320t\353\271>\260\352\252\314\026\305m\221\003\231\340\003\3004\"\205\031\244\320\032i\243CA\223\3324bh\t\250\006mF5\023\3210\322z\231=\0101\036\202d4mC\032L\202Q\002i0\0012i0\251\3454\36544z\201\241\246\200\006\200\000\000\000\000\000\000\000\003@\nhR\236\246i\242a\000\315&\324\365\031\014\r\001=C\020\031\031\031\033@M\014\206\010i\240\300hh$HBi\351&\324\321\001?I\220\323&\247\251\240\000\001\240\000\000\000\000\000\000h\033Q\220\0100\004\302`L&\023L\023\021\200&\000\215\014\230\004\300\000\000\010\300L\000\000\r5\"\201\232\200\03144\000\001\210\000\323@\000\000\311\240\032\0324i\240\321\352\000\001\240\026+\230\306\353\254\3534\242'\004\217`\350\213\200\017\347\247\323\351MP\244\242Bjp\310N\332P\216\356\026\000W\n\243H\2038F\r\r\246DJ\353*\035\\\207\230?\344\3066\220\306\232c\tb\205\277}\367\\x\320\253\207\033U-K\251r0H\314\304\332M\215\226\226\232\231\200\2319\213T\032t\235\203I\264\306\r\2464\r\203\177\366\224\255\260\265\227\004\247%\\\367\245\201\n \331\315\"Z\0362\306\353ne\212\307tN\332\0055+\232\313\n+U\331Kr*\241\24666\214\231\013m\264\25651`\306\330\330\r\200\332c\332\250\353\225\252\247J\212\251)\245\343\354\"0I2Di\240Tlb\324\036\247\013\030\242\301m\234\312\257\256s866\223hfI\346\215\031/\224,\201\270\032\272\271\254\033`\325\315Xa\257%q{\202\370\314\204S0\341\243l\230\020>\245\021\n\326\314\341]\013\270\220\341thC\2721d\312\340*\315\252\272:\271\271\333\360\352\357\277\271\016\326&e\334-=\337\334+\253\313\210C\211 \034\024\276%)\330a\264q\216\241\220CF\3673fE9;\373\233\361qu\027:\t\310\211Yf\326\016 \315J\331\300.\311\250\250\255m\215\025\025\376\320\252\314\005\230pY3\204\226\t|\024hZ\237\320?(K\267\241=oKtJ\223OBI\026\277\t\022U\2220\221i\251\347v\260\370?^\r\177\255\234\355\316\226\033\307/\022\234*\026A\226\267\277\347kr\026#\r\303w\3440W5\272\321\243\361v\261\034\326I\304\274\\\360\244.\327\n\002\341\221 H""\342\344V5X\350\362t\306I\026\000`>\253\225\212\374\r\tqP\223\217\273\0007\242\327\220e\343!\rS@\024S\222\374\234\211\262\314\t\326\240?ax/\325\005\350\216\031*\021\257\300\212\002\340\256\030F\240LM \234\0333s\362R\210\021\025\022r\351\364\311\341\013\256;\036\225\321W\020\302\335b\024\006\307\325\322@\331\273\214v\201\\eV\312\360\262\313+\243\273\237\276\235\310w\313\354\320\345\025E\003_@\037\335T\205IQ\2251\330\0240\336\235\347\317\261:$\024\201VVH\016\347hzIo\310}\221H\316\312\tS\353\333\303L\310>\206\325\303\363\347\226[\267O=\252,2\316\020\320\032\253\210\305\251~\266>\304\036\301\270>H0\025QTU\300 \242\017O\245\344Q\021\366\350\267\220\272\272\257\253j\022Z\237\013\356\022\345\263\354a\227)4\374$\254f\346:M\033ME[\323{\203b\010A&5\225\241\262\243V\260\024PTf;n\307n!\036\016\211\323\200\360`\3010~\275Dg\347S\321\357{g\2427^\302\320\203@WB\300\2457\354e\"\214\234\245g2[R\263\005\3058\216\332\302mu\312\360\301\013\032j\345\3251=IL\336\024\302\034\251\266'\016\315X\244\350i(J!\033\tFAT\305\002\327s\220\334\373\305\211\224\276\026\026\007,\316\032\344\263\360\271Z\026\005\001Q\022ku\017\373e\311+\214\220s\236V\254kX\232p4\374qM\265\362\365\333\232\301\254\007sb\010\235)N\035\364\345\361x\313a\345\352\363\356V\371\025g?>=//\243\016\234\236\010-\261\347{nk\224w\206@\303\304\030]\303lD\203\261\355R\\\344@5\335gM\355\001\n+sk\020sb\214\271E\322\204\2063:d-\310a$k\224\0007lpB\212\307\026\274G\262qrBO\336v\314'\234\246\025\231<\376\033\375y\365\034mB\tjG\232\263\351a\343*\205@\243\016\312\306\332\033\265.R[M\"\263y:\227GW0\317\230u\254\352\207\212\242\212\217U9\025\220{\036\247bA\220\333\214\305&\316P\211\256ig\240)\246K\224?\233\326\345\276|\037\273%\277B\221/\326)\276i`\344\226\362.\013\357LB\364\274|\224\260\231T\\\364\010\345Y\350\266\367\217\265\322\310FX5\361wf\025bU\231\244\253}5/\367\253s\267l\202\214\252\344@v\270 \020/21l\244\020\336H\275\205\266c\025\230\313\366\357`\316\230Y\334\334=\"\273\005\351\273\356\324\230\263\344'*mM\274\225\3141\203\2100i\263d\254""\312\265\316pW=\316\224^\007N\244\217*^<\"HIO \225(*Y2s\026\002\241\25437\353\333\315\302i\206&\366\027(\2344\010\315,%EN\"\224 m\302\311Z\214\241X\247\023\206\215\021\335v\326.9C\247\222Yx\005\225\001\312\212\262\314\241i[#\003C\330\323m\265:\350\277X\256M(\270\300\323\031\021\272f\013\364q\352\314\347\r\261\0304\n\253kB\371\250.\226\331\3166\350Ul\252\325C\211K\344d\005#] \350\2533\310R\0142\334(2:hG\200\344\354\301\206?\210x\252S@\020\"\024\3222\234C%\302s2uWZN\032\014\032\270j\332a$\020\306\023\263\013&M\247e\242F\271F<\231v\355\3072\025\363P4\241\227\024\311\211|\211WZL\007\030\211\241\350f\224 p*:g\332\217\332\336\255\030@k\203.\223&)\301\317\316C\231si\r\254\302%\025B\025\216\233\326\342X\371\030,\224\2324e\332\347L\031\310[\242\333\307x\"aGG2r\244\347=\342E'(m\343\203I6\226\263\323\214\033\211\232\262\213\023\221-IY\017\036>\261\242yIJH/.[4V\243\223qaeN\3020D\342\004\3575\356-\277\004\300\302\351e\305\206l\241\246p\244~\346\354\203\005\271\222\310f\340\211\253X\325\026D3\226\211\251d\310*\271[;\345v\201\210L\301\271\351\322\230&\003\345\236^\000\334\254-\030\361^\3236<,\213\032\324j*\334J(\331R\261\n\340\241~\224\236\352\010\222\t<\323\350\037\260y\205\n\265\245pTF\221\242\210\016\320\265-\350^\031\246\031\351\323\345\327YJ\034;qxn\323\024\276\311&\327\317\304j^%\363\304\230\\\361T @\273\217|b\017\305\357\332BQQ\004vF5\334eW+b\r\343\202\351ee\264\203\016\000\245\327\272\347\017{d4TA\322\211\304\240\310\035B\001'p\220P\200I\212\240\013\0061\024U`,\342?\\\231\0107\310G(\n\"\221\333$\304\001@,\203\321\003\355\325\210\345\347\\\350$\207#\362!\243\210\272\001\315a\013\202$\230~s\200\375\337\211\034\370\322A\0049O\270\360>\217\277\241\347>\211\313s\375\247\004>\366\220\246\274\212-\266m\265\r\264\266\376\337\251\233\221\272\310$\337\352z\315\240\3313=D\014\034VYR\033'\301\034\352\t\005\035\235\270<\313\327T\002\313l\276\276\344\033;\250\026c`\"\320,\022|\3108\206v\317RZ\306~\361n\273\231\2255F\217\030\236AHD\271\313P\2030\270\313\234\351\030\367\251S\225\371T\362>""L4\033\017q\371'\203\006\331\200\223\n1\317I\333GB\205p\250\020T ^M\253\206\017I\225)jA0\245\324L#1*t\310\0051{o\313\230F\204&\360\256\345\300\353\242\234\260r%q\000\352$\275\027\033\020\250\250\216\224\004r\010M\367\014c\233\232\352\342\222\214\216\016y'\371\226\343\001[Zo\311v\223j13\030\311\231\010{\212\002\314j\221\3454\327\262EG\354:\346\222\345d\327\225\221mG\310\204\337\224Tu@\351\376 J\356\3111]\361$Wo\321&\233\250\2436\312\266%\014n\226\201\277JN\221\235:\311\353i\373\022B\272h\216 8 \330\0262X\361\030\320\254\252\253\365v_d\306~F\027\364\242f\333\255\021Y\361I\210\277\267\342p\277\315\031\242\356$V'\272\371\206\267\222\240f=(\354\313\316\030\247H\351c\375\235\202\033\034\001\344q\007+]J(\360{\231\240\363\2173\036\217\n\234\255\343\220\323bE\205Q\220\305\351\261;\021\214\274\241\202f\306.\026\017-\256\377\230`_\334\320\027\375\207\373W\327\263\255\312\276\227\265g\030\276\200\306\000\310\237\2604\326\351j\274\274\334\314\377sC?o\241\327\337g\340.\010c\343Q\260b\364\035\003\334\201\334\363Q\n%\301!\260\2461N\207\241&\241d\003\007\242\212\r\240\351\005T*\034\260\223\204@\320\323\2634\207S\010\264\263.rt\367\"\213\201\235U~\255Lj\353\326`\262\221|\242\23403\025C\235{\032*5\254!.\021sB\240u3;\341\235%P\320\346\314\024^p\034\316\035N\3476\026\244cw[\201\210\2447\213\t\210\206\014\256\276qw$S\205\t\001\255\320\037\360";
-    PyObject *data = __Pyx_DecompressString(cstring, 2612, 2);
+    const struct { const unsigned int length: 11; } index[] = {{1},{80},{13},{20},{23},{11},{19},{179},{18},{27},{36},{1},{1},{0},{1},{1},{1},{1},{1},{1},{8},{51},{27},{9},{7},{10},{15},{15},{34},{32},{32},{30},{19},{32},{4},{13},{15},{13},{20},{23},{11},{18},{1},{11},{20},{3},{13},{19},{20},{2},{14},{23},{10},{8},{12},{25},{13},{16},{10},{7},{15},{9},{18},{20},{18},{14},{14},{5},{9},{5},{1},{6},{18},{2},{4},{5},{21},{17},{18},{23},{17},{27},{12},{18},{12},{13},{13},{7},{1},{12},{6},{9},{8},{24},{11},{12},{6},{13},{19},{7},{7},{7},{5},{6},{4},{8},{5},{8},{13},{8},{5},{13},{10},{15},{7},{8},{7},{9},{15},{21},{18},{18},{10},{13},{5},{3},{3},{8},{11},{12},{12},{5},{21},{31},{19},{9},{4},{12},{10},{9},{18},{9},{5},{3},{8},{4},{5},{10},{8},{21},{6},{23},{4},{12},{5},{11},{5},{6},{8},{5},{316},{1253},{294},{200},{189},{300}};
+    #if (CYTHON_COMPRESS_STRINGS) == 3 && __PYX_LIMITED_VERSION_HEX >= 0x030e0000 /* compression: zstd (2686 bytes) */
+const char* const cstring = "(\265/\375`{\021\245S\000\212r\224\030G\360\260\272\001\314\300\304\210\233\006l\214\270\251A>\341,|\220O\230\233\002Ys\360(\376N\272%\316\265iJI\2515\270\312L3\030k\345\034\237a\233B\236\375_\314\233\247q\203$Y\322%\016%\024\307\014j\242\010j\001f\001~\001\245\0220+\253\002c@\325\353\344b\231@\001\222p\201\247\324\013\266\372`\257\025\313d\301\030\027L\210\024\312\305:\255R\026\205\262(\026\010\256@\225\205\275\\)\224\275Y\306\3144\213]\214%na\236b6kN\033|\332\231\231c3\333\3059\343\031=\322\214\242m\021\342\231\320ZLj{\313\247\025\275`}K*S\211rf#\315\320\243`s\243\211N}e\326V\310X\347K#\315\230\031\332j3\341yg\336\275\370\324\345\210\265I\206\236\013\266\242xQJ:<\221\307\007\010\036.\317\353\221w$\275r\234\2250\240\013\346\004\232X\256\027\021\326\344Ea\2321\217\242\207\"S\216\366\274\247Y\226\027\345\304\332+\365\245y\346\211K\317f\336<Y\312\023iL\273\235'9\332b\236\314\3644\326\372\222a\314\246=}\206\230\205X^\217E\003\213\312\013\370\342\225c>\265w#c#\211EO\217\236w^|\232+\317%\3433\274\371\316\204\2368\222\227\246\204}\246\024*uJ\301V`\211\025\313\225\212Y\201+V\352\225\212I\235\274\017\366\235D\2459\352\214i\274\027\025\234m4\017\317\234^6e\336Y\342\031\016/I\303\331+G\025\232\231EoC\3066\230\364T\254\022\313\344\211\370\274\031\2238\014\257Ji\316\2347\223J\375\244w\035\306\007\360\317\316\265\375\200\263\202pb\032J=~\314\207\274\330\025\364\220+\340\341\016m\215~:\353\203\256\353!<o\327\366\354\273K\273d\0078\241\036\316\013U\300\311\325\320\017g\035m\r\350y\223\340c\325\3305\224\005\005\371X?\264\004\025o\020p\344j)\211_\362=\374\253\257\364\024\336q\017\250\247\003\000\201\031\035\007}|\304\005p\217c\325\340\240\016\000\0373>\031\243\32556\337\032m\263\372\246i\266\223\264]\031\026O\254\255\225\221X[\213\261\315(\303\231F3i\232\274#M[l3\255\r\026\313\032\214g\267\304c\266f\306\244\355\236\330\336\231\265\332\244\331\333\3024I=s\312\224\230\324\243\314(\352\361\316\320\310k\317|\255\036m9\226&\315\006\223w6\206X\264\372\212\245Mf1\3162\215I\2333\306\326""\206\246h3\246\321l\366,q\316\266\020\353\033\263\"Mb\321\234\211Z\2047\206\307\031>\307\023\313Xk\365L\250\261\315\314f(2\307\260\274\351K\243]\013\302\250\276\030Xh\252p\230m\346\313\005{\275V \t\026\314\272>\021\252\020\253\324K\206]+{\262\271\275XkJ\271@p\225R\231\000W\331\314\031|\201'R(P\365\271@XJea\251\020\251\323\212\035Y\027\030w;\3400A\005q\231\375@\344J\370\335o\321K\275\245\304[A\336\252\341?\275\203\203\032\000\340\314H9\ty\353\3555\374\214\201Qa^\324\030nD\n2\306\340(!5\251+\365\244\371\333x\016\375\364\360\220R\272\221\326>\313\007\375\014\2364\352\235\025\256!7\372\330\227\274\004\027?YA\242\326.\216\204c\375\321\3370A\005u\024\337\030\245\235\364\253\240\336N\240\237@_\364-o\342\003x\013\236Z\343&\036\372\013\276\212\256\022\222\353\374\210$W\373\246o\373\327?>_\342W$\"!\271\226\277\340\3454\322\3277{\253\247x\310[;\022&\336:\362 \217\352\033=\002\311\332\362\036\2571\201\201z\242\037O\212'\327zQ;\244\347\277\237\364;\277\303w\340 \216\332$!\253\002\337\361\035=B\256\353.\366\311\036\361\254#\034\t\222z\366\004\374\226k@\262\202\374\n\311\332\245\341\257\3617\3245/\300k\233e3\010Yk\374v\354\220\034\250K\360\254\240\255=\255t@\032\373#<\210\317}\344-\036\003\375|p\022\307\233\264O\324\3049\320\241\235\016\000\0343<\216\334'\003\224\276\360\005\274\005\007*\n\333M\002\216\334(5\360?\276\002\027\271\220\033\361\221m\202\006\360\265\276\240\247pT\224\363\261z\324v\n\364C7P\016G\256\343\344F\233\201g\275))\305\277\365=?\324\001\265\233\004\034\271/\374\245/b\005\367p\014;\005\355PP\220\017\007\202\313\351\202\324\344\007\370\267~\273\310[\273\216\302K<\n\002<\326\3724\030F:\r\334+\006\244\344[z\253\265\033|8\t\351\312\217<\251\201\252Mn\252\316\007:\342\346@\210\213\373A\007\000\017h\303p\272O\356KE|\026\0235ewk'B\202\235Vv\247\205\232\240\372\242-\324\203v \235\221\026J\323\032\361\243\021\235B\315\305\223VP\032 e\3411\220\250-$\320\026\215\017\3015\222a\033@k\235\313\310\033\350\037\256\"\327A\330#\007D@\266\310\001\024\"\037\034n\014t\331g\207\003v""\014]P3\361\362\003<\335M7|\226\355\303\225\340PiI\212\3720z\n\376qb\214p1\351\227\236Dj\250\177\330\014>6\366\007\3157,7\037&\265\227K\365\300q\244 $\250w\327\240\005\320nD\223\026\240\240n\364\032?\311\271\340pJ m\341N\244+i'\205\375\357o\374\2237\321\351\231\263\010\350~\313\211\352\341.:\022\010\245\305\300\023b\267<P9\246\r\2621t\255-\223\253\375\017\335\205\343\326\357\220\242\302\270\313&Q\320\341\300\227\315w\375\225\277\"\264j\224VB\243/\340\277<\315\310k\350+4\344\356\340\024+\351\253\335M\335\356/\003\357x\314h\361\023\317\372\341D\244\245\207u\031^\342%\272\200\003\272|\375\270\211M\023\202\026\250\022\303\216\246\030b\210Dd\244\005I2\0342\020\010\026\216\245\341\246\351\007B\263(S\210\221\222\021IR\220\224\206}\003\226\016\320\"\225Is\322\270A\276\026\217\010\202qC\324\357\016<C\323\252FbN``\240\325\331\355\210\227-\351%\365V8Mz\257u\375\353\262<\302\241\240\342:\\\000\314|\305\224\324\305\307C\n\346\0364\2355w\257\324\345\305?\010\017\232\206^S\341X,\246d-/6\244Y\r\262t\300\241\357\0213A\005\372\244\224\236\232\266P\014\237%3AO\355j\223T\310\225\034g\344\330\225;\340+\377\353g\201\255\323N\000\027\030H\376\200C\277\370@\203g\351L\035\004\002(\201\304i\312\352\257\016\244+\373\025\303\"Eydh_\211\\}\216\364\365\014\365\314\340LSI\315\223\310;d1\000\343\230$\236f\201\204?\005\242\010?!\316\207oV\346\305\274)D*\231z\200\324\324\251n\016o\231\177D\0232\320,\340r\363 z\200r|`\r\360{\357\253\223%6\341e w0'//\254\326y\246\300\\\213L%J\000b\335\253\026bH\034\332F\034\252\370):\313\365\344\213/*\\IL\250\242\370\217c\222\327!\353F4\243\330\020\013\222,\177\r*\255\204D|\333\210+7\221\017z\240Pc\216\2663Q\0263h\035\357\021\362\256V\367=\377x%&\220\372c3\252P\256+8\274V\241\350\250\027V\225\306\247\005\352/\305\030\262\376}\323C\220\271\260+4\375\257\014=t\"|\216\013\035\024\264\016\217\217\277\332Q\341\331\313\341\023\370\360\n\261\210\360\360\363>\260\241\261\357\247\274\006%\203\037\266z\305\212\351j*\0206k\324_\312\035\375he\026\244\203\316\3563#\222#\310\330'8""\265\242Q\275\314\031U\361\214\312\211v\305\216\256\333~I(YH\301\357\017\215\232P\224\020\223\263\351\224GH\220\032\022\223\2515)\014o\231\267\303L\265r\017\330\005$\004\306\r\306\"\016\373\303\301(&k\025L\010\304k6\303\260L\301\212\001\"L\351\204}();\032\257\334\244*\342z\000\360HPR\005\242\331\241W\336\355C\000\356\013\316\021\243E\217\023.\373^\000G\3708\242\r\361\221b\3556\245~\2329\200(\242\206\024T\260\267\360\037Z\300\023H\212\016<j#\247d9\350\013\017I\022\n\3276\365-;\t^\300z\323\037\t\350\311\2345\375s\206\243\317\r<\267\246M\030y{\203\365\245\350\007b_\300\020r<\243\n-\321\033\326jn\263\207\025\345\251\266\340\263\336\346\346\001\216\264\232\311)D\325&\320\256ez\301n\263O\032\013\333B\260\274j\273C\261\201\300_\331\371siQDc\355\025b\002\211e\320\342\372\307\000\006z\340\225\321\215+A\016\017\256\344\010.\215\343\ni\022.\351\372\211\344\300\016\305\315\r\265Z\000A\357\340\315$o\256\325Btfu\033\002i\362\353\017j\247)!g\0078\373+\322\330`\256e\312\271\330W\010\342\301`\2206\313\025\256U\033>\365)\006$P\204\225^\274\215\305<o\017:*\253<F\242\321\017\372\014\014*\317\357 \241x\344`\202\305\216\365'\231\220\312gW\023\333\314O\262\320(n~\374\334\244\352\253\213T\316{\322%\262d\337\3761'\370\332\022\336#\320h\354\314\325f\227%\265\271\342\316\373\360\250Q\205%\341]X\2067\026\346\324\214\017\257[T\372\360\275Z\224\217B]\025\300\242\201+\002}\370],\343>\010\221$\227%\222\004\234\256;m\252\234\332\235\276\365\316\007\226\203\252\310Y\2776\341\030T}\034T`\351\206\371k\370\003\206G@\007\300$yh\037\314\251nh\266\276\001.J\016\223\225+\372\376L\254\237\255\261#bd\206\2040\304F\242\373\235\3263\232\017\232~R\272\332\306\022h\204z\202\323\361\235\362\033\376\254\240f\t\004t\332\206<D\310\233\213\3376\336\263\356\260[\304 )\002\214&f\205\234|\030\010\236\272\025";
+    PyObject *data = __Pyx_DecompressString(cstring, 2686, 3);
     if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
     const char* const bytes = __Pyx_PyBytes_AsString(data);
     #if !CYTHON_ASSUME_SAFE_MACROS
     if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
     #endif
-    #elif (CYTHON_COMPRESS_STRINGS) != 0 /* compression: zlib (2605 bytes) */
-const char* const cstring = "x\332\215VKW\333\326\026\016)I !\267\026\230\360\010Id\036\245\244\r\255\201\246\tmo\257\301&qBl\374\2004]]9K\226\017\240\306H\266$\363\350]\267\253C\206\032j\250\241\206\032j\250\241\207\036z\350\237\220\237p\277sd\214!\364\256\333U\344s\366y\355\375\355o\177;O\326O\314}M}\"\3112\255P]2iY\\\317\256e7\305\n=\246\372\017bY\327\252O\024U\324i\265\"\311\364\200\252\246\270\253\351\242\271O\305j]\247O\266\370\005\342!\325\rES\027\223\211bBL\246w\322\205t6\223\312\354\244\363\331\314\233T\246\330\265\245\223\230\2457\322\353\211\"f=\346\363\241z(U\224\262(\357K\272$\233T_\0253\232I\361\244d\212\241\277\242b\210eZQJ\334\345\312\211h\230\272\302\266\262M\252\270\225\332z\262\362lE\224\3242\034\377\235\312\246!\032\365\222\\\221\014\203\032\242\266+\226\352J\305DX\346I\225\032\213bzW<\321\352\242J\021\276\251\211U\354\353=\200`U\321\240&\217z^RU\315\224LDKp\\Q\367\346\305\262\242\343\021\345\220\262\323\033R\305\240\213[\371\354z*\271\235Ou\343\332V\341\340\201\242r\220\231\303\352\236XQ`\223*_\374|{Q\034\234\236\227\312e\202\313\251\254\225\264JU\322\r\252\177Cx&\310\256d\230\213\325\223\343\365\354\033\206\347:\333\261\311W\316\207k\222A{\246[\310\317\371l\221\230\372\t1\360j\205\222\212\242R\022\372\320\263C\336\247\362\007RV\016\025\226K\262O\2452\325{\326u\030\210Z?(1\177t\355\200\230\364\330\274\274~\244\351\345+WM\355\003U\225?\350\025&R\325\265=]\n\2170\n\261?r\006\334\371`#\235/\024\331\224\360\r\233)\276Fzx\326\265]\344Y\217\271;\354f\210YR=w\364^\327\245rv\203ll\220t&\311n\314\3467\322/\266\363\270z'E\326\263\231B1\221)^a*\244\223\027\375\270\344\325\345\242H\345_\247\336\275\315\346\223\205\315\324Nj\223d\266\337\254\245\362\344\302$N\226\222\351\027\351\"\341\216w\0260\331L\027S\371\304&\302Jm\244\177I\0258\302)]\327\364L\352\355f\032\305\270\375&\225O\257\223\316\306n\370\3478tq&['\307\370K\242\246H\006)\311\323\335B:\363b\023\221\275L\344I1\373:\225)\024\212y\330\316\256+hu]\246\233\232\314+\243\310\022\033~Pa;\211\315\355\024\221\252U\252\226%\343D\225\025mQ""\326t\255\216\022\244\206\274\317*\235\375\031W\022\220\020^\207d\217\232\250\226\0036e\354UP~\320\007Z\222\344\017=\365\262\330S/\275fn\3555\034hP\020c\021\333H\tu#\327u\035\342\306+\243wL\352p[\357\272\204\010\272c&\036\335\t\247=)k2!\224\352:\251t\220\240,\003\306\256N)\201n\302\373\335\272\212=\220\2512\352\220;\024\276\303V%\310\227A\312TV\016\244\n\033\322\343*\256P\201\023tB%\212A\272\270a\334\251bI7I\255\016\331P\014\251\202\362d?\325}I1\312\312\236\30213*T\3353\367\331~~\006\233\330\257q\346dE\323>H\014mR\325\014B\016$\200\213\257)\357\343\207\232R\230\000\374\007\320\352p\233\215t\r`@A(\026T\356\n\033H\007XU\351\021\273H\005s\370Bw\200\244\225\3511\321@\204\216\372tq\272`\344\321\\\260\240%\324)\002'\\2\014\344\320T\244Jhf\023\243\252U\361dU\247\273\3121E&0\202\235\222\013\322Bp3 \342N\3627\256T4n\354\336\324\221\350K\313\027UN\247\0142\370i\320\312.!h\025\035$0*\323]\251^1\3034\311Z\345l\300\222Z\347\241\207\026x\317b\255\032'\300\321\244\240%\277\232\307\313?\234og\212y\245r\206\330\374\215\316\263\323\365\236\026\304y\315?!\212\347\037\203\034\031D\371+\361q\350\332`\314\351k\r\210\316gN\334I\260\001f1G\370x\363\332`\324\372\247#8\013\356\222[\360n\373\323\376\353\240\326\036\370\307i\331\232\266\022\255\241\021k\305\252\331}\255\241\317OM\353\231\035oE\306\254Z;2j\025`\214D\255\344\245\237\353\366\264\275fK\035\233\035\265\363\266\356\214\273\002|\020\0361;\216\267\206\307,\303\236\265eg\324\221\335Q\267\354\315z%\377v0\033\224\033\261V\344\221]\013\267E\330\343\272=\346\334p\212\256\340\316\271\0066\312~\324\317\3714X\016\244V\364\276\035oG\204\366@\304\352\267\022\326\257v\215\005t\2735\024\261\372\330\247\237E\020iF\026\334{n\315\343\246\353\326\014s\335\236t\342m\004\367\035\206\023\3167\336\230\177'\210\267\007>?\255\343\236w\315\207\337z\267\274\177\007\261\277\022\355\020\253\016r\037\007\256\r\016[\302\247\370\340\335\273\021\034^\267L{\331\246\316\262\323\t\025\336\r\215Y\177:9Gquo\304{\345\227\202\033A\356\212\375\014\241(n3\354X+\372\330""\215\265\331\247\025\035\267\007\001\223\344\324Z\343\367\355\025\273\346\334r\014w\226c&yG\276\034\010\255\251%/\326\232z\320\306\203'\316\347\256\331\\~\335\210\267\242\223\366\234\375\207+\264\001#f_\272\203\336\260\207\301hk|\312\336pb\316O\336\240?\354/\373\222o\006?5\267r\355\350\002vG\307\340\022\336\301s\315\373_qV\364yQ/\327\232\372\322\355w7\274\030\356\230z\320\022g\200\307k\204$\264\304Y'\355\346\\\315/\004}m\361;/\327\036\237`[\246B\3202\336\264\227`\223!7\341\022\177\335\257\265\247\342\236\320\036\177\342\376\346\337\363\361\020v\317:\353\210pJl\212\337z\327\275\031/\347\225\375\330\331\rI\367\246+5\277I\004\303A\234\331\372\235\r7\326\374\352\007?\356g\033\313\r)\274/\312\340\036\237jN\301\203\316\357{\266\177\316\311\003\261\307\336\232G\375x\033 >s\226\300\247a7\316\337[\366\276\367c\376\212_\013\372\2035N\300q\020\220\207\200\314;Q\2346\335\037\275c_\017\242A>8\302s\343\363\316\237\360P\201i$x\325(5\267\266\233\333;a~L\207\273x\3139r\245\226\31028;\307\377_`/\"\355\023\217\354=\007h\306X\3215\277\372\021!\300\253\207(\215\361\t\026\303\241\375\026\025\n\003v\201D\310\"H0\032\362\205W`;\302\030\031\271g\251\316\232\263\347\026Yr<5x\331H\264\242sN\356\343mF\243\177:\303\316\367\340\020R\235\260\211\273\3562h\354\214;\355\256\271%T\002&ID\367\020\t\034\366\236\001\227\220\026\t\373\275\373\014\tf\3030\376\207\356\241W\360?\363Y\322\333\263K\310\345\032j\265\2575\313\330\220p\337\373K~\336?\206d\210\210\364\312\345\002\200M5\204ON\200\357\243S\366\252Sl.\374\344\347X\304\324YuYe\234\231\177f\344\350\230\333\010x\317\3161\005\271g\341# N\216\310S{\304^\347\260G\200\177\363\021;\324K\375\347\366\013\254A)V\201:\026\346\201{\354SX\227;j$\260\262\375\303\2116\347\236\373B\317E\227_\357\251\3378{\346;\3733\236\375\025GG\242\227\334\267^\322\357\367\023~\021\244]\n~i\344B\027\302\250\202\233\001m\2542\316\\p\250\335\231\31595\267\277\3715\333x+8\014\217\306/<z&\220\334$X\267\254#[b~6\037\377+\030h\334n\346\013L\231\270\240\325\230\206\261h\361\231a!0\r\273B""\363\231r\016\235\256\234\352\326\230\335\317\311\021\3021t\337\376\331\235m.&\203D\260\003YA#\370\223S4\302\n1\341\374\352\376\307\337\010\246\203\215\306t#\001_\341X\235s.\353\377\020H\354V\001b\374\267\r\345\014\367(<\271\001\246\201\331\243\326[\\\220\353t\032\210\355=\253d\337\340\350c(\243\0370\337v]\304u\347\364G\336I\244\326\320\004z\315;\256\223w'@\t\004\300l\023\200\366\356\244\375\005\216\010\235y\273\363\323\021\373\337\2341\367\216\027\017Q\342\000\261kWy\177\203\263Om\341\014\231\232u\307\376\036\367\205\326\366@\330\341&\301\316<:\323\027~\037;\370\334z\r\215\346G\2377\247\236z\277\007\327\003`\377\177/,{\253(\217\332\247\013_\273\257xe}\262\020\367&QR9\026\317\241\225\013\273\375$\300\340x1.\017\203\377\347\2611\236\r\214\374\317\236/XQ+\007\232#E\006\332e\356\254\021\017\333K\310|\222\227q\021\272\261\214f\014\335\235\340\031\021B\226BG:\324laA\260\027\2323+\241\364\372/\203\004[\216\216\266\361\302\030\240\0238I\031\274\021\270\276m\243\335~\214^\033|d\227\035N\327Y\346/\304\2301\366\356\351+x40\304~\332\003\303\314\255p\276\331\241F\247\231\013\314\353\316?\035NB\267fP\224\006\353\2473L$\300\223\346\203e/\356e\202\307\220\314\2609v\325\226\017Z\343\017@?4\216\034oc\020q\3679b\220\375\021\024\364\016\312\271\320\350\203O\302$\273\352)\332\360\241\237\273|\021\023\362\234]rnB\242\337y\020\367ig\036\325\304d\277%\242\317\266\240\227\342\242+\271'\376u\177\206\265\316\340^\2407F\032\374\337\030#\326<\213D\260\004k\301~\212&\364\036\016\277\364\327\320\356G\202\004/\353\377\002\374\002\371\333";
-    PyObject *data = __Pyx_DecompressString(cstring, 2605, 1);
+    #elif (CYTHON_COMPRESS_STRINGS) == 2 /* compression: bz2 (2683 bytes) */
+const char* const cstring = "BZh91AY&SYVs\266@\000\001\320\177\377\377\377\377\377\377\377\377\377\377\377\377\365\277\377\377\373@@@@@@@@@@@@@\000@\000`\n\035\327\326\274\346\356\225\267Z\256\215\233B\224I\266\002\345\340\001\340\032\021\024\232h\000\0314\321\240zM\351\220\300\202 hy\243B##h\324i\246\200\304\3024\3204\030\322d\022\210\023\023@\230CSL\204\312\237\222\232a\032dz\231\000\000\003@\006\206\02040#\020\320\006\200i\240$\"\247\251\372\247\350\207\2520i\244\3654\36526\246&\232\031\r\030L \014M\014\203L\002\r14\003C\322\001\"B&\n\236j\nx\236\251\355)\352f\246C\020\000\311\240\000\000\000\032\000\r\006\230\215\000\362\217H=D\030\002a0&\023\t\246\t\210\300\023\000F\206L\002`\000\000\004`&\000\000\004\211B5OQ\370\244\0006\240\001\240\00024\r\032\036\240\r\000\000\032\000\365\017SF\322\036\240\000\251dc\033\277Q\3374\242'\004\243\036q\272-\340?\256\257W~j\205%\022\023SW\n\220\372\322\261\020\032@h\014\303Y\003\300W\017/\377\004F\206\246\020\320\027\374\034\t\214m!\2154\306\022\322B\344[\222\333,<\330W\341\237\024\262\344\244\350\245\"\246&\322ll\256W2\364\201),\242\315\203Nj\363W\032M\2460m1\240l\033\340\320\226J\314\214\260%9+\363\\\226\0309&Q\236\354\033)\310\331-V\"RM\225\352\000\214\354^$\310\204\244\266\002\256LH\ncch\262\302\272\353/\306\363\026\014m\215\200\330\r\246=\273\305\245j\227Q..\264\266\327\217\300\210\301*\334\210\322b\243c\026\240\365:\230\305\026\013\262\205i9\322\362\360U\025Q\025PRo\265\230\316\266\261&\035\241\263e\320\025\260jv\253\024gdS\226\034\026\"\224\"jG\r\032\262P)\220\215\202\"\024\355\227\304\225_`Q_3\207AKV\306\254\022[\311\275\215\335\307\352\365\262\250\306\313\\\346\346.\311\023Z\275\306\36615n\371%o\342t\367p\271\343mR\264\337\202\243z\253\242R\235E\334Sd\332d\020\321\312\324\322\3428\2351\272\334\356\326\341t'\236\241\330+L\357D\231\222Y0\325\001\243R,\226K\347\337\222I%\341\221\217\204'\204\260K\352\245IFW\004\204\326\347\3752P\227\017\244\353\236\230J):\361%Y\243B\222\343V\2328\362gH\343\177Kn\317\203e\261\360e\341m^\351\321\016v\344i\0202\312\347""\267+\205\262t\031\021F\200m\256`\240\2736\305\030F\301\363,\026\244\201Q7D\262\013\270\021\t\026\324\025\035\353cdcg\345\373\337\370\275\022\201C\314\223\\\225\321X\215\261\243*\263\307\220\037#\340\201\345\376\006A\241\232l\005%\262O;:\260j\346\347\342\003\231\211\367\337\022\363\270#\357\035\307\007\331\341\007<&9\227\253\203\205\231\032G;\035ZV\210\211DW\326d\247\002\245P\272'\257\276P\211$)3\325B!\357:E\033\317\344\323\2765\3465vb\027\337}\326|\332}\n9\016C\361Q+\033\030\032+A6%H\251Tg\351\236\374(\203J\261n_\2552\031X\253v\025\003\274\023zU\263\324=\250\244h\313\t'\263\307\246\332\320}\215\273\247\327\327v\356\\\251M\212,7p\352\252\320\330\315\220\207\225\365\"\230\242\220KV\225\325\000\332loT*b(\277\007\221DG\354\236\317\024\306\373\262\273\212\025lO\332\374D\305p\366\230n\357\"\242\371\210\220S\267\016sOm\250\275\275\233\\\032 \204\022cW46^7(\0060j5\264c\267\216\320\217\016\227P\007\203\006\t\233\371\267\221\247\202\336\276\207\265\330\263\271x\246(\030\2052\2461\021\346I\020\260C\263N\233h\264\343L\303`k\022\241g\312`\r\004\031\030f\362\356\254\245\311m\177R\261\016\312\371\323\253\237~\324\242\032\026%\220\216\004\205\030Q\024F\t\232\271\242\253\276:`VM\211d\003\254\2743:\335\206\336\274\222\321\340\250\211Lu\037\355\313za\032\240\347<\301X\326\2616\350m\364\342\234\257\357\360\331\314\260k\001\335\3660c\236\367\356\233\3735\316\266\235\336Fn=\366\310\275\236&lw\375-\330t\342oA]O3\354\034\345\250\356'\004\315\362e\334g\306(\033\316\232\324\032\022\013z;\252\301\344*M\267\367\336\202\013\244\353\251[ZV\\\223gT\337\207\024\205\263\300\006\037\036%I\266<o\200\235\270\322\325\325\253\1778\333\022'\306M07\275?\313\177\337\340\274\356j\020LR7\2554a\3667\261\201x(\303\301\261\270\207-Wb\273\3153.T\343\2560f\245\234>I\237\222w\021\332\024\033\030\325\033;W\025R(\317\206A\213\016[\353-8\366\010\230\327:X\026\333V*\037\207%\305r\246o\350\334\257\312jD\313\230Y\257MS\251\317Ry\022xe\222m\014\223!\345U\\5(\252.\256\021\312\264\266\334\236?c\245Q\031A\257\213\274\240""\273iv\244\264U\273\246\333\232\317w\177'\362\347\202\214\276\264`\262\220\300d\n\325\024\236L\034\357v\025\271T\237qcj\206\236\372\267\016{)7\321\320\245\"\375\005\251\353\305\326f\240\261\264\234\251\2676\355\303(\306\016 \3414\331\320Q\311F\271\316C\nd\351\013\301\311\n<\271{\264\210\362\253|a.PT\302\264\360\326\002\241\3009\216\216\034\223\311\316\272\306&\2541Q:\254\001\2320\222(w\213P\201\307W\033$\243\007\014\342L\221&\321>\347D=mz\271\025\331gZ\235\211\023i\273\r\273\34010\031,\242R\014TUUT}\257\2572\311qB%\251\305\222C\270\264'\227\n)y\271TC\262\326 (\253\213\203JZe<l;[5W\016\222\271P\321L\3362\002\221\3026\203\344\254\346\265\2505\306\326\r\025\026N\203'\n\210$\036\344r\303\342)\205v\3337\001\004B\311dMN!\222\326sV\362\252\310\311\303H\275\254\203U\323,\201C\265\300R\274\265\314\235!w\305\322\224\331\024/{[Z\371\312\260\356\320f\206\356\272\3233$\251.\361\312\300\356\021&=\rR\304\016\n\216\255\373\021\374\233\342\243\010\rt\0257v\256\340\341\345\353\023\247\026\3148\2638\217J\003\022\n\377{V\004\027\225\211(t\031p\321\363\\1\n6\211\270\t\344\344\324\001\\\0100\\;C\273\352\006\020\354\245\274pi&\322\324{8\302\343&iJ*ND\263J\250x\347\3244\347q)HD\310\204\272 \221C\252EET>\013$\203\230\301\026fx\2332\31533\306R\332\303VX\323XZ?\223y\365aVL\234I\301\341#\1770\325\026(k8\327k+AU\312\332>Nd\321\250V\302\247\353\246\211\232f<\232\325.\001\311Xl\031\001^\323V<0\210\306\265\030\255\005\\I\n\215\220^!|\0242\321)\215\204J\204\262\272L\1778\363;\025oK\340\2404\215\226@t\326\345\311\014\203T\317]4\373\227\336Z\207W\035\257\007r\322!\226\021\257\233\313\33252\023+\"V.\273U\010\0201\355\350\216r\010m\2048\225LTA\035\270\323\014\212]\331\316\203{`\2722\363e\240\303\200Z\354\235\216\377+\251\277l|\307E/\242\016\220t\317Y\267\36064\301\267\364\300;\337=\231\367\002[\035\014\212\314G\205\212\312\032P\266\227\033\307\010\t\021y\033\376\364\214\364\333\225\363\227\342\311\222CF\201]\014\006\020\276\261\"a\225,\005\347j1\"\311\004\020\344\227\017\027\325\221w\242\367N+\237\3578""!\370t\2055\347\321n3q\250m\245\271\322\3503\215\034vA&\377g\365NA\252fz\0100\315\246\333R\033g\264\341\310&\023\215\353\263\300\275\0250^I\305\363\364\240\325\330@\263\032A\026\201`\223L\203\250gp\364!X\313\372\026\303\371^9\3524\246b\211\005!\022\350-L\0331\026\351-\3621\354R\250+\360\252${\324\220K\322\247\273\333\242\014\033\006\002DR\316\212P\326<LKaL3\316Xe'\344R\007\234\332\224\265 \210\241\221%\031\210(D\301D\275z\360\304F\204'\355\256\361\320\373\342\264 \346A\270\003\350\220\372\035\234.\274J#\252\302:\310G\376\357\030\214\336\321V\343\350\340\332\341\222\177\234u\260-|(V\367\261\372Mg\nc\206S'!\374\224\006\243\225\346\304\352;\233:\275\214\370_\316\\X\366\342\263\r\305\236\362\023\375\340\374*\007'\331\210\260`1n\300\200[{\032\t!E\031\274Ox1jrs\016\275W\363\214\353ZL\227k\347\274\025\312Dy\001\262\r\241\237e\254#\031\226\225\220\2676o\3548b\325\234/\351a\331\363\\\314iV\233)m\376\354\265\267g\201\307K\005\033\227\211\r\223\016\354\245\2012l\223fO\313\024\316C\222\267\326\026C\303hF\217\240\337\235\313\250\221\210\370'\010\336\215\267*m\251\334\336\344\311\265]\023}K\216kW\246\325\034:g\225\222%\031\265S\nV\377\357\257\337\035\\\013\314Q\201{\321\277\276\350P\271\005\364:\372\261\226\2401\2021\350\351\217Z\337*\264\326\324\252NcR\203\033[\026\227\020]\2041\341P\351,\270\354 b\355\003\014\033H\204\315\324\004R\342\316E\241O\261E\203P\004\036\202\260/&\312-ie4\342\214\252\207\227\255\301Y\206!Z\315U\006\215\242\345ap&\326\267e\354\345\241\276\327\rK8R\261\227\274\331\224\\\303\347\207*\312\367\336%n\023s\313(\206$\341/\013L\245M^\341\206\006D\0230\306\350./\262\271\210k\201\023e3x\2301\016\031\242\237\377\027rE8P\220Vs\266@";
+    PyObject *data = __Pyx_DecompressString(cstring, 2683, 2);
     if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
     const char* const bytes = __Pyx_PyBytes_AsString(data);
     #if !CYTHON_ASSUME_SAFE_MACROS
     if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
     #endif
-    #else /* compression: none (4594 bytes) */
-const char* const bytes = "-Cython-accelerated COBOL lexer; drop-in replacement for the pure-Python version.DATA DIVISIONENVIRONMENT DIVISIONIDENTIFICATION DIVISIONID DIVISIONInvalid character: Note that Cython is deliberately stricter than PEP-484 and rejects subclasses of builtin types. If you need to pass subclasses then set the 'annotation_typing' directive to False.PROCEDURE DIVISIONUnterminated string literal&?\n. \t\"'add_notecobolparser/_lexer_fast.pyxCOMMENTCobolLexer_CobolLexerBase_CobolLexerPureCobolLexer._try_single_line_stringCobolLexer.check_division_headerCobolLexer.read_number_from_textCobolLexer.read_word_from_textCobolLexer.tokenizeCobolLexer.tokenize_program_textDATADATA_DIVISION_DIVISION_FIRST_DIV_DATA_LEN_DIV_ENVIRONMENT_LEN_DIV_IDENTIFICATION_LEN_DIV_ID_LEN_DIV_PROCEDURE_LENEENVIRONMENTENVIRONMENT_DIVISIONEOF_FF_INDICATORFIGURATIVE_CONSTANTFIGURATIVE_CONSTANTSIDIDENTIFICATIONIDENTIFICATION_DIVISIONIDENTIFIERKEYWORDSLEVEL_NUMBER_LEVEL_NUMBER_1_2DIGIT_RE_LEVEL_NUM_RELITERAL_PREFIXESLexerErrorNEWLINENUMERIC_LITERALPROCEDUREPROCEDURE_DIVISION__Pyx_PyDict_NextRefSINGLE_CHAR_TOKENSSTRING_LITERALSourceLocationTokenTokenTypeVALUE_appendasyncio.coroutineschcharcharscheck_division_header__class_getitem__cline_in_tracebackcobolparser._lexer_fastcobolparser.lexercobolparser.models.ast_basecurrent_linecurrent_line_upperdivision_enddivision_typedivision_word__doc__eerr_locationerrorsfree_form__func__handle_cobol_line_formathas_decimalhas_exponentintern_is_coroutineis_line_start_quoteisalnumisalphaisdigititemslengthlineline_numlineslocationlookahead_pos__main__match__metaclass____module____mro_entries__n_lines__name__new_posnext_linenext_line_index_open_string_location_open_string_quote_open_string_valueout_tokenspartial_valuepartspopposprefixed__prepare__program_text__qualname__quoteread_number_from_textread_prefixed_literal_from_textread_word_from_textremainingself__set_name__setdefaultstart_colstart_continuationstart_posstripsys__test__texttokentoken_typetokenizetokenize_program_tex""ttokens_try_single_line_stringtypeunterminatedupperupper_valuevaluevalues_ws_i\200A\360\014\000\t!\240\001\330\010 \240\003\2401\240A\330\010 \240\001\330\010!\240\021\360\006\000\t\024\220>\240\021\240)\2502\250S\260\n\270\"\270K\300q\340\010\016\210d\220\"\220A\330\014\023\2204\220q\230\001\330\014\017\210t\2208\2301\330\020\027\220q\340\020\025\220S\230\001\330\020\024\220D\230\001\330\020\024\220D\230\001\330\020\024\220D\230\002\230\"\230B\230a\330\020\024\220D\230\001\230\024\230R\230r\240\030\250\021\360\014\000\021\037\230a\330\020\027\220q\330\022\027\220s\230$\230c\240\025\240c\250\025\250d\260$\260b\270\n\300$\300d\310!\330\020\037\230q\330\020\027\220q\330\020\023\2204\220r\230\027\240\005\240T\250\021\250%\250s\260$\260c\270\024\270Q\270e\3003\300a\330\024\033\2301\340\020\021\340\010\020\220\004\220A\220Z\230q\360\006\000\t\n\330\014\020\220\001\330\014\020\220\004\220A\330\014\020\320\020)\250\026\250q\260\001\330\014\020\220\002\220#\220S\230\001\230\032\2401\340\014\023\2205\230\001\230\031\240/\260\027\270\013\3001\340\010\017\210u\220A\220Y\320\0360\260\007\260{\300!\200A\340\010 \240\001\330\010 \240\003\2401\240A\360\010\000\t\022\220\021\340\010\016\210d\220\"\220A\330\014\023\2204\220q\230\001\360\006\000\r\020\210u\220C\220t\2303\230e\2403\240a\330\020\027\220q\330\020\021\340\014\027\220~\240Q\240i\250r\260\023\260J\270b\300\005\300Q\360\006\000\r\020\210u\220C\220t\2303\230e\2403\240a\360\014\000\021\024\2204\220s\230!\330\024*\250!\340\024*\250!\330\024\030\230\t\240\025\240a\240q\330\030\033\2304\230q\240\007\240s\250$\250d\260$\260a\260w\270c\300\021\330\0342\260!\330\034\035\340\020\027\220y\240\017\250t\3203K\3101\330\024\032\230%\230z\250\021\340\020\023\2201\330\024(\250\t\260\022\2601\330\024\025\330\030\034\230F\240!\240=\260\t\270\022\2703\270a\270t\300=\320PQ\340\024)\250\021\340\024\027\220t\2304\230q\330\030\033\320\033+\2502\250S\260\001\260\024\260Q\330\034(\250\004\250F\260!\2601\330\034\035\330 #\2401\240K\250r\260\021\330 ""$\240I\250Q\250o\270S\300\001\340 5\260Q\340\030\031\330\034\035\330\034 \240\003\2401\240N\260\"\260A\330\034 \240\014\250A\250_\270C\270q\340\0341\260\021\340\030-\250\\\270\026\270q\330\030\031\330\034$\240C\240q\330\034 \320 0\260\002\260#\260Q\260d\270!\330\034 \240\003\2401\240D\250\006\250a\320/A\300\022\3001\330\034 \240\004\240F\250!\320+;\2701\270O\3103\310a\340\0341\260\021\340\024\027\220q\330\030\034\320\0345\260Q\330\030\034\320\0345\260^\3001\330\034%\240R\240s\250*\260B\260e\2701\340\030\033\2308\2402\240T\250\022\2501\330\034 \320 3\2607\270!\2704\270q\300\004\300B\300d\310!\330\030\037\230q\340\030\031\330\034 \240\001\240\024\240R\240t\250<\260x\270r\300\024\300R\300w\310a\340\030'\240~\260Q\260i\270r\300\023\300J\310b\320PU\320UV\330\030\033\2304\230t\2401\330\034 \240\007\240w\250a\330 *\250!\330$%\330$%\330$)\250\022\2501\360\006\000\031\037\230g\240Q\330\034!\240\021\240)\320+<\270O\3101\340\030\036\230a\330\030\031\340\024\027\220v\230W\240A\330\030\036\230g\240Q\240a\330\024\032\230!\330\024\025\360\006\000\r\020\210t\2208\2301\340\020 \240\001\330\020\026\220n\240B\240g\250T\260\024\260Q\260n\300H\310A\330\024%\240Q\360\n\000\021\024\220>\240\022\2407\250!\340\030\034\230A\230_\250C\250q\330\030\034\230N\250\"\250B\250b\260\001\330\030\034\230D\240\001\240\036\250r\260\022\2608\2701\340\024\025\330\030\034\230A\230^\2508\2601\330\030\034\230A\330\034 \240\001\240\036\250v\260S\270\003\2701\330\034\035\340$2\260\"\260B\260b\270\001\330$(\250\004\250A\250^\2702\270R\270x\300q\340 !\330$2\260\"\260B\260b\270\001\330$(\250\004\250A\250^\2702\270S\300\004\300E\310\021\330$(\250\004\250A\250^\2702\270R\270x\300q\360\014\000\025\034\230:\240T\320)=\270Q\330\030\036\230e\240:\250Q\360\006\000\025\034\230:\240T\320)?\270q\330\030\036\230e\240:\250Q\340\020\026\220g\230Q\230a\330\020\026\220a\330\020\021\360\n\000\r\020\210t\2206\230\023\230C\230t\2401\330\020\033\2304\320\037?\270q\330\024\032\230%\230z\250\021\340\020\023\2209\230G\2401\330\024""\033\230:\240Q\330\024\032\230'\240\021\240!\330\024\032\230!\330\024\025\360\006\000\r\020\210t\2208\2303\230c\240\025\240c\250\021\330\020\027\220z\240\024\320%9\270\021\330\024\032\230%\230z\250\021\340\020\026\220g\230Q\230a\330\020\026\220a\330\020\021\360\006\000\r\020\210u\220C\220t\2301\340\020\023\2205\230\003\2304\230t\2404\240r\250\022\2502\250W\260D\270\004\270A\270T\300\022\3002\300X\310Q\330\024\033\230:\240T\320)?\270q\300\006\300e\310:\320UV\330\024\032\230'\240\021\240!\330\024\032\230!\340\024\032\230'\240\021\240%\240q\250\004\320,?\270q\300\007\300v\310Q\330\024\033\2301\330\020\021\360\006\000\r\020\210u\220C\220q\330\020\027\220q\330\020\021\360\006\000\r\021\220\007\220w\230a\230z\250\021\320*@\300\010\310\n\320RS\330\014\023\2201\340\010\017\210q\200A\340\010\032\230!\330\010\032\230#\230Q\230a\360\010\000\t\024\220>\240\021\240)\2502\250S\260\n\270\"\270K\300q\360\006\000\t\014\2104\210r\220\027\230\004\230D\240\001\240\025\240c\250\021\330\014\033\230?\250$\320.D\300A\300V\3101\330\014\017\210~\230W\240A\330\020 \240\004\240A\240Z\250}\270F\300\"\300F\310\"\310A\310Q\330\020\027\220u\230A\230_\250O\270;\300a\360\006\000\t\021\220\001\330\010\016\210d\220\"\220A\330\014\023\2204\220q\230\001\330\014\017\210t\2208\2303\230c\240\025\240c\250\024\250S\260\005\260S\270\001\330\020\025\220W\230A\230Q\330\020\027\220q\340\020\021\340\010\026\220b\230\005\230Q\230a\330\010\026\220c\230\027\240\001\240\025\240f\250A\340\010\013\210<\220s\230$\230a\330\014\031\230\024\230Y\240a\240q\330\r\031\230\023\230D\240\001\330\014\031\230\031\240!\330\r\032\230&\240\001\240\021\330\014\031\230\031\240!\340\014\031\230\031\240!\340\010\017\210u\220A\220\\\240\027\250\013\2601\200A\340\010\032\230#\230Q\230a\340\010\013\210:\220S\230\001\330\014\023\2206\230\021\360\006\000\t\014\2104\210q\220\013\2307\240!\330\014\023\2206\230\021\340\010\024\220D\230\001\230\032\240:\250R\250s\260&\270\001\340\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0346\260j\300""\002\300!\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0346\260j\300\002\300!\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0343\260:\270R\270q\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\034,\250J\260b\270\001\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0341\260\032\2702\270Q\340\010\017\210v\220Q\200A\360\014\000\t\032\230\024\230Q\230a\330\010\027\220z\240\022\2401\330\010\032\230#\230Q\230a\340\010\032\230!\340\010\023\220>\240\021\240)\2502\250S\260\n\270\"\270K\300q\340\010\016\210d\220\"\220A\330\014\021\220\024\220Q\220a\330\014\017\210s\220#\220Q\330\020\023\2204\220r\230\022\2302\230W\240D\250\004\250A\250T\260\022\2603\260c\270\021\340\024\031\230\027\240\001\240\021\330\024\033\2301\330\024\025\330\020\027\220q\330\020\021\330\024\031\230\021\230)\320#4\260B\260e\2701\270H\300A\330\024\025\330\024\025\340\014\021\220\027\230\001\230\021\330\014\023\2201\360\006\000\t\020\210v\220U\230!\200A\360\024\000\t\037\230d\240!\330\010\032\230$\230a\340\010\037\230q\360\010\000\t\r\210J\220a\330\010\014\210J\220a\340\010\022\220#\220Q\220a\330\010\014\210L\230\005\230Q\230a\330\014\023\2205\230\001\230\021\330\014\017\210q\330\020\023\2204\220y\240\001\240\021\330\024#\2404\240s\250!\340\024#\2401\330\020\031\230\024\320\0353\2601\260N\300*\310A\330\020\023\2201\330\024\036\230g\240Q\240a\330\024\036\230g\240Q\330\030\035\230Q\330\034%\240Q\330\034\035\330\034*\250!\2509\260B\260c\270\023\270A\270V\3002\300S\310\001\360\010\000\021\032\230\024\320\0356\260a\260v\270Q\330\020\023\2201\330\024\036\230g\240Q\240a\330\024\027\220v\230Q\230b\240\006\240g\250Y\260a\330\030\"\240'\250\021\330\034!\240\021\330 )\250\021\330 !\330 .\250a\250y\270\002\270#\270S\300\001\300\026\300r\310\023\310A\360\010\000\t\023\220'\230\021\330\014\021\220\021\220)\2306\240\024\240^\2601\260H\270B\270c\300\023\300A\340\010\017\210q";
+    #elif (CYTHON_COMPRESS_STRINGS) != 0 /* compression: zlib (2676 bytes) */
+const char* const cstring = "x\332\215VKW\333\326\026\016)I !\267\026\230\360\010Id\036\241$\r\255\201\246\t}\344\032l'N\210\301\017H\323\325\225\263\204|\0005F\262%\231G\357\272]\0352\324PC\r5\324PC\r=\364\320C\377\204\374\204\373\235#c\014\241]7+\330\347\354\363\332\373\333\337\376\266\237\254\036\233{\232\372D\222eZ\246\272d\322\222\270\272\276\262\276&\226\351\021\325\177\020K\272Vy\242\250\242N+eI\246\373T5\305\035M\027\315=*Vj:}\262\301/\020\017\250n(\232:\237L\024\023b2\263\225)d\326\263\251\354V&\277\236}\233\312\026;\266L\022\263L:\263\232(b\326e>\033\252\007RY)\211\362\236\244K\262I\365e1\253\231\024OJ\246\030\372+*\206X\242ee\233\273\\>\026\rSW\330V\266I\0257R\033O\226\236-\211\222Z\202\343\277S\3314D\243\266-\227%\303\240\206\250\355\210\3335\245l\",\363\270B\215y1\263#\036k5Q\245\010\337\324\304\n\366u\037@\260\252hP\223G=+\251\252fJ&\242%8\256\250\273\263bI\321\361\210r@\331\351\264T6\350\374F~}5\225\334\314\247:qm\252pp_Q9\310\314auW,+\260I\345\177X\022\021tYQ\251\370\360\305\315y\261\177rV*\225\010\034\240\313\242\\\326\014\354\307\006\212@\021\025\337\247\250\206I%>\227\304}\311\224\367\330m\325\032\216\310\332\266V\256H\272A\365o\010O0\331\221\014s\276r|\364\265(k\345\332\276\212\354\277e\371Ze[\327\370\226\263\341\212d\320\256\351\006\362\1776\233'\246~L\014<V\246\204yB\302@\272v\310{T\376HJ\312\201\302\270B\366\340&\325\273\326u\030\210Z\333\337f\216\351\332>1\351\221yq\375P\323K\227\256\232\332G\252*\177\320KL\244\242k\273\272\024\036a\024e\177\34441g\203t&_(\262)\341\033\326R|\215t\361\270c;\317\343.sg\330a\000\263\244\272\356\350\276\256S*\353i\222N\223L6\311n\\\317\2473/7\363\270z+EV\327\263\205b\"[\274\304T\310$\317\373q\301\253\213E\227\312\277I\275\177\267\236O\026\326R[\2515\222\335|\273\222\312\223s\2238YHf^f\212\204;\336^\300d-SL\345\023k\010+\225\316\374\222*p\204S\272\256\351\331\324\273\265\014\212}\363m*\237Y%\355\215\235\360\317p\350\340L6\216\217\360\227D\315\222,R\222\247;\205L\366\345\032\"{\225\310\223\342\372\233T\266P(\346a;\275\256\240\325t\231\256i2""\257\274\"Kl\370\201\n\336J\254m\246\210T\251\240\016$\343X\225\025m^\326t\255\206\022\247\206\274\307\224\204\375\031\227\022\220\020^\347d\227\232(\271}6e\354UP\336\320\037\272-\311\037\273\ng\276\253p\272\315\334\332m\330\327\240P\306<\266\221m\324\215\\\323u\210'\257\214\3561\251\301m\275\343\022\"\350\214\2318u&\234\366\244\244\311\204P\252\353\244\334F\202\262\014\030;:\245\004\272\014\357wj*\366@\006K\250C\356P\370\016[\225 \217\006)QY\331\227\312lH\217*\270B\005N\020\033\225(\006\351\340\206q\273\212%\335$\\?\024C*\243<\331WeOR\214\222\262\253p\314\2142Uw\315=\266\237\237\301&\366m\234:Y\326\264\217\022C\233T4\203\220}\t\340\022\256M\370\242\246\024&\000\377\000Z\rn\263\221\256\001\014(\010\305\202\312]a\003i\037\253*=d\027\251`\016_\350\014\220\264\022=\"\032\210\320V\237\016N\347\214<\232s\026\264\234\032E\340\204K\206\201\034\232\212T\016\315lbT\264\n\236\254\350tG9\242\310\004F\260SrNZ\010n\006D\334I\376\306\245\212\306\215\235\233\332:\177a\371\274\312\351\224A\006?\rZ\336!\004\255\250\215\004F%\272#\325\312f\230&\210\370\351\200%\265\306C\017-\360\236\305Z1\216\201\243IAK~5\217\227\177p\276\235*\346\245\312\031b\3637:\317N\327\272\372\030\3475\377\010Q<\3730\016%\235\007C\016\r\242\374\225\3704p\245?\346\3644\373D\347\013'\356$\330\000\263\230#|\272~\245?j\375\354\010\316\234\273\340\026\274\233\376\244\377&\250\266\372\376uR\262&\255Ds`\310Z\262\252vOs\340\313\023\323zf\307\233\221\021\253\332\212\014[\005\030#Q+y\341\353\252=i\257\330R\333fG\355\274\255;\243\256\000\037\204\007\314\216\343\315\301\021\313\260\247m\331\031vdw\330-y\323\336\266\1773\230\016J\365X3\362\300\256\206\333\"\354q\335\036q\2569EWpg\\\003\033e?\352\347|\032,\006R3z\327\216\267\"B\253/b\365Z\t\353W\273\312\002\272\331\034\210X=\354\243\227E\020iD\346\334;n\325\343\246\253\326\024s\335\036w\342-\004\367\035\206c\3167\336\210\177+\210\267\372\276<\251\341\236\367\215\373\337z7\274\377\004\261\277\022\255\020\2536r\237\372\256\364\017Z\302\347\370\340\335\333\021\034^\265L{\321""\246\316\242\323\016\025\336\r\214X\177:9Gquo\310{\355o\007\327\202\334%\373\031BQ\334f\330\261f\364\221\033k\261\217ft\324\356\007L\222Sm\216\336\265\227\354\252s\3031\334i\216\231\344\035\372r 4'\026\274Xs\342^\013\017\036;_\272fc\361M=\336\214\216\3333\366\037\256\320\002\214\230}\345\366{\203\036\006\303\315\321\t;\355\304\234\237\274~\177\320_\364%\337\014~jl\344Z\3219\354\216\216\300%\274\203\347\032w\037sV\364xQ/\327\234\370\312\355u\323^\014wL\334k\212S\300\343\rB\022\232\342\264\223qs\256\346\027\202\236\226\370\235\227k\215\216\261-\023!hYo\322K\260\311\200\233p\211\277\352W[\023qOh\215>q\177\363\357\370x\010\273\247\235UD8!6\304o\275\253\336\224\227\363J~\354\364\206\244{\335\225\032\337$\202\301 \316l\275N\332\2155\036\377\340\307\375\365\372b]\n\357\2132\270G'\032\023\360\240\375\375\201\355\237q\362@\354\221\267\342Q?\336\002\210\317\234\005\360i\320\215\363\367\026\275\357\375\230\277\344W\203\336`\205\023p\024\004\344! \363N\024\247M\367G\357\310\327\203h\220\017\016\361\334\350\254\363'<T`\032\n^\327\267\033\033\233\215\315\2550?\246\303]\274\341\034\272RSd\031\234\236\341\377\347\330\213\237\"W\356\305\234~w\004d\024cMq\022ix\356\256\270\037}\301\177\204\347%\020l\354\201\275\353\000\356\030\253\312\306\343\037\021#\334\276\217\332\031\035cA\036\330\357P\3020`\027X\2064\203%\303!\241x\211\266\"\214\262\221;\226\352\2548\273n\221e\317S\203W\365D3:\343\344>\335d<\373\331\031t\276\007\311\300\205\204M\334U\227agg\335Ix\263\r\3570I\"\374\373\310\360\240\367\014\300\205\274I\330\037\334g`\000\033\206\000\335w\017\274\202\377\205\317X\321\232^@\262WP\314=\315iF\227\204\373\301_\360\363\376\0214\005\361^\276\\\000\362\251\272\360\331\t\024\304\360\204\275\354\024\033s?\3719\0261u\226]V:\247\346\027\214=ms\013\001\357\3329&1w,|\010\210\223#\362\324\036\262Wy^\"HP\343\001;\324]\033\317\355\227X\203\224,\003u,\314\002\367\330\347\260.\266\345J`u\375\207\023m\314<\367\205\256\213.\276\336U\340q\366\314w\366\027\234\036K\216\016&,\270\357\274\244\337\353'\374""\"X\275\020\374R\317\205.\204Q\005\327\003Z_f\244:\347P\253=\233q\252no\343k\266\361Fp\020\036\215\237{\364TA\271I\260nX\207\266\304\374l<\372w\320W\277\331\310\027\230tq\305\2532\221c\321\342c\212\205\300D\356\222\246\300\244u\340d\351D\267F\354^N\216\020\216\201\273\366\013w\2721\237\014\022\301\026t\007\235\342ON\321\010\253\324\204\363\253\373_?\035L\006\351\372d=\001_\341X\215sn\335\377\001\204\307\255\002\324\372o;\316)\356Qxr\rL\003\263\207\255w\270 \327nEP\343;\326\266}\215\243\217\241\214\206\301|\333q\021\327\255\223\037y\253\221\232\003chF\357\271\220\336\036\003%\020\000\263\215\001\332\333\343\366C\034\021\332\363V\373\253\335\r~sF\334[^<D\211\003\304\256]\346\r\020\316>\265\205Sd\252\326-\373{\334\027Z[}a\013\034\007;\363h]\017\375\036v\360\271\365\006\"\316\217>oL<\365~\017\256\006\300\376\377^X\364\226Q\036\325\317\027\276v_\363\312\372l!\356\215\243\244r,\236\003+\027\376\034\030\007\030\034/\306\345A\360\377,6\306\263\276\241\177\374Q XQ+\007\232#E\006\372i\356\264S\017\332\013\310|\222\227q\021\272\261\210n\ra\036\343\031\021B\226BG\332\324lbA\260\347\032SK\2416\373\257\202\004[\216\016\267\360\302\010\240\0238I\031\274\021\270\276i\243\037\177\212^\351\177`\227\034N\327i\346/\324\2321\366\366\311kx\3247\300\276Z}\203\314\255p\276\326\246F\273\333\013\314\353\366o\213\343\320\255)\024\245\301\032\356\024\023\t\360\244qo\321\213{\331\340\021$3\354\236\035\265\345\203\346\350=\320\017\235%\307\373\034T\336}\216\030d\177\010\005\275\205r.\324{\340\2230\316\256z\212>}\340\347.^\304\204<go;\327!\321\357=\210\373\2443\213jb\262\337\024\321\210y\177\230w%\367\330\277\352O\261\336\032\334\t\364\372P\235\377\010\031\262fY$\202%Xs\366St\251\017p\370\225\277\202\337\003CA\202\227\365\377\000Z\226,\343";
+    PyObject *data = __Pyx_DecompressString(cstring, 2676, 1);
+    if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
+    const char* const bytes = __Pyx_PyBytes_AsString(data);
+    #if !CYTHON_ASSUME_SAFE_MACROS
+    if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
+    #endif
+    #else /* compression: none (4731 bytes) */
+const char* const bytes = "-Cython-accelerated COBOL lexer; drop-in replacement for the pure-Python version.DATA DIVISIONENVIRONMENT DIVISIONIDENTIFICATION DIVISIONID DIVISIONInvalid character: Note that Cython is deliberately stricter than PEP-484 and rejects subclasses of builtin types. If you need to pass subclasses then set the 'annotation_typing' directive to False.PROCEDURE DIVISIONUnterminated string literalUnterminated string literal at line &?\n. \t\"'add_note: closed at end of line instead of a matching quotecobolparser/_lexer_fast.pyx, column COMMENTCobolLexer_CobolLexerBase_CobolLexerPureCobolLexer._try_single_line_stringCobolLexer.check_division_headerCobolLexer.read_number_from_textCobolLexer.read_word_from_textCobolLexer.tokenizeCobolLexer.tokenize_program_textDATADATA_DIVISION_DIVISION_FIRST_DIV_DATA_LEN_DIV_ENVIRONMENT_LEN_DIV_IDENTIFICATION_LEN_DIV_ID_LEN_DIV_PROCEDURE_LENEENVIRONMENTENVIRONMENT_DIVISIONEOF_FF_INDICATORFIGURATIVE_CONSTANTFIGURATIVE_CONSTANTSIDIDENTIFICATIONIDENTIFICATION_DIVISIONIDENTIFIERKEYWORDSLEVEL_NUMBER_LEVEL_NUMBER_1_2DIGIT_RE_LEVEL_NUM_RELITERAL_PREFIXESLexerErrorNEWLINENUMERIC_LITERALPROCEDUREPROCEDURE_DIVISION__Pyx_PyDict_NextRefSINGLE_CHAR_TOKENSSTRING_LITERALSourceLocationTokenTokenTypeVALUE_appendasyncio.coroutineschcharcharscheck_division_header__class_getitem__cline_in_tracebackcobolparser._lexer_fastcobolparser.lexercobolparser.models.ast_basecurrent_linecurrent_line_upperdivision_enddivision_typedivision_word__doc__eerr_locationerrorsfree_form__func__handle_cobol_line_formathas_decimalhas_exponentintern_is_coroutineis_line_start_quoteisalnumisalphaisdigititemslengthlineline_numlineslocationlookahead_pos__main__match__metaclass____module____mro_entries__n_lines__name__new_posnext_linenext_line_index_open_string_location_open_string_quote_open_string_valueout_tokenspartial_valuepartspopposprefixed__prepare__program_text__qualname__quoteread_number_from_textread_prefixed_literal_from_textread_word_from_textremainingself__set_name__setdefaultsta""rt_colstart_continuationstart_posstripsys__test__texttokentoken_typetokenizetokenize_program_texttokens_try_single_line_stringtypeunterminatedupperupper_valuevaluevalueswarnings_ws_i\200A\360\014\000\t!\240\001\330\010 \240\003\2401\240A\330\010 \240\001\330\010!\240\021\360\006\000\t\024\220>\240\021\240)\2502\250S\260\n\270\"\270K\300q\340\010\016\210d\220\"\220A\330\014\023\2204\220q\230\001\330\014\017\210t\2208\2301\330\020\027\220q\340\020\025\220S\230\001\330\020\024\220D\230\001\330\020\024\220D\230\001\330\020\024\220D\230\002\230\"\230B\230a\330\020\024\220D\230\001\230\024\230R\230r\240\030\250\021\360\014\000\021\037\230a\330\020\027\220q\330\022\027\220s\230$\230c\240\025\240c\250\025\250d\260$\260b\270\n\300$\300d\310!\330\020\037\230q\330\020\027\220q\330\020\023\2204\220r\230\027\240\005\240T\250\021\250%\250s\260$\260c\270\024\270Q\270e\3003\300a\330\024\033\2301\340\020\021\340\010\020\220\004\220A\220Z\230q\360\006\000\t\n\330\014\020\220\001\330\014\020\220\004\220A\330\014\020\320\020)\250\026\250q\260\001\330\014\020\220\002\220#\220S\230\001\230\032\2401\340\014\023\2205\230\001\230\031\240/\260\027\270\013\3001\340\010\017\210u\220A\220Y\320\0360\260\007\260{\300!\200A\340\010 \240\001\330\010 \240\003\2401\240A\360\010\000\t\022\220\021\340\010\016\210d\220\"\220A\330\014\023\2204\220q\230\001\360\006\000\r\020\210u\220C\220t\2303\230e\2403\240a\330\020\027\220q\330\020\021\340\014\027\220~\240Q\240i\250r\260\023\260J\270b\300\005\300Q\360\006\000\r\020\210u\220C\220t\2303\230e\2403\240a\360\014\000\021\024\2204\220s\230!\330\024*\250!\340\024*\250!\330\024\030\230\t\240\025\240a\240q\330\030\033\2304\230q\240\007\240s\250$\250d\260$\260a\260w\270c\300\021\330\0342\260!\330\034\035\340\020\027\220y\240\017\250t\3203K\3101\330\024\032\230%\230z\250\021\340\020\023\2201\330\024(\250\t\260\022\2601\330\024\025\330\030\034\230F\240!\240=\260\t\270\022\2703\270a\270t\300=\320PQ\340\024)\250\021\340\024\027\220t\2304\230q\330\030\033\320\033+\2502""\250S\260\001\260\024\260Q\330\034(\250\004\250F\260!\2601\330\034\035\330 #\2401\240K\250r\260\021\330 $\240I\250Q\250o\270S\300\001\340 5\260Q\340\030\031\330\034\035\330\034 \240\003\2401\240N\260\"\260A\330\034 \240\014\250A\250_\270C\270q\340\0341\260\021\340\030-\250\\\270\026\270q\330\030\031\330\034$\240C\240q\330\034 \320 0\260\002\260#\260Q\260d\270!\330\034 \240\003\2401\240D\250\006\250a\320/A\300\022\3001\330\034 \240\004\240F\250!\320+;\2701\270O\3103\310a\340\0341\260\021\340\024\027\220q\330\030\034\320\0345\260Q\330\030\034\320\0345\260^\3001\330\034%\240R\240s\250*\260B\260e\2701\340\030\033\2308\2402\240T\250\022\2501\330\034 \320 3\2607\270!\2704\270q\300\004\300B\300d\310!\330\030\037\230q\340\030\031\330\034 \240\001\240\024\240R\240t\250<\260x\270r\300\024\300R\300w\310a\340\030'\240~\260Q\260i\270r\300\023\300J\310b\320PU\320UV\330\030\033\2304\230t\2401\330\034 \240\007\240w\250a\330 *\250!\330$%\330$%\330$)\250\022\2501\360\020\000\035!\240\t\250\027\260\001\330 !\330 \"\240!\2409\250B\250k\270\021\270*\300B\300a\360\010\000\031\037\230g\240Q\330\034!\240\021\240)\320+<\270O\3101\340\030\036\230a\330\030\031\340\024\027\220v\230W\240A\330\030\036\230g\240Q\240a\330\024\032\230!\330\024\025\360\006\000\r\020\210t\2208\2301\340\020 \240\001\330\020\026\220n\240B\240g\250T\260\024\260Q\260n\300H\310A\330\024%\240Q\360\n\000\021\024\220>\240\022\2407\250!\340\030\034\230A\230_\250C\250q\330\030\034\230N\250\"\250B\250b\260\001\330\030\034\230D\240\001\240\036\250r\260\022\2608\2701\340\024\025\330\030\034\230A\230^\2508\2601\330\030\034\230A\330\034 \240\001\240\036\250v\260S\270\003\2701\330\034\035\340$2\260\"\260B\260b\270\001\330$(\250\004\250A\250^\2702\270R\270x\300q\340 !\330$2\260\"\260B\260b\270\001\330$(\250\004\250A\250^\2702\270S\300\004\300E\310\021\330$(\250\004\250A\250^\2702\270R\270x\300q\360\014\000\025\034\230:\240T\320)=\270Q\330\030\036\230e\240:\250Q\360\006\000\025\034\230:\240T\320)?\270q\330\030\036\230e\240:\250Q\340""\020\026\220g\230Q\230a\330\020\026\220a\330\020\021\360\n\000\r\020\210t\2206\230\023\230C\230t\2401\330\020\033\2304\320\037?\270q\330\024\032\230%\230z\250\021\340\020\023\2209\230G\2401\330\024\033\230:\240Q\330\024\032\230'\240\021\240!\330\024\032\230!\330\024\025\360\006\000\r\020\210t\2208\2303\230c\240\025\240c\250\021\330\020\027\220z\240\024\320%9\270\021\330\024\032\230%\230z\250\021\340\020\026\220g\230Q\230a\330\020\026\220a\330\020\021\360\006\000\r\020\210u\220C\220t\2301\340\020\023\2205\230\003\2304\230t\2404\240r\250\022\2502\250W\260D\270\004\270A\270T\300\022\3002\300X\310Q\330\024\033\230:\240T\320)?\270q\300\006\300e\310:\320UV\330\024\032\230'\240\021\240!\330\024\032\230!\340\024\032\230'\240\021\240%\240q\250\004\320,?\270q\300\007\300v\310Q\330\024\033\2301\330\020\021\360\006\000\r\020\210u\220C\220q\330\020\027\220q\330\020\021\360\006\000\r\021\220\007\220w\230a\230z\250\021\320*@\300\010\310\n\320RS\330\014\023\2201\340\010\017\210q\200A\340\010\032\230!\330\010\032\230#\230Q\230a\360\010\000\t\024\220>\240\021\240)\2502\250S\260\n\270\"\270K\300q\360\006\000\t\014\2104\210r\220\027\230\004\230D\240\001\240\025\240c\250\021\330\014\033\230?\250$\320.D\300A\300V\3101\330\014\017\210~\230W\240A\330\020 \240\004\240A\240Z\250}\270F\300\"\300F\310\"\310A\310Q\330\020\027\220u\230A\230_\250O\270;\300a\360\006\000\t\021\220\001\330\010\016\210d\220\"\220A\330\014\023\2204\220q\230\001\330\014\017\210t\2208\2303\230c\240\025\240c\250\024\250S\260\005\260S\270\001\330\020\025\220W\230A\230Q\330\020\027\220q\340\020\021\340\010\026\220b\230\005\230Q\230a\330\010\026\220c\230\027\240\001\240\025\240f\250A\340\010\013\210<\220s\230$\230a\330\014\031\230\024\230Y\240a\240q\330\r\031\230\023\230D\240\001\330\014\031\230\031\240!\330\r\032\230&\240\001\240\021\330\014\031\230\031\240!\340\014\031\230\031\240!\340\010\017\210u\220A\220\\\240\027\250\013\2601\200A\340\010\032\230#\230Q\230a\340\010\013\210:\220S\230\001\330\014\023\2206\230\021\360""\006\000\t\014\2104\210q\220\013\2307\240!\330\014\023\2206\230\021\340\010\024\220D\230\001\230\032\240:\250R\250s\260&\270\001\340\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0346\260j\300\002\300!\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0346\260j\300\002\300!\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0343\260:\270R\270q\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\034,\250J\260b\270\001\330\010\013\2109\220K\230q\240\001\330\014\023\2209\320\0341\260\032\2702\270Q\340\010\017\210v\220Q\200A\360\014\000\t\032\230\024\230Q\230a\330\010\027\220z\240\022\2401\330\010\032\230#\230Q\230a\340\010\032\230!\340\010\023\220>\240\021\240)\2502\250S\260\n\270\"\270K\300q\340\010\016\210d\220\"\220A\330\014\021\220\024\220Q\220a\330\014\017\210s\220#\220Q\330\020\023\2204\220r\230\022\2302\230W\240D\250\004\250A\250T\260\022\2603\260c\270\021\340\024\031\230\027\240\001\240\021\330\024\033\2301\330\024\025\330\020\027\220q\330\020\021\330\024\031\230\021\230)\320#4\260B\260e\2701\270H\300A\330\024\025\330\024\025\340\014\021\220\027\230\001\230\021\330\014\023\2201\360\006\000\t\020\210v\220U\230!\200A\360\024\000\t\037\230d\240!\330\010\032\230$\230a\340\010\037\230q\360\010\000\t\r\210J\220a\330\010\014\210J\220a\340\010\022\220#\220Q\220a\330\010\014\210L\230\005\230Q\230a\330\014\023\2205\230\001\230\021\330\014\017\210q\330\020\023\2204\220y\240\001\240\021\330\024#\2404\240s\250!\340\024#\2401\330\020\031\230\024\320\0353\2601\260N\300*\310A\330\020\023\2201\330\024\036\230g\240Q\240a\330\024\036\230g\240Q\330\030\035\230Q\330\034%\240Q\330\034\035\330\034*\250!\2509\260B\260c\270\023\270A\270V\3002\300S\310\001\360\010\000\021\032\230\024\320\0356\260a\260v\270Q\330\020\023\2201\330\024\036\230g\240Q\240a\330\024\027\220v\230Q\230b\240\006\240g\250Y\260a\330\030\"\240'\250\021\330\034!\240\021\330 )\250\021\330 !\330 .\250a\250y\270\002\270#\270S\300\001\300\026\300r\310\023\310A\360\010\000\t\023\220'\230\021\330\014""\021\220\021\220)\2306\240\024\240^\2601\260H\270B\270c\300\023\300A\340\010\017\210q";
     PyObject *data = NULL;
     CYTHON_UNUSED_VAR(__Pyx_DecompressString);
     #endif
     PyObject **stringtab = __pyx_mstate->__pyx_string_tab;
     Py_ssize_t pos = 0;
-    for (int i = 0; i < 156; i++) {
+    for (int i = 0; i < 160; i++) {
       Py_ssize_t bytes_length = index[i].length;
       PyObject *string = PyUnicode_DecodeUTF8(bytes + pos, bytes_length, NULL);
-      if (likely(string) && i >= 21) PyUnicode_InternInPlace(&string);
+      if (likely(string) && i >= 24) PyUnicode_InternInPlace(&string);
       if (unlikely(!string)) {
         Py_XDECREF(data);
         __PYX_ERR(0, 1, __pyx_L1_error)
@@ -9528,7 +9629,7 @@ const char* const bytes = "-Cython-accelerated COBOL lexer; drop-in replacement 
       stringtab[i] = string;
       pos += bytes_length;
     }
-    for (int i = 156; i < 162; i++) {
+    for (int i = 160; i < 166; i++) {
       Py_ssize_t bytes_length = index[i].length;
       PyObject *string = PyBytes_FromStringAndSize(bytes + pos, bytes_length);
       stringtab[i] = string;
@@ -9539,14 +9640,14 @@ const char* const bytes = "-Cython-accelerated COBOL lexer; drop-in replacement 
       }
     }
     Py_XDECREF(data);
-    for (Py_ssize_t i = 0; i < 162; i++) {
+    for (Py_ssize_t i = 0; i < 166; i++) {
       if (unlikely(PyObject_Hash(stringtab[i]) == -1)) {
         __PYX_ERR(0, 1, __pyx_L1_error)
       }
     }
     #if CYTHON_IMMORTAL_CONSTANTS
     {
-      PyObject **table = stringtab + 156;
+      PyObject **table = stringtab + 160;
       for (Py_ssize_t i=0; i<6; ++i) {
         #if CYTHON_COMPILING_IN_CPYTHON_FREETHREADING
         #if PY_VERSION_HEX < 0x030E0000
@@ -11506,6 +11607,421 @@ static CYTHON_INLINE int __Pyx_PyObject_Append(PyObject* L, PyObject* x) {
         Py_DECREF(retval);
     }
     return 0;
+}
+
+/* CIntToDigits (used by CIntToPyUnicode) */
+static const char DIGIT_PAIRS_10[2*10*10+1] = {
+    "00010203040506070809"
+    "10111213141516171819"
+    "20212223242526272829"
+    "30313233343536373839"
+    "40414243444546474849"
+    "50515253545556575859"
+    "60616263646566676869"
+    "70717273747576777879"
+    "80818283848586878889"
+    "90919293949596979899"
+};
+static const char DIGIT_PAIRS_8[2*8*8+1] = {
+    "0001020304050607"
+    "1011121314151617"
+    "2021222324252627"
+    "3031323334353637"
+    "4041424344454647"
+    "5051525354555657"
+    "6061626364656667"
+    "7071727374757677"
+};
+static const char DIGITS_HEX[2*16+1] = {
+    "0123456789abcdef"
+    "0123456789ABCDEF"
+};
+
+/* BuildPyUnicode (used by COrdinalToPyUnicode) */
+static PyObject* __Pyx_PyUnicode_BuildFromAscii(Py_ssize_t ulength, const char* chars, int clength,
+                                                int prepend_sign, char padding_char) {
+    PyObject *uval;
+    Py_ssize_t uoffset = ulength - clength;
+#if CYTHON_USE_UNICODE_INTERNALS
+    Py_ssize_t i;
+    void *udata;
+    uval = PyUnicode_New(ulength, 127);
+    if (unlikely(!uval)) return NULL;
+    udata = PyUnicode_DATA(uval);
+    if (uoffset > 0) {
+        i = 0;
+        if (prepend_sign) {
+            __Pyx_PyUnicode_WRITE(PyUnicode_1BYTE_KIND, udata, 0, '-');
+            i++;
+        }
+        for (; i < uoffset; i++) {
+            __Pyx_PyUnicode_WRITE(PyUnicode_1BYTE_KIND, udata, i, padding_char);
+        }
+    }
+    for (i=0; i < clength; i++) {
+        __Pyx_PyUnicode_WRITE(PyUnicode_1BYTE_KIND, udata, uoffset+i, chars[i]);
+    }
+#else
+    {
+        PyObject *sign = NULL, *padding = NULL;
+        uval = NULL;
+        if (uoffset > 0) {
+            prepend_sign = !!prepend_sign;
+            if (uoffset > prepend_sign) {
+                padding = PyUnicode_FromOrdinal(padding_char);
+                if (likely(padding) && uoffset > prepend_sign + 1) {
+                    PyObject *tmp = PySequence_Repeat(padding, uoffset - prepend_sign);
+                    Py_DECREF(padding);
+                    padding = tmp;
+                }
+                if (unlikely(!padding)) goto done_or_error;
+            }
+            if (prepend_sign) {
+                sign = PyUnicode_FromOrdinal('-');
+                if (unlikely(!sign)) goto done_or_error;
+            }
+        }
+        uval = PyUnicode_DecodeASCII(chars, clength, NULL);
+        if (likely(uval) && padding) {
+            PyObject *tmp = PyUnicode_Concat(padding, uval);
+            Py_DECREF(uval);
+            uval = tmp;
+        }
+        if (likely(uval) && sign) {
+            PyObject *tmp = PyUnicode_Concat(sign, uval);
+            Py_DECREF(uval);
+            uval = tmp;
+        }
+done_or_error:
+        Py_XDECREF(padding);
+        Py_XDECREF(sign);
+    }
+#endif
+    return uval;
+}
+
+/* COrdinalToPyUnicode (used by CIntToPyUnicode) */
+static CYTHON_INLINE int __Pyx_CheckUnicodeValue(int value) {
+    return value <= 1114111;
+}
+static PyObject* __Pyx_PyUnicode_FromOrdinal_Padded(int value, Py_ssize_t ulength, char padding_char) {
+    Py_ssize_t padding_length = ulength - 1;
+    if (likely((padding_length <= 250) && (value < 0xD800 || value > 0xDFFF))) {
+        char chars[256];
+        if (value <= 255) {
+            memset(chars, padding_char, (size_t) padding_length);
+            chars[ulength-1] = (char) value;
+            return PyUnicode_DecodeLatin1(chars, ulength, NULL);
+        }
+        char *cpos = chars + sizeof(chars);
+        if (value < 0x800) {
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0xc0 | (value & 0x1f));
+        } else if (value < 0x10000) {
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0xe0 | (value & 0x0f));
+        } else {
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0xf0 | (value & 0x07));
+        }
+        cpos -= padding_length;
+        memset(cpos, padding_char, (size_t) padding_length);
+        return PyUnicode_DecodeUTF8(cpos, chars + sizeof(chars) - cpos, NULL);
+    }
+    if (value <= 127 && CYTHON_USE_UNICODE_INTERNALS) {
+        const char chars[1] = {(char) value};
+        return __Pyx_PyUnicode_BuildFromAscii(ulength, chars, 1, 0, padding_char);
+    }
+    {
+        PyObject *uchar, *padding_uchar, *padding, *result;
+        padding_uchar = PyUnicode_FromOrdinal(padding_char);
+        if (unlikely(!padding_uchar)) return NULL;
+        padding = PySequence_Repeat(padding_uchar, padding_length);
+        Py_DECREF(padding_uchar);
+        if (unlikely(!padding)) return NULL;
+        uchar = PyUnicode_FromOrdinal(value);
+        if (unlikely(!uchar)) {
+            Py_DECREF(padding);
+            return NULL;
+        }
+        result = PyUnicode_Concat(padding, uchar);
+        Py_DECREF(padding);
+        Py_DECREF(uchar);
+        return result;
+    }
+}
+
+/* CIntToPyUnicode */
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_long(long value, Py_ssize_t width, char padding_char) {
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const long neg_one = (long) -1, const_zero = (long) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (unlikely(!(is_unsigned || value == 0 || value > 0) ||
+                    !(sizeof(value) <= 2 || value & ~ (long) 0x01fffff || __Pyx_CheckUnicodeValue((int) value)))) {
+        PyErr_SetString(PyExc_OverflowError, "%c arg not in range(0x110000)");
+        return NULL;
+    }
+    if (width <= 1) {
+        return PyUnicode_FromOrdinal((int) value);
+    }
+    return __Pyx_PyUnicode_FromOrdinal_Padded((int) value, width, padding_char);
+}
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_long(long value, Py_ssize_t width, char padding_char, char format_char) {
+    char digits[sizeof(long)*3+2];
+    char *dpos, *end = digits + sizeof(long)*3+2;
+    const char *hex_digits = DIGITS_HEX;
+    Py_ssize_t length, ulength;
+    int prepend_sign, last_one_off;
+    long remaining;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const long neg_one = (long) -1, const_zero = (long) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (format_char == 'X') {
+        hex_digits += 16;
+        format_char = 'x';
+    }
+    remaining = value;
+    last_one_off = 0;
+    dpos = end;
+    do {
+        int digit_pos;
+        switch (format_char) {
+        case 'o':
+            digit_pos = abs((int)(remaining % (8*8)));
+            remaining = (long) (remaining / (8*8));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_8 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 8);
+            break;
+        case 'd':
+            digit_pos = abs((int)(remaining % (10*10)));
+            remaining = (long) (remaining / (10*10));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_10 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 10);
+            break;
+        case 'x':
+            *(--dpos) = hex_digits[abs((int)(remaining % 16))];
+            remaining = (long) (remaining / 16);
+            break;
+        default:
+            assert(0);
+            break;
+        }
+    } while (unlikely(remaining != 0));
+    assert(!last_one_off || *dpos == '0');
+    dpos += last_one_off;
+    length = end - dpos;
+    ulength = length;
+    prepend_sign = 0;
+    if (!is_unsigned && value <= neg_one) {
+        if (padding_char == ' ' || width <= length + 1) {
+            *(--dpos) = '-';
+            ++length;
+        } else {
+            prepend_sign = 1;
+        }
+        ++ulength;
+    }
+    if (width > ulength) {
+        ulength = width;
+    }
+    if (ulength == 1) {
+        return PyUnicode_FromOrdinal(*dpos);
+    }
+    return __Pyx_PyUnicode_BuildFromAscii(ulength, dpos, (int) length, prepend_sign, padding_char);
+}
+
+/* CIntToPyUnicode */
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_int(int value, Py_ssize_t width, char padding_char) {
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const int neg_one = (int) -1, const_zero = (int) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (unlikely(!(is_unsigned || value == 0 || value > 0) ||
+                    !(sizeof(value) <= 2 || value & ~ (int) 0x01fffff || __Pyx_CheckUnicodeValue((int) value)))) {
+        PyErr_SetString(PyExc_OverflowError, "%c arg not in range(0x110000)");
+        return NULL;
+    }
+    if (width <= 1) {
+        return PyUnicode_FromOrdinal((int) value);
+    }
+    return __Pyx_PyUnicode_FromOrdinal_Padded((int) value, width, padding_char);
+}
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_int(int value, Py_ssize_t width, char padding_char, char format_char) {
+    char digits[sizeof(int)*3+2];
+    char *dpos, *end = digits + sizeof(int)*3+2;
+    const char *hex_digits = DIGITS_HEX;
+    Py_ssize_t length, ulength;
+    int prepend_sign, last_one_off;
+    int remaining;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const int neg_one = (int) -1, const_zero = (int) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (format_char == 'X') {
+        hex_digits += 16;
+        format_char = 'x';
+    }
+    remaining = value;
+    last_one_off = 0;
+    dpos = end;
+    do {
+        int digit_pos;
+        switch (format_char) {
+        case 'o':
+            digit_pos = abs((int)(remaining % (8*8)));
+            remaining = (int) (remaining / (8*8));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_8 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 8);
+            break;
+        case 'd':
+            digit_pos = abs((int)(remaining % (10*10)));
+            remaining = (int) (remaining / (10*10));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_10 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 10);
+            break;
+        case 'x':
+            *(--dpos) = hex_digits[abs((int)(remaining % 16))];
+            remaining = (int) (remaining / 16);
+            break;
+        default:
+            assert(0);
+            break;
+        }
+    } while (unlikely(remaining != 0));
+    assert(!last_one_off || *dpos == '0');
+    dpos += last_one_off;
+    length = end - dpos;
+    ulength = length;
+    prepend_sign = 0;
+    if (!is_unsigned && value <= neg_one) {
+        if (padding_char == ' ' || width <= length + 1) {
+            *(--dpos) = '-';
+            ++length;
+        } else {
+            prepend_sign = 1;
+        }
+        ++ulength;
+    }
+    if (width > ulength) {
+        ulength = width;
+    }
+    if (ulength == 1) {
+        return PyUnicode_FromOrdinal(*dpos);
+    }
+    return __Pyx_PyUnicode_BuildFromAscii(ulength, dpos, (int) length, prepend_sign, padding_char);
+}
+
+/* JoinPyUnicode */
+static PyObject* __Pyx_PyUnicode_Join(PyObject** values, Py_ssize_t value_count, Py_ssize_t result_ulength,
+                                      Py_UCS4 max_char) {
+#if CYTHON_USE_UNICODE_INTERNALS && CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
+    PyObject *result_uval;
+    int result_ukind, kind_shift;
+    Py_ssize_t i, char_pos;
+    void *result_udata;
+    if (max_char > 1114111) max_char = 1114111;
+    result_uval = PyUnicode_New(result_ulength, max_char);
+    if (unlikely(!result_uval)) return NULL;
+    result_ukind = (max_char <= 255) ? PyUnicode_1BYTE_KIND : (max_char <= 65535) ? PyUnicode_2BYTE_KIND : PyUnicode_4BYTE_KIND;
+    kind_shift = (result_ukind == PyUnicode_4BYTE_KIND) ? 2 : result_ukind - 1;
+    result_udata = PyUnicode_DATA(result_uval);
+    assert(kind_shift == 2 || kind_shift == 1 || kind_shift == 0);
+    if (unlikely((PY_SSIZE_T_MAX >> kind_shift) - result_ulength < 0))
+        goto overflow;
+    char_pos = 0;
+    for (i=0; i < value_count; i++) {
+        int ukind;
+        Py_ssize_t ulength;
+        void *udata;
+        PyObject *uval = values[i];
+        #if !CYTHON_COMPILING_IN_LIMITED_API
+        if (__Pyx_PyUnicode_READY(uval) == (-1))
+            goto bad;
+        #endif
+        ulength = __Pyx_PyUnicode_GET_LENGTH(uval);
+        #if !CYTHON_ASSUME_SAFE_SIZE
+        if (unlikely(ulength < 0)) goto bad;
+        #endif
+        if (unlikely(!ulength))
+            continue;
+        if (unlikely((PY_SSIZE_T_MAX >> kind_shift) - ulength < char_pos))
+            goto overflow;
+        ukind = __Pyx_PyUnicode_KIND(uval);
+        udata = __Pyx_PyUnicode_DATA(uval);
+        if (ukind == result_ukind) {
+            memcpy((char *)result_udata + (char_pos << kind_shift), udata, (size_t) (ulength << kind_shift));
+        } else {
+            #if PY_VERSION_HEX >= 0x030d0000
+            if (unlikely(PyUnicode_CopyCharacters(result_uval, char_pos, uval, 0, ulength) < 0)) goto bad;
+            #elif CYTHON_COMPILING_IN_CPYTHON || defined(_PyUnicode_FastCopyCharacters)
+            _PyUnicode_FastCopyCharacters(result_uval, char_pos, uval, 0, ulength);
+            #else
+            Py_ssize_t j;
+            for (j=0; j < ulength; j++) {
+                Py_UCS4 uchar = __Pyx_PyUnicode_READ(ukind, udata, j);
+                __Pyx_PyUnicode_WRITE(result_ukind, result_udata, char_pos+j, uchar);
+            }
+            #endif
+        }
+        char_pos += ulength;
+    }
+    return result_uval;
+overflow:
+    PyErr_SetString(PyExc_OverflowError, "join() result is too long for a Python string");
+bad:
+    Py_DECREF(result_uval);
+    return NULL;
+#else
+    Py_ssize_t i;
+    PyObject *result = NULL;
+    PyObject *value_tuple = PyTuple_New(value_count);
+    if (unlikely(!value_tuple)) return NULL;
+    CYTHON_UNUSED_VAR(max_char);
+    CYTHON_UNUSED_VAR(result_ulength);
+    for (i=0; i<value_count; i++) {
+        if (__Pyx_PyTuple_SET_ITEM(value_tuple, i, values[i]) != (0)) goto bad;
+        Py_INCREF(values[i]);
+    }
+    result = PyUnicode_Join(__pyx_mstate_global->__pyx_empty_unicode, value_tuple);
+bad:
+    Py_DECREF(value_tuple);
+    return result;
+#endif
 }
 
 /* py_unicode_predicate */

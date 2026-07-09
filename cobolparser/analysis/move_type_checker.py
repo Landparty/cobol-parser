@@ -82,6 +82,13 @@ class MoveTypeReport:
     """Result of a MOVE type compatibility analysis."""
 
     violations: list[MoveTypeViolation] = field(default_factory=list)
+    #: Count of source/target operands that could not be resolved to a known
+    #: DataCategory (e.g. an undeclared identifier, or an unexpanded
+    #: copybook field) and were therefore skipped rather than checked. A
+    #: report with zero violations and a non-zero unresolved_count means
+    #: "nothing was found wrong" is not the same as "everything was
+    #: checked" -- see reports/open-findings.md H5.
+    unresolved_count: int = 0
 
     @property
     def errors(self) -> list[MoveTypeViolation]:
@@ -99,6 +106,7 @@ class MoveTypeReport:
         return {
             "error_count": len(self.errors),
             "warning_count": len(self.warnings),
+            "unresolved_count": self.unresolved_count,
             "violations": [v.to_dict() for v in self.violations],
         }
 
@@ -228,6 +236,7 @@ class MoveTypeChecker:
     def __init__(self) -> None:
         # Map of upper-case data-item name → DataCategory
         self._catalog: dict[str, DataCategory] = {}
+        self._unresolved_count = 0
 
     def check(self, ast: CobolProgram) -> MoveTypeReport:
         """Analyze *ast* and return a MoveTypeReport.
@@ -239,6 +248,7 @@ class MoveTypeChecker:
             MoveTypeReport with all detected type violations.
         """
         self._catalog = {}
+        self._unresolved_count = 0
         violations: list[MoveTypeViolation] = []
 
         # Phase 1: build catalog from DATA DIVISION
@@ -247,7 +257,9 @@ class MoveTypeChecker:
         # Phase 2: check every MOVE statement
         self._check_moves(ast, violations)
 
-        return MoveTypeReport(violations=violations)
+        return MoveTypeReport(
+            violations=violations, unresolved_count=self._unresolved_count
+        )
 
     # ------------------------------------------------------------------
     # Catalog building
@@ -292,7 +304,11 @@ class MoveTypeChecker:
 
         source_cat = self._resolve_category(source_name)
         if source_cat in (DataCategory.UNKNOWN, DataCategory.FIGURATIVE):
-            return  # Cannot determine source category statically
+            # Cannot determine source category statically -- every target of
+            # this MOVE goes unchecked as a result, so count the statement
+            # once rather than the number of targets.
+            self._unresolved_count += 1
+            return
 
         loc = getattr(stmt, "location", None)
 
@@ -302,6 +318,7 @@ class MoveTypeChecker:
                 continue
             target_cat = self._resolve_category(target_name)
             if target_cat == DataCategory.UNKNOWN:
+                self._unresolved_count += 1
                 continue  # Cannot validate unknown target
 
             pair = (source_cat, target_cat)

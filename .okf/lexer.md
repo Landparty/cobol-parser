@@ -3,7 +3,7 @@ type: Module
 title: Lexer
 description: Tokenizes COBOL source into Token objects; 236 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-07-08T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
@@ -119,6 +119,36 @@ explicit `" \t"`-only loop the pure-Python lexer uses. Pinned by
 
 `LexerError` — extends `ParseError` (`cobolparser/_errors.py`). Raised for
 unrecognised characters or malformed string literals.
+
+# Warnings (non-fatal diagnostics)
+
+`CobolLexer` (both the pure-Python `_CobolLexerPure` and the `_lexer_fast`
+Cython subclass) also collects a `self.warnings: list[str]`, reset at the
+top of each `tokenize()` call, exposed via:
+
+```python
+lexer = CobolLexer(text, free_form=True)
+tokens = lexer.tokenize()
+lexer.has_warnings()   # -> bool
+lexer.get_warnings()   # -> list[str]
+```
+
+`CobolParser.parse()` forwards every lexer warning into `ParseResult.warnings`
+(prefixed `"Lexer warning: "`) after the existing `lexer.has_errors()` check.
+
+Currently the only producer is the free-form unterminated-string-literal
+case: `parse_cobol()` always lexes with `free_form=True` after
+normalization, and the free-form path never raised `LexerError` for a
+string literal that runs to end-of-line without a closing quote — it was
+silently treated as closed at the line boundary (audit 2026-07-08,
+finding H7 in `reports/open-findings.md`). That silence is intentional —
+a lone quote can legitimately appear inside a free-form comment (e.g.
+`COMPILER"S`), so promoting it to a hard `LexerError` would break valid
+input — but it is no longer *undetectable*: a caller that checks
+`ParseResult.warnings` now sees
+`"Unterminated string literal at line N, column C: closed at end of line
+instead of a matching quote"`. Pinned by
+`tests/regression/test_open_findings_high_regressions.py::TestH7UnterminatedStringWarns`.
 
 # See Also
 

@@ -1,11 +1,13 @@
 """Perform statement parser implementing IStatementParser interface."""
 
+import logging
 from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
     get_parse_context,
+    is_statement_boundary,
     matches_keyword,
     report_parse_error,
     skip_whitespace,
@@ -15,9 +17,63 @@ from cobolparser.parsers.statements._utils import (
 from ...core.ast_factory import get_factory
 from ...core.exceptions import ParseError, TokenMismatch, UnexpectedEndOfInput
 from ...core.interfaces import IStatementParser, ITokenStream
-from ...lexer import TokenType
+from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import CobolExpression, PerformStatement
+
+logger = logging.getLogger(__name__)
+
+_NOISE_TOKEN_TYPES = (
+    TokenType.WHITESPACE,
+    TokenType.COMMENT,
+    TokenType.NEWLINE,
+    TokenType.CONTINUATION,
+)
+
+
+def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | None:
+    """Look ahead past whitespace/comment/newline/continuation tokens without consuming.
+
+    Used to decide *before* committing a speculative consume (e.g. "is this
+    trailing identifier actually the start of a TIMES clause?") so a
+    non-matching token is left in the stream for the caller to handle
+    instead of being silently swallowed.
+    """
+    offset = start_offset
+    while True:
+        token = stream.peek(offset)
+        if token is None:
+            return None
+        if token.type not in _NOISE_TOKEN_TYPES:
+            return token
+        offset += 1
+
+
+def _warn_stray_trailing_token(stream: ITokenStream, token: Token) -> None:
+    """Record a warning for a token after a PERFORM target that is neither
+    a TIMES clause nor the start of a new statement (H3).
+
+    Previously this token was speculatively consumed as a candidate TIMES
+    value and, once it turned out not to be one, discarded with no warning
+    at all -- ``errors=0, warnings=0`` and ``times_count`` silently stayed
+    ``None``.
+    """
+    value = token.value or "" if token is not None else ""
+    if not value:
+        return
+    line = getattr(getattr(token, "location", None), "line", None)
+    where = f" at line {line}" if line else ""
+    context = get_parse_context(stream)
+    host = getattr(context, "host", None) if context is not None else None
+    add_warning = getattr(host, "add_warning", None)
+    message = (
+        f"PERFORM statement: unexpected token '{value}'{where} after the "
+        "target paragraph skipped: not a valid TIMES clause; token discarded"
+    )
+    if callable(add_warning):
+        add_warning(message)
+    else:
+        logger.warning(message)
 
 
 class PerformStatementParser(IStatementParser):
@@ -177,21 +233,27 @@ class PerformStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
 
-            # Check for TIMES clause after paragraph name (can be numeric or variable)
+            # Check for TIMES clause after paragraph name (can be numeric or
+            # variable). The candidate token is only a TIMES-clause value if
+            # it is actually followed by TIMES/TIME -- checked via lookahead
+            # *before* consuming, so a token that turns out not to start a
+            # TIMES clause (e.g. a stray trailing identifier, or the next
+            # statement's leading token) is left in the stream instead of
+            # being silently discarded with no warning (H3).
             if token and token.type == TokenType.IDENTIFIER:
-                times_value = token.value
-                token_stream.consume()
-                token = token_stream.peek()
-
-                # Check if  followed by TIMES keyword
-                if token and (
-                    token.type == TokenType.TIMES
+                lookahead = _peek_next_meaningful(token_stream, 1)
+                if lookahead and (
+                    lookahead.type == TokenType.TIMES
                     or (
-                        token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() in ("TIMES", "TIME")
+                        lookahead.type == TokenType.IDENTIFIER
+                        and lookahead.value
+                        and lookahead.value.upper() in ("TIMES", "TIME")
                     )
                 ):
+                    times_value = token.value
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+
                     # Can be numeric (int) or variable (string)
                     para_times_count: Any
                     try:
@@ -202,27 +264,43 @@ class PerformStatementParser(IStatementParser):
                     token_stream.consume()  # Skip TIMES keyword
                     stmt.set_times_clause(para_times_count)
                     token = token_stream.peek()
+                elif not is_statement_boundary(token):
+                    # Not a TIMES clause and not the start of a following
+                    # statement -- a bare trailing identifier here (e.g. a
+                    # typo) would otherwise be left for the caller to
+                    # misread as a new paragraph header (IDENTIFIER
+                    # immediately followed by PERIOD is indistinguishable
+                    # from a paragraph declaration at that point).
+                    _warn_stray_trailing_token(token_stream, token)
+                    token_stream.consume()
+                    token = token_stream.peek()
             elif token and (
                 token.type == TokenType.NUMERIC_LITERAL
                 or token.type == TokenType.LEVEL_NUMBER
             ):
-                try:
-                    num_times_count = int(token.value)
-                    token_stream.consume()
-                    token = token_stream.peek()
-                    if token and (
-                        token.type == TokenType.TIMES
-                        or (
-                            token.type == TokenType.IDENTIFIER
-                            and token.value
-                            and token.value.upper() in ("TIMES", "TIME")
-                        )
-                    ):
+                lookahead = _peek_next_meaningful(token_stream, 1)
+                if lookahead and (
+                    lookahead.type == TokenType.TIMES
+                    or (
+                        lookahead.type == TokenType.IDENTIFIER
+                        and lookahead.value
+                        and lookahead.value.upper() in ("TIMES", "TIME")
+                    )
+                ):
+                    try:
+                        num_times_count = int(token.value)
+                    except (ValueError, TypeError):
+                        pass
+                    else:
                         token_stream.consume()
+                        skip_whitespace(token_stream)
+                        token_stream.consume()  # Skip TIMES keyword
                         stmt.set_times_clause(num_times_count)
                         token = token_stream.peek()
-                except (ValueError, TokenMismatch, UnexpectedEndOfInput):
-                    pass
+                else:
+                    _warn_stray_trailing_token(token_stream, token)
+                    token_stream.consume()
+                    token = token_stream.peek()
 
             skip_whitespace(token_stream)
             token = token_stream.peek()
@@ -250,8 +328,15 @@ class PerformStatementParser(IStatementParser):
             if token and token.type == TokenType.UNTIL:
                 try:
                     self._parse_until_condition_only(token_stream, stmt)
-                except ParseError:
-                    pass
+                except ParseError as exc:
+                    # A malformed UNTIL condition here must not abort the
+                    # whole PERFORM; the error is already recorded via
+                    # report_or_raise when applicable. Log at debug for
+                    # diagnosability (H4 -- these catches previously had no
+                    # trace at all).
+                    logger.debug(
+                        "PERFORM UNTIL condition parse suppressed %r", exc, exc_info=True
+                    )
 
         # Expect period or END-PERFORM
         try:
@@ -352,8 +437,13 @@ class PerformStatementParser(IStatementParser):
 
             # Parse the inline body (up to END-PERFORM or period)
             self._parse_inline_statements(stream, stmt)
-        except ParseError:
-            pass
+        except ParseError as exc:
+            # H4: VARYING/UNTIL body parse failures previously vanished with
+            # no trace anywhere (no ParseResult.errors, no .warnings, no log
+            # line). Log at debug so the failure is at least diagnosable.
+            logger.debug(
+                "PERFORM VARYING clause parse suppressed %r", exc, exc_info=True
+            )
 
     def _parse_after_clauses(
         self, stream: ITokenStream, stmt: PerformStatement
@@ -472,8 +562,11 @@ class PerformStatementParser(IStatementParser):
                 condition_expr.operands = [condition_str]
                 stmt.set_until_clause(condition_expr)
             self._parse_inline_statements(stream, stmt)
-        except ParseError:
-            pass
+        except ParseError as exc:
+            # H4: previously silent -- see _parse_varying_clause above.
+            logger.debug(
+                "PERFORM UNTIL inline clause parse suppressed %r", exc, exc_info=True
+            )
 
     def _collect_until_expression(self, stream: ITokenStream) -> CobolExpression | None:
         """Consume an UNTIL keyword + condition and return it as an expression.
@@ -493,8 +586,13 @@ class PerformStatementParser(IStatementParser):
                 condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
                 condition_expr.operands = [condition_str]
                 return condition_expr
-        except ParseError:
-            pass
+        except ParseError as exc:
+            # H4: previously silent -- see _parse_varying_clause above.
+            logger.debug(
+                "PERFORM VARYING ... AFTER UNTIL expression parse suppressed %r",
+                exc,
+                exc_info=True,
+            )
         return None
 
     def _parse_until_condition_only(
@@ -591,8 +689,13 @@ class PerformStatementParser(IStatementParser):
                 else:
                     # Can't parse, skip token
                     stream.consume()
-        except ParseError:
-            pass
+        except ParseError as exc:
+            # H4: previously silent -- an inline PERFORM body statement that
+            # raised left inline_statements incomplete with zero trace
+            # anywhere (no ParseResult.errors, no .warnings, no log line).
+            logger.debug(
+                "PERFORM inline statement body parse suppressed %r", exc, exc_info=True
+            )
 
     def _try_consume_period(self, stream: ITokenStream) -> None:
         """Try to consume a period if present."""

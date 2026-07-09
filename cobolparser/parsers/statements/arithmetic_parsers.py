@@ -27,6 +27,7 @@ from ._utils import (
     _skip_newlines,
     consume_keyword_and_operand,
     get_parse_context,
+    is_statement_boundary,
     matches_keyword,
     parse_arithmetic_operands,
     parse_size_error_clauses,
@@ -513,6 +514,18 @@ class ComputeStatementParser(IStatementParser):
                     ):
                         break
 
+            # Unbalanced parentheses (a stray '(' with no matching ')')
+            # otherwise leave paren_depth != 0 for the rest of the token
+            # stream, which disables the paren_depth == 0 boundary checks
+            # above for good -- a following well-formed statement (e.g.
+            # DISPLAY) would then be silently folded into the expression
+            # string instead of stopping the COMPUTE. A token that
+            # unambiguously begins a new COBOL statement can never
+            # legitimately appear inside an arithmetic expression, so this
+            # check applies regardless of paren_depth.
+            if paren_depth != 0 and is_statement_boundary(token):
+                break
+
             expr_tokens.append(token.value if token.value else "")
             token_stream.consume()
 
@@ -521,6 +534,13 @@ class ComputeStatementParser(IStatementParser):
             stmt.set_expression(expr_str)
         else:
             report_or_raise(ctx, "COMPUTE statement missing expression", start_loc)
+
+        if paren_depth != 0:
+            report_or_raise(
+                ctx,
+                "COMPUTE statement has unbalanced parentheses in expression",
+                start_loc,
+            )
 
         parse_size_error_clauses(token_stream, stmt)
         return stmt

@@ -1,5 +1,70 @@
 # OKF Update Log
 
+## 2026-07-09 (open-findings.md HIGH-severity remediation: H1-H8 fixed, H9 discovered)
+
+Implemented fixes for all 8 HIGH findings in `reports/open-findings.md`'s
+2026-07-08 re-verification pass, each pinned by a dedicated test class in
+new file `tests/regression/test_open_findings_high_regressions.py` (21
+tests total). Full per-finding writeup: `CHANGELOG.md` (Unreleased →
+Fixed). `reports/open-findings.md` itself updated in place — H1-H8 marked
+resolved (left visible for traceability, per the file's own convention for
+prior audits), and a new H9 finding recorded for the one thing discovered
+but *not* fixed in this pass.
+
+* **Updated** [lexer.md](lexer.md): added a "Warnings (non-fatal
+  diagnostics)" section. `CobolLexer` (pure-Python and `_lexer_fast`
+  Cython) now tracks `self.warnings`, exposed via `has_warnings()`/
+  `get_warnings()`; `CobolParser.parse()` forwards them into
+  `ParseResult.warnings` (prefixed `"Lexer warning: "`). First producer:
+  an unterminated string literal in the free-form path (the only lexing
+  mode `parse_cobol()` ever uses) used to close silently at the line
+  boundary with `errors=0, warnings=0` — now warns instead, without
+  promoting to a hard error (H7).
+* **Updated** [parser.md](parser.md): new "open-findings.md HIGH-severity
+  fixes (2026-07-09, H1-H8)" section, summarizing H1 (`SET ADDRESS OF`
+  target-loop `OF`-type gap), H2 (COMPUTE unbalanced-paren boundary-guard
+  bypass — additive to the 2026-07-06 COMPUTE-swallow fix already
+  documented above it), H3/H4 (PERFORM trailing-TIMES-candidate silent
+  discard + 5 unlogged bare excepts in `perform_parser.py`), and H8
+  (`CLOSE`'s per-file option if/elif chain converted to a loop so combined
+  options like `REEL WITH NO REWIND` all survive). Also records **H9**
+  (not fixed): a statement with no terminating period, immediately
+  followed by what should be a new paragraph header, gets its name
+  absorbed as a trailing operand instead of starting a new paragraph —
+  discovered while verifying H7's "unclosed IF" sub-claim (which, on
+  investigation, turned out to be legal, correctly-parsed COBOL, not a
+  bug). Distinct root cause, not IF-specific, deliberately left unfixed
+  (high-blast-radius paragraph-boundary surgery, out of scope for this
+  bounded 8-finding pass).
+* **Updated** [analysis.md](analysis.md): `MoveTypeChecker` gained
+  `MoveTypeReport.unresolved_count` (H5) — previously an unresolvable
+  source/target `DataCategory` caused a silent early `return`/`continue`
+  with no counter anywhere, so 3 MOVEs on undeclared identifiers produced
+  `violations: [], error_count: 0, warning_count: 0`, a false all-clear.
+  Also corrected a pre-existing doc error in the same section: the method
+  is `.check(ast)`, not `.analyze(ast)`.
+* **Updated** [preprocessing.md](preprocessing.md): new "Copybook Path
+  Resolution (`path_resolver.py`)" section documenting the 3-tier
+  resolution strategy and the H6 fix — the Tier-2 directory-index fast
+  path returned an indexed path after only a size check, never calling
+  `validate_path_within_directory()` (which Tier 3 does call), so a
+  symlink inside a search directory pointing outside it would bypass
+  containment checking. Now validated via a new
+  `_validate_indexed_result()` at both Tier-2 hit points. Also fixed in
+  the same pass: the `".."` traversal guard was substring matching
+  (false-flagged `weird..name.cpy`); now a path-segment check.
+* **Updated** [tests.md](tests.md): +21 tests
+  (`tests/regression/test_open_findings_high_regressions.py`); full suite
+  now 6,750 passed / 13 skipped / 5 xfailed, 92.61% coverage.
+* Also fixed while verifying H2: `tests/samples/arithmetic_operations.cbl`
+  had a `FUNCTION MAX(WS-NUM-1, WS-NUM-2, WS-NUM-3)` line whose closing
+  `)` landed in fixed-format column 73 and was silently truncated by
+  `normalize_fixed_format` — previously masked by the very H2 bug (the
+  truncated, permanently-unbalanced expression silently absorbed the next
+  statement instead of erroring); the H2 fix correctly surfaces this now,
+  so the sample was corrected (spaces after commas removed to fit column
+  72) rather than the detection being weakened.
+
 ## 2026-07-09 (silent-drops-and-gaps audit: OCCURS KEY, program-flow clause bodies, REWRITE/START/ACCEPT/STOP operands, DATA warn channel)
 
 Follow-up to the 2026-07-08 audit. Four parallel re-audits (DATA division,

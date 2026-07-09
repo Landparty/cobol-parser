@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 15 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, test generation, and more.
 tags: [analysis, dead-code, program-flow, io, crud, test-generation]
-timestamp: 2026-07-08T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
@@ -98,13 +98,31 @@ opened before read/write, etc.).
 ## MoveTypeChecker
 
 ```python
-report: MoveTypeReport = MoveTypeChecker().analyze(ast)
+report: MoveTypeReport = MoveTypeChecker().check(ast)
 # report.violations: list[MoveTypeViolation]
+# report.unresolved_count: int   -- MOVE operands whose DataCategory could
+#                                    not be resolved (undeclared identifier,
+#                                    unexpanded copybook, ...); serialized
+#                                    in report.to_dict()
 # MoveViolationKind: NUMERIC_TO_ALPHANUMERIC, ALPHANUMERIC_TO_NUMERIC, …
 ```
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
+
+**`unresolved_count` (2026-07-09, audit finding H5):** before this field
+existed, an unresolvable source category (`UNKNOWN`/`FIGURATIVE`) caused
+`_validate_move` to `return` early, and an unresolvable target category
+caused it to `continue` past that target — both silently, with no counter
+anywhere on `MoveTypeReport`. Three MOVEs on undeclared identifiers
+(simulating an unexpanded copybook) produced `violations: [], error_count:
+0, warning_count: 0` — a **false all-clear** indistinguishable from "every
+MOVE was actually checked and found compatible." `MoveTypeChecker` now
+increments an internal counter at every such early-exit point, and
+`check()` returns it as `MoveTypeReport.unresolved_count`. A caller that
+wants a real all-clear must now check `not violations and unresolved_count
+== 0`, not just `not violations`. Pinned by
+`tests/regression/test_open_findings_high_regressions.py::TestH5MoveTypeCheckerUnresolvedCount`.
 
 ## LinkageChecker
 

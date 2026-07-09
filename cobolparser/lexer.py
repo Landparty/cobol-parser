@@ -652,6 +652,7 @@ class _CobolLexerPure:
         self.current_pos = 0
         self.tokens: list[Token] = []
         self.errors: list[LexerError] = []
+        self.warnings: list[str] = []
         self.free_form = free_form
         # Multi-line string continuation state
         self._open_string_quote: str | None = None
@@ -1125,6 +1126,21 @@ class _CobolLexerPure:
                                     err_location,
                                     char + partial_value,
                                 )
+                            )
+                        else:
+                            # Not promoted to a hard error (H7): a lone
+                            # quote can legitimately appear in a free-form
+                            # comment (e.g. COMPILER"S) and forcing that to
+                            # fail would be worse than the silence being
+                            # fixed here. Surface it as a warning instead so
+                            # a caller checking ParseResult.warnings is no
+                            # longer blind to the literal being silently
+                            # closed at the line boundary.
+                            self.warnings.append(
+                                f"Unterminated string literal at line "
+                                f"{line_num + 1}, column {start_col + pos}: "
+                                "closed at end of line instead of a matching "
+                                "quote"
                             )
                         tokens.append(
                             Token(TokenType.STRING_LITERAL, partial_value, err_location)
@@ -1652,6 +1668,7 @@ class _CobolLexerPure:
         """Tokenize the entire COBOL source code."""
         self.tokens = []
         self.errors = []
+        self.warnings = []
 
         # Process line by line: fixed-format or free-form
         for line_num, line in enumerate(self.lines):
@@ -1689,6 +1706,14 @@ class _CobolLexerPure:
     def has_errors(self) -> bool:
         """Check if there were any lexer errors."""
         return bool(self.errors)
+
+    def get_warnings(self) -> list[str]:
+        """Get lexer warnings encountered during tokenization."""
+        return self.warnings
+
+    def has_warnings(self) -> bool:
+        """Check if there were any lexer warnings."""
+        return bool(self.warnings)
 
 
 def tokenize_cobol(

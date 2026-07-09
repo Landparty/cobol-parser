@@ -58,8 +58,12 @@ def validate_path_within_directory(file_path: str, base_directory: str) -> bool:
         >>> validate_path_within_directory("../etc/passwd", "/home/user/copybooks")
         PathTraversalError: Path traversal attempt detected
     """
-    # Check for obvious traversal patterns
-    if ".." in file_path:
+    # Check for obvious traversal patterns: a literal ".." *path segment*,
+    # not merely the substring "..' anywhere in the path (a filename like
+    # "weird..name.cpy" contains the substring but is not a traversal
+    # attempt -- reports/open-findings.md H6).
+    normalized_for_segments = file_path.replace("\\", "/")
+    if any(segment == ".." for segment in normalized_for_segments.split("/")):
         raise PathTraversalError(file_path)
 
     # Resolve both paths to absolute form
@@ -332,6 +336,32 @@ class PathResolver:
                         index[stem_upper] = abs_path
         return index
 
+    def _validate_indexed_result(self, result: str) -> None:
+        """Containment check for a Tier-2 (directory-index) resolution.
+
+        The directory index is built via ``os.scandir()`` + ``entry.is_file()``,
+        which follows symlinks: a symlink inside a search directory that
+        points outside it would otherwise be served with no containment
+        check at all -- only the Tier-3 full-filesystem-search path
+        (:func:`find_copybook_file`) called ``validate_path_within_directory``.
+        See reports/open-findings.md H6.
+
+        The index is flattened across every configured search directory, so
+        containment is checked against the whole set: the resolved path must
+        land within *some* configured directory, not necessarily the one it
+        happened to be enumerated from.
+        """
+        last_error: PathTraversalError | None = None
+        for search_dir in self.search_config.directories:
+            try:
+                validate_path_within_directory(result, search_dir)
+                return
+            except PathTraversalError as exc:
+                last_error = exc
+        raise last_error or PathTraversalError(
+            result, "not within any configured search directory"
+        )
+
     def resolve(self, member_name: str, library_qualifier: str | None = None) -> str:
         """
         Resolve a copybook member name to an absolute file path.
@@ -370,6 +400,7 @@ class PathResolver:
             )
             if lookup_key in self._dir_index:
                 result = self._dir_index[lookup_key]
+                self._validate_indexed_result(result)
                 # Validate size
                 file_size = os.path.getsize(result)
                 if file_size > self.search_config.max_file_size:
@@ -385,6 +416,7 @@ class PathResolver:
                     ext_key = f"{lookup_key}{ext.upper() if not self.search_config.case_sensitive else ext}"
                     if ext_key in self._dir_index:
                         result = self._dir_index[ext_key]
+                        self._validate_indexed_result(result)
                         file_size = os.path.getsize(result)
                         if file_size > self.search_config.max_file_size:
                             raise CopybookSizeExceededError(

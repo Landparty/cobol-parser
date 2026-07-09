@@ -3,16 +3,17 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-07-08T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
 
-~6,738 tests across 242 files in 5 directories (2026-07-09: +13 in
-`tests/regression/test_tier6_silent_drop_audit.py`, which also pins that
-`REWRITE ... FROM` / `START ... KEY` operands land in the node's `operands`
-list). Coverage floor: **81% line coverage**
-enforced by `--cov-fail-under=81` in `pyproject.toml`. Branch coverage is enabled.
+6,750 passed / 13 skipped / 5 xfailed (2026-07-09: +21 in the new
+`tests/regression/test_open_findings_high_regressions.py`, one test class
+per HIGH finding H1-H8 fixed that day — see [parser.md](parser.md)'s
+"open-findings.md HIGH-severity fixes" section). Coverage floor: **81%
+line coverage** enforced by `--cov-fail-under=81` in `pyproject.toml`;
+full-suite run measured 92.61%. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
 
@@ -45,6 +46,13 @@ tests/
                                #   normalize_fixed_format / preprocess_conditional_
                                #   compilation line-number preservation + Cython
                                #   parity (2026-07-08)
+                               #   test_open_findings_high_regressions.py:
+                               #   H1-H8 from reports/open-findings.md (SET
+                               #   ADDRESS OF, COMPUTE unbalanced parens, PERFORM
+                               #   trailing-identifier + bare excepts, MoveType-
+                               #   Checker unresolved_count, PathResolver Tier-2
+                               #   containment, lexer unterminated-string warning,
+                               #   CLOSE combined per-file options) (2026-07-09)
   performance/                 # benchmarks (factory, parser)
   samples/                     # shared COBOL fixtures
     copybook_programs/         # programs with COPY statements

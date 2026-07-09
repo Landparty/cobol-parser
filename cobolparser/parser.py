@@ -237,6 +237,10 @@ class CobolParser:
                 if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                     return self._create_result(None)
 
+            if lexer.has_warnings():
+                for warning in lexer.get_warnings():
+                    self.add_warning(f"Lexer warning: {warning}")
+
             # Initialize TokenStream and parse program
             self.stream = TokenStream(self.tokens)
             program = self.parse_program()

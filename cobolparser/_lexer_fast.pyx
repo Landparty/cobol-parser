@@ -356,6 +356,17 @@ class CobolLexer(_CobolLexerBase):
                                     char + partial_value,
                                 )
                             )
+                        else:
+                            # Mirrors lexer.py's H7 fix: not promoted to a
+                            # hard error (a lone quote can legitimately
+                            # appear in a free-form comment), but no longer
+                            # fully silent either.
+                            self.warnings.append(
+                                f"Unterminated string literal at line "
+                                f"{line_num + 1}, column {start_col + pos}: "
+                                "closed at end of line instead of a matching "
+                                "quote"
+                            )
                         tokens.append(
                             Token(TokenType.STRING_LITERAL, partial_value, err_location)
                         )
