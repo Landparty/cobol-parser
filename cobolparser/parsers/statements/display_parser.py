@@ -98,6 +98,27 @@ class DisplayStatementParser(IStatementParser):
                     stmt.set_output_device(device_token.value or "")
                 break
 
+            # Check for WITH NO ADVANCING (M2) -- WITH is an optional
+            # filler word; NO ADVANCING is the fixed phrase. Neither
+            # currently introduces any other DISPLAY clause, so once we
+            # commit to consuming WITH we must find NO ADVANCING or stop
+            # (matching this loop's "unknown token -> stop" convention).
+            if token.type in (TokenType.WITH, TokenType.NO):
+                if token.type == TokenType.WITH:
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    token = token_stream.peek()
+                if token and token.type == TokenType.NO:
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    adv_token = token_stream.peek()
+                    if adv_token and adv_token.type == TokenType.ADVANCING:
+                        token_stream.consume()
+                        stmt.set_no_advancing(True)
+                        skip_whitespace(token_stream)
+                        continue
+                break
+
             # Scope terminators of an enclosing statement (e.g. END-READ when
             # this DISPLAY is an AT END clause body) end the item list. Also
             # stop at a following statement's verb when it lexes as a plain

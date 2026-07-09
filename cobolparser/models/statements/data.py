@@ -52,6 +52,9 @@ class DisplayStatement(CobolStatement):
         super().__init__("DISPLAY", location)
         self.display_items: list[str] = []
         self.output_device: str | None = None
+        self.with_no_advancing: bool = False
+        self.at_line: int | None = None
+        self.at_column: int | None = None
 
     def add_display_item(self, item: str) -> None:
         """Add an item to display."""
@@ -62,11 +65,26 @@ class DisplayStatement(CobolStatement):
         """Set the output device (UPON clause)."""
         self.output_device = device
 
+    def set_no_advancing(self, no_advancing: bool = True) -> None:
+        """Set the WITH NO ADVANCING flag (suppresses the implicit newline)."""
+        self.with_no_advancing = no_advancing
+
+    def set_position(self, line: int | None = None, column: int | None = None) -> None:
+        """Set the AT LINE/COLUMN screen position."""
+        self.at_line = line
+        self.at_column = column
+
     def to_dict(self) -> dict[str, Any]:
         """Convert DISPLAY statement to dictionary representation."""
         result = super().to_dict()
         result.update(
-            {"display_items": self.display_items, "output_device": self.output_device}
+            {
+                "display_items": self.display_items,
+                "output_device": self.output_device,
+                "with_no_advancing": self.with_no_advancing,
+                "at_line": self.at_line,
+                "at_column": self.at_column,
+            }
         )
         return result
 

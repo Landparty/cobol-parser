@@ -344,3 +344,29 @@ class TestM1DisplayFigurativeConstants:
         result = parse_cobol(_proc_program("    DISPLAY WS-X SPACES.\n"))
         stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
         assert stmts[0].display_items == ["WS-X", "SPACES"]
+
+
+class TestM2DisplayWithNoAdvancing:
+    """M2 -- DISPLAY ... WITH NO ADVANCING was silently dropped; the
+    display item before WITH survived but the clause itself vanished.
+    """
+
+    def test_with_no_advancing_is_captured(self):
+        result = parse_cobol(
+            _proc_program('    DISPLAY "PROMPT: " WITH NO ADVANCING.\n')
+        )
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert len(stmts) == 1
+        assert stmts[0].display_items == ['"PROMPT: "']
+        assert stmts[0].with_no_advancing is True
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
+
+    def test_bare_no_advancing_without_with_is_captured(self):
+        result = parse_cobol(_proc_program('    DISPLAY "X" NO ADVANCING.\n'))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].with_no_advancing is True
+
+    def test_display_without_the_clause_defaults_false(self):
+        result = parse_cobol(_proc_program('    DISPLAY "X".\n'))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].with_no_advancing is False
