@@ -250,6 +250,94 @@ def is_statement_boundary(token: Token | None) -> bool:
     )
 
 
+def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
+    """Detect the next paragraph/section header swallowed by a missing period.
+
+    An operand-collection loop with no boundary awareness (DISPLAY's item
+    list, MOVE's target list, COMPUTE's expression capture, ...) has no way
+    to distinguish a legitimate trailing operand from a following paragraph
+    name once the current statement's own period is missing -- both are just
+    "IDENTIFIER then PERIOD". :func:`is_statement_boundary` only catches
+    *known* verbs lexed as plain identifiers (PURGE, RESUME, ...); an
+    ordinary user-defined paragraph name isn't in that set. See
+    reports/open-findings.md H9.
+
+    This resolves the ambiguity the way COBOL itself does: a paragraph name
+    stands alone at the start of its own source line, whereas a trailing
+    operand normally continues the line the verb or a preceding operand is
+    on. So the current token counts as a boundary only when *all* of:
+
+    * it is an IDENTIFIER, not a reserved statement verb;
+    * it starts a new source line relative to the previously consumed token;
+    * it is immediately followed by a period or SECTION;
+    * it is not a name declared in the DATA DIVISION -- excluded so a
+      genuinely wrapped continuation-line operand (``DISPLAY\\n    WS-X.``)
+      is not misread as a paragraph header just because it opens its line.
+
+    A bare trailing operand that happens to sit on its own line but is not a
+    real paragraph name (e.g. an undeclared identifier from an unexpanded
+    COPY) will still be misclassified -- this is an inherent ambiguity of
+    missing-period recovery, not something a purely syntactic check can
+    resolve, so the DATA DIVISION cross-check is a best-effort narrowing,
+    not a guarantee.
+    """
+    token = token_stream.peek(0)
+    if token is None or token.type != TokenType.IDENTIFIER or not token.value:
+        return False
+    value_upper = token.value.upper()
+    if value_upper in STATEMENT_KEYWORDS:
+        return False
+
+    prev = previous_meaningful_token(token_stream)
+    prev_line = getattr(getattr(prev, "location", None), "line", None)
+    cur_line = getattr(getattr(token, "location", None), "line", None)
+    if prev_line is None or cur_line is None or prev_line == cur_line:
+        return False
+
+    offset = 1
+    nxt = token_stream.peek(offset)
+    while nxt is not None and nxt.type in (
+        TokenType.WHITESPACE,
+        TokenType.COMMENT,
+        TokenType.NEWLINE,
+        TokenType.CONTINUATION,
+    ):
+        offset += 1
+        nxt = token_stream.peek(offset)
+    if nxt is None:
+        return False
+    is_period = nxt.type == TokenType.PERIOD
+    is_section = bool(nxt.value) and nxt.value.upper() == "SECTION"
+    if not (is_period or is_section):
+        return False
+
+    context = get_parse_context(token_stream)
+    known_data_names = context.known_data_names if context else frozenset()
+    return value_upper not in known_data_names
+
+
+def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
+    """Record a warning when :func:`looks_like_paragraph_boundary` stops an
+    operand-collection loop early instead of consuming what looks like the
+    next paragraph/section header. See reports/open-findings.md H9.
+    """
+    token = token_stream.peek(0)
+    value = (token.value or "") if token is not None else ""
+    line = getattr(getattr(token, "location", None), "line", None) if token else None
+    where = f" at line {line}" if line else ""
+    message = (
+        f"Statement missing its terminating period{where}: '{value}' looks "
+        "like the start of the next paragraph/section rather than a "
+        "trailing operand -- treated as a new paragraph boundary instead "
+        "of being consumed"
+    )
+    context = get_parse_context(token_stream)
+    host = getattr(context, "host", None) if context else None
+    add_warning = getattr(host, "add_warning", None)
+    if callable(add_warning):
+        add_warning(message)
+
+
 _StmtT = TypeVar("_StmtT", bound=ASTNode)
 
 

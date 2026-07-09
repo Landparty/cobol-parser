@@ -31,12 +31,12 @@ undetectable by a caller that checks `warnings`, only by one that checks
 
 ## HIGH
 
-**H1-H8 below were all fixed on 2026-07-09** and are pinned by
+**H1-H9 are all fixed** (H1-H8 on 2026-07-09; H9, discovered during H7
+verification, in a 2026-07-09 follow-up pass) and are pinned by
 `tests/regression/test_open_findings_high_regressions.py` — see
 `CHANGELOG.md` (Unreleased → Fixed) for the full per-finding writeup.
 Left in place (rather than deleted) for traceability, per this file's own
-convention for prior audits. One new finding surfaced during H7
-verification and was **not** fixed as part of this pass — see H9 below.
+convention for prior audits.
 
 ### H1 — `SET ADDRESS OF x TO y` produces an empty `SetStatement`
 `cobolparser/parsers/statements/set_parser.py:60-68`. The target-collection
@@ -132,23 +132,65 @@ clause token (e.g. `WITH`) ends the whole loop. `CLOSE F REEL WITH NO
 REWIND.` → `close_options: {"F": {"reel": true, "no_rewind": false, ...}}`,
 `no_rewind` lost, only warn-masked (`"Unparsed tokens starting at 'WITH'..."`).
 
-### H9 — A statement with no terminating period absorbs the following paragraph header instead of starting a new paragraph
+### H9 — A statement with no terminating period absorbs the following paragraph header instead of starting a new paragraph — FIXED 2026-07-09
 Discovered 2026-07-09 while verifying H7's "unclosed IF" sub-claim (which
 itself turned out **not** to be a bug — period-terminated or
 nesting-closed IFs with no body are legal COBOL and were re-verified as
-parsing correctly). This is a distinct, more general root cause: any
+parsing correctly). This was a distinct, more general root cause: any
 statement lacking a terminating period, immediately followed by what
-should be a new paragraph header, causes the parser to read the paragraph
+should be a new paragraph header, caused the parser to read the paragraph
 name as a trailing operand of the preceding statement instead of
-recognizing a paragraph boundary. Reproduces with a bare `DISPLAY "X"`
+recognizing a paragraph boundary. Reproduced with a bare `DISPLAY "X"`
 (no period) immediately followed by `NEXT-PARA.` and its own statement —
-not IF-specific. Repro: `display_items: ['"X"', 'NEXT-PARA']`,
-`procedure_division.paragraphs` has only 1 entry instead of 2 (the second
-paragraph's own statement ends up folded into the first paragraph's
-statement list), `errors=[], warnings=[]` — fully silent. Not fixed here:
-paragraph-boundary detection is high-blast-radius core-parser surgery,
-out of scope for this pass's bounded list of 8 findings; needs its own
-scoped investigation and regression coverage.
+not IF-specific; also confirmed (by direct repro) in `MOVE`'s target
+list, `COMPUTE`'s expression capture, `STRING`'s operand list,
+`UNSTRING`'s `INTO` target list, and `INSPECT`'s `TALLYING`
+counter-name loop and outer "consume to period" trailer (the latter is
+what actually ate the paragraph name for `INSPECT ... REPLACING`, since
+the `REPLACING` clause loop itself already stopped safely on an
+unrecognized token — it just left it for the trailer to mishandle).
+
+Fixed via a new `looks_like_paragraph_boundary()` helper
+(`cobolparser/parsers/statements/_utils.py`) that mirrors COBOL's own
+disambiguator instead of guessing from grammar shape alone (the raw
+grammar can't tell "last operand of an unterminated statement" from "next
+paragraph name" — both are just `IDENTIFIER` then `PERIOD`): the
+candidate identifier only counts as a paragraph boundary when it (a)
+starts its own source line, (b) is immediately followed by a period or
+`SECTION`, and (c) is not a name declared in the DATA DIVISION — condition
+(c) is what keeps a genuinely wrapped continuation-line operand (e.g.
+`DISPLAY\n    WS-X.`) from being misread just because it opens its line.
+The DATA DIVISION cross-check is threaded through
+`ParseContext.known_data_names`, computed once per PROCEDURE DIVISION
+parse. Recovery now warns instead of silently re-interpreting, matching
+the H7/H8 precedent. Applied to the six statement parsers confirmed by
+direct repro: `DISPLAY`, `MOVE`, `COMPUTE`, `STRING`, `UNSTRING` (its
+`INTO` target list), and `INSPECT` (its `TALLYING` counter-name loop and
+its outer "consume to period" trailer). Pinned by
+`tests/regression/test_open_findings_high_regressions.py::TestH9MissingPeriodParagraphBoundary`
+(9 tests: one repro per fixed statement/clause shape, plus two guard
+cases for the DATA DIVISION cross-check).
+
+**Known residual gap, by design:** an undeclared identifier (e.g. from an
+unexpanded COPY member) that is *also* alone on its own continuation line
+is inherently ambiguous — no purely syntactic check can tell "wrapped
+operand referencing a name this parser can't see" from "a real paragraph
+name" — and is treated as a paragraph boundary (with a warning), which
+may be wrong for that case. This is the same class of ambiguity `parse_cobol()`
+already carries whenever copybooks aren't expanded; callers needing full
+resolution should use `parse_cobol_with_expansion()`.
+
+**Not covered by this fix:** every operand-collection loop with a
+directly-reproduced instance of this bug (probed: DISPLAY, MOVE, COMPUTE,
+SET, ADD/SUBTRACT/MULTIPLY/DIVIDE, IF, STRING, UNSTRING, INSPECT
+TALLYING/REPLACING) was fixed or found already safe. `SET`, the
+arithmetic parsers' fixed-arity target/GIVING slots, and `IF` do not have
+this bug in the shapes tested (bounded grammar, not an open list). Not
+probed at all: parsers not touched by this pass (e.g. `SORT`/`MERGE`'s
+key lists, `CALL`'s `USING` parameter list, `INITIALIZE`'s target list) —
+any of those could still share the underlying gap; fixing them needs its
+own repro-first pass rather than a blanket rewrite of every
+operand-collection loop in the parser.
 
 ---
 

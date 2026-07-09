@@ -1,5 +1,60 @@
 # OKF Update Log
 
+## 2026-07-09 (H9 fixed: missing-period paragraph-boundary swallow)
+
+Follow-up to the same-day H1-H8 pass below: fixed H9, the one HIGH finding
+that pass had deliberately left open. A statement missing its terminating
+period, immediately followed by what should be a new paragraph header, had
+the paragraph name absorbed as a trailing operand instead of starting a
+new paragraph — confirmed by direct repro in `DISPLAY`'s item list,
+`MOVE`'s target list, `COMPUTE`'s expression capture, `STRING`'s operand
+list, `UNSTRING`'s `INTO` target list, and `INSPECT`'s `TALLYING`
+counter-name loop / outer "consume to period" trailer (not IF-specific,
+not a single-statement bug; `SET`, the fixed-arity arithmetic
+target/GIVING slots, and `IF` were probed and found already safe). Fixed
+via a new `looks_like_paragraph_boundary()` predicate in
+`parsers/statements/_utils.py` that mirrors COBOL's own
+paragraph-name-vs-operand disambiguator (first token on its source line,
+immediately followed by a period/SECTION, not a DATA DIVISION name) rather
+than trying to resolve the ambiguity from grammar shape alone — the raw
+grammar cannot tell "last operand of an unterminated statement" from "next
+paragraph name" since both are just `IDENTIFIER` then `PERIOD`. Applied
+only to the six statement parsers confirmed by direct repro, not
+universally, per the original finding's own "needs its own scoped
+investigation" framing (see [parser.md](parser.md) for the full
+per-file breakdown and the deliberately-out-of-scope call sites).
+Recovery now warns (matching the H7/H8 "warn, don't silently
+reinterpret" precedent) rather than staying silent; where a fix site has
+both an inner sub-parser check and an outer trailer that both see the
+same un-consumed token (`INSPECT` TALLYING, `UNSTRING` INTO), only the
+outer one emits the warning to avoid duplicates.
+
+* **Updated** [parser.md](parser.md): replaced the H9 "not fixed" bullet
+  (end of the "open-findings.md HIGH-severity fixes (2026-07-09, H1-H8)"
+  section) with the fix writeup — files touched
+  (`_utils.py`, `display_parser.py`, `move_parser.py`,
+  `arithmetic_parsers.py`, `string_unstring_parsers.py`,
+  `initialize_inspect_parsers.py`, `core/interfaces.py`,
+  `parsers/divisions/procedure.py`), the first-on-line +
+  not-a-data-name disambiguation rule, the
+  `ParseContext.known_data_names` threading mechanism, the inner/outer
+  warning-dedup split for `INSPECT`/`UNSTRING`, and the deliberate scope
+  boundary (only 6 of the 16 `is_statement_boundary()` call sites
+  touched; the undeclared-identifier-on-a-continuation-line case remains
+  an acknowledged residual ambiguity).
+* `reports/open-findings.md`: H9 marked "FIXED 2026-07-09" in place (same
+  traceability convention as H1-H8); the HIGH-section summary line updated
+  from "H1-H8 fixed... H9 not fixed" to "H1-H9 are all fixed".
+* `CHANGELOG.md` (Unreleased → Fixed): added the H9 writeup as its own
+  bullet, and updated the H1-H8 entry's "noted but intentionally not fixed
+  here" paragraph to point at it instead of describing it as still open.
+* Pinned by 9 new tests in
+  `tests/regression/test_open_findings_high_regressions.py::TestH9MissingPeriodParagraphBoundary`
+  (one repro per fixed statement/clause shape, plus two guard cases proving the
+  DATA DIVISION cross-check prevents false positives on undeclared
+  same-line operands and declared continuation-line operands). Full suite
+  (6759 tests) and `ruff`/`black`/`mypy` all still pass.
+
 ## 2026-07-09 (open-findings.md HIGH-severity remediation: H1-H8 fixed, H9 discovered)
 
 Implemented fixes for all 8 HIGH findings in `reports/open-findings.md`'s

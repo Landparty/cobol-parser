@@ -7,10 +7,12 @@ from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
     get_parse_context,
+    looks_like_paragraph_boundary,
     matches_keyword,
     report_parse_error,
     skip_whitespace,
     try_consume_keyword,
+    warn_paragraph_boundary_swallowed,
 )
 
 from ...core.ast_factory import get_factory
@@ -137,6 +139,15 @@ class MoveStatementParser(IStatementParser):
                 val_upper = token.value.upper()
                 if val_upper in _STOP_KEYWORDS or val_upper in SCOPE_TERMINATORS:
                     break
+
+            # A missing period on this MOVE followed by what looks like the
+            # next paragraph/section header (H9): stop instead of folding it
+            # into the target list.
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                warn_paragraph_boundary_swallowed(token_stream)
+                break
 
             # Parse target - only collect IDENTIFIERs
             if token.type == TokenType.IDENTIFIER:

@@ -772,15 +772,64 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   silently lost). The option parse is now a `while True` loop that keeps
   applying options until none match, so combined options on one file (and
   across multiple files in one `CLOSE`) all survive together.
-* **H9 (not fixed, tracked in `reports/open-findings.md`) — a distinct,
+* **H9 — fixed in a 2026-07-09 follow-up pass (`_utils.py`,
+  `display_parser.py`, `move_parser.py`, `arithmetic_parsers.py`,
+  `string_unstring_parsers.py`, `initialize_inspect_parsers.py`,
+  `core/interfaces.py`, `parsers/divisions/procedure.py`):** a distinct,
   more general silent-drop found while verifying H7's "unclosed IF"
-  sub-claim:** a statement with no terminating period, immediately
-  followed by what should be a new paragraph header, causes the paragraph
-  name to be absorbed as a trailing operand of the preceding statement
-  instead of starting a new paragraph (`errors=[], warnings=[]`,
-  reproduces with a bare `DISPLAY`, not IF-specific). High blast-radius
-  paragraph-boundary-detection surgery — deliberately out of scope for the
-  bounded H1-H8 pass; needs its own investigation.
+  sub-claim — a statement with no terminating period, immediately followed
+  by what should be a new paragraph header, caused the paragraph name to
+  be absorbed as a trailing operand of the preceding statement instead of
+  starting a new paragraph (`errors=[], warnings=[]`; confirmed by direct
+  repro in `DISPLAY`'s item list, `MOVE`'s target list, `COMPUTE`'s
+  expression capture, `STRING`'s operand list, `UNSTRING`'s `INTO` target
+  list, and `INSPECT`'s `TALLYING` counter-name loop / outer "consume to
+  period" trailer — none of which is `is_statement_boundary()` territory,
+  since an ordinary user-defined paragraph name is not a known verb). The
+  raw grammar genuinely cannot disambiguate "last operand of an
+  unterminated statement" from "next paragraph name" — both are just
+  `IDENTIFIER` then `PERIOD` — so a new `looks_like_paragraph_boundary()`
+  predicate (`_utils.py`) mirrors COBOL's own disambiguator instead:
+  the candidate identifier only counts as a boundary when it (a) starts
+  its own source line (checked via `previous_meaningful_token`'s
+  `.location.line`, the same mechanism `call_parser.py`'s handler-body
+  termination already relies on), (b) is immediately followed by a period
+  or `SECTION`, and (c) is not a name declared in the DATA DIVISION.
+  Condition (c) exists specifically so a legitimately wrapped
+  continuation-line operand (`DISPLAY\n    WS-X.`) isn't misread as a
+  paragraph header just because it opens its line; the DATA DIVISION name
+  set is computed once per PROCEDURE DIVISION parse
+  (`ProcedureDivisionParser._collect_known_data_names`) and threaded to
+  statement parsers via a new `ParseContext.known_data_names` field. When
+  the predicate fires, `warn_paragraph_boundary_swallowed()` records a
+  warning (matching the H7/H8 "warn, don't silently reinterpret"
+  precedent) before the loop breaks; the existing top-level
+  `_is_paragraph_or_section_start()` check then picks the identifier up as
+  a normal new paragraph — no separate paragraph-name pre-scan was needed.
+  `INSPECT`'s `TALLYING` loop is a special case: its own inner check
+  breaks without warning, because the outer "consume to period" trailer in
+  `InspectStatementParser.parse()` re-checks the same un-consumed token and
+  is the one that records the warning — that trailer is also the *sole*
+  fix point for `INSPECT ... REPLACING`, whose own `REPLACING` clause loop
+  already stopped safely on an unrecognized token but left it for the
+  trailer's unconditional `token_stream.consume()` fallback to silently
+  discard. Same split for `UNSTRING`: the outer clause-dispatch loop owns
+  the warning, `_parse_into_targets`'s inner check only breaks.
+  **Deliberately scoped, not universal:** only the six statement parsers
+  confirmed by direct repro were touched; `is_statement_boundary()` itself
+  (used by 16 call sites, including CALL/SORT/OPEN/INITIALIZE) was left
+  untouched rather than overloaded with this check, since those sites have
+  no demonstrated instance of this bug and a bare trailing identifier
+  before a period is normal in several of them — extending coverage there
+  needs its own repro-first pass. **Known residual ambiguity:** an
+  undeclared identifier (e.g. from an unexpanded `COPY` member) alone on
+  its own continuation line is inherently indistinguishable from a real
+  paragraph name by syntax alone, and is treated as a boundary (with a
+  warning) — the same class of gap `parse_cobol()` already has whenever
+  copybooks aren't expanded. Pinned by
+  `tests/regression/test_open_findings_high_regressions.py::TestH9MissingPeriodParagraphBoundary`
+  (9 tests: one repro per fixed statement/clause shape, plus two guard
+  cases for the DATA DIVISION cross-check).
 
 # Adding a New Statement Parser
 

@@ -28,12 +28,14 @@ from ._utils import (
     consume_keyword_and_operand,
     get_parse_context,
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     parse_arithmetic_operands,
     parse_size_error_clauses,
     peek_value_upper,
     report_or_raise,
     token_location,
+    warn_paragraph_boundary_swallowed,
 )
 
 
@@ -513,6 +515,14 @@ class ComputeStatementParser(IStatementParser):
                         or upper in SCOPE_TERMINATORS
                     ):
                         break
+                if tok_type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                    token_stream
+                ):
+                    # A missing period on this COMPUTE followed by what looks
+                    # like the next paragraph/section header (H9): stop
+                    # instead of folding it into the expression string.
+                    warn_paragraph_boundary_swallowed(token_stream)
+                    break
 
             # Unbalanced parentheses (a stray '(' with no matching ')')
             # otherwise leave paren_depth != 0 for the rest of the token

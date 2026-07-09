@@ -152,16 +152,27 @@ class IStatementParser(ABC):
 class ParseContext:
     """Shared context passed to statement parsers during nested parsing operations."""
 
-    def __init__(self, host: Any, registry: Optional["StatementParserRegistry"] = None):
+    def __init__(
+        self,
+        host: Any,
+        registry: Optional["StatementParserRegistry"] = None,
+        known_data_names: frozenset[str] = frozenset(),
+    ):
         """Initialize parsing context.
 
         Args:
             host: The parser host with division/section context
             registry: Statement parser registry for nested statement parsing
+            known_data_names: Upper-cased DATA DIVISION item names, used by
+                statement parsers to tell a legitimate trailing operand from
+                a following paragraph/section name swallowed by a missing
+                period (see ``looks_like_paragraph_boundary`` in
+                ``parsers/statements/_utils.py``).
         """
         self.host = host
         self.registry = registry
         self.parser = host
+        self.known_data_names = known_data_names
 
     @property
     def current_section(self) -> Any | None:

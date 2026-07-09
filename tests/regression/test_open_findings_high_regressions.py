@@ -2,7 +2,7 @@
 
 Each test class documents exactly what was broken (per the finding) and
 locks down the corrected behavior so future refactors cannot silently
-re-introduce the same gap. Test class names carry the finding ID (H1-H8)
+re-introduce the same gap. Test class names carry the finding ID (H1-H9)
 for direct traceability back to the report.
 """
 
@@ -20,9 +20,13 @@ from cobolparser.analysis import MoveTypeChecker
 from cobolparser.core.exceptions import ParseError
 from cobolparser.models.statements import (
     ComputeStatement,
+    InspectStatement,
     IOCloseStatement,
+    MoveStatement,
     PerformStatement,
     SetStatement,
+    StringStatement,
+    UnstringStatement,
 )
 from cobolparser.preprocess import PathTraversalError
 from cobolparser.preprocess.models import CopybookSearchPath
@@ -451,3 +455,226 @@ class TestH6PathResolverContainment:
             traversal_path = os.path.join(base, "..", "etc", "passwd")
             with pytest.raises(PathTraversalError):
                 validate_path_within_directory(traversal_path, base)
+
+
+class TestH9MissingPeriodParagraphBoundary:
+    """H9 — a statement with no terminating period, immediately followed by
+    what should be a new paragraph header, absorbed the paragraph name as a
+    trailing operand instead of recognizing a paragraph boundary. Fixed via
+    ``looks_like_paragraph_boundary()`` (``parsers/statements/_utils.py``):
+    an operand-collection loop now stops when the current identifier (a)
+    starts its own source line, (b) is immediately followed by a period or
+    SECTION, and (c) is not a DATA DIVISION name -- mirroring COBOL's own
+    paragraph-name-vs-operand disambiguator instead of guessing from grammar
+    shape alone. Applied to the six statement parsers confirmed by direct
+    repro to swallow the following paragraph: DISPLAY, MOVE, COMPUTE,
+    STRING, UNSTRING, and INSPECT (both TALLYING and REPLACING).
+    """
+
+    def test_display_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                DISPLAY "X"
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        assert paragraphs[0].statements[0].display_items == ['"X"']
+        assert paragraphs[1].statements[0].display_items == ['"Y"']
+        assert any(
+            "NEXT-PARA" in w and "missing its terminating period" in w
+            for w in result.warnings
+        ), result.warnings
+
+    def test_move_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 WS-A PIC X(5).
+            01 WS-B PIC X(5).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                MOVE WS-A TO WS-B
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        move_stmt = paragraphs[0].statements[0]
+        assert isinstance(move_stmt, MoveStatement)
+        assert move_stmt.targets == ["WS-B"]
+        assert any("NEXT-PARA" in w for w in result.warnings), result.warnings
+
+    def test_compute_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 X PIC 9(4).
+            01 A PIC 9(4).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                COMPUTE X = A + 1
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        compute_stmt = paragraphs[0].statements[0]
+        assert isinstance(compute_stmt, ComputeStatement)
+        assert "NEXT-PARA" not in (compute_stmt.expression or "")
+        assert any("NEXT-PARA" in w for w in result.warnings), result.warnings
+
+    def test_string_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 WS-A PIC X(5).
+            01 WS-OUT PIC X(20).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                STRING WS-A DELIMITED BY SIZE INTO WS-OUT
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        string_stmt = paragraphs[0].statements[0]
+        assert isinstance(string_stmt, StringStatement)
+        assert "NEXT-PARA" not in string_stmt.operands
+        assert any("NEXT-PARA" in w for w in result.warnings), result.warnings
+
+    def test_unstring_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 WS-IN PIC X(20).
+            01 WS-OUT1 PIC X(10).
+            01 WS-OUT2 PIC X(10).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                UNSTRING WS-IN DELIMITED BY SPACE INTO WS-OUT1 WS-OUT2
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        unstring_stmt = paragraphs[0].statements[0]
+        assert isinstance(unstring_stmt, UnstringStatement)
+        assert [t["target"] for t in unstring_stmt.into_targets] == [
+            "WS-OUT1",
+            "WS-OUT2",
+        ]
+        assert any("NEXT-PARA" in w for w in result.warnings), result.warnings
+
+    def test_inspect_tallying_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 WS-IN PIC X(20).
+            01 WS-COUNT PIC 9(4).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                INSPECT WS-IN TALLYING WS-COUNT FOR ALL 'A'
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        inspect_stmt = paragraphs[0].statements[0]
+        assert isinstance(inspect_stmt, InspectStatement)
+        assert [c["counter"] for c in inspect_stmt.tallying_clauses] == ["WS-COUNT"]
+        assert any("NEXT-PARA" in w for w in result.warnings), result.warnings
+        # Exactly one warning: the inner TALLYING loop's boundary check and
+        # the outer "consume to period" trailer both see this token, but
+        # only the trailer should record the warning.
+        assert sum("NEXT-PARA" in w for w in result.warnings) == 1
+
+    def test_inspect_replacing_missing_period_does_not_swallow_next_paragraph(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 WS-IN PIC X(20).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                INSPECT WS-IN REPLACING ALL 'A' BY 'B'
+            NEXT-PARA.
+                DISPLAY "Y".
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        inspect_stmt = paragraphs[0].statements[0]
+        assert isinstance(inspect_stmt, InspectStatement)
+        assert len(inspect_stmt.replacing_clauses) == 1
+        assert any("NEXT-PARA" in w for w in result.warnings), result.warnings
+
+    def test_undeclared_trailing_operand_on_same_line_is_not_misread(self):
+        # CUST-NAME is undeclared here (simulating an unexpanded COPY), but
+        # it's on the same source line as DISPLAY -- a legitimate operand,
+        # not a paragraph name -- so it must survive untouched, with no
+        # warning at all.
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                DISPLAY CUST-NAME.
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        assert result.warnings == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert len(paragraphs) == 1
+        assert paragraphs[0].statements[0].display_items == ["CUST-NAME"]
+
+    def test_declared_operand_alone_on_continuation_line_is_not_misread(self):
+        # WS-X is a legitimate DISPLAY operand wrapped onto its own
+        # continuation line -- a normal COBOL style choice. Being first on
+        # its line must not be enough by itself; the DATA DIVISION
+        # cross-check must keep this from being misread as a paragraph.
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01 WS-X PIC X.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                DISPLAY
+                    WS-X.
+            """)
+        result = parse_cobol(program)
+        assert result.errors == []
+        assert result.warnings == []
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert len(paragraphs) == 1
+        assert paragraphs[0].statements[0].display_items == ["WS-X"]

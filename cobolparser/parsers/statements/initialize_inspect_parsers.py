@@ -8,9 +8,11 @@ from ...models.statements import InitializeStatement, InspectStatement
 from ._utils import (
     consume_period,
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
+    warn_paragraph_boundary_swallowed,
 )
 from ._utils import token_value_upper as _val
 
@@ -192,6 +194,14 @@ class InspectStatementParser(IStatementParser):
             # the next period and ate every intervening statement.
             if is_statement_boundary(t):
                 break
+            # A missing period on this INSPECT followed by what looks like
+            # the next paragraph/section header (H9): stop instead of
+            # silently discarding it in this "consume to period" trailer.
+            if t.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                warn_paragraph_boundary_swallowed(token_stream)
+                break
             token_stream.consume()
             skip_whitespace(token_stream)
 
@@ -215,6 +225,13 @@ class InspectStatementParser(IStatementParser):
             # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
             # be mistaken for the next TALLYING counter name.
             if is_statement_boundary(token):
+                break
+            # A missing period on this INSPECT followed by what looks like
+            # the next paragraph/section header (H9): stop instead of
+            # mistaking it for a TALLYING counter name. The "consume to
+            # period" trailer in parse() re-checks this same token and
+            # owns the warning, so this just needs to break, not warn.
+            if looks_like_paragraph_boundary(ts):
                 break
 
             # Counter name

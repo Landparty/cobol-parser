@@ -206,14 +206,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next statement); now correctly surfaced by the H2 fix and corrected
   in the sample by removing the space after each comma.
 
-  Noted but intentionally not fixed here (out of scope of the 8 listed
-  findings, and higher blast-radius core-parser surgery): a statement with
-  no terminating period, immediately followed by what should be a new
-  paragraph header, causes the paragraph-name identifier to be absorbed as
-  a trailing operand of the preceding statement instead of starting a new
-  paragraph (`errors=[], warnings=[]`; reproduces with a bare `DISPLAY`,
-  not just `IF`). Distinct root cause from H7's "unclosed IF" sub-claim;
-  flagged for a follow-up finding rather than folded into this pass.
+  Noted but intentionally not fixed in that pass (out of scope of the 8
+  listed findings, and higher blast-radius core-parser surgery): a
+  statement with no terminating period, immediately followed by what
+  should be a new paragraph header, caused the paragraph-name identifier
+  to be absorbed as a trailing operand of the preceding statement instead
+  of starting a new paragraph. Flagged as H9 and fixed in a follow-up
+  pass — see below.
+
+* **H9 — a statement missing its terminating period could absorb the
+  following paragraph/section header as a trailing operand** (follow-up to
+  the H1-H8 pass above; pinned by
+  `tests/regression/test_open_findings_high_regressions.py::TestH9MissingPeriodParagraphBoundary`).
+  Operand-collection loops with no boundary awareness (`DISPLAY`'s item
+  list, `MOVE`'s target list, `COMPUTE`'s expression capture, `STRING`'s
+  operand list) had no way to tell a legitimate trailing operand from a
+  following paragraph name once the statement's own period was missing —
+  both are just "`IDENTIFIER` then `PERIOD`" to the grammar, and
+  `is_statement_boundary()` only catches *known* verbs lexed as plain
+  identifiers, not ordinary user-defined paragraph names. Fixed via a new
+  `looks_like_paragraph_boundary()` helper (`parsers/statements/_utils.py`)
+  that mirrors COBOL's own disambiguator instead of guessing from grammar
+  shape alone: the candidate identifier only counts as a paragraph boundary
+  when it starts its own source line, is immediately followed by a period
+  or `SECTION`, and is not a name declared in the DATA DIVISION (excluded
+  so a genuinely wrapped continuation-line operand, e.g. `DISPLAY\n
+  WS-X.`, is not misread just because it opens its line). The DATA DIVISION
+  cross-check is threaded through `ParseContext.known_data_names`, computed
+  once per PROCEDURE DIVISION parse. Recovery now warns instead of silently
+  re-interpreting, per the H7/H8 precedent. Applied to the six statement
+  parsers confirmed (by direct repro) to swallow the following paragraph:
+  `DISPLAY`, `MOVE`, `COMPUTE`, `STRING`, `UNSTRING` (its `INTO` target
+  list), and `INSPECT` (both its `TALLYING` counter-name loop and its
+  outer "consume to period" trailer, which is what actually swallowed the
+  paragraph name for `INSPECT ... REPLACING`, since the `REPLACING`
+  clause loop itself already stopped safely). Not probed / not fixed:
+  other statement parsers with a similarly open-ended list/text-collection
+  loop may share this gap; only the six demonstrated cases were fixed here,
+  per the report's own "needs its own scoped investigation" framing for
+  this finding.
 
 * **A period-less statement could silently swallow an unsupported (or even a
   fully-supported) following verb** (residual of audit 2026-07-07 C2). C2

@@ -13,7 +13,13 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
-from ._utils import is_statement_boundary, matches_keyword, skip_whitespace
+from ._utils import (
+    is_statement_boundary,
+    looks_like_paragraph_boundary,
+    matches_keyword,
+    skip_whitespace,
+    warn_paragraph_boundary_swallowed,
+)
 
 
 class DisplayStatementParser(IStatementParser):
@@ -100,6 +106,15 @@ class DisplayStatementParser(IStatementParser):
             # without this, `DISPLAY X` immediately followed by an un-punctuated
             # `PURGE Y` silently folded PURGE/Y into the display item list.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
+                break
+
+            # A missing period on this DISPLAY followed by what looks like
+            # the next paragraph/section header (H9): stop instead of
+            # folding it into the item list.
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                warn_paragraph_boundary_swallowed(token_stream)
                 break
 
             # Collect display item

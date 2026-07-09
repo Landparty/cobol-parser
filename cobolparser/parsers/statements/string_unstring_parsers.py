@@ -9,10 +9,12 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     consume_period,
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
     try_parse_nested_statement,
+    warn_paragraph_boundary_swallowed,
 )
 from ._utils import (
     token_value_upper as _val,
@@ -84,6 +86,14 @@ class StringStatementParser(IStatementParser):
             if is_statement_boundary(token):
                 # No period / END-STRING terminator before the next statement:
                 # stop rather than swallow it (audit 2026-07-06 H2).
+                break
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                # A missing period on this STRING followed by what looks
+                # like the next paragraph/section header (H9): stop instead
+                # of folding it into the operand list.
+                warn_paragraph_boundary_swallowed(token_stream)
                 break
             if val == "DELIMITED":
                 token_stream.consume()
@@ -208,6 +218,14 @@ class UnstringStatementParser(IStatementParser):
                 # No period / END-UNSTRING terminator before the next
                 # statement: stop rather than swallow it (audit 2026-07-06 H2).
                 break
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                # A missing period on this UNSTRING followed by what looks
+                # like the next paragraph/section header (H9): stop instead
+                # of silently discarding it in this clause dispatch loop.
+                warn_paragraph_boundary_swallowed(token_stream)
+                break
             if val == "DELIMITED":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -318,6 +336,15 @@ class UnstringStatementParser(IStatementParser):
                 # A following statement's verb that lexes as a plain
                 # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated
                 # TokenType) must not be folded into the INTO target list.
+                break
+            elif tgt.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                # A missing period on this UNSTRING followed by what looks
+                # like the next paragraph/section header (H9): stop instead
+                # of folding it into the INTO target list. The outer clause
+                # dispatch loop in parse() re-checks this same token and
+                # owns the warning, so this just needs to break, not warn.
                 break
             elif tgt.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 # Flush previous target if any

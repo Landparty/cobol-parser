@@ -111,6 +111,25 @@ class ProcedureDivisionParser(BaseDivisionParser):
         """
         self.host = host
 
+    def _collect_known_data_names(self) -> frozenset:
+        """Upper-cased DATA DIVISION item names, for H9's paragraph-boundary
+        disambiguation (see ``looks_like_paragraph_boundary`` in
+        ``parsers/statements/_utils.py``). Best-effort: a name declared only
+        via an unexpanded COPY member won't be here, since ``parse_cobol()``
+        doesn't expand copybooks -- callers that need full coverage should
+        parse with copybook expansion enabled.
+        """
+        program = getattr(self.host, "current_program", None)
+        data_division = getattr(program, "data_division", None) if program else None
+        if data_division is None:
+            return frozenset()
+        names = set()
+        for item in data_division.find_all_by_type("CobolDataItem"):
+            name = getattr(item, "name", None)
+            if name:
+                names.add(name.upper())
+        return frozenset(names)
+
     def _create_statement_registry(self) -> StatementParserRegistry:
         """Create and populate statement registry with all available parsers.
 
@@ -216,6 +235,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
         section_order: list[str] = []
         # Track the current section so paragraphs are associated correctly
         current_section: dict[str, Any] | None = None
+
+        # H9 paragraph-boundary disambiguation: computed once per division
+        # parse and threaded to statement parsers via ParseContext.
+        self._known_data_names = self._collect_known_data_names()
 
         # Helper: get the paragraph list that new paragraphs should be added to.
         # If we're inside a section, add to that section's paragraphs; otherwise
@@ -706,7 +729,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
         """
         if not hasattr(token_stream, "_registry"):
             token_stream._registry = self._statement_registry  # type: ignore[attr-defined]
-        context = ParseContext(self.host, self._statement_registry)
+        context = ParseContext(
+            self.host,
+            self._statement_registry,
+            known_data_names=getattr(self, "_known_data_names", frozenset()),
+        )
         token_stream.context = context
         token_stream._context = context  # type: ignore[attr-defined]
 
