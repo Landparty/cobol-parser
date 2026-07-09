@@ -831,6 +831,84 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   (9 tests: one repro per fixed statement/clause shape, plus two guard
   cases for the DATA DIVISION cross-check).
 
+# open-findings.md MEDIUM-severity fixes (2026-07-09)
+
+Ten MEDIUM findings from `reports/open-findings.md`, all fixed and pinned
+by `tests/regression/test_open_findings_medium_regressions.py` (one test
+class per finding ID). Full per-finding writeup in `CHANGELOG.md`'s
+Unreleased → Fixed section; only the parser-relevant ones are summarized
+here (M4/M5/M8 normalize_fixed_format → [preprocessing.md](preprocessing.md),
+M7 typed-literal hex validation → [lexer.md](lexer.md), M14 copybook
+cache-hit accounting → [preprocessing.md](preprocessing.md)).
+
+* **M1 — `display_parser.py`:** the display-item collection loop accepted
+  `STRING_LITERAL`/`IDENTIFIER`/`NUMERIC_LITERAL` but not
+  `TokenType.FIGURATIVE_CONSTANT` (what `SPACE`/`ZERO`/`HIGH-VALUE`/etc.
+  lex to), so `DISPLAY SPACE.` produced `display_items: []` and an
+  "Unparsed tokens" warning — the single most common trigger in the
+  mockymock corpus sweep (56 hits across 24 shamrice programs).
+  `TokenType.FIGURATIVE_CONSTANT` added to the accepted set.
+* **M2 — `display_parser.py` / `models/statements/data.py`:** `WITH`/
+  `NO`/`ADVANCING` lex as dedicated `TokenType`s (not `IDENTIFIER`), so
+  `DISPLAY ... WITH NO ADVANCING` hit the item loop's final "unknown
+  token → stop" branch and the whole clause vanished (warn-masked).
+  `DisplayStatement` gained a `with_no_advancing` flag; a new branch in
+  the parse loop matches `[WITH] NO ADVANCING` (in that fixed order —
+  `WITH` optional, `NO ADVANCING` mandatory) and sets it.
+* **M3 — `display_parser.py`, `accept_parser.py`,
+  `models/statements/data.py`, `models/statements/io.py`:** `AT`
+  positioning on `DISPLAY`/`ACCEPT`, and `ACCEPT`'s extended clauses
+  (`SECURE`, `NO-ECHO`, `TIMEOUT`, `AUTO-SKIP`, `UPPER`), were dropped
+  entirely — `IOAcceptStatement` already had scaffolded fields/setters
+  (`at_line`, `at_column`, `with_no_echo`, `set_position()`, ...) that
+  `accept_parser.py` never called. A corpus grep of
+  `examples/cobol/shamrice/*.cbl` (the corpus the finding's hit-counts
+  came from) found `AT` used 34 times, **100% via the bare
+  combined-numeric form** (`AT 0330` → line 3, column 30, decoded via
+  `divmod(value, 100)`), zero via the `AT LINE n COLUMN m` keyword form —
+  `DisplayStatementParser._parse_at_clause` supports both (the keyword
+  form is speculative IBM-grammar coverage there, not corpus-driven);
+  `AcceptStatementParser` implements only the corpus-confirmed numeric
+  form. `SECURE` and `NO-ECHO` are modeled as **distinct** flags on
+  `IOAcceptStatement` (`secure` vs. the pre-existing `with_no_echo`) per
+  `accept-secure.cbl`'s own comment: `SECURE` masks input with `*` per
+  character, `NO-ECHO` shows nothing — collapsing them would have lost
+  that distinction. `IOAcceptStatement` also gained `timeout_value`
+  (int) and `auto_skip`/`upper` (bool) fields. All six clause shapes
+  (`AT nnnn`, `SECURE`, `NO-ECHO`, `TIMEOUT n`, `AUTO-SKIP`, `UPPER`,
+  optionally preceded by `WITH`) are taken verbatim from
+  `examples/cobol/shamrice/accept.cbl` and `accept-secure.cbl`.
+  **Not implemented** (zero-to-one corpus hits; for `COLOR` especially
+  the real GnuCOBOL grammar — `FOREGROUND-COLOR`/`BACKGROUND-COLOR`, a
+  two-part clause — isn't specified with enough confidence by the
+  finding's text to implement correctly): `CURSOR`, `BEEP`/`BELL`,
+  `COLOR`, `UPDATE`, `WITH BLANK SCREEN` (a `DISPLAY`-side clause
+  noticed during the corpus grep, 6 hits, but never part of this
+  finding). See `reports/open-findings.md`'s M3 entry for the residual
+  write-up.
+* **M9 — `_utils.py`:** `try_parse_nested_statement`'s bare
+  `except Exception` logged at DEBUG only, with no entry in
+  `ParseResult.errors`/`.warnings` — an exception that bypassed
+  `report_or_raise` (e.g. `TokenMismatch`/`UnexpectedEndOfInput` raised
+  directly by `token_stream.expect()`) vanished completely untraceable.
+  Now records a warning (`"Nested statement parse failed and was
+  skipped: {exc}"`) unless the exception is already tagged
+  `_already_recorded = True` by `report_or_raise` (avoiding
+  double-reporting on the much more common path). Distinct from H4's 5
+  bare `except ParseError: pass` sites in `perform_parser.py` (see the
+  H1-H8 section above) — same bug class, different call sites, both
+  fixed independently.
+* **M16 — `parsers/divisions/data.py`:** `_PICTURE_SYMBOL_TOKEN_TYPES`
+  used `TokenType.DIVIDE`/`MULTIPLY` — the DIVIDE/MULTIPLY *statement
+  keyword* tokens — instead of `TokenType.DIVIDE_OP`/`MULTIPLY_OP` (what
+  `/` and `*` actually lex to per `lexer.py`'s single-char token table),
+  so `_parse_picture_clause` stopped collecting at the first slash or
+  asterisk editing symbol. `PIC 99/99/99` truncated to pattern `"99"`
+  with the `/99/99` remainder misparsed as phantom level-99 data items
+  (`ANONYMOUS-99-N`, duplicated as both a child of the real item and at
+  top level); `PIC $***,**9.99` similarly truncated to `"$"`. Now uses
+  the correct operator token types — both patterns extract in full.
+
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)

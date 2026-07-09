@@ -66,13 +66,22 @@ from cobolparser.preprocess import (
 
 ```python
 def normalize_fixed_format(
-    lines: list[str] | str, *, merge_continued_literals: bool = True
+    lines: list[str] | str,
+    *,
+    merge_continued_literals: bool = True,
+    debug_lines_as_comments: bool = True,
 ) -> str: ...
 ```
 
-Extracts columns 8–72 from each line, silently drops comment lines (column-7 is
-`*` or `/`), and merges continuation lines (column-7 is `-`). Returns a single
-free-form text string.
+Each line is tab-expanded (`str.expandtabs(8)`, added 2026-07-09 —
+finding M8) **before** any column-index slicing, so a tab in the source
+doesn't shift the indicator/text-area columns. Extracts columns 8–72 from
+each line, drops comment lines (column-7 is `*`/`/`, or `D`/`d` when
+`debug_lines_as_comments` is true — the default, added 2026-07-09 for
+finding M4 to match `copy_statement_parser.is_comment_line()`, which
+already treated `D`/`d` as a comment; pass `debug_lines_as_comments=False`
+to compile debug lines as live code instead), and merges continuation
+lines (column-7 is `-`). Returns a single free-form text string.
 
 Continuation-line joining follows the COBOL rule that a continuation line's
 first non-blank character is the successor of the continued line's last
@@ -88,6 +97,16 @@ non-blank character, **without an intervening space**:
   digits and left the decimal point as a free-standing `.` that the lexer read
   as a statement terminator — see the [log](log.md) entry and
   `tests/regression/test_continued_literal_normalization.py`.
+
+**Trailing blanks in a continued literal** (fixed 2026-07-09, finding M5):
+a line's text is only `rstrip()`-ped once it's known no literal is left
+open at end of line. A literal that remains open (continuing to the next
+line) keeps its trailing blanks, since fixed-format continuation rules
+make them part of the literal's value — e.g. opening line `VALUE "ABC   `
+(3 trailing blanks) + continuation `-    "DEF".` now normalizes to
+`VALUE "ABCDEF"` → correctly `"ABC   DEF"`, not the pre-fix `"ABCDEF"`
+(blanks silently dropped). Applies to both the opening-line branch and
+the literal-continuation branch, pure-Python and Cython.
 
 The optional Cython `_preprocess_fast` fast-path mirrors this logic; the
 pure-Python implementation stays reachable as `_normalize_fixed_format_pure`
@@ -119,6 +138,18 @@ Features:
 - Content validation (`validate_copybook_content`)
 - LRU file cache (configurable via `set_file_cache_size`)
 - REPLACING clause support including multi-token substitution
+
+**`total_bytes` accounting on cache hits (fixed 2026-07-09, finding
+M14):** `_expand_source_recursive`'s intra-expansion cache (`context.
+content_cache`, keyed by copybook path + REPLACING clauses — for diamond
+dependencies, the same member `COPY`d multiple times within one
+expansion) previously only counted a copybook's bytes toward
+`context.total_bytes` on a cache **miss**. A cache hit still inserts the
+same real content into the expansion, so `max_total_size` was silently
+under-enforced: 3x inclusion of a 76-byte copybook with `max_total_size=
+114` (1.5x) never raised `TotalExpansionSizeExceededError`, despite ~228
+true content bytes. Cache hits now add the cached content's byte length
+to `context.total_bytes` and re-check the limit, identically to a miss.
 
 `parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
 encoding decodes, content-validation and level-number warnings) onto the

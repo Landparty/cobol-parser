@@ -150,6 +150,19 @@ input — but it is no longer *undetectable*: a caller that checks
 instead of a matching quote"`. Pinned by
 `tests/regression/test_open_findings_high_regressions.py::TestH7UnterminatedStringWarns`.
 
+A second producer (added 2026-07-09, finding M7 in
+`reports/open-findings.md`): `read_prefixed_literal_from_text` — which
+handles typed literals (`X'..'`, `N'..'`, `G'..'`, `NX'..'`) — now
+validates hex content for the `X'..'`/`NX'..'` prefixes specifically.
+`X'ABC'` (odd number of hex digits — each byte needs two) and `X'ZZ'`
+(non-hex characters) previously round-tripped with no diagnostic; both
+now append to `self.warnings`. `G'..'`/`N'..'` literals are untouched —
+they have codepage-dependent validity rules out of scope for this fix,
+and the value is still not *decoded* to actual bytes/characters for
+either form (that would require a codepage decision this fix doesn't
+make). Pinned by
+`tests/regression/test_open_findings_medium_regressions.py::TestM7TypedLiteralHexValidation`.
+
 # See Also
 
 * [preprocessing.md](preprocessing.md) — upstream fixed-format normalisation

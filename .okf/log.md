@@ -1,5 +1,80 @@
 # OKF Update Log
 
+## 2026-07-09 (open-findings.md MEDIUM-severity remediation: M1, M2, M3, M4, M5, M7, M8, M9, M14, M16 fixed)
+
+Follow-up to the same-day H1-H9 pass above: implemented fixes for 10 of
+the 17 MEDIUM findings in `reports/open-findings.md`, chosen (per user
+decision) as the ones contained enough to fix with real TDD in one pass;
+M6, M10, M11, M12, M13, M15 (each close to its own subsystem rewrite)
+deferred to separate plans, and M17 (branch-coverage debt, not a bug) not
+attempted. Each pinned by a dedicated test class in new file
+`tests/regression/test_open_findings_medium_regressions.py` (30 tests
+total, including a Cython/pure-Python parity check). Full per-finding
+writeup: `CHANGELOG.md` (Unreleased → Fixed). `reports/open-findings.md`
+updated in place — all 10 marked `FIXED 2026-07-09` (left visible for
+traceability, per the file's own convention), M3 and M7 marked partial
+with residual write-ups appended in place.
+
+M3 (screen positioning / extended ACCEPT clauses) was scoped by grepping
+`examples/cobol/shamrice/*.cbl` — the corpus the finding's original hit
+counts came from — rather than guessing IBM grammar the finding text
+didn't fully specify: `AT` positioning turned out to be 100%
+combined-numeric (`AT 0330`) in real usage with zero `AT LINE n COLUMN m`
+hits, and `SECURE`/`NO-ECHO` turned out to be semantically distinct
+(`SECURE` masks with `*`, `NO-ECHO` shows nothing) per the corpus file's
+own comment — both facts the finding text alone didn't establish.
+
+* **Updated** [parser.md](parser.md): new "open-findings.md
+  MEDIUM-severity fixes (2026-07-09)" section (mirrors the H1-H9 section
+  above it), covering M1 (`DISPLAY` figurative constants —
+  `TokenType.FIGURATIVE_CONSTANT` missing from the display-item accepted
+  set), M2 (`DISPLAY WITH NO ADVANCING` — `WITH`/`NO`/`ADVANCING` lex as
+  dedicated `TokenType`s the item loop didn't handle;
+  `DisplayStatement.with_no_advancing` added), M3 (`AT` positioning on
+  `DISPLAY`/`ACCEPT` plus `ACCEPT`'s `SECURE`/`NO-ECHO`/`TIMEOUT`/
+  `AUTO-SKIP`/`UPPER` — corpus-scoped as above; `IOAcceptStatement`
+  gained `secure`/`timeout_value`/`auto_skip`/`upper`, its pre-existing
+  `at_line`/`at_column`/`with_no_echo` scaffolding finally wired up), M9
+  (`try_parse_nested_statement`'s bare `except Exception` now surfaces a
+  warning unless the exception is already `_already_recorded` by
+  `report_or_raise` — distinct call site from H4's 5 bare excepts in
+  `perform_parser.py`), and M16 (`_PICTURE_SYMBOL_TOKEN_TYPES` used
+  `TokenType.DIVIDE`/`MULTIPLY`, the *statement keyword* tokens, instead
+  of `TokenType.DIVIDE_OP`/`MULTIPLY_OP`, so `/`- and `*`-edited pictures
+  like `PIC 99/99/99` truncated at the first edit symbol and the
+  remainder was misparsed as phantom level-99 data items).
+* **Updated** [lexer.md](lexer.md): "Warnings" section gained a second
+  producer — `read_prefixed_literal_from_text` now validates hex content
+  for `X'..'`/`NX'..'` typed literals (odd digit count or non-hex
+  characters both now warn; `G'..'`/`N'..'` untouched) — finding M7,
+  fixed partially (validation only, not decoding).
+* **Updated** [preprocessing.md](preprocessing.md): `normalize_fixed_format`
+  gained a `debug_lines_as_comments` keyword (default `True` — `D`/`d` in
+  column 7 now treated as a comment, matching
+  `copy_statement_parser.is_comment_line()`, closing the M4 two-pipelines-
+  disagree gap) and tab-expands each line (`str.expandtabs(8)`) before
+  any column-sensitive slicing (M8). Trailing blanks on a line are now
+  preserved when a literal remains open at end of line, only stripped
+  once confirmed closed (M5) — both the opening-line and
+  literal-continuation branches, pure-Python and Cython. Copybook
+  Expansion section gained a note on M14: cache hits in
+  `_expand_source_recursive` now count toward `context.total_bytes` the
+  same as a miss does (previously only misses did, so diamond-dependency
+  copybooks under-counted against `max_total_size`).
+* **Updated** [tests.md](tests.md): test count refreshed to 6,789 passed
+  / 13 skipped / 5 xfailed, 92.65% coverage.
+* Cython extension rebuilt (`python setup.py build_ext --inplace`) for
+  the M4/M5/M8 `_preprocess_fast.pyx` changes; regenerated `.c` committed
+  alongside. Verified both `_lexer_fast`/`_preprocess_fast` report as
+  active post-rebuild (`tests/unit/test_fast_import.py`) and a dedicated
+  parity test confirms the Cython and pure-Python paths agree on all
+  three new behaviors.
+* Full suite (6,789 tests) and `ruff`/`black`/`mypy` all pass after the
+  batch; the real `examples/cobol/shamrice/accept.cbl`,
+  `accept-secure.cbl`, and `mouse_example.cbl` files (the M3 motivating
+  corpus) now parse with zero `AT`/`SECURE`/`NO-ECHO`/`TIMEOUT`/
+  `AUTO-SKIP`/`UPPER`-related warnings.
+
 ## 2026-07-09 (H9 fixed: missing-period paragraph-boundary swallow)
 
 Follow-up to the same-day H1-H8 pass below: fixed H9, the one HIGH finding

@@ -8,12 +8,17 @@ timestamp: 2026-07-09T00:00:00Z
 
 # Overview
 
-6,750 passed / 13 skipped / 5 xfailed (2026-07-09: +21 in the new
-`tests/regression/test_open_findings_high_regressions.py`, one test class
-per HIGH finding H1-H8 fixed that day — see [parser.md](parser.md)'s
-"open-findings.md HIGH-severity fixes" section). Coverage floor: **81%
-line coverage** enforced by `--cov-fail-under=81` in `pyproject.toml`;
-full-suite run measured 92.61%. Branch coverage is enabled.
+6,789 passed / 13 skipped / 5 xfailed (2026-07-09: +30 in the new
+`tests/regression/test_open_findings_medium_regressions.py`, one test
+class per MEDIUM finding M1, M2, M3, M4, M5, M7, M8, M9, M14, M16 fixed
+that day, plus a Cython/pure-Python parity check — see
+[parser.md](parser.md)'s "open-findings.md MEDIUM-severity fixes"
+section and [preprocessing.md](preprocessing.md)/[lexer.md](lexer.md)
+for the M4/M5/M7/M8/M14 write-ups; also includes the earlier same-day +21
+in `tests/regression/test_open_findings_high_regressions.py` for HIGH
+findings H1-H8). Coverage floor: **81% line coverage** enforced by
+`--cov-fail-under=81` in `pyproject.toml`; full-suite run measured
+92.65%. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
 

@@ -246,6 +246,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per the report's own "needs its own scoped investigation" framing for
   this finding.
 
+* **Ten MEDIUM-severity findings from `reports/open-findings.md` (2026-07-09
+  batch), all pinned by
+  `tests/regression/test_open_findings_medium_regressions.py`:**
+  - **M1** — `DISPLAY SPACE`/`DISPLAY SPACES` (and other figurative
+    constants) produced an empty `display_items` list and an "Unparsed
+    tokens" warning: the display-item loop accepted `STRING_LITERAL`/
+    `IDENTIFIER`/`NUMERIC_LITERAL` but not `TokenType.FIGURATIVE_CONSTANT`.
+    Per the mockymock corpus sweep this was the single most common
+    trigger (56 hits across 24 shamrice programs). Now accepted.
+  - **M2** — `DISPLAY ... WITH NO ADVANCING` was silently dropped: `WITH`/
+    `NO`/`ADVANCING` lex as dedicated `TokenType`s, so the item loop's
+    final "unknown token → stop" branch ended the statement without
+    consuming the clause. `DisplayStatement` gained a `with_no_advancing`
+    flag, now set by a new WITH/NO/ADVANCING branch in the parse loop.
+  - **M3** — `DISPLAY`/`ACCEPT` `AT` positioning and ACCEPT's extended
+    clauses (`SECURE`, `NO-ECHO`, `TIMEOUT`, `AUTO-SKIP`, `UPPER`) were
+    dropped entirely. A corpus grep of `examples/cobol/shamrice/*.cbl`
+    (the corpus the audit's hit counts came from) found 34 real `AT`
+    clauses, 100% using the bare combined-numeric form (`AT 0330` → line
+    3, column 30, decoded via `divmod(value, 100)`) with zero uses of the
+    `AT LINE n COLUMN m` keyword form — both are now supported on
+    `DISPLAY`; `ACCEPT` supports the corpus-confirmed numeric form.
+    `SECURE` and `NO-ECHO` are modeled as distinct flags (per
+    `accept-secure.cbl`'s own comment, `SECURE` masks input with `*` per
+    character where `NO-ECHO` shows nothing — collapsing them would have
+    lost that distinction). `IOAcceptStatement` gained `secure`,
+    `timeout_value`, `auto_skip`, and `upper` fields alongside the
+    already-scaffolded `at_line`/`at_column`/`with_no_echo`, which were
+    previously never wired up by the parser. `CURSOR`, `BEEP`/`BELL`,
+    `COLOR` (`FOREGROUND-COLOR`/`BACKGROUND-COLOR`), `UPDATE`, and `WITH
+    BLANK SCREEN` remain unimplemented — zero-to-one corpus hits, and for
+    `COLOR` especially the real grammar is a two-part clause the finding
+    text didn't specify with enough confidence to implement correctly.
+  - **M4** — `D`/`d` in column 7 fell through `normalize_fixed_format` as
+    live code, disagreeing with `copy_statement_parser.is_comment_line()`
+    (which already treats `D`/`d` as a comment) — two pipelines, two
+    answers, neither configurable. `normalize_fixed_format` (pure-Python
+    and the `_preprocess_fast` Cython path) gained a
+    `debug_lines_as_comments` keyword (default `True`, matching
+    `is_comment_line()`) so both pipelines now agree by default, with an
+    explicit opt-out for callers that need debug lines compiled as code.
+  - **M5** — a continued alphanumeric literal lost trailing blanks that
+    are part of its value: `rstrip()` was applied to a line's text before
+    it was known whether the literal remained open (continuing to the
+    next line, where fixed-format continuation rules make those trailing
+    blanks significant) or closed (where they're just padding).
+    `normalize_fixed_format` now determines quote state first and only
+    strips trailing blanks once a literal is confirmed closed, in both
+    the opening-line and literal-continuation branches, pure-Python and
+    Cython.
+  - **M7** — typed `X'..'`/`NX'..'` literals had no hex-validity or
+    even-length check; `X'ABC'` (odd length) and `X'ZZ'` (invalid hex
+    digits) were accepted with no diagnostic. The lexer now emits a
+    warning for both cases (via `self.warnings`, surfaced through
+    `ParseResult.warnings`). `G'..'`/`N'..'` literals are untouched —
+    they have codepage-dependent validity rules out of scope here.
+  - **M8** — no tab-expansion logic existed in `normalize_fixed_format`;
+    a leading tab shifted every subsequent column, since fixed-format
+    parsing is column-index based. Lines are now tab-expanded (8-column
+    stops, `str.expandtabs(8)`) before any column-sensitive slicing, in
+    both the pure-Python and Cython paths.
+  - **M9** — `try_parse_nested_statement`'s bare `except Exception` logged
+    at DEBUG only; an exception that bypassed `report_or_raise` (e.g.
+    `TokenMismatch`/`UnexpectedEndOfInput` raised directly by
+    `token_stream.expect()`) vanished completely — no entry in
+    `ParseResult.errors` or `.warnings`. Now recorded as a warning unless
+    the exception is already tagged `_already_recorded = True` by
+    `report_or_raise` (avoiding double-reporting).
+  - **M14** — copybook cache hits (diamond dependency: the same member
+    `COPY`d multiple times within one expansion) bypassed
+    `context.total_bytes` accounting entirely — only a cache *miss*
+    incremented it, so `max_total_size` was never enforced against the
+    true expanded content size. Cache hits now add their content's byte
+    length to `total_bytes` and re-check the limit, same as a miss does.
+  - **M16** — `PIC 99/99/99` (and any other slash- or asterisk-edited
+    picture, e.g. `PIC $***,**9.99`) corrupted DATA DIVISION structure:
+    `_PICTURE_SYMBOL_TOKEN_TYPES` used `TokenType.DIVIDE`/`MULTIPLY` (the
+    DIVIDE/MULTIPLY *statement* keyword tokens) instead of
+    `TokenType.DIVIDE_OP`/`MULTIPLY_OP` (what `/` and `*` actually lex
+    to), so picture pattern collection stopped at the first edit symbol
+    and the remainder was misparsed as phantom level-99 data items. Now
+    uses the correct operator token types.
+
+  Explicitly out of scope for this batch (each close to its own
+  subsystem, deferred to separate plans): M6 (`parse_cobol()` vs.
+  `tokenize_cobol()`/CLI `tokenize` running different fixed-format
+  logic), M10 (conditional compilation beyond `symbol IS [NOT] DEFINED`,
+  and `>>EVALUATE`), M11 (EXEC CICS/IMS raw-text stubs), M12 (arithmetic/
+  loop expressions as raw strings, not trees), M13 (context-blind
+  REPLACING substitution), M15 (EBCDIC autodetection heuristic and lossy
+  decode fallback). M17 (branch-coverage debt) is test-coverage debt, not
+  a bug, and was not attempted.
+
 * **A period-less statement could silently swallow an unsupported (or even a
   fully-supported) following verb** (residual of audit 2026-07-07 C2). C2
   taught the top-level PROCEDURE DIVISION dispatch loop to warn when it

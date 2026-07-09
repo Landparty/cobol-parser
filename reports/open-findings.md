@@ -196,7 +196,27 @@ operand-collection loop in the parser.
 
 ## MEDIUM
 
-### M1 — DISPLAY/ACCEPT don't accept figurative constants as operands
+**M1, M2, M3, M4, M5, M7, M8, M9, M14, and M16 are fixed** (2026-07-09
+batch) and are pinned by
+`tests/regression/test_open_findings_medium_regressions.py` — see
+`CHANGELOG.md` (Unreleased → Fixed) for the full per-finding writeup.
+Left in place (rather than deleted) for traceability, per this file's own
+convention for prior audits. M3's fix covers `AT` positioning (both the
+corpus-dominant bare combined-numeric form and the `AT LINE`/`COLUMN`
+keyword form) plus `SECURE`/`NO-ECHO`/`TIMEOUT`/`AUTO-SKIP`/`UPPER` on
+`ACCEPT`; `CURSOR`, `BEEP`/`BELL`, `COLOR`, `UPDATE`, and `WITH BLANK
+SCREEN` were not implemented (zero-to-one corpus hits in
+`examples/cobol/shamrice/`, and — for `COLOR` especially — the real
+grammar is a two-part clause this finding's text didn't specify with
+enough confidence to implement correctly) and remain open, tracked below
+under "M3 residual — extended DISPLAY/ACCEPT clauses not covered".
+
+**M6, M10, M11, M12, M13, and M15 remain open**, each close to its own
+subsystem rewrite rather than a contained bug fix; deferred to separate
+plans. **M17** is test-coverage debt, not a bug, and was not attempted in
+this pass.
+
+### M1 — DISPLAY/ACCEPT don't accept figurative constants as operands — FIXED 2026-07-09
 `cobolparser/parsers/statements/display_parser.py:106-129` only accepts
 `STRING_LITERAL`/`IDENTIFIER`/`NUMERIC_LITERAL`; `TokenType.FIGURATIVE_CONSTANT`
 (what `SPACE`/`SPACES`/`ZERO`/`QUOTE`/`HIGH-VALUE`/`LOW-VALUE` lex to) isn't
@@ -205,12 +225,12 @@ in that set. `DISPLAY SPACE.` / `DISPLAY SPACES.` **(now warns, not fixed)** —
 Per the mockymock corpus sweep this is the single most common trigger
 (56 hits across 24 real-world shamrice programs).
 
-### M2 — `DISPLAY ... WITH NO ADVANCING` still dropped
+### M2 — `DISPLAY ... WITH NO ADVANCING` still dropped — FIXED 2026-07-09
 No `WITH`/`NO`/`ADVANCING` handling in `display_parser.py`.
 **(now warns, not fixed)** — the display item before `WITH` survives, the
 clause itself is dropped. Second-most-common mockymock trigger (13 hits).
 
-### M3 — Screen positioning and extended ACCEPT clauses still dropped
+### M3 — Screen positioning and extended ACCEPT clauses still dropped — FIXED 2026-07-09 (partial, see residual below)
 `AT LINE n COLUMN m` on DISPLAY/ACCEPT, and `SECURE`/`TIMEOUT`/`AUTO-SKIP`/
 `NO-ECHO`/`UPPER`/`UPDATE` on ACCEPT. **(now warns, not fixed)**. Notably,
 `IOAcceptStatement` (`models/statements/io.py:398-443`) already has
@@ -220,7 +240,26 @@ scaffolded fields/setters (`at_line`, `at_column`, `with_no_echo`,
 wired to it. 32 `AT` + 4 `LINE` + several single-digit extended-clause hits
 in the mockymock sweep.
 
-### M4 — `D`-column-7 debug lines: two inconsistent behaviors, still
+**Fixed 2026-07-09, partially — "M3 residual — extended DISPLAY/ACCEPT
+clauses not covered":** a corpus grep of `examples/cobol/shamrice/*.cbl`
+found `AT` positioning used 34 times, 100% via the bare combined-numeric
+form (`AT 0330`), zero via the `AT LINE n COLUMN m` keyword form — both
+are now implemented on `DISPLAY`; `ACCEPT` implements the corpus-confirmed
+numeric form. `SECURE`, `NO-ECHO`, `TIMEOUT`, and `AUTO-SKIP` are now
+wired on `ACCEPT` (all corpus-confirmed exact shapes); `UPPER` likewise.
+`SECURE` and `NO-ECHO` are modeled as distinct flags per
+`accept-secure.cbl`'s own comment (`SECURE` masks with `*`, `NO-ECHO`
+shows nothing). **Not fixed:** `CURSOR`, `BEEP`/`BELL`, `COLOR`
+(`FOREGROUND-COLOR`/`BACKGROUND-COLOR`, a GnuCOBOL-flavored two-part
+clause not confidently specified by this finding's original text),
+`UPDATE`, and `WITH BLANK SCREEN` (a `DISPLAY`-side clause noticed during
+the corpus grep — 6 hits — but never part of this finding to begin with).
+None of these had more than one corpus hit except `BLANK SCREEN`, which
+was out of scope. See
+`tests/regression/test_open_findings_medium_regressions.py::TestM3aDisplayAtPositioning`
+and `::TestM3bAcceptExtendedClauses`.
+
+### M4 — `D`-column-7 debug lines: two inconsistent behaviors — FIXED 2026-07-09
 `normalize_fixed_format` (`preprocess/__init__.py:494-537`, and its Cython
 mirror) only treats `*`/`/` as comment indicators — a `D`/`d` line falls
 through and is kept as **live code**. `copy_statement_parser.py`'s
@@ -228,7 +267,7 @@ through and is kept as **live code**. `copy_statement_parser.py`'s
 two different pipelines, two different answers, neither configurable, no
 signal either way.
 
-### M5 — Continued alphanumeric literal loses trailing blanks
+### M5 — Continued alphanumeric literal loses trailing blanks — FIXED 2026-07-09
 `preprocess/__init__.py:534` (`rstrip()` on the opening line of a new
 logical line) and its Cython mirror `_preprocess_fast.pyx:140` strip
 trailing blanks that are part of the literal per fixed-format continuation
@@ -245,14 +284,22 @@ lexer's own ~200-line fixed-format handler (emits `COMMENT` tokens).
 Confirmed empirically to disagree on token count/content for the same
 source (comment-line handling differs).
 
-### M7 — Typed literals (`X'..'`, `N'..'`, `G'..'`) not decoded
+### M7 — Typed literals (`X'..'`, `N'..'`, `G'..'`) not decoded — PARTIALLY FIXED 2026-07-09 (hex validation only, see below)
 `lexer.py:1245-1307`. `.value` still holds raw inner text; no hex-validity
 or even-length check (`X'ABC'`, odd-length/invalid hex, accepted with no
 error). A `raw_value` attribute was added since the original audit
 (preserves e.g. `"X'1F'"`), which helps a downstream consumer recover the
 prefix/kind, but decoding/validation is still absent.
 
-### M8 — Tab handling in fixed-format normalization
+**Fixed 2026-07-09, partially:** `X'..'`/`NX'..'` hex literals now get a
+validity check — invalid hex digits or an odd digit count emit a lexer
+warning (surfaced via `ParseResult.warnings`). **Not fixed:** the value is
+still not decoded to actual bytes/characters (that requires a codepage
+decision this fix doesn't make), and `G'..'`/`N'..'` literals are
+untouched (different, codepage-dependent validity rules). See
+`tests/regression/test_open_findings_medium_regressions.py::TestM7TypedLiteralHexValidation`.
+
+### M8 — Tab handling in fixed-format normalization — FIXED 2026-07-09
 No tab-expansion logic anywhere in `normalize_fixed_format` — columns are
 still raw character-index slices. **(now warns, not fixed)**: a leading
 tab shifting columns now produces `"Unparsed tokens..."` (caught by the
@@ -260,7 +307,7 @@ generic unknown-verb/unparsed-token warning mechanism added 2026-07-07)
 rather than being fully silent — but `ParseResult.success` only checks
 `errors`, so a caller checking only `success`/`errors` still misses it.
 
-### M9 — `try_parse_nested_statement` still has a bare `except Exception`
+### M9 — `try_parse_nested_statement` still has a bare `except Exception` — FIXED 2026-07-09
 `_utils.py:598-636`. CHANGELOG's own text confirms the 2026-07-07 cleanup
 only added a DEBUG log call here — "the fall-back behaviour itself is
 unchanged." Errors raised via `report_or_raise` are separately
@@ -313,7 +360,7 @@ as literal text, so the substitution never matches anything in the
 copybook body and silently no-ops (a separate, unused regex-based parser
 in the same file does handle `:...:` correctly, but nothing calls it).
 
-### M14 — Copybook cache hits bypass `total_bytes` size accounting
+### M14 — Copybook cache hits bypass `total_bytes` size accounting — FIXED 2026-07-09
 `copybook_expander.py:571-594` (`_expand_source_recursive`): `context.total_bytes`
 is only incremented on a cache **miss**; a copybook served from the
 intra-expansion cache (e.g. the same member COPYd multiple times — a
@@ -331,7 +378,7 @@ decode now appends a diagnostic to `warnings` when the caller threads a
 list through — but the byte-level data loss itself is unchanged, and the
 detection heuristic wasn't touched.
 
-### M16 — `PIC 99/99/99` (slash-edited pictures) corrupts DATA DIVISION structure
+### M16 — `PIC 99/99/99` (slash-edited pictures) corrupts DATA DIVISION structure — FIXED 2026-07-09
 Worse than the original "garbled but harmless" framing:
 `PictureClause.pattern` truncates to `"99"` (first segment only), and the
 `/99/99` remainder is misinterpreted as **phantom level-99 data items**
@@ -429,6 +476,10 @@ unverified — is worse than at the original audit.
   with no CI signal.
 - `branch-coverage holes` are covered under M17 above (moved there since
   it's a substantive, not just tooling, gap).
+- **`tests/regression/test_open_findings_medium_regressions.py`** pins the
+  2026-07-09 fixes for M1, M2, M3 (partial), M4, M5, M7 (partial), M8, M9,
+  M14, and M16 — one `TestM<N>...` class per finding, mirroring
+  `test_open_findings_high_regressions.py`'s convention.
 
 Not included here: `batch.py` coverage (was 61%, now empirically 93.55% —
 resolved), fast-vs-pure token/output identity (parity tests now exist and
