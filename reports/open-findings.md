@@ -1,5 +1,13 @@
 # cobolparser — Open Findings (as of 2026-07-08)
 
+**Status update (2026-07-09):** all 9 HIGH findings (H1-H9) and 10 of the
+17 MEDIUM findings (M1, M2, M3 partial, M4, M5, M7 partial, M8, M9, M14,
+M16) are now fixed and pinned by regression tests — see the per-severity
+banners below (`## HIGH`, `## MEDIUM`) and `CHANGELOG.md` (Unreleased →
+Fixed) for the full writeup. Still open: M6, M10, M11, M12, M13, M15
+(each close to its own subsystem rewrite, deferred to separate plans),
+M17 (test-coverage debt, not a bug), and all LOW findings.
+
 This file supersedes `audit-2026-07-06.md`, `-07.md`, `-08.md`, `-09.md`, and
 `cobol-parser-example-parse-gaps.md`. Those four audits (plus the mockymock
 corpus-sweep report) produced ~70 findings; the large majority — every
