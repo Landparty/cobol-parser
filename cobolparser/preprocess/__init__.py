@@ -501,7 +501,9 @@ def normalize_fixed_format(
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else " "
         text_slice = line[TEXT_START_COL - 1 : TEXT_END_COL]
         is_debug_comment = debug_lines_as_comments and indicator in ("D", "d")
-        if indicator in ("*", "/") or is_debug_comment:  # comment (incl. page eject, debug lines)
+        if (
+            indicator in ("*", "/") or is_debug_comment
+        ):  # comment (incl. page eject, debug lines)
             # Comment lines: flush pending buffer but do not emit comment text
             # (emitting it would let the free-form lexer tokenize it as code).
             # Still emit an empty placeholder to preserve line numbering.

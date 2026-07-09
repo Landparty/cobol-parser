@@ -731,9 +731,7 @@ def try_parse_nested_statement(
             host = getattr(context, "host", None) if context else None
             add_warning = getattr(host, "add_warning", None)
             if callable(add_warning):
-                add_warning(
-                    f"Nested statement parse failed and was skipped: {exc}"
-                )
+                add_warning(f"Nested statement parse failed and was skipped: {exc}")
         return None
 
 

@@ -62,9 +62,7 @@ class TestM16SlashEditedPicture:
     """
 
     def test_slash_edited_picture_pattern_is_not_truncated(self):
-        result = parse_cobol(
-            _data_program("    05 WS-FIELD PIC 99/99/99.")
-        )
+        result = parse_cobol(_data_program("    05 WS-FIELD PIC 99/99/99."))
         assert result.errors == []
         items = result.ast.find_all_by_type("CobolDataItem")
         names = [i.name for i in items]
@@ -75,9 +73,7 @@ class TestM16SlashEditedPicture:
         assert not any("Unparsed token" in w for w in result.warnings), result.warnings
 
     def test_check_protect_asterisk_picture_pattern_is_not_truncated(self):
-        result = parse_cobol(
-            _data_program("    01 WS-AMT PIC $***,**9.99.")
-        )
+        result = parse_cobol(_data_program("    01 WS-AMT PIC $***,**9.99."))
         assert result.errors == []
         items = result.ast.find_all_by_type("CobolDataItem")
         field = next(i for i in items if i.name == "WS-AMT")
@@ -167,9 +163,7 @@ class TestM9NestedStatementSwallowedException:
         class _FakeContext:
             host = _FakeHost()
 
-        monkeypatch.setattr(
-            _utils, "get_parse_context", lambda stream: _FakeContext()
-        )
+        monkeypatch.setattr(_utils, "get_parse_context", lambda stream: _FakeContext())
 
         result = _utils.try_parse_nested_statement(_FakeStream())
 
@@ -203,9 +197,7 @@ class TestM9NestedStatementSwallowedException:
         class _FakeContext:
             host = _FakeHost()
 
-        monkeypatch.setattr(
-            _utils, "get_parse_context", lambda stream: _FakeContext()
-        )
+        monkeypatch.setattr(_utils, "get_parse_context", lambda stream: _FakeContext())
 
         result = _utils.try_parse_nested_statement(_FakeStream())
 
@@ -300,9 +292,7 @@ class TestM8TabHandling:
         # A literal tab at column 1 expands to exactly 8 spaces (the next
         # tab stop from position 0) before column-sensitive slicing, so it
         # must produce the same result as those 8 spaces written literally.
-        untabbed = normalize_fixed_format(
-            [" " * 8 + "       DISPLAY 'OK'."]
-        )
+        untabbed = normalize_fixed_format([" " * 8 + "       DISPLAY 'OK'."])
         tabbed = normalize_fixed_format(["\t" + "       DISPLAY 'OK'."])
         assert tabbed == untabbed
 
@@ -404,9 +394,7 @@ class TestM3aDisplayAtPositioning:
         # Only the LAST AT clause's position is retained on the single
         # DisplayStatement node (the AST models one position per
         # statement, matching IOAcceptStatement's existing shape).
-        result = parse_cobol(
-            _proc_program('    DISPLAY "a" AT 0201 WS-X AT 0214.\n')
-        )
+        result = parse_cobol(_proc_program('    DISPLAY "a" AT 0201 WS-X AT 0214.\n'))
         stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
         assert stmts[0].display_items == ['"a"', "WS-X"]
         assert stmts[0].at_line == 2
@@ -425,7 +413,8 @@ class TestM3bAcceptExtendedClauses:
     def test_combined_numeric_at_form(self):
         result = parse_cobol(_proc_program("    ACCEPT WS-X AT 0117.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].at_line == 1
@@ -435,7 +424,8 @@ class TestM3bAcceptExtendedClauses:
     def test_secure_is_distinct_from_no_echo(self):
         result = parse_cobol(_proc_program("    ACCEPT WS-X SECURE AT 0117.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].secure is True
@@ -444,7 +434,8 @@ class TestM3bAcceptExtendedClauses:
     def test_no_echo_hyphenated_token(self):
         result = parse_cobol(_proc_program("    ACCEPT WS-X NO-ECHO AT 0526.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].with_no_echo is True
@@ -453,7 +444,8 @@ class TestM3bAcceptExtendedClauses:
     def test_timeout_with_numeric_value(self):
         result = parse_cobol(_proc_program("    ACCEPT WS-X TIMEOUT 3 AT 0132.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].timeout_value == 3
@@ -463,7 +455,8 @@ class TestM3bAcceptExtendedClauses:
     def test_auto_skip(self):
         result = parse_cobol(_proc_program("    ACCEPT WS-X AUTO-SKIP AT 0330.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].auto_skip is True
@@ -471,18 +464,18 @@ class TestM3bAcceptExtendedClauses:
     def test_upper(self):
         result = parse_cobol(_proc_program("    ACCEPT WS-X UPPER AT 0716.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].upper is True
 
     def test_combined_with_prefix_form(self):
         # examples/cobol/shamrice/mouse_example.cbl: `with auto-skip no-echo`
-        result = parse_cobol(
-            _proc_program("    ACCEPT WS-X WITH AUTO-SKIP NO-ECHO.\n")
-        )
+        result = parse_cobol(_proc_program("    ACCEPT WS-X WITH AUTO-SKIP NO-ECHO.\n"))
         stmts = [
-            s for s in _statements(result)
+            s
+            for s in _statements(result)
             if s.__class__.__name__ == "IOAcceptStatement"
         ]
         assert stmts[0].auto_skip is True
