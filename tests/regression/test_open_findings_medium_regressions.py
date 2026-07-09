@@ -1,0 +1,84 @@
+"""Regression tests for the MEDIUM-severity findings in reports/open-findings.md.
+
+Mirrors tests/regression/test_open_findings_high_regressions.py's convention:
+one TestM<N>... class per finding, named for direct traceability.
+"""
+
+from __future__ import annotations
+
+import textwrap
+
+from cobolparser import parse_cobol
+from cobolparser.models.statements import DisplayStatement
+
+
+def _data_program(data_item_line: str) -> str:
+    """Wrap a single WORKING-STORAGE data-item line in a minimal program."""
+    return textwrap.dedent(f"""\
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. REGTEST.
+        DATA DIVISION.
+        WORKING-STORAGE SECTION.
+        {data_item_line}
+        PROCEDURE DIVISION.
+        MAIN-PARA.
+            DISPLAY "OK".
+            STOP RUN.
+        """)
+
+
+def _proc_program(procedure_body: str) -> str:
+    """Wrap bare PROCEDURE DIVISION statements in a minimal COBOL program."""
+    return textwrap.dedent(f"""\
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. REGTEST.
+        DATA DIVISION.
+        WORKING-STORAGE SECTION.
+        01 WS-X PIC X(20).
+        PROCEDURE DIVISION.
+        MAIN-PARA.
+        {procedure_body}
+        """)
+
+
+def _statements(result):
+    proc = result.ast.procedure_division
+    if proc.paragraphs:
+        return proc.paragraphs[0].statements
+    if proc.sections and proc.sections[0].paragraphs:
+        return proc.sections[0].paragraphs[0].statements
+    return []
+
+
+class TestM16SlashEditedPicture:
+    """M16 -- PIC 99/99/99 corrupted DATA DIVISION structure.
+
+    _PICTURE_SYMBOL_TOKEN_TYPES used TokenType.DIVIDE/MULTIPLY (the DIVIDE/
+    MULTIPLY *statement* keywords) instead of TokenType.DIVIDE_OP/
+    MULTIPLY_OP (what '/' and '*' actually lex to), so picture pattern
+    collection stopped at the first edit symbol and the remainder was
+    misparsed as phantom level-99 data items.
+    """
+
+    def test_slash_edited_picture_pattern_is_not_truncated(self):
+        result = parse_cobol(
+            _data_program("    05 WS-FIELD PIC 99/99/99.")
+        )
+        assert result.errors == []
+        items = result.ast.find_all_by_type("CobolDataItem")
+        names = [i.name for i in items]
+        assert "WS-FIELD" in names
+        assert not any(n.startswith("ANONYMOUS-99") for n in names), names
+        field = next(i for i in items if i.name == "WS-FIELD")
+        assert field.picture_clause.pattern == "99/99/99"
+        assert not any("Unparsed token" in w for w in result.warnings), result.warnings
+
+    def test_check_protect_asterisk_picture_pattern_is_not_truncated(self):
+        result = parse_cobol(
+            _data_program("    01 WS-AMT PIC $***,**9.99.")
+        )
+        assert result.errors == []
+        items = result.ast.find_all_by_type("CobolDataItem")
+        field = next(i for i in items if i.name == "WS-AMT")
+        assert field.picture_clause.pattern == "$***,**9.99"
+        assert not any("Unparsed token" in w for w in result.warnings), result.warnings

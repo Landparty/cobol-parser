@@ -102,8 +102,11 @@ _PICTURE_SYMBOL_TOKEN_TYPES: frozenset[TokenType] = frozenset(
         TokenType.CURRENCY,
         TokenType.MINUS,
         TokenType.PLUS,
-        TokenType.MULTIPLY,
-        TokenType.DIVIDE,
+        TokenType.MULTIPLY_OP,  # '*' check-protect symbol -- NOT the MULTIPLY
+        TokenType.DIVIDE_OP,  # '/' stroke/slash editing symbol -- NOT the DIVIDE
+        # *statement* keyword tokens (see reports/open-findings.md M16: using
+        # the statement tokens here silently truncated slash/asterisk-edited
+        # PICTURE patterns at the first edit symbol).
     }
 )
 # Token types that may legitimately follow an *interior* decimal point in a
