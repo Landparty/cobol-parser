@@ -130,6 +130,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A period-less statement could silently swallow an unsupported (or even a
+  fully-supported) following verb** (residual of audit 2026-07-07 C2). C2
+  taught the top-level PROCEDURE DIVISION dispatch loop to warn when it
+  directly encounters a verb with no registered parser — but that loop only
+  sees the verb directly when a period separates it from the previous
+  statement. Without a period, the previous statement's own trailing-token
+  loop (MOVE's target list, the arithmetic operand collector, ...) decides
+  for itself whether to stop, via `STATEMENT_TOKEN_TYPES`/
+  `STATEMENT_KEYWORDS` (`_utils.py`). Those sets were missing several verbs
+  `_UNSUPPORTED_VERBS` already labeled (`DISABLE`, `ENABLE`, `PURGE`,
+  `RAISE`, `READY`, `RECEIVE`, `RESET`, `RESUME`, `SEND`, `SERVICE`,
+  `TRANSFORM`), missing the `TokenType` (though not the string) for
+  `EXECUTE`/`EXHIBIT`/`INVOKE`, and were completely missing two verbs with
+  **registered parsers** (`COMMIT`, `ROLLBACK` — the worse case: a fully
+  supported statement vanished) plus several more real, previously
+  unlabeled verbs (`CHAIN`, `ENTER`, `EXAMINE`, `GOTO` fused spelling,
+  `INITIATE`, `NOTE`, `RECOVER`, `SUPPRESS`, `TERMINATE`). All are now in
+  `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS`, and the newly-recognized
+  unsupported verbs were added to `_UNSUPPORTED_VERBS` for a specific
+  warning message. Separately, `PURGE`/`RAISE`/`RESUME` have no dedicated
+  lexer `TokenType` at all (they lex as plain `IDENTIFIER`), so the
+  `STATEMENT_KEYWORDS` fix alone didn't reach ten *other* list-collecting
+  loops that never consulted `STATEMENT_KEYWORDS`/`is_statement_boundary`
+  at all: `DISPLAY`'s item list, `CANCEL`'s program-name list, `SET`'s
+  target list, `OPEN`/`CLOSE`'s file-name lists, `INITIALIZE`'s target
+  list, `UNSTRING`'s `INTO` target list, `SORT`/`MERGE`'s shared
+  `_parse_keys`/`_parse_file_list` helpers, and `INSPECT`'s
+  `_parse_tallying` counter-name loop (separate nested loops with their own
+  hand-rolled boundary keyword list — or, for `_parse_tallying`, no
+  boundary check at all — bypassing the `is_statement_boundary()` check
+  their statement's outer loop already had). Each of those ten loops now
+  also breaks on `is_statement_boundary()` before accepting a bare
+  `IDENTIFIER` as a list item. A related, more severe pre-existing bug in
+  `PerformStatementParser._parse_until_condition_only` (the out-of-line
+  `PERFORM paragraph-name UNTIL condition` form) had **no boundary check at
+  all** — a period-less `PERFORM ... UNTIL cond` swallowed every remaining
+  token in the program into the condition string, including entire
+  well-formed statements, not just unsupported verbs; it now stops at the
+  same `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` boundary the sibling
+  `_collect_until_condition_tokens` helper already used. A fourth finding,
+  in `EvaluateStatementParser`: `_parse_subjects` (the subject list before
+  the first `WHEN`) had no boundary check, same shape as the ten
+  list-collecting loops above. Worse, the outer clause-scan loop treated
+  any non-`WHEN`/`END-EVALUATE` token as noise to skip past, so a malformed
+  (missing-`WHEN`) `EVALUATE` could consume forward past an entire
+  intervening statement — verified with a trailing `MOVE` immediately
+  followed by a second, well-formed `EVALUATE`: the first EVALUATE annexed
+  the *second* EVALUATE's `WHEN` clause as its own, silently erasing the
+  MOVE and merging two EVALUATEs into one, with zero errors and zero
+  warnings. Both loops now stop at the same boundary check. `IfStatement
+  Parser`'s condition collector was probed and confirmed already safe.
+  Pinned by `tests/regression/test_tier7_unsupported_verb_boundary.py`.
+
 * **`ProgramFlowAnalyzer` missed control-flow edges nested in clause bodies**
   (audit 2026-07-09). PERFORM/GO TO/CALL statements inside a `READ ... AT END`,
   `WRITE ... INVALID KEY`, `... ON SIZE ERROR`, or `STRING ... ON OVERFLOW`

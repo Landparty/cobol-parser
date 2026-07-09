@@ -5,7 +5,12 @@ from typing import Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import SetStatement
-from ._utils import matches_keyword, skip_whitespace, token_location
+from ._utils import (
+    is_statement_boundary,
+    matches_keyword,
+    skip_whitespace,
+    token_location,
+)
 from ._utils import token_value_upper as _val
 
 
@@ -46,6 +51,11 @@ class SetStatementParser(IStatementParser):
                 token_stream.consume()
                 return stmt
             if val in ("TO", "UP", "DOWN"):
+                break
+            # A following statement's verb that lexes as a plain IDENTIFIER
+            # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
+            # be folded into the target list when SET has no trailing period.
+            if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
                 break
             if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 token_stream.consume()

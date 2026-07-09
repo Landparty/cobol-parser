@@ -13,7 +13,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
-from ._utils import SCOPE_TERMINATORS, matches_keyword, skip_whitespace
+from ._utils import is_statement_boundary, matches_keyword, skip_whitespace
 
 
 class DisplayStatementParser(IStatementParser):
@@ -93,12 +93,13 @@ class DisplayStatementParser(IStatementParser):
                 break
 
             # Scope terminators of an enclosing statement (e.g. END-READ when
-            # this DISPLAY is an AT END clause body) end the item list.
-            if (
-                token.type == TokenType.IDENTIFIER
-                and token.value
-                and token.value.upper() in SCOPE_TERMINATORS
-            ):
+            # this DISPLAY is an AT END clause body) end the item list. Also
+            # stop at a following statement's verb when it lexes as a plain
+            # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated TokenType,
+            # so they are otherwise indistinguishable from a data-name item) —
+            # without this, `DISPLAY X` immediately followed by an un-punctuated
+            # `PURGE Y` silently folded PURGE/Y into the display item list.
+            if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
                 break
 
             # Collect display item

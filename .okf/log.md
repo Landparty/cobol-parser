@@ -45,6 +45,100 @@ each surfaced genuine, runtime-reproduced silent drops. Full audit:
 * **Updated** [tests.md](tests.md): +13 tests
   (`tests/regression/test_tier6_silent_drop_audit.py`).
 
+## 2026-07-08 (residual of the 2026-07-07 C2 fix: unsupported-verb boundary gap)
+
+* **Updated** [parser.md](parser.md): closed the mockymock-audit-flagged
+  residual of the 2026-07-07 C2 silent-drop fix — "an unknown verb directly
+  after a period-less statement can still be swallowed with no warning
+  (period-terminated layouts are covered)". C2's
+  `ProcedureDivisionParser._warn_unsupported_statement` only fires when the
+  top-level dispatch loop directly sees the offending token, which requires
+  a period to hand control back to that loop at the right place. Without a
+  period, the *previous* statement's own trailing-token loop (MOVE's target
+  list, the arithmetic operand collector, etc.) decides for itself whether
+  to stop, via `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` (`_utils.py`) —
+  and those sets were missing several verbs `_UNSUPPORTED_VERBS` already
+  knew how to *label*, so the following statement's tokens were silently
+  absorbed as bogus operands before ever reaching the label logic.
+  Reproduced and fixed for: `DISABLE`, `ENABLE`, `PURGE`, `RAISE`, `READY`,
+  `RECEIVE`, `RESET`, `RESUME`, `SEND`, `SERVICE`, `TRANSFORM` (string
+  already in `_UNSUPPORTED_VERBS` but missing from the boundary sets);
+  `EXECUTE`/`EXHIBIT`/`INVOKE` (string was already in `STATEMENT_KEYWORDS`,
+  but the dedicated lexer `TokenType` was missing from
+  `STATEMENT_TOKEN_TYPES`, which `MoveStatementParser`'s type-first check
+  needs); `COMMIT`/`ROLLBACK` (have registered parsers, yet were in neither
+  set — a fully-supported statement vanished, worse than the
+  unsupported-verb case); and `CHAIN`, `ENTER`, `EXAMINE`, `GOTO` (fused
+  one-word spelling only), `INITIATE`, `NOTE`, `RECOVER`, `SUPPRESS`,
+  `TERMINATE` (real verbs with dedicated `TokenType`s, previously absent
+  from every "known verb" set in this file).
+  `ProcedureDivisionParser._UNSUPPORTED_VERBS` gained the newly-recognized
+  unsupported verbs (not `COMMIT`/`ROLLBACK`, which now dispatch normally).
+  Pure clause words that never start a statement (`ON`, `OTHERWISE`,
+  `NEXT`, `THEN`, scope-terminator tokens, `DISPLAY-1`) were deliberately
+  left out.
+* **Updated** [parser.md](parser.md): `PURGE`/`RAISE`/`RESUME` have no
+  dedicated lexer `TokenType` at all — they lex as plain `IDENTIFIER`,
+  indistinguishable from a data-name — so adding their strings to
+  `STATEMENT_KEYWORDS` only closed the gap for parsers whose trailing loop
+  already consults it (MOVE, arithmetic). Ten *other* list-collecting loops
+  never consulted `STATEMENT_KEYWORDS`/`is_statement_boundary` at all, and
+  kept silently folding these three verbs into their list:
+  `display_parser.py` (item list),
+  `simple_statement_parsers.py::CancelStatementParser` (program-name list),
+  `set_parser.py` (target list), `open_parser.py`/`close_parser.py`
+  (file-name lists), `initialize_inspect_parsers.py::InitializeStatementParser`
+  (target list) — none of these six *main* parse loops consulted the shared
+  predicate at all; and `string_unstring_parsers.py::UnstringStatementParser
+  ._parse_into_targets` (INTO target list), `sort_merge_parsers.py::
+  _parse_keys` / `_parse_file_list` (KEY field list / USING·GIVING file
+  lists, shared by SORT and MERGE),
+  `initialize_inspect_parsers.py::InspectStatementParser._parse_tallying`
+  (TALLYING counter-name loop) — these four are separate nested helper
+  loops with their own hand-rolled boundary keyword list (or, for
+  `_parse_tallying`, no boundary check at all) that predates/bypasses the
+  `is_statement_boundary()` check their statement's *outer* loop already
+  had (2026-07-06/2026-07-08 fixes). Each of the ten now breaks on
+  `is_statement_boundary(token)` before accepting a bare `IDENTIFIER` as a
+  list item.
+* **Updated** [parser.md](parser.md): a related, more severe pre-existing
+  bug (independent of the `STATEMENT_KEYWORDS` gaps above, found by the
+  same sweep) — `PerformStatementParser._parse_until_condition_only` (the
+  out-of-line `PERFORM paragraph-name UNTIL condition` form, no inline
+  body) had **no boundary check whatsoever**: only a literal period or
+  `END-PERFORM` stopped it. A period-less `PERFORM ... UNTIL cond` silently
+  swallowed every remaining token in the program into the condition
+  string — verified with a normal `DISPLAY`/`STOP RUN` pair, not just an
+  unsupported verb, both of which vanished from the AST with
+  `result.success == True`, `warnings == []`. Now stops at the same
+  `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` boundary the sibling
+  `_collect_until_condition_tokens` helper (used by the inline PERFORM
+  UNTIL/VARYING forms) already used.
+* **Updated** [parser.md](parser.md): a fourth finding, in
+  `EvaluateStatementParser` — two independent unguarded loops.
+  `_parse_subjects` (subject list before the first `WHEN`) had no boundary
+  check, same shape as the ten list-collecting loops above: a malformed/
+  period-less `EVALUATE` with no `WHEN` folded a following verb into
+  `stmt.subjects` as free text. Fixed the same way as the sibling
+  `_parse_selectors` (already correct): `self._is_statement_keyword()`.
+  More severe: the *outer* clause-scan loop between `_parse_subjects` and
+  the `WHEN` dispatch treated any non-`WHEN`/`END-EVALUATE` token as noise
+  to skip past, so a malformed `EVALUATE` could consume forward past entire
+  intervening statements hunting for a literal `"WHEN"` — verified with a
+  trailing `MOVE 1 TO WS-Y` followed by a second, well-formed `EVALUATE
+  WS-Y ... WHEN 1 ... END-EVALUATE`: the first EVALUATE annexed the
+  *second* EVALUATE's `WHEN` clause as its own, silently erasing the MOVE
+  and merging two EVALUATEs into one, with `errors == []` and
+  `warnings == []` (the missing-WHEN error that normally flags a malformed
+  EVALUATE never fired, because *a* WHEN was found — just the wrong one's).
+  Fixed with the same `self._is_statement_keyword()` break. Probed and
+  confirmed safe: `IfStatementParser`'s condition collector (with/without
+  `THEN`/`END-IF`) already stops correctly on a following verb.
+* **Updated** [tests.md](tests.md) implicitly: +1 new regression file,
+  `tests/regression/test_tier7_unsupported_verb_boundary.py` (9 tests
+  total, including 2 for the EVALUATE finding). Full suite: 6729 passed,
+  0 failed.
+
 ## 2026-07-08 (silent-drops-and-gaps audit: SORT/MERGE/ENTRY/CALL swallows, line-number drift, batch/CLI fault isolation)
 
 * **Updated** [parser.md](parser.md): SORT/MERGE's "remaining clauses" loop

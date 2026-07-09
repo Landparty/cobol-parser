@@ -60,6 +60,16 @@ class EvaluateStatementParser(IStatementParser):
                     break
 
                 if token_val_upper != "WHEN":
+                    # A malformed EVALUATE (missing its first WHEN, or with
+                    # stray tokens between clauses) must not vacuum forward
+                    # past a following statement's verb in search of a WHEN
+                    # or END-EVALUATE that may only exist inside a *later*,
+                    # unrelated statement (e.g. a second EVALUATE) -- that
+                    # silently folded whole intervening statements into this
+                    # one with zero errors/warnings. Stop and let the missing
+                    # WHEN / missing END-EVALUATE errors below report it.
+                    if self._is_statement_keyword(token_val_upper):
+                        break
                     token_stream.consume()
                     continue
 
@@ -187,6 +197,13 @@ class EvaluateStatementParser(IStatementParser):
 
             token_val_upper = token.value.upper() if token.value else ""
             if token_val_upper in ("WHEN", "END-EVALUATE"):
+                break
+
+            # A malformed/period-less EVALUATE (missing its first WHEN)
+            # must not swallow a following statement's verb into the
+            # subject list -- this hit even fully-supported verbs like
+            # STOP RUN, not just unsupported ones.
+            if self._is_statement_keyword(token_val_upper):
                 break
 
             if token_val_upper == "ALSO":

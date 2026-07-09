@@ -64,6 +64,11 @@ def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:
                 ):
                     break
                 if f.type == TokenType.IDENTIFIER:
+                    # A following statement's verb that lexes as a plain
+                    # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated
+                    # TokenType) must not be folded into the KEY field list.
+                    if is_statement_boundary(f):
+                        break
                     ts.consume()
                     keys.append({"field": f.value or "", "order": order})
                 else:
@@ -90,6 +95,11 @@ def _parse_file_list(ts: ITokenStream) -> list[str]:
             "WITH",
             "COLLATING",
         ):
+            break
+        if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
+            # A following statement's verb that lexes as a plain IDENTIFIER
+            # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
+            # be folded into the file-name list.
             break
         if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
             ts.consume()

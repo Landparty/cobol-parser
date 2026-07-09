@@ -4,6 +4,7 @@ from typing import Any
 
 from cobolparser.parsers.statements._utils import (
     create_statement,
+    is_statement_boundary,
     matches_keyword,
     skip_whitespace,
     try_consume_keyword,
@@ -74,6 +75,12 @@ class OpenStatementParser(IStatementParser):
                     stmt.set_reposition(True)
                     skip_whitespace(token_stream)
                     continue
+                # A following statement's verb that lexes as a plain
+                # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated
+                # TokenType) must not be folded into the file-name list when
+                # OPEN has no trailing period.
+                if is_statement_boundary(token):
+                    break
                 # Otherwise it's a file name
                 stmt.add_file(token.value)
                 token_stream.consume()

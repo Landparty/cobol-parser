@@ -314,6 +314,11 @@ class UnstringStatementParser(IStatementParser):
                 if n and n.type != TokenType.PERIOD:
                     token_stream.consume()
                     current_count_var = n.value or ""
+            elif tgt.type == TokenType.IDENTIFIER and is_statement_boundary(tgt):
+                # A following statement's verb that lexes as a plain
+                # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated
+                # TokenType) must not be folded into the INTO target list.
+                break
             elif tgt.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 # Flush previous target if any
                 if current_target is not None:

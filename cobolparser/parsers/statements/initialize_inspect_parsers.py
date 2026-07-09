@@ -58,6 +58,12 @@ class InitializeStatementParser(IStatementParser):
                 return stmt
             if val in ("REPLACING", "WITH"):
                 break
+            # A following statement's verb that lexes as a plain IDENTIFIER
+            # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
+            # be folded into the target list when INITIALIZE has no trailing
+            # period.
+            if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
+                break
             if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 token_stream.consume()
                 stmt.add_target(token.value or "")
@@ -204,6 +210,11 @@ class InspectStatementParser(IStatementParser):
                 break
 
             if token.type != TokenType.IDENTIFIER:
+                break
+            # A following statement's verb that lexes as a plain IDENTIFIER
+            # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
+            # be mistaken for the next TALLYING counter name.
+            if is_statement_boundary(token):
                 break
 
             # Counter name

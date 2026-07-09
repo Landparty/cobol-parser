@@ -25,6 +25,7 @@ from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
     STATEMENT_KEYWORDS,
     consume_period,
+    is_statement_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
@@ -139,6 +140,12 @@ class CancelStatementParser(IStatementParser):
                 break
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
+                break
+            # A following statement's verb that lexes as a plain IDENTIFIER
+            # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
+            # be folded into the program-name list when CANCEL has no
+            # trailing period.
+            if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
                 break
             if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 token_stream.consume()

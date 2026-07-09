@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-08T00:00:00Z
+timestamp: 2026-07-08T14:00:00Z
 ---
 
 # Overview
@@ -534,6 +534,185 @@ statement parsers prior sweeps had not covered in depth. All pinned by
   with `environment.py`'s `_warn_dropped_select_token`. Unsupported data-item
   clauses (GROUP-USAGE, VOLATILE, DYNAMIC LENGTH, ...) are no longer fully
   silent.
+
+# Silent-Drop Audit: unsupported-verb boundary gap (2026-07-08 residual fix)
+
+The 2026-07-07 C2 fix (`_warn_unsupported_statement`) only fires when the
+PROCEDURE DIVISION's top-level dispatch loop *sees* the offending token
+directly — which requires a period to hand control back to that loop at the
+right place. A statement with no trailing period, immediately followed by an
+unsupported (or simply un-added) verb, never reaches that loop at the right
+spot: the *previous* statement's own trailing-token loop (MOVE's target
+list, the arithmetic operand collector, etc.) runs first and decides for
+itself, via `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` (`_utils.py`,
+consulted through `is_statement_boundary()` or an equivalent inline check),
+whether the next token starts a new statement. Those two sets were missing
+several verbs `ProcedureDivisionParser._UNSUPPORTED_VERBS` already knew how
+to *label* — so once the wrongly-shaped following statement reached the
+label logic, it was already too late: its tokens had been silently absorbed
+as bogus operands of the previous statement, with `result.success is True`
+and `warnings == []`.
+
+Confirmed via a `MOVE A TO B` (no period) probe, sweeping every verb whose
+lexer `TokenType` or `STATEMENT_KEYWORDS` string was missing from the
+boundary sets:
+
+* **DISABLE, ENABLE, PURGE, RAISE, READY, RECEIVE, RESET, RESUME, SEND,
+  SERVICE, TRANSFORM** — already in `_UNSUPPORTED_VERBS`'s warning-message
+  list, but absent from `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS`.
+* **EXECUTE, EXHIBIT, INVOKE** — the *string* was already in
+  `STATEMENT_KEYWORDS`, but the lexer's dedicated `TokenType` for each was
+  missing from `STATEMENT_TOKEN_TYPES`. This mattered because
+  `MoveStatementParser`'s target loop checks `token.type in
+  _STOP_TOKEN_TYPES` **before** falling back to a value check that is itself
+  gated on `token.type == TokenType.IDENTIFIER` — a keyword-typed token
+  (never `IDENTIFIER`) skips both checks and falls into the loop's
+  "skip non-identifier noise" branch, discarded with zero trace.
+* **COMMIT, ROLLBACK** — *do* have registered parsers
+  (`CommitStatementParser`/`RollbackStatementParser`), yet were absent from
+  both boundary sets. A period-less statement directly followed by a
+  legally-formed `COMMIT.`/`ROLLBACK.` lost the entire statement — worse
+  than the unsupported-verb case, since this one was fully supported and
+  still vanished.
+* **CHAIN, ENTER, EXAMINE, GOTO (the fused one-word spelling only — `GO TO`
+  as two words is unaffected and already worked via the `GO` entry),
+  INITIATE, NOTE, RECOVER, SUPPRESS, TERMINATE** — real (mostly
+  obsolete/Report-Writer) COBOL verbs with dedicated lexer `TokenType`s and
+  no registered parser, previously absent from every set that tracks
+  "known verb" in this file.
+
+Fix: `STATEMENT_TOKEN_TYPES` gained the `TokenType` member for every verb
+above that has one; `STATEMENT_KEYWORDS` gained the string for every verb
+above (including `PURGE`/`RAISE`/`RESUME`, which the lexer tokenizes as plain
+`IDENTIFIER` with no dedicated `TokenType` at all — see below for why the
+`STATEMENT_KEYWORDS` addition alone wasn't sufficient for these three).
+`ProcedureDivisionParser._UNSUPPORTED_VERBS` gained `CHAIN`, `ENTER`,
+`EXAMINE`, `GOTO`, `INITIATE`, `NOTE`, `RECOVER`, `SUPPRESS`, `TERMINATE` so
+these get the specific "Unsupported statement 'X'" message instead of the
+generic "Unparsed tokens" one; `COMMIT`/`ROLLBACK` were deliberately **not**
+added there since they now dispatch to their real parsers instead of ever
+reaching the warn-and-skip path. Pure clause words that are tokenized
+distinctly but never start a statement (`ON`, `OTHERWISE`, `NEXT`, `THEN`,
+scope-terminator tokens like `END-INVOKE`/`END-SET`, and `DISPLAY-1`'s
+USAGE-clause token) were deliberately left out of both sets.
+
+**Second wave — ten list-collecting loops never consulted the boundary sets
+at all.** `PURGE`/`RAISE`/`RESUME` have no dedicated `TokenType`, so they are
+lexically indistinguishable from a data-name and only a *value* check
+(`STATEMENT_KEYWORDS`) can catch them — which is exactly what
+`MoveStatementParser`'s target loop and `parse_arithmetic_operands()` already
+consult. But two further, independent probes found ten *other* loops that
+never made that check, so these three verbs kept vanishing even after the
+`STATEMENT_KEYWORDS` fix above:
+
+- Leading with `DISPLAY`/`CANCEL`/`SET`/`OPEN`/`CLOSE`/`INITIALIZE` instead
+  of `MOVE` found six statement parsers whose *main* trailing loop collects
+  an open-ended list of bare `IDENTIFIER` tokens and never consults
+  `STATEMENT_KEYWORDS`/`is_statement_boundary` at all:
+  - `display_parser.py` — the DISPLAY item-collection loop accepted any
+    `STRING_LITERAL`/`IDENTIFIER`/`NUMERIC_LITERAL` token as an item and
+    only checked `SCOPE_TERMINATORS` by value (never `STATEMENT_KEYWORDS`).
+  - `simple_statement_parsers.py::CancelStatementParser` — the program-name
+    loop accepted any `IDENTIFIER`/`STRING_LITERAL`.
+  - `set_parser.py` — the `SET id-1 [id-2 ...] TO value` target loop.
+  - `open_parser.py` / `close_parser.py` — the multi-file-name loops (`OPEN
+    INPUT A B C`, `CLOSE A B C`).
+  - `initialize_inspect_parsers.py::InitializeStatementParser` — the
+    `INITIALIZE id-1 [id-2 ...]` target loop.
+- Leading with `STRING`/`UNSTRING`/`SORT`/`MERGE`/`CALL`/`ENTRY` instead
+  (these statements' own *outer* loop already calls `is_statement_boundary()`
+  from the 2026-07-06/2026-07-08 fixes, so `STRING`/`CALL`/`ENTRY` were
+  already clean) found three more instances hiding in separate nested
+  **helper** loops with their own hand-rolled boundary keyword list that
+  predates or bypasses that outer-loop check:
+  - `string_unstring_parsers.py::UnstringStatementParser._parse_into_targets`
+    — the `INTO target-1 [target-2 ...]` list.
+  - `sort_merge_parsers.py::_parse_keys` (shared by SORT/MERGE) — the
+    `{ASCENDING|DESCENDING} KEY field-1 [field-2 ...]` list.
+  - `sort_merge_parsers.py::_parse_file_list` (shared by SORT/MERGE) — the
+    `USING`/`GIVING` file-name lists.
+- A follow-up registry walk (every parser in `_create_statement_registry()`,
+  checked by eye for an open bare-`IDENTIFIER`-list shape and, where
+  plausible, verified behaviorally) found one more:
+  `initialize_inspect_parsers.py::InspectStatementParser._parse_tallying`
+  — the `counter-1 FOR {CHARACTERS|ALL|LEADING} [value] ...` list treated
+  any bare `IDENTIFIER` as the start of a new TALLYING counter clause with
+  **no boundary check at all** (unlike its sibling `_parse_replacing`, which
+  only accepts a token whose *value* is a REPLACING category keyword —
+  never an arbitrary `IDENTIFIER` — so it was never at risk). The rest of
+  the registry is type-excluded (`TokenType`-carrying verbs) or reads a
+  fixed number of single tokens per clause (`ACCEPT`, `UNLOCK`, `REWRITE`,
+  `START`, `DELETE`, `READ`, `WRITE`, `RETURN`'s AT END skip-loop, `USE`,
+  `GO`'s computed-target scan, `SEARCH`'s WHEN-condition collector, `ADD`/
+  `SUBTRACT`/`MULTIPLY`/`DIVIDE`/`COMPUTE`, `PERFORM`'s target/THRU/AFTER
+  fields, `XmlJsonStatementParser`) — none of these are an open list of
+  bare identifiers, and each already gates on `STATEMENT_KEYWORDS`/
+  `is_statement_boundary` or a required literal keyword before consuming a
+  value, so they were not re-verified individually beyond that check.
+
+Each of the ten now breaks on `is_statement_boundary(token)` when the token
+is a plain `IDENTIFIER`, immediately before accepting it as a list item —
+the same guard `MoveStatementParser`'s value-check branch already applies.
+(`TokenType`-carrying verbs were already safe in the type-only loops above,
+since their type never matches `STRING_LITERAL`/`IDENTIFIER`/
+`NUMERIC_LITERAL`; `display_parser.py` no longer needs its own
+`SCOPE_TERMINATORS` check, since `is_statement_boundary()` subsumes it.) This
+two-wave shape — fix the shared boundary sets, then discover that several
+loops don't consult the shared sets at all — is exactly the same failure
+mode `is_statement_boundary()` was introduced to eliminate on 2026-07-06;
+each new statement parser (or new helper loop inside one) must call it
+rather than re-deriving its own boundary list. Pinned by
+`tests/regression/test_tier7_unsupported_verb_boundary.py`.
+
+**Third finding — `PERFORM paragraph-name UNTIL condition` had no boundary
+check at all, for *any* verb.** Distinct from the `PURGE`/`RAISE`/`RESUME`
+gap above (and not caused by it): `PerformStatementParser
+._parse_until_condition_only` — used only by the out-of-line form with an
+explicit target paragraph and no inline body (`PERFORM SOME-PARA UNTIL
+cond`, as opposed to the inline `PERFORM UNTIL cond ... END-PERFORM` form,
+which already went through `_collect_until_condition_tokens` and was safe)
+— stopped only at a literal period or `END-PERFORM`. A period-less `PERFORM
+... UNTIL cond` therefore swallowed **every remaining token in the
+program** into the condition string, including entire well-formed
+statements — verified with a trailing `DISPLAY 'HELLO'` / `STOP RUN` pair,
+both of which vanished from the AST (`result.success == True`, `warnings ==
+[]`, one `PerformStatement` node left holding the whole rest of the program
+as `until_condition.operands`). Fixed by adding the same
+`STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` check
+`_collect_until_condition_tokens` already used. Pinned by
+`TestPerformUntilConditionNoLongerSwallowsRest` in
+`tests/regression/test_tier7_unsupported_verb_boundary.py`.
+
+**Fourth finding — `EVALUATE` had two independent unguarded loops, one of
+which could annex an entire unrelated later statement.**
+`EvaluateStatementParser._parse_subjects` (the subject-list loop before the
+first `WHEN`) had no boundary check at all, so a malformed/period-less
+`EVALUATE` with no `WHEN` clause folded a following verb straight into
+`stmt.subjects` as free text — same shape as the `PURGE`/`RAISE`/`RESUME`
+list-loop gap above, fixed the same way (`self._is_statement_keyword()`,
+already used by the sibling `_parse_selectors`, added to `_parse_subjects`
+too). More severe: the *outer* clause-scan loop (between `subject_count =
+self._parse_subjects(...)` and the `WHEN`-clause dispatch) treated any token
+that wasn't literally `WHEN` or `END-EVALUATE` as noise to skip past. A
+malformed `EVALUATE` therefore consumed forward past entire intervening
+statements — verified with a trailing `MOVE 1 TO WS-Y` followed by a second,
+well-formed `EVALUATE WS-Y ... WHEN 1 ... END-EVALUATE` — until it hit the
+literal string `"WHEN"` *inside that second EVALUATE* and annexed it as its
+own clause, silently erasing the `MoveStatement` and folding two EVALUATEs
+into one, with **zero errors and zero warnings** (the missing-WHEN /
+missing-END-EVALUATE errors that normally flag a malformed EVALUATE never
+fired, because the loop found *a* WHEN — just the wrong one's). Fixed by
+adding the same `self._is_statement_keyword()` break to the outer loop's
+`token_val_upper != "WHEN"` branch. Pinned by
+`TestEvaluateSubjectsAndClauseScanDoNotSwallowFollowingContent` in
+`tests/regression/test_tier7_unsupported_verb_boundary.py`.
+
+Verified adjacent, not vulnerable: `IfStatementParser`'s condition collector
+(probed with `IF ... PURGE ...` variants, with and without `THEN`/`END-IF`)
+already stops correctly. `EvaluateStatementParser._parse_selectors` (the
+per-`WHEN` selector list) already called `self._is_statement_keyword()`
+before this fix — only `_parse_subjects` and the outer clause-scan loop were
+missing it.
 
 # Adding a New Statement Parser
 

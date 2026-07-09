@@ -524,6 +524,21 @@ class PerformStatementParser(IStatementParser):
                 ):
                     stream.consume()
                     break
+                # No trailing period / END-PERFORM before the next statement:
+                # stop rather than swallow it. Unlike _collect_until_condition_
+                # tokens (used by the inline PERFORM VARYING/UNTIL forms), this
+                # loop previously had no boundary check at all, so `PERFORM
+                # para UNTIL cond` with no trailing period consumed every
+                # remaining token in the program -- including unrelated
+                # statements -- into the condition string.
+                if token.type in STATEMENT_TOKEN_TYPES:
+                    break
+                if (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() in STATEMENT_KEYWORDS
+                ):
+                    break
 
                 condition_tokens.append(token.value or str(token.type))
                 stream.consume()

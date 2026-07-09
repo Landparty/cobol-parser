@@ -4,6 +4,7 @@ from typing import Any
 
 from cobolparser.parsers.statements._utils import (
     create_statement,
+    is_statement_boundary,
     matches_keyword,
     skip_whitespace,
 )
@@ -39,6 +40,12 @@ class CloseStatementParser(IStatementParser):
             if token.type == TokenType.PERIOD:
                 break
             if token.type != TokenType.IDENTIFIER:
+                break
+            # A following statement's verb that lexes as a plain IDENTIFIER
+            # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
+            # be folded into the file-name list when CLOSE has no trailing
+            # period.
+            if is_statement_boundary(token):
                 break
 
             file_name = token.value
