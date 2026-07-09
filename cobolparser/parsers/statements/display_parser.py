@@ -122,6 +122,7 @@ class DisplayStatementParser(IStatementParser):
                 TokenType.STRING_LITERAL,
                 TokenType.IDENTIFIER,
                 TokenType.NUMERIC_LITERAL,
+                TokenType.FIGURATIVE_CONSTANT,  # SPACE(S), ZERO(S), HIGH-VALUE(S), ... (M1)
             ):
                 item_token = token_stream.consume()
 

@@ -326,3 +326,21 @@ def test_fast_and_pure_normalize_fixed_format_agree_on_m4_m5_m8_cases():
     ]
     for lines in cases:
         assert normalize_fixed_format(lines) == _normalize_fixed_format_pure(lines)
+
+
+class TestM1DisplayFigurativeConstants:
+    """M1 -- DISPLAY SPACE / DISPLAY SPACES (and other figurative
+    constants) were not accepted as display items.
+    """
+
+    def test_display_space_is_captured(self):
+        result = parse_cobol(_proc_program("    DISPLAY SPACE.\n"))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert len(stmts) == 1
+        assert stmts[0].display_items == ["SPACE"]
+        assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
+
+    def test_display_spaces_mixed_with_identifier(self):
+        result = parse_cobol(_proc_program("    DISPLAY WS-X SPACES.\n"))
+        stmts = [s for s in _statements(result) if isinstance(s, DisplayStatement)]
+        assert stmts[0].display_items == ["WS-X", "SPACES"]
