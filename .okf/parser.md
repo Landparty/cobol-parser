@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-09T00:00:00Z
+timestamp: 2026-07-09T01:00:00Z
 ---
 
 # Overview
@@ -717,13 +717,17 @@ per-`WHEN` selector list) already called `self._is_statement_keyword()`
 before this fix — only `_parse_subjects` and the outer clause-scan loop were
 missing it.
 
-# open-findings.md HIGH-severity fixes (2026-07-09, H1-H8)
+# open-findings.md HIGH-severity fixes (2026-07-09, H1-H10)
 
 Eight HIGH findings from `reports/open-findings.md`'s 2026-07-08
-re-verification pass, all fixed and pinned by
-`tests/regression/test_open_findings_high_regressions.py` (one test class
-per finding ID). Full per-finding writeup in `CHANGELOG.md`'s Unreleased →
-Fixed section; only the parser-relevant ones are summarized here (H5
+re-verification pass, plus H9 (found in a same-day follow-up) and H10
+(reported directly by a user, found independently of this document's own
+audit passes), all fixed and pinned by
+`tests/regression/test_open_findings_high_regressions.py` (H1-H9, one test
+class per finding ID) and
+`tests/regression/test_perform_backward_compat.py::TestPerformVaryingOutOfLine`
+(H10). Full per-finding writeup in `CHANGELOG.md`'s Unreleased → Fixed
+section; only the parser-relevant ones are summarized here (H5
 MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
 [preprocessing.md](preprocessing.md), H7 lexer warning →
 [lexer.md](lexer.md) above).
@@ -830,6 +834,55 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   `tests/regression/test_open_findings_high_regressions.py::TestH9MissingPeriodParagraphBoundary`
   (9 tests: one repro per fixed statement/clause shape, plus two guard
   cases for the DATA DIVISION cross-check).
+* **H10 — `perform_parser.py`, reported by a user (verified independently
+  against the real parser before reporting; found separately from this
+  document's own audit passes):** the out-of-line PERFORM branch (reached
+  after a target paragraph is consumed) checked for `TIMES`, `WITH TEST`,
+  and `UNTIL` following the paragraph name, but had **no case for
+  `VARYING` at all** — `PERFORM MY-LOOP VARYING I FROM 1 BY 1 UNTIL I >
+  10.` left the whole `VARYING`/`FROM`/`BY`/`UNTIL` clause unconsumed for
+  the generic "unparsed tokens ... clause or statement not fully
+  supported" recovery path to discard, and `PerformStatement.perform_type`
+  stayed the default `"SIMPLE"` — indistinguishable from a genuine plain
+  `PERFORM MY-LOOP.` to any caller keyed off `perform_type` (e.g.
+  `ProgramFlowAnalyzer`'s loop-edge classification, `program_flow.py:833`).
+  The reporter's own framing: the only thing preventing this from being a
+  live problem was an *unrelated* mechanism — the generic dropped-clause
+  warning happening to trip an unrelated downstream refusal gate in a
+  consuming service, before any terminator logic there ran. That's a real
+  but accidental safety net, not a fix: the *inline* form of the identical
+  clause (`PERFORM VARYING I FROM 1 BY 1 DISPLAY I END-PERFORM`, no
+  `UNTIL`) already had the same mistagging with **zero** warning to mask
+  it (`errors=[], warnings=[]`, `perform_type: "SIMPLE"`), confirming the
+  root cause: `perform_type` only ever became `"VARYING"` as a side effect
+  of `set_varying_clause()`, which requires a fully-parsed
+  `until_condition` — so a malformed clause silently reported `"SIMPLE"`
+  regardless of dispatch path.
+
+  Fixed by (1) extracting the inline VARYING clause's `id FROM x BY y
+  [WITH TEST ...] UNTIL cond [AFTER ...]` parsing into a shared
+  `_parse_varying_header()`, wired into a new out-of-line dispatch
+  (`_parse_out_of_line_varying_clause`) hooked in right where the
+  paragraph-name branch already checks for `UNTIL`, and (2) a new
+  `PerformStatement.mark_varying()` called the instant the `VARYING`
+  keyword is consumed — *before* attempting `FROM`/`BY`/`UNTIL` — so
+  `perform_type` reflects the keyword's unambiguous presence rather than a
+  successful sub-parse, and can no longer regress to `"SIMPLE"` as a side
+  effect of a degraded clause. A malformed/incomplete VARYING clause
+  (keyword present, sub-clause not fully recognized) now also emits an
+  explicit warning via a new `_warn_incomplete_varying_clause()`, instead
+  of depending on an unrelated recovery path to (sometimes) surface it.
+  Pinned by `TestPerformVaryingOutOfLine` in
+  `tests/regression/test_perform_backward_compat.py` (happy path, a
+  degraded/no-UNTIL case asserting `perform_type == "VARYING"` with
+  `varying_clause is None` — the assertion that actually pins the
+  reported concern — and a plain-PERFORM guard case), plus strengthened
+  assertions on the pre-existing `test_perform_variable_times_count_not_breaking`
+  (same file — its COBOL fixture also had a latent fixed-format
+  column-72 overflow that silently truncated the `UNTIL` clause,
+  independent of this bug, fixed by wrapping the statement across two
+  lines) and on `TestPerformVaryingMissingUntil` in
+  `tests/unit/test_perform_edge_cases.py` (inline-form degraded case).
 
 # open-findings.md MEDIUM-severity fixes (2026-07-09)
 
@@ -908,6 +961,41 @@ cache-hit accounting → [preprocessing.md](preprocessing.md)).
   (`ANONYMOUS-99-N`, duplicated as both a child of the real item and at
   top level); `PIC $***,**9.99` similarly truncated to `"$"`. Now uses
   the correct operator token types — both patterns extract in full.
+
+# Section/Paragraph Location Tracking (2026-07-09, user-reported)
+
+A user parsing a real program noticed `ENVIRONMENT DIVISION`'s
+`CobolDivision` node and its `INPUT-OUTPUT` `CobolSection` reported the
+*same* `line`/`column` in `to_dict()` output, even though the two headers
+sit on different source lines. Root cause: `BaseDivisionParser.parse()`
+(`divisions/base.py`) captures `start_location` once, from the division
+keyword token, and threads that single `SourceLocation` through to
+`_create_ast_node()` — which every division parser's `_create_ast_node`
+was reusing verbatim for **every** `CobolSection`/`CobolParagraph` it built,
+instead of capturing each section's own header token location.
+
+`procedure.py` already did this correctly (`section_info.get("location",
+start_location)`, populated from the section-header token when parsed) —
+only `environment.py` and `data.py` had the bug:
+
+* **`environment.py`:** `_parse_configuration_section`,
+  `_parse_input_output_section`, and `_parse_file_control_paragraph` each
+  now capture the location of their own leading keyword token (via
+  `token_stream.peek(0)`, before consuming it) and return it in their result
+  dict under `"location"` (the FILE-CONTROL paragraph's location is returned
+  as `"file_control_location"` inside the INPUT-OUTPUT section's dict, since
+  `_create_ast_node` needs both the section's and the paragraph's location).
+  `_create_ast_node` reads `division_content[...].get("location",
+  start_location)` per section instead of hard-coding `start_location`.
+* **`data.py`:** `_parse_section` (shared by `FILE`/`WORKING-STORAGE`/
+  `LOCAL-STORAGE`/`LINKAGE`) captures its own section-keyword token location
+  the same way and returns it under `"location"`; `_create_ast_node` reads it
+  per section instead of reusing the division's `start_location`.
+
+Statement-level and data-item-level locations inside sections were already
+accurate — this fix is scoped to the `Division` → `Section` → `Paragraph`
+container nodes' own location metadata. Pinned by
+`tests/regression/test_section_location_tracking.py`.
 
 # Adding a New Statement Parser
 

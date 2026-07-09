@@ -1,12 +1,14 @@
 # cobolparser — Open Findings (as of 2026-07-08)
 
-**Status update (2026-07-09):** all 9 HIGH findings (H1-H9) and 10 of the
-17 MEDIUM findings (M1, M2, M3 partial, M4, M5, M7 partial, M8, M9, M14,
-M16) are now fixed and pinned by regression tests — see the per-severity
-banners below (`## HIGH`, `## MEDIUM`) and `CHANGELOG.md` (Unreleased →
-Fixed) for the full writeup. Still open: M6, M10, M11, M12, M13, M15
-(each close to its own subsystem rewrite, deferred to separate plans),
-M17 (test-coverage debt, not a bug), and all LOW findings.
+**Status update (2026-07-09):** all 10 HIGH findings (H1-H10; H10 found in
+a later same-day follow-up, independently of this document's original
+audits) and 10 of the 17 MEDIUM findings (M1, M2, M3 partial, M4, M5, M7
+partial, M8, M9, M14, M16) are now fixed and pinned by regression tests —
+see the per-severity banners below (`## HIGH`, `## MEDIUM`) and
+`CHANGELOG.md` (Unreleased → Fixed) for the full writeup. Still open: M6,
+M10, M11, M12, M13, M15 (each close to its own subsystem rewrite, deferred
+to separate plans), M17 (test-coverage debt, not a bug), and all LOW
+findings.
 
 This file supersedes `audit-2026-07-06.md`, `-07.md`, `-08.md`, `-09.md`, and
 `cobol-parser-example-parse-gaps.md`. Those four audits (plus the mockymock
@@ -39,12 +41,15 @@ undetectable by a caller that checks `warnings`, only by one that checks
 
 ## HIGH
 
-**H1-H9 are all fixed** (H1-H8 on 2026-07-09; H9, discovered during H7
-verification, in a 2026-07-09 follow-up pass) and are pinned by
-`tests/regression/test_open_findings_high_regressions.py` — see
-`CHANGELOG.md` (Unreleased → Fixed) for the full per-finding writeup.
-Left in place (rather than deleted) for traceability, per this file's own
-convention for prior audits.
+**H1-H10 are all fixed** (H1-H8 on 2026-07-09; H9, discovered during H7
+verification, in a 2026-07-09 follow-up pass; H10, reported directly by a
+user rather than found by this document's audit passes, in a further
+2026-07-09 follow-up) and are pinned by
+`tests/regression/test_open_findings_high_regressions.py` (H1-H9) and
+`tests/regression/test_perform_backward_compat.py::TestPerformVaryingOutOfLine`
+(H10) — see `CHANGELOG.md` (Unreleased → Fixed) for the full per-finding
+writeup. Left in place (rather than deleted) for traceability, per this
+file's own convention for prior audits.
 
 ### H1 — `SET ADDRESS OF x TO y` produces an empty `SetStatement`
 `cobolparser/parsers/statements/set_parser.py:60-68`. The target-collection
@@ -199,6 +204,66 @@ key lists, `CALL`'s `USING` parameter list, `INITIALIZE`'s target list) —
 any of those could still share the underlying gap; fixing them needs its
 own repro-first pass rather than a blanket rewrite of every
 operand-collection loop in the parser.
+
+### H10 — out-of-line `PERFORM procedure-name VARYING ...` silently dropped, `perform_type` mistagged `"SIMPLE"` — FIXED 2026-07-09
+
+Reported by a user, who verified it directly against the real parser
+before raising it (not carried forward from this document's own audit
+passes). `cobolparser/parsers/statements/perform_parser.py`'s out-of-line
+branch (reached after a target paragraph, e.g. `PERFORM MY-LOOP ...`) had
+explicit handling for `TIMES`, `WITH TEST`, and `UNTIL` following the
+paragraph name, but no case at all for `VARYING`. `PERFORM MY-LOOP
+VARYING I FROM 1 BY 1 UNTIL I > 10.` left the `VARYING`/`FROM`/`BY`/
+`UNTIL` tokens unconsumed; they fell through to the top-level "unparsed
+tokens... clause or statement not fully supported" recovery, and
+`PerformStatement.perform_type` stayed the default `"SIMPLE"` —
+indistinguishable from a genuine plain `PERFORM MY-LOOP.` to any caller
+that branches on `perform_type` (`ProgramFlowAnalyzer`'s loop-edge
+classification at `program_flow.py:833` is exactly such a caller).
+
+The user's own framing of this finding is worth preserving verbatim: what
+actually kept it from being a live problem was a wholly unrelated
+mechanism — cobolparser's own generic dropped-clause parse warning
+happened to trip an unrelated downstream refusal gate before any
+terminator logic (outside this repo, in a consuming service) ever ran.
+That's a real but *accidental* safety net — if the out-of-line VARYING
+shape were ever parsed (even partially) without also fixing the tagging,
+the mistag would go fully silent again with nothing left to trip. Direct
+repro of exactly that scenario: the *inline* form (`PERFORM VARYING I
+FROM 1 BY 1 DISPLAY I END-PERFORM`, no `UNTIL`) already had this identical
+mistagging bug, with **zero** accidental warning to mask it
+(`errors=[], warnings=[]`, `perform_type: "SIMPLE"`) — because
+`perform_type` only ever became `"VARYING"` as a side effect of
+`set_varying_clause()`, which requires a fully-parsed `until_condition`.
+
+Fixed by (1) adding the missing out-of-line `VARYING` dispatch, parsing
+`id FROM x BY y [WITH TEST ...] UNTIL cond [AFTER ...]` via a header
+parser shared with the inline form, and (2) tagging `perform_type =
+"VARYING"` (via a new `PerformStatement.mark_varying()`) the instant the
+`VARYING` keyword is consumed — independent of whether the rest of the
+clause parses cleanly — so the tag can no longer regress to `"SIMPLE"`
+as a side effect of a degraded sub-parse. A malformed/incomplete VARYING
+clause (keyword present, `FROM`/`BY`/`UNTIL` not fully recognized) now
+also emits an explicit warning instead of relying on an unrelated
+recovery path to (sometimes) surface it. Pinned by
+`TestPerformVaryingOutOfLine` in `tests/regression/test_perform_backward_compat.py`
+(happy path, degraded/no-UNTIL path asserting `perform_type == "VARYING"`
+with `varying_clause is None`, and a plain-PERFORM guard case), plus
+strengthened assertions on the pre-existing (but previously too weak to
+catch this) `test_perform_variable_times_count_not_breaking` in the same
+file and `TestPerformVaryingMissingUntil` in
+`tests/unit/test_perform_edge_cases.py` (inline-form degraded case). Also
+verified end to end that the tagging fix reaches its actual downstream
+consumer: `test_out_of_line_perform_varying_is_loop` in
+`tests/unit/analysis/test_program_flow.py` confirms `ProgramFlowAnalyzer`
+now classifies this shape's PERFORM edge as `is_loop=True` — previously
+`False`, since it read `perform_type` and saw `"SIMPLE"`. Also confirmed
+no consumer crashes on the new `perform_type == "VARYING"` +
+`varying_clause is None` state a degraded clause can now produce (a state
+that could not previously occur, since the tag was only ever set alongside
+a populated clause): the sole other reader,
+`coverage_analyzer.py:631-632`, already guards with `if
+statement.varying_clause and ...` before subscripting it.
 
 ---
 

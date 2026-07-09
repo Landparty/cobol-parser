@@ -76,6 +76,34 @@ def _warn_stray_trailing_token(stream: ITokenStream, token: Token) -> None:
         logger.warning(message)
 
 
+def _warn_incomplete_varying_clause(
+    stream: ITokenStream, stmt: PerformStatement
+) -> None:
+    """Record a warning when a PERFORM VARYING clause's FROM/BY/UNTIL
+    sub-clause didn't fully parse, so ``varying_clause``/``until_condition``
+    stay unset even though ``perform_type`` is (correctly) tagged "VARYING"
+    via :meth:`PerformStatement.mark_varying`.
+
+    Without this, a malformed VARYING clause would drop its data with zero
+    trace -- ``varying_clause: null`` looks identical to "this PERFORM never
+    had a VARYING clause" as opposed to "it had one, but it was malformed".
+    """
+    line = getattr(getattr(stmt, "location", None), "line", None)
+    where = f" at line {line}" if line else ""
+    context = get_parse_context(stream)
+    host = getattr(context, "host", None) if context is not None else None
+    add_warning = getattr(host, "add_warning", None)
+    message = (
+        f"PERFORM VARYING clause{where}: FROM/BY/UNTIL not fully recognized -- "
+        "varying_clause left unset (perform_type is still recorded as "
+        "'VARYING', not the default 'SIMPLE')"
+    )
+    if callable(add_warning):
+        add_warning(message)
+    else:
+        logger.warning(message)
+
+
 class PerformStatementParser(IStatementParser):
     """Parser for PERFORM statements using IStatementParser interface."""
 
@@ -324,8 +352,20 @@ class PerformStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
 
+            # Check for VARYING clause after paragraph name -- the
+            # out-of-line form: PERFORM procedure-name-1 [THRU procedure-
+            # name-2] [WITH TEST ...] VARYING id FROM x BY y UNTIL cond
+            # [AFTER ...]. Previously unhandled here entirely: the VARYING
+            # token matched neither the TIMES/WITH TEST/UNTIL branches nor
+            # the trailing "period or END-PERFORM" check, so the whole
+            # clause was left unconsumed for the top-level "unparsed
+            # tokens" recovery to discard, and perform_type stayed the
+            # default "SIMPLE" -- indistinguishable from a genuine plain
+            # PERFORM to anything keyed off perform_type.
+            if token and token.type == TokenType.VARYING:
+                self._parse_out_of_line_varying_clause(token_stream, stmt)
             # Check for UNTIL clause after paragraph name
-            if token and token.type == TokenType.UNTIL:
+            elif token and token.type == TokenType.UNTIL:
                 try:
                     self._parse_until_condition_only(token_stream, stmt)
                 except ParseError as exc:
@@ -335,7 +375,9 @@ class PerformStatementParser(IStatementParser):
                     # diagnosability (H4 -- these catches previously had no
                     # trace at all).
                     logger.debug(
-                        "PERFORM UNTIL condition parse suppressed %r", exc, exc_info=True
+                        "PERFORM UNTIL condition parse suppressed %r",
+                        exc,
+                        exc_info=True,
                     )
 
         # Expect period or END-PERFORM
@@ -358,82 +400,12 @@ class PerformStatementParser(IStatementParser):
     def _parse_varying_clause(
         self, stream: ITokenStream, stmt: PerformStatement
     ) -> None:
-        """Parse VARYING clause for PERFORM statement."""
+        """Parse VARYING clause for an inline PERFORM (no target paragraph;
+        an imperative-statement body + END-PERFORM follows)."""
         try:
-            stream.consume()  # Skip VARYING
-            skip_whitespace(stream)
-
-            # Get variable name
-            token = stream.peek()
-            if not token or token.type != TokenType.IDENTIFIER:
-                return
-
-            variable_name = token.value
-            stream.consume()
-            skip_whitespace(stream)
-
-            # Expect FROM
-            token = stream.peek()
-            if not token or not token.value or token.value.upper() != "FROM":
-                return
-            stream.consume()
-            skip_whitespace(stream)
-
-            # Get FROM value
-            token = stream.peek()
-            if not token or not token.value:
-                return
-            from_value = token.value
-            stream.consume()
-            skip_whitespace(stream)
-
-            # Expect BY
-            token = stream.peek()
-            if not token or not token.value or token.value.upper() != "BY":
-                return
-            stream.consume()
-            skip_whitespace(stream)
-
-            # Get BY value
-            token = stream.peek()
-            if not token or not token.value:
-                return
-            by_value = token.value
-            stream.consume()
-            skip_whitespace(stream)
-
-            # Check for WITH TEST clause (before UNTIL)
-            token = stream.peek()
-            if token and token.type == TokenType.WITH:
-                try:
-                    stream.consume()  # Skip WITH
-                    token = stream.peek()
-                    if token and token.type == TokenType.TEST:
-                        stream.consume()  # Skip TEST
-                        token = stream.peek()
-                        if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
-                            val = token.type.name  # "BEFORE" or "AFTER"
-                            stmt.set_test_timing(val)
-                            stream.consume()
-                            token = stream.peek()
-                except (TokenMismatch, UnexpectedEndOfInput):
-                    pass
-
-                skip_whitespace(stream)
-                token = stream.peek()
-
-            # Parse UNTIL condition
-            token = stream.peek()
-            if token and token.type == TokenType.UNTIL:
-                until_condition = self._collect_until_expression(stream)
-                if until_condition:
-                    stmt.set_varying_clause(
-                        variable_name, from_value, by_value, until_condition
-                    )
-
-            # Parse AFTER dimensions (PERFORM VARYING ... AFTER ... — 2-D/3-D
-            # table loops). Each AFTER phrase repeats var FROM x BY y [UNTIL c].
-            self._parse_after_clauses(stream, stmt)
+            self._parse_varying_header(stream, stmt)
+            if stmt.varying_clause is None:
+                _warn_incomplete_varying_clause(stream, stmt)
 
             # Parse the inline body (up to END-PERFORM or period)
             self._parse_inline_statements(stream, stmt)
@@ -444,6 +416,116 @@ class PerformStatementParser(IStatementParser):
             logger.debug(
                 "PERFORM VARYING clause parse suppressed %r", exc, exc_info=True
             )
+
+    def _parse_out_of_line_varying_clause(
+        self, stream: ITokenStream, stmt: PerformStatement
+    ) -> None:
+        """Parse VARYING clause for an out-of-line PERFORM -- the target
+        (and optional THRU) paragraph is already set on *stmt*. Unlike the
+        inline form there is no imperative-statement body or END-PERFORM:
+        the loop body is the target paragraph(s) themselves."""
+        try:
+            self._parse_varying_header(stream, stmt)
+            if stmt.varying_clause is None:
+                _warn_incomplete_varying_clause(stream, stmt)
+        except ParseError as exc:
+            logger.debug(
+                "PERFORM VARYING clause (out-of-line) parse suppressed %r",
+                exc,
+                exc_info=True,
+            )
+
+    def _parse_varying_header(
+        self, stream: ITokenStream, stmt: PerformStatement
+    ) -> None:
+        """Parse ``VARYING id FROM x BY y [WITH TEST ...] UNTIL cond
+        [AFTER ...]`` and record it on *stmt*. Shared by the inline PERFORM
+        VARYING form (dispatched directly on the VARYING keyword, no target
+        paragraph) and the out-of-line form (target paragraph already set,
+        VARYING appears after it).
+
+        Marks ``stmt`` as a VARYING-form PERFORM (via ``mark_varying()``)
+        immediately upon consuming the keyword, *before* attempting to parse
+        FROM/BY/UNTIL -- so perform_type reflects the keyword's presence
+        even if the rest of the clause is malformed or incomplete, rather
+        than only becoming "VARYING" as a side effect of a fully successful
+        sub-parse.
+        """
+        stream.consume()  # Skip VARYING
+        stmt.mark_varying()
+        skip_whitespace(stream)
+
+        # Get variable name
+        token = stream.peek()
+        if not token or token.type != TokenType.IDENTIFIER:
+            return
+
+        variable_name = token.value
+        stream.consume()
+        skip_whitespace(stream)
+
+        # Expect FROM
+        token = stream.peek()
+        if not token or not token.value or token.value.upper() != "FROM":
+            return
+        stream.consume()
+        skip_whitespace(stream)
+
+        # Get FROM value
+        token = stream.peek()
+        if not token or not token.value:
+            return
+        from_value = token.value
+        stream.consume()
+        skip_whitespace(stream)
+
+        # Expect BY
+        token = stream.peek()
+        if not token or not token.value or token.value.upper() != "BY":
+            return
+        stream.consume()
+        skip_whitespace(stream)
+
+        # Get BY value
+        token = stream.peek()
+        if not token or not token.value:
+            return
+        by_value = token.value
+        stream.consume()
+        skip_whitespace(stream)
+
+        # Check for WITH TEST clause (before UNTIL)
+        token = stream.peek()
+        if token and token.type == TokenType.WITH:
+            try:
+                stream.consume()  # Skip WITH
+                token = stream.peek()
+                if token and token.type == TokenType.TEST:
+                    stream.consume()  # Skip TEST
+                    token = stream.peek()
+                    if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
+                        val = token.type.name  # "BEFORE" or "AFTER"
+                        stmt.set_test_timing(val)
+                        stream.consume()
+                        token = stream.peek()
+            except (TokenMismatch, UnexpectedEndOfInput):
+                pass
+
+            skip_whitespace(stream)
+            token = stream.peek()
+
+        # Parse UNTIL condition
+        token = stream.peek()
+        if token and token.type == TokenType.UNTIL:
+            until_condition = self._collect_until_expression(stream)
+            if until_condition:
+                stmt.set_varying_clause(
+                    variable_name, from_value, by_value, until_condition
+                )
+
+        # Parse AFTER dimensions (PERFORM VARYING ... AFTER ... — 2-D/3-D
+        # table loops). Each AFTER phrase repeats var FROM x BY y [UNTIL c].
+        self._parse_after_clauses(stream, stmt)
 
     def _parse_after_clauses(
         self, stream: ITokenStream, stmt: PerformStatement

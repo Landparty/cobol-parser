@@ -262,6 +262,12 @@ class DataDivisionParser(BaseDivisionParser):
         Returns:
             Dictionary containing section content with parsed data items
         """
+        # Capture the section keyword's own location before consuming it (the
+        # AST node must report where this section actually starts, not its
+        # parent division's location).
+        section_token = token_stream.peek(0)
+        section_location = section_token.location if section_token else None
+
         # Consume section keyword
         token_stream.consume()
 
@@ -412,11 +418,14 @@ class DataDivisionParser(BaseDivisionParser):
         # Build hierarchical structure based on level numbers
         hierarchical_items = self._build_data_hierarchy(data_items)
 
-        return {
+        result: dict[str, Any] = {
             "type": section_name.lower().replace("-", "_"),
             "data_items": hierarchical_items,
             "exec_sql_items": exec_sql_items,
         }
+        if section_location is not None:
+            result["location"] = section_location
+        return result
 
     def _build_data_hierarchy(self, data_items: list) -> list:
         """Build hierarchical structure from flat list of data items.
@@ -1413,7 +1422,13 @@ class DataDivisionParser(BaseDivisionParser):
 
         for key, section_name in section_map.items():
             if key in division_content:
-                section = CobolSection(section_name, start_location)
+                section_content = division_content[key]
+                section_location = (
+                    section_content.get("location", start_location)
+                    if isinstance(section_content, dict)
+                    else start_location
+                )
+                section = CobolSection(section_name, section_location)
 
                 # Add parsed data items to section
                 if (

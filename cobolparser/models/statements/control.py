@@ -264,6 +264,20 @@ class PerformStatement(CobolStatement):
         self.until_condition = condition
         self.add_child(condition)
 
+    def mark_varying(self) -> None:
+        """Tag this PERFORM as a VARYING-form loop.
+
+        Called as soon as the VARYING keyword is recognized, *before* its
+        FROM/BY/UNTIL sub-clause is known to parse successfully. Without
+        this, perform_type only became "VARYING" via set_varying_clause(),
+        which requires a fully-parsed until_condition -- so a malformed or
+        partially-recognized VARYING clause left perform_type at the
+        default "SIMPLE", indistinguishable from a genuine plain PERFORM to
+        any caller keyed off perform_type. The keyword's presence is
+        unambiguous proof of intent even when the rest of the clause isn't.
+        """
+        self.perform_type = "VARYING"
+
     def set_varying_clause(
         self,
         variable: str,

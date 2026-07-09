@@ -229,7 +229,13 @@ class TestPerformVaryingMissingBy:
 
 
 class TestPerformVaryingMissingUntil:
-    """PERFORM VARYING X FROM 1 BY 1 without UNTIL clause (lines 353-367)."""
+    """PERFORM VARYING X FROM 1 BY 1 without UNTIL clause (lines 353-367).
+
+    Also pins the perform_type tagging fix: a malformed inline VARYING
+    clause (missing UNTIL) previously left perform_type at the default
+    "SIMPLE" with zero warnings -- fully indistinguishable from a genuine
+    plain PERFORM. It must now stay tagged "VARYING" and emit a warning.
+    """
 
     def test_perform_varying_no_until(self):
         """PERFORM VARYING ... FROM ... BY ... with no UNTIL — should recover."""
@@ -241,6 +247,11 @@ class TestPerformVaryingMissingUntil:
         )
         result = _parse_collect_all(source)
         assert result.ast is not None
+        performs = _find_performs(result)
+        assert len(performs) >= 1
+        assert performs[0].perform_type == "VARYING"
+        assert performs[0].varying_clause is None
+        assert any("VARYING" in w for w in result.warnings)
 
     def test_perform_varying_from_by_then_period(self):
         """PERFORM VARYING WS-I FROM 1 BY 1 then period, no UNTIL."""
@@ -249,6 +260,9 @@ class TestPerformVaryingMissingUntil:
         )
         result = _parse_collect_all(source)
         assert result.ast is not None
+        performs = _find_performs(result)
+        assert len(performs) >= 1
+        assert performs[0].perform_type == "VARYING"
 
 
 class TestPerformInlineEmptyBody:

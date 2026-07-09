@@ -123,6 +123,12 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         - ALPHABET name IS ...
         Unknown clauses are consumed until the next period.
         """
+        # Capture the CONFIGURATION keyword's own location before consuming it
+        # (the AST node must report where this section actually starts, not
+        # its parent division's location).
+        config_token = token_stream.peek(0)
+        config_location = config_token.location if config_token else None
+
         # Consume CONFIGURATION keyword
         token_stream.consume()
 
@@ -169,6 +175,8 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 token_stream.consume()
 
         result: dict[str, Any] = {"type": "configuration"}
+        if config_location is not None:
+            result["location"] = config_location
         if special_names:
             result["special_names"] = special_names
         return result
@@ -328,6 +336,10 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         Returns:
             Dictionary containing I/O definitions including SELECT statements
         """
+        # Capture the INPUT-OUTPUT keyword's own location before consuming it.
+        io_token = token_stream.peek(0)
+        io_location = io_token.location if io_token else None
+
         # Consume INPUT-OUTPUT keyword
         token_stream.consume()
 
@@ -343,6 +355,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
         # Parse FILE-CONTROL and other paragraphs
         select_statements: list[dict[str, Any]] = []
+        file_control_location: SourceLocation | None = None
 
         while not token_stream.is_empty():
             token = token_stream.peek(0)
@@ -365,11 +378,20 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             if token_value == "FILE-CONTROL" or token_value.endswith("CONTROL"):
                 file_control_data = self._parse_file_control_paragraph(token_stream)
                 select_statements.extend(file_control_data.get("selects", []))
+                file_control_location = file_control_data.get("location")
             else:
                 # Skip other content
                 token_stream.consume()
 
-        return {"type": "input_output", "select_statements": select_statements}
+        result: dict[str, Any] = {
+            "type": "input_output",
+            "select_statements": select_statements,
+        }
+        if io_location is not None:
+            result["location"] = io_location
+        if file_control_location is not None:
+            result["file_control_location"] = file_control_location
+        return result
 
     def _parse_file_control_paragraph(
         self, token_stream: ITokenStream
@@ -384,6 +406,10 @@ class EnvironmentDivisionParser(BaseDivisionParser):
         Returns:
             Dictionary containing parsed SELECT statements
         """
+        # Capture the FILE-CONTROL keyword's own location before consuming it.
+        fc_token = token_stream.peek(0)
+        fc_location = fc_token.location if fc_token else None
+
         # Consume FILE-CONTROL keyword (may appear as "NTROL" due to tokenizer)
         token = token_stream.peek(0)
         if token and token.value.upper().endswith("CONTROL"):
@@ -429,7 +455,10 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 # Skip other tokens
                 token_stream.consume()
 
-        return {"selects": select_statements}
+        result: dict[str, Any] = {"selects": select_statements}
+        if fc_location is not None:
+            result["location"] = fc_location
+        return result
 
     def _parse_select_statement(
         self, token_stream: ITokenStream
@@ -1008,8 +1037,13 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
         # Create CONFIGURATION SECTION if present
         if "configuration" in division_content:
-            config_section = CobolSection("CONFIGURATION", start_location)
             config_data = division_content["configuration"]
+            config_location = (
+                config_data.get("location", start_location)
+                if isinstance(config_data, dict)
+                else start_location
+            )
+            config_section = CobolSection("CONFIGURATION", config_location)
             if isinstance(config_data, dict) and "special_names" in config_data:
                 config_section.set_metadata(
                     "special_names", config_data["special_names"]
@@ -1018,14 +1052,19 @@ class EnvironmentDivisionParser(BaseDivisionParser):
 
         # Create INPUT-OUTPUT SECTION if present
         if "input_output" in division_content:
-            io_section = CobolSection("INPUT-OUTPUT", start_location)
+            io_content = division_content["input_output"]
+            io_location = io_content.get("location", start_location)
+            io_section = CobolSection("INPUT-OUTPUT", io_location)
 
             # Add FILE-CONTROL paragraph with SELECT statements
-            select_statements = division_content.get("input_output", {}).get(
-                "select_statements", []
-            )
+            select_statements = io_content.get("select_statements", [])
             if select_statements:
-                file_control_para = CobolParagraph("FILE-CONTROL", start_location)
+                file_control_location = io_content.get(
+                    "file_control_location", io_location
+                )
+                file_control_para = CobolParagraph(
+                    "FILE-CONTROL", file_control_location
+                )
 
                 # Convert select data dicts to SelectStatement AST nodes
                 for select_data in select_statements:

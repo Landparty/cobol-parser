@@ -246,6 +246,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per the report's own "needs its own scoped investigation" framing for
   this finding.
 
+* **H10 — out-of-line `PERFORM procedure-name VARYING ...` was not parsed at
+  all, and left `perform_type` mistagged `"SIMPLE"`** (found 2026-07-09,
+  follow-up to the H1-H9 pass; pinned by `TestPerformVaryingOutOfLine` in
+  `tests/regression/test_perform_backward_compat.py`, plus a strengthened
+  assertion in `test_perform_variable_times_count_not_breaking` in the same
+  file, `TestPerformVaryingMissingUntil` in
+  `tests/unit/test_perform_edge_cases.py`, and
+  `test_out_of_line_perform_varying_is_loop` in
+  `tests/unit/analysis/test_program_flow.py` — the actual downstream payoff:
+  `ProgramFlowAnalyzer`'s loop-edge classification now correctly flips to
+  `is_loop=True` for this shape). `perform_parser.py`'s
+  out-of-line branch (target paragraph already consumed) checked for
+  `TIMES`, `WITH TEST`, and `UNTIL` after the paragraph name, but never for
+  `VARYING` — so `PERFORM MY-LOOP VARYING I FROM 1 BY 1 UNTIL I > 10.` left
+  the entire `VARYING ... UNTIL ...` clause unconsumed for the generic
+  "unparsed tokens" recovery path to discard, and `PerformStatement.
+  perform_type` stayed the default `"SIMPLE"` — indistinguishable from a
+  genuine plain `PERFORM MY-LOOP.` to any caller that branches on
+  `perform_type` (e.g. `ProgramFlowAnalyzer`'s loop-edge classification).
+  The only thing that made this non-silent before the fix was the
+  generic dropped-clause warning tripping unrelated downstream recovery —
+  an accidental side effect, not a real safety net: had the out-of-line
+  VARYING shape ever been parsed (even partially) without also fixing the
+  tagging, the mistag would have become fully silent again.
+
+  Fixed by extracting the inline VARYING clause's `id FROM x BY y [WITH
+  TEST ...] UNTIL cond [AFTER ...]` parsing into a shared
+  `_parse_varying_header()`, now called from both the inline dispatch
+  (`PERFORM VARYING ...`, no target paragraph) and a new out-of-line
+  dispatch (`PERFORM procedure-name [THRU ...] VARYING ...`) hooked in
+  right where the paragraph-name branch already checks for `UNTIL`. Root
+  cause of the mistagging itself: `perform_type` only became `"VARYING"`
+  as a side effect of `set_varying_clause()`, which requires a fully
+  parsed `until_condition` — so even a malformed clause (missing
+  `FROM`/`BY`/`UNTIL`) silently reported `"SIMPLE"`. `PerformStatement`
+  gained `mark_varying()`, called the instant the `VARYING` keyword is
+  consumed, before any sub-clause is attempted, so the tag reflects the
+  keyword's unambiguous presence rather than a successful sub-parse. This
+  also fixes the identical latent bug on the *inline* form: `PERFORM
+  VARYING I FROM 1 BY 1 DISPLAY I END-PERFORM` (no `UNTIL`) previously
+  mistagged `"SIMPLE"` with `errors=[], warnings=[]` — fully silent, no
+  accidental recovery-path warning to mask it. A malformed VARYING clause
+  (keyword present, `FROM`/`BY`/`UNTIL` not fully parsed) now also emits an
+  explicit warning via the new `_warn_incomplete_varying_clause()` instead
+  of leaving `varying_clause: null` indistinguishable from "no VARYING
+  clause was ever present."
+
+* **ENVIRONMENT/DATA division sections reported the wrong source line**
+  (found 2026-07-09, user-reported while testing the parser; pinned by new
+  `tests/regression/test_section_location_tracking.py`).
+  `BaseDivisionParser.parse()` captures one `start_location` from the
+  division keyword token and threads it through to `_create_ast_node()`;
+  `environment.py`'s and `data.py`'s `_create_ast_node` implementations both
+  reused that single location for **every** `CobolSection` (and, in
+  ENVIRONMENT's case, the `FILE-CONTROL` `CobolParagraph`) they built,
+  instead of each section's own header token location. Concretely, an
+  `ENVIRONMENT DIVISION` on line 3 with `INPUT-OUTPUT SECTION` on line 6
+  reported `line: 3` for both nodes. `procedure.py` already tracked each
+  section's own location correctly (`section_info.get("location",
+  start_location)`) — only these two division parsers had the bug. Fixed by
+  having `_parse_configuration_section`, `_parse_input_output_section`,
+  `_parse_file_control_paragraph` (environment.py), and `_parse_section`
+  (data.py) each capture their own leading keyword token's location and
+  return it in their result dict; `_create_ast_node` in both files now reads
+  the per-section location instead of hard-coding `start_location`.
+  Statement/data-item-level locations were already accurate; this fix is
+  scoped to the `Division`/`Section`/`Paragraph` container nodes.
+
 * **Ten MEDIUM-severity findings from `reports/open-findings.md` (2026-07-09
   batch), all pinned by
   `tests/regression/test_open_findings_medium_regressions.py`:**

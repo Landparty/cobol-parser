@@ -15,6 +15,25 @@ pip install -e ".[dev]"
 
 Requires Python 3.11, 3.12, or 3.13.
 
+### Install the CLI globally (uv)
+
+To get the `cobol-parser` command on your `PATH` in any directory, without
+setting up a project virtualenv:
+
+```bash
+uv tool install .            # from a clone of this repo
+uv tool install --editable . # dev mode: picks up code changes without reinstalling
+```
+
+`uv tool install` builds the Cython fast-path extensions as part of the
+install, so the CLI runs at full speed. Verify it worked from anywhere:
+
+```bash
+cobol-parser --version
+```
+
+After pulling new commits (non-editable install only), rerun `uv tool install . --reinstall` to update.
+
 ## Quick Start
 
 ```python

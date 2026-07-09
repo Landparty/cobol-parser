@@ -67,7 +67,9 @@
       "PowerShell(gh api *)",
       "PowerShell(ls \"C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser\\\\docs\\\\okf\\\\\" 2>$null; if \\(-not $?\\) { \"NOT_FOUND\" })",
       "Bash(mkdir -p \"C:/Users/samdi/AppData/Local/Temp/claude/C--Users-samdi-Documents-workspace-legacylens-cobol-parser/6a5bee0d-7863-4e52-9aee-6bb650183a4b/scratchpad\")",
-      "Bash(cd C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser *)"
+      "Bash(cd C:\\\\Users\\\\samdi\\\\Documents\\\\workspace\\\\legacylens\\\\cobol-parser *)",
+      "Bash(uv *)",
+      "Bash(cobol-parser --help)"
     ],
     "additionalDirectories": [
       "\\tmp"

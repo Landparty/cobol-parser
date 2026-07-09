@@ -1,5 +1,57 @@
 # OKF Update Log
 
+## 2026-07-09 (ENVIRONMENT/DATA division sections stamped with the wrong line — user-reported)
+
+A user testing the parser noticed that `ENVIRONMENT DIVISION`'s
+`CobolDivision` node and its `INPUT-OUTPUT SECTION` `CobolSection` reported
+the exact same `line`/`column` in the AST's `to_dict()` output. Confirmed as
+a real, consistent bug (not specific to that one division): every
+`CobolSection`/`CobolParagraph` built by `environment.py`'s and `data.py`'s
+`_create_ast_node()` reused the division's own `start_location` instead of
+its own header token's location — `procedure.py` already tracked per-section
+locations correctly, so only these two division parsers needed the fix.
+Both now capture each section's (and the FILE-CONTROL paragraph's) own
+keyword-token location during parsing and thread it through to
+`_create_ast_node`. Pinned by new file
+`tests/regression/test_section_location_tracking.py` (TDD: written first,
+confirmed failing against the old behavior, then fixed).
+
+* **Updated** [parser.md](parser.md): new "Section/Paragraph Location
+  Tracking" section describing the root cause and fix.
+
+## 2026-07-09 (H10 fixed: out-of-line `PERFORM ... VARYING ...` dropped, `perform_type` mistagged)
+
+A user reported, and personally verified before reporting, that the
+out-of-line form of `PERFORM procedure-name VARYING ...` was not parsed
+at all: the clause was silently dropped and `PerformStatement.perform_type`
+stayed the default `"SIMPLE"`, indistinguishable from a genuine plain
+`PERFORM`. The user's own diagnosis was precise: what actually prevented
+this from being a live problem today was an unrelated mechanism — the
+generic dropped-clause parse warning tripping an unrelated downstream
+refusal gate (in a consuming service, outside this repo) before any
+terminator logic there ran — a real but accidental safety net that would
+go silent again if the out-of-line VARYING shape were ever parsed without
+also fixing the tagging.
+
+Filed as H10 in `reports/open-findings.md` (a new finding, not from this
+document's own prior audit passes) and fixed same-day. Root cause:
+`perform_type` only became `"VARYING"` as a side effect of
+`set_varying_clause()`, which requires a fully-parsed `until_condition` —
+confirmed to be a strictly worse, fully silent instance of the *same* bug
+already present on the *inline* PERFORM VARYING form (no accidental
+warning to mask it there). Fixed via a new `PerformStatement.
+mark_varying()`, called the instant the `VARYING` keyword is consumed,
+before `FROM`/`BY`/`UNTIL` are attempted — plus a missing out-of-line
+`VARYING` dispatch in `perform_parser.py`, and an explicit warning on any
+VARYING clause that doesn't fully parse. Pinned by
+`TestPerformVaryingOutOfLine` in `tests/regression/test_perform_backward_compat.py`
+and a strengthened assertion in `TestPerformVaryingMissingUntil`
+(`tests/unit/test_perform_edge_cases.py`) for the inline-form case.
+
+* **Updated** [parser.md](parser.md): H10 added to the "open-findings.md
+  HIGH-severity fixes" section (now "H1-H10"), full write-up alongside the
+  existing H1-H9 entries.
+
 ## 2026-07-09 (open-findings.md MEDIUM-severity remediation: M1, M2, M3, M4, M5, M7, M8, M9, M14, M16 fixed)
 
 Follow-up to the same-day H1-H9 pass above: implemented fixes for 10 of

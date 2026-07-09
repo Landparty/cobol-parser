@@ -177,11 +177,21 @@ class TestPerformBackwardCompatibilityRegression:
         assert perf_dict["test_timing"] == "BEFORE"
 
     def test_perform_variable_times_count_not_breaking(self):
-        """Verify that adding variable TIMES support doesn't break numeric TIMES."""
+        """Verify that adding variable TIMES support doesn't break numeric TIMES.
+
+        This is also the out-of-line PERFORM ... THRU ... VARYING ... form
+        (target paragraph + VARYING, no inline body). Previously this
+        assertion only checked `len(performs) >= 1`, which passed even
+        though the VARYING clause was silently dropped and `perform_type`
+        stayed the default "SIMPLE" -- see
+        `TestPerformVaryingOutOfLine` below for the dedicated regression
+        coverage of that bug.
+        """
         cobol = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. TEST-VAR-TIMES.
        PROCEDURE DIVISION.
-           PERFORM MY-LOOP THRU MY-LOOP-END VARYING WS-COUNT FROM 1 BY 1 UNTIL WS-COUNT > 5.
+           PERFORM MY-LOOP THRU MY-LOOP-END
+               VARYING WS-COUNT FROM 1 BY 1 UNTIL WS-COUNT > 5.
            STOP RUN.
        MY-LOOP.
            DISPLAY "LOOP".
@@ -194,6 +204,132 @@ class TestPerformBackwardCompatibilityRegression:
         performs = self._find_perform_statements(result.ast)
         # Should find at least one perform statement
         assert len(performs) >= 1
+        perf = performs[0]
+
+        assert perf.perform_type == "VARYING"
+        assert perf.target_paragraph == "MY-LOOP"
+        assert perf.thru_paragraph == "MY-LOOP-END"
+        assert perf.varying_clause == {
+            "variable": "WS-COUNT",
+            "from_value": "1",
+            "by_value": "1",
+        }
+        assert perf.until_condition is not None
+
+
+class TestPerformVaryingOutOfLine:
+    """Regression tests for the out-of-line PERFORM ... VARYING ... form
+    (a target paragraph followed by VARYING, as opposed to the inline
+    `PERFORM VARYING ... END-PERFORM` form). Previously this shape was not
+    handled at all: the VARYING token matched none of the out-of-line
+    branches (TIMES/WITH TEST/UNTIL), so the clause was left unconsumed for
+    the generic "unparsed tokens" recovery to discard, and `perform_type`
+    stayed the default "SIMPLE" -- indistinguishable from a genuine plain
+    `PERFORM MY-LOOP.` to any caller keyed off `perform_type`.
+    """
+
+    def _parse_cobol(self, cobol_text):
+        parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        return parser.parse(cobol_text)
+
+    def _first_perform(self, ast):
+        proc_div = ast.get_division("PROCEDURE")
+        for section in proc_div.sections:
+            if hasattr(section, "children"):
+                for child in section.children:
+                    if isinstance(child, PerformStatement):
+                        return child
+            if hasattr(section, "paragraphs"):
+                for paragraph in section.paragraphs:
+                    if hasattr(paragraph, "statements"):
+                        for stmt in paragraph.statements:
+                            if isinstance(stmt, PerformStatement):
+                                return stmt
+            if hasattr(section, "statements"):
+                for stmt in section.statements:
+                    if isinstance(stmt, PerformStatement):
+                        return stmt
+        return None
+
+    def test_out_of_line_varying_fully_parsed(self):
+        """PERFORM para VARYING i FROM x BY y UNTIL cond -- the well-formed
+        case: perform_type is "VARYING", the clause data is captured, and
+        no warning is emitted."""
+        cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST-OOL-VARYING.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM VARY-PARA VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10.
+           STOP RUN.
+       VARY-PARA.
+           DISPLAY WS-I.
+       """
+        result = self._parse_cobol(cobol)
+        assert result.ast is not None
+        assert result.errors == []
+        assert result.warnings == []
+
+        perf = self._first_perform(result.ast)
+        assert perf is not None
+        assert perf.target_paragraph == "VARY-PARA"
+        assert perf.perform_type == "VARYING"
+        assert perf.varying_clause == {
+            "variable": "WS-I",
+            "from_value": "1",
+            "by_value": "1",
+        }
+        assert perf.until_condition is not None
+
+    def test_out_of_line_varying_missing_until_still_tagged_varying(self):
+        """PERFORM para VARYING i FROM x BY y. (no UNTIL) is a malformed/
+        incomplete VARYING clause -- `varying_clause` correctly stays
+        unset, but `perform_type` must still be "VARYING", not silently
+        fall back to the default "SIMPLE" the way a genuine plain PERFORM
+        would report. This is the assertion that pins the actual bug: the
+        keyword's presence, not a fully successful sub-parse, is what
+        determines the tag."""
+        cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST-OOL-VARYING-NO-UNTIL.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM VARY-PARA VARYING WS-I FROM 1 BY 1.
+           STOP RUN.
+       VARY-PARA.
+           DISPLAY WS-I.
+       """
+        result = self._parse_cobol(cobol)
+        assert result.ast is not None
+
+        perf = self._first_perform(result.ast)
+        assert perf is not None
+        assert perf.target_paragraph == "VARY-PARA"
+        assert perf.perform_type == "VARYING"
+        assert perf.varying_clause is None
+        # The degraded clause is now surfaced via a warning instead of
+        # being fully silent.
+        assert any("VARYING" in w for w in result.warnings)
+
+    def test_out_of_line_varying_not_confused_with_simple_perform(self):
+        """A genuine plain `PERFORM para.` (no VARYING at all) must still
+        report perform_type "SIMPLE" -- guards against a fix that tags
+        every out-of-line PERFORM as VARYING regardless of the source."""
+        cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST-PLAIN-PERFORM.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM SOME-PARA.
+           STOP RUN.
+       SOME-PARA.
+           DISPLAY "HELLO".
+       """
+        result = self._parse_cobol(cobol)
+        assert result.ast is not None
+
+        perf = self._first_perform(result.ast)
+        assert perf is not None
+        assert perf.target_paragraph == "SOME-PARA"
+        assert perf.perform_type == "SIMPLE"
+        assert perf.varying_clause is None
 
 
 class TestPerformEdgeCasesRegression:

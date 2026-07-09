@@ -2398,6 +2398,38 @@ class TestProgramFlowEdgeCases:
         assert perform_edges[0].is_loop is True
         assert perform_edges[0].perform_type == "VARYING"
 
+    def test_out_of_line_perform_varying_is_loop(self) -> None:
+        """Out-of-line `PERFORM procedure-name VARYING ...` (a target
+        paragraph followed by VARYING, as opposed to the inline `PERFORM
+        VARYING ... END-PERFORM` form covered above) must also be
+        classified as a loop edge, end to end through the real parser.
+        Previously this shape wasn't parsed as VARYING at all --
+        `perform_type` stayed the default "SIMPLE", so `is_loop` here
+        would have come out `False` for a genuine loop."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OOLVARYING.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-I PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM LOOP-PARA VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 10
+           STOP RUN.
+       LOOP-PARA.
+           DISPLAY WS-I.
+"""
+        result = parse_cobol(source, filename="oolvarying.cbl")
+        assert result.ast is not None
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert len(perform_edges) == 1
+        assert perform_edges[0].perform_type == "VARYING"
+        assert perform_edges[0].is_loop is True
+
     # -- EXIT with non-PROGRAM type (SECTION, PARAGRAPH) ----------------------
 
     def test_exit_section_not_marked_as_exit_point(self) -> None:
