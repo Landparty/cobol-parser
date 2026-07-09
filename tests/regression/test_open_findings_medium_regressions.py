@@ -134,3 +134,79 @@ class TestM14CacheHitBytesAccounting:
             "max_total_size must raise, even when later inclusions are "
             "served from the intra-expansion cache"
         )
+
+
+class TestM9NestedStatementSwallowedException:
+    """M9 -- try_parse_nested_statement's bare except Exception had no
+    trace at all (not even a warning) for exceptions that bypass
+    report_or_raise, e.g. TokenMismatch/UnexpectedEndOfInput raised
+    directly by token_stream.expect().
+    """
+
+    def test_unrecorded_exception_surfaces_as_warning(self, monkeypatch):
+        from cobolparser.parsers.statements import _utils
+
+        class _FakeRegistry:
+            def find_parser(self, stream):
+                return self
+
+            def parse(self, stream):
+                raise ValueError("boom -- not routed through report_or_raise")
+
+        class _FakeStream:
+            _registry = _FakeRegistry()
+            context = None
+
+        collected_warnings = []
+
+        class _FakeHost:
+            def add_warning(self, message):
+                collected_warnings.append(message)
+
+        class _FakeContext:
+            host = _FakeHost()
+
+        monkeypatch.setattr(
+            _utils, "get_parse_context", lambda stream: _FakeContext()
+        )
+
+        result = _utils.try_parse_nested_statement(_FakeStream())
+
+        assert result is None
+        assert len(collected_warnings) == 1
+        assert "boom" in collected_warnings[0]
+
+    def test_already_recorded_exception_does_not_double_warn(self, monkeypatch):
+        from cobolparser.parsers.statements import _utils
+
+        class _AlreadyRecordedError(Exception):
+            _already_recorded = True
+
+        class _FakeRegistry:
+            def find_parser(self, stream):
+                return self
+
+            def parse(self, stream):
+                raise _AlreadyRecordedError("already handled by report_or_raise")
+
+        class _FakeStream:
+            _registry = _FakeRegistry()
+            context = None
+
+        collected_warnings = []
+
+        class _FakeHost:
+            def add_warning(self, message):
+                collected_warnings.append(message)
+
+        class _FakeContext:
+            host = _FakeHost()
+
+        monkeypatch.setattr(
+            _utils, "get_parse_context", lambda stream: _FakeContext()
+        )
+
+        result = _utils.try_parse_nested_statement(_FakeStream())
+
+        assert result is None
+        assert collected_warnings == []

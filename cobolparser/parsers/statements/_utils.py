@@ -719,8 +719,21 @@ def try_parse_nested_statement(
         return parser.parse(stream)
     except Exception as exc:
         # Exploratory nested dispatch must never raise (the real error is
-        # surfaced via the parse context); log at debug for diagnosability.
+        # surfaced via the parse context when report_or_raise pre-records
+        # it into host.errors before raising). Exceptions that bypass
+        # report_or_raise entirely -- e.g. TokenMismatch/UnexpectedEndOfInput
+        # raised directly by token_stream.expect() -- would otherwise vanish
+        # with only this DEBUG line; surface those as a warning so a caller
+        # checking ParseResult.warnings isn't blind to the failure (M9).
         logger.debug("try_parse_nested suppressed %r", exc, exc_info=True)
+        if not getattr(exc, "_already_recorded", False):
+            context = get_parse_context(stream)
+            host = getattr(context, "host", None) if context else None
+            add_warning = getattr(host, "add_warning", None)
+            if callable(add_warning):
+                add_warning(
+                    f"Nested statement parse failed and was skipped: {exc}"
+                )
         return None
 
 
