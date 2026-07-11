@@ -96,6 +96,14 @@ class TestPictureIsClause:
         assert item.picture_clause.pattern == "X(99)"
         assert item.value_clause == "SPACE"
 
+    def test_pic_newline_is_x(self):
+        item = _single_item(
+            "       01  WS-X   PIC\n" "                  IS X(99)   VALUE SPACE.\n"
+        )
+        assert item.picture_clause is not None
+        assert item.picture_clause.pattern == "X(99)"
+        assert item.value_clause == "SPACE"
+
     def test_picture_is_9(self):
         item = _single_item("       01  WS-N   PICTURE IS 9(5).\n")
         assert item.picture_clause is not None

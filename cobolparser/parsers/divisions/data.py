@@ -1247,9 +1247,11 @@ class DataDivisionParser(BaseDivisionParser):
         # pattern was returned) moved on and then silently dropped IS, the
         # whole pattern, and any numeric literal in it (misread as a new
         # data item's level number) as unrecognized clause tokens.
+        self._skip_newlines(token_stream)
         is_token = token_stream.peek()
         if is_token and is_token.type == TokenType.IS:
             token_stream.consume()
+            self._skip_newlines(token_stream)
 
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
