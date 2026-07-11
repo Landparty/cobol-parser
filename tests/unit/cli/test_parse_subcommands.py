@@ -1,5 +1,5 @@
 """Tests for cobolparser.cli.parse subcommands: analyze, dead-code,
-program-flow, generate-tests, and error paths in _read_source / _resolve_path.
+program-flow, and error paths in _read_source / _resolve_path.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import pytest
 from cobolparser.cli.parse import (
     _cmd_analyze,
     _cmd_dead_code,
-    _cmd_generate_tests,
     _cmd_program_flow,
     _read_source,
     _resolve_path,
@@ -53,24 +52,6 @@ def _make_dead_code_args(filepath: str, **kwargs) -> argparse.Namespace:
 
 def _make_program_flow_args(filepath: str, **kwargs) -> argparse.Namespace:
     return _make_analyze_args(filepath, **kwargs)
-
-
-def _make_generate_tests_args(
-    filepath: str, output=None, strategy=None, **kwargs
-) -> argparse.Namespace:
-    defaults = {
-        "file": filepath,
-        "compact": False,
-        "free_form": False,
-        "dialect": "ibm-enterprise",
-        "error_recovery": "collect-all",
-        "copybook_path": [],
-        "define": [],
-        "output": output,
-        "strategy": strategy,
-    }
-    defaults.update(kwargs)
-    return argparse.Namespace(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -240,43 +221,6 @@ class TestCmdProgramFlow:
         out = capsys.readouterr().out.strip()
         assert "\n" not in out
         json.loads(out)
-
-
-# ---------------------------------------------------------------------------
-# _cmd_generate_tests
-# ---------------------------------------------------------------------------
-
-
-class TestCmdGenerateTests:
-    def test_generate_tests_stdout(self, capsys):
-        args = _make_generate_tests_args(_SIMPLE)
-        _cmd_generate_tests(args)
-        out = capsys.readouterr().out
-        assert len(out) > 0  # produced some output
-
-    def test_generate_tests_to_file(self, tmp_path, capsys):
-        out_file = str(tmp_path / "tests.cut")
-        args = _make_generate_tests_args(_SIMPLE, output=out_file)
-        _cmd_generate_tests(args)
-        stdout = capsys.readouterr().out
-        # summary line printed to stdout
-        assert "test cases" in stdout
-        # file was written
-        assert Path(out_file).exists()
-        assert Path(out_file).stat().st_size > 0
-
-    def test_generate_tests_with_strategy(self, capsys):
-        args = _make_generate_tests_args(_SIMPLE, strategy=["paragraph"])
-        _cmd_generate_tests(args)
-        out = capsys.readouterr().out
-        assert len(out) > 0
-
-    def test_generate_tests_parse_failure_exits(self, tmp_path):
-        bad = tmp_path / "bad.cbl"
-        bad.write_text("@@@@ NOT COBOL")
-        args = _make_generate_tests_args(str(bad), error_recovery="fail-fast")
-        with pytest.raises(SystemExit):
-            _cmd_generate_tests(args)
 
 
 # ---------------------------------------------------------------------------

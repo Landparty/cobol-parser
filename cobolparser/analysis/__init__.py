@@ -31,22 +31,6 @@ def __getattr__(name: str) -> object:
             "IOOperation": IOOperation,
         }
         return _map[name]
-    if name in ("CoverageAnalyzer", "CoverageMap"):
-        from .coverage_analyzer import CoverageAnalyzer, CoverageMap
-
-        _map = {
-            "CoverageAnalyzer": CoverageAnalyzer,
-            "CoverageMap": CoverageMap,
-        }
-        return _map[name]
-    if name in ("TestPlanGenerator", "TestPlan"):
-        from .test_plan import TestPlan, TestPlanGenerator
-
-        _map = {
-            "TestPlanGenerator": TestPlanGenerator,
-            "TestPlan": TestPlan,
-        }
-        return _map[name]
     if name in (
         "ProgramFlowAnalyzer",
         "ProgramFlowReport",
@@ -212,7 +196,6 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
-    "CoverageAnalyzer",
     "CRUDFlags",
     "CRUDMatrix",
     "CRUDMatrixGenerator",
@@ -225,7 +208,6 @@ __all__ = [
     "LEAnalysisResult",
     "LEFunctionUsage",
     "LEServiceCall",
-    "CoverageMap",
     "DataCategory",
     "DeadCodeAnalyzer",
     "DeadCodeReport",
@@ -249,8 +231,6 @@ __all__ = [
     "MoveTypeReport",
     "MoveTypeViolation",
     "MoveViolationKind",
-    "TestPlan",
-    "TestPlanGenerator",
     "ProgramFlowAnalyzer",
     "ProgramFlowReport",
     "FlowNode",

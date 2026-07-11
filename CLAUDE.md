@@ -92,7 +92,6 @@ cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser program-flow <file.cbl>
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
-cobol-parser generate-tests <file.cbl> -o <file.cut>
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>
@@ -157,13 +156,12 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 15 static analysis modules:
+**`cobolparser/analysis/`** -- 13 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
 - `io_logger.py` -- IO operation logging
 - `io_sequence.py` -- IO sequence validation
-- `coverage_analyzer.py` -- Test coverage analysis
 - `crud_matrix.py` -- CRUD matrix generation for file operations
 - `dead_code.py` -- Unreferenced paragraph/section detection
 - `host_var_resolver.py` -- SQL host variable resolution
@@ -172,10 +170,8 @@ COBOL source (.cbl/.cob)
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
 - `program_flow.py` -- Control flow graph analysis
-- `test_plan.py` -- Test plan generation from AST
 
 **`cobolparser/generators/`** -- Code generation utilities:
-- `cobolcheck.py` -- Generates CobolCheck `.cut` test files from parsed AST
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
@@ -183,7 +179,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 
 **`cobolparser/cli/`** -- Command-line interface:
-- `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, generate-tests, io-sequence, move-type-check, linkage-check, language-env, ims-dli
+- `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, io-sequence, move-type-check, linkage-check, language-env, ims-dli
 - `coverage.py` -- IO coverage CLI tools
 
 ### Statement Parsers (cobolparser/parsers/statements/)
@@ -296,11 +292,6 @@ from cobolparser import (
     CRUDMatrixGenerator,        # matrix.entries, .to_csv(), .to_json()
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
-
-# CobolCheck test generation — three-stage pipeline available via
-# CoverageAnalyzer + TestPlanGenerator + CobolCheckGenerator
-from cobolparser import generate_cobolcheck_tests
-output = generate_cobolcheck_tests(source, strategies=["paragraph", "branch", "boundary"])
 ```
 
 ### Adding a New Statement Parser
@@ -335,7 +326,7 @@ tests/
   unit/                  # Unit tests - individual components
     analysis/            # IO coverage reporter, diagnostics, all analyzers
     cli/                 # CLI command tests
-    generators/          # CobolCheck and flowchart generator tests
+    generators/          # Flowchart generator tests
     io_statements/       # IO parser unit tests
   integration/           # Integration tests - end-to-end parsing
     test_shamrice_examples.py  # Parametrized: all *.cbl in examples/cobol/shamrice/ must parse error-free

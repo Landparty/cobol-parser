@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Removed
+
+* **CobolCheck test generation** (2026-07-09): the `cobol-parser generate-tests`
+  CLI subcommand, the `generate_cobolcheck_tests()` Python API, and the
+  `CoverageAnalyzer` / `TestPlanGenerator` / `CobolCheckGenerator` classes have
+  been removed. Equivalent test-generation functionality now lives in the
+  mockymock framework.
+
 ### Added
 
 * **OCCURS `ASCENDING/DESCENDING KEY` and multi-index `INDEXED BY` capture**

@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 15 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, test generation, and more.
-tags: [analysis, dead-code, program-flow, io, crud, test-generation]
+description: 13 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, and more.
+tags: [analysis, dead-code, program-flow, io, crud]
 timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 15 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 13 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`.
 
@@ -24,11 +24,7 @@ from cobolparser import (
     LinkageChecker,
     LanguageEnvironmentAnalyzer,
     CRUDMatrixGenerator,
-    CoverageAnalyzer,
-    TestPlanGenerator,
-    CobolCheckGenerator,         # from cobolparser.generators
     DynamicCallAnalyzer,
-    generate_cobolcheck_tests,   # convenience wrapper
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 ```
@@ -69,8 +65,7 @@ and IF/EVALUATE/SEARCH/RETURN — it never descended into IO clause bodies
 STRING/UNSTRING `ON OVERFLOW`. A PERFORM/GO TO/CALL nested in one of those
 produced no edge, cascading into **false `unreachable_nodes`** and missing
 flowchart arrows. Fixed with a final `else` branch iterating
-`_CLAUSE_BODY_ATTRS` (same clause-attribute set as
-`coverage_analyzer._nested_statements`); the `id`-based `visited` set keeps the
+`_CLAUSE_BODY_ATTRS`; the `id`-based `visited` set keeps the
 generic pass from double-counting statements the specialized branches already
 handled. Pinned by `tests/regression/test_tier6_silent_drop_audit.py`.
 
@@ -186,24 +181,6 @@ resolved = HostVariableResolver().resolve(ast)   # note: .resolve(), not .analyz
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
 definitions.
 
-## CoverageAnalyzer + TestPlanGenerator + CobolCheckGenerator
-
-Three-stage test-generation pipeline:
-
-```python
-from cobolparser.analysis.coverage_analyzer import CoverageAnalyzer
-from cobolparser.analysis.test_plan import TestPlanGenerator
-from cobolparser.generators.cobolcheck import CobolCheckGenerator
-
-coverage_map: CoverageMap = CoverageAnalyzer().analyze(ast)
-test_plan: TestPlan     = TestPlanGenerator(strategies=["paragraph","branch","boundary"]).generate(coverage_map)
-cut_content: str        = CobolCheckGenerator().generate(test_plan)
-
-# Or, one-shot convenience:
-from cobolparser import generate_cobolcheck_tests
-cut_content = generate_cobolcheck_tests(source, strategies=["paragraph","branch","boundary"])
-```
-
 # Module File Map
 
 | File | Analyzer |
@@ -213,7 +190,6 @@ cut_content = generate_cobolcheck_tests(source, strategies=["paragraph","branch"
 | `io_diagnostics.py` | IO operation diagnostics |
 | `io_logger.py` | `IOLogger` |
 | `io_sequence.py` | `IOSequenceAnalyzer` |
-| `coverage_analyzer.py` | `CoverageAnalyzer` |
 | `crud_matrix.py` | `CRUDMatrixGenerator` |
 | `dead_code.py` | `DeadCodeAnalyzer` |
 | `host_var_resolver.py` | `HostVariableResolver` |
@@ -222,7 +198,6 @@ cut_content = generate_cobolcheck_tests(source, strategies=["paragraph","branch"
 | `linkage_checker.py` | `LinkageChecker` |
 | `move_type_checker.py` | `MoveTypeChecker` |
 | `program_flow.py` | `ProgramFlowAnalyzer` |
-| `test_plan.py` | `TestPlanGenerator` |
 
 # Silent-Failure Audit (2026-07-08)
 

@@ -1,6 +1,6 @@
 # cobol-parser
 
-Python library for parsing IBM Enterprise COBOL source into an AST. Supports dependency extraction, dead code detection, program flow analysis, CRUD matrices, and CobolCheck test generation. 99.1% parse success on the NIST COBOL-85 corpus.
+Python library for parsing IBM Enterprise COBOL source into an AST. Supports dependency extraction, dead code detection, program flow analysis, and CRUD matrices. 99.1% parse success on the NIST COBOL-85 corpus.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-5800%2B%20passing-green.svg)](#commands)
@@ -51,7 +51,6 @@ CLI:
 cobol-parser parse program.cbl
 cobol-parser analyze program.cbl      # dynamic call analysis
 cobol-parser dead-code program.cbl    # unreferenced paragraphs
-cobol-parser generate-tests program.cbl -o program.cut
 ```
 
 ## Commands

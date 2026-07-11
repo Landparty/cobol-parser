@@ -65,8 +65,6 @@ import logging
 from .analysis import (
     BranchArm,
     BranchNode,
-    CoverageAnalyzer,
-    CoverageMap,
     CRUDFlags,
     CRUDMatrix,
     CRUDMatrixGenerator,
@@ -101,8 +99,6 @@ from .analysis import (
     ProgramFlowAnalyzer,
     ProgramFlowReport,
     TableEntry,
-    TestPlan,
-    TestPlanGenerator,
 )
 from .batch import (
     BatchResult,
@@ -112,7 +108,6 @@ from .batch import (
 from .dialects import (
     IBMEnterpriseCobol,
 )
-from .generators import CobolCheckGenerator
 from .lexer import (
     CobolLexer,
     LexerError,
@@ -195,42 +190,6 @@ from .profiling import (
 #     ANSICobol,
 #     MicroFocusCobol,
 # )
-
-
-def generate_cobolcheck_tests(
-    source: str,
-    filename: str = "<string>",
-    strategies: list[str] | None = None,
-) -> str:
-    """Parse COBOL source and generate CobolCheck test content.
-
-    Args:
-        source: COBOL source code string.
-        filename: Source filename for error reporting.
-        strategies: Coverage strategies to use (default: all).
-
-    Returns:
-        String content for a .cut file.
-
-    Raises:
-        ValueError: If the source cannot be parsed.
-    """
-    result = parse_cobol(source, filename=filename)
-    if result.ast is None:
-        errors = "; ".join(str(e) for e in result.errors)
-        raise ValueError(f"Failed to parse COBOL source: {errors}")
-
-    from .analysis.coverage_analyzer import CoverageAnalyzer as _CoverageAnalyzer
-    from .analysis.test_plan import TestPlanGenerator as _TestPlanGenerator
-
-    analyzer = _CoverageAnalyzer()
-    coverage_map = analyzer.analyze(result.ast)
-
-    planner = _TestPlanGenerator(strategies=strategies)
-    test_plan = planner.generate(coverage_map)
-
-    generator = CobolCheckGenerator()
-    return generator.generate(test_plan)
 
 
 # Version info
@@ -328,13 +287,6 @@ __all__ = [
     "IOLogger",
     "IOLogReport",
     "IOOperation",
-    # Coverage analysis and test generation
-    "CoverageAnalyzer",
-    "CoverageMap",
-    "TestPlanGenerator",
-    "TestPlan",
-    "CobolCheckGenerator",
-    "generate_cobolcheck_tests",
     # Will be added when implemented:
     # "ANSICobol",
     # "MicroFocusCobol",

@@ -1,5 +1,27 @@
 # OKF Update Log
 
+## 2026-07-09 (CobolCheck test generation removed — superseded by mockymock)
+
+Removed the CobolCheck test-generation feature end to end: the
+`cobol-parser generate-tests` CLI subcommand, the `generate_cobolcheck_tests()`
+Python API, and the `CoverageAnalyzer` / `TestPlanGenerator` /
+`CobolCheckGenerator` classes (`cobolparser/analysis/coverage_analyzer.py`,
+`cobolparser/analysis/test_plan.py`, `cobolparser/generators/cobolcheck.py`,
+all deleted), plus their ~180 dedicated tests across 6 test files. Confirmed
+via `interface-contract.md` that the backend adapter never called into this
+feature, so no cross-repo consumer was affected. The vendored copy in
+`backend/_vendor/cobol-parser/` was re-synced afterward. Full suite still
+passes (6,638 passed / 13 skipped / 5 xfailed) at 92.44% coverage, above the
+81% floor.
+
+* **Updated** [cli.md](cli.md): removed the "Generate-Tests" subcommand
+  section and the CobolCheck mention in Output Identification.
+* **Updated** [analysis.md](analysis.md): removed the "CoverageAnalyzer +
+  TestPlanGenerator + CobolCheckGenerator" section, its Public API imports,
+  and its two Module File Map rows; module count 15 → 13.
+* **Updated** [tests.md](tests.md): refreshed pass count and the
+  `generators/` directory description (flowchart tests only now).
+
 ## 2026-07-09 (ENVIRONMENT/DATA division sections stamped with the wrong line — user-reported)
 
 A user testing the parser noticed that `ENVIRONMENT DIVISION`'s

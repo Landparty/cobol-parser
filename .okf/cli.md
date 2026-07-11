@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-07-08T00:00:00Z
+timestamp: 2026-07-09T00:00:00Z
 ---
 
 # Overview
@@ -34,8 +34,7 @@ pinned by `tests/unit/cli/test_output_identification.py`):
 * **`batch`** — a JSON list; each entry carries `"path"` and, when the parse
   produced an AST, `"program_id"`.
 * **Text outputs** — Mermaid flowcharts start with a `%% Program: <name>`
-  comment; DOT names the digraph after the program; generated CobolCheck
-  `.cut` files carry the program name in their header comment. `preprocess`
+  comment; DOT names the digraph after the program. `preprocess`
   output is deliberately unidentified (it is transformed source meant to be
   fed onward).
 
@@ -150,20 +149,6 @@ count). `--encoding` sets file read encoding (default `utf-8`). Prints one
 JSON result per file. `--errors` includes parse errors/warnings per file;
 `--stats` appends per-file `ParseStatistics`. `--profile-output` in batch mode
 must be a directory (one `.prof` per file), not a single file path.
-
-## Generate-Tests
-
-```bash
-cobol-parser generate-tests <file.cbl> -o <file.cut>
-```
-
-Runs the three-stage test-generation pipeline (`CoverageAnalyzer` →
-`TestPlanGenerator` → `CobolCheckGenerator`) and writes a CobolCheck `.cut` file.
-`-o`/`--output` write failures (bad path, permission denied) now go through
-the standard `_fail("Cannot write output file: ...")` path instead of an
-uncaught traceback (audit 2026-07-08) — this subcommand's file write was the
-one place that bypassed the shared `_text_out()` error handling every other
-output-writing subcommand uses.
 
 ## IO-Sequence
 

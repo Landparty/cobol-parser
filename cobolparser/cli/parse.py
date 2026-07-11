@@ -21,7 +21,6 @@ _SUBCOMMANDS = frozenset(
         "analyze",
         "dead-code",
         "program-flow",
-        "generate-tests",
         "io-sequence",
         "move-type-check",
         "linkage-check",
@@ -807,66 +806,6 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
         _emit_report(report.to_dict(), args, prof, ast)
 
 
-# -- Subcommand: generate-tests -----------------------------------------------
-
-
-def _build_generate_tests_parser(
-    subparsers: argparse._SubParsersAction,
-) -> None:
-    p = subparsers.add_parser(
-        "generate-tests",
-        help="Generate CobolCheck unit tests from COBOL source",
-    )
-    p.add_argument("file", help="Path to the COBOL source file")
-    p.add_argument(
-        "--output",
-        "-o",
-        default=None,
-        metavar="FILE",
-        help="Output .cut file path (default: stdout)",
-    )
-    p.add_argument(
-        "--strategy",
-        action="append",
-        default=None,
-        choices=["paragraph", "branch", "boundary"],
-        help="Coverage strategy to use (repeatable; default: all)",
-    )
-    _add_free_form_arg(p)
-    _add_dialect_arg(p)
-    _add_error_recovery_arg(p)
-    _add_copybook_args(p)
-    _add_define_args(p)
-    p.set_defaults(func=_cmd_generate_tests)
-
-
-def _cmd_generate_tests(args: argparse.Namespace) -> None:
-    ast, _prof = _parse_or_fail(args)
-
-    from ..analysis.coverage_analyzer import CoverageAnalyzer
-    from ..analysis.test_plan import TestPlanGenerator
-    from ..generators.cobolcheck import CobolCheckGenerator
-
-    analyzer = CoverageAnalyzer()
-    coverage_map = analyzer.analyze(ast)
-
-    planner = TestPlanGenerator(strategies=args.strategy)
-    test_plan = planner.generate(coverage_map)
-
-    generator = CobolCheckGenerator()
-    output = generator.generate(test_plan)
-
-    if args.output:
-        try:
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(output)
-        except OSError as e:
-            _fail(f"Cannot write output file: {e}")
-        print(f"Generated {test_plan.total_test_cases} test cases -> {args.output}")
-    else:
-        print(output, end="")
-
-
 # -- Subcommand: io-sequence --------------------------------------------------
 
 
@@ -1111,7 +1050,6 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
     )
     _build_program_flow_parser(subparsers)
-    _build_generate_tests_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
         "io-sequence",

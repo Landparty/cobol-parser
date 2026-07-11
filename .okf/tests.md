@@ -8,7 +8,10 @@ timestamp: 2026-07-09T00:00:00Z
 
 # Overview
 
-6,789 passed / 13 skipped / 5 xfailed (2026-07-09: +30 in the new
+6,638 passed / 13 skipped / 5 xfailed (2026-07-09: CobolCheck test
+generation — `CoverageAnalyzer`, `TestPlanGenerator`, `CobolCheckGenerator`,
+the `generate-tests` CLI subcommand, and their ~180 dedicated tests — was
+removed, superseded by the mockymock framework. Earlier the same day: +30 in
 `tests/regression/test_open_findings_medium_regressions.py`, one test
 class per MEDIUM finding M1, M2, M3, M4, M5, M7, M8, M9, M14, M16 fixed
 that day, plus a Cython/pure-Python parity check — see
@@ -18,7 +21,7 @@ for the M4/M5/M7/M8/M14 write-ups; also includes the earlier same-day +21
 in `tests/regression/test_open_findings_high_regressions.py` for HIGH
 findings H1-H8). Coverage floor: **81% line coverage** enforced by
 `--cov-fail-under=81` in `pyproject.toml`; full-suite run measured
-92.65%. Branch coverage is enabled.
+92.44%. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
 
@@ -31,7 +34,7 @@ tests/
   unit/                        # individual components
     analysis/                  # IO coverage reporter, diagnostics, all analyzers
     cli/                       # CLI command tests
-    generators/                # CobolCheck and flowchart generator tests
+    generators/                # Flowchart generator tests
     io_statements/             # IO parser unit tests
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free

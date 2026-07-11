@@ -39,7 +39,6 @@ from ..models.statements.misc import (
 
 # Conditional clause-body attributes that may hold nested statements on IO /
 # arithmetic / STRING statements the ``scan()`` dispatch does not special-case.
-# Kept in sync with ``coverage_analyzer._nested_statements``.
 _CLAUSE_BODY_ATTRS: tuple[str, ...] = (
     "at_end_clause",
     "not_at_end_clause",
@@ -789,7 +788,7 @@ class ProgramFlowAnalyzer:
                 # STRING/UNSTRING (ON OVERFLOW). Without descending here, a
                 # PERFORM/GO TO/CALL living inside such a clause produced no
                 # edge, cascading into false "unreachable" reports and missing
-                # flowchart arrows. Mirrors coverage_analyzer._nested_statements.
+                # flowchart arrows.
                 for attr in _CLAUSE_BODY_ATTRS:
                     clause = getattr(stmt, attr, None)
                     if isinstance(clause, list):
