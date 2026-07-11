@@ -1238,6 +1238,19 @@ class DataDivisionParser(BaseDivisionParser):
         both the pure-Python and Cython-accelerated data-item paths; the fast
         clause loop delegates here so the two can never drift.
         """
+        # Optional IS: PICTURE IS <pattern> / PIC IS <pattern>. Consumed
+        # here (rather than by callers) so both the pure-Python and
+        # Cython-accelerated dispatch loops get it via this shared method.
+        # Previously unhandled: the pattern-token dispatch below has no
+        # branch for TokenType.IS, so an unconsumed IS fell straight
+        # through to the caller's clause loop, which (seeing no picture
+        # pattern was returned) moved on and then silently dropped IS, the
+        # whole pattern, and any numeric literal in it (misread as a new
+        # data item's level number) as unrecognized clause tokens.
+        is_token = token_stream.peek()
+        if is_token and is_token.type == TokenType.IS:
+            token_stream.consume()
+
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
 
@@ -1305,7 +1318,16 @@ class DataDivisionParser(BaseDivisionParser):
         after VALUE), so LEVEL_NUMBER is accepted as a numeric literal here —
         after a consumed VALUE keyword a level number can only be a literal.
         A MINUS/PLUS token followed by a numeric is a signed literal.
+
+        The clause's operand may start on the physical line after the
+        `VALUE`/`IS` keyword with no fixed-format `-` continuation
+        indicator required (ordinary multi-line clause continuation, legal
+        COBOL, same as any other clause in this division) -- so NEWLINE
+        tokens are skipped both before and after an optional `IS`, mirroring
+        `_skip_newlines`'s use elsewhere in this file (e.g. the OCCURS
+        ASCENDING/DESCENDING KEY and INDEXED BY clauses).
         """
+        self._skip_newlines(token_stream)
         token = token_stream.peek()
         if not token:
             return None
@@ -1313,6 +1335,7 @@ class DataDivisionParser(BaseDivisionParser):
         # Optional IS: VALUE IS <literal>
         if token.type == TokenType.IS:
             token_stream.consume()
+            self._skip_newlines(token_stream)
             token = token_stream.peek()
             if not token:
                 return None
