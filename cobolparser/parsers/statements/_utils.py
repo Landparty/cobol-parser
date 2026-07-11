@@ -207,6 +207,49 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
     }
 )
 
+# Reserved COBOL clause-continuation words that the lexer does not tokenize
+# with a dedicated TokenType (unlike e.g. WITH/ON/FROM/TO/BY, which already
+# have their own TokenType and so can never reach looks_like_paragraph_
+# boundary's IDENTIFIER check at all) -- these lex as plain TokenType.
+# IDENTIFIER but, being reserved words, can never legally be a paragraph
+# name or an unrecognized verb, so they must never be misread as either.
+# Sourced from the clause vocabularies of the six statement parsers H9
+# (7405700) wired looks_like_paragraph_boundary into: DISPLAY, MOVE,
+# COMPUTE (arithmetic_parsers), STRING/UNSTRING, INSPECT. See the STRING/
+# UNSTRING regression this fixes: a multi-clause ``STRING a DELIMITED BY
+# SIZE b DELIMITED BY SIZE c ...`` with each ``DELIMITED BY SIZE`` clause
+# on its own continuation line -- exactly the layout GnuCOBOL/IBM COBOL
+# style guides recommend -- had every ``DELIMITED`` past the first
+# misdetected as a new statement, silently truncating the AST.
+CLAUSE_CONTINUATION_KEYWORDS: frozenset = frozenset(
+    {
+        "ALL",
+        "COLUMN",
+        "CONVERTING",
+        "COUNT",
+        "DELIMITED",
+        "DELIMITER",
+        "FILLER",
+        "FUNCTION",
+        "GIVING",
+        "INITIAL",
+        "OVERFLOW",
+        "POINTER",
+        "ROUNDED",
+        "TALLYING",
+    }
+)
+
+# DB2/SQL special registers that real COBOL programs legitimately reference
+# (DISPLAY SQLCODE, IF SQLCODE NOT = 0, ...) without any WORKING-STORAGE
+# declaration -- the SQL precompiler provides them, so they are never a
+# "declared DATA DIVISION name" the way looks_like_paragraph_boundary's
+# existing known_data_names cross-check expects. Deliberately narrow: only
+# the two special registers commonly referenced bare (unsubscripted); array
+# members like SQLERRD(3)/SQLWARN0 are followed by a token other than a
+# clean line-start IDENTIFIER and are not affected by this heuristic.
+SQL_SPECIAL_REGISTERS: frozenset = frozenset({"SQLCODE", "SQLSTATE"})
+
 
 # ---------------------------------------------------------------------------
 # Token value helpers
@@ -274,7 +317,14 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     * it is not a name declared in the DATA DIVISION -- excluded so a
       genuinely wrapped continuation-line operand (``DISPLAY\\n    WS-X.``)
       is not misread as the start of a new statement just because it opens
-      its line.
+      its line;
+    * it is not one of :data:`CLAUSE_CONTINUATION_KEYWORDS` (reserved
+      COBOL clause words -- ``DELIMITED``, ``TALLYING``, ``POINTER``, ...
+      -- that the lexer does not give a dedicated TokenType, so they reach
+      this check as plain IDENTIFIERs even though a reserved word can
+      never legally be a paragraph name or unrecognized verb) or
+      :data:`SQL_SPECIAL_REGISTERS` (``SQLCODE``/``SQLSTATE``, which real
+      programs reference without a WORKING-STORAGE declaration).
 
     Earlier this also required the token be immediately followed by a period
     or SECTION -- the bare paragraph-header shape. That under-detected: an
@@ -297,7 +347,11 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     if token is None or token.type != TokenType.IDENTIFIER or not token.value:
         return False
     value_upper = token.value.upper()
-    if value_upper in STATEMENT_KEYWORDS:
+    if (
+        value_upper in STATEMENT_KEYWORDS
+        or value_upper in CLAUSE_CONTINUATION_KEYWORDS
+        or value_upper in SQL_SPECIAL_REGISTERS
+    ):
         return False
 
     prev = previous_meaningful_token(token_stream)
