@@ -418,7 +418,7 @@ class ProcedureScanner:
             elif isinstance(stmt, AlterStatement):
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):
-                self._collector.process_cancel(stmt, source_id)
+                self._collector.process_cancel(stmt, proc_name)
             elif isinstance(stmt, ReturnStatement):
                 node.has_return = True
                 # Scan AT END / NOT AT END branches for nested flow
