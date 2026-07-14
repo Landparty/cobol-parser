@@ -1,5 +1,16 @@
 # OKF Update Log
 
+## 2026-07-14 (program_flow god-class refactor)
+
+* [analysis.md](analysis.md): `cobolparser/analysis/program_flow.py` (~987-line
+  `ProgramFlowAnalyzer` class) decomposed into the package
+  `cobolparser/analysis/program_flow/` with focused collaborators —
+  `models.py`, `scanner.py` (`ProcedureScanner`), `edges.py`
+  (`EdgeCollector` + edge-type category sets), `cycles.py`, `graph.py`,
+  `analyzer.py`. Behavior-preserving: public API, import paths, and
+  `to_dict()` output unchanged (verified byte-identical against the old
+  implementation across all sample programs).
+
 ## 2026-07-09 (H9 fixed: missing-period paragraph-boundary swallow)
 
 Follow-up to the same-day H1-H8 pass below: fixed H9, the one HIGH finding
