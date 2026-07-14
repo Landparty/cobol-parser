@@ -412,9 +412,9 @@ class ProcedureScanner:
                     for s in stmt.at_end_clause:
                         scan(s, source_id)
             elif isinstance(stmt, SortStatement):
-                self._collector.process_sort(stmt, source_id)
+                self._collector.process_sort(stmt, proc_name)
             elif isinstance(stmt, MergeStatement):
-                self._collector.process_merge(stmt, source_id)
+                self._collector.process_merge(stmt, proc_name)
             elif isinstance(stmt, AlterStatement):
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):
