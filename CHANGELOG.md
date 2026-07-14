@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Bug Fixes
+
+* **parser:** exclude clause-continuation keywords (`DELIMITED`, `TALLYING`,
+  `POINTER`, ...) and SQL special registers (`SQLCODE`/`SQLSTATE`) from
+  `looks_like_paragraph_boundary`, and drop its period/`SECTION` lookahead so
+  an unknown verb followed by its own operands is caught too. Fixes
+  real-world layouts — a multi-source `STRING` with each `DELIMITED BY SIZE`
+  clause on its own continuation line, and a period-less `DISPLAY` before a
+  bare `SQLCODE` — that were silently truncating the AST. Pinned by
+  `tests/regression/test_clause_continuation_boundary.py`.
+
 ## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)
 
 

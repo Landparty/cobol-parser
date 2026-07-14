@@ -1,5 +1,28 @@
 # OKF Update Log
 
+## 2026-07-14 (H9 refinement: clause-continuation keywords + SQL special registers)
+
+Refined `looks_like_paragraph_boundary()` (`parsers/statements/_utils.py`) so
+the H9 missing-period recovery no longer misclassifies two real-world shapes
+surfaced by the mockymock legacy-application corpus sweep:
+
+* Added `CLAUSE_CONTINUATION_KEYWORDS` (`DELIMITED`, `TALLYING`, `POINTER`,
+  `GIVING`, `ROUNDED`, ...) and `SQL_SPECIAL_REGISTERS` (`SQLCODE`,
+  `SQLSTATE`) frozensets, excluded alongside `STATEMENT_KEYWORDS`. These are
+  reserved words / precompiler-provided registers that lex as plain
+  `IDENTIFIER` but can never legally be a paragraph name, so a multi-source
+  `STRING` with each `DELIMITED BY SIZE` clause on its own continuation line,
+  or a period-less `DISPLAY` before a bare `SQLCODE`, no longer truncates the
+  AST.
+* Dropped the "next token must be a period or `SECTION`" lookahead. That form
+  under-detected: an unknown/misspelled verb followed by its own operands
+  (`FROBNICATE WS-X.`) is as undetectable to a keyword-set check as a bare
+  paragraph name and was silently absorbed. The DATA-DIVISION cross-check now
+  covers both shapes. Full suite stays green (6761 passed / 18 skipped /
+  5 xfailed).
+
+Pinned by `tests/regression/test_clause_continuation_boundary.py`.
+
 ## 2026-07-09 (H9 fixed: missing-period paragraph-boundary swallow)
 
 Follow-up to the same-day H1-H8 pass below: fixed H9, the one HIGH finding
