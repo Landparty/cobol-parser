@@ -42,22 +42,13 @@ KNOWN_ISSUES: dict[str, str] = {
         "clean with expansion — see "
         "test_sm101a_parses_clean_with_copybook_expansion"
     ),
-    "SM206A.CBL": (
-        "COPY ... REPLACING with pseudo-text is not applied before parsing, "
-        "so the replacement text — which contains a bare MOVE token "
-        "(`BY MOVE ==DELETE==`) — leaks into the statement stream as a MOVE "
-        "with no TO. Surfaced by the H3 fix (MOVE malformed-input diagnostics); "
-        "was previously masked by silent acceptance. Resolve by implementing "
-        "COPY REPLACING pseudo-text substitution."
-    ),
-    "SM208A.CBL": (
-        "uses the REPLACE compiler-directing statement (30x) and `==...==` "
-        "pseudo-text, which the parser does not apply; the raw pseudo-text "
-        '(`MOVE "*" AO WRK-XN-00001`, `==MOVE "FAIL" TO==`) leaks into the '
-        "statement stream as malformed MOVEs (missing TO / missing target). "
-        "Surfaced by the H3 fix; was previously masked by silent acceptance. "
-        "Resolve by implementing the REPLACE statement."
-    ),
+    # SM206A.CBL removed: COPY ... REPLACING with pseudo-text no longer leaks.
+    # The non-expansion parse now strips un-expanded COPY statements (including
+    # their REPLACING pseudo-text) before lexing. See
+    # tests/regression/test_replace_and_copy_pseudo_text.py.
+    # SM208A.CBL removed: the REPLACE compiler-directing statement is now
+    # applied as a source-text pseudo-text substitution pass before lexing.
+    # See tests/regression/test_replace_and_copy_pseudo_text.py.
     # NC205A.CBL removed: its continued numeric literal `-999.777` now
     # normalizes correctly (fixed-format continuation-line join no longer
     # injects a space). See tests/regression/test_continued_literal_normalization.py.

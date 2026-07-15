@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **preprocess:** implement COBOL source-text pseudo-text substitution before
+  lexing (`cobolparser/preprocess/replace_statement.py`), wired into
+  `CobolParser._parse_core`. Two NIST COBOL-85 programs now parse error-free
+  and were removed from `KNOWN_ISSUES`:
+  * `apply_replace_statements` applies the `REPLACE ==a== BY ==b== [==c== BY
+    ==d== ...] .` compiler-directing statement (one or more operand pairs) and
+    cancels the active set at `REPLACE OFF.`. Matching is on the COBOL
+    *text-word* stream — whitespace-, comma-, and semicolon-insensitive between
+    words, with a separator period treated as its own text word and literals
+    compared exactly — so multi-word / multi-line pseudo-text (including a
+    pseudo-text operand that itself contains a period or a statement keyword)
+    matches regardless of layout. Fixes `SM208A.CBL` (30x `REPLACE`), where the
+    raw pseudo-text (`MOVE "*" AO WRK-XN-00001`, `==MOVE "FAIL" TO==`) had been
+    leaking into the statement stream as malformed MOVEs.
+  * `strip_unexpanded_copy_statements` blanks `COPY` statements the standalone
+    pipeline is not going to expand — reusing the pseudo-text-aware
+    `CopyStatementLexer` — so a `COPY ... REPLACING ==pseudo-text==` operand
+    that legally contains a bare `MOVE` token (`SM206A.CBL`'s `BY MOVE
+    ==DELETE==`) no longer leaks as a `MOVE` with no `TO`. In the
+    copybook-expansion pipeline COPY is already inlined before this point, so
+    the strip is a no-op there.
+  Both passes preserve the physical line count of their input. Pinned by
+  `tests/regression/test_replace_and_copy_pseudo_text.py`.
 * **parser:** exclude clause-continuation keywords (`DELIMITED`, `TALLYING`,
   `POINTER`, ...) and SQL special registers (`SQLCODE`/`SQLSTATE`) from
   `looks_like_paragraph_boundary`, and drop its period/`SECTION` lookahead so

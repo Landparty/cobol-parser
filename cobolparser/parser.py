@@ -32,6 +32,10 @@ from .plugins.core import (
     SerializationConfig,
 )
 from .preprocess import normalize_fixed_format, strip_compiler_directives
+from .preprocess.replace_statement import (
+    apply_replace_statements,
+    strip_unexpanded_copy_statements,
+)
 from .profiling import ProfilerContext, ProfilingResult
 
 logger = logging.getLogger(__name__)
@@ -214,6 +218,23 @@ class CobolParser:
                         else "free-form"
                     ),
                 )
+
+            # Source-text manipulation before lexing (mirrors a compiler's
+            # COPY/REPLACE text phase). Strip un-expanded COPY statements so a
+            # REPLACING pseudo-text operand does not leak into the token
+            # stream, then apply REPLACE compiler-directing statements. Both
+            # preserve line count. In the copybook-expansion pipeline COPY is
+            # already inlined before this point, so the COPY strip is a no-op
+            # there.
+            preprocess_warnings: list[str] = []
+            cleaned_source = strip_unexpanded_copy_statements(
+                cleaned_source, warnings=preprocess_warnings
+            )
+            cleaned_source = apply_replace_statements(
+                cleaned_source, warnings=preprocess_warnings
+            )
+            for _warning in preprocess_warnings:
+                self.add_warning(_warning)
 
             lexer = CobolLexer(
                 cleaned_source, filename, self.dialect, free_form=actual_free_form

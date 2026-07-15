@@ -1,5 +1,43 @@
 # OKF Update Log
 
+## 2026-07-14 (REPLACE statement + un-expanded COPY pseudo-text substitution)
+
+Implemented COBOL source-text pseudo-text substitution as a preprocessing pass
+run before lexing, in a new module `cobolparser/preprocess/replace_statement.py`,
+wired into `CobolParser._parse_core` just before `CobolLexer`. Two NIST
+COBOL-85 programs (`SM206A`, `SM208A`) now parse error-free and were removed
+from `KNOWN_ISSUES` in `tests/integration/test_nist_cobol85_support.py`.
+
+* **`apply_replace_statements`** — the `REPLACE ==a== BY ==b== [ ... ] .`
+  compiler-directing statement (one or more operand pairs) with `REPLACE OFF.`
+  cancelling the active set. Matching is on a COBOL **text-word** stream via a
+  new `_tokenize_text_words`: space/comma/semicolon separators are equivalent
+  (not text words), a separator period IS its own text word (so `MOVE WS-A TO
+  WS-B.` matches a find of `MOVE WS-A TO WS-B` and keeps the sentence period),
+  literals are single words compared case-sensitively, other words compare
+  case-insensitively. A single left-to-right scan per segment applies the
+  active pairs (first match wins); the REPLACE statements themselves are
+  blanked. Fixes `SM208A` (30x `REPLACE`; `MOVE "*" AO ...`, `==MOVE "FAIL"
+  TO==`, giant 160-quote literals, multi-line pseudo-text, `,`/`;` separators,
+  empty `====` deletion).
+* **`strip_unexpanded_copy_statements`** — blanks `COPY` statements the
+  standalone (`parse_cobol`) pipeline will not expand, reusing the existing
+  pseudo-text-aware `CopyStatementLexer` (single COPY parser, not a divergent
+  one). This removes the whole statement — including a `REPLACING
+  ==pseudo-text==` operand that legally contains statement keywords/periods —
+  so nothing leaks into the token stream. Fixes `SM206A`, whose `COPY KP004
+  REPLACING ... BY MOVE ==DELETE== ...` leaked a bare `MOVE` as a MOVE with no
+  TO. In the copybook-expansion pipeline COPY is already inlined before this
+  point, so the strip is a no-op there (verified: `SM206A` still parses clean
+  with expansion, `SM101A`/`SM207A` expansion tests unaffected).
+
+Both passes preserve their input's physical line count (every newline in a
+removed/replaced span is re-emitted) so downstream error line numbers stay
+aligned. Both are cheap no-ops when the source contains no `REPLACE`/`COPY`
+keyword. Full suite stays green (6791 passed / 18 skipped / 3 xfailed; +24 new
+tests, and `SM206A`/`SM208A` flipped from strict-xfail to pass). Pinned by
+`tests/regression/test_replace_and_copy_pseudo_text.py`.
+
 ## 2026-07-14 (H9 refinement: clause-continuation keywords + SQL special registers)
 
 Refined `looks_like_paragraph_boundary()` (`parsers/statements/_utils.py`) so

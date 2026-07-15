@@ -19,6 +19,7 @@ raw COBOL (fixed format)
   ──► normalize_fixed_format()   # columns 8-72, blanks comment/blank lines (preserving line numbers), merges continuations
   ──► expand_copybooks()         # optionally: inline COPY … REPLACING … statements
   ──► strip_compiler_directives()# drop compiler control statements (used inside CobolParser)
+  ──► strip_unexpanded_copy_statements() / apply_replace_statements()  # source-text manipulation (inside CobolParser, pre-lex)
   ──► CobolLexer.tokenize()
 ```
 
@@ -150,6 +151,59 @@ routes these into `ExpansionStatistics.warnings`; the CLI (`--define`)
 prints them to stderr. Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
 / `::TestH7ConditionalCompilationWarnings`.
+
+# Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
+
+`preprocess/replace_statement.py` implements the two source-text
+pseudo-text-substitution passes the standalone (non-copybook-expanding) parse
+pipeline needs. Both run inside `CobolParser._parse_core` on the normalized
+free-form source, immediately before `CobolLexer`, and both preserve their
+input's physical line count (every newline in a removed/replaced span is
+re-emitted). Each is a cheap no-op when its keyword is absent.
+
+```python
+from cobolparser.preprocess.replace_statement import (
+    apply_replace_statements,          # REPLACE ==a== BY ==b== . / REPLACE OFF.
+    strip_unexpanded_copy_statements,  # blank COPY the pipeline won't expand
+)
+```
+
+* **`apply_replace_statements(source, warnings=None)`** — applies the
+  `REPLACE ==pseudo-text-1== BY ==pseudo-text-2== [ ... ] .` compiler-directing
+  statement (one or more operand pairs) and cancels the active set at
+  `REPLACE OFF.`. A new `REPLACE` **replaces** the active set rather than
+  accumulating. Matching is on a COBOL **text-word** stream (`_tokenize_text_words`):
+  * space / comma / semicolon separators are equivalent and are *not* text
+    words (so `MOVE; "FAIL" , TO` matches `MOVE , "FAIL"; TO`);
+  * a **separator period** is its own text word (so a find of
+    `MOVE WS-A TO WS-B` matches source `MOVE WS-A TO WS-B.` and leaves the
+    sentence period in place);
+  * a literal (`"..."` / `'...'`) is one text word compared case-sensitively;
+    other words compare case-insensitively;
+  * a decimal point inside a numeric literal (`3.14`) stays part of the word.
+
+  Each source segment between REPLACE statements is rewritten by a single
+  left-to-right word scan (first active pair to match at a position wins);
+  the REPLACE statements themselves are blanked. `REPLACE` inside a string
+  literal is ignored. A `warnings` list receives a diagnostic if a set is
+  still active at EOF (no closing `REPLACE OFF.`).
+
+* **`strip_unexpanded_copy_statements(source, warnings=None)`** — blanks
+  `COPY` statements the standalone pipeline is not going to expand
+  (`parse_cobol` does not resolve copybooks). It **reuses `CopyStatementLexer`**
+  (the same pseudo-text-aware scanner the expansion path uses — one COPY
+  parser, not a divergent second one) to find each statement's full span,
+  including a `REPLACING ==pseudo-text==` operand that legally contains COBOL
+  statement keywords and periods. Removing the whole statement mirrors a
+  compiler with the copybook unavailable and stops that pseudo-text from
+  leaking as a malformed statement (e.g. `BY MOVE ==DELETE==` had leaked a
+  `MOVE` with no `TO`). In the **copybook-expansion** pipeline COPY is already
+  inlined before this point, so the strip is a no-op there. `warnings` receives
+  one diagnostic per removed COPY plus any the lexer recorded.
+
+These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
+(`COPY ... REPLACING` pseudo-text) parse error-free; pinned by
+`tests/regression/test_replace_and_copy_pseudo_text.py`.
 
 # Copybook Path Resolution (`path_resolver.py`)
 
