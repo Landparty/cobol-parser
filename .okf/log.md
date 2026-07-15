@@ -10,6 +10,12 @@
   `_parse_picture_clause`/`_parse_value_clause`/`_parse_usage_clause`
   wrappers required by the `_data_fast` Cython callback surface. Division
   Parsers table updated; behavior-preserving, no public API change.
+* [parser.md](parser.md): `EnvironmentDivisionParser`
+  (`parsers/divisions/environment.py`, ~1,133 lines) decomposed into
+  `environment_sections.py` (`ConfigurationSectionParser`,
+  `InputOutputSectionParser`) and `environment_select.py`
+  (`SelectClauseParser`). The division parser keeps its import path and
+  delegates; behavior-preserving, no public API change.
 
 ## 2026-07-14 (program_flow god-class refactor)
 

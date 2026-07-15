@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_parse_value_clause`, and `_parse_usage_clause` remain on the class with
   their exact signatures because the compiled `_data_fast` extension calls
   them back by name. No behavior or public API changes.
+* **parser:** internal refactor — `EnvironmentDivisionParser`
+  (`cobolparser/parsers/divisions/environment.py`, ~1,133 lines) decomposed
+  into focused collaborators: `environment_sections.py`
+  (`ConfigurationSectionParser` — CONFIGURATION SECTION + SPECIAL-NAMES;
+  `InputOutputSectionParser` — INPUT-OUTPUT SECTION + FILE-CONTROL) and
+  `environment_select.py` (`SelectClauseParser` — SELECT statements, all
+  clause parsers, and `SelectStatement` AST node construction).
+  `EnvironmentDivisionParser` stays at its original import path, keeps the
+  division scan loop and AST creation, and delegates section/SELECT parsing.
+  No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
 ## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)
