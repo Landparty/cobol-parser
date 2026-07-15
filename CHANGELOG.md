@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **parser:** internal refactor — `DataDivisionParser`
+  (`cobolparser/parsers/divisions/data.py`, ~1,467 lines) decomposed into
+  focused collaborators: `data_clauses.py` (`DataItemClauseParser` — data-item
+  entries and their PICTURE/VALUE/USAGE/OCCURS/... clauses, including the
+  optional `_data_fast` Cython fast path), `data_file_description.py`
+  (`FileDescriptionClauseParser` — FD/SD clause capture), and
+  `data_special_entries.py` (`SpecialEntryParser` — level-88 condition names,
+  level-66 RENAMES, data-division EXEC SQL blocks). `DataDivisionParser` stays
+  at its original import path, keeps the section scan / hierarchy build / AST
+  creation, and delegates entry parsing; `_parse_picture_clause`,
+  `_parse_value_clause`, and `_parse_usage_clause` remain on the class with
+  their exact signatures because the compiled `_data_fast` extension calls
+  them back by name. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
 ## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)

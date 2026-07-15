@@ -111,8 +111,18 @@ CobolParser.parse(source)
 | `base.py` | Base division parser with error recovery |
 | `identification.py` | IDENTIFICATION DIVISION |
 | `environment.py` | ENVIRONMENT DIVISION |
-| `data.py` | DATA DIVISION |
+| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below |
+| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
+| `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
+| `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names, level-66 RENAMES, data-division EXEC SQL blocks |
 | `procedure.py` | PROCEDURE DIVISION — hosts `StatementParserRegistry` |
+
+**Cython callback surface (2026-07-15 refactor):** `DataDivisionParser` keeps
+`_parse_picture_clause` / `_parse_value_clause` / `_parse_usage_clause` (and
+`_parse_data_item`) as delegating wrappers with their historical names and
+signatures — the compiled `_data_fast` extension receives the division parser
+as `parser_self` and calls those three back by name. New clause logic goes in
+`DataItemClauseParser`; the wrappers must stay.
 
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside

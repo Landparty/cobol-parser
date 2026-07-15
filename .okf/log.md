@@ -1,5 +1,16 @@
 # OKF Update Log
 
+## 2026-07-15 (division-parser god-class refactor)
+
+* [parser.md](parser.md): `DataDivisionParser`
+  (`parsers/divisions/data.py`, ~1,467 lines) decomposed into collaborators
+  `data_clauses.py` (`DataItemClauseParser`), `data_file_description.py`
+  (`FileDescriptionClauseParser`), and `data_special_entries.py`
+  (`SpecialEntryParser`). The division parser keeps its import path and the
+  `_parse_picture_clause`/`_parse_value_clause`/`_parse_usage_clause`
+  wrappers required by the `_data_fast` Cython callback surface. Division
+  Parsers table updated; behavior-preserving, no public API change.
+
 ## 2026-07-14 (program_flow god-class refactor)
 
 * [analysis.md](analysis.md): `cobolparser/analysis/program_flow.py` (~987-line
