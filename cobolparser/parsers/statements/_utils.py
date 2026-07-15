@@ -319,6 +319,10 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
       (``SQLCODE``/``SQLSTATE``, which real programs reference without a
       WORKING-STORAGE declaration);
     * it starts a new source line relative to the previously consumed token;
+    * it is immediately followed by a period or SECTION -- required because
+      a continuation-line operand named by an *unexpanded* COPY member is
+      not in ``known_data_names``, and without this shape check it would be
+      misread as a boundary, truncating the statement;
     * it is not a name declared in the DATA DIVISION -- excluded so a
       genuinely wrapped continuation-line operand (``DISPLAY\\n    WS-X.``)
       is not misread as a paragraph header just because it opens its line.
@@ -345,6 +349,31 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     prev_line = getattr(getattr(prev, "location", None), "line", None)
     cur_line = getattr(getattr(token, "location", None), "line", None)
     if prev_line is None or cur_line is None or prev_line == cur_line:
+        return False
+
+    # The candidate must be immediately followed by a period or SECTION —
+    # the bare paragraph-header shape. This deliberately under-detects
+    # (an unknown verb followed by its own operands is not caught), but
+    # dropping it is a proven real-world regression: a continuation-line
+    # operand whose name comes from an *unexpanded* COPY member is not in
+    # known_data_names, so without this shape check it is misread as a
+    # boundary and the statement is truncated (caught by mocky-mock's
+    # copybook fixtures: `COMPUTE X =` / newline / `ORD-AMOUNT ...`).
+    offset = 1
+    nxt = token_stream.peek(offset)
+    while nxt is not None and nxt.type in (
+        TokenType.WHITESPACE,
+        TokenType.COMMENT,
+        TokenType.NEWLINE,
+        TokenType.CONTINUATION,
+    ):
+        offset += 1
+        nxt = token_stream.peek(offset)
+    if nxt is None:
+        return False
+    is_period = nxt.type == TokenType.PERIOD
+    is_section = bool(nxt.value) and nxt.value.upper() == "SECTION"
+    if not (is_period or is_section):
         return False
 
     context = get_parse_context(token_stream)

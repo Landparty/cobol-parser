@@ -85,12 +85,14 @@ surfaced by the mockymock legacy-application corpus sweep:
   `STRING` with each `DELIMITED BY SIZE` clause on its own continuation line,
   or a period-less `DISPLAY` before a bare `SQLCODE`, no longer truncates the
   AST.
-* Dropped the "next token must be a period or `SECTION`" lookahead. That form
-  under-detected: an unknown/misspelled verb followed by its own operands
-  (`FROBNICATE WS-X.`) is as undetectable to a keyword-set check as a bare
-  paragraph name and was silently absorbed. The DATA-DIVISION cross-check now
-  covers both shapes. Full suite stays green (6761 passed / 18 skipped /
-  5 xfailed).
+* The "next token must be a period or `SECTION`" lookahead is **kept**.
+  Dropping it (as the abandoned PR #87 branch did) looked attractive for
+  catching unknown-verb shapes, but is a proven real-world regression: a
+  continuation-line operand named by an *unexpanded* COPY member is not in
+  `known_data_names`, so without the shape check it is misread as a
+  boundary and the statement truncated — mocky-mock's copybook fixtures
+  (`COMPUTE X =` / newline / `ORD-AMOUNT ...` with `COPY ORDREC.`
+  unresolved) caught exactly this.
 
 Pinned by `tests/regression/test_clause_continuation_boundary.py`.
 
