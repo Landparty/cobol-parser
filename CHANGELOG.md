@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EnvironmentDivisionParser` stays at its original import path, keeps the
   division scan loop and AST creation, and delegates section/SELECT parsing.
   No behavior or public API changes.
+* **parser:** internal refactor — `ProcedureDivisionParser`
+  (`cobolparser/parsers/divisions/procedure.py`, ~912 lines) decomposed into
+  focused collaborator modules: `procedure_registry.py`
+  (`create_statement_registry()` — builds the shared
+  `StatementParserRegistry` with all 40+ statement parsers),
+  `procedure_boundaries.py` (paragraph/section/statement boundary lookahead
+  predicates), and `procedure_recovery.py` (`StatementRecoveryHandler` —
+  unsupported-statement warnings, FAIL_FAST/COLLECT_ALL error recording, and
+  stream resynchronization; also hosts the `STRAY_MARKERS` /
+  `UNSUPPORTED_VERBS` sets, aliased on the class for introspection).
+  `ProcedureDivisionParser` stays at its original import path, keeps the
+  paragraph/section dispatch loop, ParseContext attachment, and AST
+  creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
 ## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)
