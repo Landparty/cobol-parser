@@ -1,5 +1,38 @@
 # OKF Update Log
 
+## 2026-07-14 (Area B–aware comment-entry termination; NIST KNOWN_ISSUES emptied)
+
+Made the IDENTIFICATION DIVISION parser's boundary checks comment-entry
+aware (`parsers/divisions/identification.py`,
+`_at_comment_entry_aware_boundary`): COBOL-74 comment-entries end only at
+the next **Area A** entry, and `normalize_fixed_format` preserves Area A/B
+as leading indentation. The parser now tracks an `in_comment_entry` state —
+opened when an AUTHOR/INSTALLATION/DATE-WRITTEN/DATE-COMPILED/REMARKS/
+SECURITY entry itself starts in Area A (at or left of the division's own
+header column, stashed by `BaseDivisionParser.parse` as
+`_division_header_column`), closed by PROGRAM-ID or an Area A division
+header — and **only while that state is active** does an Area B
+division-header-shaped sequence count as comment text instead of a
+boundary. Fixes NIST `OBNC1M`, whose SECURITY comment-entry embeds an
+entire phony program in Area B — previously the phony `ENVIRONMENT
+DIVISION.` ended the division early and the phony `IDENTIFICATION
+DIVISION.` spawned a bogus program unit failing "PROGRAM-ID is mandatory".
+The state-gating matters: suppressing on column geometry alone broke 31
+tests whose loosely indented sources put every real division deeper than
+the IDENTIFICATION header — outside a comment-entry the column is
+deliberately ignored and those keep terminating the division exactly as
+before. Pinned by `tests/regression/test_comment_entry_area_b.py`.
+
+Also moved `SM101A` from `KNOWN_ISSUES` to a new
+`REQUIRES_COPYBOOK_EXPANSION` set in
+`tests/integration/test_nist_cobol85_support.py`: its COPY members are
+statement fragments by design, so the strict parametrized test now parses it
+through the copybook-expansion pipeline (as a compiler must) and requires
+zero errors — a stronger guarantee than the previous strict-xfail.
+
+**`KNOWN_ISSUES` is now empty: all 459 NIST COBOL-85 programs parse
+error-free** (517 passed / 0 xfailed in the NIST support suite).
+
 ## 2026-07-14 (REPLACE statement + un-expanded COPY pseudo-text substitution)
 
 Implemented COBOL source-text pseudo-text substitution as a preprocessing pass

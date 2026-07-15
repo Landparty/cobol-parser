@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **parser:** IDENTIFICATION DIVISION boundary checks are now comment-entry
+  aware. COBOL-74 comment-entries (AUTHOR, SECURITY, REMARKS, ...) end only
+  at the next Area A entry, and `normalize_fixed_format` preserves Area A/B
+  as indentation — so a phony program embedded in Area B inside a
+  comment-entry (NIST `OBNC1M`) no longer terminates the division early or
+  spawns a bogus second program unit. The relative-column check
+  self-calibrates for free-form sources. Pinned by
+  `tests/regression/test_comment_entry_area_b.py`. With this and the
+  pseudo-text fixes below, **all 459 NIST COBOL-85 programs now parse
+  error-free** (`KNOWN_ISSUES` is empty; `SM101A` is parsed through the
+  copybook-expansion pipeline it requires by design, via
+  `REQUIRES_COPYBOOK_EXPANSION`).
+
 * **preprocess:** implement COBOL source-text pseudo-text substitution before
   lexing (`cobolparser/preprocess/replace_statement.py`), wired into
   `CobolParser._parse_core`. Two NIST COBOL-85 programs now parse error-free

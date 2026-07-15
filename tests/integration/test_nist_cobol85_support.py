@@ -29,19 +29,16 @@ NIST_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol"
 # Programs the parser cannot yet handle error-free. Marked strict-xfail so
 # any improvement is flagged and this list only ever shrinks.
 KNOWN_ISSUES: dict[str, str] = {
-    "OBNC1M.CBL": (
-        "COBOL-74 obsolete-feature test: a REMARKS-style comment-entry "
-        "deliberately contains an entire phony program written in Area B; "
-        "distinguishing it from real divisions requires Area A/B-aware "
-        "comment-entry termination, which the column-stripping normalizer "
-        "does not preserve"
-    ),
-    "SM101A.CBL": (
-        "requires copybook expansion by design (its COPY members are "
-        "statement fragments that complete the surrounding code); parses "
-        "clean with expansion — see "
-        "test_sm101a_parses_clean_with_copybook_expansion"
-    ),
+    # OBNC1M.CBL removed: the IDENTIFICATION DIVISION parser's boundary
+    # checks are now comment-entry aware — normalize_fixed_format preserves
+    # Area A/B as indentation, so the phony program its SECURITY
+    # comment-entry embeds in Area B no longer terminates the division. See
+    # tests/regression/test_comment_entry_area_b.py.
+    # SM101A.CBL removed from KNOWN_ISSUES: it requires copybook expansion by
+    # design (its COPY members are statement fragments that complete the
+    # surrounding code), so the strict parametrized test now parses it through
+    # the copybook-expansion pipeline — the way a compiler must — via
+    # REQUIRES_COPYBOOK_EXPANSION below, and requires zero errors there.
     # SM206A.CBL removed: COPY ... REPLACING with pseudo-text no longer leaks.
     # The non-expansion parse now strips un-expanded COPY statements (including
     # their REPLACING pseudo-text) before lexing. See
@@ -57,6 +54,14 @@ KNOWN_ISSUES: dict[str, str] = {
 # Copybooks the content validator currently flags. Marked strict-xfail so a
 # validator improvement is flagged and this list only ever shrinks.
 KNOWN_COPYBOOK_ISSUES: dict[str, str] = {}
+
+# Programs that are incomplete as standalone text by design: their COPY
+# members are statement *fragments* that complete the surrounding code, so no
+# COBOL compiler could process them without expansion either. The strict
+# parametrized test parses these through the copybook-expansion pipeline
+# (against the suite's own copybooks) and still requires zero errors — a
+# stronger guarantee than the strict-xfail these entries used to carry.
+REQUIRES_COPYBOOK_EXPANSION: frozenset = frozenset({"SM101A.CBL"})
 
 
 def _read(path: Path) -> str:
@@ -96,7 +101,11 @@ class TestCorpusPresence:
         assert len(list(NIST_DIR.glob("*.CPY"))) >= 51
 
     def test_known_issues_refer_to_existing_files(self) -> None:
-        for name in [*KNOWN_ISSUES, *KNOWN_COPYBOOK_ISSUES]:
+        for name in [
+            *KNOWN_ISSUES,
+            *KNOWN_COPYBOOK_ISSUES,
+            *REQUIRES_COPYBOOK_EXPANSION,
+        ]:
             assert (NIST_DIR / name).exists(), f"stale KNOWN_ISSUES entry: {name}"
 
 
@@ -105,8 +114,20 @@ class TestNistProgramsParseErrorFree:
 
     @pytest.mark.parametrize("cbl_path", _cbl_params())
     def test_parses_error_free(self, cbl_path: Path) -> None:
-        parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
-        result = parser.parse(_read(cbl_path))
+        if cbl_path.name in REQUIRES_COPYBOOK_EXPANSION:
+            from cobolparser.preprocess.copybook_expander import (
+                parse_cobol_with_expansion,
+            )
+
+            result = parse_cobol_with_expansion(
+                _read(cbl_path),
+                filename=cbl_path.name,
+                copybook_paths=[str(NIST_DIR)],
+                error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+            )
+        else:
+            parser = CobolParser(error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+            result = parser.parse(_read(cbl_path))
         assert result.ast is not None, f"{cbl_path.name}: AST is None"
         assert result.errors == [], f"{cbl_path.name}: parse errors:\n" + "\n".join(
             str(e) for e in result.errors
