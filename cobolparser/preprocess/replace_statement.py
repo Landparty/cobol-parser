@@ -261,12 +261,17 @@ class _ReplaceScanner:
             if (not (prev.isalnum() or prev in ("-", "_"))) and self._match_word(
                 "REPLACE"
             ):
+                # Captured immediately after the keyword match so a rewind
+                # can't land mid-word when separators preceded the keyword
+                # (keyword_start may point at those separators).
+                after_keyword = self.pos
                 stmt = self._parse_replace_at(keyword_start)
                 if stmt is not None:
                     statements.append(stmt)
                     continue
-                # Not a well-formed REPLACE — rewind past the keyword only.
-                self.pos = keyword_start + len("REPLACE")
+                # Not a well-formed REPLACE — rewind past the keyword only,
+                # so the text _parse_replace_at consumed is re-scanned.
+                self.pos = after_keyword
                 continue
             self.pos += 1
         return statements
@@ -412,8 +417,12 @@ def strip_unexpanded_copy_statements(
         cursor = end
         if warnings is not None:
             member = (stmt.member_name or "").strip()
+            # Wording is path-neutral: this pass runs both when no copybook
+            # path was configured AND when expansion ran but could not
+            # resolve this member (missing file) — the caller can't tell
+            # which from here.
             warnings.append(
-                f"COPY {member} not expanded (no copybook path configured); "
+                f"COPY {member} was not expanded; "
                 "its content is omitted from the parsed program"
             )
     pieces.append(source[cursor:])

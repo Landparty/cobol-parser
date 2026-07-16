@@ -1,5 +1,30 @@
 # OKF Update Log
 
+## 2026-07-15 (PR #89 review fixes: Area A comment-entry termination, COPY warning wording, REPLACE scanner rewind)
+
+Three small fixes out of the PR #89 self-review:
+
+* **Comment-entry termination completed** (`divisions/identification.py`):
+  per COBOL-74, *any* entry starting in Area A ends a comment-entry — not
+  just recognized clause keywords. The clause-value loop now stops at a
+  line-starting Area A token (tracked via each consumed token's line, so
+  same-line values after `AUTHOR.` are unaffected), and the main loop's
+  unknown-clause recovery closes `in_comment_entry` on an Area A token.
+  Two new tests in `tests/regression/test_comment_entry_area_b.py`
+  (unknown Area A word closes the entry; an Area B `AUTHOR` keyword does
+  not open one).
+* **Un-expanded COPY warning is path-neutral**
+  (`preprocess/replace_statement.py`): now `COPY <member> was not
+  expanded; ...` — the old "(no copybook path configured)" was wrong when
+  expansion ran but couldn't resolve the member. mocky-mock's adapter
+  matches on `COPY ` + `not expanded`, unaffected.
+* **REPLACE scanner rewind** (`preprocess/replace_statement.py`): a failed
+  `_parse_replace_at` now rewinds to just past the matched keyword
+  (captured after `_match_word`), not `keyword_start + 7`, which could
+  land mid-word when separators preceded the keyword.
+
+Full suite: 6797 passed / 18 skipped / 1 xfailed; ruff/black/mypy clean.
+
 ## 2026-07-14 (Area B–aware comment-entry termination; NIST KNOWN_ISSUES emptied)
 
 Made the IDENTIFICATION DIVISION parser's boundary checks comment-entry

@@ -152,7 +152,13 @@ class IdentificationDivisionParser(BaseDivisionParser):
                     token_stream, in_comment_entry=in_comment_entry
                 )
             else:
-                # Unknown clause - skip it for error recovery
+                # Unknown clause - skip it for error recovery. Per COBOL-74,
+                # *any* entry starting in Area A ends an active
+                # comment-entry — not just recognized clause keywords — so
+                # an unknown Area A word closes the state before being
+                # consumed (comment-entry continuation text is Area B).
+                if in_comment_entry and self._token_in_area_a(token):
+                    in_comment_entry = False
                 token_stream.consume()
 
         # Validate mandatory PROGRAM-ID
@@ -255,8 +261,11 @@ class IdentificationDivisionParser(BaseDivisionParser):
         Args:
             token_stream: Token stream positioned at clause keyword
             in_comment_entry: True when the clause is an Area A
-                comment-entry, so Area B division-header-shaped text inside
-                the value is documentation rather than a boundary
+                comment-entry: Area B division-header-shaped text inside the
+                value is documentation rather than a boundary, and — per
+                COBOL-74, where a comment-entry ends at the next entry
+                starting in Area A — any line-starting Area A token ends the
+                value (comment-entry continuation text is Area B)
 
         Returns:
             Clause value as a string
@@ -265,7 +274,8 @@ class IdentificationDivisionParser(BaseDivisionParser):
             ParseError: If clause syntax is invalid
         """
         # Consume clause keyword (AUTHOR, INSTALLATION, etc.)
-        token_stream.consume()
+        keyword_token = token_stream.consume()
+        last_line = getattr(getattr(keyword_token, "location", None), "line", None)
 
         # Expect period after clause keyword
         try:
@@ -289,6 +299,19 @@ class IdentificationDivisionParser(BaseDivisionParser):
             if token and token.value == ".":
                 token_stream.consume()
                 break
+            # A comment-entry ends at the next entry starting in Area A
+            # (COBOL-74). Only a *line-starting* token counts: in loosely
+            # indented free-form sources, mid-line tokens can sit at or left
+            # of the header column without being entries.
+            if token and in_comment_entry:
+                cur_line = getattr(getattr(token, "location", None), "line", None)
+                starts_line = (
+                    cur_line is not None
+                    and last_line is not None
+                    and cur_line != last_line
+                )
+                if starts_line and self._token_in_area_a(token):
+                    break
             # Stop at division boundaries without consuming them. A bare
             # keyword such as DATA only counts when actually followed by
             # DIVISION — comment-entries are free text and may contain it —
@@ -301,6 +324,9 @@ class IdentificationDivisionParser(BaseDivisionParser):
             if token:
                 value_tokens.append(token.value)
                 token_stream.consume()
+                cur_line = getattr(getattr(token, "location", None), "line", None)
+                if cur_line is not None:
+                    last_line = cur_line
             else:
                 break
 

@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as indentation — so a phony program embedded in Area B inside a
   comment-entry (NIST `OBNC1M`) no longer terminates the division early or
   spawns a bogus second program unit. The relative-column check
-  self-calibrates for free-form sources. Pinned by
-  `tests/regression/test_comment_entry_area_b.py`. With this and the
+  self-calibrates for free-form sources. Per COBOL-74, *any* line-starting
+  Area A token — not just recognized clause keywords — ends an active
+  comment-entry, in both the clause-value loop and the main clause loop.
+  Pinned by `tests/regression/test_comment_entry_area_b.py`. With this and the
   pseudo-text fixes below, **all 459 NIST COBOL-85 programs now parse
   error-free** (`KNOWN_ISSUES` is empty; `SM101A` is parsed through the
   copybook-expansion pipeline it requires by design, via

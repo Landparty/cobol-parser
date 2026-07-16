@@ -70,6 +70,53 @@ class TestAreaBPhonyProgramInCommentEntry:
         names = [d.to_dict().get("division_name") for d in result.ast.divisions]
         assert names == ["IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE"]
 
+    def test_unknown_area_a_word_closes_comment_entry(self) -> None:
+        # Per COBOL-74, *any* entry starting in Area A ends a comment-entry,
+        # not just recognized clause keywords. After the unknown Area A word
+        # UNKNOWN-ENTRY, the comment-entry is closed, so the following
+        # Area B DATA DIVISION is a real boundary again (loose-indent
+        # behavior outside comment-entries is unchanged).
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AREACLS.
+       SECURITY.
+           NONE
+       UNKNOWN-ENTRY.
+           DATA DIVISION.
+           WORKING-STORAGE SECTION.
+           01 WS-X PIC 9 VALUE 1.
+           PROCEDURE DIVISION.
+           MAIN-PARA.
+               STOP RUN.
+"""
+        result = _parse(source)
+        assert result.ast is not None
+        names = [d.to_dict().get("division_name") for d in result.ast.divisions]
+        assert "DATA" in names
+        assert "PROCEDURE" in names
+
+    def test_area_b_comment_clause_does_not_open_comment_entry(self) -> None:
+        # Guard: only an AUTHOR/SECURITY/... entry that itself starts in
+        # Area A opens an Area B–swallowing comment-entry. In a loosely
+        # indented source where the AUTHOR keyword sits deeper than the
+        # IDENTIFICATION header, today's behavior is kept: the following
+        # indented DATA DIVISION still terminates the division.
+        source = """       IDENTIFICATION DIVISION.
+           PROGRAM-ID. LOOSTST.
+           AUTHOR. SOMEONE
+           DATA DIVISION.
+           WORKING-STORAGE SECTION.
+           01 WS-X PIC 9 VALUE 1.
+           PROCEDURE DIVISION.
+           MAIN-PARA.
+               STOP RUN.
+"""
+        result = _parse(source)
+        assert result.ast is not None
+        assert result.ast.program_name == "LOOSTST"
+        names = [d.to_dict().get("division_name") for d in result.ast.divisions]
+        assert "DATA" in names
+        assert "PROCEDURE" in names
+
     def test_real_division_at_header_column_still_ends_identification(
         self,
     ) -> None:
