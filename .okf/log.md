@@ -1,5 +1,126 @@
 # OKF Update Log
 
+## 2026-07-15 (PR #89 review fixes: Area A comment-entry termination, COPY warning wording, REPLACE scanner rewind)
+
+Three small fixes out of the PR #89 self-review:
+
+* **Comment-entry termination completed** (`divisions/identification.py`):
+  per COBOL-74, *any* entry starting in Area A ends a comment-entry — not
+  just recognized clause keywords. The clause-value loop now stops at a
+  line-starting Area A token (tracked via each consumed token's line, so
+  same-line values after `AUTHOR.` are unaffected), and the main loop's
+  unknown-clause recovery closes `in_comment_entry` on an Area A token.
+  Two new tests in `tests/regression/test_comment_entry_area_b.py`
+  (unknown Area A word closes the entry; an Area B `AUTHOR` keyword does
+  not open one).
+* **Un-expanded COPY warning is path-neutral**
+  (`preprocess/replace_statement.py`): now `COPY <member> was not
+  expanded; ...` — the old "(no copybook path configured)" was wrong when
+  expansion ran but couldn't resolve the member. mocky-mock's adapter
+  matches on `COPY ` + `not expanded`, unaffected.
+* **REPLACE scanner rewind** (`preprocess/replace_statement.py`): a failed
+  `_parse_replace_at` now rewinds to just past the matched keyword
+  (captured after `_match_word`), not `keyword_start + 7`, which could
+  land mid-word when separators preceded the keyword.
+
+Full suite: 6797 passed / 18 skipped / 1 xfailed; ruff/black/mypy clean.
+
+## 2026-07-14 (Area B–aware comment-entry termination; NIST KNOWN_ISSUES emptied)
+
+Made the IDENTIFICATION DIVISION parser's boundary checks comment-entry
+aware (`parsers/divisions/identification.py`,
+`_at_comment_entry_aware_boundary`): COBOL-74 comment-entries end only at
+the next **Area A** entry, and `normalize_fixed_format` preserves Area A/B
+as leading indentation. The parser now tracks an `in_comment_entry` state —
+opened when an AUTHOR/INSTALLATION/DATE-WRITTEN/DATE-COMPILED/REMARKS/
+SECURITY entry itself starts in Area A (at or left of the division's own
+header column, stashed by `BaseDivisionParser.parse` as
+`_division_header_column`), closed by PROGRAM-ID or an Area A division
+header — and **only while that state is active** does an Area B
+division-header-shaped sequence count as comment text instead of a
+boundary. Fixes NIST `OBNC1M`, whose SECURITY comment-entry embeds an
+entire phony program in Area B — previously the phony `ENVIRONMENT
+DIVISION.` ended the division early and the phony `IDENTIFICATION
+DIVISION.` spawned a bogus program unit failing "PROGRAM-ID is mandatory".
+The state-gating matters: suppressing on column geometry alone broke 31
+tests whose loosely indented sources put every real division deeper than
+the IDENTIFICATION header — outside a comment-entry the column is
+deliberately ignored and those keep terminating the division exactly as
+before. Pinned by `tests/regression/test_comment_entry_area_b.py`.
+
+Also moved `SM101A` from `KNOWN_ISSUES` to a new
+`REQUIRES_COPYBOOK_EXPANSION` set in
+`tests/integration/test_nist_cobol85_support.py`: its COPY members are
+statement fragments by design, so the strict parametrized test now parses it
+through the copybook-expansion pipeline (as a compiler must) and requires
+zero errors — a stronger guarantee than the previous strict-xfail.
+
+**`KNOWN_ISSUES` is now empty: all 459 NIST COBOL-85 programs parse
+error-free** (517 passed / 0 xfailed in the NIST support suite).
+
+## 2026-07-14 (REPLACE statement + un-expanded COPY pseudo-text substitution)
+
+Implemented COBOL source-text pseudo-text substitution as a preprocessing pass
+run before lexing, in a new module `cobolparser/preprocess/replace_statement.py`,
+wired into `CobolParser._parse_core` just before `CobolLexer`. Two NIST
+COBOL-85 programs (`SM206A`, `SM208A`) now parse error-free and were removed
+from `KNOWN_ISSUES` in `tests/integration/test_nist_cobol85_support.py`.
+
+* **`apply_replace_statements`** — the `REPLACE ==a== BY ==b== [ ... ] .`
+  compiler-directing statement (one or more operand pairs) with `REPLACE OFF.`
+  cancelling the active set. Matching is on a COBOL **text-word** stream via a
+  new `_tokenize_text_words`: space/comma/semicolon separators are equivalent
+  (not text words), a separator period IS its own text word (so `MOVE WS-A TO
+  WS-B.` matches a find of `MOVE WS-A TO WS-B` and keeps the sentence period),
+  literals are single words compared case-sensitively, other words compare
+  case-insensitively. A single left-to-right scan per segment applies the
+  active pairs (first match wins); the REPLACE statements themselves are
+  blanked. Fixes `SM208A` (30x `REPLACE`; `MOVE "*" AO ...`, `==MOVE "FAIL"
+  TO==`, giant 160-quote literals, multi-line pseudo-text, `,`/`;` separators,
+  empty `====` deletion).
+* **`strip_unexpanded_copy_statements`** — blanks `COPY` statements the
+  standalone (`parse_cobol`) pipeline will not expand, reusing the existing
+  pseudo-text-aware `CopyStatementLexer` (single COPY parser, not a divergent
+  one). This removes the whole statement — including a `REPLACING
+  ==pseudo-text==` operand that legally contains statement keywords/periods —
+  so nothing leaks into the token stream. Fixes `SM206A`, whose `COPY KP004
+  REPLACING ... BY MOVE ==DELETE== ...` leaked a bare `MOVE` as a MOVE with no
+  TO. In the copybook-expansion pipeline COPY is already inlined before this
+  point, so the strip is a no-op there (verified: `SM206A` still parses clean
+  with expansion, `SM101A`/`SM207A` expansion tests unaffected).
+
+Both passes preserve their input's physical line count (every newline in a
+removed/replaced span is re-emitted) so downstream error line numbers stay
+aligned. Both are cheap no-ops when the source contains no `REPLACE`/`COPY`
+keyword. Full suite stays green (6791 passed / 18 skipped / 3 xfailed; +24 new
+tests, and `SM206A`/`SM208A` flipped from strict-xfail to pass). Pinned by
+`tests/regression/test_replace_and_copy_pseudo_text.py`.
+
+## 2026-07-14 (H9 refinement: clause-continuation keywords + SQL special registers)
+
+Refined `looks_like_paragraph_boundary()` (`parsers/statements/_utils.py`) so
+the H9 missing-period recovery no longer misclassifies two real-world shapes
+surfaced by the mockymock legacy-application corpus sweep:
+
+* Added `CLAUSE_CONTINUATION_KEYWORDS` (`DELIMITED`, `TALLYING`, `POINTER`,
+  `GIVING`, `ROUNDED`, ...) and `SQL_SPECIAL_REGISTERS` (`SQLCODE`,
+  `SQLSTATE`) frozensets, excluded alongside `STATEMENT_KEYWORDS`. These are
+  reserved words / precompiler-provided registers that lex as plain
+  `IDENTIFIER` but can never legally be a paragraph name, so a multi-source
+  `STRING` with each `DELIMITED BY SIZE` clause on its own continuation line,
+  or a period-less `DISPLAY` before a bare `SQLCODE`, no longer truncates the
+  AST.
+* The "next token must be a period or `SECTION`" lookahead is **kept**.
+  Dropping it (as the abandoned PR #87 branch did) looked attractive for
+  catching unknown-verb shapes, but is a proven real-world regression: a
+  continuation-line operand named by an *unexpanded* COPY member is not in
+  `known_data_names`, so without the shape check it is misread as a
+  boundary and the statement truncated — mocky-mock's copybook fixtures
+  (`COMPUTE X =` / newline / `ORD-AMOUNT ...` with `COPY ORDREC.`
+  unresolved) caught exactly this.
+
+Pinned by `tests/regression/test_clause_continuation_boundary.py`.
+
 ## 2026-07-15 (division-parser god-class refactor)
 
 * [parser.md](parser.md): `DataDivisionParser`

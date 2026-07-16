@@ -34,6 +34,53 @@ class IdentificationDivisionParser(BaseDivisionParser):
     division_name: str | None = "IDENTIFICATION"
     division_keywords: tuple = ("ID",)
 
+    #: Clause keywords whose value is a COBOL-74 comment-entry (free
+    #: documentation text). PROGRAM-ID deliberately excluded — its value is
+    #: structured, not a comment-entry.
+    _COMMENT_ENTRY_CLAUSES: frozenset = frozenset(
+        {
+            "AUTHOR",
+            "INSTALLATION",
+            "DATE-WRITTEN",
+            "DATE-COMPILED",
+            "REMARKS",
+            "SECURITY",
+        }
+    )
+
+    def _token_in_area_a(self, token: Any) -> bool:
+        """True when *token* starts at or left of this division's own header
+        column — the Area A position after ``normalize_fixed_format``
+        (which preserves the fixed-format Area A/B split as indentation).
+        Unknown columns conservatively count as Area A."""
+        header_col = getattr(self, "_division_header_column", None)
+        col = getattr(getattr(token, "location", None), "column", None)
+        if header_col is None or col is None:
+            return True
+        return bool(col <= header_col)
+
+    def _at_comment_entry_aware_boundary(
+        self, token_stream: ITokenStream, in_comment_entry: bool
+    ) -> bool:
+        """True at a *real* division boundary, honouring comment-entries.
+
+        COBOL-74 comment-entry paragraphs (AUTHOR, SECURITY, REMARKS, ...)
+        are pure documentation that ends only at the next entry starting in
+        Area A — they may legally contain an entire phony program written in
+        Area B (NIST OBNC1M does exactly that). So while a comment-entry is
+        active, a division header indented into Area B (deeper than this
+        division's own header) is documentation, not a boundary. Outside a
+        comment-entry the column is deliberately ignored: free-form and
+        loosely indented sources routinely place real division headers
+        deeper than the IDENTIFICATION header, and those must keep
+        terminating the division exactly as before.
+        """
+        if not at_division_boundary(token_stream):
+            return False
+        if not in_comment_entry:
+            return True
+        return self._token_in_area_a(token_stream.peek(0))
+
     def parse_division(self, token_stream: ITokenStream) -> dict[str, str | None]:
         """Parse Identification Division content.
 
@@ -69,7 +116,13 @@ class IdentificationDivisionParser(BaseDivisionParser):
             "security": None,
         }
 
-        # Parse clauses until we reach next division or EOF
+        # Parse clauses until we reach next division or EOF. A COBOL-74
+        # comment-entry (opened by an Area A AUTHOR/SECURITY/REMARKS/...
+        # entry) stays "active" until the next Area A entry, so that
+        # division-header-shaped documentation written in Area B inside it
+        # (NIST OBNC1M embeds an entire phony program that way) is consumed
+        # as comment text instead of terminating the division.
+        in_comment_entry = False
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if not token:
@@ -79,27 +132,33 @@ class IdentificationDivisionParser(BaseDivisionParser):
 
             # Check if we've reached the next division. A bare keyword such
             # as DATA only counts when actually followed by DIVISION — the
-            # word may appear inside a comment-entry.
-            if at_division_boundary(token_stream):
+            # word may appear inside a comment-entry — and while a
+            # comment-entry is active, a header indented into Area B is
+            # comment-entry documentation, not a boundary.
+            if self._at_comment_entry_aware_boundary(token_stream, in_comment_entry):
                 break
 
             # Parse specific clauses
             if token_value == "PROGRAM-ID":
+                in_comment_entry = False
                 content["program_id"] = self._parse_program_id(token_stream)
-            elif token_value == "AUTHOR":
-                content["author"] = self._parse_clause_value(token_stream)
-            elif token_value == "INSTALLATION":
-                content["installation"] = self._parse_clause_value(token_stream)
-            elif token_value == "DATE-WRITTEN":
-                content["date_written"] = self._parse_clause_value(token_stream)
-            elif token_value == "DATE-COMPILED":
-                content["date_compiled"] = self._parse_clause_value(token_stream)
-            elif token_value == "REMARKS":
-                content["remarks"] = self._parse_clause_value(token_stream)
-            elif token_value == "SECURITY":
-                content["security"] = self._parse_clause_value(token_stream)
+            elif token_value in self._COMMENT_ENTRY_CLAUSES:
+                # Only an entry that itself starts in Area A opens an
+                # Area B–swallowing comment-entry; a loosely indented source
+                # that puts everything in "Area B" keeps today's behavior.
+                in_comment_entry = self._token_in_area_a(token)
+                key = token_value.lower().replace("-", "_")
+                content[key] = self._parse_clause_value(
+                    token_stream, in_comment_entry=in_comment_entry
+                )
             else:
-                # Unknown clause - skip it for error recovery
+                # Unknown clause - skip it for error recovery. Per COBOL-74,
+                # *any* entry starting in Area A ends an active
+                # comment-entry — not just recognized clause keywords — so
+                # an unknown Area A word closes the state before being
+                # consumed (comment-entry continuation text is Area B).
+                if in_comment_entry and self._token_in_area_a(token):
+                    in_comment_entry = False
                 token_stream.consume()
 
         # Validate mandatory PROGRAM-ID
@@ -190,7 +249,9 @@ class IdentificationDivisionParser(BaseDivisionParser):
 
         return program_name
 
-    def _parse_clause_value(self, token_stream: ITokenStream) -> str:
+    def _parse_clause_value(
+        self, token_stream: ITokenStream, in_comment_entry: bool = False
+    ) -> str:
         """Parse a general clause value.
 
         Format: CLAUSE-KEYWORD. value-text.
@@ -199,6 +260,12 @@ class IdentificationDivisionParser(BaseDivisionParser):
 
         Args:
             token_stream: Token stream positioned at clause keyword
+            in_comment_entry: True when the clause is an Area A
+                comment-entry: Area B division-header-shaped text inside the
+                value is documentation rather than a boundary, and — per
+                COBOL-74, where a comment-entry ends at the next entry
+                starting in Area A — any line-starting Area A token ends the
+                value (comment-entry continuation text is Area B)
 
         Returns:
             Clause value as a string
@@ -207,7 +274,8 @@ class IdentificationDivisionParser(BaseDivisionParser):
             ParseError: If clause syntax is invalid
         """
         # Consume clause keyword (AUTHOR, INSTALLATION, etc.)
-        token_stream.consume()
+        keyword_token = token_stream.consume()
+        last_line = getattr(getattr(keyword_token, "location", None), "line", None)
 
         # Expect period after clause keyword
         try:
@@ -231,14 +299,34 @@ class IdentificationDivisionParser(BaseDivisionParser):
             if token and token.value == ".":
                 token_stream.consume()
                 break
+            # A comment-entry ends at the next entry starting in Area A
+            # (COBOL-74). Only a *line-starting* token counts: in loosely
+            # indented free-form sources, mid-line tokens can sit at or left
+            # of the header column without being entries.
+            if token and in_comment_entry:
+                cur_line = getattr(getattr(token, "location", None), "line", None)
+                starts_line = (
+                    cur_line is not None
+                    and last_line is not None
+                    and cur_line != last_line
+                )
+                if starts_line and self._token_in_area_a(token):
+                    break
             # Stop at division boundaries without consuming them. A bare
             # keyword such as DATA only counts when actually followed by
-            # DIVISION — comment-entries are free text and may contain it.
-            if token and at_division_boundary(token_stream):
+            # DIVISION — comment-entries are free text and may contain it —
+            # and inside an Area A comment-entry, an Area B header-shaped
+            # sequence is comment text too.
+            if token and self._at_comment_entry_aware_boundary(
+                token_stream, in_comment_entry
+            ):
                 break
             if token:
                 value_tokens.append(token.value)
                 token_stream.consume()
+                cur_line = getattr(getattr(token, "location", None), "line", None)
+                if cur_line is not None:
+                    last_line = cur_line
             else:
                 break
 

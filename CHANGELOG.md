@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Bug Fixes
+
+* **parser:** IDENTIFICATION DIVISION boundary checks are now comment-entry
+  aware. COBOL-74 comment-entries (AUTHOR, SECURITY, REMARKS, ...) end only
+  at the next Area A entry, and `normalize_fixed_format` preserves Area A/B
+  as indentation — so a phony program embedded in Area B inside a
+  comment-entry (NIST `OBNC1M`) no longer terminates the division early or
+  spawns a bogus second program unit. The relative-column check
+  self-calibrates for free-form sources. Per COBOL-74, *any* line-starting
+  Area A token — not just recognized clause keywords — ends an active
+  comment-entry, in both the clause-value loop and the main clause loop.
+  Pinned by `tests/regression/test_comment_entry_area_b.py`. With this and the
+  pseudo-text fixes below, **all 459 NIST COBOL-85 programs now parse
+  error-free** (`KNOWN_ISSUES` is empty; `SM101A` is parsed through the
+  copybook-expansion pipeline it requires by design, via
+  `REQUIRES_COPYBOOK_EXPANSION`).
+
+* **preprocess:** implement COBOL source-text pseudo-text substitution before
+  lexing (`cobolparser/preprocess/replace_statement.py`), wired into
+  `CobolParser._parse_core`. Two NIST COBOL-85 programs now parse error-free
+  and were removed from `KNOWN_ISSUES`:
+  * `apply_replace_statements` applies the `REPLACE ==a== BY ==b== [==c== BY
+    ==d== ...] .` compiler-directing statement (one or more operand pairs) and
+    cancels the active set at `REPLACE OFF.`. Matching is on the COBOL
+    *text-word* stream — whitespace-, comma-, and semicolon-insensitive between
+    words, with a separator period treated as its own text word and literals
+    compared exactly — so multi-word / multi-line pseudo-text (including a
+    pseudo-text operand that itself contains a period or a statement keyword)
+    matches regardless of layout. Fixes `SM208A.CBL` (30x `REPLACE`), where the
+    raw pseudo-text (`MOVE "*" AO WRK-XN-00001`, `==MOVE "FAIL" TO==`) had been
+    leaking into the statement stream as malformed MOVEs.
+  * `strip_unexpanded_copy_statements` blanks `COPY` statements the standalone
+    pipeline is not going to expand — reusing the pseudo-text-aware
+    `CopyStatementLexer` — so a `COPY ... REPLACING ==pseudo-text==` operand
+    that legally contains a bare `MOVE` token (`SM206A.CBL`'s `BY MOVE
+    ==DELETE==`) no longer leaks as a `MOVE` with no `TO`. In the
+    copybook-expansion pipeline COPY is already inlined before this point, so
+    the strip is a no-op there.
+  Both passes preserve the physical line count of their input. Pinned by
+  `tests/regression/test_replace_and_copy_pseudo_text.py`.
+* **parser:** exclude clause-continuation keywords (`DELIMITED`, `TALLYING`,
+  `POINTER`, ...) and SQL special registers (`SQLCODE`/`SQLSTATE`) from
+  `looks_like_paragraph_boundary`. Fixes real-world layouts — a multi-source
+  `STRING` with each `DELIMITED BY SIZE` clause on its own continuation
+  line, and a period-less `DISPLAY` before a bare `SQLCODE` — that were
+  silently truncating the AST. The period/`SECTION` lookahead is kept:
+  dropping it misreads continuation-line operands named by *unexpanded*
+  COPY members as boundaries (caught by mocky-mock's copybook fixtures).
+  Pinned by `tests/regression/test_clause_continuation_boundary.py`.
+
 ### Changed
 
 * **parser:** internal refactor — `DataDivisionParser`

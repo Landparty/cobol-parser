@@ -168,6 +168,15 @@ class BaseDivisionParser(IDivisionParser, ABC):
         # Consume division keyword
         division_token = token_stream.consume()
         start_location = division_token.location
+        # Column of this division's own header keyword. Comment-entry-aware
+        # boundary checks (see IdentificationDivisionParser) compare candidate
+        # division keywords against it: COBOL-74 comment-entries end only at
+        # the next Area A entry, and after normalize_fixed_format Area A/B
+        # survives as indentation, so a "division header" indented deeper
+        # than the real header is comment text, not a boundary.
+        self._division_header_column: int | None = getattr(
+            start_location, "column", None
+        )
 
         # Check for optional "DIVISION" keyword. COBOL words may be separated
         # by newlines, so the header can be split across source lines
