@@ -57,6 +57,20 @@ Produces a control-flow graph. Edge types:
 
 THRU ranges expand to `range_members`; cycles are classified in `cycle_details`.
 
+**Structure (2026-07-14):** `program_flow` is a package, not a single module.
+`cobolparser/analysis/program_flow/` splits the former god class into
+collaborators — `models.py` (`FlowNode`/`FlowEdge`/`FlowEdgeType`/`BranchArm`/
+`BranchNode`/`ProgramFlowReport`), `scanner.py` (`ProcedureScanner`: procedure
+collection + the recursive `scan()` statement walk, `_CLAUSE_BODY_ATTRS`),
+`edges.py` (`EdgeCollector`: PERFORM/GO TO/CALL/SORT/MERGE/CANCEL/ALTER edge
+construction, `INTERNAL_EDGE_TYPES`/`PERFORM_EDGE_TYPES`/`GOTO_EDGE_TYPES`),
+`cycles.py` (`detect_cycles`/`classify_cycles`), `graph.py`
+(`build_fall_through_edges`/`compute_convergence_nodes`/
+`find_unreachable_nodes`), and `analyzer.py` (`ProgramFlowAnalyzer`
+orchestrator). All public names still import from
+`cobolparser.analysis.program_flow`; behavior and `to_dict()` output are
+unchanged.
+
 Unlike most analyzers (which walk `get_all_statements()`), the flow graph is
 built by a hand-rolled `scan()` that recurses statement-by-statement. Audit
 2026-07-09: `scan()` special-cased only PERFORM inline blocks, CALL handlers,
@@ -197,7 +211,7 @@ definitions.
 | `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` |
 | `linkage_checker.py` | `LinkageChecker` |
 | `move_type_checker.py` | `MoveTypeChecker` |
-| `program_flow.py` | `ProgramFlowAnalyzer` |
+| `program_flow/` | `ProgramFlowAnalyzer` (package: `models` / `scanner` / `edges` / `cycles` / `graph` / `analyzer`) |
 
 # Silent-Failure Audit (2026-07-08)
 

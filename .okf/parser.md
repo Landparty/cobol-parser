@@ -110,9 +110,24 @@ CobolParser.parse(source)
 | `factory.py` | `DivisionParserFactory`, `DivisionType` enum (IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE) |
 | `base.py` | Base division parser with error recovery |
 | `identification.py` | IDENTIFICATION DIVISION |
-| `environment.py` | ENVIRONMENT DIVISION |
-| `data.py` | DATA DIVISION |
-| `procedure.py` | PROCEDURE DIVISION — hosts `StatementParserRegistry` |
+| `environment.py` | ENVIRONMENT DIVISION — division scan + AST node; section/SELECT parsing delegated to the two `environment_*.py` collaborators below |
+| `environment_sections.py` | `ConfigurationSectionParser` (CONFIGURATION SECTION + SPECIAL-NAMES) and `InputOutputSectionParser` (INPUT-OUTPUT SECTION + FILE-CONTROL) |
+| `environment_select.py` | `SelectClauseParser` — SELECT statement + all clause parsers (ASSIGN/ORGANIZATION/ACCESS/KEY/STATUS/ALTERNATE/PADDING/RESERVE/SHARING/LOCK/PASSWORD) and `SelectStatement` node construction |
+| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below |
+| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
+| `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
+| `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names, level-66 RENAMES, data-division EXEC SQL blocks |
+| `procedure.py` | PROCEDURE DIVISION — paragraph/section dispatch loop, ParseContext attachment, AST node; hosts the shared `StatementParserRegistry` cache; supporting logic delegated to the three `procedure_*.py` collaborators below |
+| `procedure_registry.py` | `create_statement_registry()` — registers all 40+ statement parsers in first-match priority order (new statement parsers register here) |
+| `procedure_boundaries.py` | `is_paragraph_or_section_start` / `is_section_marker` / `is_statement_keyword` lookahead predicates |
+| `procedure_recovery.py` | `StatementRecoveryHandler` — unsupported-statement warnings, FAIL_FAST/COLLECT_ALL error recording, stream resynchronization; owns `STRAY_MARKERS` / `UNSUPPORTED_VERBS` (aliased as `ProcedureDivisionParser._STRAY_MARKERS` / `._UNSUPPORTED_VERBS`) |
+
+**Cython callback surface (2026-07-15 refactor):** `DataDivisionParser` keeps
+`_parse_picture_clause` / `_parse_value_clause` / `_parse_usage_clause` (and
+`_parse_data_item`) as delegating wrappers with their historical names and
+signatures — the compiled `_data_fast` extension receives the division parser
+as `parser_self` and calls those three back by name. New clause logic goes in
+`DataItemClauseParser`; the wrappers must stay.
 
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside
@@ -122,6 +137,14 @@ must therefore accept `LEVEL_NUMBER` alongside `NUMERIC_LITERAL` —
 all do. `_parse_value_clause` also consumes an optional `IS` and a
 `MINUS`/`PLUS` sign token before the literal (`VALUE IS -5`). Regression
 suite: `tests/regression/test_numeric_value_clause.py`.
+
+**VALUE ALL (`data_clauses.py`):** `ALL` lexes as a `FIGURATIVE_CONSTANT`, so
+`parse_value_clause` special-cases it before the plain-literal branch:
+`VALUE ALL '='` → `value_clause='ALL "="'`, `VALUE ALL ZEROS` →
+`'ALL ZEROS'` (a bare trailing `ALL` still returns `"ALL"`). The returned
+string round-trips as legal COBOL — downstream consumers (mockymock's
+working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
+suite: `tests/regression/test_value_all_clause.py`.
 
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
@@ -1000,7 +1023,7 @@ container nodes' own location metadata. Pinned by
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)
-2. Register it in `ProcedureDivisionParser` (or via `StatementParserRegistry`)
+2. Register it in `create_statement_registry()` (`parsers/divisions/procedure_registry.py` — the builder `ProcedureDivisionParser` uses)
 3. Add a `TokenType` entry in `lexer.py` if the verb is not yet a keyword
 4. Add AST node(s) in the appropriate `cobolparser/models/statements/<category>.py` with `to_dict()`; use `ASTNodeFactory` from `core/ast_factory.py`
 5. Export from `cobolparser/parsers/statements/__init__.py` and `cobolparser/models/statements/__init__.py`

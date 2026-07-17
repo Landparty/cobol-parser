@@ -15,6 +15,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   been removed. Equivalent test-generation functionality now lives in the
   mockymock framework.
 
+### Bug Fixes
+
+* **parser:** `VALUE ALL <literal>` data-item clauses are now parsed instead
+  of being dropped with an "Unparsed token" content-drop warning. `ALL`
+  lexes as a figurative constant, so `parse_value_clause` previously
+  consumed it as a complete value and left the repeated literal behind —
+  `05 FILLER PIC X(133) VALUE ALL '='.` (the common report-separator idiom)
+  produced `value_clause="ALL"` plus a `PARSE_WARNING` that made mockymock
+  refuse the whole program. Now `VALUE ALL '='` → `value_clause='ALL "="'`
+  and `VALUE ALL ZEROS` → `'ALL ZEROS'`, both round-tripping as legal
+  COBOL for downstream `MOVE <value> TO <item>` splicing. Pinned by
+  `tests/regression/test_value_all_clause.py`.
+* **parser:** IDENTIFICATION DIVISION boundary checks are now comment-entry
+  aware. COBOL-74 comment-entries (AUTHOR, SECURITY, REMARKS, ...) end only
+  at the next Area A entry, and `normalize_fixed_format` preserves Area A/B
+  as indentation — so a phony program embedded in Area B inside a
+  comment-entry (NIST `OBNC1M`) no longer terminates the division early or
+  spawns a bogus second program unit. The relative-column check
+  self-calibrates for free-form sources. Per COBOL-74, *any* line-starting
+  Area A token — not just recognized clause keywords — ends an active
+  comment-entry, in both the clause-value loop and the main clause loop.
+  Pinned by `tests/regression/test_comment_entry_area_b.py`. With this and the
+  pseudo-text fixes below, **all 459 NIST COBOL-85 programs now parse
+  error-free** (`KNOWN_ISSUES` is empty; `SM101A` is parsed through the
+  copybook-expansion pipeline it requires by design, via
+  `REQUIRES_COPYBOOK_EXPANSION`).
+
+* **preprocess:** implement COBOL source-text pseudo-text substitution before
+  lexing (`cobolparser/preprocess/replace_statement.py`), wired into
+  `CobolParser._parse_core`. Two NIST COBOL-85 programs now parse error-free
+  and were removed from `KNOWN_ISSUES`:
+  * `apply_replace_statements` applies the `REPLACE ==a== BY ==b== [==c== BY
+    ==d== ...] .` compiler-directing statement (one or more operand pairs) and
+    cancels the active set at `REPLACE OFF.`. Matching is on the COBOL
+    *text-word* stream — whitespace-, comma-, and semicolon-insensitive between
+    words, with a separator period treated as its own text word and literals
+    compared exactly — so multi-word / multi-line pseudo-text (including a
+    pseudo-text operand that itself contains a period or a statement keyword)
+    matches regardless of layout. Fixes `SM208A.CBL` (30x `REPLACE`), where the
+    raw pseudo-text (`MOVE "*" AO WRK-XN-00001`, `==MOVE "FAIL" TO==`) had been
+    leaking into the statement stream as malformed MOVEs.
+  * `strip_unexpanded_copy_statements` blanks `COPY` statements the standalone
+    pipeline is not going to expand — reusing the pseudo-text-aware
+    `CopyStatementLexer` — so a `COPY ... REPLACING ==pseudo-text==` operand
+    that legally contains a bare `MOVE` token (`SM206A.CBL`'s `BY MOVE
+    ==DELETE==`) no longer leaks as a `MOVE` with no `TO`. In the
+    copybook-expansion pipeline COPY is already inlined before this point, so
+    the strip is a no-op there.
+  Both passes preserve the physical line count of their input. Pinned by
+  `tests/regression/test_replace_and_copy_pseudo_text.py`.
+* **parser:** exclude clause-continuation keywords (`DELIMITED`, `TALLYING`,
+  `POINTER`, ...) and SQL special registers (`SQLCODE`/`SQLSTATE`) from
+  `looks_like_paragraph_boundary`. Fixes real-world layouts — a multi-source
+  `STRING` with each `DELIMITED BY SIZE` clause on its own continuation
+  line, and a period-less `DISPLAY` before a bare `SQLCODE` — that were
+  silently truncating the AST. The period/`SECTION` lookahead is kept:
+  dropping it misreads continuation-line operands named by *unexpanded*
+  COPY members as boundaries (caught by mocky-mock's copybook fixtures).
+  Pinned by `tests/regression/test_clause_continuation_boundary.py`.
+
+### Changed
+
+* **parser:** internal refactor — `DataDivisionParser`
+  (`cobolparser/parsers/divisions/data.py`, ~1,467 lines) decomposed into
+  focused collaborators: `data_clauses.py` (`DataItemClauseParser` — data-item
+  entries and their PICTURE/VALUE/USAGE/OCCURS/... clauses, including the
+  optional `_data_fast` Cython fast path), `data_file_description.py`
+  (`FileDescriptionClauseParser` — FD/SD clause capture), and
+  `data_special_entries.py` (`SpecialEntryParser` — level-88 condition names,
+  level-66 RENAMES, data-division EXEC SQL blocks). `DataDivisionParser` stays
+  at its original import path, keeps the section scan / hierarchy build / AST
+  creation, and delegates entry parsing; `_parse_picture_clause`,
+  `_parse_value_clause`, and `_parse_usage_clause` remain on the class with
+  their exact signatures because the compiled `_data_fast` extension calls
+  them back by name. No behavior or public API changes.
+* **parser:** internal refactor — `EnvironmentDivisionParser`
+  (`cobolparser/parsers/divisions/environment.py`, ~1,133 lines) decomposed
+  into focused collaborators: `environment_sections.py`
+  (`ConfigurationSectionParser` — CONFIGURATION SECTION + SPECIAL-NAMES;
+  `InputOutputSectionParser` — INPUT-OUTPUT SECTION + FILE-CONTROL) and
+  `environment_select.py` (`SelectClauseParser` — SELECT statements, all
+  clause parsers, and `SelectStatement` AST node construction).
+  `EnvironmentDivisionParser` stays at its original import path, keeps the
+  division scan loop and AST creation, and delegates section/SELECT parsing.
+  No behavior or public API changes.
+* **parser:** internal refactor — `ProcedureDivisionParser`
+  (`cobolparser/parsers/divisions/procedure.py`, ~912 lines) decomposed into
+  focused collaborator modules: `procedure_registry.py`
+  (`create_statement_registry()` — builds the shared
+  `StatementParserRegistry` with all 40+ statement parsers),
+  `procedure_boundaries.py` (paragraph/section/statement boundary lookahead
+  predicates), and `procedure_recovery.py` (`StatementRecoveryHandler` —
+  unsupported-statement warnings, FAIL_FAST/COLLECT_ALL error recording, and
+  stream resynchronization; also hosts the `STRAY_MARKERS` /
+  `UNSUPPORTED_VERBS` sets, aliased on the class for introspection).
+  `ProcedureDivisionParser` stays at its original import path, keeps the
+  paragraph/section dispatch loop, ParseContext attachment, and AST
+  creation, and delegates the rest. No behavior or public API changes.
+* **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
+
 ## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)
 
 

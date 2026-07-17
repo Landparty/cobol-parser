@@ -169,7 +169,7 @@ COBOL source (.cbl/.cob)
 - `language_env_analyzer.py` -- IBM Language Environment detection
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
-- `program_flow.py` -- Control flow graph analysis
+- `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`; public API re-exported from the package `__init__.py`)
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST

@@ -208,6 +208,49 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
 )
 
 
+# Reserved COBOL clause-continuation words that the lexer does not tokenize
+# with a dedicated TokenType (unlike e.g. WITH/ON/FROM/TO/BY, which already
+# have their own TokenType and so can never reach looks_like_paragraph_
+# boundary's IDENTIFIER check at all) -- these lex as plain TokenType.
+# IDENTIFIER but, being reserved words, can never legally be a paragraph
+# name or an unrecognized verb, so they must never be misread as either.
+# Sourced from the clause vocabularies of the statement parsers the H9 fix
+# wired looks_like_paragraph_boundary into (DISPLAY, MOVE, COMPUTE,
+# STRING/UNSTRING, INSPECT). Guards the layout IBM/GnuCOBOL style guides
+# recommend: a multi-clause ``STRING a DELIMITED BY SIZE b DELIMITED BY
+# SIZE c`` with each ``DELIMITED BY SIZE`` clause on its own continuation
+# line, where every ``DELIMITED`` past the first would otherwise be at risk
+# of being misread as a new statement.
+CLAUSE_CONTINUATION_KEYWORDS: frozenset = frozenset(
+    {
+        "ALL",
+        "COLUMN",
+        "CONVERTING",
+        "COUNT",
+        "DELIMITED",
+        "DELIMITER",
+        "FILLER",
+        "FUNCTION",
+        "GIVING",
+        "INITIAL",
+        "OVERFLOW",
+        "POINTER",
+        "ROUNDED",
+        "TALLYING",
+    }
+)
+
+# DB2/SQL special registers that real COBOL programs legitimately reference
+# (DISPLAY SQLCODE, IF SQLCODE NOT = 0, ...) without any WORKING-STORAGE
+# declaration -- the SQL precompiler provides them, so they are never a
+# "declared DATA DIVISION name" the way looks_like_paragraph_boundary's
+# known_data_names cross-check expects. Deliberately narrow: only the two
+# special registers commonly referenced bare (unsubscripted); array members
+# like SQLERRD(3)/SQLWARN0 are followed by a token other than a clean
+# line-start period and are not affected by this heuristic.
+SQL_SPECIAL_REGISTERS: frozenset = frozenset({"SQLCODE", "SQLSTATE"})
+
+
 # ---------------------------------------------------------------------------
 # Token value helpers
 # ---------------------------------------------------------------------------
@@ -251,59 +294,86 @@ def is_statement_boundary(token: Token | None) -> bool:
 
 
 def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
-    """Detect the next statement (paragraph header or unrecognized verb)
-    swallowed by a missing period.
+    """Detect the next paragraph/section header swallowed by a missing period.
 
     An operand-collection loop with no boundary awareness (DISPLAY's item
     list, MOVE's target list, COMPUTE's expression capture, ...) has no way
     to distinguish a legitimate trailing operand from a following paragraph
-    name -- or an entirely unknown/misspelled verb with its own operands --
-    once the current statement's own period is missing: all three shapes are
-    just "IDENTIFIER [more tokens]". :func:`is_statement_boundary` only
-    catches *known* verbs lexed as plain identifiers (PURGE, RESUME, ...); an
-    ordinary user-defined paragraph name, or a verb the parser has never
-    heard of, isn't in that set. See reports/open-findings.md H9.
+    name once the current statement's own period is missing -- both are just
+    "IDENTIFIER then PERIOD". :func:`is_statement_boundary` only catches
+    *known* verbs lexed as plain identifiers (PURGE, RESUME, ...); an
+    ordinary user-defined paragraph name isn't in that set. See
+    reports/open-findings.md H9.
 
-    This resolves the ambiguity the way COBOL itself does: a new statement
+    This resolves the ambiguity the way COBOL itself does: a paragraph name
     stands alone at the start of its own source line, whereas a trailing
     operand normally continues the line the verb or a preceding operand is
-    on. So the current token counts as a boundary when *all* of:
+    on. So the current token counts as a boundary only when *all* of:
 
     * it is an IDENTIFIER, not a reserved statement verb;
+    * it is not one of :data:`CLAUSE_CONTINUATION_KEYWORDS` (reserved COBOL
+      clause words -- ``DELIMITED``, ``TALLYING``, ``POINTER``, ... -- that
+      the lexer does not give a dedicated TokenType, so they reach this
+      check as plain IDENTIFIERs even though a reserved word can never
+      legally be a paragraph name) or :data:`SQL_SPECIAL_REGISTERS`
+      (``SQLCODE``/``SQLSTATE``, which real programs reference without a
+      WORKING-STORAGE declaration);
     * it starts a new source line relative to the previously consumed token;
+    * it is immediately followed by a period or SECTION -- required because
+      a continuation-line operand named by an *unexpanded* COPY member is
+      not in ``known_data_names``, and without this shape check it would be
+      misread as a boundary, truncating the statement;
     * it is not a name declared in the DATA DIVISION -- excluded so a
       genuinely wrapped continuation-line operand (``DISPLAY\\n    WS-X.``)
-      is not misread as the start of a new statement just because it opens
-      its line.
-
-    Earlier this also required the token be immediately followed by a period
-    or SECTION -- the bare paragraph-header shape. That under-detected: an
-    unknown verb followed by its own operands (``FROBNICATE WS-X.``) is
-    exactly as undetectable to a keyword-set check as a bare paragraph name,
-    so it was silently absorbed into the operand list with no warning at
-    all, even though the period-terminated form of the same typo already
-    gets caught (and warned about) by the top-level "no parser registered"
-    path. Dropping that requirement widens the same DATA-DIVISION
-    cross-check to cover both shapes.
+      is not misread as a paragraph header just because it opens its line.
 
     A bare trailing operand that happens to sit on its own line but is not a
-    real paragraph name or unknown verb (e.g. an undeclared identifier from
-    an unexpanded COPY) will still be misclassified -- this is an inherent
-    ambiguity of missing-period recovery, not something a purely syntactic
-    check can resolve, so the DATA DIVISION cross-check is a best-effort
-    narrowing, not a guarantee.
+    real paragraph name (e.g. an undeclared identifier from an unexpanded
+    COPY) will still be misclassified -- this is an inherent ambiguity of
+    missing-period recovery, not something a purely syntactic check can
+    resolve, so the DATA DIVISION cross-check is a best-effort narrowing,
+    not a guarantee.
     """
     token = token_stream.peek(0)
     if token is None or token.type != TokenType.IDENTIFIER or not token.value:
         return False
     value_upper = token.value.upper()
-    if value_upper in STATEMENT_KEYWORDS:
+    if (
+        value_upper in STATEMENT_KEYWORDS
+        or value_upper in CLAUSE_CONTINUATION_KEYWORDS
+        or value_upper in SQL_SPECIAL_REGISTERS
+    ):
         return False
 
     prev = previous_meaningful_token(token_stream)
     prev_line = getattr(getattr(prev, "location", None), "line", None)
     cur_line = getattr(getattr(token, "location", None), "line", None)
     if prev_line is None or cur_line is None or prev_line == cur_line:
+        return False
+
+    # The candidate must be immediately followed by a period or SECTION —
+    # the bare paragraph-header shape. This deliberately under-detects
+    # (an unknown verb followed by its own operands is not caught), but
+    # dropping it is a proven real-world regression: a continuation-line
+    # operand whose name comes from an *unexpanded* COPY member is not in
+    # known_data_names, so without this shape check it is misread as a
+    # boundary and the statement is truncated (caught by mocky-mock's
+    # copybook fixtures: `COMPUTE X =` / newline / `ORD-AMOUNT ...`).
+    offset = 1
+    nxt = token_stream.peek(offset)
+    while nxt is not None and nxt.type in (
+        TokenType.WHITESPACE,
+        TokenType.COMMENT,
+        TokenType.NEWLINE,
+        TokenType.CONTINUATION,
+    ):
+        offset += 1
+        nxt = token_stream.peek(offset)
+    if nxt is None:
+        return False
+    is_period = nxt.type == TokenType.PERIOD
+    is_section = bool(nxt.value) and nxt.value.upper() == "SECTION"
+    if not (is_period or is_section):
         return False
 
     context = get_parse_context(token_stream)
@@ -314,7 +384,7 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
 def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
     """Record a warning when :func:`looks_like_paragraph_boundary` stops an
     operand-collection loop early instead of consuming what looks like the
-    start of the next statement. See reports/open-findings.md H9.
+    next paragraph/section header. See reports/open-findings.md H9.
     """
     token = token_stream.peek(0)
     value = (token.value or "") if token is not None else ""
@@ -322,9 +392,9 @@ def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
     where = f" at line {line}" if line else ""
     message = (
         f"Statement missing its terminating period{where}: '{value}' looks "
-        "like the start of a new statement (a paragraph/section header, or "
-        "an unrecognized verb) rather than a trailing operand -- treated as "
-        "a statement boundary instead of being consumed"
+        "like the start of the next paragraph/section rather than a "
+        "trailing operand -- treated as a new paragraph boundary instead "
+        "of being consumed"
     )
     context = get_parse_context(token_stream)
     host = getattr(context, "host", None) if context else None
