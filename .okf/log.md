@@ -1,5 +1,25 @@
 # OKF Update Log
 
+## 2026-07-17 (VALUE ALL literal clause support)
+
+* **`VALUE ALL <literal>` parsed instead of dropped**
+  (`divisions/data_clauses.py`, `parse_value_clause`): `ALL` lexes as a
+  `FIGURATIVE_CONSTANT`, so the previous literal branch consumed it as a
+  complete value and the repeated literal (`'='`) fell through to the
+  unknown-clause loop as an "Unparsed token" content-drop warning —
+  which made mockymock refuse the program (PARSE_WARNING, fail-closed).
+  Surfaced by the legacy-application corpus re-sweep on `EODPROC.cbl`'s
+  report-separator idiom `05 FILLER PIC X(133) VALUE ALL '='.`. New
+  handling: `ALL` + string literal → `value_clause='ALL "="'`; `ALL` +
+  figurative constant → `'ALL ZEROS'`; bare `ALL` keeps the old
+  figurative-constant result. The literal may sit on a continuation line
+  (newlines skipped after `ALL`, same as after `VALUE`/`IS`). The Cython
+  `_data_fast` path is unaffected — it delegates VALUE parsing back to
+  this Python method. Regression suite:
+  `tests/regression/test_value_all_clause.py` (6 tests, includes a
+  no-warnings assertion). Updated `parser.md` (VALUE ALL note) and
+  `CHANGELOG.md` (Unreleased).
+
 ## 2026-07-15 (PR #89 review fixes: Area A comment-entry termination, COPY warning wording, REPLACE scanner rewind)
 
 Three small fixes out of the PR #89 self-review:

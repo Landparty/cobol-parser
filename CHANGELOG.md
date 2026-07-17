@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **parser:** `VALUE ALL <literal>` data-item clauses are now parsed instead
+  of being dropped with an "Unparsed token" content-drop warning. `ALL`
+  lexes as a figurative constant, so `parse_value_clause` previously
+  consumed it as a complete value and left the repeated literal behind —
+  `05 FILLER PIC X(133) VALUE ALL '='.` (the common report-separator idiom)
+  produced `value_clause="ALL"` plus a `PARSE_WARNING` that made mockymock
+  refuse the whole program. Now `VALUE ALL '='` → `value_clause='ALL "="'`
+  and `VALUE ALL ZEROS` → `'ALL ZEROS'`, both round-tripping as legal
+  COBOL for downstream `MOVE <value> TO <item>` splicing. Pinned by
+  `tests/regression/test_value_all_clause.py`.
 * **parser:** IDENTIFICATION DIVISION boundary checks are now comment-entry
   aware. COBOL-74 comment-entries (AUTHOR, SECURITY, REMARKS, ...) end only
   at the next Area A entry, and `normalize_fixed_format` preserves Area A/B

@@ -138,6 +138,14 @@ all do. `_parse_value_clause` also consumes an optional `IS` and a
 `MINUS`/`PLUS` sign token before the literal (`VALUE IS -5`). Regression
 suite: `tests/regression/test_numeric_value_clause.py`.
 
+**VALUE ALL (`data_clauses.py`):** `ALL` lexes as a `FIGURATIVE_CONSTANT`, so
+`parse_value_clause` special-cases it before the plain-literal branch:
+`VALUE ALL '='` → `value_clause='ALL "="'`, `VALUE ALL ZEROS` →
+`'ALL ZEROS'` (a bare trailing `ALL` still returns `"ALL"`). The returned
+string round-trips as legal COBOL — downstream consumers (mockymock's
+working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
+suite: `tests/regression/test_value_all_clause.py`.
+
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
 | File | COBOL Verbs |
