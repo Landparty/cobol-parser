@@ -691,6 +691,23 @@ class DataItemClauseParser:
             if not token:
                 return None
 
+        # ALL <literal>: the literal (or figurative constant) fills the
+        # item by repetition, e.g. VALUE ALL '='. Returned as
+        # `ALL "<literal>"` so the clause round-trips as legal COBOL
+        # (MOVE ALL "=" TO X). A bare ALL with nothing repeatable after
+        # it keeps the previous plain-figurative-constant behavior.
+        if token.type == TokenType.FIGURATIVE_CONSTANT and token.value.upper() == "ALL":
+            token_stream.consume()
+            self._skip_newlines(token_stream)
+            literal = token_stream.peek()
+            if literal and literal.type == TokenType.STRING_LITERAL:
+                token_stream.consume()
+                return f'ALL "{literal.value}"'
+            if literal and literal.type == TokenType.FIGURATIVE_CONSTANT:
+                token_stream.consume()
+                return f"ALL {literal.value}"
+            return "ALL"
+
         sign = ""
         if token.type in (TokenType.MINUS, TokenType.PLUS):
             next_token = token_stream.peek(1)
