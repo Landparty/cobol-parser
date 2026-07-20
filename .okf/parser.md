@@ -146,6 +146,17 @@ string round-trips as legal COBOL — downstream consumers (mockymock's
 working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
 suite: `tests/regression/test_value_all_clause.py`.
 
+**Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
+emits NEWLINE tokens, so any clause reader that peeks for an operand after
+consuming a keyword must skip NEWLINEs first or a line break between keyword
+and operand silently drops the operand. REDEFINES does this via
+`_skip_newlines` (pure Python) and an inline newline-skip loop (Cython) —
+the same pattern the OCCURS sub-clauses (TIMES/DEPENDING/KEY/INDEXED) use.
+Remember both implementations must change together, and the checked-in
+`_data_fast.c` must be regenerated (Cython 3.2.4). Regression cases:
+`tests/unit/test_data_division_branches.py::TestRedefinesClause`
+(multi-line + forced pure-Python-loop variants).
+
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
 | File | COBOL Verbs |

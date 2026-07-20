@@ -1,5 +1,16 @@
 # OKF Update Log
 
+## 2026-07-20 (multi-line REDEFINES clause fix)
+
+A `REDEFINES` keyword separated from its target data-name by a line break
+lost the target (NEWLINE token between keyword and identifier). Fixed in
+both the pure-Python clause loop (`data_clauses.py`, via `_skip_newlines`)
+and the Cython fast path (`_data_fast.pyx`, inline newline-skip loop;
+`_data_fast.c` regenerated with Cython 3.2.4). New multi-line REDEFINES
+cases in `tests/unit/test_data_division_branches.py::TestRedefinesClause`,
+including a forced pure-Python-loop variant. Updated `parser.md`
+(multi-line clause gotcha) and `CHANGELOG.md` (Unreleased → Bug Fixes).
+
 ## 2026-07-20 (open-findings M6/M10/M11/M12/M13/M15 batch fix)
 
 The six MEDIUM findings previously deferred as subsystem rewrites are

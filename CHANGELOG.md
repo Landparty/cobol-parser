@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **parser:** a `REDEFINES` clause whose target data-name sits on the next
+  line (`01 WS-B REDEFINES` / newline / `WS-A PIC 9(10).`) no longer
+  silently drops the redefines target: both the pure-Python clause loop
+  (`DataItemClauseParser`) and the `_data_fast` Cython fast path now skip
+  NEWLINE tokens between the `REDEFINES` keyword and its target, matching
+  the multi-line handling the OCCURS clause already had. Pinned by the
+  multi-line cases in `tests/unit/test_data_division_branches.py::TestRedefinesClause`.
 * **preprocess:** COPY `REPLACING` is now context-aware (open-findings
   M13): substitution never rewrites fixed-format comment lines or text
   inside string literals (doubled-quote escapes handled; a clause whose

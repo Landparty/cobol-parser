@@ -373,6 +373,8 @@ class DataItemClauseParser:
             # REDEFINES clause
             elif value_upper == "REDEFINES":
                 token_stream.consume()  # Consume REDEFINES keyword
+                # The target may sit on the next line (continuation).
+                self._skip_newlines(token_stream)
                 redef_token = token_stream.peek()
                 if redef_token and redef_token.type == TokenType.IDENTIFIER:
                     data_item.set_redefines(redef_token.value)
