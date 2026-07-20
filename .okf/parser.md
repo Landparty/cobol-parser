@@ -146,6 +146,17 @@ string round-trips as legal COBOL — downstream consumers (mockymock's
 working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
 suite: `tests/regression/test_value_all_clause.py`.
 
+**Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
+emits NEWLINE tokens, so any clause reader that peeks for an operand after
+consuming a keyword must skip NEWLINEs first or a line break between keyword
+and operand silently drops the operand. REDEFINES does this via
+`_skip_newlines` (pure Python) and an inline newline-skip loop (Cython) —
+the same pattern the OCCURS sub-clauses (TIMES/DEPENDING/KEY/INDEXED) use.
+Remember both implementations must change together, and the checked-in
+`_data_fast.c` must be regenerated (Cython 3.2.4). Regression cases:
+`tests/unit/test_data_division_branches.py::TestRedefinesClause`
+(multi-line + forced pure-Python-loop variants).
+
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
 | File | COBOL Verbs |
@@ -242,6 +253,20 @@ Pinned by `tests/unit/test_arithmetic_size_error_branches.py`,
 `tests/unit/test_utils_clause_collection.py`,
 `tests/unit/test_display_parser.py`, and
 `tests/unit/io_statements/test_write_close_parsers.py`.
+
+**WRITE `BEFORE`/`AFTER` phrase — `ADVANCING` optional (`write_parser.py`,
+2026-07-20):** the standard grammar is `BEFORE|AFTER [ADVANCING] [n]
+[LINES|LINE|PAGE]`, but the parser previously consumed `BEFORE`/`AFTER`
+and then *required* the `ADVANCING` keyword before parsing the rest —
+`WRITE rec AFTER 1` / `AFTER 1 LINE` / `BEFORE PAGE` silently dropped the
+clause (`advancing_clause=None`), and a trailing `LINE`/`LINES` token was
+left unconsumed to trigger the procedure division's "Unparsed tokens"
+content-drop warning. `ADVANCING` is now consumed if present via
+`try_consume_keyword` and the count/unit parsing runs either way, so both
+forms produce the same `advancing_clause` dict
+(`{"type": "AFTER", "value": 1, "unit": "LINES"}`; `PAGE` → `"value":
+"PAGE", "unit": "CHANNEL"`). Pinned by
+`tests/unit/test_write_advancing.py`.
 
 **EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
 the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I

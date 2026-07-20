@@ -260,6 +260,75 @@ class TestRedefinesClause:
         assert ov is not None
         assert ov.redefines == "WS-BASE"
 
+    def test_redefines_target_on_next_line(self):
+        # The REDEFINES keyword ends the line; its target starts the next
+        # one. The NEWLINE token between them must not drop the target.
+        src = _wrap(
+            "01  WS-ORIGINAL PIC X(4).\n"
+            "01  WS-REDEFINED REDEFINES\n"
+            "    WS-ORIGINAL PIC 9(4).\n"
+        )
+        result = _assert_parsed(src)
+        items = result.ast.find_all_by_type("DataItem")
+        rd = next((i for i in items if i.name == "WS-REDEFINED"), None)
+        assert rd is not None
+        assert rd.redefines == "WS-ORIGINAL"
+        assert rd.picture_clause is not None
+        assert rd.picture_clause.pattern == "9(4)"
+
+    def test_redefines_entry_split_one_word_per_line(self):
+        src = _wrap(
+            "01  WS-ORIGINAL PIC X(4).\n"
+            "01  WS-REDEFINED\n"
+            "    REDEFINES\n"
+            "    WS-ORIGINAL\n"
+            "    PIC 9(4).\n"
+        )
+        result = _assert_parsed(src)
+        items = result.ast.find_all_by_type("DataItem")
+        rd = next((i for i in items if i.name == "WS-REDEFINED"), None)
+        assert rd is not None
+        assert rd.redefines == "WS-ORIGINAL"
+        assert rd.picture_clause is not None
+        assert rd.picture_clause.pattern == "9(4)"
+
+    def test_redefines_target_on_next_line_fixed_format(self):
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. REDEFML.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  WS-ORIGINAL PIC X(4).\n"
+            "       01  WS-REDEFINED REDEFINES\n"
+            "           WS-ORIGINAL PIC 9(4).\n"
+            "       PROCEDURE DIVISION.\n"
+            "           GOBACK.\n"
+        )
+        result = parse_cobol(src)
+        assert result.ast is not None
+        items = result.ast.find_all_by_type("DataItem")
+        rd = next((i for i in items if i.name == "WS-REDEFINED"), None)
+        assert rd is not None
+        assert rd.redefines == "WS-ORIGINAL"
+
+    def test_redefines_target_on_next_line_pure_python_loop(self, monkeypatch):
+        # The Cython fast path and the pure-Python clause loop are separate
+        # implementations; force the pure-Python one so both are covered
+        # regardless of whether the extension is compiled.
+        import cobolparser.parsers.divisions.data_clauses as dc
+
+        monkeypatch.setattr(dc, "_HAS_DATA_FAST", False)
+        src = _wrap(
+            "01  WS-ORIGINAL PIC X(4).\n"
+            "01  WS-REDEFINED REDEFINES\n"
+            "    WS-ORIGINAL PIC 9(4).\n"
+        )
+        result = _assert_parsed(src)
+        items = result.ast.find_all_by_type("DataItem")
+        rd = next((i for i in items if i.name == "WS-REDEFINED"), None)
+        assert rd is not None
+        assert rd.redefines == "WS-ORIGINAL"
+
 
 # ---------------------------------------------------------------------------
 # FILLER items

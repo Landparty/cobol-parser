@@ -16,6 +16,30 @@
 * Pinned by `tests/unit/test_perform_thru_numeric.py` and
   `tests/unit/analysis/test_program_flow_thru_reachability.py`.
 
+## 2026-07-20 (multi-line REDEFINES clause fix)
+
+A `REDEFINES` keyword separated from its target data-name by a line break
+lost the target (NEWLINE token between keyword and identifier). Fixed in
+both the pure-Python clause loop (`data_clauses.py`, via `_skip_newlines`)
+and the Cython fast path (`_data_fast.pyx`, inline newline-skip loop;
+`_data_fast.c` regenerated with Cython 3.2.4). New multi-line REDEFINES
+cases in `tests/unit/test_data_division_branches.py::TestRedefinesClause`,
+including a forced pure-Python-loop variant. Updated `parser.md`
+(multi-line clause gotcha) and `CHANGELOG.md` (Unreleased → Bug Fixes).
+
+## 2026-07-20 (WRITE BEFORE/AFTER without ADVANCING keyword)
+
+* **`WRITE ... AFTER 1` (no `ADVANCING`) no longer drops the clause**
+  (`parsers/statements/write_parser.py`): the `ADVANCING` keyword is
+  optional in the standard `BEFORE|AFTER [ADVANCING] [n] [LINES|LINE|PAGE]`
+  phrase, but the parser required it — `AFTER 1`, `AFTER 1 LINE`, and
+  `BEFORE PAGE` consumed the `BEFORE`/`AFTER` token and then recorded
+  nothing, with a trailing `LINE`/`LINES` surfacing as an "Unparsed
+  tokens" content-drop warning. The count/unit parsing now runs whether
+  or not `ADVANCING` is present. Pinned by
+  `tests/unit/test_write_advancing.py`. Updated `parser.md` and
+  `CHANGELOG.md` (Unreleased).
+
 ## 2026-07-20 (open-findings M6/M10/M11/M12/M13/M15 batch fix)
 
 The six MEDIUM findings previously deferred as subsystem rewrites are
