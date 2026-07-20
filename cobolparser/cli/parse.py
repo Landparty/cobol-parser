@@ -561,13 +561,18 @@ def _build_tokenize_parser(
 
 
 def _cmd_tokenize(args: argparse.Namespace) -> None:
-    from ..lexer import CobolLexer
+    from ..lexer import _tokenize_source
 
     source = _read_source(args.file)
     dialect = _DIALECT_MAP[args.dialect]
 
-    lexer = CobolLexer(source, args.file, dialect, free_form=args.free_form)
-    tokens = lexer.tokenize()
+    # Unified pipeline (M6): fixed-format source is normalized and lexed
+    # free-form exactly like `cobol-parser parse`, with comment lines
+    # preserved as COMMENT tokens. Lexer errors are ignored here, matching
+    # the previous behavior of this subcommand (best-effort token dump).
+    tokens, _errors, _warnings = _tokenize_source(
+        source, args.file, dialect, free_form=args.free_form
+    )
 
     output = {
         "source_file": args.file,
