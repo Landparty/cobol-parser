@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 13 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, and more.
 tags: [analysis, dead-code, program-flow, io, crud]
-timestamp: 2026-07-09T00:00:00Z
+timestamp: 2026-07-20T00:00:00Z
 ---
 
 # Overview
@@ -56,6 +56,20 @@ Produces a control-flow graph. Edge types:
 - `FlowEdgeType.FALL_THROUGH` — sequential paragraph fall-through
 
 THRU ranges expand to `range_members`; cycles are classified in `cycle_details`.
+
+**THRU range members count as reachable (2026-07-20):** `PERFORM A THRU C`
+(and SORT/MERGE procedure ranges) execute every paragraph the range
+physically spans, but the graph only carries explicit edges to the two
+endpoints — the intermediates ride along in `FlowEdge.range_members`.
+`find_unreachable_nodes` (`graph.py`) therefore adds each range member as a
+neighbor of the edge's source when building its BFS adjacency. Before this,
+an intermediate member whose fall-through edge from its predecessor was
+suppressed (predecessor contains a GO TO, or ends with a terminator) was
+falsely listed in `unreachable_nodes` even though the range provably
+executes it. Cycle detection (`cycles.py`) intentionally still uses only
+explicit edges — member-hops have no `(source, target)` edge record, so
+adding them would misclassify cycles as `MIXED`. Pinned by
+`tests/unit/analysis/test_program_flow_thru_reachability.py`.
 
 **Structure (2026-07-14):** `program_flow` is a package, not a single module.
 `cobolparser/analysis/program_flow/` splits the former god class into

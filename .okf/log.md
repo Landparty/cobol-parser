@@ -25,6 +25,22 @@
   `tests/unit/test_write_advancing.py`. Updated `parser.md`,
   `ast-models.md`, and `CHANGELOG.md` (Unreleased).
 
+## 2026-07-20 (PERFORM THRU gaps: numeric procedure names + range reachability)
+
+* **All-digit procedure names** (`PERFORM 1000 THRU 1999` numbering):
+  `procedure_boundaries.py` recognizes numeric paragraph headers
+  (`_is_procedure_name_token`), and `perform_parser.py` no longer consumes
+  a numeric token as a speculative TIMES count — TIMES is checked by
+  lookahead first, and all-digit tokens are accepted as the PERFORM target
+  and the THRU end. Updated `parser.md`.
+* **THRU range members reachable**: `program_flow/graph.py`
+  `find_unreachable_nodes` treats every `FlowEdge.range_members` entry as a
+  neighbor of the edge source, ending false `unreachable_nodes` for range
+  intermediates whose fall-through edge was suppressed. Updated
+  `analysis.md`.
+* Pinned by `tests/unit/test_perform_thru_numeric.py` and
+  `tests/unit/analysis/test_program_flow_thru_reachability.py`.
+
 ## 2026-07-20 (multi-line REDEFINES clause fix)
 
 A `REDEFINES` keyword separated from its target data-name by a line break
