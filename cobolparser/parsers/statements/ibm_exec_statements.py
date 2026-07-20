@@ -16,6 +16,143 @@ _IMS_CALL_TYPES = frozenset(
 )
 
 
+def _skip_quoted(text: str, start: int) -> int:
+    """Return the index just past the quoted literal opening at ``text[start]``.
+
+    Handles doubled-quote escapes (``'IT''S'``). If the literal is
+    unterminated, returns ``len(text)``.
+    """
+    quote = text[start]
+    i = start + 1
+    n = len(text)
+    while i < n:
+        if text[i] == quote:
+            if i + 1 < n and text[i + 1] == quote:
+                i += 2
+                continue
+            return i + 1
+        i += 1
+    return n
+
+
+def _read_paren_group(text: str, start: int) -> tuple[str, int]:
+    """Read a balanced ``(...)`` group starting at ``text[start] == '('``.
+
+    Returns ``(inner_text, index_after_close)``. Nested parentheses and
+    quoted literals (which may contain unbalanced parens) are handled.
+    The inner text is whitespace-normalized and spaces adjacent to
+    parentheses are removed so ``FROM ( WS-DATA ( 1:10 ) )`` yields
+    ``WS-DATA(1:10)``.
+    """
+    depth = 0
+    i = start
+    n = len(text)
+    inner_start = start + 1
+    while i < n:
+        ch = text[i]
+        if ch in "'\"":
+            i = _skip_quoted(text, i)
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                inner = text[inner_start:i]
+                return _normalize_arg_text(inner), i + 1
+        i += 1
+    # Unterminated group: take everything to end of text.
+    return _normalize_arg_text(text[inner_start:]), n
+
+
+def _normalize_arg_text(text: str) -> str:
+    """Collapse whitespace and remove spaces adjacent to parentheses."""
+    collapsed = " ".join(text.split())
+    return collapsed.replace(" (", "(").replace("( ", "(").replace(" )", ")").strip()
+
+
+def _parse_cics_options(text: str) -> dict[str, str | None]:
+    """Parse a CICS option list into ``{OPTION: argument-or-None}``.
+
+    *text* is the joined token text following the CICS command (e.g.
+    ``"MAP ( 'MAP1' ) MAPSET ( 'SET1' ) ERASE"``). Each option keyword maps
+    to the text inside its parenthesized argument, or ``None`` for flag
+    options like ERASE / NOHANDLE. Nested parentheses and quoted literals
+    inside arguments are preserved. Insertion order follows source order.
+    """
+    options: dict[str, str | None] = {}
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch.isspace() or ch in "()":
+            i += 1
+            continue
+        if ch in "'\"":
+            i = _skip_quoted(text, i)
+            continue
+        # Read an option keyword (or bare operand word).
+        j = i
+        while j < n and not text[j].isspace() and text[j] not in "()'\"":
+            j += 1
+        word = text[i:j].upper()
+        i = j
+        # Skip whitespace between the keyword and a possible argument list.
+        k = i
+        while k < n and text[k].isspace():
+            k += 1
+        if k < n and text[k] == "(":
+            arg, i = _read_paren_group(text, k)
+            options[word] = arg
+        else:
+            options[word] = None
+    return options
+
+
+def _parse_ims_arguments(text: str) -> list[str]:
+    """Split EXEC IMS / EXEC DLI text into top-level positional arguments.
+
+    Each argument is either a bare word (PCB name, I/O area, SSA name) or a
+    keyword with its parenthesized argument reattached (``PCB(1)``,
+    ``SEGMENT(EMPLOYEE)``, ``WHERE(EMPID=:WS-ID)``). Nested parentheses and
+    quoted literals are kept inside their argument.
+    """
+    arguments: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch == "(":
+            inner, i = _read_paren_group(text, i)
+            arguments.append(f"({inner})")
+            continue
+        if ch == ")":
+            i += 1
+            continue
+        if ch in "'\"":
+            end = _skip_quoted(text, i)
+            arguments.append(text[i:end])
+            i = end
+            continue
+        j = i
+        while j < n and not text[j].isspace() and text[j] not in "()'\"":
+            j += 1
+        word = text[i:j]
+        i = j
+        k = i
+        while k < n and text[k].isspace():
+            k += 1
+        if k < n and text[k] == "(":
+            inner, i = _read_paren_group(text, k)
+            arguments.append(f"{word}({inner})")
+        else:
+            arguments.append(word)
+    return arguments
+
+
 class ExecCicsStatement(ASTNode):
     """AST node for EXEC CICS statements."""
 
@@ -23,12 +160,17 @@ class ExecCicsStatement(ASTNode):
         super().__init__("EXEC_CICS", location)
         self.cics_command: str = ""
         self.cics_text: str = ""
+        #: Structured option list: option keyword -> argument text inside the
+        #: parentheses, or None for flag options (ERASE, NOHANDLE, ...).
+        #: Insertion order matches source order.
+        self.options: dict[str, str | None] = {}
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "node_type": self.node_type,
             "cics_command": self.cics_command,
             "cics_text": self.cics_text,
+            "options": dict(self.options),
             "location": self.location.to_dict(),
         }
 
@@ -160,6 +302,9 @@ class ExecCicsStatementParser(IStatementParser):
         # Collect remaining CICS text until END-EXEC
         stmt.cics_text = collect_exec_sql_text(token_stream)
 
+        # Structured option list (MAP('M1'), MAPSET('S1'), ERASE, ...)
+        stmt.options = _parse_cics_options(stmt.cics_text)
+
         return stmt
 
 
@@ -171,6 +316,10 @@ class ExecImsStatement(ASTNode):
         self.ims_command: str = ""
         self.ims_call_type: str = "UNKNOWN"
         self.ims_text: str = ""
+        #: Positional arguments following the function code: PCB reference,
+        #: I/O area, SSAs, or DLI keyword options with their parenthesized
+        #: argument reattached (e.g. ``PCB(1)``, ``SEGMENT(EMPLOYEE)``).
+        self.arguments: list[str] = []
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -178,6 +327,7 @@ class ExecImsStatement(ASTNode):
             "ims_command": self.ims_command,
             "ims_call_type": self.ims_call_type,
             "ims_text": self.ims_text,
+            "arguments": list(self.arguments),
             "location": self.location.to_dict(),
         }
 
@@ -253,5 +403,8 @@ class ExecImsStatementParser(IStatementParser):
 
         # Collect remaining text until END-EXEC
         stmt.ims_text = collect_exec_sql_text(token_stream)
+
+        # Structured positional arguments (PCB name, I/O area, SSAs, ...)
+        stmt.arguments = _parse_ims_arguments(stmt.ims_text)
 
         return stmt
