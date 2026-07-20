@@ -2,6 +2,12 @@
 
 from typing import Any
 
+from cobolparser.parsers.statements._conditions import (
+    COMPARISON_OPS,
+    build_condition_expression,
+    find_top_level_operator,
+    strip_enclosing_parens,
+)
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     get_parse_context,
@@ -220,156 +226,30 @@ class IfStatementParser(IStatementParser):
 
         return stmt
 
-    _COMPARISON_OPS = {
-        "=": "EQUAL",
-        "EQUAL": "EQUAL",
-        ">": "GREATER",
-        "GREATER": "GREATER",
-        "<": "LESS",
-        "LESS": "LESS",
-        ">=": "GREATER_OR_EQUAL",
-        "<=": "LESS_OR_EQUAL",
-        "<>": "NOT_EQUAL",
-    }
+    # Kept as a class attribute for backward compatibility; the canonical
+    # table now lives in cobolparser.parsers.statements._conditions (M12).
+    _COMPARISON_OPS = COMPARISON_OPS
 
     def _build_condition_expression(
         self, tokens: list[str], location: SourceLocation
     ) -> CobolExpression | None:
         """Convert a flat list of condition token strings into an expression tree.
 
-        Handles simple comparisons (LHS op RHS), NOT-prefixed operators, and
-        compound conditions joined by AND / OR.
+        Delegates to the shared condition machinery in
+        :mod:`cobolparser.parsers.statements._conditions`, which is also
+        used by the PERFORM parser to decompose UNTIL conditions (M12).
         """
-        from cobolparser.models.statements.base import (
-            ConditionalExpression,
-            LogicalExpression,
-        )
-
-        # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.)
-        cleaned: list[str] = []
-        i = 0
-        while i < len(tokens):
-            tok = tokens[i].upper()
-            if tok == "NOT" and i + 1 < len(tokens):
-                nxt = tokens[i + 1].upper()
-                combined = {
-                    "NOT EQUAL": "NOT_EQUAL",
-                    "NOT =": "NOT_EQUAL",
-                    "NOT LESS": "GREATER_OR_EQUAL",
-                    "NOT <": "GREATER_OR_EQUAL",
-                    "NOT GREATER": "LESS_OR_EQUAL",
-                    "NOT >": "LESS_OR_EQUAL",
-                }.get(f"NOT {nxt}")
-                if combined:
-                    cleaned.append(combined)
-                    i += 2
-                    continue
-            cleaned.append(tokens[i])
-            i += 1
-
-        # Drop a fully-enclosing pair of parentheses so ( X ) recurses as X.
-        cleaned = self._strip_enclosing_parens(cleaned)
-
-        # Split on the lowest-precedence logical operator at the top paren
-        # level. COBOL binds AND tighter than OR, so OR is split first (it
-        # becomes the tree root) and AND stays nested beneath it. Split on the
-        # rightmost operator so the tree is left-associative, matching COBOL's
-        # left-to-right evaluation. Parenthesised sub-conditions are skipped
-        # here and resolved by the recursive call, e.g. (A OR B) AND C keeps
-        # AND as the root.
-        for logical_op in ("OR", "AND"):
-            idx = self._find_top_level_operator(cleaned, logical_op)
-            if idx is not None:
-                left_expr = self._build_condition_expression(cleaned[:idx], location)
-                right_expr = self._build_condition_expression(
-                    cleaned[idx + 1 :], location
-                )
-                if left_expr and right_expr:
-                    logical = LogicalExpression(logical_op, location)
-                    logical.set_left_condition(left_expr)
-                    logical.set_right_condition(right_expr)
-                    return logical
-
-        # Simple comparison: find the first comparison operator token
-        upper_cleaned = [t.upper() for t in cleaned]
-        op_idx = None
-        resolved_op = None
-        for idx, tok in enumerate(upper_cleaned):
-            if tok in self._COMPARISON_OPS:
-                op_idx = idx
-                resolved_op = self._COMPARISON_OPS[tok]
-                break
-            if tok in ("NOT_EQUAL", "GREATER_OR_EQUAL", "LESS_OR_EQUAL"):
-                op_idx = idx
-                resolved_op = tok
-                break
-
-        if op_idx is not None and resolved_op:
-            left_parts = [t for t in cleaned[:op_idx] if t.upper() != "IS"]
-            right_parts = cleaned[op_idx + 1 :]
-            lhs = " ".join(left_parts).strip() if left_parts else None
-            rhs = " ".join(right_parts).strip() if right_parts else None
-            if lhs:
-                expr = ConditionalExpression(resolved_op, location)
-                expr.set_left_operand(lhs)
-                if rhs:
-                    expr.set_right_operand(rhs)
-                return expr
-
-        # Fallback: wrap entire token list as a raw comparison node
-        if cleaned:
-            expr = ConditionalExpression("COMPARISON", location)
-            expr._metadata["raw_condition"] = " ".join(cleaned)
-            return expr
-
-        return None
+        return build_condition_expression(tokens, location)
 
     @staticmethod
     def _strip_enclosing_parens(tokens: list[str]) -> list[str]:
-        """Strip pair(s) of parentheses that wrap the whole token list.
-
-        ``( A OR B )`` -> ``A OR B`` and ``(( A ))`` -> ``A`` , but a pair that
-        closes before the end is left untouched: ``( A ) OR ( B )`` and
-        ``( A OR B ) AND C`` keep their parentheses so the split logic can see
-        the top-level operator. Unbalanced input is returned unchanged.
-        """
-        while len(tokens) >= 2 and tokens[0] == "(" and tokens[-1] == ")":
-            depth = 0
-            encloses = True
-            for i, tok in enumerate(tokens):
-                if tok == "(":
-                    depth += 1
-                elif tok == ")":
-                    depth -= 1
-                    # Opening paren closes before the final token -> it does
-                    # not enclose the whole expression.
-                    if depth == 0 and i != len(tokens) - 1:
-                        encloses = False
-                        break
-            if encloses and depth == 0:
-                tokens = tokens[1:-1]
-            else:
-                break
-        return tokens
+        """Delegate to the shared :func:`strip_enclosing_parens` (M12)."""
+        return strip_enclosing_parens(tokens)
 
     @staticmethod
     def _find_top_level_operator(tokens: list[str], op: str) -> int | None:
-        """Index of the rightmost ``op`` token outside any parentheses.
-
-        Returns the rightmost match so the resulting tree is left-associative.
-        Operators nested inside parentheses are ignored. Returns ``None`` when
-        no top-level occurrence exists.
-        """
-        depth = 0
-        found: int | None = None
-        for i, tok in enumerate(tokens):
-            if tok == "(":
-                depth += 1
-            elif tok == ")":
-                depth -= 1
-            elif depth == 0 and tok.upper() == op:
-                found = i
-        return found
+        """Delegate to the shared :func:`find_top_level_operator` (M12)."""
+        return find_top_level_operator(tokens, op)
 
     def _is_statement_keyword(self, token_upper: str) -> bool:
         """Check if token is a COBOL statement keyword."""

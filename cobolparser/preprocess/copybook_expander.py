@@ -65,11 +65,13 @@ def _cached_read_file(
     file_path: str,
     encoding_override: str | None = None,
     warnings: list[str] | None = None,
+    encoding_errors: str = "replace",
 ) -> str:
     """Read a file with caching to avoid redundant disk I/O.
 
-    The cache key includes the encoding override to handle cases where
-    the same file might be read with different encodings (rare but possible).
+    The cache key includes the encoding override and the errors policy to
+    handle cases where the same file might be read with different settings
+    (rare but possible).
     Optional *warnings* receives encoding-loss diagnostics emitted by
     :func:`read_file_with_encoding`; on cache hit, any diagnostics recorded
     on the original read are replayed into *warnings* so downstream
@@ -78,7 +80,7 @@ def _cached_read_file(
     global _FILE_CONTENT_CACHE_HITS, _FILE_CONTENT_CACHE_MISSES
     global _FILE_CONTENT_CACHE_EVICTIONS
 
-    cache_key = f"{file_path}::{encoding_override or 'auto'}"
+    cache_key = f"{file_path}::{encoding_override or 'auto'}::{encoding_errors}"
     if cache_key in _FILE_CONTENT_CACHE:
         _FILE_CONTENT_CACHE.move_to_end(cache_key)
         _FILE_CONTENT_CACHE_HITS += 1
@@ -90,7 +92,10 @@ def _cached_read_file(
     _FILE_CONTENT_CACHE_MISSES += 1
     fresh_warnings: list[str] = []
     content = read_file_with_encoding(
-        file_path, encoding_override, warnings=fresh_warnings
+        file_path,
+        encoding_override,
+        warnings=fresh_warnings,
+        encoding_errors=encoding_errors,
     )
     if warnings is not None and fresh_warnings:
         warnings.extend(fresh_warnings)
@@ -153,21 +158,103 @@ def get_file_cache_stats() -> dict[str, int]:
     }
 
 
+#: Number of bytes examined when detecting encoding. Bounding the sample keeps
+#: detection O(1) for very large copybooks while sampling far more context
+#: than any realistic copybook needs to be classified.
+_DETECT_PREFIX_BYTES = 64 * 1024
+
+#: Characters plausible in COBOL source text. Candidate decodings are scored
+#: by the proportion of their characters drawn from this set. Includes tab,
+#: LF, CR and NEL (U+0085 — what cp037 decodes the EBCDIC NL byte 0x15 to).
+_COBOL_TEXT_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789"
+    " .,;:'\"()<>=+-*/$"
+    "\t\n\r\x85"
+)
+
+#: Byte values of the ASCII subset of _COBOL_TEXT_CHARS, so the ASCII-side
+#: plausibility score can be computed directly from bytes (no trial decode).
+_COBOL_TEXT_BYTES = frozenset(ord(ch) for ch in _COBOL_TEXT_CHARS if ord(ch) < 0x80)
+
+#: High-signal COBOL keywords used as a scoring tiebreaker between candidate
+#: decodings (searched case-insensitively).
+_COBOL_KEYWORDS = ("DIVISION", "SECTION", "PIC", "COPY", "VALUE", "FILLER")
+
+
+def _score_cobol_plausibility(text: str, *, newline_bonus: bool) -> float:
+    """Score how plausibly *text* is COBOL source (higher is more plausible).
+
+    Base score is the proportion of characters in the COBOL charset (0..1);
+    keyword hits add up to +0.3 and a matching newline convention adds +0.05.
+    """
+    if not text:
+        return 0.0
+    in_charset = sum(1 for ch in text if ch in _COBOL_TEXT_CHARS)
+    score = in_charset / len(text)
+    upper = text.upper()
+    keyword_hits = sum(1 for kw in _COBOL_KEYWORDS if kw in upper)
+    score += 0.1 * min(keyword_hits, 3)
+    if newline_bonus:
+        score += 0.05
+    return score
+
+
+def _try_strict_utf8(prefix: bytes, truncated: bool) -> str | None:
+    """Strict-decode *prefix* as UTF-8, tolerating a truncation-split tail.
+
+    When *truncated* is True the prefix may end mid multi-byte sequence; a
+    decode error within the final 4 bytes is retried on the shortened prefix
+    so a valid UTF-8 file is not misclassified because of the sample cut.
+    Returns the decoded text, or None if the bytes are not valid UTF-8.
+    """
+    try:
+        return prefix.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if truncated and exc.start >= len(prefix) - 4:
+            try:
+                return prefix[: exc.start].decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+        return None
+
+
 def detect_encoding(file_path: str) -> str:
     """
     Detect character encoding of a file using pure-Python heuristics.
 
-    Detection algorithm (no external dependencies per constitution):
-    1. Check for UTF-8 BOM (\\xef\\xbb\\xbf)
-    2. Try UTF-8 decode with strict error handling
-    3. Check for EBCDIC indicators (0x40 for space vs 0x20 in ASCII)
-    4. Fallback to ASCII with error replacement
+    Detection algorithm (no external dependencies per constitution), applied
+    to a bounded prefix (first 64KB) with a single byte pass plus at most two
+    trial decodes:
+
+    1. Byte-order marks are decisive: UTF-8 BOM -> 'utf-8-sig'; a UTF-16 BOM
+       whose decoded text is plausible COBOL -> 'utf-16'.
+    2. ASCII/UTF-8 line endings (0x0A/0x0D) with >=95% ASCII printables are
+       decisive for ASCII/UTF-8.
+    3. Strict UTF-8 trial decode: success with multi-byte characters present
+       is decisive for UTF-8.
+    4. Otherwise, compare COBOL-plausibility scores of the bytes read as
+       ASCII versus decoded as EBCDIC (proportion of characters in the COBOL
+       charset, EBCDIC newline bytes 0x15 NL / 0x25 LF vs ASCII 0x0A/0x0D,
+       and COBOL keyword hits as a tiebreaker). This replaces the old single
+       0x40-vs-0x20 byte-count ratio, which misclassified '@'-heavy ASCII
+       files as EBCDIC.
+
+    Single-byte EBCDIC codecs (cp037, cp500, ...) decode every byte sequence
+    without error and agree on the entire COBOL character set (letters,
+    digits, space, common punctuation), so variants cannot be distinguished
+    by content. cp037 (US/Canada, the most common IBM mainframe encoding) is
+    returned as the canonical EBCDIC label; callers needing a specific
+    variant (e.g. cp1047, cp500, cp273) should set the
+    CopybookSearchPath.encoding field to override auto-detection.
 
     Args:
         file_path: Path to file to detect encoding
 
     Returns:
-        Encoding name string ('utf-8', 'cp037' for EBCDIC, or 'ascii')
+        Encoding name string ('utf-8-sig', 'utf-8', 'utf-16', 'cp037' for
+        EBCDIC, or 'ascii')
 
     Raises:
         EncodingError: If file cannot be read
@@ -178,39 +265,82 @@ def detect_encoding(file_path: str) -> str:
     """
     try:
         with open(file_path, "rb") as f:
-            raw_bytes = f.read()
-
-        # Check for UTF-8 BOM
-        if raw_bytes.startswith(b"\xef\xbb\xbf"):
-            return "utf-8-sig"
-
-        # Try UTF-8 decode
-        try:
-            raw_bytes.decode("utf-8", errors="strict")
-            return "utf-8"
-        except UnicodeDecodeError:
-            pass
-
-        # Check for EBCDIC indicators.
-        # EBCDIC uses 0x40 for space, while ASCII uses 0x20.
-        space_ebcdic = raw_bytes.count(b"\x40")
-        space_ascii = raw_bytes.count(b"\x20")
-
-        if space_ebcdic > space_ascii and space_ebcdic > len(raw_bytes) * 0.05:
-            # Likely EBCDIC. Single-byte EBCDIC codecs (cp037, cp500, etc.) all
-            # decode any byte sequence without error, so a strict-decode probe
-            # cannot distinguish variants. Return cp037 (US/Canada, the most
-            # common IBM mainframe encoding) as the safe default. Callers that
-            # need a specific variant (e.g. cp1047 for Open Systems, cp500 for
-            # International EBCDIC, cp273 for German) should set the
-            # CopybookSearchPath.encoding field to override auto-detection.
-            return "cp037"
-
-        # Fallback to ASCII
-        return "ascii"
-
+            raw_bytes = f.read(_DETECT_PREFIX_BYTES + 1)
     except (OSError, ValueError) as e:
         raise EncodingError(file_path, f"Failed to detect encoding: {str(e)}") from e
+
+    truncated = len(raw_bytes) > _DETECT_PREFIX_BYTES
+    prefix = raw_bytes[:_DETECT_PREFIX_BYTES]
+
+    if not prefix:
+        return "utf-8"
+
+    # --- Decisive check 1: byte-order marks -------------------------------
+    if prefix.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    if prefix.startswith((b"\xff\xfe", b"\xfe\xff")):
+        # Verify the BOM is real UTF-16 (not binary junk): decode an
+        # even-length slice and require plausible COBOL text.
+        probe = prefix[: len(prefix) - (len(prefix) % 2)]
+        try:
+            decoded_utf16 = probe.decode("utf-16")
+        except UnicodeDecodeError:
+            decoded_utf16 = ""
+        if decoded_utf16 and (
+            _score_cobol_plausibility(decoded_utf16, newline_bonus=False) >= 0.6
+        ):
+            return "utf-16"
+        # Implausible text behind the "BOM": fall through to byte heuristics.
+
+    # --- Single byte pass: printability, charset and newline conventions ---
+    ascii_printable = 0
+    ascii_cobol_chars = 0
+    has_ascii_newline = False
+    has_ebcdic_newline = False
+    for byte in prefix:
+        if 0x20 <= byte <= 0x7E or byte in (0x09, 0x0A, 0x0D):
+            ascii_printable += 1
+            if byte in (0x0A, 0x0D):
+                has_ascii_newline = True
+        if byte in (0x15, 0x25):
+            has_ebcdic_newline = True
+        if byte in _COBOL_TEXT_BYTES:
+            ascii_cobol_chars += 1
+    printable_ratio = ascii_printable / len(prefix)
+
+    # Trial decode 1: strict UTF-8 on the bounded prefix.
+    utf8_text = _try_strict_utf8(prefix, truncated)
+
+    # --- Decisive check 2: ASCII line endings + overwhelmingly printable ---
+    if has_ascii_newline and printable_ratio >= 0.95:
+        return "utf-8" if utf8_text is not None else "ascii"
+
+    # --- Decisive check 3: valid UTF-8 with real multi-byte characters -----
+    if utf8_text is not None and any(ord(ch) > 0x7F for ch in utf8_text):
+        return "utf-8"
+
+    # --- Comparative scoring: ASCII vs EBCDIC plausibility -----------------
+    # ASCII side is scored straight from the byte pass (keywords searched on
+    # the raw bytes); EBCDIC side uses trial decode 2 (cp037 — cp500 scores
+    # identically on the COBOL charset, see docstring).
+    ascii_score = ascii_cobol_chars / len(prefix)
+    upper_bytes = prefix.upper()
+    ascii_keyword_hits = sum(
+        1 for kw in _COBOL_KEYWORDS if kw.encode("ascii") in upper_bytes
+    )
+    ascii_score += 0.1 * min(ascii_keyword_hits, 3)
+    if has_ascii_newline:
+        ascii_score += 0.05
+
+    ebcdic_text = prefix.decode("cp037")
+    ebcdic_score = _score_cobol_plausibility(
+        ebcdic_text, newline_bonus=has_ebcdic_newline
+    )
+
+    if ebcdic_score > ascii_score:
+        return "cp037"
+
+    return "utf-8" if utf8_text is not None else "ascii"
 
 
 #: U+FFFD REPLACEMENT CHARACTER — emitted by Python's ``errors="replace"``
@@ -225,21 +355,27 @@ def convert_to_utf8(
     *,
     source_label: str = "<content>",
     warnings: list[str] | None = None,
+    errors: str = "replace",
 ) -> str:
     """
-    Convert file content to UTF-8 string with fallback handling.
+    Convert file content to UTF-8 string with configurable strictness.
 
-    Decodes ``content`` using ``detected_encoding`` (errors replaced, not
-    raised).  If the codec name is unknown a second attempt with ASCII
+    With ``errors="replace"`` (default, backward compatible), decodes
+    ``content`` using ``detected_encoding`` with unmappable bytes replaced by
+    U+FFFD.  If the codec name is unknown a second attempt with ASCII
     replacement is made.  No multi-codec probe sequence is performed because
     single-byte EBCDIC codecs (cp037, cp500, cp1047, …) all decode every
     byte sequence without raising errors, making error-based probing useless.
     Use ``CopybookSearchPath.encoding`` to supply a specific EBCDIC variant
     rather than relying on auto-detection.
 
-    When the decode replaces unmappable bytes, a diagnostic is appended to
-    *warnings* (when provided) naming the source so callers can surface it
-    via ``ExpansionStatistics.warnings``.
+    With ``errors="strict"``, any undecodable byte raises ``EncodingError``
+    with the source label and byte offset instead of silently mangling data.
+
+    When a replace-mode decode substitutes unmappable bytes, a diagnostic
+    (including the replacement count) is appended to *warnings* (when
+    provided) naming the source so callers can surface it via
+    ``ExpansionStatistics.warnings``.
 
     Args:
         content: Raw bytes from file
@@ -247,13 +383,40 @@ def convert_to_utf8(
         source_label: Identifier used in warning messages (file path or
             ``"<content>"`` for in-memory data).
         warnings: Optional list that lossy-decode diagnostics are appended to.
+        errors: Decode strictness — ``"replace"`` (default) or ``"strict"``.
 
     Returns:
         UTF-8 string content
 
     Raises:
-        EncodingError: If conversion fails
+        EncodingError: If conversion fails, or if ``errors="strict"`` and the
+            content contains undecodable bytes.
+        ValueError: If *errors* is not ``"replace"`` or ``"strict"``.
     """
+    if errors not in ("replace", "strict"):
+        raise ValueError(
+            f"encoding errors policy must be 'replace' or 'strict', got {errors!r}"
+        )
+
+    if errors == "strict":
+        try:
+            return content.decode(detected_encoding, errors="strict")
+        except UnicodeDecodeError as e:
+            raise EncodingError(
+                source_label,
+                f"Cannot decode byte 0x{content[e.start]:02x} at offset "
+                f"{e.start} as {detected_encoding}: {e.reason} "
+                f"(encoding_errors='strict'). Set CopybookSearchPath.encoding "
+                f"to the correct codec, or use encoding_errors='replace' to "
+                f"substitute U+FFFD.",
+            ) from e
+        except LookupError as e:
+            raise EncodingError(
+                source_label,
+                f"Unknown encoding {detected_encoding!r} "
+                f"(encoding_errors='strict'): {str(e)}",
+            ) from e
+
     try:
         # Decode using detected encoding
         text = content.decode(detected_encoding, errors="replace")
@@ -285,6 +448,7 @@ def read_file_with_encoding(
     encoding_override: str | None = None,
     *,
     warnings: list[str] | None = None,
+    encoding_errors: str = "replace",
 ) -> str:
     """
     Read a file with automatic encoding detection and UTF-8 conversion.
@@ -295,12 +459,16 @@ def read_file_with_encoding(
             encoding directly.  Pass via ``CopybookSearchPath.encoding`` to
             force a specific EBCDIC variant for all copybooks in an expansion.
         warnings: Optional list that lossy-decode diagnostics are appended to.
+        encoding_errors: Decode strictness — ``"replace"`` (default)
+            substitutes undecodable bytes with U+FFFD and warns; ``"strict"``
+            raises ``EncodingError`` with file/offset context.
 
     Returns:
         File content as UTF-8 string
 
     Raises:
-        EncodingError: If file cannot be read or converted
+        EncodingError: If file cannot be read or converted, or if
+            ``encoding_errors="strict"`` and undecodable bytes are present
 
     Example:
         >>> content = read_file_with_encoding("employee.cpy")
@@ -323,6 +491,7 @@ def read_file_with_encoding(
             encoding,
             source_label=file_path,
             warnings=warnings,
+            errors=encoding_errors,
         )
 
     except EncodingError:
@@ -343,6 +512,8 @@ def expand_copybooks(
     max_file_size: int = MAX_COPYBOOK_SIZE_BYTES,
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES,
     path_resolver: "PathResolver | None" = None,
+    encoding: str | None = None,
+    encoding_errors: str = "replace",
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
@@ -362,6 +533,14 @@ def expand_copybooks(
         defined_symbols: Pre-defined symbols for conditional compilation
         max_file_size: Maximum size per copybook file in bytes
         max_total_size: Maximum total expanded content size in bytes
+        encoding: Optional explicit encoding for all copybook files (skips
+            auto-detection; e.g. 'cp1047' or 'cp500' for a specific EBCDIC
+            variant). When None (default), encoding is auto-detected per file.
+        encoding_errors: Decode strictness for copybook files — "replace"
+            (default, backward compatible) substitutes undecodable bytes with
+            U+FFFD and records a lossy-decode warning in
+            ``statistics.warnings``; "strict" raises ``EncodingError`` with
+            file/offset context instead.
 
     Returns:
         CopybookExpansion object containing expanded source and metadata
@@ -371,7 +550,10 @@ def expand_copybooks(
         CopybookNotFoundError: If referenced copybook file not found
         PathTraversalError: If path validation fails
         NestingDepthError: If nesting depth exceeds maximum
-        EncodingError: If file encoding cannot be detected or converted
+        EncodingError: If file encoding cannot be detected or converted, or
+            if ``encoding_errors="strict"`` and a copybook contains
+            undecodable bytes
+        ValueError: If ``encoding_errors`` is not "replace" or "strict"
         CopybookSizeExceededError: If a copybook exceeds the size limit
         TotalExpansionSizeExceededError: If total expanded size exceeds limit
         CopybookSyntaxError: If copybook content validation fails
@@ -400,6 +582,8 @@ def expand_copybooks(
         max_nesting_depth=max_nesting_depth,
         max_file_size=max_file_size,
         max_total_size=max_total_size,
+        encoding=encoding,
+        encoding_errors=encoding_errors,
     )
 
     # Create path resolver
@@ -592,6 +776,7 @@ def _expand_source_recursive(
                 copybook_path,
                 encoding_override=path_resolver.search_config.encoding,
                 warnings=encoding_warnings,
+                encoding_errors=path_resolver.search_config.encoding_errors,
             )
 
             # Update total bytes and check limit
@@ -728,6 +913,8 @@ def parse_cobol_with_expansion(
     filename: str,
     copybook_paths: list[str],
     max_nesting_depth: int = 100,
+    process_conditionals: bool = False,
+    defined_symbols: dict[str, str] | None = None,
     **parser_kwargs: Any,
 ) -> Any:
     """
@@ -741,6 +928,9 @@ def parse_cobol_with_expansion(
         filename: Source filename for error reporting
         copybook_paths: List of directory paths to search for copybooks
         max_nesting_depth: Maximum allowed nesting depth (default: 100)
+        process_conditionals: Whether to process >>DEFINE/>>IF/>>EVALUATE
+            conditional compilation directives before parsing (default: False)
+        defined_symbols: Pre-defined symbols for conditional compilation
         **parser_kwargs: Additional arguments passed to parse_cobol()
 
     Returns:
@@ -769,6 +959,8 @@ def parse_cobol_with_expansion(
         copybook_paths=copybook_paths,
         max_nesting_depth=max_nesting_depth,
         preserve_source_locations=False,  # Parser will track its own locations
+        process_conditionals=process_conditionals,
+        defined_symbols=defined_symbols,
     )
 
     # Parse the expanded source

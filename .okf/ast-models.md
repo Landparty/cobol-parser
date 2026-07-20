@@ -177,6 +177,23 @@ class name (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`,
 statement kind — this is what the CLI `analyze` and `parse --find-type`
 subcommands rely on.
 
+# Additive expression-tree fields (2026-07-20, M12)
+
+* `ComputeStatement.expression_tree: CobolExpression | None` — structural
+  decomposition of the COMPUTE expression (`set_expression_tree()`); the
+  raw `.expression` string is unchanged. Emitted in `to_dict()` under
+  `"expression_tree"` only when populated, so pre-M12 dict output is
+  byte-identical.
+* `CobolExpression.condition_tree: CobolExpression | None` — structural
+  decomposition of a raw condition (`set_condition_tree()`; also
+  registered as a child for generic traversal). Used by PERFORM UNTIL:
+  `until_condition` remains the historical `CobolExpression("CONDITION")`
+  with the raw joined string in `operands`, and the tree rides alongside.
+  Emitted in `to_dict()` under `"condition_tree"` only when populated.
+* Consumers (`ProgramFlowAnalyzer`, `coverage_analyzer`,
+  backend extractors per `interface-contract.md`) need no changes — all
+  historical fields/keys are untouched.
+
 # See Also
 
 * [parser.md](parser.md) — produces AST nodes

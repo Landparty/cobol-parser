@@ -75,6 +75,272 @@ _SQL_KEYWORDS = frozenset(
     ]
 )
 
+# Keywords that terminate a FROM table list or can never be a table name in
+# the tokenizer-based extraction (see _extract_tables_tokenized).
+_SQL_TABLE_STOP_KEYWORDS = frozenset(
+    {
+        "WHERE",
+        "GROUP",
+        "ORDER",
+        "HAVING",
+        "ON",
+        "UNION",
+        "EXCEPT",
+        "INTERSECT",
+        "FETCH",
+        "FOR",
+        "WITH",
+        "SET",
+        "VALUES",
+        "INNER",
+        "LEFT",
+        "RIGHT",
+        "FULL",
+        "OUTER",
+        "CROSS",
+        "JOIN",
+        "AS",
+        "USING",
+        "OPTIMIZE",
+        "AT",
+    }
+    | _SQL_KEYWORDS
+)
+
+
+# ---------------------------------------------------------------------------
+# Light SQL tokenizer (literal/comment aware) used to derive additional
+# structure (select columns, WHERE presence, multi-table extraction) on top
+# of the pre-existing regex extraction. Deliberately not a full grammar.
+# ---------------------------------------------------------------------------
+
+
+def _strip_sql_literals_and_comments(sql: str) -> str:
+    """Blank out string literals and SQL comments from *sql*.
+
+    Quoted literals (``'...'`` / ``"..."`` with doubled-quote escapes),
+    ``--`` line comments, and ``/* ... */`` block comments are replaced by a
+    single space so subsequent keyword/host-variable scans never match text
+    inside them. A ``--`` immediately preceded by an identifier character is
+    NOT treated as a comment (COBOL names may contain hyphens).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            while i < n:
+                if sql[i] == quote:
+                    if i + 1 < n and sql[i + 1] == quote:
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            out.append(" ")
+            continue
+        if (
+            ch == "-"
+            and i + 1 < n
+            and sql[i + 1] == "-"
+            and (i == 0 or not (sql[i - 1].isalnum() or sql[i - 1] in "_-:"))
+        ):
+            newline = sql.find("\n", i)
+            i = n if newline == -1 else newline
+            out.append(" ")
+            continue
+        if ch == "/" and i + 1 < n and sql[i + 1] == "*":
+            end = sql.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            out.append(" ")
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _scan_sql_tokens(sql: str) -> list[tuple[str, int]]:
+    """Tokenize literal/comment-scrubbed SQL into ``(token, paren_depth)``.
+
+    Host variables keep their leading colon (``:WS-NAME``); an indicator form
+    ``:WS-NAME:WS-IND`` yields two consecutive colon tokens. Identifier
+    tokens may include dots and hyphens; other characters come out as
+    single-character punctuation tokens. Whitespace is skipped.
+    """
+    tokens: list[tuple[str, int]] = []
+    depth = 0
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch.isspace():
+            i += 1
+        elif ch == "(":
+            tokens.append(("(", depth))
+            depth += 1
+            i += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            tokens.append((")", depth))
+            i += 1
+        elif ch == ":":
+            j = i + 1
+            while j < n and (sql[j].isalnum() or sql[j] in "_-"):
+                j += 1
+            tokens.append((sql[i:j], depth))
+            i = j
+        elif ch.isalnum() or ch in "_$#@":
+            j = i
+            while j < n and (sql[j].isalnum() or sql[j] in "_-$#@."):
+                j += 1
+            tokens.append((sql[i:j], depth))
+            i = j
+        else:
+            tokens.append((ch, depth))
+            i += 1
+    return tokens
+
+
+def _is_sql_word(token: str) -> bool:
+    """Return True for identifier-shaped tokens (not punctuation/host vars)."""
+    return (
+        bool(token)
+        and not token.startswith(":")
+        and (token[0].isalnum() or token[0] in "_$#@")
+    )
+
+
+def _tidy_sql_fragment(parts: list[str]) -> str:
+    """Join scan tokens back into readable SQL fragment text."""
+    text = " ".join(parts)
+    for src, dst in ((" (", "("), ("( ", "("), (" )", ")"), (". ", "."), (" .", ".")):
+        text = text.replace(src, dst)
+    return text.strip()
+
+
+def _extract_select_columns(tokens: list[tuple[str, int]]) -> list[str]:
+    """Return the SELECT-list items of a SELECT statement's token scan.
+
+    Items are split on top-level commas between ``SELECT`` and the first
+    top-level ``INTO``/``FROM``. A leading ``DISTINCT``/``ALL`` qualifier is
+    dropped. Returns ``[]`` when the scan does not start with SELECT.
+    """
+    if not tokens or tokens[0][0].upper() != "SELECT":
+        return []
+    columns: list[str] = []
+    current: list[str] = []
+    start = 1
+    if (
+        len(tokens) > 1
+        and tokens[1][1] == 0
+        and tokens[1][0].upper() in ("DISTINCT", "ALL")
+    ):
+        start = 2
+    for token, depth in tokens[start:]:
+        upper = token.upper()
+        if depth == 0 and upper in ("INTO", "FROM"):
+            break
+        if depth == 0 and token == ",":
+            if current:
+                columns.append(_tidy_sql_fragment(current))
+                current = []
+            continue
+        current.append(token)
+    if current:
+        columns.append(_tidy_sql_fragment(current))
+    return columns
+
+
+def _read_qualified_name(tokens: list[tuple[str, int]], index: int) -> tuple[str, int]:
+    """Read a (possibly qualified) table name at *index*; return (name, next)."""
+    parts: list[str] = []
+    n = len(tokens)
+    while index < n:
+        token, depth = tokens[index]
+        if depth != 0 or not _is_sql_word(token):
+            break
+        parts.append(token)
+        index += 1
+        if not token.endswith("."):
+            break
+    return "".join(parts), index
+
+
+def _extract_tables_tokenized(
+    tokens: list[tuple[str, int]], sql_type: str
+) -> list[str]:
+    """Tokenizer-based table extraction (multi-table FROM lists, JOINs).
+
+    Complements the regex extraction: results are appended to
+    ``ExecSQLStatement.tables`` only when not already present, so existing
+    regex behaviour is preserved.
+    """
+    tables: list[str] = []
+
+    def add(name: str) -> None:
+        if name and name.upper() not in _SQL_TABLE_STOP_KEYWORDS and name not in tables:
+            tables.append(name)
+
+    def read_table_list(index: int) -> int:
+        """Read ``table [AS alias][, table [AS alias]]...`` from *index*."""
+        n = len(tokens)
+        while True:
+            name, index = _read_qualified_name(tokens, index)
+            if not name or name.upper() in _SQL_TABLE_STOP_KEYWORDS:
+                return index
+            add(name)
+            # Optional alias: AS alias | bare alias word.
+            if index < n and tokens[index][1] == 0:
+                token = tokens[index][0]
+                upper = token.upper()
+                if upper == "AS":
+                    index += 1
+                    if index < n and _is_sql_word(tokens[index][0]):
+                        index += 1
+                elif _is_sql_word(token) and upper not in _SQL_TABLE_STOP_KEYWORDS:
+                    index += 1
+            if index < n and tokens[index] == (",", 0):
+                index += 1
+                continue
+            return index
+
+    from_types = (
+        SQLStatementType.SELECT,
+        SQLStatementType.DELETE,
+        SQLStatementType.DECLARE_CURSOR,
+    )
+    n = len(tokens)
+    i = 0
+    insert_into_pending = sql_type == SQLStatementType.INSERT
+    while i < n:
+        token, depth = tokens[i]
+        if depth == 0:
+            upper = token.upper()
+            if upper == "FROM" and sql_type in from_types:
+                i = read_table_list(i + 1)
+                continue
+            if upper == "JOIN":
+                name, j = _read_qualified_name(tokens, i + 1)
+                add(name)
+                i = max(j, i + 1)
+                continue
+            if upper == "INTO" and insert_into_pending:
+                name, j = _read_qualified_name(tokens, i + 1)
+                add(name)
+                insert_into_pending = False
+                i = max(j, i + 1)
+                continue
+            if upper == "UPDATE" and sql_type == SQLStatementType.UPDATE and i == 0:
+                name, j = _read_qualified_name(tokens, i + 1)
+                add(name)
+                i = max(j, i + 1)
+                continue
+        i += 1
+    return tables
+
 
 @dataclass
 class SQLStatementInfo:
@@ -323,6 +589,10 @@ class ExecSQLStatement(CobolStatement):
         self.cursor_name: str | None = None
         self.prepared_statement_name: str | None = None
         self.into_variables: list[str] = []
+        #: SELECT-list items (tokenizer-derived; populated for SELECT only).
+        self.select_columns: list[str] = []
+        #: True when a top-level WHERE clause is present.
+        self.where_present: bool = False
 
     @property
     def sql_type(self) -> str:
@@ -346,14 +616,32 @@ class ExecSQLStatement(CobolStatement):
         # Determine SQL type
         self._sql_type = self._determine_sql_type(upper_sql)
 
-        # Extract host variables (:variable_name)
-        self._extract_host_variables(normalized)
+        # Scans below must never match inside string literals or comments.
+        scrubbed = _strip_sql_literals_and_comments(normalized)
 
-        # Extract table names
-        self._extract_tables(normalized)
+        # Extract host variables (:variable_name)
+        self._extract_host_variables(scrubbed)
+
+        # Extract table names (regex pass — preserved for compatibility)
+        self._extract_tables(scrubbed)
+
+        # Tokenizer pass: adds structure the regexes miss (multi-table FROM
+        # lists, JOIN chains, SELECT columns, WHERE presence).
+        tokens = _scan_sql_tokens(scrubbed)
+        for table in _extract_tables_tokenized(tokens, self._sql_type):
+            if table not in self.tables:
+                self.tables.append(table)
+        self.select_columns = (
+            _extract_select_columns(tokens)
+            if self._sql_type == SQLStatementType.SELECT
+            else []
+        )
+        self.where_present = any(
+            depth == 0 and token.upper() == "WHERE" for token, depth in tokens
+        )
 
         # Extract INTO variables
-        self._extract_into_variables(normalized)
+        self._extract_into_variables(scrubbed)
 
         # Extract cursor name if applicable
         self._extract_cursor_info(normalized)
@@ -560,6 +848,8 @@ class ExecSQLStatement(CobolStatement):
                 "cursor_name": self.cursor_name,
                 "prepared_statement_name": self.prepared_statement_name,
                 "into_variables": self.into_variables,
+                "select_columns": self.select_columns,
+                "where_present": self.where_present,
                 "structured_output": structured.to_dict(),
             }
         )

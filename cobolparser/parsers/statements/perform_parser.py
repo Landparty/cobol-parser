@@ -3,6 +3,7 @@
 import logging
 from typing import Any, cast
 
+from cobolparser.parsers.statements._conditions import build_condition_expression
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
@@ -47,6 +48,32 @@ def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | No
         if token.type not in _NOISE_TOKEN_TYPES:
             return token
         offset += 1
+
+
+def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
+    """Build the UNTIL condition node from its collected token strings.
+
+    Backward-compatible shape (M12): the returned node is still a
+    ``CobolExpression("CONDITION")`` whose ``operands`` hold the single raw
+    joined condition string -- exactly what every pre-M12 consumer reads.
+    Additionally, the same tokens are decomposed with the IF parser's
+    shared condition machinery and attached as ``condition_tree`` (a
+    ConditionalExpression / LogicalExpression tree), so callers can walk
+    the condition structurally. Tree building is best-effort and never
+    fails the PERFORM parse.
+    """
+    condition_str = " ".join(condition_tokens).strip()
+    condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
+    condition_expr.operands = [condition_str]
+    try:
+        tree = build_condition_expression(list(condition_tokens), SourceLocation(0, 0))
+    except Exception:
+        # Strictly fail-soft: a condition the shared machinery cannot
+        # handle keeps the raw string with no structural tree.
+        tree = None
+    if tree is not None:
+        condition_expr.set_condition_tree(tree)
+    return condition_expr
 
 
 def _warn_stray_trailing_token(stream: ITokenStream, token: Token) -> None:
@@ -639,10 +666,9 @@ class PerformStatementParser(IStatementParser):
             skip_whitespace(stream)
             condition_tokens = self._collect_until_condition_tokens(stream)
             if condition_tokens:
-                condition_str = " ".join(condition_tokens).strip()
-                condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
-                condition_expr.operands = [condition_str]
-                stmt.set_until_clause(condition_expr)
+                stmt.set_until_clause(
+                    _make_until_condition_expression(condition_tokens)
+                )
             self._parse_inline_statements(stream, stmt)
         except ParseError as exc:
             # H4: previously silent -- see _parse_varying_clause above.
@@ -664,10 +690,7 @@ class PerformStatementParser(IStatementParser):
                 stream, for_varying=True
             )
             if condition_tokens:
-                condition_str = " ".join(condition_tokens).strip()
-                condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
-                condition_expr.operands = [condition_str]
-                return condition_expr
+                return _make_until_condition_expression(condition_tokens)
         except ParseError as exc:
             # H4: previously silent -- see _parse_varying_clause above.
             logger.debug(
@@ -725,11 +748,9 @@ class PerformStatementParser(IStatementParser):
 
             # Create CobolExpression for the condition and set it on statement
             if condition_tokens:
-                condition_str = " ".join(condition_tokens).strip()
-                location = SourceLocation(0, 0)  # Default location
-                condition_expr = CobolExpression("CONDITION", location)
-                condition_expr.operands = [condition_str]
-                stmt.set_until_clause(condition_expr)
+                stmt.set_until_clause(
+                    _make_until_condition_expression(condition_tokens)
+                )
         except (TokenMismatch, UnexpectedEndOfInput):
             pass
 

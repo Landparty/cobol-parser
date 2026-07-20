@@ -1,5 +1,42 @@
 # OKF Update Log
 
+## 2026-07-20 (open-findings M6/M10/M11/M12/M13/M15 batch fix)
+
+The six MEDIUM findings previously deferred as subsystem rewrites are
+fixed, each pinned by its own
+`tests/regression/test_open_findings_m<N>_regression.py`:
+
+* **M13** — `apply_replacing_clauses` is a context-aware line scanner
+  (comment lines and string literals protected); `:ABC:` pseudo-text
+  delimiters stripped by `CopyStatementLexer._read_operand` so colon
+  operands substitute. Updated `preprocessing.md`.
+* **M10** — `preprocess_conditional_compilation` evaluates real `>>IF`
+  conditions (comparisons, `AND`/`OR`/`NOT`, `DEFINED`) against valued
+  symbols (`dict` accepted; pre-existing CLI `--define NAME=VALUE` values
+  now take effect), and implements
+  `>>EVALUATE`/`>>WHEN`/`>>WHEN OTHER`/`>>END-EVALUATE`. Obsolete pins
+  in `test_tier4_audit_remediations.py` updated. Updated
+  `preprocessing.md`.
+* **M11** — `ExecCicsStatement.options` dict, `ExecImsStatement` DLI
+  function + positional args, tokenizer-based `parse_exec_sql`
+  (`select_columns`, `where_present`, `:VAR:IND`). Additive only.
+  Updated `parser.md`.
+* **M12** — `ComputeStatement.expression_tree` (precedence-parsed) and
+  `CobolExpression.condition_tree` for PERFORM UNTIL / IF-fallback
+  conditions, via new shared `parsers/statements/_conditions.py`. Raw
+  strings and dict output for pre-existing shapes unchanged. Updated
+  `parser.md`, `ast-models.md`.
+* **M15** — `detect_encoding` plausibility scoring over a 64 KiB prefix;
+  `encoding_errors` (`"replace"`/`"strict"`) on `CopybookSearchPath` /
+  `expand_copybooks`. Updated `preprocessing.md`.
+* **M6** — `tokenize_cobol()`/CLI `tokenize` unified onto
+  `normalize_fixed_format` + free-form lexing with COMMENT tokens
+  re-emitted at original line numbers (`_tokenize_source`). No Cython
+  mirror touched. Updated `lexer.md`.
+
+`reports/open-findings.md` and `CHANGELOG.md` (Unreleased) updated in the
+same batch. Remaining open: M17 (coverage debt) and LOW findings.
+
 ## 2026-07-17 (VALUE ALL literal clause support)
 
 * **`VALUE ALL <literal>` parsed instead of dropped**

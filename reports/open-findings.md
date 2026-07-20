@@ -1,14 +1,17 @@
 # cobolparser — Open Findings (as of 2026-07-08)
 
+**Status update (2026-07-20):** the six remaining MEDIUM findings (M6, M10,
+M11, M12, M13, M15) are now fixed, each pinned by its own regression file
+`tests/regression/test_open_findings_m<N>_regression.py` — see the
+per-finding "FIXED 2026-07-20" notes below and `CHANGELOG.md` (Unreleased).
+Still open: M17 (test-coverage debt, not a bug) and the LOW findings.
+
 **Status update (2026-07-09):** all 10 HIGH findings (H1-H10; H10 found in
 a later same-day follow-up, independently of this document's original
 audits) and 10 of the 17 MEDIUM findings (M1, M2, M3 partial, M4, M5, M7
 partial, M8, M9, M14, M16) are now fixed and pinned by regression tests —
 see the per-severity banners below (`## HIGH`, `## MEDIUM`) and
-`CHANGELOG.md` (Unreleased → Fixed) for the full writeup. Still open: M6,
-M10, M11, M12, M13, M15 (each close to its own subsystem rewrite, deferred
-to separate plans), M17 (test-coverage debt, not a bug), and all LOW
-findings.
+`CHANGELOG.md` (Unreleased → Fixed) for the full writeup.
 
 This file supersedes `audit-2026-07-06.md`, `-07.md`, `-08.md`, `-09.md`, and
 `cobol-parser-example-parse-gaps.md`. Those four audits (plus the mockymock
@@ -284,10 +287,10 @@ grammar is a two-part clause this finding's text didn't specify with
 enough confidence to implement correctly) and remain open, tracked below
 under "M3 residual — extended DISPLAY/ACCEPT clauses not covered".
 
-**M6, M10, M11, M12, M13, and M15 remain open**, each close to its own
-subsystem rewrite rather than a contained bug fix; deferred to separate
-plans. **M17** is test-coverage debt, not a bug, and was not attempted in
-this pass.
+**M6, M10, M11, M12, M13, and M15 are fixed** (2026-07-20 batch), each
+pinned by its own `tests/regression/test_open_findings_m<N>_regression.py`
+file — see the per-finding "FIXED 2026-07-20" notes below. **M17** is
+test-coverage debt, not a bug, and remains open.
 
 ### M1 — DISPLAY/ACCEPT don't accept figurative constants as operands — FIXED 2026-07-09
 `cobolparser/parsers/statements/display_parser.py:106-129` only accepts
@@ -348,7 +351,17 @@ rules. Repro: opening line `VALUE "ABC   ` (3 trailing blanks) +
 continuation `-    "DEF".` → `VALUE "ABCDEF"` (blanks gone; should be
 `"ABC   DEF"`).
 
-### M6 — `parse_cobol()` and `tokenize_cobol()`/CLI `tokenize` run different fixed-format logic
+### M6 — `parse_cobol()` and `tokenize_cobol()`/CLI `tokenize` run different fixed-format logic — FIXED 2026-07-20
+
+Fixed: `tokenize_cobol()` and CLI `tokenize` now route fixed-format source
+through the same `normalize_fixed_format` + `free_form=True` path
+`parse_cobol()` uses, so both pipelines agree on every non-COMMENT token.
+Comment lines are preserved for the tokenize UX: they are captured during
+normalization and re-emitted as `COMMENT` tokens with their original line
+numbers (`_fixed_format_comment_tokens` / `_merge_comment_tokens` in
+`lexer.py`). Free-form input behavior is unchanged, and the Cython-mirrored
+hot paths were not touched. Pinned by
+`tests/regression/test_open_findings_m6_regression.py`.
 `parse_cobol()` normalizes via `normalize_fixed_format` then lexes with
 `free_form=True` (comment lines dropped upstream). `tokenize_cobol()`
 (`lexer.py:1694-1719`) and CLI `tokenize` (`cli/parse.py:570`) construct
@@ -389,7 +402,24 @@ do surface), but exceptions that bypass `report_or_raise` (e.g.
 `TokenMismatch`/`UnexpectedEndOfInput` raised directly by
 `token_stream.expect()`) are still fully lost with only a DEBUG line.
 
-### M10 — Conditional compilation (`>>IF`/`>>EVALUATE`) still functionally incomplete
+### M10 — Conditional compilation (`>>IF`/`>>EVALUATE`) still functionally incomplete — FIXED 2026-07-20
+
+Fixed: `preprocess_conditional_compilation` now evaluates real `>>IF`
+conditions — comparisons (`=`, `<>`, `>`, `<`, `>=`, `<=`) between symbol
+values and numeric/string literals, `DEFINED(sym)` / `sym IS [NOT]
+DEFINED`, and `AND`/`OR`/`NOT` with parentheses — against defined symbols
+that may now carry values (`dict[str, str | int | float | bool]` accepted
+alongside the legacy name-only forms; values from the CLI's existing
+`--define NAME=VALUE` form now take effect in comparisons).
+`>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE`
+(condition `>>WHEN`s), and `>>WHEN OTHER` / `>>END-EVALUATE` are
+implemented. A comparison referencing an undefined symbol warns and
+evaluates false; genuinely unparseable conditions keep the old
+warn-and-skip behavior. Directive lines are still blanked in place so
+line numbers stay stable. Pinned by
+`tests/regression/test_open_findings_m10_regression.py`; the obsolete
+pins in `test_tier4_audit_remediations.py` were updated to the new
+semantics.
 `preprocess/__init__.py:628-686`. **(now warns, not fixed)**: only
 `symbol IS [NOT] DEFINED` is evaluated; any other `>>IF` condition (e.g.
 `>>IF DEBUGLEVEL > 3`) still unconditionally blanks the guarded block
@@ -400,7 +430,19 @@ confirmed still fully unimplemented (falls through to the generic
 wired into the default `parse_cobol()` path — only reachable via
 `parse_cobol_with_expansion(process_conditionals=True)` or CLI `--define`.
 
-### M11 — EXEC CICS / EXEC IMS remain raw-text stubs; EXEC SQL improved but still not a real clause tree
+### M11 — EXEC CICS / EXEC IMS remain raw-text stubs; EXEC SQL improved but still not a real clause tree — FIXED 2026-07-20
+
+Fixed: `ExecCicsStatement` now carries a structured `options` dict
+(option keyword → parenthesized argument text, `None` for flag options
+like `ERASE`/`NOHANDLE`; nested parentheses and quoted literals inside
+arguments handled), `ExecImsStatement` captures the DLI function code
+plus positional arguments (PCB, I/O area, SSAs), and `parse_exec_sql`
+was upgraded from regex scraping to a literal/comment-aware tokenizer
+that extracts statement kind, tables (FROM/INTO/UPDATE/JOIN), host
+variables including the `:VAR:IND` indicator form, and for SELECTs a
+`select_columns` list and `where_present` flag. All previous fields and
+`to_dict()` keys are preserved (additive only). Pinned by
+`tests/regression/test_open_findings_m11_regression.py`.
 `ExecCicsStatement`/`ExecImsStatement` (`ibm_exec_statements.py`) still only
 capture a command name + flat joined-token text blob — `EXEC CICS SEND
 MAP('MAP1') MAPSET('SET1') END-EXEC.` produces no `MAP`/`MAPSET` fields.
@@ -409,7 +451,22 @@ EXEC SQL is better than the original audit claimed: `parse_exec_sql()`
 and `tables` — but this is regex field-scraping over the flattened SQL
 text, not a real SQL grammar (no SELECT-list/WHERE-clause structure).
 
-### M12 — Arithmetic/loop expressions still stored as raw strings, not trees
+### M12 — Arithmetic/loop expressions still stored as raw strings, not trees — FIXED 2026-07-20
+
+Fixed: `ComputeStatement` gains an additive `expression_tree`
+(precedence-parsed `ArithmeticExpression` tree: unary +/-, `**`, `*`/`/`,
+binary +/-, parentheses, subscripted identifiers, FUNCTION calls) while
+`.expression` remains the byte-identical raw string; tree-build failure
+degrades to `None` with behavior otherwise unchanged. `PERFORM UNTIL`
+conditions are now structurally decomposed via the IF parser's condition
+machinery, factored into the shared
+`parsers/statements/_conditions.py` (`build_condition_expression`), and
+attached as `condition_tree` on the historical raw-string
+`CobolExpression` (also emitted in `to_dict()` only when present). The
+IF fallback path (class/sign/condition-name conditions like `A IS
+NUMERIC`) now produces a structured node too, with
+`metadata.raw_condition` still populated. Pinned by
+`tests/regression/test_open_findings_m12_regression.py`.
 `ComputeStatement.expression` (`arithmetic_parsers.py:477-523`) is always a
 plain joined `str`, never decomposed. `PERFORM ... UNTIL`'s
 `CobolExpression.operands` (added since the original audit, referenced in
@@ -421,7 +478,17 @@ its fallback for non-comparison conditions (`IF A IS NUMERIC`,
 condition-names, sign conditions) still stores a raw joined string in
 `metadata.raw_condition`.
 
-### M13 — REPLACING is context-blind text substitution
+### M13 — REPLACING is context-blind text substitution — FIXED 2026-07-20
+
+Fixed: `apply_replacing_clauses` is now a line-based scanner that never
+rewrites fixed-format comment lines (column-7 `*`/`/`) or text inside
+string literals (both quote styles, doubled-quote escapes) — except when
+a clause's own search text contains a quote (quoted pseudo-text
+deliberately targets literal text). `CopyStatementLexer._read_operand`
+now recognizes `:ABC:` pseudo-text and strips the delimiters, so
+colon-delimited REPLACING operands actually substitute instead of
+silently no-opping. Pinned by
+`tests/regression/test_open_findings_m13_regression.py`.
 `apply_replacing_clauses` (`copy_statement_parser.py:774-824`) is pure
 regex substitution with only identifier-boundary lookarounds — no
 literal/comment awareness. Confirmed: a `REPLACING FOO BY BAR` clause
@@ -442,7 +509,18 @@ routine diamond dependency) contributes zero to the running total. Repro:
 `TotalExpansionSizeExceededError` raised despite 228 true content bytes,
 more than double the configured limit.
 
-### M15 — EBCDIC autodetection heuristic still fragile; lossy decode fallback still silently mangles bytes
+### M15 — EBCDIC autodetection heuristic still fragile; lossy decode fallback still silently mangles bytes — FIXED 2026-07-20
+
+Fixed: `detect_encoding` replaces the single 0x40-vs-0x20 byte-ratio
+check with a bounded-prefix plausibility comparison — BOM and strict
+UTF-8 checks first, then ASCII-vs-EBCDIC scoring of trial-decoded text
+(COBOL charset proportion, EBCDIC newline conventions, keyword hits as
+tiebreaker). A new `encoding_errors` option on `CopybookSearchPath` /
+`expand_copybooks(...)` selects decode strictness: `"replace"` (default,
+backward compatible) substitutes U+FFFD and warns with a replacement
+count; `"strict"` raises `EncodingError` with file/offset context
+instead of silently mangling bytes. Pinned by
+`tests/regression/test_open_findings_m15_regression.py`.
 `copybook_expander.py:194-210` (`detect_encoding`) is still a raw
 `0x40`-vs-`0x20` byte-count heuristic with a 5% threshold.
 `convert_to_utf8` still uses `errors="replace"` (U+FFFD) on undecodable

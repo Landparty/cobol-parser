@@ -1740,17 +1740,159 @@ class _CobolLexerPure:
         return bool(self.warnings)
 
 
+def _fixed_format_comment_tokens(
+    physical_lines: list[str], normalized: str
+) -> list[Token]:
+    """Recover COMMENT tokens for comment lines dropped by normalization.
+
+    ``normalize_fixed_format`` emits an empty placeholder line for every
+    comment line (indicator ``*``, ``/`` or debug ``D``) and every blank/short
+    line so later lines keep their line numbers, but the comment text itself
+    is dropped before the free-form lexer runs. This helper re-scans the
+    original physical lines, pairs each empty line in *normalized* with the
+    physical comment/blank line that produced it (they correspond 1:1, in
+    order), and builds COMMENT tokens whose line numbers use the same
+    (normalized) coordinate system as the tokens lexed from *normalized* —
+    so the two streams interleave consistently.
+    """
+    # One entry per placeholder-producing physical line, in order: the
+    # COMMENT token value, or None for blank/short lines (no token).
+    placeholders: list[str | None] = []
+    for raw in physical_lines:
+        line = raw.rstrip("\n").expandtabs(8)
+        if len(line) < _FF_AREA_A:
+            placeholders.append(None)  # blank/short line placeholder
+            continue
+        indicator = line[_FF_INDICATOR]
+        if indicator == "/":
+            # Page eject — same token value the legacy fixed-format
+            # lexer path emitted.
+            placeholders.append("/ PAGE BREAK")
+        elif indicator in ("*", "D", "d"):
+            placeholders.append(line[_FF_INDICATOR:_FF_LINE_END].rstrip())
+        # Code / continuation lines produce no placeholder.
+
+    comments: list[Token] = []
+    next_placeholder = 0
+    for norm_idx, norm_line in enumerate(normalized.splitlines()):
+        if norm_line:
+            continue
+        if next_placeholder >= len(placeholders):
+            break
+        text = placeholders[next_placeholder]
+        next_placeholder += 1
+        if text is not None:
+            location = SourceLocation(norm_idx + 1, _FF_INDICATOR + 1, 1)
+            comments.append(Token(TokenType.COMMENT, text, location))
+    return comments
+
+
+def _merge_comment_tokens(tokens: list[Token], comments: list[Token]) -> list[Token]:
+    """Interleave COMMENT *comments* into *tokens* by source line order.
+
+    Both lists are already sorted by line; comment lines never carry code
+    tokens (they are empty in the normalized text), so a simple line-number
+    merge is sufficient. Any trailing comments land just before EOF because
+    the EOF token's line number is past the last source line.
+    """
+    if not comments:
+        return tokens
+    merged: list[Token] = []
+    next_comment = 0
+    for token in tokens:
+        while (
+            next_comment < len(comments)
+            and comments[next_comment].location.line < token.location.line
+        ):
+            merged.append(comments[next_comment])
+            next_comment += 1
+        merged.append(token)
+    merged.extend(comments[next_comment:])
+    return merged
+
+
+def _tokenize_source(
+    source: str,
+    filename: str = "<string>",
+    dialect: DialectType = DialectType.IBM_ENTERPRISE,
+    free_form: bool = False,
+    keep_comments: bool = True,
+) -> tuple[list[Token], list[LexerError], list[str]]:
+    """Tokenize *source* on the same pipeline ``parse_cobol`` uses (M6).
+
+    When *free_form* is False and the source is auto-detected as
+    fixed-format (same detection ``CobolParser.parse`` performs), it is
+    normalized via ``normalize_fixed_format`` and lexed with
+    ``free_form=True`` — so the token stream agrees with the parser's on
+    every non-COMMENT token. Because normalization drops comment lines,
+    *keep_comments* (default True) re-emits them as COMMENT tokens with
+    line numbers in the normalized coordinate system, interleaved at their
+    original positions. Free-form (or non-fixed-detected) input is lexed
+    directly, unchanged.
+
+    Returns:
+        Tuple of (tokens, lexer errors, lexer warnings).
+    """
+    if not free_form:
+        # Deferred imports: parser.py imports this module at load time, and
+        # keeping preprocess out of module scope avoids import cycles.
+        from .parser import _detect_fixed_format
+        from .preprocess import normalize_fixed_format
+
+        if _detect_fixed_format(source):
+            physical_lines = source.splitlines()
+            errors: list[LexerError] = []
+            try:
+                normalized = normalize_fixed_format(physical_lines)
+            except ValueError as exc:
+                # Unterminated literal at EOF. Record the error and fall back
+                # to the never-raising normalization, mirroring
+                # CobolParser.parse under COLLECT_ALL.
+                errors.append(
+                    LexerError(
+                        str(exc),
+                        SourceLocation(max(len(physical_lines), 1), 1, 1),
+                    )
+                )
+                normalized = normalize_fixed_format(
+                    physical_lines, merge_continued_literals=False
+                )
+            lexer = CobolLexer(normalized, filename, dialect, free_form=True)
+            tokens: list[Token] = lexer.tokenize()
+            if keep_comments:
+                tokens = _merge_comment_tokens(
+                    tokens,
+                    _fixed_format_comment_tokens(physical_lines, normalized),
+                )
+            errors.extend(lexer.get_errors())
+            return tokens, errors, lexer.get_warnings()
+
+    lexer = CobolLexer(source, filename, dialect, free_form=free_form)
+    direct_tokens: list[Token] = lexer.tokenize()
+    return direct_tokens, lexer.get_errors(), lexer.get_warnings()
+
+
 def tokenize_cobol(
     source: str,
     filename: str = "<string>",
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
+    free_form: bool = False,
+    keep_comments: bool = True,
 ) -> list[Token]:
     """Convenience function to tokenize COBOL source code.
+
+    Fixed-format source is auto-detected and normalized through the same
+    ``normalize_fixed_format`` + free-form lexing pipeline ``parse_cobol``
+    uses, so both paths agree on all non-COMMENT tokens (M6). Comment lines
+    are preserved as COMMENT tokens unless *keep_comments* is False.
 
     Args:
         source: COBOL source code
         filename: Source filename for error reporting
         dialect: COBOL dialect
+        free_form: Treat source as free-form (skip fixed-format detection
+            and normalization)
+        keep_comments: Emit fixed-format comment lines as COMMENT tokens
 
     Returns:
         List of tokens
@@ -1758,14 +1900,15 @@ def tokenize_cobol(
     Raises:
         LexerError: If there are lexing errors
     """
-    lexer = CobolLexer(source, filename, dialect)
-    tokens = lexer.tokenize()
+    tokens, errors, _warnings = _tokenize_source(
+        source, filename, dialect, free_form=free_form, keep_comments=keep_comments
+    )
 
-    if lexer.has_errors():
+    if errors:
         # Raise first error
-        raise lexer.get_errors()[0]
+        raise errors[0]
 
-    return tokens  # type: ignore[no-any-return]
+    return tokens
 
 
 # ---------------------------------------------------------------------------
