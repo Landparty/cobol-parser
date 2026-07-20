@@ -1,5 +1,18 @@
 # OKF Update Log
 
+## 2026-07-20 (WRITE BEFORE/AFTER without ADVANCING keyword)
+
+* **`WRITE ... AFTER 1` (no `ADVANCING`) no longer drops the clause**
+  (`parsers/statements/write_parser.py`): the `ADVANCING` keyword is
+  optional in the standard `BEFORE|AFTER [ADVANCING] [n] [LINES|LINE|PAGE]`
+  phrase, but the parser required it — `AFTER 1`, `AFTER 1 LINE`, and
+  `BEFORE PAGE` consumed the `BEFORE`/`AFTER` token and then recorded
+  nothing, with a trailing `LINE`/`LINES` surfacing as an "Unparsed
+  tokens" content-drop warning. The count/unit parsing now runs whether
+  or not `ADVANCING` is present. Pinned by
+  `tests/unit/test_write_advancing.py`. Updated `parser.md` and
+  `CHANGELOG.md` (Unreleased).
+
 ## 2026-07-20 (open-findings M6/M10/M11/M12/M13/M15 batch fix)
 
 The six MEDIUM findings previously deferred as subsystem rewrites are
