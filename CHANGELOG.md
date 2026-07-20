@@ -15,8 +15,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   been removed. Equivalent test-generation functionality now lives in the
   mockymock framework.
 
+### Added
+
+* **preprocess:** conditional compilation is now functionally complete
+  (open-findings M10). `>>IF` evaluates real conditions — comparisons
+  (`=`, `<>`, `>`, `<`, `>=`, `<=`) against symbol values, `DEFINED(sym)` /
+  `sym IS [NOT] DEFINED`, and `AND`/`OR`/`NOT` with parentheses — and
+  `>>EVALUATE sym` / `>>EVALUATE TRUE` with `>>WHEN` / `>>WHEN OTHER` /
+  `>>END-EVALUATE` block selection is implemented. Defined symbols may now
+  carry values (`dict[str, str | int | float | bool]` accepted alongside
+  the legacy name-only forms), so values supplied via the CLI's existing
+  `--define NAME=VALUE` form now take effect in comparisons. An
+  undefined symbol in a comparison warns and evaluates false; directive
+  lines are still blanked in place so line numbers stay stable. Pinned by
+  `tests/regression/test_open_findings_m10_regression.py`.
+* **parser:** EXEC blocks now produce structured data (open-findings M11):
+  `ExecCicsStatement.options` maps each CICS option keyword to its
+  parenthesized argument (`None` for flag options like `ERASE`);
+  `ExecImsStatement` captures the DLI function code and positional
+  arguments (PCB, I/O area, SSAs); `parse_exec_sql` upgraded from regex
+  scraping to a literal/comment-aware tokenizer adding `select_columns`
+  and `where_present` plus better table/host-variable extraction
+  (including `:VAR:IND` indicator form). All previous fields and
+  `to_dict()` keys preserved. Pinned by
+  `tests/regression/test_open_findings_m11_regression.py`.
+* **parser:** structural expression trees (open-findings M12).
+  `ComputeStatement.expression_tree` holds a precedence-parsed
+  `ArithmeticExpression` tree (`**`, unary sign, subscripts, FUNCTION
+  calls) while `.expression` stays byte-identical; `PERFORM UNTIL`
+  conditions gain a `condition_tree` built by the IF parser's condition
+  machinery, now factored into the shared
+  `parsers/statements/_conditions.py`; the IF fallback path (class/sign/
+  condition-name conditions) produces structured nodes with
+  `metadata.raw_condition` still populated. New dict keys are emitted
+  only when populated, so pre-existing output shapes are unchanged.
+  Pinned by `tests/regression/test_open_findings_m12_regression.py`.
+* **lexer:** `tokenize_cobol()` and CLI `tokenize` now run the same
+  fixed-format pipeline as `parse_cobol()` (open-findings M6):
+  `normalize_fixed_format` + free-form lexing, with comment lines
+  re-emitted as `COMMENT` tokens at their original line numbers. The two
+  paths now agree on every non-COMMENT token. Pinned by
+  `tests/regression/test_open_findings_m6_regression.py`.
+
 ### Bug Fixes
 
+* **preprocess:** COPY `REPLACING` is now context-aware (open-findings
+  M13): substitution never rewrites fixed-format comment lines or text
+  inside string literals (doubled-quote escapes handled; a clause whose
+  own search text contains a quote still targets literals deliberately),
+  and `:ABC:` pseudo-text delimiters are recognized and stripped so
+  colon-delimited operands actually substitute instead of silently
+  no-opping. Pinned by
+  `tests/regression/test_open_findings_m13_regression.py`.
+* **preprocess:** copybook encoding detection and decode strictness
+  (open-findings M15): `detect_encoding` now compares ASCII-vs-EBCDIC
+  plausibility scores over a bounded 64 KiB prefix (BOM/strict-UTF-8
+  checks first; COBOL charset proportion, EBCDIC newline conventions,
+  keyword tiebreaker) instead of the fragile 0x40-byte-ratio heuristic,
+  and a new `encoding_errors` option (`CopybookSearchPath` /
+  `expand_copybooks`) selects `"replace"` (default; warns with a
+  replacement count) or `"strict"` (raises `EncodingError` with
+  file/offset context) for undecodable bytes. Pinned by
+  `tests/regression/test_open_findings_m15_regression.py`.
 * **parser:** `VALUE ALL <literal>` data-item clauses are now parsed instead
   of being dropped with an "Unparsed token" content-drop warning. `ALL`
   lexes as a figurative constant, so `parse_value_clause` previously

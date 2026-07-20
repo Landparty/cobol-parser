@@ -163,6 +163,21 @@ either form (that would require a codepage decision this fix doesn't
 make). Pinned by
 `tests/regression/test_open_findings_medium_regressions.py::TestM7TypedLiteralHexValidation`.
 
+# Unified tokenize pipeline (2026-07-20, M6)
+
+`tokenize_cobol()` and CLI `tokenize` no longer run the lexer's own
+fixed-format handler (`free_form=False`): both now route fixed-format
+source through `normalize_fixed_format` + `free_form=True` lexing — the
+exact path `parse_cobol()` uses — via the shared `_tokenize_source()`
+helper in `lexer.py`, so the two pipelines agree on every non-COMMENT
+token (count, values, line numbers). Comment lines are not lost:
+`_fixed_format_comment_tokens()` captures them during normalization and
+`_merge_comment_tokens()` re-emits them as `COMMENT` tokens at their
+original line numbers. Free-form input behavior is unchanged, and the
+helpers are module-level additions — no `_lexer_fast.pyx` /
+`_preprocess_fast.pyx` mirror was touched. Pinned by
+`tests/regression/test_open_findings_m6_regression.py`.
+
 # See Also
 
 * [preprocessing.md](preprocessing.md) — upstream fixed-format normalisation

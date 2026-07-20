@@ -171,17 +171,30 @@ same channel. The scanner also checks the **left** word boundary so
 `GOODCOPY.` is not probed as a COPY statement (previously only the right
 boundary was checked).
 
-**Conditional-compilation diagnostics (audit 2026-07-07 H7):**
+**Conditional-compilation diagnostics (audit 2026-07-07 H7; semantics
+completed 2026-07-20, M10):**
 `preprocess_conditional_compilation(source, defined_symbols, warnings=None)`
-appends to *warnings*: unsupported `>>IF` conditions (only
-`sym IS [NOT] DEFINED` is evaluated — anything else **deletes the guarded
-block**, now loudly), malformed `>>DEFINE`, stray `>>ELSE`/`>>END-IF`,
-unknown `>>` directives (passed through to the lexer), and unclosed `>>IF`
-at end of input. The copybook expansion path (`process_conditionals=True`)
-routes these into `ExpansionStatistics.warnings`; the CLI (`--define`)
-prints them to stderr. Pinned by
+now **evaluates** `>>IF` conditions instead of blanking on anything beyond
+`DEFINED`: comparisons (`=`, `<>`, `>`, `<`, `>=`, `<=`) between symbol
+values and numeric/string literals, `DEFINED(sym)` / `sym IS [NOT]
+DEFINED`, and `AND`/`OR`/`NOT` with parentheses. `defined_symbols` accepts
+the legacy name-only set/list forms *or* a `dict[str, str | int | float |
+bool]` carrying values (values from the CLI's existing `--define
+NAME=VALUE` form now take effect).
+`>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE` (condition
+`>>WHEN`s), `>>WHEN OTHER`, and `>>END-EVALUATE` are implemented.
+Warnings still appended: a comparison referencing an **undefined symbol**
+(warns, evaluates false), genuinely unparseable `>>IF` conditions
+(warn + skip, as before), malformed `>>DEFINE`, stray `>>ELSE`/`>>END-IF`,
+unknown `>>` directives (passed through to the lexer), and unclosed
+`>>IF` / `>>EVALUATE` at end of input. Directive/skipped lines are still
+blanked in place so line numbers stay stable. The copybook expansion path
+(`process_conditionals=True`) routes warnings into
+`ExpansionStatistics.warnings`; the CLI (`--define`) prints them to
+stderr. Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
-/ `::TestH7ConditionalCompilationWarnings`.
+/ `::TestH7ConditionalCompilationWarnings` (updated to the new semantics)
+and `tests/regression/test_open_findings_m10_regression.py`.
 
 # Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
 
@@ -311,6 +324,34 @@ All preprocessing errors extend `PreprocessingError` which extends `ParseError`:
 | `PathTraversalError` | COPY target escapes the allowed directory |
 | `EncodingError` | Cannot decode copybook bytes |
 | `NestingDepthError` | COPY nesting exceeds configured limit |
+
+# Context-Aware REPLACING + Encoding Detection (2026-07-20, M13/M15)
+
+**REPLACING is context-aware (M13):** `apply_replacing_clauses`
+(`copy_statement_parser.py`) is a line-based scanner, not whole-text regex.
+Fixed-format comment lines (column-7 `*`/`/`, mask computed once from the
+original content) are never rewritten; text inside string literals (both
+quote styles, doubled-quote escapes, unterminated literal runs to EOL) is
+never rewritten — *unless* the clause's own search text contains a quote
+(quoted pseudo-text deliberately targets literal text). Boundary semantics
+(hyphen-aware word boundaries, longest-first ordering, LEADING/TRAILING,
+case-insensitivity) are unchanged. `CopyStatementLexer._read_operand`
+recognizes `:ABC:` pseudo-text and strips the delimiters, so
+`REPLACING :ABC: BY :XYZ:` substitutes `ABC`→`XYZ` (previously a silent
+no-op — the colons were captured as literal text). No Cython mirror.
+Pinned by `tests/regression/test_open_findings_m13_regression.py`.
+
+**Encoding detection + strictness (M15):** `detect_encoding`
+(`copybook_expander.py`) scores ASCII-vs-EBCDIC plausibility over a
+bounded 64 KiB prefix (BOM / strict-UTF-8 checks first, then COBOL-charset
+proportion, EBCDIC newline conventions 0x15/0x25, keyword tiebreaker via
+`_score_cobol_plausibility`) instead of the old single 0x40-vs-0x20
+byte-ratio test — an ASCII file full of `@` (0x40) is no longer
+misdetected. `CopybookSearchPath.encoding_errors` /
+`expand_copybooks(..., encoding_errors=...)` selects decode strictness:
+`"replace"` (default) substitutes U+FFFD and warns with a replacement
+count; `"strict"` raises `EncodingError` with file/offset context. Pinned
+by `tests/regression/test_open_findings_m15_regression.py`.
 
 # See Also
 

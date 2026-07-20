@@ -1038,6 +1038,36 @@ container nodes' own location metadata. Pinned by
 | `DialectType` | Enum — `IBM_ENTERPRISE`, others planned |
 | `ParseStatistics` | Wall-clock timings, token counts, node counts |
 
+# Structured EXEC blocks + expression trees (2026-07-20, M11/M12)
+
+**EXEC CICS / IMS / SQL (M11):** `ibm_exec_statements.py`'s
+`_parse_cics_options` parses the CICS option list into
+`ExecCicsStatement.options: dict[str, str | None]` (keyword → argument
+text inside parentheses, `None` for flag options like `ERASE`/`NOHANDLE`;
+nested parentheses and quoted literals handled). `ExecImsStatement`
+captures the DLI function code plus top-level positional arguments (PCB,
+I/O area, SSAs). `parse_exec_sql` (`models/sql_statements.py`) is a
+literal/comment-aware tokenizer: statement kind, tables (FROM / INTO /
+UPDATE / JOIN), host variables including `:VAR:IND`, and for SELECTs
+`select_columns` + `where_present`. All pre-existing fields and
+`to_dict()` keys are unchanged — everything new is additive. Pinned by
+`tests/regression/test_open_findings_m11_regression.py`.
+
+**Expression trees (M12):** COMPUTE's collected token sequence is now
+also precedence-parsed (unary sign, `**`, `*`/`/`, binary `+`/`-`,
+parentheses, subscripted identifiers, FUNCTION calls) into
+`ComputeStatement.expression_tree`; the raw `.expression` string is
+byte-identical to before, and a failed tree build degrades to `None`
+(never a new error/warning). The IF parser's condition machinery was
+factored into `parsers/statements/_conditions.py`
+(`build_condition_expression`) and is reused by the PERFORM parser:
+`PERFORM ... UNTIL` raw-string conditions gain a structural
+`condition_tree` (see [ast-models.md](ast-models.md)); the IF fallback
+path (class/sign/condition-name conditions like `A IS NUMERIC`) now
+produces a structured node while `metadata.raw_condition` stays
+populated. Pinned by
+`tests/regression/test_open_findings_m12_regression.py`.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation
