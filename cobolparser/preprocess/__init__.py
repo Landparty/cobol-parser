@@ -14,7 +14,7 @@ Key Features:
 - Automatic encoding detection and UTF-8 conversion
 - SUPPRESS clause support for listing control
 - REPLACING clause with LEADING/TRAILING modifiers
-- Conditional compilation directive processing (>>IF/>>DEFINE)
+- Conditional compilation directive processing (>>DEFINE/>>IF/>>EVALUATE)
 - Copybook content validation and size limits
 - Fuzzy matching for misspelled copybook names
 
@@ -22,7 +22,7 @@ Main Functions:
     expand_copybooks: Expand all COPY statements in COBOL source code
     parse_cobol_with_expansion: Convenience function combining expansion + parsing
     normalize_fixed_format: Normalize fixed-format COBOL lines into pseudo free-form
-    preprocess_conditional_compilation: Process >>IF/>>DEFINE directives
+    preprocess_conditional_compilation: Process >>DEFINE/>>IF/>>EVALUATE directives
     validate_copybook_content: Validate copybook content before expansion
 
 Exception Types:
@@ -46,12 +46,11 @@ Usage Example:
 """
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Optional
 
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
 _DEFINE_RE = re.compile(r">>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?")
-_IS_DEFINED_RE = re.compile(r"(\w+)\s+IS\s+(NOT\s+)?DEFINED")
 _DATA_DEF_RE = re.compile(
     r"^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$", re.MULTILINE
 )
@@ -569,68 +568,469 @@ def normalize_fixed_format(
     return "\n".join(result) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Conditional-compilation condition evaluator (>>IF / >>WHEN / >>EVALUATE)
+# ---------------------------------------------------------------------------
+
+
+class _ConditionSyntaxError(Exception):
+    """Raised when a >>IF/>>WHEN condition cannot be tokenized or parsed."""
+
+
+class _UndefinedSymbolError(Exception):
+    """Raised when a condition references a symbol that is not defined."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+
+_COND_TOKEN_RE = re.compile(
+    r"""
+      (?P<ws>\s+)
+    | (?P<lparen>\()
+    | (?P<rparen>\))
+    | (?P<op>>=|<=|<>|=|>|<)
+    | (?P<boollit>B'[01]'|B"[01]")
+    | (?P<string>'[^']*'|"[^"]*")
+    | (?P<number>\d+(?:\.\d+)?)
+    | (?P<word>[A-Z_][A-Z0-9_-]*)
+    """,
+    re.VERBOSE,
+)
+
+# >>DIRECTIVE-NAME [rest-of-line]
+_DIRECTIVE_LINE_RE = re.compile(r"^>>\s*([A-Z][A-Z0-9-]*)(?:\s+(.*?))?\s*$")
+
+_OPERAND_KINDS = frozenset({"word", "string", "number", "boollit"})
+
+
+def _strip_quotes(text: str) -> str:
+    """Strip one pair of matching surrounding quotes, if present."""
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1]
+    return text
+
+
+def _try_number(text: str) -> float | None:
+    """Return the numeric value of *text*, or None if it is not numeric."""
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _values_equal(left: str, right: str) -> bool:
+    """Compare two resolved values: numerically when both are numeric,
+    otherwise as case-insensitive strings."""
+    ln, rn = _try_number(left), _try_number(right)
+    if ln is not None and rn is not None:
+        return ln == rn
+    return left.upper() == right.upper()
+
+
+def _tokenize_condition(text: str) -> list[tuple[str, str]]:
+    """Tokenize a constant conditional expression (already uppercased)."""
+    tokens: list[tuple[str, str]] = []
+    pos = 0
+    while pos < len(text):
+        match = _COND_TOKEN_RE.match(text, pos)
+        if match is None:
+            raise _ConditionSyntaxError(f"unexpected character {text[pos]!r}")
+        pos = match.end()
+        kind = match.lastgroup
+        if kind is None or kind == "ws":
+            continue
+        tokens.append((kind, match.group()))
+    return tokens
+
+
+class _ConditionParser:
+    """Recursive-descent evaluator for constant conditional expressions.
+
+    Grammar (a practical subset of IBM Enterprise COBOL conditional
+    compilation conditions)::
+
+        expression := and-expr ( OR and-expr )*
+        and-expr   := not-expr ( AND not-expr )*
+        not-expr   := NOT not-expr | primary
+        primary    := '(' expression ')'
+                    | DEFINED '(' symbol ')'
+                    | operand IS [NOT] DEFINED
+                    | operand [IS [NOT]] (= | <> | > | < | >= | <=) operand
+                    | operand                    -- interpreted as a boolean
+        operand    := symbol | number | 'string' | "string" | B'0' | B'1'
+                    | TRUE | FALSE
+    """
+
+    def __init__(self, tokens: list[tuple[str, str]], defined: dict[str, str]) -> None:
+        self._tokens = tokens
+        self._pos = 0
+        self._defined = defined
+
+    def parse(self) -> bool:
+        value = self._parse_or()
+        if self._pos != len(self._tokens):
+            raise _ConditionSyntaxError(
+                f"unexpected trailing token {self._tokens[self._pos][1]!r}"
+            )
+        return value
+
+    # -- token helpers ----------------------------------------------------
+
+    def _peek(self, offset: int = 0) -> tuple[str, str] | None:
+        index = self._pos + offset
+        return self._tokens[index] if index < len(self._tokens) else None
+
+    def _advance(self) -> tuple[str, str]:
+        token = self._peek()
+        if token is None:
+            raise _ConditionSyntaxError("unexpected end of condition")
+        self._pos += 1
+        return token
+
+    def _match_word(self, *words: str) -> str | None:
+        token = self._peek()
+        if token is not None and token[0] == "word" and token[1] in words:
+            self._pos += 1
+            return token[1]
+        return None
+
+    def _match_op(self) -> str | None:
+        token = self._peek()
+        if token is not None and token[0] == "op":
+            self._pos += 1
+            return token[1]
+        return None
+
+    # -- grammar ----------------------------------------------------------
+
+    def _parse_or(self) -> bool:
+        value = self._parse_and()
+        while self._match_word("OR"):
+            rhs = self._parse_and()
+            value = value or rhs
+        return value
+
+    def _parse_and(self) -> bool:
+        value = self._parse_not()
+        while self._match_word("AND"):
+            rhs = self._parse_not()
+            value = value and rhs
+        return value
+
+    def _parse_not(self) -> bool:
+        if self._match_word("NOT"):
+            return not self._parse_not()
+        return self._parse_primary()
+
+    def _parse_primary(self) -> bool:
+        token = self._peek()
+        if token is None:
+            raise _ConditionSyntaxError("unexpected end of condition")
+        kind, text = token
+
+        if kind == "lparen":
+            self._advance()
+            value = self._parse_or()
+            closing = self._peek()
+            if closing is None or closing[0] != "rparen":
+                raise _ConditionSyntaxError("missing closing parenthesis")
+            self._advance()
+            return value
+
+        # DEFINED(symbol) function form
+        if kind == "word" and text == "DEFINED":
+            after = self._peek(1)
+            if after is not None and after[0] == "lparen":
+                self._advance()  # DEFINED
+                self._advance()  # (
+                name_token = self._advance()
+                if name_token[0] != "word":
+                    raise _ConditionSyntaxError(
+                        f"expected symbol name in DEFINED(...), got "
+                        f"{name_token[1]!r}"
+                    )
+                closing = self._advance()
+                if closing[0] != "rparen":
+                    raise _ConditionSyntaxError("missing ')' after DEFINED(symbol")
+                return name_token[1] in self._defined
+
+        operand = self._parse_operand()
+
+        # operand IS [NOT] DEFINED | operand IS [NOT] <op> operand
+        if self._match_word("IS"):
+            negate = self._match_word("NOT") is not None
+            if self._match_word("DEFINED"):
+                if operand[0] != "word":
+                    raise _ConditionSyntaxError(
+                        "only a symbol name can be tested with IS [NOT] DEFINED"
+                    )
+                exists = operand[1] in self._defined
+                return not exists if negate else exists
+            op = self._match_op()
+            if op is None:
+                raise _ConditionSyntaxError(
+                    "expected DEFINED or a comparison operator after IS"
+                )
+            result = self._compare(operand, op, self._parse_operand())
+            return not result if negate else result
+
+        op = self._match_op()
+        if op is not None:
+            return self._compare(operand, op, self._parse_operand())
+
+        return self._truthy(operand)
+
+    def _parse_operand(self) -> tuple[str, str]:
+        token = self._peek()
+        if token is None or token[0] not in _OPERAND_KINDS:
+            found = "end of condition" if token is None else repr(token[1])
+            raise _ConditionSyntaxError(f"expected an operand, got {found}")
+        self._pos += 1
+        return token
+
+    # -- evaluation -------------------------------------------------------
+
+    def _resolve(self, operand: tuple[str, str]) -> str:
+        kind, text = operand
+        if kind == "word":
+            if text in ("TRUE", "FALSE"):
+                return text
+            if text in self._defined:
+                return self._defined[text]
+            raise _UndefinedSymbolError(text)
+        if kind == "string":
+            return _strip_quotes(text)
+        if kind == "boollit":
+            return "TRUE" if text[2] == "1" else "FALSE"
+        return text  # number
+
+    def _compare(self, left: tuple[str, str], op: str, right: tuple[str, str]) -> bool:
+        lv, rv = self._resolve(left), self._resolve(right)
+        ln, rn = _try_number(lv), _try_number(rv)
+        lc: float | str
+        rc: float | str
+        if ln is not None and rn is not None:
+            lc, rc = ln, rn
+        else:
+            lc, rc = lv.upper(), rv.upper()
+        if op == "=":
+            return lc == rc
+        if op == "<>":
+            return lc != rc
+        if op == ">":
+            return lc > rc  # type: ignore[operator]
+        if op == "<":
+            return lc < rc  # type: ignore[operator]
+        if op == ">=":
+            return lc >= rc  # type: ignore[operator]
+        return lc <= rc  # type: ignore[operator]
+
+    def _truthy(self, operand: tuple[str, str]) -> bool:
+        kind, text = operand
+        if kind == "string":
+            raise _ConditionSyntaxError(
+                f"string literal {text} is not a boolean condition"
+            )
+        value = self._resolve(operand)
+        number = _try_number(value)
+        if number is not None:
+            return number != 0
+        return value.upper() not in ("FALSE", "B'0'", 'B"0"', "")
+
+
+def _evaluate_condition(
+    condition_text: str,
+    defined: dict[str, str],
+    warn: Callable[[str], None],
+    line_no: int,
+    directive: str,
+) -> bool:
+    """Evaluate a >>IF / >>WHEN condition, degrading to False with a warning.
+
+    Degradation rules (documented behavior):
+
+    - A condition that references an **undefined symbol** (outside of an
+      ``IS [NOT] DEFINED`` / ``DEFINED(...)`` test) is treated as FALSE and
+      a warning is recorded.
+    - A condition that cannot be **parsed** is treated as FALSE (the guarded
+      block is blanked out) and a warning is recorded.
+    """
+    try:
+        tokens = _tokenize_condition(condition_text)
+        return _ConditionParser(tokens, defined).parse()
+    except _UndefinedSymbolError as exc:
+        warn(
+            f"Line {line_no}: {directive} condition '{condition_text}' "
+            f"references undefined symbol '{exc.name}' — condition treated "
+            "as FALSE"
+        )
+        return False
+    except _ConditionSyntaxError as exc:
+        warn(
+            f"Line {line_no}: unsupported {directive} condition "
+            f"'{condition_text}' ({exc}) — condition treated as FALSE "
+            "(guarded lines blanked out)"
+        )
+        return False
+
+
+def _coerce_symbol_value(value: str | int | float | bool) -> str:
+    """Normalize a caller-supplied symbol value to its string form."""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return _strip_quotes(value)
+
+
+def _normalize_defined_symbols(
+    defined_symbols: Mapping[str, str | int | float | bool] | Iterable[str] | None,
+) -> dict[str, str]:
+    """Normalize the *defined_symbols* argument into ``{NAME: value}``.
+
+    Accepts a mapping of name -> value (str/int/float/bool), a bare string
+    (a single symbol name), or an iterable of symbol names (each defined
+    with the default value ``"TRUE"``). Symbol names are uppercased to match
+    the case-insensitive handling of directive lines.
+    """
+    result: dict[str, str] = {}
+    if defined_symbols is None:
+        return result
+    if isinstance(defined_symbols, Mapping):
+        for name, value in defined_symbols.items():
+            result[str(name).strip().upper()] = _coerce_symbol_value(value)
+    elif isinstance(defined_symbols, str):
+        result[defined_symbols.strip().upper()] = "TRUE"
+    else:
+        for name in defined_symbols:
+            result[str(name).strip().upper()] = "TRUE"
+    return result
+
+
+class _CondFrame:
+    """One nesting level of >>IF or >>EVALUATE processing."""
+
+    __slots__ = (
+        "kind",
+        "parent_active",
+        "active",
+        "branch_taken",
+        "eval_cond_mode",
+        "eval_subject",
+        "eval_subject_valid",
+    )
+
+    def __init__(
+        self, kind: str, parent_active: bool, active: bool, branch_taken: bool
+    ) -> None:
+        self.kind = kind  # "if" or "eval"
+        self.parent_active = parent_active
+        self.active = active
+        self.branch_taken = branch_taken
+        self.eval_cond_mode = False  # True for >>EVALUATE TRUE
+        self.eval_subject: str | None = None  # resolved subject value
+        self.eval_subject_valid = True  # False -> only >>WHEN OTHER matches
+
+
 def preprocess_conditional_compilation(
     source: str,
-    defined_symbols: dict[str, str] | None = None,
+    defined_symbols: (
+        Mapping[str, str | int | float | bool] | Iterable[str] | None
+    ) = None,
     warnings: list[str] | None = None,
 ) -> str:
     """
-    Process IBM >>IF/>>DEFINE conditional compilation directives.
+    Process IBM Enterprise COBOL conditional compilation directives.
 
-    Supports:
-    - >>DEFINE symbol [AS value]
-    - >>IF symbol IS DEFINED / IS NOT DEFINED
-    - >>ELSE
-    - >>END-IF
+    Supported directives:
 
-    Any other ``>>`` directive (including ``>>EVALUATE``, which is NOT
-    implemented despite superficially resembling a conditional-compilation
-    construct) falls through to the generic "unknown compiler directive"
-    path: it is passed through to the lexer unprocessed and, when
-    *warnings* is provided, recorded there (audit 2026-07-07 H7 review —
-    this docstring previously claimed "basic support" for >>EVALUATE that
-    was never implemented).
+    - ``>>DEFINE symbol [AS value]`` — values may be numeric literals,
+      quoted strings, or ``B'0'``/``B'1'``; a bare ``>>DEFINE symbol``
+      defines the symbol with the value ``TRUE``
+    - ``>>IF condition`` / ``>>ELSE`` / ``>>END-IF`` (nestable)
+    - ``>>EVALUATE TRUE`` with condition ``>>WHEN`` branches,
+      ``>>EVALUATE symbol-or-literal`` with literal ``>>WHEN`` branches,
+      ``>>WHEN OTHER``, ``>>END-EVALUATE`` (nestable, may contain >>IF
+      blocks and vice versa)
+
+    ``>>IF`` / ``>>WHEN`` conditions support (see ``_ConditionParser``):
+
+    - ``symbol IS [NOT] DEFINED`` and ``DEFINED(symbol)``
+    - comparisons ``=``, ``<>``, ``>``, ``<``, ``>=``, ``<=`` between
+      symbols and numeric/string literals (numeric when both sides are
+      numeric, otherwise case-insensitive string comparison)
+    - boolean literals ``B'0'``/``B'1'``, ``TRUE``, ``FALSE``
+    - ``AND`` / ``OR`` / ``NOT`` with parentheses
+
+    Degradation rules (all recorded via *warnings*):
+
+    - A condition referencing an **undefined symbol** (outside of an
+      ``IS [NOT] DEFINED`` / ``DEFINED(...)`` test) evaluates to FALSE.
+    - An **unparseable** condition evaluates to FALSE (the guarded block is
+      blanked out).
+    - An undefined or unparseable ``>>EVALUATE`` subject means only a
+      ``>>WHEN OTHER`` branch can be selected.
+    - Stray ``>>ELSE``/``>>END-IF``/``>>WHEN``/``>>END-EVALUATE`` are
+      ignored; unclosed ``>>IF``/``>>EVALUATE`` at end of input warn.
+    - Any other ``>>`` directive is passed through to the lexer
+      unprocessed, with a warning.
 
     Args:
         source: COBOL source code containing directives
-        defined_symbols: Pre-defined symbols (optional)
-        warnings: Optional list that receives diagnostics for directives this
-            preprocessor cannot evaluate (unknown ``>>IF`` conditions,
-            malformed ``>>DEFINE``, stray ``>>ELSE``/``>>END-IF``, an
-            unclosed ``>>IF`` at end of input, and any other unrecognized
-            ``>>`` directive such as ``>>EVALUATE``) — previously all
-            silent (audit 2026-07-07 H7), even though an unknown ``>>IF``
-            condition blanks out the whole guarded block.
+        defined_symbols: Pre-defined symbols. Either a mapping of symbol
+            name to value (str, int, float, or bool — bools become
+            ``TRUE``/``FALSE``), or an iterable of symbol names (each
+            defined as ``TRUE``). Names are matched case-insensitively.
+        warnings: Optional list that receives diagnostics (see the
+            degradation rules above); the function never raises for
+            malformed directives.
 
     Returns:
         Source code with conditional sections processed. Directive lines and
-        lines inside a skipped (or unrecognized-condition) ``>>IF`` block are
-        blanked out rather than removed, so every surviving line keeps its
-        original line number for error/warning reporting.
+        lines inside a skipped block are blanked out rather than removed, so
+        every surviving line keeps its original line number for
+        error/warning reporting.
 
     Example:
         >>> source = '>>DEFINE DEBUG\\n>>IF DEBUG IS DEFINED\\n       DISPLAY "Debug mode".\\n>>END-IF\\n'
         >>> preprocess_conditional_compilation(source)
         '\\n\\n       DISPLAY "Debug mode".\\n'
     """
-    defined = dict(defined_symbols) if defined_symbols else {}
-    result_lines = []
-    skip_stack = [False]  # Stack of skip states (False = include lines)
+    defined = _normalize_defined_symbols(defined_symbols)
+    result_lines: list[str] = []
+    frames: list[_CondFrame] = []
 
     def _warn(message: str) -> None:
         if warnings is not None:
             warnings.append(message)
 
+    def _active() -> bool:
+        return all(frame.active for frame in frames)
+
     for line_no, line in enumerate(source.splitlines(), start=1):
         stripped = line.strip().upper()
 
-        # >>DEFINE symbol [AS value]
-        if stripped.startswith(">>DEFINE"):
+        directive_match = (
+            _DIRECTIVE_LINE_RE.match(stripped) if stripped.startswith(">>") else None
+        )
+        name = directive_match.group(1) if directive_match else None
+        rest = (
+            (directive_match.group(2) or "").strip()
+            if directive_match is not None
+            else ""
+        )
+
+        # >>DEFINE symbol [AS value] — honored only in an active region.
+        if name == "DEFINE":
             match = _DEFINE_RE.match(stripped)
             if match:
-                symbol = match.group(1)
-                value = match.group(2).strip() if match.group(2) else "TRUE"
-                defined[symbol] = value
+                if _active():
+                    symbol = match.group(1)
+                    value = _strip_quotes(match.group(2)) if match.group(2) else "TRUE"
+                    defined[symbol] = value
             else:
                 _warn(
                     f"Line {line_no}: malformed >>DEFINE directive "
@@ -643,54 +1043,139 @@ def preprocess_conditional_compilation(
             continue
 
         # >>IF condition
-        elif stripped.startswith(">>IF"):
-            condition_text = stripped[4:].strip()
-
-            # Parse condition
-            is_defined_match = _IS_DEFINED_RE.match(condition_text)
-            if is_defined_match:
-                symbol = is_defined_match.group(1)
-                is_not = is_defined_match.group(2) is not None
-
-                symbol_exists = symbol in defined
-                condition_met = (not symbol_exists) if is_not else symbol_exists
-
-                # If currently skipping, continue skipping
-                if any(skip_stack):
-                    skip_stack.append(True)
-                else:
-                    skip_stack.append(not condition_met)
+        elif name == "IF":
+            parent_active = _active()
+            if parent_active:
+                condition = _evaluate_condition(rest, defined, _warn, line_no, ">>IF")
             else:
-                # Unknown condition - default to skipping, but say so: the
-                # entire guarded block is blanked out of the source.
-                _warn(
-                    f"Line {line_no}: unsupported >>IF condition "
-                    f"'{condition_text}' — only 'symbol IS [NOT] DEFINED' is "
-                    "supported; the guarded block was SKIPPED (source lines "
-                    "blanked out)"
+                condition = False
+            frames.append(
+                _CondFrame(
+                    "if",
+                    parent_active,
+                    active=parent_active and condition,
+                    # In an inactive region no branch (including >>ELSE)
+                    # may ever activate.
+                    branch_taken=condition if parent_active else True,
                 )
-                skip_stack.append(True)
+            )
             result_lines.append("")
             continue
 
         # >>ELSE
-        elif stripped.startswith(">>ELSE"):
-            if len(skip_stack) > 1:
-                # Only toggle if parent is not skipping
-                parent_skip = any(skip_stack[:-1])
-                if not parent_skip:
-                    skip_stack[-1] = not skip_stack[-1]
+        elif name == "ELSE":
+            if frames and frames[-1].kind == "if":
+                frame = frames[-1]
+                frame.active = frame.parent_active and not frame.branch_taken
+                frame.branch_taken = True
             else:
                 _warn(f"Line {line_no}: >>ELSE without a matching >>IF ignored")
             result_lines.append("")
             continue
 
         # >>END-IF
-        elif stripped.startswith(">>END-IF"):
-            if len(skip_stack) > 1:
-                skip_stack.pop()
+        elif name == "END-IF":
+            if frames and frames[-1].kind == "if":
+                frames.pop()
             else:
                 _warn(f"Line {line_no}: >>END-IF without a matching >>IF ignored")
+            result_lines.append("")
+            continue
+
+        # >>EVALUATE TRUE | >>EVALUATE symbol-or-literal
+        elif name == "EVALUATE":
+            parent_active = _active()
+            frame = _CondFrame(
+                "eval",
+                parent_active,
+                active=False,  # lines before the first >>WHEN are blanked
+                branch_taken=not parent_active,
+            )
+            if rest == "TRUE":
+                frame.eval_cond_mode = True
+            elif parent_active:
+                try:
+                    tokens = _tokenize_condition(rest)
+                    if len(tokens) != 1 or tokens[0][0] not in _OPERAND_KINDS:
+                        raise _ConditionSyntaxError(
+                            "expected TRUE, a symbol, or a single literal"
+                        )
+                    frame.eval_subject = _ConditionParser([], defined)._resolve(
+                        tokens[0]
+                    )
+                except _UndefinedSymbolError as exc:
+                    _warn(
+                        f"Line {line_no}: >>EVALUATE subject references "
+                        f"undefined symbol '{exc.name}' — only >>WHEN OTHER "
+                        "can match"
+                    )
+                    frame.eval_subject_valid = False
+                except _ConditionSyntaxError as exc:
+                    _warn(
+                        f"Line {line_no}: unsupported >>EVALUATE subject "
+                        f"'{rest}' ({exc}) — only >>WHEN OTHER can match"
+                    )
+                    frame.eval_subject_valid = False
+            frames.append(frame)
+            result_lines.append("")
+            continue
+
+        # >>WHEN OTHER | >>WHEN condition-or-literal
+        elif name == "WHEN":
+            if frames and frames[-1].kind == "eval":
+                frame = frames[-1]
+                if rest == "OTHER":
+                    frame.active = frame.parent_active and not frame.branch_taken
+                    frame.branch_taken = True
+                else:
+                    matched = False
+                    if frame.parent_active and not frame.branch_taken:
+                        if frame.eval_cond_mode:
+                            matched = _evaluate_condition(
+                                rest, defined, _warn, line_no, ">>WHEN"
+                            )
+                        elif frame.eval_subject_valid:
+                            try:
+                                tokens = _tokenize_condition(rest)
+                                if (
+                                    len(tokens) != 1
+                                    or tokens[0][0] not in _OPERAND_KINDS
+                                ):
+                                    raise _ConditionSyntaxError(
+                                        "expected a single literal or symbol"
+                                    )
+                                value = _ConditionParser([], defined)._resolve(
+                                    tokens[0]
+                                )
+                                matched = _values_equal(frame.eval_subject or "", value)
+                            except _UndefinedSymbolError as exc:
+                                _warn(
+                                    f"Line {line_no}: >>WHEN value references "
+                                    f"undefined symbol '{exc.name}' — branch "
+                                    "not selected"
+                                )
+                            except _ConditionSyntaxError as exc:
+                                _warn(
+                                    f"Line {line_no}: unsupported >>WHEN value "
+                                    f"'{rest}' ({exc}) — branch not selected"
+                                )
+                    frame.active = matched
+                    if matched:
+                        frame.branch_taken = True
+            else:
+                _warn(f"Line {line_no}: >>WHEN without a matching >>EVALUATE ignored")
+            result_lines.append("")
+            continue
+
+        # >>END-EVALUATE
+        elif name == "END-EVALUATE":
+            if frames and frames[-1].kind == "eval":
+                frames.pop()
+            else:
+                _warn(
+                    f"Line {line_no}: >>END-EVALUATE without a matching "
+                    ">>EVALUATE ignored"
+                )
             result_lines.append("")
             continue
 
@@ -705,15 +1190,23 @@ def preprocess_conditional_compilation(
         # Regular line - include if not skipping. A skipped line still
         # occupies a source line, so emit a blank placeholder rather than
         # dropping it outright, to keep every later line's number accurate.
-        if not any(skip_stack):
+        if _active():
             result_lines.append(line)
         else:
             result_lines.append("")
 
-    if len(skip_stack) > 1:
+    unclosed_ifs = sum(1 for frame in frames if frame.kind == "if")
+    unclosed_evals = len(frames) - unclosed_ifs
+    if unclosed_ifs:
         _warn(
-            f"{len(skip_stack) - 1} unclosed >>IF directive(s) at end of "
+            f"{unclosed_ifs} unclosed >>IF directive(s) at end of "
             "input — every line after the unclosed >>IF may have been "
+            "included or skipped incorrectly"
+        )
+    if unclosed_evals:
+        _warn(
+            f"{unclosed_evals} unclosed >>EVALUATE directive(s) at end of "
+            "input — every line after the unclosed >>EVALUATE may have been "
             "included or skipped incorrectly"
         )
 

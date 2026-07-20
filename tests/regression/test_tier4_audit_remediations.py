@@ -443,9 +443,20 @@ class TestH7ConditionalCompilationWarnings:
         out = preprocess_conditional_compilation(source, defines or {}, warnings)
         return out, warnings
 
-    def test_unknown_if_condition_warns_and_skips(self):
+    def test_undefined_symbol_comparison_warns_and_skips(self):
+        """M10 update: `FOO > 3` is now a *supported* comparison; with FOO
+        undefined it warns about the undefined symbol and evaluates FALSE
+        (block skipped)."""
         out, warnings = self._preprocess(
             ">>IF FOO > 3\nDISPLAY 'HIDDEN'.\n>>END-IF\nDISPLAY 'KEPT'.\n"
+        )
+        assert "HIDDEN" not in out
+        assert "KEPT" in out
+        assert any("undefined symbol 'FOO'" in w for w in warnings)
+
+    def test_unparseable_if_condition_warns_and_skips(self):
+        out, warnings = self._preprocess(
+            ">>IF FOO > > 3\nDISPLAY 'HIDDEN'.\n>>END-IF\nDISPLAY 'KEPT'.\n"
         )
         assert "HIDDEN" not in out
         assert "KEPT" in out
@@ -471,15 +482,23 @@ class TestH7ConditionalCompilationWarnings:
         assert ">>CALLINTERFACE DYNAMIC" in out
         assert any("unknown compiler directive" in w for w in warnings)
 
-    def test_evaluate_directive_is_not_actually_supported(self):
-        """>>EVALUATE is NOT implemented despite resembling a conditional-
-        compilation construct (Copilot review on PR #79 caught the
-        docstring overstating "basic support"); it falls through the
-        generic unknown-directive path like any other unrecognized >>
-        directive."""
-        out, warnings = self._preprocess(">>EVALUATE TRUE\nDISPLAY 'X'.\n")
-        assert ">>EVALUATE TRUE" in out
-        assert any("unknown compiler directive" in w for w in warnings)
+    def test_evaluate_directive_is_now_supported(self):
+        """M10 update: >>EVALUATE is now implemented as a real directive
+        (it used to fall through the unknown-directive path). A well-formed
+        block selects the matching >>WHEN branch silently; an unclosed
+        >>EVALUATE at end of input warns."""
+        out, warnings = self._preprocess(
+            ">>EVALUATE TRUE\n"
+            ">>WHEN 1 = 1\n"
+            "DISPLAY 'PICKED'.\n"
+            ">>END-EVALUATE\n"
+        )
+        assert ">>EVALUATE" not in out
+        assert "PICKED" in out
+        assert warnings == []
+
+        _, warnings = self._preprocess(">>EVALUATE TRUE\nDISPLAY 'X'.\n")
+        assert any("unclosed >>EVALUATE" in w for w in warnings)
 
     def test_supported_directives_stay_silent(self):
         out, warnings = self._preprocess(
