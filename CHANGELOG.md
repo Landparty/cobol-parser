@@ -66,6 +66,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NEWLINE tokens between the `REDEFINES` keyword and its target, matching
   the multi-line handling the OCCURS clause already had. Pinned by the
   multi-line cases in `tests/unit/test_data_division_branches.py::TestRedefinesClause`.
+* **parser:** the `ADVANCING` keyword in WRITE's `BEFORE`/`AFTER` phrase is
+  now optional, matching the standard grammar (2026-07-20). `WRITE rec
+  AFTER 1`, `AFTER 1 LINE`, `AFTER 2 LINES`, and `BEFORE PAGE` previously
+  consumed the `BEFORE`/`AFTER` token but required a literal `ADVANCING`
+  before recording anything — the clause was silently dropped
+  (`advancing_clause=None`), and a trailing `LINE`/`LINES` was left in the
+  stream to surface as an "Unparsed tokens" content-drop warning. The
+  count/`LINES`/`LINE`/`PAGE` parsing now runs whether or not `ADVANCING`
+  is present, producing the same `advancing_clause` dict as the explicit
+  form. Pinned by `tests/unit/test_write_advancing.py`.
 * **preprocess:** COPY `REPLACING` is now context-aware (open-findings
   M13): substitution never rewrites fixed-format comment lines or text
   inside string literals (doubled-quote escapes handled; a clause whose

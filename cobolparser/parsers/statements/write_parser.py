@@ -22,7 +22,7 @@ class WriteStatementParser(IStatementParser):
     Supports:
     - WRITE record-name
     - WRITE record-name FROM source-data
-    - WRITE record-name [FROM source] [BEFORE/AFTER ADVANCING [n LINES|PAGE]]
+    - WRITE record-name [FROM source] [BEFORE/AFTER [ADVANCING] [n] [LINES|LINE|PAGE]]
     - WRITE record-name [INVALID KEY stmts] [NOT INVALID KEY stmts] [END-WRITE]
     """
 
@@ -83,46 +83,48 @@ class WriteStatementParser(IStatementParser):
             token_stream.consume()
             skip_whitespace(token_stream)
 
-            # Expect ADVANCING keyword
-            if try_consume_keyword(token_stream, TokenType.ADVANCING, "ADVANCING"):
-                stmt.advancing_mode = advancing_mode
+            # ADVANCING itself is optional in the standard grammar:
+            # `WRITE rec AFTER 1`, `AFTER 1 LINE`, and `AFTER PAGE` are all
+            # legal without it, so its absence must not drop the clause.
+            try_consume_keyword(token_stream, TokenType.ADVANCING, "ADVANCING")
+            stmt.advancing_mode = advancing_mode
 
-                # Optional count (numeric literal or level number). Store it —
-                # it was historically consumed and dropped, so `WRITE ... AFTER
-                # ADVANCING 2 LINES` lost the "2 LINES".
-                advancing_count: int | None = None
-                token = token_stream.peek()
-                if token and token.type in (
-                    TokenType.LEVEL_NUMBER,
-                    TokenType.NUMERIC_LITERAL,
-                ):
-                    try:
-                        advancing_count = int(token.value) if token.value else None
-                    except ValueError:
-                        advancing_count = None
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
+            # Optional count (numeric literal or level number). Store it —
+            # it was historically consumed and dropped, so `WRITE ... AFTER
+            # ADVANCING 2 LINES` lost the "2 LINES".
+            advancing_count: int | None = None
+            token = token_stream.peek()
+            if token and token.type in (
+                TokenType.LEVEL_NUMBER,
+                TokenType.NUMERIC_LITERAL,
+            ):
+                try:
+                    advancing_count = int(token.value) if token.value else None
+                except ValueError:
+                    advancing_count = None
+                token_stream.consume()
+                skip_whitespace(token_stream)
 
-                # Optional LINES / LINE / PAGE
-                # Lexer emits TokenType.LINES for "LINES" and TokenType.LINE for "LINE";
-                # PAGE has no dedicated token type so it arrives as IDENTIFIER.
-                advancing_page = False
-                token = token_stream.peek()
-                if token and (
-                    token.type in (TokenType.LINES, TokenType.LINE)
-                    or (
-                        token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() == "PAGE"
-                    )
-                ):
-                    advancing_page = bool(token.value) and token.value.upper() == "PAGE"
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-
-                stmt.set_advancing(
-                    advancing_mode, lines=advancing_count, page=advancing_page
+            # Optional LINES / LINE / PAGE
+            # Lexer emits TokenType.LINES for "LINES" and TokenType.LINE for "LINE";
+            # PAGE has no dedicated token type so it arrives as IDENTIFIER.
+            advancing_page = False
+            token = token_stream.peek()
+            if token and (
+                token.type in (TokenType.LINES, TokenType.LINE)
+                or (
+                    token.type == TokenType.IDENTIFIER
+                    and token.value
+                    and token.value.upper() == "PAGE"
                 )
+            ):
+                advancing_page = bool(token.value) and token.value.upper() == "PAGE"
+                token_stream.consume()
+                skip_whitespace(token_stream)
+
+            stmt.set_advancing(
+                advancing_mode, lines=advancing_count, page=advancing_page
+            )
 
         # Optional INVALID KEY / NOT INVALID KEY clauses
         skip_whitespace(token_stream)

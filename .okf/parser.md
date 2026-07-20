@@ -254,6 +254,20 @@ Pinned by `tests/unit/test_arithmetic_size_error_branches.py`,
 `tests/unit/test_display_parser.py`, and
 `tests/unit/io_statements/test_write_close_parsers.py`.
 
+**WRITE `BEFORE`/`AFTER` phrase — `ADVANCING` optional (`write_parser.py`,
+2026-07-20):** the standard grammar is `BEFORE|AFTER [ADVANCING] [n]
+[LINES|LINE|PAGE]`, but the parser previously consumed `BEFORE`/`AFTER`
+and then *required* the `ADVANCING` keyword before parsing the rest —
+`WRITE rec AFTER 1` / `AFTER 1 LINE` / `BEFORE PAGE` silently dropped the
+clause (`advancing_clause=None`), and a trailing `LINE`/`LINES` token was
+left unconsumed to trigger the procedure division's "Unparsed tokens"
+content-drop warning. `ADVANCING` is now consumed if present via
+`try_consume_keyword` and the count/unit parsing runs either way, so both
+forms produce the same `advancing_clause` dict
+(`{"type": "AFTER", "value": 1, "unit": "LINES"}`; `PAGE` → `"value":
+"PAGE", "unit": "CHANNEL"`). Pinned by
+`tests/unit/test_write_advancing.py`.
+
 **EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
 the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I
 status-code idiom) arrives as a whitespace-only token that `_build_selector`
