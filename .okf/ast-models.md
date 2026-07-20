@@ -73,7 +73,13 @@ Serialization fidelity notes (2026-07-07):
   raw `clause_text`.
 * `IOWriteStatement.advancing_clause` is populated by the WRITE parser
   (`{"type": "AFTER", "value": 2, "unit": "LINES"}`), not just
-  `advancing_mode`.
+  `advancing_mode`. `unit` is also `"CHANNEL"` for `ADVANCING PAGE`
+  (`value="PAGE"`); `"LINES"` for `ADVANCING identifier LINES` (a
+  data-name holding a line count — `value` is the data-name, not an int);
+  and `"MNEMONIC"` for a bare SPECIAL-NAMES mnemonic-name target with no
+  `LINE`/`LINES` suffix (`value` is the mnemonic-name, e.g.
+  `ADVANCING TOP-OF-PAGE` → `{"type": "AFTER", "value": "TOP-OF-PAGE",
+  "unit": "MNEMONIC"}`) (2026-07-20).
 * `IORewriteStatement.from_clause` (2026-07-09) — the `REWRITE rec FROM data`
   source (previously consumed and discarded). Also added to `operands` via
   `_add_unique_operand`, matching `IOWriteStatement.set_from`, so

@@ -192,7 +192,7 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         self.record_name: str | None = None
         self.from_clause: str | None = None
         self.advancing_clause: dict[str, Any] | None = (
-            None  # {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"}
+            None  # {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"|"MNEMONIC"}
         )
         self.delete_record: bool = False  # For VSAM DELETE
         self.at_eop_clause: list[CobolStatement] | None = None  # AT END-OF-PAGE
@@ -218,14 +218,35 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         self._add_unique_operand(source)
 
     def set_advancing(
-        self, mode: str, lines: int | None = None, page: bool = False
+        self,
+        mode: str,
+        lines: int | None = None,
+        page: bool = False,
+        identifier: str | None = None,
+        mnemonic: str | None = None,
     ) -> None:
-        """Set the ADVANCING clause."""
+        """Set the ADVANCING clause.
+
+        ``identifier`` is a data-name holding a line count (e.g.
+        ``ADVANCING WS-LINE-COUNT LINES``); ``mnemonic`` is a SPECIAL-NAMES
+        mnemonic-name for a printer channel (e.g. ``ADVANCING TOP-OF-PAGE``,
+        defined via ``SPECIAL-NAMES. C01 IS TOP-OF-PAGE``) and takes no
+        LINE/LINES suffix.
+        """
         mode_upper = mode.upper()
+        if mnemonic is not None:
+            value: Any = mnemonic
+            unit: str | None = "MNEMONIC"
+        elif identifier is not None:
+            value = identifier
+            unit = "LINES"
+        else:
+            value = lines if lines else ("PAGE" if page else None)
+            unit = "CHANNEL" if page else ("LINES" if lines else None)
         self.advancing_clause = {
             "type": mode_upper,  # BEFORE or AFTER
-            "value": lines if lines else ("PAGE" if page else None),
-            "unit": "CHANNEL" if page else ("LINES" if lines else None),
+            "value": value,
+            "unit": unit,
         }
         if self.advancing_clause:
             self.metadata["uses_advancing"] = True

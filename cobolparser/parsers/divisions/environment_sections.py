@@ -5,7 +5,7 @@ Collaborators of
 
 - :class:`ConfigurationSectionParser` — CONFIGURATION SECTION, including the
   SPECIAL-NAMES paragraph (CURRENCY SIGN, DECIMAL-POINT IS COMMA, CLASS,
-  ALPHABET)
+  ALPHABET, mnemonic-name clauses)
 - :class:`InputOutputSectionParser` — INPUT-OUTPUT SECTION with the
   FILE-CONTROL paragraph, delegating each SELECT statement to
   :class:`~.environment_select.SelectClauseParser`
@@ -39,6 +39,8 @@ class ConfigurationSectionParser:
         - DECIMAL-POINT IS COMMA
         - CLASS name IS range
         - ALPHABET name IS ...
+        - implementor-name IS mnemonic-name [ON STATUS IS cond]
+          [OFF STATUS IS cond] (e.g. `C01 IS TOP-OF-PAGE`, `CONSOLE IS CRT`)
         Unknown clauses are consumed until the next period.
         """
         # Capture the CONFIGURATION keyword's own location before consuming it
@@ -110,6 +112,7 @@ class ConfigurationSectionParser:
         decimal_point_is_comma: bool = False
         class_definitions: list[dict[str, Any]] = []
         alphabet_definitions: list[dict[str, Any]] = []
+        mnemonic_definitions: list[dict[str, Any]] = []
 
         def _at_para_end() -> bool:
             token = token_stream.peek(0)
@@ -224,6 +227,45 @@ class ConfigurationSectionParser:
                     token_stream.consume()
                 alphabet_definitions.append({"name": alpha_name, "values": values})
 
+            elif token.value != "." and (
+                (peek1 := token_stream.peek(1)) is not None
+                and peek1.value.upper() == "IS"
+            ):
+                # Mnemonic-name clause: implementor-name-1 IS mnemonic-name-1
+                # [ON STATUS IS condition-1] [OFF STATUS IS condition-2]
+                # e.g. `C01 IS TOP-OF-PAGE`, `CONSOLE IS CRT`,
+                # `UPSI-0 IS SWITCH-1 ON STATUS IS SW1-ON OFF STATUS IS SW1-OFF`.
+                environment_name = token.value
+                token_stream.consume()  # implementor-name
+                token_stream.consume()  # IS
+                name_tok = token_stream.peek(0)
+                mnemonic_name = name_tok.value if name_tok else ""
+                if name_tok:
+                    token_stream.consume()
+                entry: dict[str, Any] = {
+                    "environment_name": environment_name,
+                    "mnemonic_name": mnemonic_name,
+                }
+                while not token_stream.is_empty():
+                    pk = token_stream.peek(0)
+                    if not pk or pk.value.upper() not in ("ON", "OFF"):
+                        break
+                    status_key = (
+                        "on_status" if pk.value.upper() == "ON" else "off_status"
+                    )
+                    token_stream.consume()  # ON / OFF
+                    pk2 = token_stream.peek(0)
+                    if pk2 and pk2.value.upper() == "STATUS":
+                        token_stream.consume()
+                    pk2 = token_stream.peek(0)
+                    if pk2 and pk2.value.upper() == "IS":
+                        token_stream.consume()
+                    cond_tok = token_stream.peek(0)
+                    if cond_tok:
+                        entry[status_key] = cond_tok.value
+                        token_stream.consume()
+                mnemonic_definitions.append(entry)
+
             elif token.value == ".":
                 token_stream.consume()  # clause separator
 
@@ -240,6 +282,8 @@ class ConfigurationSectionParser:
             result["class_definitions"] = class_definitions
         if alphabet_definitions:
             result["alphabet_definitions"] = alphabet_definitions
+        if mnemonic_definitions:
+            result["mnemonic_definitions"] = mnemonic_definitions
         return result
 
 

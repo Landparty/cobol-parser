@@ -93,6 +93,69 @@ def test_class_definition_parses_successfully():
     assert result.success
 
 
+# ---------------------------------------------------------------------------
+# Mnemonic names
+# ---------------------------------------------------------------------------
+
+
+def test_mnemonic_name_is_parsed():
+    src = _program_with_special_names("    C01 IS TOP-OF-PAGE.")
+    result = parse_cobol(src, filename="test.cbl")
+    assert result.success, f"Parse errors: {result.errors}"
+
+    sn = _get_config_special_names(result)
+    assert sn.get("mnemonic_definitions") == [
+        {"environment_name": "C01", "mnemonic_name": "TOP-OF-PAGE"}
+    ]
+
+
+def test_multiple_mnemonic_names_are_parsed():
+    src = _program_with_special_names("    C01 IS TOP-OF-PAGE\n    CONSOLE IS CRT.")
+    result = parse_cobol(src, filename="test.cbl")
+    assert result.success, f"Parse errors: {result.errors}"
+
+    sn = _get_config_special_names(result)
+    assert sn.get("mnemonic_definitions") == [
+        {"environment_name": "C01", "mnemonic_name": "TOP-OF-PAGE"},
+        {"environment_name": "CONSOLE", "mnemonic_name": "CRT"},
+    ]
+
+
+def test_mnemonic_name_with_on_off_status():
+    src = _program_with_special_names(
+        "    UPSI-0 IS SWITCH-1 ON STATUS IS SW1-ON OFF STATUS IS SW1-OFF."
+    )
+    result = parse_cobol(src, filename="test.cbl")
+    assert result.success, f"Parse errors: {result.errors}"
+
+    sn = _get_config_special_names(result)
+    assert sn.get("mnemonic_definitions") == [
+        {
+            "environment_name": "UPSI-0",
+            "mnemonic_name": "SWITCH-1",
+            "on_status": "SW1-ON",
+            "off_status": "SW1-OFF",
+        }
+    ]
+
+
+def test_mnemonic_name_mixed_with_currency_and_class():
+    src = _program_with_special_names(
+        "    CURRENCY SIGN IS '$'.\n"
+        "    C01 IS TOP-OF-PAGE.\n"
+        "    CLASS NUMERIC-CLASS IS '0' THRU '9'."
+    )
+    result = parse_cobol(src, filename="test.cbl")
+    assert result.success, f"Parse errors: {result.errors}"
+
+    sn = _get_config_special_names(result)
+    assert sn.get("currency_sign") == "$"
+    assert sn.get("mnemonic_definitions") == [
+        {"environment_name": "C01", "mnemonic_name": "TOP-OF-PAGE"}
+    ]
+    assert len(sn.get("class_definitions", [])) == 1
+
+
 def test_special_names_then_input_output():
     """SPECIAL-NAMES must not prevent INPUT-OUTPUT from being parsed."""
     src = textwrap.dedent("""\
