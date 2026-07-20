@@ -233,6 +233,11 @@ class CopybookSearchPath:
             EBCDIC variant (e.g. 'cp1047' for Open Systems, 'cp500' for International
             EBCDIC, 'cp273' for German) instead of the auto-detected default of cp037.
             When None, encoding is auto-detected per file.
+        encoding_errors: Decode strictness for copybook files. ``"replace"``
+            (default, backward compatible) substitutes undecodable bytes with
+            U+FFFD and records a lossy-decode warning; ``"strict"`` raises
+            ``EncodingError`` with file/offset context instead of silently
+            mangling data.
     """
 
     directories: list[str] = field(default_factory=list)
@@ -245,6 +250,7 @@ class CopybookSearchPath:
     max_total_size: int = MAX_TOTAL_EXPANSION_BYTES
     max_cache_entries: int = 100
     encoding: str | None = None
+    encoding_errors: str = "replace"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert search configuration to dictionary for JSON serialization."""
@@ -256,6 +262,7 @@ class CopybookSearchPath:
             "max_file_size": self.max_file_size,
             "max_total_size": self.max_total_size,
             "max_cache_entries": self.max_cache_entries,
+            "encoding_errors": self.encoding_errors,
         }
         if self.encoding is not None:
             result["encoding"] = self.encoding
