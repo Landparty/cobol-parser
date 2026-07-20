@@ -32,6 +32,23 @@ _NOISE_TOKEN_TYPES = (
 )
 
 
+def _is_procedure_name_token(token: Token | None) -> bool:
+    """True if *token* can name a procedure: an identifier, or an all-digit
+    numeric token. COBOL permits all-digit paragraph/section names, and
+    ``PERFORM 1000 THRU 1999`` numbering is idiomatic in THRU-style code;
+    the lexer emits those names as NUMERIC_LITERAL (or LEVEL_NUMBER for 1-2
+    digit values), never IDENTIFIER.
+    """
+    if token is None or not token.value:
+        return False
+    if token.type == TokenType.IDENTIFIER:
+        return True
+    return (
+        token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+        and token.value.isdigit()
+    )
+
+
 def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | None:
     """Look ahead past whitespace/comment/newline/continuation tokens without consuming.
 
@@ -216,6 +233,12 @@ class PerformStatementParser(IStatementParser):
 
         # Check for TIMES clause (inline PERFORM n TIMES)
         # Check for numeric literals: TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER, or numeric IDENTIFIER
+        # The numeric token is only a TIMES count when TIMES/TIME actually
+        # follows -- checked via lookahead *before* consuming. COBOL also
+        # allows all-digit procedure names (PERFORM 1000 THRU 1999), so a
+        # numeric token with no TIMES after it must fall through to the
+        # procedure-name-target branch below instead of being consumed as a
+        # failed TIMES count and lost.
         if token and (
             token.type == TokenType.NUMERIC_LITERAL
             or token.type == TokenType.LEVEL_NUMBER
@@ -225,32 +248,33 @@ class PerformStatementParser(IStatementParser):
                 and token.value.isdigit()
             )
         ):
-            try:
-                times_count = int(token.value)
-                token_stream.consume()
-                token = token_stream.peek()
-                # Check for TIMES keyword: TokenType.TIMES or IDENTIFIER "TIMES"
-                if token and (
-                    token.type == TokenType.TIMES
-                    or (
-                        token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() in ("TIMES", "TIME")
-                    )
-                ):
-                    token_stream.consume()
+            lookahead = _peek_next_meaningful(token_stream, 1)
+            if lookahead and (
+                lookahead.type == TokenType.TIMES
+                or (
+                    lookahead.type == TokenType.IDENTIFIER
+                    and lookahead.value
+                    and lookahead.value.upper() in ("TIMES", "TIME")
+                )
+            ):
+                try:
+                    times_count = int(token.value)
+                    token_stream.consume()  # the count
+                    skip_whitespace(token_stream)
+                    token_stream.consume()  # TIMES keyword
                     stmt.set_times_clause(times_count)
                     # Parse inline statements until END-PERFORM
                     self._parse_inline_statements(token_stream, stmt)
                     return stmt
-            except (ValueError, TokenMismatch, UnexpectedEndOfInput):
-                pass
+                except (ValueError, TokenMismatch, UnexpectedEndOfInput):
+                    pass
 
             skip_whitespace(token_stream)
             token = token_stream.peek()
 
-        # Simple PERFORM paragraph-name
-        if token and token.type == TokenType.IDENTIFIER:
+        # Simple PERFORM procedure-name (an identifier, or an all-digit
+        # numeric paragraph name -- e.g. PERFORM 1000 THRU 1999)
+        if token and _is_procedure_name_token(token):
             paragraph = token.value
             stmt.set_target_paragraph(paragraph)
             try:
@@ -271,8 +295,12 @@ class PerformStatementParser(IStatementParser):
             ):
                 try:
                     token_stream.consume()  # Skip THRU/THROUGH
+                    # The end name may sit on a continuation line
+                    # (PERFORM name THRU\n    other-name), so newline and
+                    # whitespace tokens must be skipped before peeking it.
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER:
+                    if token and _is_procedure_name_token(token):
                         stmt.set_thru_paragraph(token.value)
                         token_stream.consume()
                         token = token_stream.peek()

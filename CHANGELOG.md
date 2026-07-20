@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **parser:** all-digit procedure names are supported (2026-07-20), closing
+  the `PERFORM 1000 THRU 1999` numbering gap common in THRU-style COBOL.
+  Numeric paragraph headers (`1000.`) are recognized as paragraphs
+  (`procedure_boundaries.py` accepts all-digit NUMERIC_LITERAL /
+  LEVEL_NUMBER tokens as procedure names), and the PERFORM parser accepts
+  all-digit names as both the target and the THRU/THROUGH end. The inline
+  `PERFORM n TIMES` form now decides via lookahead *before* consuming the
+  numeric, so a numeric target is no longer swallowed as a failed TIMES
+  count (previously `PERFORM 1000 THRU 1999` misparsed with
+  `target_paragraph = "THRU"` and the numeric paragraphs were skipped as
+  unsupported statements). Pinned by
+  `tests/unit/test_perform_thru_numeric.py`.
 * **preprocess:** conditional compilation is now functionally complete
   (open-findings M10). `>>IF` evaluates real conditions — comparisons
   (`=`, `<>`, `>`, `<`, `>=`, `<=`) against symbol values, `DEFINED(sym)` /
@@ -59,6 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **analysis:** program-flow reachability honors THRU ranges (2026-07-20).
+  `find_unreachable_nodes` now treats every `FlowEdge.range_members` entry
+  (PERFORM/SORT/MERGE ... THRU) as a neighbor of the edge's source, so an
+  intermediate paragraph of a performed range is no longer falsely listed
+  in `unreachable_nodes` when its incoming fall-through edge is suppressed
+  (e.g. the preceding member contains a GO TO). Cycle detection still uses
+  only explicit edges. Pinned by
+  `tests/unit/analysis/test_program_flow_thru_reachability.py`.
 * **preprocess:** COPY `REPLACING` is now context-aware (open-findings
   M13): substitution never rewrites fixed-format comment lines or text
   inside string literals (doubled-quote escapes handled; a clause whose
