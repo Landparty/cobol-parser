@@ -1,5 +1,30 @@
 # OKF Update Log
 
+## 2026-07-20 (WRITE ADVANCING mnemonic-name / SPECIAL-NAMES mnemonic clauses)
+
+* **WRITE `ADVANCING` now accepts a mnemonic-name or identifier target**
+  (`parsers/statements/write_parser.py`): `BEFORE|AFTER [ADVANCING]
+  {integer-1 | identifier-1 | mnemonic-name-1}` previously only handled
+  `integer-1` — an `IDENTIFIER` token (a line-count data-name, or a
+  SPECIAL-NAMES mnemonic-name like a printer channel) was left
+  unconsumed, and the leftover token was then mis-parsed by the procedure
+  division scanner as a bogus paragraph header (`WRITE rec AFTER
+  ADVANCING TOP-OF-PAGE.` produced an empty `advancing_clause` plus a
+  phantom `TOP-OF-PAGE` paragraph). A trailing `LINE`/`LINES` after the
+  identifier distinguishes `identifier-1` (`unit="LINES"`) from
+  `mnemonic-name-1` (`unit="MNEMONIC"`, no suffix). `PAGE` still hits the
+  existing CHANNEL path.
+* **SPECIAL-NAMES mnemonic-name clauses are now captured**
+  (`parsers/divisions/environment_sections.py`): `implementor-name IS
+  mnemonic-name [ON STATUS IS cond] [OFF STATUS IS cond]` (e.g. `C01 IS
+  TOP-OF-PAGE`, `CONSOLE IS CRT`, UPSI switch forms) previously fell into
+  the SPECIAL-NAMES paragraph's generic unknown-clause fallback and was
+  discarded with no trace. Detected via one-token lookahead (`name IS
+  ...`) and collected into `special_names["mnemonic_definitions"]`.
+  Pinned by `tests/unit/test_special_names.py` and
+  `tests/unit/test_write_advancing.py`. Updated `parser.md`,
+  `ast-models.md`, and `CHANGELOG.md` (Unreleased).
+
 ## 2026-07-20 (WRITE BEFORE/AFTER without ADVANCING keyword)
 
 * **`WRITE ... AFTER 1` (no `ADVANCING`) no longer drops the clause**

@@ -257,6 +257,34 @@ forms produce the same `advancing_clause` dict
 "PAGE", "unit": "CHANNEL"`). Pinned by
 `tests/unit/test_write_advancing.py`.
 
+**WRITE `ADVANCING` mnemonic-name / identifier support (`write_parser.py`,
+`environment_sections.py`, 2026-07-20):** the count position of `BEFORE|AFTER
+[ADVANCING] {integer-1 | identifier-1 | mnemonic-name-1}` accepted only a
+numeric literal — an `IDENTIFIER` token there (a data-name holding a line
+count, or a SPECIAL-NAMES mnemonic-name for a printer channel) was left
+unconsumed, and the PROCEDURE DIVISION scanner then mis-parsed the dangling
+identifier as a bogus paragraph header (`WRITE rec AFTER ADVANCING
+TOP-OF-PAGE.` produced `advancing_clause={"type": "AFTER", "value": None,
+"unit": None}` plus a phantom `TOP-OF-PAGE` paragraph). The parser now
+branches on whether a trailing `LINE`/`LINES` follows the identifier: if so
+it's `identifier-1` (`{"unit": "LINES", "value": <name>}`, same unit as a
+literal count); if not it's `mnemonic-name-1`
+(`{"unit": "MNEMONIC", "value": <name>}`). `PAGE` is excluded from this
+branch so `ADVANCING PAGE` still hits the existing CHANNEL path.
+`IOWriteStatement.set_advancing()` gained `identifier=`/`mnemonic=` kwargs
+(mutually exclusive with `lines=`/`page=`, default `None` so existing call
+sites are unaffected). Companion fix: `ConfigurationSectionParser`'s
+SPECIAL-NAMES paragraph previously only recognized `CURRENCY`,
+`DECIMAL-POINT`, `CLASS`, and `ALPHABET` — a mnemonic-name clause
+(`implementor-name IS mnemonic-name [ON STATUS IS cond] [OFF STATUS IS
+cond]`) fell into the generic "unknown clause, consume to next period"
+branch and vanished with no metadata trace. It's now detected by
+lookahead (`peek(1).value.upper() == "IS"`) and collected into
+`special_names["mnemonic_definitions"]` as `{"environment_name":
+"C01", "mnemonic_name": "TOP-OF-PAGE"}` (plus `on_status`/`off_status`
+keys when the UPSI switch form is used). Pinned by
+`tests/unit/test_special_names.py` and `tests/unit/test_write_advancing.py`.
+
 **EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
 the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I
 status-code idiom) arrives as a whitespace-only token that `_build_selector`

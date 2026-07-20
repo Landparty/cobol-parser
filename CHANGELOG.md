@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **parser:** SPECIAL-NAMES mnemonic-name clauses (`implementor-name IS
+  mnemonic-name [ON STATUS IS cond] [OFF STATUS IS cond]`, e.g. `C01 IS
+  TOP-OF-PAGE`, `CONSOLE IS CRT`, `UPSI-0 IS SWITCH-1 ON STATUS IS ...`)
+  are now parsed into `special_names["mnemonic_definitions"]` instead of
+  being silently discarded by the SPECIAL-NAMES paragraph's unknown-clause
+  fallback. `WriteStatementParser`'s `BEFORE`/`AFTER ADVANCING` clause now
+  also accepts an identifier target: a data-name holding a line count
+  (followed by `LINE`/`LINES`, e.g. `ADVANCING WS-LINE-COUNT LINES`) is
+  recorded as `{"unit": "LINES", "value": "WS-LINE-COUNT"}`, and a bare
+  mnemonic-name (no `LINE`/`LINES` suffix, e.g. `AFTER ADVANCING
+  TOP-OF-PAGE`) as `{"unit": "MNEMONIC", "value": "TOP-OF-PAGE"}`.
+  Previously the identifier was left unconsumed and the procedure division
+  scanner mis-parsed it as a bogus paragraph header. Pinned by
+  `tests/unit/test_special_names.py` and `tests/unit/test_write_advancing.py`.
 * **preprocess:** conditional compilation is now functionally complete
   (open-findings M10). `>>IF` evaluates real conditions — comparisons
   (`=`, `<>`, `>`, `<`, `>=`, `<=`) against symbol values, `DEFINED(sym)` /

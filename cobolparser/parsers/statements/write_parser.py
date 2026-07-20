@@ -23,6 +23,9 @@ class WriteStatementParser(IStatementParser):
     - WRITE record-name
     - WRITE record-name FROM source-data
     - WRITE record-name [FROM source] [BEFORE/AFTER [ADVANCING] [n] [LINES|LINE|PAGE]]
+    - WRITE record-name [FROM source] [BEFORE/AFTER [ADVANCING] identifier [LINES|LINE]]
+    - WRITE record-name [FROM source] [BEFORE/AFTER [ADVANCING] mnemonic-name]
+      (a SPECIAL-NAMES mnemonic-name, e.g. `AFTER ADVANCING TOP-OF-PAGE`)
     - WRITE record-name [INVALID KEY stmts] [NOT INVALID KEY stmts] [END-WRITE]
     """
 
@@ -93,6 +96,8 @@ class WriteStatementParser(IStatementParser):
             # it was historically consumed and dropped, so `WRITE ... AFTER
             # ADVANCING 2 LINES` lost the "2 LINES".
             advancing_count: int | None = None
+            advancing_identifier: str | None = None
+            advancing_mnemonic: str | None = None
             token = token_stream.peek()
             if token and token.type in (
                 TokenType.LEVEL_NUMBER,
@@ -104,6 +109,29 @@ class WriteStatementParser(IStatementParser):
                     advancing_count = None
                 token_stream.consume()
                 skip_whitespace(token_stream)
+            elif (
+                token
+                and token.type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() != "PAGE"
+            ):
+                # `{identifier-1 | mnemonic-name-1}` per the standard
+                # grammar: a data-name holding a line count (followed by
+                # LINE/LINES, e.g. `ADVANCING WS-LINE-COUNT LINES`) or a
+                # SPECIAL-NAMES mnemonic-name for a printer channel, which
+                # takes no LINE/LINES suffix (e.g. `ADVANCING TOP-OF-PAGE`,
+                # a mnemonic defined via `SPECIAL-NAMES. C01 IS TOP-OF-PAGE`).
+                name = token.value
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                next_token = token_stream.peek()
+                if next_token and next_token.type in (
+                    TokenType.LINES,
+                    TokenType.LINE,
+                ):
+                    advancing_identifier = name
+                else:
+                    advancing_mnemonic = name
 
             # Optional LINES / LINE / PAGE
             # Lexer emits TokenType.LINES for "LINES" and TokenType.LINE for "LINE";
@@ -123,7 +151,11 @@ class WriteStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
 
             stmt.set_advancing(
-                advancing_mode, lines=advancing_count, page=advancing_page
+                advancing_mode,
+                lines=advancing_count,
+                page=advancing_page,
+                identifier=advancing_identifier,
+                mnemonic=advancing_mnemonic,
             )
 
         # Optional INVALID KEY / NOT INVALID KEY clauses
