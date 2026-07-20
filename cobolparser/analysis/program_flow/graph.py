@@ -84,15 +84,22 @@ def find_unreachable_nodes(
 
     Uses breadth-first search from all known entry points. Nodes that
     cannot be reached are returned as unreachable, in source order.
+
+    THRU ranges (``PERFORM A THRU C``, SORT/MERGE procedure ranges) execute
+    every paragraph the range physically spans, so each ``range_members``
+    entry counts as a neighbor of the edge's source. Without this, an
+    intermediate member whose fall-through edge from the preceding member is
+    suppressed (e.g. the predecessor contains a GO TO) was falsely reported
+    unreachable even though the range provably executes it.
     """
     adj: dict[str, list[str]] = {name: [] for name in nodes}
     for edge in edges:
-        if (
-            edge.edge_type in INTERNAL_EDGE_TYPES
-            and edge.source in adj
-            and edge.target in nodes
-        ):
-            adj[edge.source].append(edge.target)
+        if edge.edge_type in INTERNAL_EDGE_TYPES and edge.source in adj:
+            if edge.target in nodes:
+                adj[edge.source].append(edge.target)
+            for member in edge.range_members:
+                if member in nodes:
+                    adj[edge.source].append(member)
 
     reachable: set[str] = set()
     queue: deque[str] = deque(entry_points)

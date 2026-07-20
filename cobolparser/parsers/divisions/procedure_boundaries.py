@@ -7,13 +7,31 @@ at a new paragraph, a section header, or a statement keyword.
 """
 
 from cobolparser.core.interfaces import ITokenStream
+from cobolparser.lexer import Token
 from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS
+
+# Token types that can carry a procedure (paragraph/section) name. COBOL
+# allows all-digit procedure names (``1000 THRU 1999`` style numbering is
+# idiomatic in PERFORM THRU code); the lexer emits those as NUMERIC_LITERAL
+# (or LEVEL_NUMBER for 1-2 digit values), never IDENTIFIER.
+_NAME_TOKEN_TYPES = ("IDENTIFIER", "NUMERIC_LITERAL", "LEVEL_NUMBER")
+
+
+def _is_procedure_name_token(token: Token | None) -> bool:
+    """True if *token* can be a procedure name: an identifier, or an
+    all-digit token (numeric paragraph names like ``1000``)."""
+    if token is None or not token.value:
+        return False
+    if token.type.name == "IDENTIFIER":
+        return True
+    return token.type.name in _NAME_TOKEN_TYPES and token.value.isdigit()
 
 
 def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
     """Check if current position starts a new paragraph or section.
 
-    A paragraph/section starts when an identifier is followed by either:
+    A paragraph/section starts when a procedure name (an identifier, or an
+    all-digit numeric paragraph name) is followed by either:
     - A period (paragraph end/start)
     - SECTION keyword (section definition)
 
@@ -46,7 +64,7 @@ def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
                 next_idx += 1
                 continue
             # Found a non-whitespace token
-            if next_token.type.name == "IDENTIFIER":
+            if _is_procedure_name_token(next_token):
                 # Check if it's followed by SECTION or a period (paragraph name pattern)
                 next_next_idx = next_idx + 1
                 while next_next_idx < 10:
@@ -67,8 +85,9 @@ def is_paragraph_or_section_start(token_stream: ITokenStream) -> bool:
             return False
         return False
 
-    # Case 2: Original logic - current token is an IDENTIFIER
-    if token.type.name != "IDENTIFIER":
+    # Case 2: Original logic - current token is a procedure name (an
+    # identifier, or an all-digit numeric paragraph name)
+    if not _is_procedure_name_token(token):
         return False
 
     # Look ahead for SECTION or period

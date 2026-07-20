@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-09T01:00:00Z
+timestamp: 2026-07-20T00:00:00Z
 ---
 
 # Overview
@@ -500,6 +500,30 @@ site): a plain, non-VARYING `PERFORM UNTIL` has no AFTER clause of its own,
 so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
+
+**All-digit procedure names / PERFORM THRU numbering (2026-07-20):** COBOL
+permits procedure names made entirely of digits, and `PERFORM 1000 THRU
+1999` numbering is idiomatic in THRU-style code. Those names lex as
+`NUMERIC_LITERAL` (or `LEVEL_NUMBER` for 1–2 digit values), never
+`IDENTIFIER`, so support is explicit in two places:
+
+* `divisions/procedure_boundaries.py` — `_is_procedure_name_token` accepts
+  an identifier or an all-digit numeric token;
+  `is_paragraph_or_section_start` uses it in both its after-period and
+  at-name cases, so numeric paragraph headers (`1000.`) are recognized
+  instead of being skipped as unsupported statements.
+* `perform_parser.py` — the inline `PERFORM n TIMES` branch now checks for
+  a following `TIMES`/`TIME` via `_peek_next_meaningful` *before* consuming
+  the numeric. Previously the numeric was consumed speculatively and, when
+  TIMES did not follow, simply lost — `PERFORM 1000 THRU 1999` set
+  `target_paragraph` to the literal word `THRU`. A numeric token not
+  followed by TIMES now falls through to the procedure-name-target branch,
+  and both the target and the THRU end accept all-digit names (shared
+  `_is_procedure_name_token` helper). `GO TO 1999` already worked (the GO
+  parser takes the token value regardless of type); SORT/MERGE `THRU`
+  procedure names remain IDENTIFIER-only.
+
+Pinned by `tests/unit/test_perform_thru_numeric.py`.
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
