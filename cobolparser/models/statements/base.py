@@ -97,16 +97,37 @@ class CobolExpression(ASTNode):
         super().__init__("Expression", location)
         self.expression_type = expression_type
         self.operands: list[str] = []
+        # M12: optional structural decomposition of a raw condition. Used by
+        # the PERFORM parser: `until_condition` remains the historical
+        # CobolExpression("CONDITION") whose operands hold the raw joined
+        # string, while `condition_tree` carries the ConditionalExpression /
+        # LogicalExpression tree built from the same tokens.
+        self.condition_tree: CobolExpression | None = None
+
+    def set_condition_tree(self, tree: "CobolExpression") -> None:
+        """Attach a structural decomposition of this raw condition (M12).
+
+        The raw ``operands`` string is left untouched for backward
+        compatibility; the tree is additive and also registered as a child
+        so generic AST traversal reaches it.
+        """
+        self.condition_tree = tree
+        self.add_child(tree)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert expression to dictionary representation."""
-        return {
+        result: dict[str, Any] = {
             "node_type": self.node_type,
             "expression_type": self.expression_type,
             "operands": self.operands,
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }
+        # Additive key: only present when a structural tree was attached, so
+        # dict output for all pre-M12 shapes stays byte-identical.
+        if self.condition_tree is not None:
+            result["condition_tree"] = self.condition_tree.to_dict()
+        return result
 
 
 class ArithmeticExpression(CobolExpression):

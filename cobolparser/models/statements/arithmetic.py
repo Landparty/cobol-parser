@@ -83,6 +83,11 @@ class ComputeStatement(CobolStatement):
         super().__init__("COMPUTE", location)
         self.targets: list[str] = []
         self.expression: str | CobolExpression | None = None
+        # M12: structural decomposition of the expression. `expression`
+        # stays the raw space-joined token string for backward
+        # compatibility; this holds the precedence-parsed tree (or None
+        # when the token sequence could not be decomposed).
+        self.expression_tree: CobolExpression | None = None
         self.on_size_error: list[CobolStatement] | None = None
         self.not_on_size_error: list[CobolStatement] | None = None
 
@@ -101,6 +106,17 @@ class ComputeStatement(CobolStatement):
         # Only add as child if it's an ASTNode object, not a string
         if isinstance(expression, ASTNode):
             self.add_child(expression)
+
+    def set_expression_tree(self, tree: "CobolExpression | None") -> None:
+        """Attach the structural expression tree for this COMPUTE (M12).
+
+        Additive to :meth:`set_expression` -- the raw string is unchanged.
+        ``None`` (tree could not be built from the token sequence) leaves
+        the attribute unset without error.
+        """
+        self.expression_tree = tree
+        if isinstance(tree, ASTNode):
+            self.add_child(tree)
 
     def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("on_size_error", statements)
@@ -124,6 +140,9 @@ class ComputeStatement(CobolStatement):
             {
                 "targets": self.targets,
                 "expression": expression_dict,
+                "expression_tree": (
+                    self.expression_tree.to_dict() if self.expression_tree else None
+                ),
             }
         )
         result.update(

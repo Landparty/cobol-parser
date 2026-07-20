@@ -11,13 +11,18 @@ from typing import Any, Protocol, TypeVar, cast
 from ...core.ast_factory import create_node
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import ASTNode
+from ...models.ast_base import ASTNode, SourceLocation
 from ...models.statements import (
     AddStatement,
     ComputeStatement,
     DivideStatement,
     MultiplyStatement,
     SubtractStatement,
+)
+from ...models.statements.base import (
+    ArithmeticExpression,
+    CobolExpression,
+    FunctionCall,
 )
 from ._utils import (
     ARITHMETIC_OPERAND_TOKEN_TYPES,
@@ -435,6 +440,233 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
     return " ".join(p for p in parts if p)
 
 
+class _ExpressionSyntaxError(Exception):
+    """Internal signal: a COMPUTE token sequence is not tree-parseable.
+
+    Never escapes :func:`build_compute_expression_tree` -- tree building is
+    strictly best-effort (M12) and must not introduce errors or warnings
+    where the raw-string path produced none.
+    """
+
+
+_EXPR_BINARY_OPS = ("+", "-", "*", "/", "**")
+
+
+def _split_top_level_commas(tokens: list[str]) -> list[list[str]]:
+    """Split a token list on commas that sit outside any parentheses."""
+    parts: list[list[str]] = [[]]
+    depth = 0
+    for tok in tokens:
+        if tok == "(":
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+        if tok == "," and depth == 0:
+            parts.append([])
+        else:
+            parts[-1].append(tok)
+    return parts
+
+
+class _ExpressionTreeParser:
+    """Recursive-descent precedence parser over COMPUTE expression tokens.
+
+    Input is the flat list of token *strings* the COMPUTE parser already
+    collects for the raw expression string, so the tree is guaranteed to be
+    derived from exactly the same tokens. Grammar (COBOL precedence, loosest
+    to tightest):
+
+        expression := term   (("+" | "-") term)*        left-associative
+        term       := unary  (("*" | "/") unary)*       left-associative
+        unary      := ("+" | "-")* power                "-" -> NEGATE node
+        power      := primary ("**" unary)?             right-associative
+        primary    := "(" expression ")"
+                    | "FUNCTION" name ["(" args ")"]    -> FunctionCall
+                    | identifier ["(" subscripts ")"]   -> leaf string
+                    | literal                           -> leaf string
+
+    Leaves are plain strings (identifiers -- subscript groups folded in as
+    ``"A ( I )"``, mirroring ``_consume_arithmetic_operand`` -- and
+    literals); interior nodes are :class:`ArithmeticExpression` (operator
+    ``+ - * / **`` or unary ``NEGATE`` with only ``right_operand`` set) and
+    :class:`FunctionCall`.
+    """
+
+    def __init__(self, tokens: list[str], location: SourceLocation) -> None:
+        self._tokens = tokens
+        self._pos = 0
+        self._location = location
+
+    def parse(self) -> CobolExpression:
+        """Parse the full token list into a single expression node."""
+        node = self._parse_full()
+        if isinstance(node, CobolExpression):
+            return node
+        # Single operand (e.g. COMPUTE X = A): wrap the leaf so the
+        # attribute is uniformly a CobolExpression.
+        leaf = CobolExpression("OPERAND", self._location)
+        leaf.operands = [node]
+        return leaf
+
+    def _parse_full(self) -> str | CobolExpression:
+        node = self._parse_expression()
+        if self._pos != len(self._tokens):
+            raise _ExpressionSyntaxError(f"trailing token {self._peek()!r}")
+        return node
+
+    def _peek(self) -> str | None:
+        return self._tokens[self._pos] if self._pos < len(self._tokens) else None
+
+    def _advance(self) -> str:
+        tok = self._tokens[self._pos]
+        self._pos += 1
+        return tok
+
+    def _binary(
+        self,
+        operator: str,
+        left: str | CobolExpression,
+        right: str | CobolExpression,
+    ) -> ArithmeticExpression:
+        node = ArithmeticExpression(operator, self._location)
+        node.set_left_operand(left)
+        node.set_right_operand(right)
+        return node
+
+    def _parse_expression(self) -> str | CobolExpression:
+        node = self._parse_term()
+        while self._peek() in ("+", "-"):
+            op = self._advance()
+            node = self._binary(op, node, self._parse_term())
+        return node
+
+    def _parse_term(self) -> str | CobolExpression:
+        node = self._parse_unary()
+        while self._peek() in ("*", "/"):
+            op = self._advance()
+            node = self._binary(op, node, self._parse_unary())
+        return node
+
+    def _parse_unary(self) -> str | CobolExpression:
+        tok = self._peek()
+        if tok == "+":
+            self._advance()
+            return self._parse_unary()
+        if tok == "-":
+            self._advance()
+            node = ArithmeticExpression("NEGATE", self._location)
+            node.set_right_operand(self._parse_unary())
+            return node
+        return self._parse_power()
+
+    def _parse_power(self) -> str | CobolExpression:
+        node = self._parse_primary()
+        if self._peek() == "**":
+            self._advance()
+            # Right-associative; the exponent may itself carry a sign
+            # (2 ** -3), hence _parse_unary on the right.
+            node = self._binary("**", node, self._parse_unary())
+        return node
+
+    def _parse_primary(self) -> str | CobolExpression:
+        tok = self._peek()
+        if tok is None:
+            raise _ExpressionSyntaxError("unexpected end of expression")
+        if tok == "(":
+            self._advance()
+            node = self._parse_expression()
+            if self._peek() != ")":
+                raise _ExpressionSyntaxError("missing closing parenthesis")
+            self._advance()
+            return node
+        if tok.upper() == "FUNCTION":
+            return self._parse_function_call()
+        if tok in _EXPR_BINARY_OPS or tok in (")", ","):
+            raise _ExpressionSyntaxError(f"unexpected token {tok!r}")
+        self._advance()
+        # Subscripted identifier: fold "NAME ( I [, J] )" into the leaf
+        # string, mirroring _consume_arithmetic_operand's "TABLE1 ( INDEX1 )"
+        # shape (COBOL has no implicit multiplication, so IDENTIFIER "("
+        # can only be a subscript/reference-modification group here).
+        if tok[:1].isalpha() and self._peek() == "(":
+            group = self._consume_balanced_group()
+            return " ".join([tok, *group])
+        return tok
+
+    def _consume_balanced_group(self) -> list[str]:
+        """Consume a balanced ``( ... )`` group, parens included."""
+        parts: list[str] = []
+        depth = 0
+        while True:
+            tok = self._peek()
+            if tok is None:
+                raise _ExpressionSyntaxError("unbalanced parentheses")
+            parts.append(self._advance())
+            if tok == "(":
+                depth += 1
+            elif tok == ")":
+                depth -= 1
+                if depth == 0:
+                    return parts
+
+    def _parse_function_call(self) -> FunctionCall:
+        self._advance()  # FUNCTION keyword
+        name = self._peek()
+        if name is None or name in _EXPR_BINARY_OPS or name in ("(", ")", ","):
+            raise _ExpressionSyntaxError("FUNCTION requires a function name")
+        self._advance()
+        call = FunctionCall(name, self._location)
+        if self._peek() == "(":
+            group = self._consume_balanced_group()
+            for arg_tokens in _split_top_level_commas(group[1:-1]):
+                if not arg_tokens:
+                    continue
+                argument: str | CobolExpression
+                try:
+                    argument = _ExpressionTreeParser(
+                        arg_tokens, self._location
+                    )._parse_full()
+                except _ExpressionSyntaxError:
+                    # Space-separated argument lists (FUNCTION MAX(A B))
+                    # and other shapes the grammar doesn't cover degrade
+                    # to the raw joined string, never to a failure.
+                    argument = " ".join(arg_tokens)
+                call.add_argument(argument)
+        return call
+
+
+def build_compute_expression_tree(
+    tokens: list[str], location: SourceLocation
+) -> CobolExpression | None:
+    """Best-effort structural parse of COMPUTE expression tokens (M12).
+
+    Returns ``None`` for any token sequence the precedence parser does not
+    understand (including the unbalanced-parentheses case already reported
+    by the COMPUTE parser itself, see H2) -- the caller keeps the raw
+    joined string either way, so failure here never adds an error or
+    warning that the pre-M12 parser did not produce.
+
+    ``**`` reaches this function as two adjacent ``"*"`` tokens (the lexer
+    emits two MULTIPLY_OP tokens); they are re-merged before parsing.
+    """
+    cleaned: list[str] = []
+    for tok in tokens:
+        if not tok or not tok.strip():
+            continue  # drop NEWLINE/empty tokens kept in the raw string
+        if tok == "*" and cleaned and cleaned[-1] == "*":
+            cleaned[-1] = "**"
+            continue
+        cleaned.append(tok)
+    if not cleaned:
+        return None
+    try:
+        return _ExpressionTreeParser(cleaned, location).parse()
+    except Exception:
+        # Strictly fail-soft: any surprise (grammar gap, odd token) leaves
+        # expression_tree as None with the raw string untouched.
+        return None
+
+
 class ComputeStatementParser(IStatementParser):
     """Parser for COMPUTE statements using IStatementParser interface."""
 
@@ -542,6 +774,12 @@ class ComputeStatementParser(IStatementParser):
         if expr_tokens:
             expr_str = " ".join(expr_tokens).strip()
             stmt.set_expression(expr_str)
+            # M12: additionally attach a structural tree parsed from the
+            # exact same tokens. Best-effort only -- on failure the tree
+            # stays None and the raw string above is unaffected.
+            stmt.set_expression_tree(
+                build_compute_expression_tree(expr_tokens, start_loc)
+            )
         else:
             report_or_raise(ctx, "COMPUTE statement missing expression", start_loc)
 
