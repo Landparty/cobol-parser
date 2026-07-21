@@ -26,6 +26,36 @@
 * **Updated** [tests.md](tests.md): added the new file to the `regression/`
   directory-layout annotations.
 
+## 2026-07-21 (procedure_registry.py dispatch-order invariant test)
+
+* **Updated** [parser.md](parser.md): added
+  `tests/unit/test_procedure_registry_dispatch_order.py`, closing a gap
+  flagged in review — `create_statement_registry()`'s first-match dispatch
+  order is order-sensitive by design ("more specific before general") but
+  had no automated invariant test, so a misordered future registration
+  would have failed silently at runtime instead of at test/review time.
+  Investigated every `matches()` implementation in
+  `cobolparser/parsers/statements/` to find genuine first-token overlaps;
+  confirmed the only real overlap in the current registry is the IBM EXEC
+  family (`EXEC SQL`/`EXEC CICS`/`EXEC IMS`/`EXEC DLI` all start with
+  `EXEC`, disambiguated on the second token) — every other registered verb
+  matches a distinct `TokenType`. The new test file: (1) pins
+  `create_statement_registry()`'s exact parser order in `EXPECTED_ORDER` so
+  any accidental reorder/insertion/removal in `procedure_registry.py` fails
+  immediately; (2) parametrizes `DISPATCH_CASES` — one real
+  `Token`/`TokenStream` case per registered parser (46 total) — asserting
+  `find_parser()` returns the correct class against the actual production
+  registry, so a future parser with an overly broad `matches()` inserted in
+  the wrong slot is caught by a wrong-class assertion instead of a silent
+  mis-parse; (3) a guard test asserting `DISPATCH_CASES` covers every class
+  the registry actually registers, so the invariant test itself can't
+  silently drift out of sync. Verified the order-pin test actually catches
+  breakage by temporarily swapping two adjacent registrations in a scratch
+  copy — the test failed with a clear index-level diff, then the swap was
+  reverted. Updated the "Adding a New Statement Parser" checklist in
+  parser.md with a step to update this test. Pinned by
+  `tests/unit/test_procedure_registry_dispatch_order.py`.
+
 ## 2026-07-21 (copybook REPLACING/`>>IF` ran before sequence-area stripping)
 
 * **Updated** [preprocessing.md](preprocessing.md): user asked to confirm
