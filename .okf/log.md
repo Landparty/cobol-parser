@@ -1,5 +1,46 @@
 # OKF Update Log
 
+## 2026-07-21 (copybook REPLACING/`>>IF` ran before sequence-area stripping)
+
+* **Updated** [preprocessing.md](preprocessing.md): user asked to confirm
+  that fixed-format sequence-number (columns 1-6) and identification
+  (columns 73-80) columns are always ignored "even in the copybooks."
+  Confirmed the *default* expansion path already strips them correctly, but
+  found a real gap via direct reproduction (not merely theorized —
+  `expand_copybooks` run against copybooks with real 6-digit sequence
+  numbers and column-72-flush REPLACING targets): `_expand_source_recursive`
+  ran `apply_replacing_clauses`, `preprocess_conditional_compilation`,
+  `validate_copybook_content`, and `validate_level_numbers` on the raw
+  80-column copybook line, stripping sequence/identification columns only
+  *afterward*. A length-changing `REPLACING` therefore shifted the
+  column-72 boundary relative to the original line: a shrinking replacement
+  (`==LONGPLACEHOLDERTAG==` by `==X==`) pulled the identification-area text
+  into the kept window and inserted it into the parsed program; a growing
+  replacement (`==SHORTTAG==` by a longer value) truncated real code,
+  dropping the replaced text's terminating period. Separately, `>>IF`/
+  `>>END-IF` inside a copybook using real (non-blank) sequence numbers were
+  never recognized as directives (the check saw the sequence-number digits
+  before `>>`), so conditional blocks never evaluated.
+  Fix: `_expand_source_recursive`'s copybook-content branch now strips
+  sequence/identification columns and blanks comment lines immediately
+  after reading the file — before REPLACING, conditional compilation, or
+  either validator sees it. `apply_replacing_clauses` gained an
+  `indicator_position: int = 6` parameter (mirroring
+  `normalize_continuation_lines`) so it locates the indicator column
+  correctly on both raw (index 6) and pre-stripped (index 0) content, and
+  `_expand_source_recursive` gained `already_stripped: bool = False` so its
+  own internal strip is skipped when the caller already normalized the
+  content (skipping it unconditionally would double-strip and eat 6 more
+  real characters off every line). One pre-existing unit test
+  (`test_copybook_expander_coverage.py::test_content_validation`) used a
+  synthetic single-line copybook (`"* Just a comment"`, comment marker at
+  column 1, not column 7) that only worked by coincidence against the old
+  naive `.strip().startswith("*")` check; corrected the fixture to use a
+  real fixed-format comment line (6-space sequence area + column-7 `*`).
+  Pinned by
+  `tests/regression/test_copybook_sequence_area_before_replacing.py`. Full
+  suite green (6818 passed / 13 skipped / 1 xfailed).
+
 ## 2026-07-21 (PICTURE clause with no terminating period drops the next data item)
 
 * **Updated** [parser.md](parser.md): `parse_picture_clause`
@@ -24,11 +65,13 @@
   result the way cobolparser did. The bug is not fixed-format-specific: a
   plain missing period in free-form source hits the identical defect.
   Fix: `parse_picture_clause`'s NEWLINE branch now looks ahead past the
-  newline; a bare, unparenthesized `LEVEL_NUMBER` immediately followed by an
-  `IDENTIFIER` (never legal inside a PICTURE pattern — occurrence counts are
-  always parenthesized, e.g. `9(05)`) stops the clause there instead of
-  consuming the newline, and records a `ParseResult.warnings` entry —
-  consistent with the "dropped-content signal" contract mockymock's
+  newline for a LEVEL_NUMBER that cannot legally be more PICTURE content —
+  either its value contains a digit other than `0`/`9` (the only two
+  digit-shaped PICTURE symbols), or it's immediately followed by an
+  `IDENTIFIER` (never legal inside a PICTURE pattern — occurrence counts
+  are always parenthesized, e.g. `9(05)`) — and stops the clause there
+  instead of consuming the newline, recording a `ParseResult.warnings`
+  entry — consistent with the "dropped-content signal" contract mockymock's
   `check_whole_program` PARSE_WARNING refusal gate already depends on
   (`mocky-mock/.okf/integration.md` Gotchas). The Cython `_data_fast` fast
   path delegates PICTURE parsing back to this same method, so both paths are
@@ -38,6 +81,21 @@
   (`TestFixedFormatColumnTruncation` — the literal repro — and
   `TestFreeFormMissingPeriod` — the same defect with no column truncation
   involved). Full suite green (6813 passed / 13 skipped / 1 xfailed).
+  **Follow-up (same day, advisor review):** the initial fix keyed only on
+  "LEVEL_NUMBER followed by IDENTIFIER", missing an *anonymous* next item
+  with no data-name at all (`05  REDEFINES ...` — no IDENTIFIER token
+  follows the level number), which still silently corrupted the previous
+  item's pattern and misattached the anonymous item's children to it. Added
+  the digit-content signal above (any digit other than `0`/`9` can never be
+  legal PICTURE content, so the token is unconditionally a real level
+  number) to close that gap without reintroducing a false positive on the
+  legitimate `PIC 9\n99.`-style multi-line continuation (every character of
+  an all-`0`/`9` LEVEL_NUMBER stays ambiguous, so the IDENTIFIER check still
+  gates that case). Also strengthened the original tests to assert
+  parent/child re-attachment explicitly (not just node presence — the
+  original bug's defining symptom was children reattaching to the *wrong*
+  parent) and added `TestAnonymousNextItem`. Full suite green (6815 passed
+  / 13 skipped / 1 xfailed).
 
 ## 2026-07-21 (SUBTRACT ... FROM and GIVING subscripted targets dropped)
 

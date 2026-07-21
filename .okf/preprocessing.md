@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-07-09T00:00:00Z
+timestamp: 2026-07-21T00:00:00Z
 ---
 
 # Overview
@@ -139,6 +139,31 @@ Features:
 - Content validation (`validate_copybook_content`)
 - LRU file cache (configurable via `set_file_cache_size`)
 - REPLACING clause support including multi-token substitution
+
+**Sequence/identification areas stripped before REPLACING and
+conditional compilation (fixed 2026-07-21):** in `_expand_source_recursive`,
+a copybook's sequence-number (columns 1-6) and identification (columns
+73-80) areas used to be stripped (`strip_sequence_area` +
+`remove_comment_lines`) only *after* `apply_replacing_clauses`,
+`preprocess_conditional_compilation`, `validate_copybook_content`, and
+`validate_level_numbers` had already run on the raw 80-column line. Two
+concrete failures: (1) a length-changing `REPLACING` shifts every character
+after its match point on that raw line, so the column-72 boundary — applied
+afterward — lands in the wrong place: a shrinking replacement pulls
+identification text into the kept code window, a growing one truncates real
+code (including its terminating period); (2) `>>IF`/`>>END-IF` inside a
+copybook with real (non-blank) numeric sequence numbers were never
+recognized as directives, since the raw sequence-number digits sit before
+`>>` on the line. Fixed by moving the strip to run immediately after the
+copybook is read from disk, before any of those four calls.
+`apply_replacing_clauses` gained an `indicator_position: int = 6` parameter
+(same pattern as `normalize_continuation_lines`) so it can locate the
+indicator column correctly whether it's operating on raw (index 6) or
+already-stripped (index 0) content, and `_expand_source_recursive` gained an
+`already_stripped: bool = False` parameter so its own internal strip is
+skipped when the caller already normalized the content (avoiding a
+double-strip that would eat 6 more real characters off each line). Pinned by
+`tests/regression/test_copybook_sequence_area_before_replacing.py`.
 
 **`total_bytes` accounting on cache hits (fixed 2026-07-09, finding
 M14):** `_expand_source_recursive`'s intra-expansion cache (`context.

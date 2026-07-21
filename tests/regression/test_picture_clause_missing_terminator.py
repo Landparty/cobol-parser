@@ -47,8 +47,10 @@ def _item_by_name(result, name: str):
     for item in result.ast.find_all_by_type("CobolDataItem"):
         if item.name == name:
             return item
-    raise AssertionError(f"no data item named {name!r}; parsed names: "
-                          f"{[i.name for i in result.ast.find_all_by_type('CobolDataItem')]}")
+    raise AssertionError(
+        f"no data item named {name!r}; parsed names: "
+        f"{[i.name for i in result.ast.find_all_by_type('CobolDataItem')]}"
+    )
 
 
 def _child_data_item_names(item) -> set[str]:
@@ -161,4 +163,54 @@ class TestFreeFormMissingPeriod:
         assert "BARIABLE" in names
         assert "BARIABLE-B1" in names
         assert "BARIABLE-B2" in names
+        assert result.warnings
+
+
+class TestAnonymousNextItem:
+    """The next item may have no data-name at all (anonymous, distinct from
+    FILLER). A lookahead keyed only on "LEVEL_NUMBER followed by
+    IDENTIFIER" misses this shape entirely -- `05  REDEFINES ...` has no
+    IDENTIFIER after the level number, just a clause keyword. This class
+    pins the grammar-based fallback: a LEVEL_NUMBER value containing any
+    digit other than 0/9 (here, the '5' in "05") can never be legal
+    PICTURE content, so it is treated as a new item regardless of what
+    follows it.
+    """
+
+    _SRC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-RECORD.
+           05  VARIABLE                             PIC X(08).
+           05  Variable-name
+                  REDEFINES  VARIABLE                          PIC 9(08).
+           05  REDEFINES  VARIABLE.
+               10  BARIABLE-B1  PIC X(04).
+               10  BARIABLE-B2  PIC X(04).
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+
+    def test_anonymous_item_is_not_dropped(self):
+        result = parse_cobol(self._SRC, filename="test.cob")
+        assert result.ast is not None
+        variable_name = _item_by_name(result, "Variable-name")
+        assert variable_name.picture_clause.pattern == "9(08)"
+        anonymous_items = [
+            item
+            for item in result.ast.find_all_by_type("CobolDataItem")
+            if item.name.startswith("ANONYMOUS-")
+        ]
+        assert len(anonymous_items) == 1, [
+            i.name for i in result.ast.find_all_by_type("CobolDataItem")
+        ]
+        anonymous_item = anonymous_items[0]
+        assert anonymous_item.redefines == "VARIABLE"
+        assert _child_data_item_names(anonymous_item) == {
+            "BARIABLE-B1",
+            "BARIABLE-B2",
+        }
+        assert _child_data_item_names(variable_name) == set()
         assert result.warnings

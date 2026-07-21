@@ -869,15 +869,18 @@ def _split_literal_segments(line: str) -> list[tuple[str, bool]]:
     return segments
 
 
-def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str:
+def apply_replacing_clauses(
+    content: str,
+    clauses: list[ReplacingClause],
+    indicator_position: int = 6,
+) -> str:
     """
     Apply REPLACING clauses to copybook content with identifier awareness.
 
     Substitution is context-aware (open-findings M13):
 
-    - Fixed-format comment lines (``*`` or ``/`` in column 7) are never
-      modified. The copybook text at this stage is still raw fixed-format;
-      comment stripping happens later in the expansion pipeline.
+    - Fixed-format comment lines (``*`` or ``/`` in the indicator column) are
+      never modified.
     - Text inside alphanumeric string literals (``'...'`` or ``"..."``,
       including doubled-quote escapes) is never modified — unless the
       clause's own search text contains a quote character (a pseudo-text
@@ -891,13 +894,26 @@ def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str
       ``REPLACING :TAG: BY :EMP:`` rewrites the ``TAG`` in ``:TAG:-FIELD``
       as well as standalone ``TAG`` tokens (whole-token-substring
       semantics).
+
+    Args:
+        content: Copybook content. Column 7 is fixed-format's indicator
+            column; ``indicator_position`` locates it in *content*.
+        clauses: REPLACING clauses to apply.
+        indicator_position: Index of the indicator character in each line
+            (default 6, matching raw fixed-format text with the
+            sequence-number area still present). Pass 0 for content that has
+            already had ``strip_sequence_area`` applied, where the indicator
+            is the first character of each line.
     """
     lines = content.split("\n")
 
     # Comment status is decided once, from the original content, so a
     # substitution can never shift a line into or out of comment status
     # midway through applying the clause list.
-    is_comment = [len(line) > 6 and line[6] in ("*", "/") for line in lines]
+    is_comment = [
+        len(line) > indicator_position and line[indicator_position] in ("*", "/")
+        for line in lines
+    ]
 
     # Sort clauses by length descending to prioritize longer matches (e.g. 'ABC-1' before 'ABC')
     sorted_clauses = sorted(clauses, key=lambda c: len(c.find_text), reverse=True)

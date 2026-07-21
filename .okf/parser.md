@@ -181,16 +181,30 @@ cobolparser's column-8-72 extraction already matches GnuCOBOL's own
 semantics — the bug was purely the *silence*, not a truncation-boundary
 mismatch. Not fixed-format-specific: a plain missing period in free-form
 source hits the identical loop defect. Fixed by having the NEWLINE branch
-look ahead past the newline for a bare, unparenthesized `LEVEL_NUMBER`
-immediately followed by an `IDENTIFIER` (never legal inside a PICTURE
-pattern — occurrence counts are always parenthesized, e.g. `9(05)`); when
-found, the clause stops there instead of consuming the newline, and a
-`ParseResult.warnings` entry is recorded via the same `host.add_warning`
-channel `_warn_dropped_data_token` already uses. The `_data_fast` Cython
-path calls back into this same Python method for PICTURE parsing (see
-"Cython callback surface" above), so both paths are fixed together with no
-`.pyx`/`.c` change. Pinned by
-`tests/regression/test_picture_clause_missing_terminator.py`.
+look ahead past the newline for a LEVEL_NUMBER that cannot legally be more
+PICTURE content: either (a) its value contains a digit other than `0`/`9`
+— the only two digit-shaped PICTURE symbols (digit position /
+zero-insertion) — so e.g. the `5` in `05` can only be a real level number
+regardless of what follows it, or (b) it's immediately followed by an
+`IDENTIFIER` (a named or `FILLER` item — both lex as `IDENTIFIER`). Signal
+(a) alone was added after an initial "IDENTIFIER-follows" version shipped
+without it: that version missed an **anonymous** next item with no
+data-name at all (`05  REDEFINES ...`, no IDENTIFIER token at all — code
+review caught it), which still corrupted the previous item's pattern and
+misattached the anonymous item's children to it with `warnings == []`. (a)
+does not misfire on the legitimate multi-line case this method already
+tolerates — a PICTURE pattern built only from `9`/`0` symbols split across
+lines, e.g. `PIC 9\n99.` — because every character of the LEVEL_NUMBER
+value is itself `0` or `9`. When either signal fires, the clause stops
+there instead of consuming the newline, and a `ParseResult.warnings` entry
+is recorded via the same `host.add_warning` channel `_warn_dropped_data_token`
+already uses. The `_data_fast` Cython path calls back into this same Python
+method for PICTURE parsing (see "Cython callback surface" above), so both
+paths are fixed together with no `.pyx`/`.c` change. Pinned by
+`tests/regression/test_picture_clause_missing_terminator.py`, including
+explicit parent/child re-attachment assertions (the original defect didn't
+just drop the next item — its children were misattached to the preceding
+sibling) and a dedicated anonymous-item case.
 
 # Statement Parsers (`cobolparser/parsers/statements/`)
 

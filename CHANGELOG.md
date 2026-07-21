@@ -85,6 +85,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **preprocess:** copybook content's sequence-number (columns 1-6) and
+  identification (columns 73-80) areas are now stripped immediately after a
+  copybook is read from disk, before `REPLACING`, `>>IF` conditional
+  compilation, or content/level-number validation ever see the text
+  (2026-07-21). Previously those columns were only stripped *after*
+  `apply_replacing_clauses` ran, so a length-changing `REPLACING` clause
+  shifted every character after its match point on the raw 80-column line:
+  a shrinking replacement (e.g. `==LONGNAME==` by `==X==`) pulled
+  identification-area text into the kept code window, silently inserting
+  garbage into the parsed program, while a growing replacement pushed real
+  code past column 72 and truncated it — including, in the worst case, its
+  terminating period, which would silently merge two statements. Separately,
+  a copybook using real (non-blank) numeric sequence numbers defeated
+  `>>IF`/`>>END-IF` recognition entirely (the directive check saw the
+  sequence-number digits before `>>`), so conditional blocks inside such
+  copybooks were never evaluated. `apply_replacing_clauses` gained an
+  `indicator_position` parameter (mirroring `normalize_continuation_lines`)
+  so it can correctly locate the indicator column in already-stripped text,
+  and `_expand_source_recursive` gained an `already_stripped` parameter so
+  the same content isn't stripped twice. Pinned by
+  `tests/regression/test_copybook_sequence_area_before_replacing.py`.
 * **parser:** a `PICTURE` clause with no terminating period, immediately
   followed by what looks like the next data item's own `level-number
   data-name` header, no longer silently absorbs that header into its
@@ -101,14 +122,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to match GnuCOBOL 3.2's own column-72 truncation semantics — GnuCOBOL
   hard-errors on the same truncated shape rather than accepting it), so a
   terminating period placed at column 73+ vanishes from the normalized text.
-  The loop's NEWLINE branch now looks ahead past the newline for a bare
-  LEVEL_NUMBER immediately followed by an IDENTIFIER (never legal inside a
-  PICTURE pattern — occurrence counts are always parenthesized, e.g.
-  `9(05)`); when found, the clause stops there instead of consuming the
-  newline, and a `ParseResult.warnings` entry is recorded. Applies to both
-  the pure-Python and `_data_fast` Cython-accelerated paths (both delegate
-  PICTURE parsing to the same `parse_picture_clause`). Pinned by
-  `tests/regression/test_picture_clause_missing_terminator.py`.
+  The loop's NEWLINE branch now looks ahead past the newline for a
+  LEVEL_NUMBER that cannot legally be more picture pattern: either its
+  value contains a digit other than `0`/`9` (the only two digit-shaped
+  PICTURE symbols — e.g. the `5` in `05`, which also catches an
+  *anonymous* next item with no data-name at all, such as a bare
+  `05  REDEFINES ...`), or it's immediately followed by an IDENTIFIER (a
+  named or `FILLER` data item). When found, the clause stops there instead
+  of consuming the newline, and a `ParseResult.warnings` entry is recorded.
+  Applies to both the pure-Python and `_data_fast` Cython-accelerated paths
+  (both delegate PICTURE parsing to the same `parse_picture_clause`).
+  Pinned by `tests/regression/test_picture_clause_missing_terminator.py`,
+  including explicit parent/child re-attachment assertions (the original
+  defect didn't just drop the next item — its children were misattached to
+  the preceding sibling).
 * **parser:** `ADD ... TO` no longer drops a subscripted target's subscript
   (2026-07-21). `ADD 1 TO TABLE-ITEM (I, J, K)` previously captured only
   `TABLE-ITEM` as the target and left `( I , J , K )` unconsumed as an

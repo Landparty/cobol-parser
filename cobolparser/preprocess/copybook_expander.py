@@ -669,6 +669,7 @@ def _expand_source_recursive(
     validate_levels: bool = False,
     process_conditionals: bool = False,
     stats: ExpansionStatistics | None = None,
+    already_stripped: bool = False,
 ) -> tuple[str, int, bool]:
     """
     Recursively expand COPY statements in source code.
@@ -684,6 +685,13 @@ def _expand_source_recursive(
         validate_levels: Whether to validate level number alignment
         process_conditionals: Whether to process conditional directives
         stats: Statistics object to update
+        already_stripped: True when the caller has already run
+            ``remove_comment_lines``/``strip_sequence_area`` on
+            *source_code* (e.g. copybook content, normalized up front so
+            REPLACING/conditional-compilation/validation never see the raw
+            sequence-number or identification columns). Skips the redundant
+            internal strip, which would otherwise double-strip and corrupt
+            already-normalized text.
 
     Returns:
         Tuple of (expanded_source, max_depth_reached, is_normalized)
@@ -707,14 +715,22 @@ def _expand_source_recursive(
         chain = context.expansion_stack + [source_file]
         raise CircularReferenceError(chain)
 
-    # Normalize source for robust matching and expansion
-    # We strip sequence areas and comments to ensure the lexer works consistently
-    source_no_comments = remove_comment_lines(source_code)
-    source_stripped = strip_sequence_area(source_no_comments)
-    # We must merge continuation lines to find statements split across lines
-    normalized_source = normalize_continuation_lines(
-        source_stripped, indicator_position=0
-    )
+    # Normalize source for robust matching and expansion. We strip sequence
+    # areas and comments to ensure the lexer works consistently. Skipped when
+    # the caller (the copybook-content branch below) already did this, since
+    # re-running strip_sequence_area on already-stripped text would eat 6
+    # more real characters off the front of every line.
+    if already_stripped:
+        normalized_source = normalize_continuation_lines(
+            source_code, indicator_position=0
+        )
+    else:
+        source_no_comments = remove_comment_lines(source_code)
+        source_stripped = strip_sequence_area(source_no_comments)
+        # We must merge continuation lines to find statements split across lines
+        normalized_source = normalize_continuation_lines(
+            source_stripped, indicator_position=0
+        )
 
     # Extract COPY statements using the robust lexer on normalized source
     lexer = CopyStatementLexer(normalized_source, source_file)
@@ -725,9 +741,11 @@ def _expand_source_recursive(
     if stats is not None and lexer.warnings:
         stats.warnings.extend(lexer.warnings)
 
-    # If no COPY statements, return source unchanged to preserve full fidelity
+    # If no COPY statements, return source unchanged to preserve full fidelity.
+    # is_normalized mirrors already_stripped here: if the caller already
+    # stripped this content, it stays normalized even on this passthrough.
     if not copy_statements:
-        return source_code, context.current_depth, False
+        return source_code, context.current_depth, already_stripped
 
     # Push current file onto stack
 
@@ -779,7 +797,8 @@ def _expand_source_recursive(
                 encoding_errors=path_resolver.search_config.encoding_errors,
             )
 
-            # Update total bytes and check limit
+            # Update total bytes and check limit. Measured on the raw file
+            # content (matching the on-disk size) before the strip below.
             content_size = len(copybook_content.encode("utf-8"))
             context.total_bytes += content_size
             if stats:
@@ -789,6 +808,20 @@ def _expand_source_recursive(
                 raise TotalExpansionSizeExceededError(
                     context.total_bytes, path_resolver.search_config.max_total_size
                 )
+
+            # Strip the sequence-number (columns 1-6) and identification
+            # (columns 73-80) areas, and blank comment lines, before anything
+            # below inspects or rewrites this content. REPLACING/>>IF/
+            # validation all operate on the program-text stream, which by
+            # definition excludes those administrative columns. Doing this
+            # *after* REPLACING (the previous order) let a length-changing
+            # REPLACING move the column-72 boundary relative to the
+            # original line: a shrinking replacement pulled identification
+            # text into the kept window, and a growing one silently
+            # truncated real code (including its terminating period).
+            copybook_content = strip_sequence_area(
+                remove_comment_lines(copybook_content)
+            )
 
             # Validate copybook content if requested
             if validate_content:
@@ -820,10 +853,13 @@ def _expand_source_recursive(
             if copybook_path not in included_copybooks:
                 included_copybooks.append(copybook_path)
 
-            # Apply REPLACING clause if present (using enhanced function)
+            # Apply REPLACING clause if present (using enhanced function).
+            # copybook_content is already stripped (indicator at index 0).
             if statement.replacing_clauses:
                 copybook_content = apply_replacing_clauses(
-                    copybook_content, statement.replacing_clauses
+                    copybook_content,
+                    statement.replacing_clauses,
+                    indicator_position=0,
                 )
 
             # Handle SUPPRESS clause (for listing control - we still include the content)
@@ -846,12 +882,13 @@ def _expand_source_recursive(
                     validate_levels,
                     process_conditionals,
                     stats,
+                    already_stripped=True,
                 )
             )
 
-            # If the nested content is NOT normalized (i.e. it had no COPY statements and was returned as-is),
-            # we MUST normalize it now because we are going to insert it into our 'expanded_source'
-            # which IS normalized. Mixing padded and unpadded code breaks layout.
+            # copybook_content was already stripped above, so nested_normalized
+            # is always True here; this fixup is kept as a defensive no-op in
+            # case that invariant ever changes.
             if not nested_normalized:
                 nested_no_comments = remove_comment_lines(expanded_copybook)
                 nested_stripped = strip_sequence_area(nested_no_comments)
