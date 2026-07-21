@@ -1,5 +1,31 @@
 # OKF Update Log
 
+## 2026-07-21 (generic swallow-sweep regression test added)
+
+* **Added** `tests/regression/test_swallow_sweep.py`: formalizes the manual
+  "period-less verb + marker statement" probe used throughout the
+  2026-07-05..09 Silent-Drop Audit sections into a permanent, generic sweep
+  — one fixture per class in `create_statement_registry()` (46), cross-product
+  with a `DISPLAY 'MARKER'.` sentinel, asserting the marker survives as its
+  own top-level entry in `CobolParagraph.statements` (not merely somewhere in
+  `get_all_statements()`'s tree-wide recursion, which would false-pass a
+  marker absorbed into a clause body — see design rationale in the test
+  module docstring). A completeness guard fails the suite if a future
+  statement parser is registered with no matching fixture. Validated during
+  development by disabling `MoveStatementParser`'s boundary check and
+  confirming exactly one targeted failure (no collateral damage), then
+  reverting. A second validation pass caught a real gap: the initial
+  ADD/SUBTRACT/MULTIPLY/DIVIDE fixtures used a plain scalar target, which is
+  safe-by-construction (consumed in one shot regardless of any boundary
+  check) and stayed green even with `_consume_arithmetic_target` mutated —
+  redesigned around a subscripted `GIVING` target so they route through the
+  shared `consume_optional_subscript` paren-depth loop instead, confirmed by
+  mutating that loop (all four failed together, then reverted).
+* **Updated** [parser.md](parser.md): new "Generic swallow-sweep regression"
+  section cross-referencing this test from the audit trail it formalizes.
+* **Updated** [tests.md](tests.md): added the new file to the `regression/`
+  directory-layout annotations.
+
 ## 2026-07-21 (procedure_registry.py dispatch-order invariant test)
 
 * **Updated** [parser.md](parser.md): added
