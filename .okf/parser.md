@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-21T01:00:00Z
+timestamp: 2026-07-21T02:00:00Z
 ---
 
 # Overview
@@ -1232,6 +1232,60 @@ path (class/sign/condition-name conditions like `A IS NUMERIC`) now
 produces a structured node while `metadata.raw_condition` stays
 populated. Pinned by
 `tests/regression/test_open_findings_m12_regression.py`.
+
+# Generic swallow-sweep regression (2026-07-21)
+
+Every Silent-Drop Audit section above (2026-07-05 through 2026-07-09) was
+found by hand-rolling the same probe per verb: "period-less statement X,
+immediately followed by a marker statement — does the marker survive?"
+`tests/regression/test_swallow_sweep.py` formalizes that probe as a
+permanent, self-maintaining sweep instead of a one-off manual audit:
+
+* One `Fixture(node_type, snippet, needs_file)` entry per class registered
+  in `create_statement_registry()` (46 as of this writing), keyed by parser
+  class name. Each `snippet` is a minimal, period-less statement (with an
+  explicit `END-IF`/`END-EVALUATE`/`END-SEARCH` for scope-taking statements,
+  so the boundary being probed is "does the statement stop at its own scope
+  terminator without a trailing period," not "does it ever terminate at
+  all").
+* `test_fixture_table_covers_every_registered_parser` diffs the fixture
+  table's keys against `create_statement_registry().get_all_parsers()`, so a
+  future statement parser added with no matching fixture fails the suite
+  immediately — the whole point being that this sweep covers new verbs
+  automatically instead of waiting for the next manual audit.
+* `test_marker_survives_after` builds each fixture into a full program,
+  parses it, and asserts against **`CobolParagraph.statements`** (the flat,
+  source-order list `add_statement()` appends to) — not the tree-wide
+  `CobolProgram.get_all_statements()`. This distinction matters: a swallowed
+  marker isn't deleted, it's absorbed as a *child* of the statement under
+  test (folded into an expression string, or nested into a THEN/WHEN/AT END
+  body), and `get_all_statements()` deliberately recurses into exactly those
+  bodies (see its docstring above), so it would still find the marker and
+  report a false pass. `CobolParagraph.statements` only reflects what the
+  PROCEDURE DIVISION parser itself treated as separate top-level statements,
+  so a swallowed marker simply never appears there — confirmed by a
+  canary test (`TestHarnessDetectsSwallowing`) that reproduces this exact
+  false-pass mode with an intentionally unclosed `IF`, and by manually
+  disabling `MoveStatementParser`'s boundary check during development (one
+  targeted failure, no collateral damage across the other 45 fixtures).
+* **A fixture only guards a real vulnerable path, not just "the parser
+  runs."** ADD/SUBTRACT/MULTIPLY/DIVIDE's plain scalar-target form (`ADD 1
+  TO WS-A`) turned out to be safe-by-construction — a single bare
+  `IDENTIFIER` target is consumed in one shot regardless of how (or whether)
+  the trailing-boundary check is wired, so no plausible regression there
+  would ever touch the marker. Confirmed by mutating
+  `_consume_arithmetic_target`: the fixture stayed green. The four
+  arithmetic fixtures were redesigned around a subscripted `GIVING` target
+  (`ADD 1 TO WS-A GIVING WS-C (WS-IDX)`) to route through
+  `consume_optional_subscript` (`_utils.py`) — the shared paren-depth loop
+  every arithmetic verb's `GIVING` clause uses, and the one with real
+  historical swallow bugs (see the ADD/SUBTRACT subscripted-target entries
+  above). Disabling that loop's `depth == 0` stop condition made all four
+  fixtures fail together with zero collateral damage elsewhere, confirmed
+  and reverted. General lesson for adding future fixtures: prefer a snippet
+  shape that exercises a loop/boundary-check, not just a single
+  unconditionally-consumed token — a mutation test against the real parser
+  is the way to check.
 
 # See Also
 

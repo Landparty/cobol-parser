@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-07-09T00:00:00Z
+timestamp: 2026-07-21T02:00:00Z
 ---
 
 # Overview
@@ -44,6 +44,15 @@ tests/
   contracts/                   # API contract tests — stability guarantees
     io_statements/
   regression/                  # backward compatibility
+                               #   test_swallow_sweep.py: generic cross-product
+                               #   sweep -- one period-less snippet per
+                               #   registered statement parser x a DISPLAY
+                               #   'MARKER'. sentinel, asserting the marker
+                               #   survives as CobolParagraph's next top-level
+                               #   statement. Fails automatically if a new
+                               #   parser is registered without a fixture
+                               #   (2026-07-21) -- see parser.md's "Generic
+                               #   swallow-sweep regression" section
                                #   test_evaluate_traversal_regression.py:
                                #   EVALUATE WHEN branches must be AST children
                                #   (find_all_by_type reaches nested statements;
