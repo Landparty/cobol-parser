@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-20T00:00:00Z
+timestamp: 2026-07-21T01:00:00Z
 ---
 
 # Overview
@@ -157,6 +157,41 @@ Remember both implementations must change together, and the checked-in
 `tests/unit/test_data_division_branches.py::TestRedefinesClause`
 (multi-line + forced pure-Python-loop variants).
 
+**PICTURE clause with no terminating period drops the next data item
+(`data_clauses.py::parse_picture_clause`, 2026-07-21):** the flip side of
+the multi-line tolerance above — `parse_picture_clause`'s token loop treats
+a NEWLINE as "more pattern may follow" *unconditionally*, which is correct
+for a legitimate multi-line PICTURE clause but wrong when the terminating
+period was simply lost. `LEVEL_NUMBER` is one of the token types the
+picture-pattern loop collects (the lexer types every 1-2 digit integer as
+`LEVEL_NUMBER` regardless of context — see the gotcha in `data.py` above),
+so a bare level number belonging to the *next* data item (`05  BARIABLE`)
+was appended to the previous item's pattern (e.g. `"9(08)05bariable"`), and
+the following IDENTIFIER (the next item's name) went with it — the next
+item, and all of its children, vanished from the AST with
+`result.success == True` and `result.warnings == []`. The most common
+real-world trigger is fixed-format column-72 truncation:
+`normalize_fixed_format` (see [preprocessing.md](preprocessing.md)) extracts
+only columns 8-72, so a terminating period placed at column 73+ never
+reaches the lexer. Verified empirically against real GnuCOBOL 3.2 (via
+mockymock's Docker toolchain, plain fixed-format `cobc`, no `-free`): the
+same truncation shape is a **hard compile error** there (`group item cannot
+have PICTURE clause` / `syntax error, unexpected Literal`), confirming
+cobolparser's column-8-72 extraction already matches GnuCOBOL's own
+semantics — the bug was purely the *silence*, not a truncation-boundary
+mismatch. Not fixed-format-specific: a plain missing period in free-form
+source hits the identical loop defect. Fixed by having the NEWLINE branch
+look ahead past the newline for a bare, unparenthesized `LEVEL_NUMBER`
+immediately followed by an `IDENTIFIER` (never legal inside a PICTURE
+pattern — occurrence counts are always parenthesized, e.g. `9(05)`); when
+found, the clause stops there instead of consuming the newline, and a
+`ParseResult.warnings` entry is recorded via the same `host.add_warning`
+channel `_warn_dropped_data_token` already uses. The `_data_fast` Cython
+path calls back into this same Python method for PICTURE parsing (see
+"Cython callback surface" above), so both paths are fixed together with no
+`.pyx`/`.c` change. Pinned by
+`tests/regression/test_picture_clause_missing_terminator.py`.
+
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
 | File | COBOL Verbs |
@@ -253,6 +288,45 @@ Pinned by `tests/unit/test_arithmetic_size_error_branches.py`,
 `tests/unit/test_utils_clause_collection.py`,
 `tests/unit/test_display_parser.py`, and
 `tests/unit/io_statements/test_write_close_parsers.py`.
+
+**ADD `... TO` subscripted target dropped (`arithmetic_parsers.py`,
+2026-07-21):** `AddStatementParser`'s `TO` branch consumed its target via a
+private `_consume_identifier` helper that accepted only a bare `IDENTIFIER`
+token, unlike `COMPUTE`'s `_consume_arithmetic_target` (already shared),
+which folds a trailing `(subscript[, subscript]...)` group into the target
+string. `ADD 1 TO TABLE-ITEM (I, J, K)` therefore captured only
+`TABLE-ITEM` as the target and left `( I , J , K )` unconsumed — an
+"Unparsed tokens" content-drop warning — and in a two-statement paragraph
+the resulting recovery was bad enough to drop a *following* subscripted
+`ADD` statement from the AST entirely, not just mis-parse its target. Fixed
+by having `AddStatementParser` call the same `_consume_arithmetic_target`
+helper COMPUTE already uses instead of its own bare-identifier method (now
+removed); `AddStatement.target` is the same `"NAME ( SUB1 , SUB2 )"` shape
+COMPUTE already produces for subscripted targets. Pinned by
+`tests/unit/test_arithmetic_migration.py::test_add_statement_with_subscripted_target`
+and `::test_add_statement_with_subscripted_target_and_giving`.
+
+**SUBTRACT `... FROM` and arithmetic `GIVING` subscripted targets dropped
+(`arithmetic_parsers.py` / `_utils.py`, 2026-07-21):** two sibling gaps in
+the same bug class as the ADD fix above. (1) `SubtractStatementParser`'s
+`FROM` branch consumed an identifier target with a bare
+`stmt.set_target(tok.value); token_stream.consume()` instead of
+`_consume_arithmetic_target`, so `SUBTRACT 1 FROM VARIABLE (H, I, 1)`
+captured only `VARIABLE` and left `( H , I , 1 )` unconsumed. Fixed by
+routing the `IDENTIFIER` case through `_consume_arithmetic_target`
+(numeric-literal/level-number/figurative-constant targets, which can never
+carry a subscript, keep the original bare-consume branch). (2)
+`_utils.consume_keyword_and_operand` — shared by every arithmetic
+statement's `GIVING` clause (ADD, SUBTRACT, MULTIPLY, DIVIDE) — only
+accepted a single bare `IDENTIFIER` token, so `ADD 1 TO A GIVING RESULT
+(H, I, 1)` dropped `(H, I, 1)` from the `GIVING` target too. Fixed by
+folding an optional trailing `(subscript[, subscript]...)` group into the
+returned value, mirroring `_consume_arithmetic_target`'s paren-depth
+loop (duplicated rather than shared to avoid a `_utils.py` ->
+`arithmetic_parsers.py` import cycle). Pinned by
+`tests/unit/test_arithmetic_migration.py::test_subtract_statement_with_subscripted_target`,
+`::test_add_statement_with_subscripted_giving_target`, and
+`tests/unit/test_utils_clause_collection.py::TestConsumeKeywordAndOperand::test_consumes_subscripted_target`.
 
 **WRITE `BEFORE`/`AFTER` phrase — `ADVANCING` optional (`write_parser.py`,
 2026-07-20):** the standard grammar is `BEFORE|AFTER [ADVANCING] [n]

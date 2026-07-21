@@ -886,6 +886,38 @@ def parse_arithmetic_operands(
     return operands, ""
 
 
+def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
+    """Consume a trailing ``(...)`` subscript group, appending it to *parts*.
+
+    If the next token is not ``LEFT_PAREN``, *parts* is left untouched. Paren
+    depth is tracked so a nested call like ``WS-T(FUNCTION FOO(I))`` is
+    captured correctly. Shared by every target-consuming helper that must
+    fold a subscript group into its result string instead of leaving it to
+    be dropped as an unparsed trailing token -- COMPUTE/ADD/SUBTRACT targets
+    (:func:`_consume_arithmetic_target` in ``arithmetic_parsers.py``) and the
+    arithmetic ``GIVING`` clause (:func:`consume_keyword_and_operand` below).
+    """
+    next_token = stream.peek()
+    if not (next_token and next_token.type == TokenType.LEFT_PAREN):
+        return
+    depth = 0
+    while not stream.is_empty():
+        t = stream.peek()
+        if not t:
+            break
+        if t.type == TokenType.LEFT_PAREN:
+            depth += 1
+            parts.append("(")
+        elif t.type == TokenType.RIGHT_PAREN:
+            depth -= 1
+            parts.append(")")
+        else:
+            parts.append(t.value if t.value else "")
+        stream.consume()
+        if depth == 0:
+            break
+
+
 def consume_keyword_and_operand(
     stream: ITokenStream,
     keyword: str,
@@ -907,6 +939,12 @@ def consume_keyword_and_operand(
     The same tokens between the keyword and the identifier are also skipped
     so that COBOL line continuations don't break clause recognition.
 
+    A trailing ``(subscript[, subscript]...)`` group on the operand is folded
+    into the returned string via :func:`consume_optional_subscript` (e.g.
+    ``GIVING RESULT (H, I, 1)`` -> ``"RESULT ( H , I , 1 )"``) -- a GIVING
+    target is a data item just like an ADD/SUBTRACT ``TO``/``FROM`` target
+    and may equally be table-subscripted.
+
     Returns ``None`` if the keyword is not present at the current position or
     if no identifier follows it. The keyword check is case-insensitive.
     """
@@ -917,9 +955,10 @@ def consume_keyword_and_operand(
     skip_whitespace(stream)
     token = stream.peek()
     if token and token.type == TokenType.IDENTIFIER and token.value:
-        value = token.value
+        parts: list[str] = [token.value]
         stream.consume()
-        return value
+        consume_optional_subscript(stream, parts)
+        return " ".join(p for p in parts if p)
     return None
 
 

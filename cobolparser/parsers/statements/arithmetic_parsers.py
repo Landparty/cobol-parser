@@ -31,6 +31,7 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     _skip_newlines,
     consume_keyword_and_operand,
+    consume_optional_subscript,
     get_parse_context,
     is_statement_boundary,
     looks_like_paragraph_boundary,
@@ -89,7 +90,7 @@ class AddStatementParser(IStatementParser):
         if separator == "TO":
             token_stream.consume()  # consume TO
             _skip_newlines(token_stream)
-            target = self._consume_identifier(token_stream)
+            target = _consume_arithmetic_target(token_stream)
             if target:
                 stmt.set_target(target)
             else:
@@ -112,16 +113,6 @@ class AddStatementParser(IStatementParser):
 
         parse_size_error_clauses(token_stream, stmt)
         return stmt
-
-    @staticmethod
-    def _consume_identifier(stream: ITokenStream) -> str | None:
-        _skip_newlines(stream)
-        token = stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value:
-            value = token.value
-            stream.consume()
-            return value
-        return None
 
 
 class SubtractStatementParser(IStatementParser):
@@ -176,11 +167,18 @@ class SubtractStatementParser(IStatementParser):
                     report_or_raise(
                         ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                     )
+            elif tok and tok.type == TokenType.IDENTIFIER and tok.value:
+                # Identifier targets may carry a subscript group (e.g.
+                # ``FROM VARIABLE (H, I, 1)``); reuse the same helper ADD's
+                # TO target and COMPUTE's targets already use so it isn't
+                # dropped as an unparsed trailing token.
+                target = _consume_arithmetic_target(token_stream)
+                if target:
+                    stmt.set_target(target)
             elif (
                 tok
                 and tok.type
                 in (
-                    TokenType.IDENTIFIER,
                     TokenType.NUMERIC_LITERAL,
                     TokenType.LEVEL_NUMBER,
                     TokenType.FIGURATIVE_CONSTANT,
@@ -427,26 +425,8 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
     parts: list[str] = [token.value]
     stream.consume()
 
-    # Optional subscript group: ``(...)``. Track paren depth so nested calls
-    # like ``WS-T(FUNCTION FOO(I))`` are captured correctly.
-    next_token = stream.peek()
-    if next_token and next_token.type == TokenType.LEFT_PAREN:
-        depth = 0
-        while not stream.is_empty():
-            t = stream.peek()
-            if not t:
-                break
-            if t.type == TokenType.LEFT_PAREN:
-                depth += 1
-                parts.append("(")
-            elif t.type == TokenType.RIGHT_PAREN:
-                depth -= 1
-                parts.append(")")
-            else:
-                parts.append(t.value if t.value else "")
-            stream.consume()
-            if depth == 0:
-                break
+    # Optional subscript group: ``(...)``.
+    consume_optional_subscript(stream, parts)
 
     return " ".join(p for p in parts if p)
 

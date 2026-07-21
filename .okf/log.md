@@ -1,5 +1,101 @@
 # OKF Update Log
 
+## 2026-07-21 (PICTURE clause with no terminating period drops the next data item)
+
+* **Updated** [parser.md](parser.md): `parse_picture_clause`
+  (`parsers/divisions/data_clauses.py`) unconditionally treated a NEWLINE as
+  "more picture pattern may follow" (needed for legitimate multi-line
+  PICTURE clauses). When a clause's terminating period was missing, the loop
+  crossed the newline and picked up the *next* data item's own
+  `level-number data-name` pair as more pattern content — the lexer types
+  every 1-2 digit integer as `LEVEL_NUMBER` regardless of context, and
+  `LEVEL_NUMBER` is one of the token types the picture-pattern loop collects.
+  The next item (and all its children) vanished from the AST with
+  `result.success == True` and `result.warnings == []`.
+  Root cause confirmed via a minimal repro (`cobolparser.parse_cobol` on a
+  `REDEFINES ... PIC 9(08)` entry whose terminating period lands at column
+  73): `normalize_fixed_format` extracts only columns 8-72, silently
+  truncating the period. Empirically verified against real GnuCOBOL 3.2 (via
+  mockymock's `mockymock-cobc` Docker container, plain fixed-format `cobc`,
+  no `-free`) that the same source **fails to compile** there too
+  (`group item 'Variable-name' cannot have PICTURE clause` / `syntax error,
+  unexpected Literal`) — GnuCOBOL applies the same column-72 truncation
+  (cobolparser's semantics already match) but never silently accepts the
+  result the way cobolparser did. The bug is not fixed-format-specific: a
+  plain missing period in free-form source hits the identical defect.
+  Fix: `parse_picture_clause`'s NEWLINE branch now looks ahead past the
+  newline; a bare, unparenthesized `LEVEL_NUMBER` immediately followed by an
+  `IDENTIFIER` (never legal inside a PICTURE pattern — occurrence counts are
+  always parenthesized, e.g. `9(05)`) stops the clause there instead of
+  consuming the newline, and records a `ParseResult.warnings` entry —
+  consistent with the "dropped-content signal" contract mockymock's
+  `check_whole_program` PARSE_WARNING refusal gate already depends on
+  (`mocky-mock/.okf/integration.md` Gotchas). The Cython `_data_fast` fast
+  path delegates PICTURE parsing back to this same method, so both paths are
+  fixed together with no `.pyx`/`.c` change needed. Pinned by five new
+  tests written first and confirmed failing against the old behavior:
+  `tests/regression/test_picture_clause_missing_terminator.py`
+  (`TestFixedFormatColumnTruncation` — the literal repro — and
+  `TestFreeFormMissingPeriod` — the same defect with no column truncation
+  involved). Full suite green (6813 passed / 13 skipped / 1 xfailed).
+
+## 2026-07-21 (SUBTRACT ... FROM and GIVING subscripted targets dropped)
+
+* **Updated** [parser.md](parser.md): two sibling gaps in the same bug class
+  as the ADD ... TO fix above, both in
+  `parsers/statements/arithmetic_parsers.py` /
+  `parsers/statements/_utils.py`:
+  1. `SubtractStatementParser`'s `FROM` branch consumed an identifier
+     target with a bare `stmt.set_target(tok.value); token_stream.consume()`
+     instead of `_consume_arithmetic_target`, so `SUBTRACT 1 FROM
+     VARIABLE (H, I, 1)` captured only `VARIABLE` and left `( H , I , 1 )`
+     unconsumed as an "Unparsed tokens" content-drop warning. Fixed by
+     routing the `IDENTIFIER` case through `_consume_arithmetic_target`
+     (numeric-literal/level-number/figurative-constant targets, which can
+     never carry a subscript, keep the original bare-consume branch).
+  2. `_utils.consume_keyword_and_operand` — shared by every arithmetic
+     statement's `GIVING` clause (ADD, SUBTRACT, MULTIPLY, DIVIDE) — only
+     accepted a single bare `IDENTIFIER` token, so `ADD 1 TO A GIVING
+     RESULT (H, I, 1)` dropped `(H, I, 1)` from the `GIVING` target too.
+     Fixed by extracting the paren-depth-tracking subscript loop
+     `_consume_arithmetic_target` already had into a new shared
+     `consume_optional_subscript` helper in `_utils.py`, used by both
+     `consume_keyword_and_operand` and (now refactored to call it)
+     `_consume_arithmetic_target` itself.
+  Pinned by three new tests written first and confirmed failing (dropped
+  subscript, non-empty `warnings`/wrong return value) against the old
+  behavior: `tests/unit/test_arithmetic_migration.py::test_subtract_statement_with_subscripted_target`,
+  `::test_add_statement_with_subscripted_giving_target`, and
+  `tests/unit/test_utils_clause_collection.py::TestConsumeKeywordAndOperand::test_consumes_subscripted_target`.
+  Full unit (4625 passed / 4 skipped / 1 xfailed) and regression+integration
+  (1870 passed / 4 skipped) suites all still green; `ruff`/`black`/`mypy`
+  clean on the touched files.
+
+## 2026-07-21 (ADD ... TO subscripted target dropped)
+
+* **Updated** [parser.md](parser.md): `AddStatementParser`'s `TO` branch
+  (`parsers/statements/arithmetic_parsers.py`) consumed its target via a
+  private `_consume_identifier` helper that accepted only a bare
+  `IDENTIFIER` token — unlike `COMPUTE`'s `_consume_arithmetic_target`
+  (already shared), which folds a trailing `(subscript[, subscript]...)`
+  group into the target string. `ADD 1 TO TABLE-ITEM (I, J, K)` therefore
+  captured only `TABLE-ITEM` as the target and left `( I , J , K )`
+  unconsumed as an "Unparsed tokens" content-drop warning; in a
+  two-statement paragraph the recovery was bad enough to drop a
+  *following* subscripted `ADD` statement from the AST entirely. Fixed by
+  switching `AddStatementParser` to call the same `_consume_arithmetic_target`
+  helper COMPUTE uses instead of its own bare-identifier method (removed);
+  `AddStatement.target` now produces the same `"NAME ( SUB1 , SUB2 )"`
+  shape COMPUTE already does for subscripted targets. Pinned by two new
+  tests in `tests/unit/test_arithmetic_migration.py`
+  (`test_add_statement_with_subscripted_target`,
+  `test_add_statement_with_subscripted_target_and_giving`), written first
+  and confirmed failing (dropped/truncated statement, non-empty
+  `warnings`) against the old behavior before the fix. Full unit
+  (4620 passed / 4 skipped / 1 xfailed), regression, and integration
+  suites (1870 passed) all still green; `ruff`/`mypy` clean on the
+  touched files.
+
 ## 2026-07-20 (WRITE ADVANCING mnemonic-name / SPECIAL-NAMES mnemonic clauses)
 
 * **WRITE `ADVANCING` now accepts a mnemonic-name or identifier target**

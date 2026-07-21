@@ -85,6 +85,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **parser:** a `PICTURE` clause with no terminating period, immediately
+  followed by what looks like the next data item's own `level-number
+  data-name` header, no longer silently absorbs that header into its
+  pattern and drops the next item (and all of its children) from the AST
+  (2026-07-21). The picture-pattern loop treats a NEWLINE as "more pattern
+  may follow" for legitimate multi-line PICTURE clauses; since the lexer
+  types every 1-2 digit integer as `LEVEL_NUMBER` regardless of context and
+  `LEVEL_NUMBER` is a collected picture-pattern token type, a bare level
+  number belonging to the *next* entry (`05  BARIABLE`) was appended to the
+  previous item's pattern (`"9(08)05bariable"`) with `result.success ==
+  True` and `result.warnings == []` — no signal at all. The most common
+  real-world trigger is fixed-format column-72 truncation:
+  `normalize_fixed_format` extracts only columns 8-72 (confirmed empirically
+  to match GnuCOBOL 3.2's own column-72 truncation semantics — GnuCOBOL
+  hard-errors on the same truncated shape rather than accepting it), so a
+  terminating period placed at column 73+ vanishes from the normalized text.
+  The loop's NEWLINE branch now looks ahead past the newline for a bare
+  LEVEL_NUMBER immediately followed by an IDENTIFIER (never legal inside a
+  PICTURE pattern — occurrence counts are always parenthesized, e.g.
+  `9(05)`); when found, the clause stops there instead of consuming the
+  newline, and a `ParseResult.warnings` entry is recorded. Applies to both
+  the pure-Python and `_data_fast` Cython-accelerated paths (both delegate
+  PICTURE parsing to the same `parse_picture_clause`). Pinned by
+  `tests/regression/test_picture_clause_missing_terminator.py`.
+* **parser:** `ADD ... TO` no longer drops a subscripted target's subscript
+  (2026-07-21). `ADD 1 TO TABLE-ITEM (I, J, K)` previously captured only
+  `TABLE-ITEM` as the target and left `( I , J , K )` unconsumed as an
+  "Unparsed tokens" content-drop warning; in a two-statement paragraph the
+  resulting recovery could drop a *following* subscripted `ADD` statement
+  from the AST entirely. `AddStatementParser` now consumes its target via
+  the same subscript-aware helper `COMPUTE` already uses, so
+  `AddStatement.target` is `"TABLE-ITEM ( I , J , K )"`, the same shape
+  COMPUTE produces for subscripted targets. Pinned by
+  `tests/unit/test_arithmetic_migration.py::test_add_statement_with_subscripted_target`
+  and `::test_add_statement_with_subscripted_target_and_giving`.
+* **parser:** `SUBTRACT ... FROM` and the shared arithmetic `GIVING` clause
+  (ADD/SUBTRACT/MULTIPLY/DIVIDE) also dropped a subscripted target's
+  subscript (2026-07-21) — the same bug class as the `ADD ... TO` fix
+  above. `SUBTRACT 1 FROM VARIABLE (H, I, 1)` captured only `VARIABLE`, and
+  `ADD 1 TO A GIVING RESULT (H, I, 1)` captured only `RESULT`, each
+  leaving `( ... )` unconsumed as an "Unparsed tokens" content-drop
+  warning. `SubtractStatementParser`'s `FROM` branch now routes identifier
+  targets through the same `_consume_arithmetic_target` helper as ADD/
+  COMPUTE, and `_utils.consume_keyword_and_operand` (used by every
+  arithmetic statement's `GIVING` clause) now folds a trailing
+  `(subscript[, subscript]...)` group into its returned value. Pinned by
+  `tests/unit/test_arithmetic_migration.py::test_subtract_statement_with_subscripted_target`,
+  `::test_add_statement_with_subscripted_giving_target`, and
+  `tests/unit/test_utils_clause_collection.py::TestConsumeKeywordAndOperand::test_consumes_subscripted_target`.
 * **analysis:** program-flow reachability honors THRU ranges (2026-07-20).
   `find_unreachable_nodes` now treats every `FlowEdge.range_members` entry
   (PERFORM/SORT/MERGE ... THRU) as a neighbor of the edge's source, so an

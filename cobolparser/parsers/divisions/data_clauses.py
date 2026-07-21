@@ -658,12 +658,85 @@ class DataItemClauseParser:
                 pattern_parts.append(token.value)
                 token_stream.consume()
             elif token.type == TokenType.NEWLINE:
+                if paren_depth == 0:
+                    next_item_token = self._picture_clause_next_item_token(token_stream)
+                    if next_item_token is not None:
+                        self._warn_picture_clause_missing_terminator(next_item_token)
+                        break
                 token_stream.consume()
             else:
                 break
 
         result = "".join(pattern_parts) if pattern_parts else None
         return result
+
+    @staticmethod
+    def _picture_clause_next_item_token(token_stream: ITokenStream) -> Any:
+        """Look past the NEWLINE at the current stream position for a fresh
+        ``level-number [data-name]`` header (the start of the *next* data
+        item entry, possibly anonymous/FILLER) rather than more picture
+        pattern.
+
+        A bare, unparenthesized LEVEL_NUMBER never legally appears inside a
+        PICTURE pattern -- occurrence/repetition counts are always written
+        in parentheses (e.g. ``9(05)``) -- but the lexer types every 1-2
+        digit integer as LEVEL_NUMBER regardless of context, including the
+        legitimate case of a multi-line picture pattern built only from the
+        two digit-shaped picture symbols, ``9`` (digit position) and ``0``
+        (zero-insertion) -- e.g. a pattern split as ``PIC 9\\n99.``. Two
+        independent signals distinguish a genuine next-item header from
+        that case:
+
+        - The LEVEL_NUMBER's value contains a digit other than ``0``/``9``
+          (e.g. the ``5`` in ``05``) -- no legal PICTURE symbol produces
+          such a digit, so the token can only be a real level number,
+          regardless of what follows it (covers unnamed/anonymous items
+          and items introduced directly by a clause keyword, e.g.
+          ``05  REDEFINES ...`` with no data-name).
+        - The LEVEL_NUMBER is immediately followed by an IDENTIFIER (a
+          named or ``FILLER`` data item -- both lex as IDENTIFIER) --
+          covers the remaining case of an all-0/9 level number (``99``,
+          ``90``, ...) that happens to carry a name.
+
+        Returns the LEVEL_NUMBER token when either signal fires, else None
+        -- preserving the legitimate multi-line PICTURE continuation case
+        (e.g. ``PIC 9(5)\\n   V99.``), where the token after the newline is
+        not a LEVEL_NUMBER at all.
+        """
+        offset = 0
+        token = token_stream.peek(offset)
+        while token is not None and token.type == TokenType.NEWLINE:
+            offset += 1
+            token = token_stream.peek(offset)
+        if token is None or token.type != TokenType.LEVEL_NUMBER:
+            return None
+        value = token.value or ""
+        if value and any(ch not in "09" for ch in value):
+            return token
+        next_token = token_stream.peek(offset + 1)
+        if next_token is None or next_token.type != TokenType.IDENTIFIER:
+            return None
+        return token
+
+    def _warn_picture_clause_missing_terminator(self, next_item_token: Any) -> None:
+        """Record a warning when a PICTURE clause is stopped early because
+        what follows its newline looks like the next data item's own
+        level-number/name pair. Consistent with the ``ParseResult.warnings``
+        "dropped-content signal" contract other silent-drop fixes in this
+        codebase use -- this is the difference between a clean-looking
+        `success=True, warnings=[]` parse and one that actually lost data.
+        """
+        line = getattr(getattr(next_item_token, "location", None), "line", None)
+        where = f" before line {line}" if line else ""
+        host = getattr(self._parser, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(
+                f"PICTURE clause has no terminating period{where}: stopped "
+                "at what looks like the next data item's level number and "
+                "name; the terminating period may have been lost to "
+                "fixed-format column-72 truncation"
+            )
 
     def parse_value_clause(self, token_stream: ITokenStream) -> str | None:
         """Parse VALUE clause value.
