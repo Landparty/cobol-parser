@@ -56,6 +56,8 @@ class _BinaryArithmeticNode(Protocol):
 
     def set_giving(self, value: str) -> None: ...
 
+    def set_rounded(self, value: bool = ...) -> None: ...
+
 
 _ArithT = TypeVar("_ArithT", bound=_BinaryArithmeticNode)
 
@@ -301,6 +303,15 @@ def _parse_binary_arithmetic(
     giving = consume_keyword_and_operand(token_stream, "GIVING")
     if giving:
         stmt.set_giving(giving)
+
+    # ROUNDED is legal here whether or not GIVING was present (e.g. both
+    # ``DIVIDE x BY y GIVING z ROUNDED`` and ``DIVIDE x INTO y ROUNDED``).
+    # Left unconsumed, it stays in the stream and gets misread by the
+    # paragraph-boundary lookahead as a new paragraph header.
+    _skip_newlines(token_stream)
+    if peek_value_upper(token_stream) == "ROUNDED":
+        token_stream.consume()
+        stmt.set_rounded(True)
 
     parse_size_error_clauses(token_stream, stmt)
     return stmt

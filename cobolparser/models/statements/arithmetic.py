@@ -17,6 +17,7 @@ class ArithmeticStatement(CobolStatement):
         self.not_on_size_error: list[CobolStatement] | None = None
         self.target: str | None = None  # For TO clause
         self.giving: str | None = None  # For GIVING clause
+        self.rounded: bool = False  # For ROUNDED clause
 
     def set_target(self, target: str) -> None:
         """Set target for TO clause (result stored in target)."""
@@ -27,6 +28,10 @@ class ArithmeticStatement(CobolStatement):
         """Set result variable for GIVING clause."""
         self.giving = giving
         self._add_unique_operand(giving)
+
+    def set_rounded(self, rounded: bool = True) -> None:
+        """Set whether the ROUNDED clause was present."""
+        self.rounded = rounded
 
     def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("on_size_error", statements)
@@ -40,6 +45,8 @@ class ArithmeticStatement(CobolStatement):
             result["target"] = self.target
         if self.giving:
             result["giving"] = self.giving
+        if self.rounded:
+            result["rounded"] = self.rounded
         result.update(
             self._serialize_clauses(
                 "on_size_error", "not_on_size_error", omit_empty=True
