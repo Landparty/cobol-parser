@@ -121,6 +121,12 @@ class GoStatementParser(IStatementParser):
             if look.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
                 idx += 1
                 continue
+            if look.type is TokenType.COMMA:
+                # A comma between targets (`GO TO A, B DEPENDING ON X`) is a
+                # separator, not a terminator -- keep scanning for DEPENDING,
+                # mirroring the MOVE/SET parsers' comma handling.
+                idx += 1
+                continue
             look_upper = (look.value or "").upper()
             if look_upper == "DEPENDING":
                 found_depending = True
@@ -144,16 +150,21 @@ class GoStatementParser(IStatementParser):
                 if next_token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
                     token_stream.consume()
                     continue
+                if next_token.type is TokenType.COMMA:
+                    # Separator between targets -- consume without counting
+                    # it as (or recording it as) a target.
+                    token_stream.consume()
+                    continue
                 stmt.add_target_paragraph(next_token.value)
                 token_stream.consume()
                 consumed_targets += 1
-            # Position at the DEPENDING keyword (skip layout tokens)
+            # Position at the DEPENDING keyword (skip layout tokens and any
+            # trailing separator comma)
             while not token_stream.is_empty():
                 next_token = token_stream.peek()
-                if next_token and next_token.type.name in (
-                    "NEWLINE",
-                    "WHITESPACE",
-                    "COMMENT",
+                if next_token and (
+                    next_token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT")
+                    or next_token.type is TokenType.COMMA
                 ):
                     token_stream.consume()
                     continue
