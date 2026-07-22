@@ -13,6 +13,7 @@ from .ast_base import ASTNode, SourceLocation
 # Pre-compiled regex patterns for PictureClause parsing (avoids re-compilation per instance)
 _PIC_P_FACTOR_RE = re.compile(r"P(\((\d+)\))?")
 _PIC_ALPHA_RE = re.compile(r"([XA])(\((\d+)\))?$")
+_PIC_NATIONAL_RE = re.compile(r"N(\((\d+)\))?$")
 _PIC_BASIC_NUMERIC_RE = re.compile(r"S?9(\((\d+)\))?$")
 _PIC_SIGNED_RE = re.compile(r"S(9+|\((\d+)\)|9\((\d+)\))$")
 _PIC_LEFT_V_RE = re.compile(r"S?(9+|9\((\d+)\))$")
@@ -20,7 +21,7 @@ _PIC_RIGHT_V_RE = re.compile(r"(9+|9\((\d+)\))$")
 _PIC_SCALING_LEFT_RE = re.compile(r"S?P(\((\d+)\))?9+$")
 _PIC_SCALING_RIGHT_RE = re.compile(r"S?9+P(\((\d+)\))?$")
 _PIC_COMPLEX_RE = re.compile(r"S?(9+)V(9+)$")
-_PIC_DIGIT_X_RE = re.compile(r"[9X]")
+_PIC_DIGIT_X_RE = re.compile(r"[9XN]")
 _PIC_NINE_RE = re.compile(r"9")
 # Strips ``(n)`` repeat counts so editing-symbol detection isn't fooled by the
 # digits inside a repeat factor (e.g. the ``0`` in ``9(10)``).
@@ -89,8 +90,8 @@ class PictureClause(ASTNode):
                     self.scaling_factor = 1
 
         # Use the first character as a cheap guard for the simple
-        # alphanumeric branch below, so we avoid that regex when the
-        # pattern cannot be X/A-based.
+        # alphanumeric/national branches below, so we avoid those regexes
+        # when the pattern cannot be X/A/N-based.
         first = pattern[0] if pattern else ""
 
         # 1. Basic alphanumeric patterns: X, X(n), A, A(n)
@@ -98,6 +99,21 @@ class PictureClause(ASTNode):
             alpha_match = _PIC_ALPHA_RE.match(pattern)
             if alpha_match:
                 count_str = alpha_match.group(3)
+                self.size = int(count_str) if count_str else 1
+                return
+
+        # 1b. Basic national patterns: N, N(n) -- national/DBCS character
+        # items (PIC N). Counted the same way X/A are counted above: one
+        # character position per N, expanded by an optional (n) repeat
+        # factor. This codebase has no existing double-byte/DBCS sizing
+        # convention elsewhere (no GROUP-USAGE NATIONAL byte-doubling, no
+        # code page handling), so -- per the simpler, more defensible
+        # option -- size is a single-width character count (PIC N(10) ->
+        # size 10), not a double-byte count.
+        if first == "N":
+            national_match = _PIC_NATIONAL_RE.match(pattern)
+            if national_match:
+                count_str = national_match.group(2)
                 self.size = int(count_str) if count_str else 1
                 return
 
