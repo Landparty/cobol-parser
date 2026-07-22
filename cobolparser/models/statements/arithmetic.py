@@ -15,14 +15,28 @@ class ArithmeticStatement(CobolStatement):
         super().__init__(statement_type, location)
         self.on_size_error: list[CobolStatement] | None = None
         self.not_on_size_error: list[CobolStatement] | None = None
-        self.target: str | None = None  # For TO clause
+        self.target: str | None = None  # First/primary target (back-compat)
+        self.targets: list[str] = []  # All TO/FROM targets, in order
         self.giving: str | None = None  # For GIVING clause
-        self.rounded: bool = False  # For ROUNDED clause
+        self.rounded: bool = False  # True if ROUNDED appeared on any target
+        self.is_corresponding: bool = False  # For CORRESPONDING/CORR clause
 
     def set_target(self, target: str) -> None:
-        """Set target for TO clause (result stored in target)."""
-        self.target = target
+        """Add a TO/FROM target (result stored in target).
+
+        COBOL allows multiple comma/space-separated targets after TO/FROM
+        (``ADD A TO B, C``); ``target`` keeps holding the first one for
+        backward compatibility with single-target callers, while ``targets``
+        accumulates the full ordered list.
+        """
+        if self.target is None:
+            self.target = target
+        self.targets.append(target)
         self._add_unique_operand(target)
+
+    def set_corresponding(self, is_corresponding: bool = True) -> None:
+        """Set whether this is an ADD/SUBTRACT CORRESPONDING statement."""
+        self.is_corresponding = is_corresponding
 
     def set_giving(self, giving: str) -> None:
         """Set result variable for GIVING clause."""
@@ -43,10 +57,14 @@ class ArithmeticStatement(CobolStatement):
         result = super().to_dict()
         if self.target:
             result["target"] = self.target
+        if self.targets:
+            result["targets"] = self.targets
         if self.giving:
             result["giving"] = self.giving
         if self.rounded:
             result["rounded"] = self.rounded
+        if self.is_corresponding:
+            result["is_corresponding"] = self.is_corresponding
         result.update(
             self._serialize_clauses(
                 "on_size_error", "not_on_size_error", omit_empty=True
@@ -81,6 +99,18 @@ class DivideStatement(ArithmeticStatement):
 
     def __init__(self, location: SourceLocation):
         super().__init__("DIVIDE", location)
+        self.remainder: str | None = None  # For REMAINDER clause
+
+    def set_remainder(self, remainder: str) -> None:
+        """Set the REMAINDER clause's target identifier."""
+        self.remainder = remainder
+        self._add_unique_operand(remainder)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        if self.remainder:
+            result["remainder"] = self.remainder
+        return result
 
 
 class ComputeStatement(CobolStatement):
@@ -89,6 +119,7 @@ class ComputeStatement(CobolStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("COMPUTE", location)
         self.targets: list[str] = []
+        self.rounded: bool = False  # True if ROUNDED appeared on any target
         self.expression: str | CobolExpression | None = None
         # M12: structural decomposition of the expression. `expression`
         # stays the raw space-joined token string for backward
@@ -102,6 +133,10 @@ class ComputeStatement(CobolStatement):
         """Add a target variable for the computation."""
         self.targets.append(target)
         self._add_unique_operand(target)
+
+    def set_rounded(self, rounded: bool = True) -> None:
+        """Set whether ROUNDED was present on any target."""
+        self.rounded = rounded
 
     def set_expression(self, expression: Union[str, "CobolExpression"]) -> None:
         """Set the arithmetic expression for the computation.
@@ -152,6 +187,8 @@ class ComputeStatement(CobolStatement):
                 ),
             }
         )
+        if self.rounded:
+            result["rounded"] = self.rounded
         result.update(
             self._serialize_clauses(
                 "on_size_error", "not_on_size_error", omit_empty=True
