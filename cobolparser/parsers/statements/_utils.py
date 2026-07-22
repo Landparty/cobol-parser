@@ -1052,6 +1052,42 @@ _EXEC_SQL_NO_SPACE_BEFORE: frozenset[TokenType] = frozenset(
     }
 )
 
+#: (previous token type, current token type) pairs that the lexer produces
+#: for a two-character relational operator it has no dedicated token for --
+#: ``>=``, ``<=``, and ``<>`` all lex as two single-char tokens (GREATER/LESS
+#: + ASSIGN, or LESS + GREATER). Rejoining them with ``" ".join`` would
+#: corrupt ``WHERE SALARY >= :WS-ID`` into ``"...SALARY > =:WS-ID..."``.
+_EXEC_SQL_SPLIT_RELOP_PAIRS: frozenset[tuple[TokenType, TokenType]] = frozenset(
+    {
+        (TokenType.GREATER, TokenType.ASSIGN),  # >=
+        (TokenType.LESS, TokenType.ASSIGN),  # <=
+        (TokenType.LESS, TokenType.GREATER),  # <>
+    }
+)
+
+
+def _is_split_relational_operator(prev_token: Token | None, token: Token) -> bool:
+    """Return True if *token* immediately abuts *prev_token* forming ``>=``/``<=``/``<>``.
+
+    Column adjacency (same line, ``token``'s column immediately following the
+    end of ``prev_token``'s value) is used rather than a bare value check so
+    that a legitimately space-separated ``>`` ... ``=`` pair elsewhere in the
+    text is not mistakenly fused -- e.g. host code that never actually splits
+    a relational operator across whitespace still round-trips unchanged, and
+    only the lexer's own artifact of tokenizing ``>=`` as two chars is
+    repaired here.
+    """
+    if prev_token is None:
+        return False
+    if (prev_token.type, token.type) not in _EXEC_SQL_SPLIT_RELOP_PAIRS:
+        return False
+    prev_loc = prev_token.location
+    cur_loc = token.location
+    if prev_loc is None or cur_loc is None or prev_loc.line != cur_loc.line:
+        return False
+    prev_value = prev_token.value or ""
+    return cur_loc.column == prev_loc.column + len(prev_value)
+
 
 def collect_exec_sql_text(stream: ITokenStream) -> str:
     """Collect the raw SQL text from a token stream up to (and consuming) END-EXEC.
@@ -1084,6 +1120,7 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
     """
     sql_parts: list[str] = []
     prev_was_colon = False
+    prev_token: Token | None = None
     terminated = False
     first_token = stream.peek(0)
     while not stream.is_empty():
@@ -1102,7 +1139,12 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
             break
 
         if token.value:
-            if prev_was_colon or token.type in _EXEC_SQL_NO_SPACE_BEFORE:
+            no_space_before = (
+                prev_was_colon
+                or token.type in _EXEC_SQL_NO_SPACE_BEFORE
+                or _is_split_relational_operator(prev_token, token)
+            )
+            if no_space_before:
                 if sql_parts:
                     sql_parts[-1] = sql_parts[-1] + token.value
                 else:
@@ -1110,6 +1152,7 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
             else:
                 sql_parts.append(token.value)
             prev_was_colon = token.type == TokenType.COLON
+            prev_token = token
         stream.consume()
 
     if not terminated:

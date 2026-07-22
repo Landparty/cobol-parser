@@ -269,31 +269,9 @@ class InspectStatementParser(IStatementParser):
                         value = v.value
                         skip_whitespace(ts)
 
-                # Optional BEFORE/AFTER INITIAL
-                before = None
-                after = None
-                p = ts.peek()
-                pv = _val(p) if p else ""
-                if pv in ("BEFORE", "AFTER"):
-                    ba_type = pv
-                    ts.consume()
-                    skip_whitespace(ts)
-                    p = ts.peek()
-                    if p and _val(p) == "INITIAL":
-                        ts.consume()
-                        skip_whitespace(ts)
-                    p = ts.peek()
-                    if p and p.type in (
-                        TokenType.IDENTIFIER,
-                        TokenType.STRING_LITERAL,
-                        TokenType.NUMERIC_LITERAL,
-                    ):
-                        ts.consume()
-                        if ba_type == "BEFORE":
-                            before = p.value
-                        else:
-                            after = p.value
-                        skip_whitespace(ts)
+                # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a single
+                # FOR-phrase may carry both qualifiers simultaneously.
+                before, after = self._parse_before_after(ts)
 
                 stmt.add_tallying_clause(counter, for_type, value, before, after)
             else:
@@ -343,37 +321,49 @@ class InspectStatementParser(IStatementParser):
                         to_value = v.value or ""
                         skip_whitespace(ts)
 
-                # Optional BEFORE/AFTER INITIAL
-                before = None
-                after = None
-                p = ts.peek()
-                pv = _val(p) if p else ""
-                if pv in ("BEFORE", "AFTER"):
-                    ba_type = pv
-                    ts.consume()
-                    skip_whitespace(ts)
-                    p = ts.peek()
-                    if p and _val(p) == "INITIAL":
-                        ts.consume()
-                        skip_whitespace(ts)
-                    p = ts.peek()
-                    if p and p.type in (
-                        TokenType.IDENTIFIER,
-                        TokenType.STRING_LITERAL,
-                        TokenType.NUMERIC_LITERAL,
-                    ):
-                        ts.consume()
-                        if ba_type == "BEFORE":
-                            before = p.value
-                        else:
-                            after = p.value
-                        skip_whitespace(ts)
+                # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a single
+                # REPLACING phrase may carry both qualifiers simultaneously.
+                before, after = self._parse_before_after(ts)
 
                 stmt.add_replacing_clause(
                     replace_type, from_value, to_value, before, after
                 )
             else:
                 break
+
+    def _parse_before_after(self, ts: ITokenStream) -> tuple[str | None, str | None]:
+        """Parse an optional ``BEFORE [INITIAL] ... AFTER [INITIAL] ...`` suffix.
+
+        The COBOL standard allows a single TALLYING/REPLACING phrase to carry
+        BOTH a BEFORE and an AFTER qualifier at once (BEFORE always precedes
+        AFTER when both are present), so each is checked independently rather
+        than stopping after the first match.
+        """
+        before: str | None = None
+        after: str | None = None
+        for qualifier in ("BEFORE", "AFTER"):
+            p = ts.peek()
+            if not p or _val(p) != qualifier:
+                continue
+            ts.consume()
+            skip_whitespace(ts)
+            p = ts.peek()
+            if p and _val(p) == "INITIAL":
+                ts.consume()
+                skip_whitespace(ts)
+            p = ts.peek()
+            if p and p.type in (
+                TokenType.IDENTIFIER,
+                TokenType.STRING_LITERAL,
+                TokenType.NUMERIC_LITERAL,
+            ):
+                ts.consume()
+                if qualifier == "BEFORE":
+                    before = p.value
+                else:
+                    after = p.value
+                skip_whitespace(ts)
+        return before, after
 
     def _parse_converting(self, ts: ITokenStream, stmt: InspectStatement) -> None:
         """Parse CONVERTING from TO to."""
