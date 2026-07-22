@@ -304,6 +304,13 @@ class CallStatementParser(IStatementParser):
             if not token or token.type == TokenType.PERIOD:
                 break
 
+            # Commas are pure separators between USING parameters (and
+            # between BY-phrase groups); skip them and continue to the next
+            # parameter instead of treating them as the end of the clause.
+            if token.type == TokenType.COMMA:
+                token_stream.consume()
+                continue
+
             # Check for end of USING clause
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
@@ -327,6 +334,7 @@ class CallStatementParser(IStatementParser):
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
                 TokenType.VALUE,
+                TokenType.OMITTED,
             ):
                 break
 
@@ -350,9 +358,14 @@ class CallStatementParser(IStatementParser):
                         skip_whitespace(token_stream)
                         token = token_stream.peek()
 
-            # Parse parameter name
-            if token and token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
-                param_name = token.value
+            # Parse parameter name (OMITTED is a valid USING parameter
+            # placeholder per the COBOL grammar, not just a mode modifier).
+            if token and token.type in (
+                TokenType.IDENTIFIER,
+                TokenType.STRING_LITERAL,
+                TokenType.OMITTED,
+            ):
+                param_name = token.value if token.value else "OMITTED"
                 stmt.add_using_parameter(param_name, passing_mode)
                 token_stream.consume()
             else:

@@ -65,6 +65,23 @@ class AcceptStatementParser(IStatementParser):
                 token_stream.consume()
                 from_parts = [src.value or ""]
                 skip_whitespace(token_stream)
+                # FROM ENVIRONMENT names the environment variable with a
+                # following literal or identifier; capture it as the
+                # statement's environment_name (contract field) instead of
+                # dropping it (string literal) or folding it into
+                # from_source (identifier).
+                if (src.value or "").upper() == "ENVIRONMENT":
+                    name_tok = token_stream.peek()
+                    if (
+                        name_tok
+                        and name_tok.value
+                        and name_tok.type
+                        in (TokenType.STRING_LITERAL, TokenType.IDENTIFIER)
+                        and not is_statement_boundary(name_tok)
+                    ):
+                        token_stream.consume()
+                        stmt.set_environment_name(name_tok.value.strip("\"'"))
+                        skip_whitespace(token_stream)
                 # Capture a trailing format phrase (e.g. ACCEPT x FROM DATE
                 # YYYYMMDD / FROM DAY YYYYDDD). Without this the format word
                 # was left in the stream and re-parsed as a phantom paragraph.

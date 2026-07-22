@@ -136,6 +136,13 @@ class EntryStatementParser(IStatementParser):
             if is_statement_boundary(next_token):
                 break
 
+            # Commas are pure separators between USING parameters (mirrors
+            # call_parser.py); skip them instead of recording a literal ","
+            # entry that corrupts parameter arity.
+            if next_token.type == TokenType.COMMA:
+                token_stream.consume()
+                continue
+
             # Parse parameter name (should be identifier)
             if next_token.type.name in ("IDENTIFIER", "PICTURE"):
                 param_name = next_token.value

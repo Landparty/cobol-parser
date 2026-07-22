@@ -3,6 +3,7 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    collect_clause_stmts,
     consume_end_keyword_and_period,
     create_statement,
     matches_keyword,
@@ -26,7 +27,12 @@ class WriteStatementParser(IStatementParser):
     - WRITE record-name [FROM source] [BEFORE/AFTER [ADVANCING] identifier [LINES|LINE]]
     - WRITE record-name [FROM source] [BEFORE/AFTER [ADVANCING] mnemonic-name]
       (a SPECIAL-NAMES mnemonic-name, e.g. `AFTER ADVANCING TOP-OF-PAGE`)
+    - WRITE record-name [AT END-OF-PAGE stmts] [NOT AT END-OF-PAGE stmts] [END-WRITE]
+      (sequential/line-sequential files; format 1)
     - WRITE record-name [INVALID KEY stmts] [NOT INVALID KEY stmts] [END-WRITE]
+      (indexed/relative files; format 2 -- mutually exclusive with END-OF-PAGE
+      per the standard grammar, but both branches are attempted here since
+      nothing upstream tells the parser which file organization is in play)
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -158,7 +164,60 @@ class WriteStatementParser(IStatementParser):
                 mnemonic=advancing_mnemonic,
             )
 
-        # Optional INVALID KEY / NOT INVALID KEY clauses
+        # Optional AT END-OF-PAGE clause (sequential/line-sequential files;
+        # format 1). Mirrors READ's AT END / NOT AT END pattern above, but
+        # matches TokenType.END_OF_PAGE directly since the lexer gives
+        # "END-OF-PAGE"/"EOP" a dedicated token type rather than lexing them
+        # as a plain "END" IDENTIFIER the way READ's "AT END" does.
+        skip_whitespace(token_stream)
+        token = token_stream.peek()
+        if token and token.type == TokenType.AT:
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            token = token_stream.peek()
+            if token and token.type == TokenType.END_OF_PAGE:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+            clause_stmts = collect_clause_stmts(
+                token_stream, {"END-WRITE", "NOT", "END_WRITE"}
+            )
+            stmt.set_at_eop_clause(clause_stmts)
+
+        # Optional NOT AT END-OF-PAGE clause
+        token = token_stream.peek()
+        if token and token.type == TokenType.NOT:
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            next_tok = token_stream.peek()
+            if next_tok and next_tok.type == TokenType.AT:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                token = token_stream.peek()
+                if token and token.type == TokenType.END_OF_PAGE:
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                clause_stmts = collect_clause_stmts(
+                    token_stream, {"END-WRITE", "INVALID", "NOT"}
+                )
+                stmt.set_not_at_eop_clause(clause_stmts)
+            elif next_tok and next_tok.type == TokenType.INVALID:
+                # NOT INVALID KEY (format 2) -- we already consumed NOT, so
+                # handle INVALID KEY now rather than leaving it for
+                # parse_invalid_key_clauses below (which expects NOT still
+                # unconsumed).
+                token_stream.consume()  # INVALID
+                skip_whitespace(token_stream)
+                token = token_stream.peek()
+                if token and token.type == TokenType.KEY:
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                clause_stmts = collect_clause_stmts(token_stream, {"END-WRITE", "NOT"})
+                stmt.set_not_invalid_key_clause(clause_stmts)
+            # else: consumed NOT unexpectedly, continue
+
+        # Optional INVALID KEY / NOT INVALID KEY clauses (indexed/relative
+        # files; format 2). NOT INVALID KEY may already have been parsed
+        # above when it followed an AT END-OF-PAGE-shaped NOT.
         skip_whitespace(token_stream)
         parse_invalid_key_clauses(token_stream, stmt, "END-WRITE")
 

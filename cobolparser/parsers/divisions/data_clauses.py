@@ -822,14 +822,35 @@ class DataItemClauseParser:
     def parse_usage_clause(self, token_stream: ITokenStream) -> str | None:
         """Parse USAGE clause value.
 
-        Returns the usage type (e.g., COMP-3, COMP-5, DISPLAY).
+        Returns the usage type (e.g., COMP-3, COMP-5, DISPLAY, DISPLAY-1).
+
+        Optional IS: USAGE IS <keyword> / USAGE <keyword>. Consumed here,
+        mirroring the ``parse_picture_clause`` / ``parse_value_clause`` IS
+        handling above, so a leading IS token doesn't fall through
+        unmatched (none of the branches below accept ``TokenType.IS``) and
+        get silently dropped -- with a spurious "Unparsed token" warning --
+        by the caller's generic clause-recovery branch.
         """
+        self._skip_newlines(token_stream)
+        is_token = token_stream.peek()
+        if is_token and is_token.type == TokenType.IS:
+            token_stream.consume()
+            self._skip_newlines(token_stream)
+
         token = token_stream.peek()
         if not token:
             return None
 
         # Check for COMP token types first (COMP_1, COMP_2, etc.)
         if token.type in _COMP_TOKEN_TYPES:
+            usage = token.value.upper()
+            token_stream.consume()
+            return usage
+
+        # DISPLAY-1 lexes as its own token type (see lexer.py's DISPLAY-1
+        # keyword mapping), not IDENTIFIER and not a value in
+        # _COMP_KEYWORDS, so it needs an explicit check here.
+        if token.type == TokenType.DISPLAY_1:
             usage = token.value.upper()
             token_stream.consume()
             return usage

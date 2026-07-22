@@ -289,6 +289,16 @@ class ExecCicsStatementParser(IStatementParser):
 
         stmt = ExecCicsStatement(start_location)
 
+        # Skip whitespace / newline tokens before the CICS command -- the
+        # idiomatic layout (and this class's own docstring example) puts the
+        # command verb on the line after ``EXEC CICS``.
+        while not token_stream.is_empty():
+            pk = token_stream.peek(0)
+            if pk and pk.value and not pk.value.strip():
+                token_stream.consume()
+            else:
+                break
+
         # Capture command name (first non-whitespace token after EXEC CICS)
         cmd_token = token_stream.peek(0)
         if (

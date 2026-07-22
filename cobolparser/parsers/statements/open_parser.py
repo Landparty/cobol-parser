@@ -39,17 +39,22 @@ class OpenStatementParser(IStatementParser):
         skip_whitespace(token_stream)
 
         # Parse open mode: INPUT, OUTPUT, I-O, EXTEND
+        current_mode: str | None = None
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value:
             val = token.value.upper()
             if val in _OPEN_MODES or val == "I-O":
+                current_mode = val
                 stmt.set_open_mode(val)
                 token_stream.consume()
                 skip_whitespace(token_stream)
 
         # Parse one or more file names, possibly across several mode groups
         # (OPEN INPUT FILE-A OUTPUT FILE-B ...). `open_mode` keeps the first
-        # group's mode; files from every group are collected.
+        # group's mode for backward compatibility; `current_mode` tracks
+        # whichever mode group is active as the loop advances so each file
+        # is recorded (via `file_modes`) with its own mode rather than all
+        # files being indistinguishably attributed to the first group's mode.
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -63,9 +68,10 @@ class OpenStatementParser(IStatementParser):
                 val = token.value.upper()
                 if val == "WITH":
                     break
-                # A subsequent open mode starts a new mode group: consume it
-                # and keep collecting its file names.
+                # A subsequent open mode starts a new mode group: consume it,
+                # update current_mode, and keep collecting its file names.
                 if val in _OPEN_MODES or val == "I-O":
+                    current_mode = val
                     token_stream.consume()
                     skip_whitespace(token_stream)
                     continue
@@ -82,7 +88,7 @@ class OpenStatementParser(IStatementParser):
                 if is_statement_boundary(token):
                     break
                 # Otherwise it's a file name
-                stmt.add_file(token.value)
+                stmt.add_file(token.value, current_mode)
                 token_stream.consume()
                 skip_whitespace(token_stream)
             else:

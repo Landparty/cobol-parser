@@ -84,7 +84,7 @@ class StartStatementParser(IStatementParser):
                     condition_parts.append(val)
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    # Optional OR EQUAL
+                    # Optional OR EQUAL [TO]
                     if peek_value_upper(token_stream) == "OR":
                         token_stream.consume()
                         skip_whitespace(token_stream)
@@ -92,6 +92,20 @@ class StartStatementParser(IStatementParser):
                             condition_parts.append("OR EQUAL")
                             token_stream.consume()
                             skip_whitespace(token_stream)
+                            # The trailing "TO" (as in "GREATER THAN OR EQUAL
+                            # TO key-name") arrives as a dedicated
+                            # TokenType.TO token, not an IDENTIFIER, so it
+                            # must be matched via peek_value_upper like the
+                            # other comparison keywords above. Left
+                            # unconsumed, it blocks the key-name IDENTIFIER
+                            # check below (which only matches
+                            # TokenType.IDENTIFIER) and everything that
+                            # follows -- key-name, INVALID KEY, NOT INVALID
+                            # KEY -- silently fails to parse.
+                            if peek_value_upper(token_stream) == "TO":
+                                condition_parts.append("TO")
+                                token_stream.consume()
+                                skip_whitespace(token_stream)
 
             if condition_parts:
                 stmt.set_key_condition(" ".join(condition_parts))

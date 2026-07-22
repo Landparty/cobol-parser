@@ -40,6 +40,7 @@ from ._utils import (
     parse_size_error_clauses,
     peek_value_upper,
     report_or_raise,
+    skip_whitespace,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -78,6 +79,12 @@ class AddStatementParser(IStatementParser):
         stmt: AddStatement = create_node(AddStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
+        skip_whitespace(token_stream)
+        if peek_value_upper(token_stream) in ("CORRESPONDING", "CORR"):
+            token_stream.consume()
+            stmt.set_corresponding(True)
+            skip_whitespace(token_stream)
+
         operands, separator = parse_arithmetic_operands(token_stream, {"TO", "GIVING"})
         for operand in operands:
             stmt.add_operand(operand)
@@ -93,6 +100,9 @@ class AddStatementParser(IStatementParser):
             target = _consume_arithmetic_target(token_stream)
             if target:
                 stmt.set_target(target)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                _consume_additional_arithmetic_targets(token_stream, stmt)
             else:
                 report_or_raise(
                     ctx, "ADD ... TO requires a target identifier", start_loc
@@ -100,10 +110,14 @@ class AddStatementParser(IStatementParser):
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
             else:
                 report_or_raise(
                     ctx, "ADD ... GIVING requires a target identifier", start_loc
@@ -130,6 +144,12 @@ class SubtractStatementParser(IStatementParser):
         stmt: SubtractStatement = create_node(SubtractStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
+        skip_whitespace(token_stream)
+        if peek_value_upper(token_stream) in ("CORRESPONDING", "CORR"):
+            token_stream.consume()
+            stmt.set_corresponding(True)
+            skip_whitespace(token_stream)
+
         operands, separator = parse_arithmetic_operands(
             token_stream, {"FROM", "GIVING"}
         )
@@ -150,6 +170,7 @@ class SubtractStatementParser(IStatementParser):
                 token_stream.consume()  # consume FROM
             _skip_newlines(token_stream)
             tok = token_stream.peek()
+            target_set = False
             if tok and tok.type in (TokenType.MINUS, TokenType.PLUS):
                 # Sign-prefixed FROM target: e.g. FROM -1000000 GIVING Y
                 next_tok = token_stream.peek(1)
@@ -163,6 +184,7 @@ class SubtractStatementParser(IStatementParser):
                     token_stream.consume()
                     stmt.set_target(sign + next_tok.value)
                     token_stream.consume()
+                    target_set = True
                 else:
                     report_or_raise(
                         ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
@@ -175,6 +197,7 @@ class SubtractStatementParser(IStatementParser):
                 target = _consume_arithmetic_target(token_stream)
                 if target:
                     stmt.set_target(target)
+                    target_set = True
             elif (
                 tok
                 and tok.type
@@ -187,20 +210,31 @@ class SubtractStatementParser(IStatementParser):
             ):
                 stmt.set_target(tok.value)
                 token_stream.consume()
+                target_set = True
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                 )
+            if target_set:
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                # SUBTRACT allows multiple FROM targets, each individually
+                # ROUNDED: ``FROM b [ROUNDED], c [ROUNDED] ...``.
+                _consume_additional_arithmetic_targets(token_stream, stmt)
             # SUBTRACT a FROM b GIVING c: the 3-operand form stores the
             # result in c instead of back into b (mirrors ADD's TO branch,
             # which already checks for a trailing GIVING the same way).
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... GIVING requires a target identifier", start_loc
@@ -306,10 +340,16 @@ def _parse_binary_arithmetic(
     # ``DIVIDE x BY y GIVING z ROUNDED`` and ``DIVIDE x INTO y ROUNDED``).
     # Left unconsumed, it stays in the stream and gets misread by the
     # paragraph-boundary lookahead as a new paragraph header.
-    _skip_newlines(token_stream)
-    if peek_value_upper(token_stream) == "ROUNDED":
-        token_stream.consume()
+    if _consume_optional_rounded(token_stream):
         stmt.set_rounded(True)
+
+    # REMAINDER is DIVIDE-only (``DIVIDE x INTO y GIVING z REMAINDER r``,
+    # or the non-standard-but-tolerated ``DIVIDE x INTO y REMAINDER r``
+    # without GIVING); MULTIPLY has no such clause.
+    if verb == "DIVIDE":
+        remainder = consume_keyword_and_operand(token_stream, "REMAINDER")
+        if remainder:
+            cast(DivideStatement, stmt).set_remainder(remainder)
 
     parse_size_error_clauses(token_stream, stmt)
     return stmt
@@ -429,6 +469,68 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
     consume_optional_subscript(stream, parts)
 
     return " ".join(p for p in parts if p)
+
+
+def _consume_optional_rounded(stream: ITokenStream) -> bool:
+    """Consume a trailing ROUNDED keyword if present, skipping NEWLINEs first.
+
+    Shared by every arithmetic verb that accepts ROUNDED (ADD/SUBTRACT's
+    TO/FROM/GIVING targets -- each individually -- and MULTIPLY/DIVIDE's
+    single GIVING target via :func:`_parse_binary_arithmetic`) so ROUNDED
+    detection isn't left unconsumed to be misread by the paragraph-boundary
+    lookahead. Returns ``True`` if ROUNDED was found and consumed.
+    """
+    _skip_newlines(stream)
+    if peek_value_upper(stream) == "ROUNDED":
+        stream.consume()
+        return True
+    return False
+
+
+#: GIVING has no dedicated TokenType (see e.g. consume_keyword_and_operand),
+#: so it lexes as a plain IDENTIFIER and must be excluded by value here or
+#: ``_consume_additional_arithmetic_targets`` would swallow it as a bogus
+#: target. ON/NOT/END-ADD/END-SUBTRACT already have dedicated TokenTypes (or
+#: are covered by SCOPE_TERMINATORS/STATEMENT_KEYWORDS/
+#: CONTROL_FLOW_BOUNDARIES), so ``_consume_arithmetic_target``'s IDENTIFIER
+#: check already stops on those without help from this set.
+_ADDITIONAL_TARGET_STOP_KEYWORDS: frozenset[str] = (
+    frozenset({"GIVING"})
+    | STATEMENT_KEYWORDS
+    | CONTROL_FLOW_BOUNDARIES
+    | SCOPE_TERMINATORS
+)
+
+
+def _consume_additional_arithmetic_targets(stream: ITokenStream, stmt: Any) -> None:
+    """Consume further TO/FROM targets after the first, each optionally ROUNDED.
+
+    COBOL allows a comma- or space-separated target list -- ``TO id-2
+    [ROUNDED], id-3 [ROUNDED] ...`` -- for both ADD's TO clause and
+    SUBTRACT's FROM clause. *stmt* must already have its first target set via
+    :meth:`ArithmeticStatement.set_target`; this only adds the rest.
+    """
+    while True:
+        _skip_newlines(stream)
+        if peek_value_upper(stream) == ",":
+            stream.consume()
+            _skip_newlines(stream)
+        if peek_value_upper(stream) in _ADDITIONAL_TARGET_STOP_KEYWORDS:
+            break
+        # A missing period on this statement followed by the next paragraph/
+        # section header (H9): stop instead of folding the header into the
+        # target list -- without this, `ADD A TO B` with no trailing period
+        # would swallow a following `NEXT-PARA.` as a bogus extra target and
+        # the paragraph would vanish from the AST entirely.
+        if looks_like_paragraph_boundary(stream):
+            warn_paragraph_boundary_swallowed(stream)
+            break
+        extra_target = _consume_arithmetic_target(stream)
+        if extra_target is None:
+            break
+        stmt.set_target(extra_target)
+        if _consume_optional_rounded(stream):
+            stmt.set_rounded(True)
 
 
 class _ExpressionSyntaxError(Exception):
@@ -682,11 +784,13 @@ class ComputeStatementParser(IStatementParser):
             )
         stmt.add_target(target)
 
-        # Additional targets and per-target ROUNDED phrases, up to '='.
+        # Additional targets and per-target ROUNDED phrases, up to '='. COMPUTE
+        # only records whether ROUNDED appeared at all (not which target it
+        # modified), matching ADD/SUBTRACT/MULTIPLY/DIVIDE's single `rounded`
+        # flag -- previously this branch consumed and discarded the keyword.
         while True:
-            _skip_newlines(token_stream)
-            if peek_value_upper(token_stream) == "ROUNDED":
-                token_stream.consume()
+            if _consume_optional_rounded(token_stream):
+                stmt.set_rounded(True)
                 continue
             extra_target = _consume_arithmetic_target(token_stream)
             if extra_target is None:
