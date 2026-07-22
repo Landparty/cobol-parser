@@ -150,6 +150,7 @@ class UnstringStatement(CobolStatement):
         self.delimiters: list[str] = []
         self.into_targets: list[dict[str, Any]] = []
         self.pointer_variable: str | None = None
+        self.tallying_variable: str | None = None
 
     def set_source(self, source: str) -> None:
         """Set the UNSTRING source operand."""
@@ -177,6 +178,10 @@ class UnstringStatement(CobolStatement):
         """Set the WITH POINTER variable."""
         self.pointer_variable = variable
 
+    def set_tallying_variable(self, variable: str) -> None:
+        """Set the TALLYING IN variable."""
+        self.tallying_variable = variable
+
     def set_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("on_overflow", statements)
 
@@ -193,6 +198,8 @@ class UnstringStatement(CobolStatement):
             result["into_targets"] = self.into_targets
         if self.pointer_variable:
             result["pointer_variable"] = self.pointer_variable
+        if self.tallying_variable:
+            result["tallying_variable"] = self.tallying_variable
         result.update(
             self._serialize_clauses("on_overflow", "not_on_overflow", omit_empty=True)
         )
