@@ -5,7 +5,7 @@ from typing import Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import StopStatement
-from ._utils import matches_keyword
+from ._utils import consume_period, matches_keyword
 
 
 class StopStatementParser(IStatementParser):
@@ -58,5 +58,9 @@ class StopStatementParser(IStatementParser):
                     ):
                         stmt.returning = val.value
                         token_stream.consume()
+
+        # Consume the sentence period so it is not re-parsed as a phantom
+        # empty paragraph named "." by the procedure-division parser.
+        consume_period(token_stream)
 
         return stmt
