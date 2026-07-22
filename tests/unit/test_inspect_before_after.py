@@ -249,3 +249,34 @@ MAIN-PARA.
         clause = stmts[0].to_dict()["replacing_clauses"][0]
         assert clause["before"] == "X"
         assert clause["after"] == "Y"
+
+    def test_tallying_reversed_qualifier_order(self):
+        """IBM Enterprise COBOL allows AFTER before BEFORE -- both must be
+        captured regardless of which qualifier is written first."""
+        result = self._parse(
+            'INSPECT WS-FIELD TALLYING WS-COUNT FOR ALL "X" '
+            'AFTER INITIAL "Z" BEFORE INITIAL "Y".'
+        )
+        assert result.success is True
+        assert result.errors == []
+        assert result.warnings == []
+
+        stmts = result.ast.find_all_by_type("InspectStatement")
+        assert len(stmts) == 1
+        clause = stmts[0].to_dict()["tallying_clauses"][0]
+        assert clause["before"] == "Y"
+        assert clause["after"] == "Z"
+
+    def test_replacing_reversed_qualifier_order(self):
+        result = self._parse(
+            'INSPECT WS-FIELD REPLACING ALL "A" BY "B" '
+            'AFTER INITIAL "Y" BEFORE INITIAL "X".'
+        )
+        assert result.success is True
+        assert result.errors == []
+
+        stmts = result.ast.find_all_by_type("InspectStatement")
+        assert len(stmts) == 1
+        clause = stmts[0].to_dict()["replacing_clauses"][0]
+        assert clause["before"] == "X"
+        assert clause["after"] == "Y"

@@ -335,16 +335,21 @@ class InspectStatementParser(IStatementParser):
         """Parse an optional ``BEFORE [INITIAL] ... AFTER [INITIAL] ...`` suffix.
 
         The COBOL standard allows a single TALLYING/REPLACING phrase to carry
-        BOTH a BEFORE and an AFTER qualifier at once (BEFORE always precedes
-        AFTER when both are present), so each is checked independently rather
-        than stopping after the first match.
+        BOTH a BEFORE and an AFTER qualifier at once, and IBM Enterprise
+        COBOL permits them in either order -- so this loops until neither
+        qualifier matches (each captured at most once) instead of checking a
+        fixed BEFORE-then-AFTER sequence.
         """
         before: str | None = None
         after: str | None = None
-        for qualifier in ("BEFORE", "AFTER"):
+        while True:
             p = ts.peek()
-            if not p or _val(p) != qualifier:
-                continue
+            qualifier = _val(p) if p else ""
+            if not (
+                (qualifier == "BEFORE" and before is None)
+                or (qualifier == "AFTER" and after is None)
+            ):
+                break
             ts.consume()
             skip_whitespace(ts)
             p = ts.peek()
@@ -363,6 +368,10 @@ class InspectStatementParser(IStatementParser):
                 else:
                     after = p.value
                 skip_whitespace(ts)
+            else:
+                # Qualifier with no value (malformed) -- stop rather than
+                # loop forever on the same unconsumable token.
+                break
         return before, after
 
     def _parse_converting(self, ts: ITokenStream, stmt: InspectStatement) -> None:

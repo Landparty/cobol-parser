@@ -517,6 +517,14 @@ def _consume_additional_arithmetic_targets(stream: ITokenStream, stmt: Any) -> N
             _skip_newlines(stream)
         if peek_value_upper(stream) in _ADDITIONAL_TARGET_STOP_KEYWORDS:
             break
+        # A missing period on this statement followed by the next paragraph/
+        # section header (H9): stop instead of folding the header into the
+        # target list -- without this, `ADD A TO B` with no trailing period
+        # would swallow a following `NEXT-PARA.` as a bogus extra target and
+        # the paragraph would vanish from the AST entirely.
+        if looks_like_paragraph_boundary(stream):
+            warn_paragraph_boundary_swallowed(stream)
+            break
         extra_target = _consume_arithmetic_target(stream)
         if extra_target is None:
             break

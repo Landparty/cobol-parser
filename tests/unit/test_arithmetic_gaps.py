@@ -162,6 +162,30 @@ class TestAddSubtractMultipleTargets:
         assert stmt.targets == ["A"]
         assert stmt.giving == "RESULT"
 
+    def test_missing_period_does_not_swallow_next_paragraph(self):
+        """The extra-target loop must stop at a paragraph header (H9): with
+        the trailing period missing, `ADD A TO B` followed by `NEXT-PARA.`
+        must not fold the header into the target list -- the paragraph has
+        to survive in the AST and a boundary warning must be recorded."""
+        src = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST.
+       PROCEDURE DIVISION.
+       PARA-1.
+           ADD A TO B
+       NEXT-PARA.
+           DISPLAY "HI".
+        """
+        result = parse_cobol(src, filename="test.cbl")
+        adds = result.ast.find_all_by_type("AddStatement")
+        assert len(adds) == 1
+        assert adds[0].targets == ["B"]
+        paragraphs = {
+            p.paragraph_name for p in result.ast.find_all_by_type("CobolParagraph")
+        }
+        assert "NEXT-PARA" in paragraphs
+        assert len(result.warnings) >= 1
+
 
 class TestDivideRemainder:
     """Bug 4: DIVIDE REMAINDER was completely unimplemented."""
