@@ -165,3 +165,32 @@ class TestStopPeriodConsumed:
         stops = result.ast.find_all_by_type("StopStatement")
         assert len(stops) == 1
         assert stops[0].stop_type == "RUN"
+
+    def test_no_trailing_phantom_paragraph_without_named_paragraph(self):
+        """A PROCEDURE DIVISION with no named paragraph header (only the
+        implicit paragraph) must not gain a second, empty-named, trailing
+        paragraph once the EOF sentinel token is reached.
+
+        The EOF token's empty value isn't in the division parser's
+        keyword-exclusion tuple, so without an explicit EOF check it used to
+        fall through to the "unknown token -> paragraph name" branch and
+        manufacture a spurious zero-statement paragraph, inflating both
+        ``procedure_count`` and ``total_lines`` (get_statistics() takes the
+        max AST node line, and the phantom paragraph's location trails the
+        real content).
+        """
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. DEMO.\n"
+            "       PROCEDURE DIVISION.\n"
+            '           DISPLAY "TEST"\n'
+            "           STOP RUN.\n"
+        )
+        result = parse_cobol(source)
+        assert result.success
+        assert result.errors == []
+        assert _paragraph_names(result) == [""]
+
+        stats = result.ast.get_statistics()
+        assert stats["procedure_count"] == 1
+        assert stats["total_lines"] == 5
