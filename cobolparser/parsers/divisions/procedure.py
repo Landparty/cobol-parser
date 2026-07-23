@@ -25,6 +25,7 @@ from typing import Any
 from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.core.registry import StatementParserRegistry
+from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
 from cobolparser.parsers.statements._utils import skip_whitespace
@@ -168,6 +169,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
             token = token_stream.peek(0)
             if not token:
+                break
+
+            # The EOF sentinel token has an empty value, which isn't in the
+            # keyword-exclusion tuple below, so without this check it falls
+            # through to the "unknown token -> paragraph name" branch and
+            # manufactures a spurious empty-named, zero-statement trailing
+            # paragraph on every program.
+            if token.type == TokenType.EOF:
                 break
 
             token_value = token.value.upper() if token.value else ""
