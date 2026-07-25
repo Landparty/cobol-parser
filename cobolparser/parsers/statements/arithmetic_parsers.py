@@ -56,6 +56,8 @@ class _BinaryArithmeticNode(Protocol):
 
     def add_operand(self, value: str) -> None: ...
 
+    def set_target(self, value: str) -> None: ...
+
     def set_giving(self, value: str) -> None: ...
 
     def set_rounded(self, value: bool = ...) -> None: ...
@@ -112,12 +114,14 @@ class AddStatementParser(IStatementParser):
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
             else:
                 report_or_raise(
                     ctx, "ADD ... GIVING requires a target identifier", start_loc
@@ -229,12 +233,14 @@ class SubtractStatementParser(IStatementParser):
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... GIVING requires a target identifier", start_loc
@@ -335,6 +341,16 @@ def _parse_binary_arithmetic(
     giving = consume_keyword_and_operand(token_stream, "GIVING")
     if giving:
         stmt.set_giving(giving)
+    elif second_operand is not None:
+        # Format 1 (no GIVING): MULTIPLY/DIVIDE overwrite the second operand
+        # in place, so -- unlike format 2, where it's just a multiplicand/
+        # divisor left untouched -- it really is a result target. Track it
+        # via set_target (add_operand above already recorded it in
+        # .operands; set_target's _add_unique_operand no-ops on the
+        # duplicate) so it participates in the same target/targets/ROUNDED
+        # machinery ADD/SUBTRACT's TO/FROM already use, instead of only ever
+        # appearing as an untyped operand string.
+        stmt.set_target(second_operand)
 
     # ROUNDED is legal here whether or not GIVING was present (e.g. both
     # ``DIVIDE x BY y GIVING z ROUNDED`` and ``DIVIDE x INTO y ROUNDED``).
@@ -342,6 +358,16 @@ def _parse_binary_arithmetic(
     # paragraph-boundary lookahead as a new paragraph header.
     if _consume_optional_rounded(token_stream):
         stmt.set_rounded(True)
+
+    if giving:
+        # GIVING accepts a comma/space-separated list of result targets,
+        # each optionally ROUNDED (``GIVING z, w ROUNDED``).
+        _consume_additional_giving_targets(token_stream, stmt)
+    elif second_operand is not None:
+        # Format 1 accepts a comma/space-separated target list too:
+        # ``BY id-2 [ROUNDED], id-3 [ROUNDED] ...`` /
+        # ``INTO id-2 [ROUNDED], id-3 [ROUNDED] ...``.
+        _consume_additional_arithmetic_targets(token_stream, stmt)
 
     # REMAINDER is DIVIDE-only (``DIVIDE x INTO y GIVING z REMAINDER r``,
     # or the non-standard-but-tolerated ``DIVIDE x INTO y REMAINDER r``
@@ -487,15 +513,21 @@ def _consume_optional_rounded(stream: ITokenStream) -> bool:
     return False
 
 
-#: GIVING has no dedicated TokenType (see e.g. consume_keyword_and_operand),
-#: so it lexes as a plain IDENTIFIER and must be excluded by value here or
-#: ``_consume_additional_arithmetic_targets`` would swallow it as a bogus
-#: target. ON/NOT/END-ADD/END-SUBTRACT already have dedicated TokenTypes (or
-#: are covered by SCOPE_TERMINATORS/STATEMENT_KEYWORDS/
+#: GIVING/REMAINDER have no dedicated TokenType (see e.g.
+#: consume_keyword_and_operand), so they lex as plain IDENTIFIERs and must be
+#: excluded by value here or ``_consume_additional_arithmetic_targets`` would
+#: swallow them as a bogus target -- REMAINDER matters for MULTIPLY/DIVIDE's
+#: format-1 (no GIVING) multi-target list, which this helper also serves (see
+#: _parse_binary_arithmetic): ``DIVIDE x INTO y REMAINDER r`` (the
+#: tolerated-without-GIVING form) must stop the target list at REMAINDER, not
+#: swallow it as a second target name. Safe to share with ADD/SUBTRACT's
+#: TO/FROM list too since REMAINDER is a COBOL reserved word and can never be
+#: a real data-name there. ON/NOT/END-ADD/END-SUBTRACT already have dedicated
+#: TokenTypes (or are covered by SCOPE_TERMINATORS/STATEMENT_KEYWORDS/
 #: CONTROL_FLOW_BOUNDARIES), so ``_consume_arithmetic_target``'s IDENTIFIER
 #: check already stops on those without help from this set.
 _ADDITIONAL_TARGET_STOP_KEYWORDS: frozenset[str] = (
-    frozenset({"GIVING"})
+    frozenset({"GIVING", "REMAINDER"})
     | STATEMENT_KEYWORDS
     | CONTROL_FLOW_BOUNDARIES
     | SCOPE_TERMINATORS
@@ -529,6 +561,47 @@ def _consume_additional_arithmetic_targets(stream: ITokenStream, stmt: Any) -> N
         if extra_target is None:
             break
         stmt.set_target(extra_target)
+        if _consume_optional_rounded(stream):
+            stmt.set_rounded(True)
+
+
+#: GIVING may itself be followed by further comma/space-separated targets
+#: (``GIVING id-3 [ROUNDED] [id-4 [ROUNDED]] ...``); REMAINDER (DIVIDE-only)
+#: must stop the list rather than being swallowed as a bogus extra target.
+_ADDITIONAL_GIVING_STOP_KEYWORDS: frozenset[str] = (
+    frozenset({"REMAINDER"})
+    | STATEMENT_KEYWORDS
+    | CONTROL_FLOW_BOUNDARIES
+    | SCOPE_TERMINATORS
+)
+
+
+def _consume_additional_giving_targets(stream: ITokenStream, stmt: Any) -> None:
+    """Consume further GIVING targets after the first, each optionally ROUNDED.
+
+    COBOL allows a comma- or space-separated GIVING target list --
+    ``GIVING id-3 [ROUNDED] [id-4 [ROUNDED]] ...`` -- for ADD, SUBTRACT,
+    MULTIPLY, and DIVIDE alike. *stmt* must already have its first GIVING
+    target set via :meth:`ArithmeticStatement.set_giving`; this only adds
+    the rest.
+    """
+    while True:
+        _skip_newlines(stream)
+        if peek_value_upper(stream) == ",":
+            stream.consume()
+            _skip_newlines(stream)
+        if peek_value_upper(stream) in _ADDITIONAL_GIVING_STOP_KEYWORDS:
+            break
+        # Same H9-pattern guard as _consume_additional_arithmetic_targets:
+        # don't swallow a following paragraph header as a bogus extra
+        # GIVING target when this statement's period is missing.
+        if looks_like_paragraph_boundary(stream):
+            warn_paragraph_boundary_swallowed(stream)
+            break
+        extra_giving = _consume_arithmetic_target(stream)
+        if extra_giving is None:
+            break
+        stmt.set_giving(extra_giving)
         if _consume_optional_rounded(stream):
             stmt.set_rounded(True)
 
@@ -791,6 +864,16 @@ class ComputeStatementParser(IStatementParser):
         while True:
             if _consume_optional_rounded(token_stream):
                 stmt.set_rounded(True)
+                continue
+            if peek_value_upper(token_stream) == ",":
+                # A comma between targets (`COMPUTE A, B = ...`) is a
+                # separator, not a terminator -- skip it and keep collecting
+                # targets. Without this, the comma was left unconsumed and
+                # the subsequent `=` check failed outright ("COMPUTE
+                # statement missing '=' operator"), a harder failure than
+                # the warned/silent drops this bug class usually produces.
+                token_stream.consume()
+                _skip_newlines(token_stream)
                 continue
             extra_target = _consume_arithmetic_target(token_stream)
             if extra_target is None:

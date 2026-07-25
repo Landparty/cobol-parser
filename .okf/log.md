@@ -1,5 +1,142 @@
 # OKF Update Log
 
+## 2026-07-24 (targeted follow-up round: CALL BY-mode persistence, COMPUTE comma targets; vendor sync)
+
+User-scoped follow-up after reviewing the five-fix sweep below ("one more
+targeted round: SEARCH WHEN conditions, CALL BY CONTENT/REFERENCE groups,
+READ/WRITE INTO clauses"). Checked those plus COMPUTE (an obvious sibling
+of the just-fixed ADD/SUBTRACT/MULTIPLY/DIVIDE target lists). Found and
+fixed two more real bugs, confirmed two candidates needed no fix:
+
+* **Updated** [parser.md](parser.md): CALL's `BY REFERENCE`/`CONTENT`/
+  `VALUE` passing mode didn't persist across a comma-separated parameter
+  list within one BY-phrase group (`passing_mode` was reset to the
+  REFERENCE default every loop iteration instead of only when a fresh
+  `BY` keyword appeared) — a silent semantic corruption (parameter names
+  intact, mode wrong), not a data-drop. COMPUTE's multi-target comma list
+  (`COMPUTE A, B = expr`) had zero comma handling and was a **hard parse
+  failure** ("COMPUTE statement missing '=' operator", no AST node at
+  all) — worse than every other fix in this bug class, which were all
+  silent/warned drops rather than outright failures. SEARCH's
+  WHEN-condition collector and READ/WRITE's INTO/FROM clauses were
+  checked and confirmed (by direct repro, not grammar inspection alone)
+  to need no fix — neither takes a list per the standard grammar.
+* **Updated** [ast-models.md](ast-models.md): new note on
+  `CallStatement.using_parameters`' mode-persistence fix.
+* Extended `tests/unit/test_initialize_sort_arithmetic_comma_gaps.py` to
+  29 tests (was 22): `TestCallByModePersistsAcrossCommaList` (3),
+  `TestComputeCommaTargets` (4).
+* Full suite green: 7096 passed / 13 skipped / 1 xfailed, 92.20% coverage
+  (up from 7089, no regressions). `ruff check .`, `black --check .`, and
+  `mypy cobolparser/` all clean on touched files.
+* **Vendor sync**: `backend/_vendor/cobol-parser/cobolparser/` was stale
+  (predated even PR #99-#101) — user approved syncing it. Copied via
+  `cp -r cobolparser/. ../backend/_vendor/cobol-parser/cobolparser/`
+  (note the trailing `/.`: a bare `cp -r src/ dst/` against an
+  **already-existing** `dst/` nests `dst/src/` instead of overwriting —
+  hit this on the first attempt, caught via `diff -rq`, corrected).
+  Also found and removed one genuinely stale leftover file in the vendor
+  copy predating this repo's own 2026-07-14 `program_flow.py` →
+  `program_flow/` package refactor (the source repo has no flat
+  `program_flow.py` anymore; the vendor copy still had both the stale
+  file and the new package, an ambiguous same-name module+package
+  situation `cp -r` alone doesn't clean up since it only adds/overwrites,
+  never deletes). Verified post-sync via a standalone import + parse
+  smoke test against the vendored copy directly (not the full backend
+  service, whose own dependencies weren't verified in this pass).
+  `diff -rq` confirms full parity with `cobol-parser/cobolparser/`
+  (excluding `__pycache__`) after the fix. Re-synced a second time after
+  the CALL/COMPUTE fixes above landed.
+* `CHANGELOG.md` (Unreleased → Fixed) and `reports/open-findings.md`
+  updated in the same pass.
+
+## 2026-07-24 (follow-up comma-list sweep: INITIALIZE, SORT/MERGE KEY/USING/GIVING, arithmetic GIVING)
+
+Continuing the gap audit (user request: "make sure there is no gaps in the
+cobolparser") after reconciling the doc debt below, re-verified the
+comma-truncation bug class the 2026-07-22/23 sweep fixed elsewhere against
+parsers that sweep didn't touch. Found and fixed four more real instances,
+via direct `parse_cobol()` repro (not spec-recitation) before writing any
+fix, per this repo's established methodology. A subsequent advisor
+second-opinion review of this same pass surfaced a fifth, adjacent
+instance (MULTIPLY/DIVIDE format-1 multi-target, distinct from the GIVING
+multi-target fix already made) that the repro sweep itself had not
+covered — confirmed empirically the same way, then fixed and pinned
+alongside the other four rather than left as a known gap.
+
+* **Updated** [parser.md](parser.md): new "Follow-up comma-list sweep:
+  INITIALIZE, SORT/MERGE KEY/USING/GIVING, arithmetic GIVING (2026-07-24)"
+  section. `INITIALIZE id-1, id-2, ...` (warned drop, now fixed).
+  `SORT`/`MERGE` `KEY field-1, field-2 ...` — **fully silent**
+  (`errors=[], warnings=[]`), the worst instance of this bug class found
+  to date. `SORT`/`MERGE` `USING`/`GIVING file-1, file-2 ...` — also fully
+  silent, same shared `_parse_file_list` helper. `ADD`/`SUBTRACT`/
+  `MULTIPLY`/`DIVIDE ... GIVING id-3, id-4 ...` (multi-target GIVING list,
+  symmetric with the TO/FROM multi-target fix from 2026-07-22/23, which
+  did not extend to GIVING).
+* **Updated** [ast-models.md](ast-models.md): new field notes for
+  `ArithmeticStatement.givings: list[str]` and `MultiplyStatement`/
+  `DivideStatement` now populating `.target`/`.targets` for format 1.
+* New test file `tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`
+  (22 tests) pins all five fixes plus back-compat coverage for the
+  pre-existing single-target/space-separated forms, including an explicit
+  guard that format-2 (GIVING) MULTIPLY/DIVIDE do NOT gain a spurious
+  `.target`.
+* **Methodology note kept in parser.md:** the SORT/MERGE test's first
+  draft used a fixture line that itself exceeded fixed-format column 72,
+  producing a `giving_files: ['WS']`-shaped truncation that initially
+  looked like a fifth bug. Confirmed via direct lexer/column inspection
+  that this was a test-fixture artifact (this repo's own documented
+  column-72 truncation semantics, correctly applied) before concluding
+  so — fixed by reformatting the fixture across two lines, not by
+  changing parser code. Recorded as a reminder for future fixture
+  authoring in this repo, not as a finding.
+* Full suite green after all five fixes: 7089 passed / 13 skipped / 1
+  xfailed, 92.20% coverage (up from the 7067/92.19% baseline — +22 new
+  tests, no regressions). `ruff check .` and `mypy cobolparser/` clean
+  (107 source files; the shared `_BinaryArithmeticNode` structural
+  `Protocol` gained a `set_target` method to type-check the format-1 fix);
+  `black --check .` clean on all touched files (one pre-existing,
+  unrelated formatting drift in
+  `tests/regression/test_tier2_silent_drop_regressions.py`, not touched by
+  this pass, left alone as out of scope).
+* `CHANGELOG.md` (Unreleased → Fixed) and `reports/open-findings.md`
+  updated in the same pass.
+
+## 2026-07-24 (OKF reconciliation for PR #99-#101: statement-support verification sweep + EOF sentinel fix)
+
+Nine fixes landed on `main` 2026-07-22/23 (PR #99, #100, #101 — commits
+`5492c40`, `824f654`, `64ff7b9`, `316f0ce`, `82a82ec`, `68f68c0`,
+`ddbc688`, `50b6028`, `4a8daa3`) with no matching OKF/`CHANGELOG.md`/
+`open-findings.md` update. Reconciled retroactively while auditing this
+repo for outstanding gaps (user request: "make sure there is no gaps in
+the cobolparser").
+
+* **Updated** [parser.md](parser.md): new "Statement-Support Verification
+  Sweep (2026-07-22/23)" section — comma-separated list truncation across
+  seven parsers (CALL USING incl. OMITTED, SET, UNSTRING INTO, DISPLAY
+  items, computed GO TO, CANCEL, ENTRY USING), UNSTRING `DELIMITED BY ...
+  OR ...` + `TALLYING IN`, EXEC CICS command-verb-on-next-line loss + EXEC
+  SQL/DLI operator-rejoin spacing, INSPECT BEFORE+AFTER (both qualifiers,
+  either order), PIC N(n) sizing, USAGE IS optional-IS handling, START KEY
+  OR EQUAL TO trailing TO, WRITE AT END-OF-PAGE/NOT AT END-OF-PAGE, OPEN
+  per-file `file_modes`, ADD/SUBTRACT ROUNDED/multi-target/CORRESPONDING +
+  DIVIDE REMAINDER, DISPLAY UPON clause-continuation + period handling,
+  ENTRY comma, ACCEPT FROM ENVIRONMENT name, STOP period consumption, and
+  the EOF-sentinel phantom trailing paragraph (three distinct root causes
+  now on record for that one symptom: DISPLAY UPON, STOP, and this EOF fix).
+* **Updated** [ast-models.md](ast-models.md): new field notes for
+  `ArithmeticStatement.targets`/`.rounded`/`.is_corresponding`,
+  `DivideStatement.remainder`, `UnstringStatement.tallying_variable` +
+  multi-delimiter `.delimiters`, `IOOpenStatement.file_modes`,
+  `IOWriteStatement.not_at_eop_clause`, `IOAcceptStatement.
+  environment_name`, and `PIC N(n)` sizing.
+* Full suite re-verified green before and independent of this doc pass:
+  7067 passed / 13 skipped / 1 xfailed, 92.19% coverage (no source changes
+  in this pass — documentation only).
+* `reports/open-findings.md` and `CHANGELOG.md` (Unreleased) also updated
+  in the same pass.
+
 ## 2026-07-21 (generic swallow-sweep regression test added)
 
 * **Added** `tests/regression/test_swallow_sweep.py`: formalizes the manual

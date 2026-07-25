@@ -297,6 +297,15 @@ class CallStatementParser(IStatementParser):
     ) -> None:
         """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""
 
+        # A BY REFERENCE|CONTENT|VALUE phrase governs every parameter that
+        # follows it until the next BY phrase (``BY CONTENT a, b`` passes
+        # BOTH a and b by content) -- so this must persist across loop
+        # iterations, not reset per parameter. Only re-initialized here,
+        # once, before the first parameter; the loop body below only
+        # overwrites it when an actual BY keyword is seen.
+        passing_mode = (
+            "REFERENCE"  # Default when no BY phrase precedes the first parameter
+        )
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
             token = token_stream.peek()
@@ -338,8 +347,10 @@ class CallStatementParser(IStatementParser):
             ):
                 break
 
-            # Check for BY [REFERENCE|CONTENT|VALUE]
-            passing_mode = "REFERENCE"  # Default
+            # Check for BY [REFERENCE|CONTENT|VALUE] -- only overwrites the
+            # mode established above/by a prior iteration when a BY keyword
+            # is actually present; otherwise passing_mode carries over
+            # unchanged (see the persistence note above the loop).
             if token.type == TokenType.BY or (
                 token.type == TokenType.IDENTIFIER
                 and token.value

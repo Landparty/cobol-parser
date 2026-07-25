@@ -17,7 +17,8 @@ class ArithmeticStatement(CobolStatement):
         self.not_on_size_error: list[CobolStatement] | None = None
         self.target: str | None = None  # First/primary target (back-compat)
         self.targets: list[str] = []  # All TO/FROM targets, in order
-        self.giving: str | None = None  # For GIVING clause
+        self.giving: str | None = None  # First/primary GIVING target (back-compat)
+        self.givings: list[str] = []  # All GIVING targets, in order
         self.rounded: bool = False  # True if ROUNDED appeared on any target
         self.is_corresponding: bool = False  # For CORRESPONDING/CORR clause
 
@@ -39,8 +40,16 @@ class ArithmeticStatement(CobolStatement):
         self.is_corresponding = is_corresponding
 
     def set_giving(self, giving: str) -> None:
-        """Set result variable for GIVING clause."""
-        self.giving = giving
+        """Add a GIVING result target (result stored in giving).
+
+        COBOL allows a comma/space-separated list of GIVING targets
+        (``ADD A TO B GIVING C, D``); ``giving`` keeps holding the first one
+        for backward compatibility with single-target callers, while
+        ``givings`` accumulates the full ordered list.
+        """
+        if self.giving is None:
+            self.giving = giving
+        self.givings.append(giving)
         self._add_unique_operand(giving)
 
     def set_rounded(self, rounded: bool = True) -> None:
@@ -61,6 +70,8 @@ class ArithmeticStatement(CobolStatement):
             result["targets"] = self.targets
         if self.giving:
             result["giving"] = self.giving
+        if self.givings:
+            result["givings"] = self.givings
         if self.rounded:
             result["rounded"] = self.rounded
         if self.is_corresponding:

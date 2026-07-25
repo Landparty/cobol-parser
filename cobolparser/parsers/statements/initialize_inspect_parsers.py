@@ -66,6 +66,14 @@ class InitializeStatementParser(IStatementParser):
             # period.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
                 break
+            if token.type == TokenType.COMMA:
+                # A comma between targets (`INITIALIZE a, b, c`) is a
+                # separator, not a terminator -- skip it and keep collecting
+                # targets, mirroring the MOVE/SET parsers' target-list
+                # handling.
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
             if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 token_stream.consume()
                 stmt.add_target(token.value or "")

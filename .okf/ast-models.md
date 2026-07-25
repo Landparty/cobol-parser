@@ -3,7 +3,7 @@ type: Module
 title: AST Models
 description: ASTNode hierarchy — CobolProgram, data items, statement nodes, to_dict()/to_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
-timestamp: 2026-07-03T00:00:00Z
+timestamp: 2026-07-24T00:00:00Z
 ---
 
 # Overview
@@ -66,6 +66,13 @@ Serialization fidelity notes (2026-07-07):
 * `CallStatement.to_dict()` serializes `not_on_exception` (previously
   omitted), and CALL handler statements are registered as AST children so
   `find_all_by_type()` agrees with `get_all_statements()`.
+* `CallStatement.using_parameters`' `CallParameter.passing_mode` now
+  persists correctly across a comma-separated parameter list within one
+  `BY REFERENCE`/`BY CONTENT`/`BY VALUE` group (2026-07-24) — `CALL 'P'
+  USING BY CONTENT a, b` previously mode-tagged `b` back to the REFERENCE
+  default instead of CONTENT (both parameter names survived; only the
+  mode was silently wrong). See [parser.md](parser.md) "Follow-up
+  comma-list sweep" targeted round.
 * `GoStatement` carries `target_paragraphs` (all computed-GO-TO targets) in
   addition to `target_paragraph` (the first).
 * `XmlJsonStatement` (`models/statements/misc.py`) models XML/JSON
@@ -89,6 +96,49 @@ Serialization fidelity notes (2026-07-07):
   tracked in `operands` for the same reason.
 * `StopStatement.returning` (2026-07-09) — `STOP RUN RETURNING x` return code
   (previously dropped).
+* `ArithmeticStatement.targets: list[str]` (2026-07-22) — full ordered list
+  of comma/space-separated `TO`/`FROM` targets (`ADD 1 TO a, b, c`);
+  `.target` keeps the first for backward compatibility. `.rounded: bool`
+  (also on `ComputeStatement`) and `.is_corresponding: bool` (ADD/SUBTRACT
+  `CORRESPONDING`) were previously discarded or misparsed as literal
+  operands. `DivideStatement.remainder: str | None` — the `REMAINDER r`
+  target (was entirely unimplemented). See [parser.md](parser.md)
+  "Statement-Support Verification Sweep (2026-07-22/23)".
+* `UnstringStatement.tallying_variable: str | None` (2026-07-22) —
+  `TALLYING IN counter`, documented but never implemented; `.delimiters`
+  now collects every `OR`-joined delimiter (`DELIMITED BY d1 OR d2`),
+  previously only the first survived.
+* `IOOpenStatement.file_modes: dict[str, str]` (2026-07-22) — per-file
+  open mode keyed by file name, for `OPEN INPUT a OUTPUT b`-style
+  statements where `.open_mode` alone (first mode group only) can't
+  distinguish `b`'s real mode. `crud_matrix.py`/`io_logger.py` still read
+  `.open_mode` alone — not yet updated to consult this map.
+* `IOWriteStatement.not_at_eop_clause` (2026-07-22) — `NOT AT
+  END-OF-PAGE`; `.at_eop_clause`/`.not_at_eop_clause` (format-1,
+  sequential files) are now actually populated by the WRITE parser
+  (previously `AT END-OF-PAGE` was entirely unimplemented; only format-2's
+  `INVALID KEY`/`NOT INVALID KEY` worked).
+* `IOAcceptStatement.environment_name` (2026-07-22) — `ACCEPT x FROM
+  ENVIRONMENT "name"`'s variable name; the field existed but the parser
+  never called its setter.
+* `PictureClause` now sizes `PIC N(n)` (national/DBCS) correctly — one
+  character position per `N`, no double-byte counting (2026-07-22;
+  previously fell through to a default size of 1 regardless of `n`).
+* `ArithmeticStatement.givings: list[str]` (2026-07-24) — full ordered
+  list of comma/space-separated `GIVING` result targets (`ADD A TO B
+  GIVING C, D`); `.giving` keeps the first for backward compatibility,
+  mirroring the `target`/`targets` split above. Applies to
+  `AddStatement`/`SubtractStatement`/`MultiplyStatement`/`DivideStatement`
+  alike. See [parser.md](parser.md) "Follow-up comma-list sweep
+  (2026-07-24)".
+* `MultiplyStatement`/`DivideStatement` now populate `.target`/`.targets`
+  (2026-07-24) for format 1 (no `GIVING`) — `MULTIPLY x BY id-2, id-3` /
+  `DIVIDE x INTO id-2, id-3` overwrite their second operand(s) in place,
+  so they're result targets like ADD/SUBTRACT's `TO`/`FROM`, not just
+  `.operands` entries (previously only `.operands` was populated, and
+  anything past the first comma was dropped). Format 2 (`GIVING`)
+  deliberately does **not** set `.target` — the second operand there is a
+  multiplicand/divisor, not a result.
 
 # Data Items (`models/data_items.py`)
 

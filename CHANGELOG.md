@@ -262,6 +262,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   COPY members as boundaries (caught by mocky-mock's copybook fixtures).
   Pinned by `tests/regression/test_clause_continuation_boundary.py`.
 
+### Fixed
+
+* **parser (2026-07-24 targeted follow-up round):** two more bugs found by
+  checking the remaining known list-collecting loops for the same
+  comma-handling property — see [.okf/parser.md](.okf/parser.md) "Follow-up
+  comma-list sweep" targeted round. `CALL ... USING BY REFERENCE|CONTENT|
+  VALUE`'s passing mode didn't persist across a comma-separated parameter
+  list within one BY-phrase group (`BY CONTENT a, b` silently mode-tagged
+  `b` back to REFERENCE) — a silent semantic corruption, not a data-drop.
+  `COMPUTE id-1, id-2 = expr` (comma-separated multi-target) was a **hard
+  parse failure** ("COMPUTE statement missing '=' operator", no AST node
+  produced) — worse than every other fix in this bug class. SEARCH's
+  WHEN-condition collector and READ/WRITE's INTO/FROM clauses were checked
+  and confirmed to need no fix (neither takes a list). Pinned by 7 new
+  tests in `tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`
+  (29 total).
+* **parser (2026-07-24 follow-up comma-list sweep):** five more instances
+  of the comma-separated-list truncation bug class below, found by
+  re-verifying the parsers the 2026-07-22/23 sweep didn't cover — see
+  [.okf/parser.md](.okf/parser.md) "Follow-up comma-list sweep
+  (2026-07-24)". `INITIALIZE id-1, id-2, ...` (warned drop).
+  `SORT`/`MERGE` `{ASCENDING|DESCENDING} KEY field-1, field-2 ...` —
+  **fully silent** (`errors=[], warnings=[]`), the worst instance of this
+  bug class found so far. `SORT`/`MERGE` `USING`/`GIVING file-1, file-2
+  ...` — also fully silent (same shared file-list helper).
+  `ADD`/`SUBTRACT`/`MULTIPLY`/`DIVIDE ... GIVING id-3, id-4 ...`
+  (multi-target `GIVING`, symmetric with the `TO`/`FROM` multi-target fix
+  below, which didn't extend to `GIVING`; new
+  `ArithmeticStatement.givings: list[str]` field). `MULTIPLY x BY id-2,
+  id-3` / `DIVIDE x INTO id-2, id-3` — format 1 (no `GIVING`) has the same
+  gap on its own second-operand target list, which is distinct from
+  `GIVING`'s (found via second-opinion review rather than the repro sweep
+  itself); `MultiplyStatement`/`DivideStatement` now populate
+  `.target`/`.targets` for this form (previously only `.operands`), while
+  format 2 (`GIVING`) deliberately does not gain a spurious `.target`.
+  Pinned by `tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`
+  (22 tests).
+* **parser (2026-07-22/23 statement-support verification sweep):** nine
+  silent-drop/gap fixes found by re-verifying statement parsers against
+  real COBOL grammar shapes — see [.okf/parser.md](.okf/parser.md)
+  "Statement-Support Verification Sweep (2026-07-22/23)" for full detail
+  per fix. Summary:
+  * Comma-separated operand lists previously truncated at the first comma
+    (dropping every later item, and often leaking the abandoned names as
+    phantom paragraphs): `CALL ... USING a, b, c` (also fixed: `OMITTED`
+    as a USING parameter dropped every parameter from the first `OMITTED`
+    onward), `SET ix1, ix2 UP BY 1`, `UNSTRING ... INTO a, b, c`,
+    `DISPLAY a, b, c`, `GO TO a, b, c DEPENDING ON x`,
+    `CANCEL prog-a, prog-b`, `ENTRY 'X' USING a, b` (the last one worse
+    than a drop — the literal `","` token was captured as a parameter
+    name, corrupting arity).
+  * `UNSTRING ... DELIMITED BY d1 OR d2 ...` now collects every delimiter
+    (previously only the first survived); `TALLYING IN counter`
+    (documented, never implemented) now works.
+  * `EXEC CICS` lost its command verb when written on the line after
+    `EXEC CICS` (the idiomatic layout); EXEC SQL/DLI text reconstruction
+    inserted a spurious space when rejoining a lexer-split `>=`/`<=`/`<>`
+    operator.
+  * `INSPECT TALLYING`/`REPLACING` `BEFORE`/`AFTER INITIAL` now accepts
+    both qualifiers on one phrase, in either order (previously: one
+    qualifier, fixed order only).
+  * `PIC N(n)` (national/DBCS) sized as 1 regardless of `n`; now sized
+    correctly. `USAGE IS <keyword>` (and bare `USAGE DISPLAY-1`) silently
+    downgraded to plain `DISPLAY` — the optional `IS` (and the
+    `DISPLAY-1` token type) weren't recognized.
+  * `START ... KEY IS GREATER THAN OR EQUAL TO key-name` never consumed
+    the trailing `TO`, which blocked the key-name and `INVALID
+    KEY`/`NOT INVALID KEY` parsing entirely.
+  * `WRITE ... AT END-OF-PAGE` / `NOT AT END-OF-PAGE` (format-1,
+    sequential files) was entirely unimplemented — only format-2's
+    `INVALID KEY` worked.
+  * `OPEN INPUT a OUTPUT b`-style multi-mode-group statements collapsed
+    every file onto the first group's mode; added a per-file
+    `IOOpenStatement.file_modes` map (`.open_mode` alone is ambiguous for
+    later files). Known follow-up, not yet done:
+    `analysis/crud_matrix.py`/`io_logger.py` still read `.open_mode`
+    alone.
+  * `ADD`/`SUBTRACT` never checked `ROUNDED`; only captured a single
+    target (COBOL allows a comma/space-separated list, losing extra
+    targets' values and `ROUNDED` flags); misparsed `CORRESPONDING` as a
+    literal operand named `"CORRESPONDING"`. `DIVIDE ... REMAINDER` was
+    entirely unimplemented. All four now supported
+    (`ArithmeticStatement.targets`/`.rounded`/`.is_corresponding`,
+    `DivideStatement.remainder`). Self-review follow-up in the same PR:
+    the new multi-target loop could itself swallow a following paragraph
+    header as a bogus target when the period was missing — now guarded
+    the same way `MOVE` is (H9 pattern).
+  * `DISPLAY ... UPON device-name` dropped any following clause (e.g.
+    `WITH NO ADVANCING`) and left the sentence period unconsumed, which
+    the procedure scanner misread as a phantom `"."` paragraph.
+  * `ACCEPT ... FROM ENVIRONMENT "name"` dropped the variable name (the
+    model field existed; nothing populated it).
+  * `STOP` (`STOP RUN.` and all other forms) never consumed its sentence
+    period, producing a phantom empty `"."` paragraph after every STOP —
+    the same symptom class as the DISPLAY UPON fix above, and as the next
+    item.
+  * The PROCEDURE DIVISION scanner's EOF sentinel token (empty value,
+    not in the keyword-exclusion set) fell through the "unknown token →
+    new paragraph" fallback and manufactured a phantom empty-named,
+    zero-statement trailing paragraph on **every** program lacking a
+    final named paragraph header — inflating `total_lines`/
+    `procedure_count` by one on nearly all real-world input. Found via a
+    backend integration test outside this repo, not by this repo's own
+    suite.
+
 ### Changed
 
 * **parser:** internal refactor — `DataDivisionParser`

@@ -1,5 +1,56 @@
 # cobolparser — Open Findings (as of 2026-07-08)
 
+**Status update (2026-07-24, part 3):** at the user's direction, ran one
+more targeted round checking CALL's BY-phrase groups, COMPUTE's target
+list, SEARCH's WHEN conditions, and READ/WRITE's INTO/FROM clauses for the
+same comma-handling property. Found and fixed two more real bugs: CALL's
+`BY REFERENCE`/`CONTENT`/`VALUE` mode didn't persist across a
+comma-separated parameter list (silent semantic corruption — parameter
+names intact, passing mode silently wrong for parameters after the first
+in a comma list); COMPUTE's multi-target comma list was a **hard parse
+failure**, not merely a silent/warned drop. SEARCH and READ/WRITE checked
+and confirmed to need no fix. 7 new tests (29 total in
+`tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`), full suite
+green (7096 passed, up from 7089). Also synced the previously-stale
+`backend/_vendor/cobol-parser/` copy (approved by the user) and removed one
+genuinely stale leftover file there predating a 2026-07-14 refactor. See
+[`.okf/parser.md`](../.okf/parser.md) "Follow-up comma-list sweep" targeted
+round for full detail.
+
+**Status update (2026-07-24, part 2):** continued the gap audit past the
+reconciliation below and found five more real, live instances of the same
+comma-separated-list bug class in code the 2026-07-22/23 sweep didn't
+touch — `INITIALIZE` targets, `SORT`/`MERGE` `KEY` fields (fully silent,
+`errors=[], warnings=[]` — the worst instance of this bug class on
+record), `SORT`/`MERGE` `USING`/`GIVING` file lists (also fully silent),
+`ADD`/`SUBTRACT`/`MULTIPLY`/`DIVIDE`'s `GIVING` multi-target list, and
+(found via a second-opinion review of this same pass, not the original
+repro sweep) `MULTIPLY`/`DIVIDE` format-1's own second-operand multi-target
+list. Fixed the same session, TDD, 22 new tests
+(`tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`), full suite
+verified green (7089 passed, up from 7067) plus ruff/black/mypy clean. See
+[`.okf/parser.md`](../.okf/parser.md) "Follow-up comma-list sweep
+(2026-07-24)" for full detail, including a methodology note about a
+fixed-format column-72 test-fixture artifact that initially looked like a
+sixth bug and wasn't.
+
+**Status update (2026-07-24, part 1):** re-verified against current `main`
+(commit `4414ef5`). All items this document tracks are unchanged from the
+2026-07-20 status below (still open: M17, the M3/M7/M13/M15 partials, and
+the LOW list). Separately, PR #99-#101 (2026-07-22/23, "statement-support
+verification sweep") found and fixed nine *new* gaps this document never
+tracked — comma-separated operand-list truncation across seven parsers,
+`UNSTRING` `DELIMITED BY ... OR ...`/`TALLYING IN`, `EXEC CICS` command-verb
+loss, `INSPECT` `BEFORE`+`AFTER` combined, `PIC N(n)` sizing, `USAGE IS`
+optional-`IS` handling, `START ... OR EQUAL TO`, `WRITE AT END-OF-PAGE`,
+`OPEN` per-file mode, `ADD`/`SUBTRACT` `ROUNDED`/multi-target/
+`CORRESPONDING`, `DIVIDE REMAINDER`, and an EOF-sentinel phantom trailing
+paragraph. See [`.okf/parser.md`](../.okf/parser.md) "Statement-Support
+Verification Sweep (2026-07-22/23)" and `CHANGELOG.md` (Unreleased →
+Fixed) for full writeups — not added as numbered findings here since they
+were found and fixed in the same pass, unlike this document's convention
+of tracking *open* items.
+
 **Status update (2026-07-20):** the six remaining MEDIUM findings (M6, M10,
 M11, M12, M13, M15) are now fixed, each pinned by its own regression file
 `tests/regression/test_open_findings_m<N>_regression.py` — see the
