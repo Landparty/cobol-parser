@@ -819,13 +819,18 @@ def _expand_source_recursive(
             # original line: a shrinking replacement pulled identification
             # text into the kept window, and a growing one silently
             # truncated real code (including its terminating period).
+            raw_copybook_content = copybook_content
             copybook_content = strip_sequence_area(
                 remove_comment_lines(copybook_content)
             )
 
             # Validate copybook content if requested
             if validate_content:
-                warnings = validate_copybook_content(copybook_content, copybook_path)
+                warnings = validate_copybook_content(
+                    copybook_content,
+                    copybook_path,
+                    raw_content=raw_copybook_content,
+                )
                 if stats and warnings:
                     stats.warnings.extend(warnings)
 
