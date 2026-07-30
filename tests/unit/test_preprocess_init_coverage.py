@@ -29,6 +29,7 @@ from cobolparser.preprocess import (
     validate_copybook_content,
     validate_level_numbers,
 )
+from cobolparser.preprocess.copy_statement_parser import remove_comment_lines
 
 
 class TestCircularReferenceError:
@@ -495,6 +496,37 @@ class TestValidateCopybookContent:
         assert len(warnings) == 1
         assert "only comments" in warnings[0].lower()
 
+    def test_comment_only_after_comment_stripping_pipeline(self):
+        """Regression: in the real pipeline, remove_comment_lines() blanks
+        comment lines to whitespace *before* validate_copybook_content() is
+        called, so a comment-only copybook arrives here already blank. The
+        stripped content alone can no longer distinguish "comment-only" from
+        "genuinely empty" -- the caller must pass the pre-strip content via
+        raw_content so the correct message is reported instead of the
+        misleading "is empty".
+        """
+        raw = "      * This is a comment\n      * Another comment\n"
+        content = remove_comment_lines(raw)
+        assert content.strip() == ""  # blanked away, as it would be in production
+
+        warnings = validate_copybook_content(content, "/path/test.cpy", raw_content=raw)
+
+        assert len(warnings) == 1
+        assert "only comments" in warnings[0].lower()
+        assert "is empty" not in warnings[0].lower()
+
+    def test_genuinely_empty_still_reports_empty(self):
+        """A truly empty copybook (nothing but whitespace even before
+        comment-stripping) must still report "is empty", not "only
+        comments"."""
+        raw = "   \n   \n"
+        content = remove_comment_lines(raw)
+
+        warnings = validate_copybook_content(content, "/path/test.cpy", raw_content=raw)
+
+        assert len(warnings) == 1
+        assert "is empty" in warnings[0].lower()
+
     def test_binary_content_raises(self):
         """Test that binary content raises CopybookSyntaxError."""
         content = "Some text\x00with null bytes"
@@ -535,6 +567,64 @@ class TestValidateCopybookContent:
 
         # Should detect the missing period on line 1
         assert any("missing terminating period" in w.lower() for w in warnings)
+
+    def test_missing_period_no_false_positive_across_blanked_comments(self):
+        """Data-item lines with correct periods must not be flagged just
+        because blanked (former-comment) lines sit above them.
+
+        In the real pipeline, remove_comment_lines() blanks comment lines to
+        whitespace-only lines *before* validate_copybook_content() runs. The
+        old regex used bare \\s, which matches newlines, so ^\\s* could bridge
+        across those blanked lines and [^\\s]+ could swallow a trailing
+        period -- producing false "missing terminating period" warnings
+        misattributed to the wrong line.
+        """
+        raw = (
+            "      * Comment line one\n"
+            "      * Comment line two\n"
+            "       05 FIELD-A PIC X(10).\n"
+            "       05 FIELD-B PIC X(20).\n"
+        )
+        content = remove_comment_lines(raw)
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        assert not any("missing terminating period" in w.lower() for w in warnings)
+
+    def test_missing_period_correct_line_number_after_blanked_comment(self):
+        """A genuinely missing period must be attributed to the actual code
+        line, not to a blanked comment line above it."""
+        raw = (
+            "      * Comment line\n"
+            "       05 FIELD-A PIC X(10)\n"
+            "       05 FIELD-B PIC X(20).\n"
+        )
+        content = remove_comment_lines(raw)
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        missing = [w for w in warnings if "missing terminating period" in w.lower()]
+        assert len(missing) == 1
+        assert "Line 2" in missing[0]
+
+    def test_missing_period_detected_with_decimal_point_pic(self):
+        """A PICTURE clause's own decimal point (e.g. PIC 9(5).99) must not
+        be mistaken for the line's terminating period -- the value token
+        excludes only a *trailing* period, not internal ones, so this
+        genuinely unterminated line is still flagged."""
+        content = "       05 AMOUNT PIC 9(5).99\n"
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        assert any("missing terminating period" in w.lower() for w in warnings)
+
+    def test_no_false_positive_with_decimal_point_pic(self):
+        """A correctly terminated decimal-point PIC must not be flagged."""
+        content = "       05 AMOUNT PIC 9(5).99.\n"
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        assert not any("missing terminating period" in w.lower() for w in warnings)
 
     def test_valid_content(self):
         """Test that valid content produces no/minimal warnings."""

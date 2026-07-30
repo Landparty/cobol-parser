@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-07-21T00:00:00Z
+timestamp: 2026-07-27T00:00:00Z
 ---
 
 # Overview
@@ -176,6 +176,50 @@ under-enforced: 3x inclusion of a 76-byte copybook with `max_total_size=
 114` (1.5x) never raised `TotalExpansionSizeExceededError`, despite ~228
 true content bytes. Cache hits now add the cached content's byte length
 to `context.total_bytes` and re-check the limit, identically to a miss.
+
+**`validate_copybook_content` missing-period regex no longer crosses blanked
+comment lines, and comment-only copybooks report correctly (fixed
+2026-07-27):** `_DATA_DEF_RE` (the "may be missing terminating period"
+check) used bare `\s` for its leading/internal/trailing whitespace, which
+matches newlines. Since `remove_comment_lines` blanks comment lines to
+whitespace-only lines *before* `validate_copybook_content` runs (see the
+sequence/identification-area strip above), `^\s*` could bridge across those
+blanked lines to a later real code line, and `[^\s]+` — not excluding `.` —
+swallowed a data item's trailing period as part of the "value" token.
+Together this produced false "missing terminating period" warnings on
+correctly-terminated lines, misattributed to the wrong line (typically a
+blanked comment line above, not the real code line). Fixed by switching
+every internal `\s`/`\s+`/`\s*` to `[ \t]`/`[ \t]+`/`[ \t]*` (space/tab
+only — can't cross a line) and the value token to `[^\s]*[^\s.]` — "one or
+more non-whitespace characters, the last of which is not a period". This
+excludes only a *trailing* period (the sentence terminator), not an
+*internal* one: a decimal-point PICTURE like `PIC 9(5).99` (no terminator)
+is still correctly flagged, while `PIC 9(5).99.` (terminated) is not. An
+earlier draft of this fix used `[^\s.]+` (excludes periods everywhere in
+the token), which silently stopped detecting missing terminators on any
+decimal-point PIC — caught in review before landing; pinned by
+`test_missing_period_detected_with_decimal_point_pic` /
+`test_no_false_positive_with_decimal_point_pic`.
+
+Separately, the "contains only comments" check
+(`lines = [... not line.strip().startswith("*") ...]`) was dead code when
+reached through the real pipeline: by the time `validate_copybook_content`
+runs, `remove_comment_lines` has already blanked every comment line, so
+`content` can never contain a literal `*`-prefixed line — a genuinely
+comment-only copybook instead falls into the earlier "is empty" branch,
+which is misleading (comment-only is a legitimate documentation-only
+pattern, not an empty file). `validate_copybook_content` gained an optional
+`raw_content: str | None` parameter: when the post-strip `content` is blank
+but `raw_content` (the pre-strip source) is not, the warning is "contains
+only comments" instead of "is empty". `_expand_source_recursive` now
+captures the copybook's raw content before the sequence/comment strip and
+passes it through. Direct callers that omit `raw_content` keep the old
+behavior — exercised by `TestValidateCopybookContent::test_comment_only`,
+which passes raw `*`-comment lines straight in without going through
+`remove_comment_lines` first. Pinned by
+`tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
+and `tests/unit/test_copybook_expander_coverage.py::TestExpandCopybooks::
+test_content_validation`.
 
 `parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
 encoding decodes, content-validation and level-number warnings) onto the

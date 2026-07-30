@@ -1,5 +1,48 @@
 # OKF Update Log
 
+## 2026-07-27 (validate_copybook_content: multiline missing-period regex + comment-only misreport)
+
+User-reported pair of bugs in `cobolparser/preprocess/__init__.py`'s
+`validate_copybook_content`, both specific to copybooks that start with (or
+contain) comment lines — confirmed by direct script reproduction before any
+fix was written, per this repo's TDD convention.
+
+* **Updated** [preprocessing.md](preprocessing.md): documented both fixes
+  under "Copybook Expansion".
+  1. `_DATA_DEF_RE` used bare `\s`, which matches newlines. Since
+     `remove_comment_lines` blanks comment lines to whitespace *before*
+     `validate_copybook_content` runs, `^\s*` could bridge across those
+     blanked lines and `[^\s]+` (not excluding `.`) swallowed a trailing
+     period — producing false "missing terminating period" warnings on
+     correctly-terminated lines, misattributed to the wrong line (reproduced:
+     a copybook with 2 leading comment lines + 2 correctly-terminated code
+     lines got both flagged, warnings attached to line 1 and line 4 instead
+     of neither). Fixed by switching internal `\s`/`\s+`/`\s*` to
+     `[ \t]`/`[ \t]+`/`[ \t]*` (can't cross a line) and the value token to
+     `[^\s]*[^\s.]` ("non-whitespace, not ending in a period" — excludes
+     only a trailing period, not a PICTURE's own internal decimal point).
+     An initial `[^\s.]+` draft excluded periods everywhere in the token,
+     which silently broke detection for decimal-point PICs like
+     `PIC 9(5).99` with a genuinely missing terminator — caught by the
+     advisor review before landing, fixed, and pinned with two more tests.
+  2. The "contains only comments" check was dead code in the real pipeline:
+     `remove_comment_lines` already blanks every comment line before
+     `validate_copybook_content` sees the content, so a genuinely
+     comment-only copybook fell into the earlier "is empty" branch instead —
+     misleading, since comment-only is a legitimate documentation-only
+     pattern. Fixed by adding an optional `raw_content` parameter (the
+     pre-strip source); `_expand_source_recursive` now captures and passes
+     it so the correct message is reported.
+* Added regression tests to
+  `tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
+  (6 new cases, written and confirmed failing before each fix) and
+  strengthened `tests/unit/test_copybook_expander_coverage.py::
+  TestExpandCopybooks::test_content_validation` to assert the exact message
+  instead of just "warnings is non-empty".
+* Full suite green: 7102 passed / 13 skipped / 1 xfailed, 92.20% coverage
+  (up from 7096, no regressions). `ruff check`, `black --check`, and
+  `mypy cobolparser/` clean on touched files.
+
 ## 2026-07-24 (targeted follow-up round: CALL BY-mode persistence, COMPUTE comma targets; vendor sync)
 
 User-scoped follow-up after reviewing the five-fix sweep below ("one more

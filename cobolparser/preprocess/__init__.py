@@ -52,7 +52,8 @@ from typing import Optional
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
 _DEFINE_RE = re.compile(r">>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?")
 _DATA_DEF_RE = re.compile(
-    r"^\s*\d{2}\s+[A-Za-z][A-Za-z0-9-]*\s+PIC\s+[^\s]+\s*$", re.MULTILINE
+    r"^[ \t]*\d{2}[ \t]+[A-Za-z][A-Za-z0-9-]*[ \t]+PIC[ \t]+[^\s]*[^\s.][ \t]*$",
+    re.MULTILINE,
 )
 _LEVEL_NUMBER_RE = re.compile(r"^\s*(\d{2})\s+[A-Za-z]", re.MULTILINE)
 
@@ -1213,7 +1214,9 @@ def preprocess_conditional_compilation(
     return "\n".join(result_lines)
 
 
-def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
+def validate_copybook_content(
+    content: str, copybook_path: str, raw_content: str | None = None
+) -> list[str]:
     """
     Validate copybook content before expansion.
 
@@ -1225,8 +1228,15 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
     - Other potential issues
 
     Args:
-        content: Copybook content to validate
+        content: Copybook content to validate. Callers that already ran this
+            through remove_comment_lines() (comment lines blanked to
+            whitespace) should pass the pre-strip source via raw_content so
+            a comment-only copybook is reported correctly instead of as
+            empty.
         copybook_path: Path to copybook (for error messages)
+        raw_content: Optional original content, before comment lines were
+            blanked out, used only to distinguish a comment-only copybook
+            from a genuinely empty one.
 
     Returns:
         List of warning messages (empty if no issues)
@@ -1239,7 +1249,10 @@ def validate_copybook_content(content: str, copybook_path: str) -> list[str]:
     # Check for empty content
     stripped = content.strip()
     if not stripped:
-        warnings.append(f"Copybook '{copybook_path}' is empty")
+        if raw_content is not None and raw_content.strip():
+            warnings.append(f"Copybook '{copybook_path}' contains only comments")
+        else:
+            warnings.append(f"Copybook '{copybook_path}' is empty")
         return warnings
 
     # Check for comment-only content
