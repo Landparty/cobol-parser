@@ -76,9 +76,66 @@ jobs:
           name: dist-wheels-${{ matrix.os }}
           path: wheelhouse/
 
+  # Build single-file executables with Nuitka. Unlike the wheels above,
+  # which still ship plain .py source for everything the Cython hot paths
+  # don't cover, Nuitka compiles the entire cobolparser package to machine
+  # code -- these binaries embed no application source. See PUBLISHING.md.
+  build-nuitka-executables:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: cobol-parser-linux-x86_64
+          - os: macos-latest
+            artifact: cobol-parser-macos-arm64
+          - os: windows-latest
+            artifact: cobol-parser-windows-amd64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install patchelf (required by Nuitka onefile mode on Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+      - name: Install cobolparser
+        # Nuitka compiles the pure-Python source directly, so the Cython
+        # extension build is unnecessary here (and would only slow down
+        # the job).
+        env:
+          COBOLPARSER_SKIP_EXT: "1"
+        run: pip install .
+      - name: Install Nuitka
+        run: pip install nuitka
+      - name: Build onefile executable
+        shell: bash
+        run: scripts/build_executable.sh "${{ matrix.artifact }}"
+      - name: Smoke-test the executable
+        shell: bash
+        run: |
+          BIN="build/${{ matrix.artifact }}"
+          chmod +x "$BIN" || true
+          "$BIN" --version
+          SAMPLE=$(find tests/samples -maxdepth 1 -iname "*.cbl" | head -1)
+          "$BIN" parse "$SAMPLE" --stats
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-exe-${{ matrix.os }}
+          path: build/${{ matrix.artifact }}
+
   # Collect every artifact and attach them all to the GitHub Release.
   publish:
-    needs: [release-please, build-sdist, build-binary-wheels]
+    needs:
+      [
+        release-please,
+        build-sdist,
+        build-binary-wheels,
+        build-nuitka-executables,
+      ]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:

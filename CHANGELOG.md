@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **release:** the release workflow now also builds single-file `cobol-parser`
+  executables with Nuitka (Linux/macOS/Windows) and attaches them to the
+  GitHub Release alongside the existing wheels/sdist. Unlike the wheels,
+  which only compile the three Cython hot-path modules and still ship plain
+  `.py` source for the rest of the package, these binaries compile the whole
+  `cobolparser` package to machine code. See `PUBLISHING.md`.
 * **parser:** SPECIAL-NAMES mnemonic-name clauses (`implementor-name IS
   mnemonic-name [ON STATUS IS cond] [OFF STATUS IS cond]`, e.g. `C01 IS
   TOP-OF-PAGE`, `CONSOLE IS CRT`, `UPSI-0 IS SWITCH-1 ON STATUS IS ...`)
