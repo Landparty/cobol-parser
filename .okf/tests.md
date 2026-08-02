@@ -35,10 +35,12 @@ tests/
     analysis/                  # IO coverage reporter, diagnostics, all analyzers
     cli/                       # CLI command tests
     generators/                # Flowchart generator tests
+    test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
     io_statements/             # IO parser unit tests
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
     test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation
+    test_copybook_csv_generation.py  # parametrised over the sample + NIST *.CPY corpora: no copybook may crash gen-data; a copybook with no record layout must raise CopybookLayoutError, and every generated cell must be assignable to its field (see generators.md)
     io/                        # IO coverage reporting integration
     io_statements/             # IO statement parsing, VSAM
   contracts/                   # API contract tests — stability guarantees
@@ -156,5 +158,6 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
 # See Also
 
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
+* [generators.md](generators.md) — flowchart and copybook → CSV generator tests
 * [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
 * [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing

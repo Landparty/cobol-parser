@@ -25,6 +25,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
 | Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.) | `.okf/analysis.md` |
+| Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
 | `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
 | CLI subcommands and flags | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
@@ -88,6 +89,7 @@ cobol-parser parse <file.cbl> [path] [--compact] [--free-form] [--dialect ibm-en
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
+cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [-o out.csv]
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser program-flow <file.cbl>
@@ -173,6 +175,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
+- `copybook_data.py` -- `CopybookDataGenerator` generates synthetic CSV test data from a copybook record layout, honoring PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
 
@@ -292,6 +295,16 @@ from cobolparser import (
     CRUDMatrixGenerator,        # matrix.entries, .to_csv(), .to_json()
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
+
+# Synthetic CSV test data from a copybook record layout
+from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
+dataset = CopybookDataGenerator(
+    DataGeneratorOptions(rows=100, seed=7)
+).generate_from_file("CUSTOMER.cpy")
+dataset.to_csv()               # header row + 100 generated records
+dataset.write_csv("out.csv")
+dataset.fields                 # list[FieldSpec] — the resolved layout
+dataset.seed                   # replay this run with DataGeneratorOptions(seed=...)
 ```
 
 ### Adding a New Statement Parser

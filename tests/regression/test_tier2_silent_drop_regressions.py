@@ -1182,17 +1182,16 @@ class TestDivideRoundedClauseCaptured:
         paragraph literally named "ROUNDED"."""
         result = parse_cobol(
             _proc_program(
-                "    DIVIDE WS-X BY WS-X GIVING WS-X ROUNDED.\n"
-                "    DISPLAY 'AFTER'\n"
+                "    DIVIDE WS-X BY WS-X GIVING WS-X ROUNDED.\n" "    DISPLAY 'AFTER'\n"
             ),
             filename="reg.cbl",
         )
         assert result.success, f"Errors: {result.errors}"
         proc = result.ast.get_division("PROCEDURE")
         names = [p.paragraph_name for p in proc.paragraphs]
-        assert "ROUNDED" not in names, (
-            f"ROUNDED must not be parsed as its own paragraph; got {names}"
-        )
+        assert (
+            "ROUNDED" not in names
+        ), f"ROUNDED must not be parsed as its own paragraph; got {names}"
         main_para = next(p for p in proc.paragraphs if p.paragraph_name == "MAIN-PARA")
         stmt_types = [type(s).__name__ for s in main_para.statements]
         assert "DisplayStatement" in stmt_types, (

@@ -17,6 +17,7 @@ Version 1.1.0. Author: Samuel Dion.
 ## Analysis & Generation
 
 * [Analysis](analysis.md) — 13 static-analysis modules (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.)
+* [Generators](generators.md) — flowcharts (Mermaid/DOT) and copybook → CSV synthetic test data
 * [Batch Parsing](batch.md) — `parse_files()` / `parse_files_with_copybooks()`, per-file fault isolation
 * [CLI](cli.md) — `cobol-parser` subcommands and flags
 * [Tests](tests.md) — Test layout, pytest markers, coverage floor (81 %)

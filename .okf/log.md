@@ -1,5 +1,43 @@
 # OKF Update Log
 
+## 2026-08-02 (copybook → CSV synthetic test-data generation)
+
+New feature: `cobolparser/generators/copybook_data.py` plus a
+`cobol-parser gen-data` CLI subcommand. Flattens a copybook record layout
+into CSV columns and generates rows of values constrained by each field's
+PICTURE, `USAGE`, level-88 domain, and `VALUE` clause.
+
+* **Created** [generators.md](generators.md) — new concept file covering both
+  generator modules. `flowchart.py` was previously undocumented in the OKF
+  (only mentioned in passing from cli.md's `program-flow --format`); it now
+  has a home alongside `copybook_data.py`. Documents the public API, the
+  copybook-fragment parsing strategy (program-skeleton wrapper, free-form
+  Area-B shift, synthesised record root for level-02-only copybooks), the
+  flattening rules table, the four-level value-precedence chain, and the
+  determinism/seed-replay guarantee.
+* **Updated** [index.md](index.md): added a Generators entry under
+  "Analysis & Generation".
+* **Updated** [cli.md](cli.md): added the `## Gen-Data` subcommand section
+  between Expand and Analyze — flags, the two JSON modes (`--list-records`,
+  `--describe`), and the note that this subcommand emits **CSV** on stdout
+  rather than the JSON every other subcommand emits, so it is deliberately
+  outside the "Output Identification" convention documented at the top of
+  that file.
+* **Updated** [tests.md](tests.md): added the three new test files to the
+  directory layout and a generators.md cross-reference.
+
+Two parser behaviours were confirmed against source while writing this and
+are worth recording, since both shaped the generator's design:
+
+* `ConditionNameItem.values` records `VALUE 2 THRU 4` as
+  `["2", "THROUGH:4"]` — the range end is *marked*, not expanded. Consumers
+  wanting the domain must expand it themselves (`_condition_values` does,
+  capped at 64 entries).
+* `PictureClause.is_signed` reports only an explicit `S`. A numeric-edited
+  picture carrying `+`/`-`/`CR`/`DB` (e.g. `PIC -ZZ,ZZ9.99`) holds a sign but
+  reports `is_signed=False`; the generator compensates in `_is_signed()`.
+  Noted in [ast-models.md](ast-models.md) under Data Items.
+
 ## 2026-07-27 (validate_copybook_content: multiline missing-period regex + comment-only misreport)
 
 User-reported pair of bugs in `cobolparser/preprocess/__init__.py`'s
