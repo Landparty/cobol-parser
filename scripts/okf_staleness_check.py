@@ -24,6 +24,7 @@ OKF_MAP = [
     ("cobolparser/models/", [".okf/ast-models.md"]),
     ("cobolparser/_data_fast.pyx", [".okf/ast-models.md"]),
     ("cobolparser/analysis/", [".okf/analysis.md"]),
+    ("cobolparser/generators/", [".okf/generators.md"]),
     ("cobolparser/batch.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
     ("cobolparser/dialects/", [".okf/dialects.md"]),
