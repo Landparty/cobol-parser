@@ -3,6 +3,9 @@
 **Date:** 2026-08-02
 **Status:** Proposed (no code written yet)
 **Scope:** `Landparty/cobol-parser` (bulk) + `samdion1994/mocky-mock` (consumer hook)
+**Detailed implementation plans:**
+[Phase 0](2026-08-02-phase0-value-engine-refactor.md) ·
+[Phases 1–9](2026-08-02-program-data-generation-implementation.md)
 
 ---
 
