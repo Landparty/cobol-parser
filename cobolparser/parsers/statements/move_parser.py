@@ -6,6 +6,7 @@ from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    consume_optional_subscript,
     get_parse_context,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -149,13 +150,21 @@ class MoveStatementParser(IStatementParser):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
 
-            # Parse target - only collect IDENTIFIERs
+            # Parse target - only collect IDENTIFIERs. A trailing
+            # ``(subscript[, subscript]...)`` group (e.g. a table reference
+            # like ``TBL (3, 5, 2)``) is folded into the target string via
+            # consume_optional_subscript, matching how ADD/SUBTRACT/COMPUTE
+            # targets and the arithmetic GIVING clause already do -- without
+            # this, the subscript tokens fall to the `else` branch below and
+            # are silently discarded, losing which table element was set.
             if token.type == TokenType.IDENTIFIER:
-                target_name = token.value
+                parts: list[str] = [token.value] if token.value else []
+                token_stream.consume()
+                consume_optional_subscript(token_stream, parts)
+                target_name = " ".join(p for p in parts if p)
                 if target_name:
                     stmt.add_target(target_name)
                 target_count += 1
-                token_stream.consume()
             else:
                 # Skip non-identifier tokens (operators, comparisons, etc)
                 token_stream.consume()

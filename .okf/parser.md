@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-09T01:00:00Z
+timestamp: 2026-07-24T00:00:00Z
 ---
 
 # Overview
@@ -110,9 +110,24 @@ CobolParser.parse(source)
 | `factory.py` | `DivisionParserFactory`, `DivisionType` enum (IDENTIFICATION, ENVIRONMENT, DATA, PROCEDURE) |
 | `base.py` | Base division parser with error recovery |
 | `identification.py` | IDENTIFICATION DIVISION |
-| `environment.py` | ENVIRONMENT DIVISION |
-| `data.py` | DATA DIVISION |
-| `procedure.py` | PROCEDURE DIVISION — hosts `StatementParserRegistry` |
+| `environment.py` | ENVIRONMENT DIVISION — division scan + AST node; section/SELECT parsing delegated to the two `environment_*.py` collaborators below |
+| `environment_sections.py` | `ConfigurationSectionParser` (CONFIGURATION SECTION + SPECIAL-NAMES) and `InputOutputSectionParser` (INPUT-OUTPUT SECTION + FILE-CONTROL) |
+| `environment_select.py` | `SelectClauseParser` — SELECT statement + all clause parsers (ASSIGN/ORGANIZATION/ACCESS/KEY/STATUS/ALTERNATE/PADDING/RESERVE/SHARING/LOCK/PASSWORD) and `SelectStatement` node construction |
+| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below |
+| `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
+| `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
+| `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names, level-66 RENAMES, data-division EXEC SQL blocks |
+| `procedure.py` | PROCEDURE DIVISION — paragraph/section dispatch loop, ParseContext attachment, AST node; hosts the shared `StatementParserRegistry` cache; supporting logic delegated to the three `procedure_*.py` collaborators below |
+| `procedure_registry.py` | `create_statement_registry()` — registers all 40+ statement parsers in first-match priority order (new statement parsers register here); order invariant pinned by `tests/unit/test_procedure_registry_dispatch_order.py` |
+| `procedure_boundaries.py` | `is_paragraph_or_section_start` / `is_section_marker` / `is_statement_keyword` lookahead predicates |
+| `procedure_recovery.py` | `StatementRecoveryHandler` — unsupported-statement warnings, FAIL_FAST/COLLECT_ALL error recording, stream resynchronization; owns `STRAY_MARKERS` / `UNSUPPORTED_VERBS` (aliased as `ProcedureDivisionParser._STRAY_MARKERS` / `._UNSUPPORTED_VERBS`) |
+
+**Cython callback surface (2026-07-15 refactor):** `DataDivisionParser` keeps
+`_parse_picture_clause` / `_parse_value_clause` / `_parse_usage_clause` (and
+`_parse_data_item`) as delegating wrappers with their historical names and
+signatures — the compiled `_data_fast` extension receives the division parser
+as `parser_self` and calls those three back by name. New clause logic goes in
+`DataItemClauseParser`; the wrappers must stay.
 
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside
@@ -122,6 +137,74 @@ must therefore accept `LEVEL_NUMBER` alongside `NUMERIC_LITERAL` —
 all do. `_parse_value_clause` also consumes an optional `IS` and a
 `MINUS`/`PLUS` sign token before the literal (`VALUE IS -5`). Regression
 suite: `tests/regression/test_numeric_value_clause.py`.
+
+**VALUE ALL (`data_clauses.py`):** `ALL` lexes as a `FIGURATIVE_CONSTANT`, so
+`parse_value_clause` special-cases it before the plain-literal branch:
+`VALUE ALL '='` → `value_clause='ALL "="'`, `VALUE ALL ZEROS` →
+`'ALL ZEROS'` (a bare trailing `ALL` still returns `"ALL"`). The returned
+string round-trips as legal COBOL — downstream consumers (mockymock's
+working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
+suite: `tests/regression/test_value_all_clause.py`.
+
+**Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
+emits NEWLINE tokens, so any clause reader that peeks for an operand after
+consuming a keyword must skip NEWLINEs first or a line break between keyword
+and operand silently drops the operand. REDEFINES does this via
+`_skip_newlines` (pure Python) and an inline newline-skip loop (Cython) —
+the same pattern the OCCURS sub-clauses (TIMES/DEPENDING/KEY/INDEXED) use.
+Remember both implementations must change together, and the checked-in
+`_data_fast.c` must be regenerated (Cython 3.2.4). Regression cases:
+`tests/unit/test_data_division_branches.py::TestRedefinesClause`
+(multi-line + forced pure-Python-loop variants).
+
+**PICTURE clause with no terminating period drops the next data item
+(`data_clauses.py::parse_picture_clause`, 2026-07-21):** the flip side of
+the multi-line tolerance above — `parse_picture_clause`'s token loop treats
+a NEWLINE as "more pattern may follow" *unconditionally*, which is correct
+for a legitimate multi-line PICTURE clause but wrong when the terminating
+period was simply lost. `LEVEL_NUMBER` is one of the token types the
+picture-pattern loop collects (the lexer types every 1-2 digit integer as
+`LEVEL_NUMBER` regardless of context — see the gotcha in `data.py` above),
+so a bare level number belonging to the *next* data item (`05  BARIABLE`)
+was appended to the previous item's pattern (e.g. `"9(08)05bariable"`), and
+the following IDENTIFIER (the next item's name) went with it — the next
+item, and all of its children, vanished from the AST with
+`result.success == True` and `result.warnings == []`. The most common
+real-world trigger is fixed-format column-72 truncation:
+`normalize_fixed_format` (see [preprocessing.md](preprocessing.md)) extracts
+only columns 8-72, so a terminating period placed at column 73+ never
+reaches the lexer. Verified empirically against real GnuCOBOL 3.2 (via
+mockymock's Docker toolchain, plain fixed-format `cobc`, no `-free`): the
+same truncation shape is a **hard compile error** there (`group item cannot
+have PICTURE clause` / `syntax error, unexpected Literal`), confirming
+cobolparser's column-8-72 extraction already matches GnuCOBOL's own
+semantics — the bug was purely the *silence*, not a truncation-boundary
+mismatch. Not fixed-format-specific: a plain missing period in free-form
+source hits the identical loop defect. Fixed by having the NEWLINE branch
+look ahead past the newline for a LEVEL_NUMBER that cannot legally be more
+PICTURE content: either (a) its value contains a digit other than `0`/`9`
+— the only two digit-shaped PICTURE symbols (digit position /
+zero-insertion) — so e.g. the `5` in `05` can only be a real level number
+regardless of what follows it, or (b) it's immediately followed by an
+`IDENTIFIER` (a named or `FILLER` item — both lex as `IDENTIFIER`). Signal
+(a) alone was added after an initial "IDENTIFIER-follows" version shipped
+without it: that version missed an **anonymous** next item with no
+data-name at all (`05  REDEFINES ...`, no IDENTIFIER token at all — code
+review caught it), which still corrupted the previous item's pattern and
+misattached the anonymous item's children to it with `warnings == []`. (a)
+does not misfire on the legitimate multi-line case this method already
+tolerates — a PICTURE pattern built only from `9`/`0` symbols split across
+lines, e.g. `PIC 9\n99.` — because every character of the LEVEL_NUMBER
+value is itself `0` or `9`. When either signal fires, the clause stops
+there instead of consuming the newline, and a `ParseResult.warnings` entry
+is recorded via the same `host.add_warning` channel `_warn_dropped_data_token`
+already uses. The `_data_fast` Cython path calls back into this same Python
+method for PICTURE parsing (see "Cython callback surface" above), so both
+paths are fixed together with no `.pyx`/`.c` change. Pinned by
+`tests/regression/test_picture_clause_missing_terminator.py`, including
+explicit parent/child re-attachment assertions (the original defect didn't
+just drop the next item — its children were misattached to the preceding
+sibling) and a dedicated anonymous-item case.
 
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
@@ -219,6 +302,87 @@ Pinned by `tests/unit/test_arithmetic_size_error_branches.py`,
 `tests/unit/test_utils_clause_collection.py`,
 `tests/unit/test_display_parser.py`, and
 `tests/unit/io_statements/test_write_close_parsers.py`.
+
+**ADD `... TO` subscripted target dropped (`arithmetic_parsers.py`,
+2026-07-21):** `AddStatementParser`'s `TO` branch consumed its target via a
+private `_consume_identifier` helper that accepted only a bare `IDENTIFIER`
+token, unlike `COMPUTE`'s `_consume_arithmetic_target` (already shared),
+which folds a trailing `(subscript[, subscript]...)` group into the target
+string. `ADD 1 TO TABLE-ITEM (I, J, K)` therefore captured only
+`TABLE-ITEM` as the target and left `( I , J , K )` unconsumed — an
+"Unparsed tokens" content-drop warning — and in a two-statement paragraph
+the resulting recovery was bad enough to drop a *following* subscripted
+`ADD` statement from the AST entirely, not just mis-parse its target. Fixed
+by having `AddStatementParser` call the same `_consume_arithmetic_target`
+helper COMPUTE already uses instead of its own bare-identifier method (now
+removed); `AddStatement.target` is the same `"NAME ( SUB1 , SUB2 )"` shape
+COMPUTE already produces for subscripted targets. Pinned by
+`tests/unit/test_arithmetic_migration.py::test_add_statement_with_subscripted_target`
+and `::test_add_statement_with_subscripted_target_and_giving`.
+
+**SUBTRACT `... FROM` and arithmetic `GIVING` subscripted targets dropped
+(`arithmetic_parsers.py` / `_utils.py`, 2026-07-21):** two sibling gaps in
+the same bug class as the ADD fix above. (1) `SubtractStatementParser`'s
+`FROM` branch consumed an identifier target with a bare
+`stmt.set_target(tok.value); token_stream.consume()` instead of
+`_consume_arithmetic_target`, so `SUBTRACT 1 FROM VARIABLE (H, I, 1)`
+captured only `VARIABLE` and left `( H , I , 1 )` unconsumed. Fixed by
+routing the `IDENTIFIER` case through `_consume_arithmetic_target`
+(numeric-literal/level-number/figurative-constant targets, which can never
+carry a subscript, keep the original bare-consume branch). (2)
+`_utils.consume_keyword_and_operand` — shared by every arithmetic
+statement's `GIVING` clause (ADD, SUBTRACT, MULTIPLY, DIVIDE) — only
+accepted a single bare `IDENTIFIER` token, so `ADD 1 TO A GIVING RESULT
+(H, I, 1)` dropped `(H, I, 1)` from the `GIVING` target too. Fixed by
+folding an optional trailing `(subscript[, subscript]...)` group into the
+returned value, mirroring `_consume_arithmetic_target`'s paren-depth
+loop (duplicated rather than shared to avoid a `_utils.py` ->
+`arithmetic_parsers.py` import cycle). Pinned by
+`tests/unit/test_arithmetic_migration.py::test_subtract_statement_with_subscripted_target`,
+`::test_add_statement_with_subscripted_giving_target`, and
+`tests/unit/test_utils_clause_collection.py::TestConsumeKeywordAndOperand::test_consumes_subscripted_target`.
+
+**WRITE `BEFORE`/`AFTER` phrase — `ADVANCING` optional (`write_parser.py`,
+2026-07-20):** the standard grammar is `BEFORE|AFTER [ADVANCING] [n]
+[LINES|LINE|PAGE]`, but the parser previously consumed `BEFORE`/`AFTER`
+and then *required* the `ADVANCING` keyword before parsing the rest —
+`WRITE rec AFTER 1` / `AFTER 1 LINE` / `BEFORE PAGE` silently dropped the
+clause (`advancing_clause=None`), and a trailing `LINE`/`LINES` token was
+left unconsumed to trigger the procedure division's "Unparsed tokens"
+content-drop warning. `ADVANCING` is now consumed if present via
+`try_consume_keyword` and the count/unit parsing runs either way, so both
+forms produce the same `advancing_clause` dict
+(`{"type": "AFTER", "value": 1, "unit": "LINES"}`; `PAGE` → `"value":
+"PAGE", "unit": "CHANNEL"`). Pinned by
+`tests/unit/test_write_advancing.py`.
+
+**WRITE `ADVANCING` mnemonic-name / identifier support (`write_parser.py`,
+`environment_sections.py`, 2026-07-20):** the count position of `BEFORE|AFTER
+[ADVANCING] {integer-1 | identifier-1 | mnemonic-name-1}` accepted only a
+numeric literal — an `IDENTIFIER` token there (a data-name holding a line
+count, or a SPECIAL-NAMES mnemonic-name for a printer channel) was left
+unconsumed, and the PROCEDURE DIVISION scanner then mis-parsed the dangling
+identifier as a bogus paragraph header (`WRITE rec AFTER ADVANCING
+TOP-OF-PAGE.` produced `advancing_clause={"type": "AFTER", "value": None,
+"unit": None}` plus a phantom `TOP-OF-PAGE` paragraph). The parser now
+branches on whether a trailing `LINE`/`LINES` follows the identifier: if so
+it's `identifier-1` (`{"unit": "LINES", "value": <name>}`, same unit as a
+literal count); if not it's `mnemonic-name-1`
+(`{"unit": "MNEMONIC", "value": <name>}`). `PAGE` is excluded from this
+branch so `ADVANCING PAGE` still hits the existing CHANNEL path.
+`IOWriteStatement.set_advancing()` gained `identifier=`/`mnemonic=` kwargs
+(mutually exclusive with `lines=`/`page=`, default `None` so existing call
+sites are unaffected). Companion fix: `ConfigurationSectionParser`'s
+SPECIAL-NAMES paragraph previously only recognized `CURRENCY`,
+`DECIMAL-POINT`, `CLASS`, and `ALPHABET` — a mnemonic-name clause
+(`implementor-name IS mnemonic-name [ON STATUS IS cond] [OFF STATUS IS
+cond]`) fell into the generic "unknown clause, consume to next period"
+branch and vanished with no metadata trace. It's now detected by
+lookahead (`peek(1).value.upper() == "IS"`) and collected into
+`special_names["mnemonic_definitions"]` as `{"environment_name":
+"C01", "mnemonic_name": "TOP-OF-PAGE"}` (plus `on_status`/`off_status`
+keys when the UPSI switch form is used). Pinned by
+`tests/unit/test_special_names.py` and `tests/unit/test_write_advancing.py`.
 
 **EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
 the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I
@@ -452,6 +616,30 @@ site): a plain, non-VARYING `PERFORM UNTIL` has no AFTER clause of its own,
 so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
+
+**All-digit procedure names / PERFORM THRU numbering (2026-07-20):** COBOL
+permits procedure names made entirely of digits, and `PERFORM 1000 THRU
+1999` numbering is idiomatic in THRU-style code. Those names lex as
+`NUMERIC_LITERAL` (or `LEVEL_NUMBER` for 1–2 digit values), never
+`IDENTIFIER`, so support is explicit in two places:
+
+* `divisions/procedure_boundaries.py` — `_is_procedure_name_token` accepts
+  an identifier or an all-digit numeric token;
+  `is_paragraph_or_section_start` uses it in both its after-period and
+  at-name cases, so numeric paragraph headers (`1000.`) are recognized
+  instead of being skipped as unsupported statements.
+* `perform_parser.py` — the inline `PERFORM n TIMES` branch now checks for
+  a following `TIMES`/`TIME` via `_peek_next_meaningful` *before* consuming
+  the numeric. Previously the numeric was consumed speculatively and, when
+  TIMES did not follow, simply lost — `PERFORM 1000 THRU 1999` set
+  `target_paragraph` to the literal word `THRU`. A numeric token not
+  followed by TIMES now falls through to the procedure-name-target branch,
+  and both the target and the THRU end accept all-digit names (shared
+  `_is_procedure_name_token` helper). `GO TO 1999` already worked (the GO
+  parser takes the token value regardless of type); SORT/MERGE `THRU`
+  procedure names remain IDENTIFIER-only.
+
+Pinned by `tests/unit/test_perform_thru_numeric.py`.
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
@@ -1000,10 +1188,12 @@ container nodes' own location metadata. Pinned by
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)
-2. Register it in `ProcedureDivisionParser` (or via `StatementParserRegistry`)
+2. Register it in `create_statement_registry()` (`parsers/divisions/procedure_registry.py` — the builder `ProcedureDivisionParser` uses), in the right first-match priority slot (more specific before general)
 3. Add a `TokenType` entry in `lexer.py` if the verb is not yet a keyword
 4. Add AST node(s) in the appropriate `cobolparser/models/statements/<category>.py` with `to_dict()`; use `ASTNodeFactory` from `core/ast_factory.py`
 5. Export from `cobolparser/parsers/statements/__init__.py` and `cobolparser/models/statements/__init__.py`
+6. Update `EXPECTED_ORDER` and `DISPATCH_CASES` in `tests/unit/test_procedure_registry_dispatch_order.py` — this pins the registration order and asserts the new parser dispatches for its own keyword(s); the suite fails loudly if the new registration is missing or misplaced
+7. Add a fixture to `FIXTURES` in `tests/regression/test_swallow_sweep.py` (see "Generic swallow-sweep regression" below) — both this and step 6 fail the suite automatically if skipped, so neither strictly requires remembering to do it, but a real fixture snippet still needs a human to write it
 
 # Configuration Classes
 
@@ -1014,6 +1204,430 @@ container nodes' own location metadata. Pinned by
 | `SerializationConfig` | `include_metadata: bool` |
 | `DialectType` | Enum — `IBM_ENTERPRISE`, others planned |
 | `ParseStatistics` | Wall-clock timings, token counts, node counts |
+
+# Structured EXEC blocks + expression trees (2026-07-20, M11/M12)
+
+**EXEC CICS / IMS / SQL (M11):** `ibm_exec_statements.py`'s
+`_parse_cics_options` parses the CICS option list into
+`ExecCicsStatement.options: dict[str, str | None]` (keyword → argument
+text inside parentheses, `None` for flag options like `ERASE`/`NOHANDLE`;
+nested parentheses and quoted literals handled). `ExecImsStatement`
+captures the DLI function code plus top-level positional arguments (PCB,
+I/O area, SSAs). `parse_exec_sql` (`models/sql_statements.py`) is a
+literal/comment-aware tokenizer: statement kind, tables (FROM / INTO /
+UPDATE / JOIN), host variables including `:VAR:IND`, and for SELECTs
+`select_columns` + `where_present`. All pre-existing fields and
+`to_dict()` keys are unchanged — everything new is additive. Pinned by
+`tests/regression/test_open_findings_m11_regression.py`.
+
+**Expression trees (M12):** COMPUTE's collected token sequence is now
+also precedence-parsed (unary sign, `**`, `*`/`/`, binary `+`/`-`,
+parentheses, subscripted identifiers, FUNCTION calls) into
+`ComputeStatement.expression_tree`; the raw `.expression` string is
+byte-identical to before, and a failed tree build degrades to `None`
+(never a new error/warning). The IF parser's condition machinery was
+factored into `parsers/statements/_conditions.py`
+(`build_condition_expression`) and is reused by the PERFORM parser:
+`PERFORM ... UNTIL` raw-string conditions gain a structural
+`condition_tree` (see [ast-models.md](ast-models.md)); the IF fallback
+path (class/sign/condition-name conditions like `A IS NUMERIC`) now
+produces a structured node while `metadata.raw_condition` stays
+populated. Pinned by
+`tests/regression/test_open_findings_m12_regression.py`.
+
+# Generic swallow-sweep regression (2026-07-21)
+
+Every Silent-Drop Audit section above (2026-07-05 through 2026-07-09) was
+found by hand-rolling the same probe per verb: "period-less statement X,
+immediately followed by a marker statement — does the marker survive?"
+`tests/regression/test_swallow_sweep.py` formalizes that probe as a
+permanent, self-maintaining sweep instead of a one-off manual audit:
+
+* One `Fixture(node_type, snippet, needs_file)` entry per class registered
+  in `create_statement_registry()` (46 as of this writing), keyed by parser
+  class name. Each `snippet` is a minimal, period-less statement (with an
+  explicit `END-IF`/`END-EVALUATE`/`END-SEARCH` for scope-taking statements,
+  so the boundary being probed is "does the statement stop at its own scope
+  terminator without a trailing period," not "does it ever terminate at
+  all").
+* `test_fixture_table_covers_every_registered_parser` diffs the fixture
+  table's keys against `create_statement_registry().get_all_parsers()`, so a
+  future statement parser added with no matching fixture fails the suite
+  immediately — the whole point being that this sweep covers new verbs
+  automatically instead of waiting for the next manual audit.
+* `test_marker_survives_after` builds each fixture into a full program,
+  parses it, and asserts against **`CobolParagraph.statements`** (the flat,
+  source-order list `add_statement()` appends to) — not the tree-wide
+  `CobolProgram.get_all_statements()`. This distinction matters: a swallowed
+  marker isn't deleted, it's absorbed as a *child* of the statement under
+  test (folded into an expression string, or nested into a THEN/WHEN/AT END
+  body), and `get_all_statements()` deliberately recurses into exactly those
+  bodies (see its docstring above), so it would still find the marker and
+  report a false pass. `CobolParagraph.statements` only reflects what the
+  PROCEDURE DIVISION parser itself treated as separate top-level statements,
+  so a swallowed marker simply never appears there — confirmed by a
+  canary test (`TestHarnessDetectsSwallowing`) that reproduces this exact
+  false-pass mode with an intentionally unclosed `IF`, and by manually
+  disabling `MoveStatementParser`'s boundary check during development (one
+  targeted failure, no collateral damage across the other 45 fixtures).
+* **A fixture only guards a real vulnerable path, not just "the parser
+  runs."** ADD/SUBTRACT/MULTIPLY/DIVIDE's plain scalar-target form (`ADD 1
+  TO WS-A`) turned out to be safe-by-construction — a single bare
+  `IDENTIFIER` target is consumed in one shot regardless of how (or whether)
+  the trailing-boundary check is wired, so no plausible regression there
+  would ever touch the marker. Confirmed by mutating
+  `_consume_arithmetic_target`: the fixture stayed green. The four
+  arithmetic fixtures were redesigned around a subscripted `GIVING` target
+  (`ADD 1 TO WS-A GIVING WS-C (WS-IDX)`) to route through
+  `consume_optional_subscript` (`_utils.py`) — the shared paren-depth loop
+  every arithmetic verb's `GIVING` clause uses, and the one with real
+  historical swallow bugs (see the ADD/SUBTRACT subscripted-target entries
+  above). Disabling that loop's `depth == 0` stop condition made all four
+  fixtures fail together with zero collateral damage elsewhere, confirmed
+  and reverted. General lesson for adding future fixtures: prefer a snippet
+  shape that exercises a loop/boundary-check, not just a single
+  unconditionally-consumed token — a mutation test against the real parser
+  is the way to check.
+
+# Statement-Support Verification Sweep (2026-07-22/23)
+
+A fresh verification pass (PR #99, #100, #101 — distinct from, and later
+than, the Silent-Drop Audit series above) found nine more real gaps by the
+same "does something vanish from the AST with `success==True`?" standard,
+this time concentrated on **comma-separated operand lists** and a handful
+of unrelated clause-parsing gaps. All pinned by dedicated new test files
+(`test_arithmetic_gaps.py`, `test_call_using_comma_omitted.py`,
+`test_data_pic_usage_gaps.py`, `test_display_goto_cancel_gaps.py`,
+`test_entry_accept_stop_gaps.py`, `test_exec_cics_sql_gaps.py`,
+`test_inspect_before_after.py`, `test_io_control_flow_gaps.py`,
+`test_set_comma_targets.py`, `test_unstring_gaps.py`).
+
+**Comma-separated lists silently truncated at the first comma.** Seven
+independent list-collecting loops accepted a bare `IDENTIFIER`/
+`STRING_LITERAL` sequence but treated `TokenType.COMMA` as an unrecognized
+token — ending the list (and, where no trailing period followed, leaking
+the abandoned names into the procedure scanner as phantom paragraphs).
+Fixed by consuming and skipping the comma in each loop, mirroring the
+`MOVE` parser's pre-existing target-list handling:
+- `call_parser.py` — `CALL ... USING a, b, c` (USING parameters).
+  `TokenType.OMITTED` was also missing from both the boundary-check and
+  parameter-acceptance type sets, so every parameter *from the first
+  `OMITTED` onward* was dropped, not just the placeholder itself
+  (`OMITTED` is a legal USING parameter value per the grammar, not merely a
+  passing-mode modifier).
+- `set_parser.py` — `SET ix1, ix2 UP BY 1` (index/pointer targets).
+- `string_unstring_parsers.py::UnstringStatementParser._parse_into_targets`
+  — `UNSTRING ... INTO a, b, c` (normal COBOL style with commas).
+- `display_parser.py` — `DISPLAY a, b, c` (display items).
+- `go_parser.py` — `GO TO a, b, c DEPENDING ON x` (computed GO TO targets);
+  previously collapsed to a single unconditional target, silently
+  discarding the DEPENDING-selected alternatives.
+- `simple_statement_parsers.py::CancelStatementParser` —
+  `CANCEL prog-a, prog-b` (program-name list).
+- `entry_parser.py` — `ENTRY 'X' USING a, b` (USING parameters); worse than
+  the others, the loop's `else` fallback captured the literal `","` token
+  itself as a parameter name, corrupting arity rather than merely dropping
+  later parameters.
+
+**UNSTRING gained two previously-unimplemented clauses**
+(`string_unstring_parsers.py`, `models/statements/data.py`):
+`DELIMITED BY d1 OR d2 OR ...` now loops to collect every `OR`-joined
+delimiter (`UnstringStatement.delimiters`) instead of keeping only the
+first; `TALLYING IN counter` — documented in the parser's own docstring
+but never implemented — now populates a new
+`UnstringStatement.tallying_variable` field.
+
+**EXEC CICS lost its command verb when written on the line after `EXEC
+CICS`** (`ibm_exec_statements.py`) — the idiomatic, most common layout
+(and the parser's own docstring example). The command-token lookup ran
+before skipping intervening `NEWLINE`/`WHITESPACE` tokens, so the verb was
+misfiled as a bogus options key. Fixed by skipping layout tokens first.
+Separately, EXEC SQL/DLI raw-text reconstruction inserted a spurious space
+when rejoining a lexer-split `>=`/`<=`/`<>` relational operator (each lexes
+as two adjacent tokens), corrupting WHERE-clause text fidelity.
+
+**`INSPECT` `TALLYING`/`REPLACING` `BEFORE`/`AFTER INITIAL` qualifiers**
+(`initialize_inspect_parsers.py`): the original 2026-07-07 implementation
+accepted only one qualifier per FOR-phrase, in a fixed BEFORE-then-AFTER
+order. COBOL allows **both** qualifiers on the same phrase, in **either**
+order (IBM Enterprise COBOL). Refactored into a shared `_parse_before_after`
+helper that loops until neither qualifier matches (each captured at most
+once), used by both `_parse_tallying` and `_parse_replacing`.
+
+**`PIC N(n)` (national/DBCS fields) sized as 1 regardless of `n`**
+(`models/data_items.py::PictureClause`): the size-inference cascade had a
+branch for `X`/`A` (alphanumeric/alphabetic) patterns but none for `N`
+(national), so `PIC N(n)` fell through every numeric/alphanumeric branch to
+the final "no match" default of size 1. Added an `N`/`N(n)` branch
+mirroring the `X`/`A` one — one character position per `N`, no
+double-byte/DBCS byte-doubling (this codebase has no existing DBCS/code-page
+convention to build on, so single-width counting was the more defensible
+choice absent one).
+
+**`USAGE IS <keyword>` silently downgraded to plain `DISPLAY`**
+(`divisions/data_clauses.py`): the USAGE clause parser never consumed the
+optional `IS` token before the usage keyword, so `USAGE IS NATIONAL` /
+`USAGE IS INDEX` / `USAGE IS DISPLAY-1` left `IS` unconsumed and fell
+through without recognizing the keyword after it. `USAGE DISPLAY-1` (no
+`IS` at all) had the same failure for a different reason: `DISPLAY-1`
+lexes as its own dedicated `TokenType` that the clause parser's keyword set
+never checked.
+
+**`START ... KEY IS GREATER THAN OR EQUAL TO key-name`** (`start_parser.py`):
+the trailing `TO` after `OR EQUAL` was never consumed — it arrives as a
+dedicated `TokenType.TO` token, not an `IDENTIFIER`, so the existing
+value-based keyword matching skipped over it, leaving it to block the
+key-name `IDENTIFIER` check (which only matches `TokenType.IDENTIFIER`)
+and everything that should follow: the key-name itself, `INVALID KEY`,
+`NOT INVALID KEY`. All silently failed to parse — not just truncated.
+
+**`WRITE ... AT END-OF-PAGE` / `NOT AT END-OF-PAGE`** (`write_parser.py`,
+`models/statements/io.py`): format-1 (sequential/line-sequential file)
+clause was entirely unimplemented — only format-2's `INVALID KEY`/
+`NOT INVALID KEY` (indexed/relative files) was handled. Added
+`IOWriteStatement.set_at_eop_clause`/`set_not_at_eop_clause` (the former
+already existed as a field but nothing populated it) parsed the same way
+READ's `AT END`/`NOT AT END` is, via `collect_clause_stmts`. Both branches
+are attempted regardless of file organization — nothing upstream of the
+parser knows which SELECT clause governs the record being written, and the
+two clause families are mutually exclusive in real programs by the
+standard's own grammar, so attempting both is safe.
+
+**`OPEN` with multiple mode groups collapsed every file onto the first
+group's mode** (`models/statements/io.py::IOOpenStatement`): `open_mode`
+only ever reflects the *first* `INPUT`/`OUTPUT`/`I-O`/`EXTEND` group (see
+"Multi-mode OPEN" above, 2026-07-05) — for `OPEN INPUT FILE-A OUTPUT
+FILE-B`, a caller reading `open_mode` alone cannot tell `FILE-B` is really
+`OUTPUT`. Added `IOOpenStatement.file_modes: dict[str, str]` (file name →
+its own mode group's keyword), populated by a new optional `mode` parameter
+on `add_file()`. **Known follow-up, out of scope for this fix:**
+`analysis/crud_matrix.py` and `analysis/io_logger.py` still read
+`.open_mode` alone for every file in a statement; they have not yet been
+updated to consult `file_modes`.
+
+**Arithmetic: `ROUNDED`, multi-target lists, `CORRESPONDING`, `DIVIDE
+REMAINDER`** (`arithmetic_parsers.py`, `models/statements/arithmetic.py`):
+- `ADD`/`SUBTRACT` never checked for `ROUNDED` at all (only `COMPUTE`
+  consumed it — and only to discard it, never storing it).
+  `ArithmeticStatement.rounded` and `ComputeStatement.rounded` are now
+  populated by `set_rounded()`; `ArithmeticStatement.to_dict()` grew a
+  matching `is_corresponding` flag (see below).
+- `ADD`/`SUBTRACT` only captured a **single** target even though COBOL
+  allows a comma/space-separated list (`ADD 1 TO a, b, c`) — extra targets,
+  their per-target `ROUNDED` flags, and downstream `SIZE ERROR` handling
+  were all lost for anything past the first. `ArithmeticStatement.target`
+  (first target, back-compat) is now joined by `ArithmeticStatement.targets`
+  (the full ordered list); `set_target()` appends to both.
+- `DIVIDE ... REMAINDER r` was entirely unimplemented — the `REMAINDER`
+  keyword and its target were left unconsumed. Added
+  `DivideStatement.remainder`, set via `set_remainder()`.
+- `ADD`/`SUBTRACT CORRESPONDING` (`ADD CORRESPONDING a TO b`) was misparsed
+  as a literal operand *named* `"CORRESPONDING"` instead of being
+  recognized as the `CORRESPONDING`/`CORR` keyword. Added
+  `ArithmeticStatement.is_corresponding`, set via `set_corresponding()`.
+- **Self-review fix, same PR:** the new multi-target loop could itself
+  swallow a following paragraph header as a bogus extra target when the
+  ADD/SUBTRACT statement's period was missing — the header vanished from
+  the AST with no warning. Now stops at `looks_like_paragraph_boundary`
+  and records the H9-pattern warning, same as `MoveStatementParser` (see
+  H9 above).
+
+**`DISPLAY ... UPON device-name` dropped everything after the device name**
+(`display_parser.py`): the UPON branch unconditionally `break`s after
+consuming the device token, so a legal trailing clause
+(`DISPLAY x UPON CONSOLE WITH NO ADVANCING`) was dropped, and — because the
+loop exited without consuming the sentence period — the period was left in
+the stream for the procedure-division scanner to misread as an empty
+paragraph named `"."`. Now continues the clause loop (`skip_whitespace` +
+`continue`) instead of breaking, matching the non-UPON path's period
+handling.
+
+**`ACCEPT ... FROM ENVIRONMENT "name"` dropped the environment-variable
+name** (`accept_parser.py`): the pre-existing `IOAcceptStatement.
+environment_name` contract field (scaffolded but never wired, per the M3
+notes above) is now populated when the FROM source is literally
+`ENVIRONMENT`, capturing the following literal/identifier via
+`set_environment_name()` instead of letting it fall through to the generic
+`from_source` capture (string literal case) or being dropped in the
+identifier case.
+
+**`STOP` never consumed its sentence period** (`stop_parser.py`): every
+`STOP RUN.` (and every other STOP form) left the trailing period
+unconsumed, which the procedure-division scanner then misread as a phantom
+empty paragraph named `"."` — the same symptom class as the DISPLAY UPON
+and EOF-sentinel bugs in this section. Fixed with a `consume_period()` call
+at the end of the parser, matching the pattern already used elsewhere in
+the statement parsers.
+
+**EOF sentinel manufactured a phantom trailing paragraph on every program**
+(`divisions/procedure.py`): the PROCEDURE DIVISION dispatch loop's
+"unknown token → treat as a new paragraph name" fallback checks the
+token's value against a keyword-exclusion tuple, but the EOF sentinel
+token's value is the empty string, which isn't in that tuple — so once
+every real paragraph/section was consumed, the loop fell through and
+manufactured a spurious empty-named, zero-statement paragraph at end of
+file, on **every** program lacking a final named paragraph header (i.e.
+almost all of them). This inflated `get_statistics()["total_lines"]`
+(computed as the max AST node line) and `procedure_count` by one. Not
+found by this repo's own test suite — surfaced by a backend integration
+test (outside this repo) asserting `total_lines` stays within 20% of the
+source's real line count. Fixed with an explicit `token.type ==
+TokenType.EOF: break` check ahead of the fallback branch. This is the
+**third** distinct root cause found to produce a phantom "."-or-empty
+trailing paragraph (the other two: DISPLAY UPON above, and STOP's missing
+period consumption above) — all three share the same symptom
+(`procedure_count` one higher than the real paragraph count, a bogus
+zero-statement `CobolParagraph` at the end of the AST) but are unrelated
+bugs in different parsers, worth remembering as a recognizable fingerprint
+if a fourth instance ever turns up.
+
+**Documentation debt this section closes:** all nine fixes above (commits
+`5492c40`, `824f654`, `64ff7b9`, `316f0ce`, `82a82ec`, `68f68c0`,
+`ddbc688`, `50b6028`, `4a8daa3`, merged via PR #99, #100, #101) landed on
+`main` on 2026-07-22/23 without a matching OKF/`CHANGELOG.md`/
+`open-findings.md` update — this section, the corresponding
+[ast-models.md](ast-models.md) field notes, [log.md](log.md) entries, and
+`CHANGELOG.md` (Unreleased → Fixed) reconcile that gap retroactively.
+
+# Follow-up comma-list sweep: INITIALIZE, SORT/MERGE KEY/USING/GIVING, arithmetic GIVING + format-1 targets (2026-07-24)
+
+While auditing the repo for outstanding gaps (user request: "make sure
+there is no gaps in the cobolparser"), re-verified the comma-truncation
+bug class the 2026-07-22/23 sweep above fixed in CALL/SET/UNSTRING/
+DISPLAY/GO TO/CANCEL/ENTRY against the parsers that sweep didn't touch,
+using the same repro method (`parse_cobol()` against a minimal program,
+inspect `ParseResult.errors`/`.warnings` and the resulting AST). Found and
+fixed five more real instances (four from the repro sweep, a fifth from a
+second-opinion review of this same pass — see below) — all pinned by
+`tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`:
+
+* **`INITIALIZE id-1, id-2, ...`** (`initialize_inspect_parsers.py`): the
+  target-collection loop broke on `TokenType.COMMA` (a warned drop — every
+  target after the first comma was lost). Fixed by skipping the comma and
+  continuing, same pattern as the other comma fixes.
+* **`SORT`/`MERGE` `{ASCENDING|DESCENDING} KEY field-1, field-2 ...`**
+  (`sort_merge_parsers.py::_parse_keys`, shared by both statements): the
+  field-collection loop's `else: break` fired on `TokenType.COMMA` —
+  **and unlike every other instance of this bug class, with no warning at
+  all** (`errors=[], warnings=[]`): the field simply vanished from
+  `SortStatement.keys`/`MergeStatement.keys`. Worse in a second way too:
+  because the comma-truncated inner loop returned control to the outer
+  clause loop with the comma token still unconsumed, and that outer loop's
+  `else: token_stream.consume()` fallback silently eats one token at a
+  time with no boundary check, a `USING`/`GIVING` clause immediately
+  following the truncated KEY list could itself be partially consumed as
+  noise before the outer loop's keyword checks ever saw it intact,
+  depending on exact spacing — not separately confirmed as a live
+  secondary symptom, but a real risk the comma fix also closes by
+  construction (the inner loop never returns with an unconsumed comma
+  anymore).
+* **`SORT`/`MERGE` `USING file-1, file-2 ...` / `GIVING file-1, file-2
+  ...`** (`sort_merge_parsers.py::_parse_file_list`, shared by both
+  statements and by both the USING and GIVING clauses): same `else:
+  break`-on-COMMA defect, same fully-silent symptom.
+* **`ADD`/`SUBTRACT`/`MULTIPLY`/`DIVIDE ... GIVING id-3 [ROUNDED] [id-4
+  [ROUNDED]] ...`** (`arithmetic_parsers.py`,
+  `models/statements/arithmetic.py`): the standard grammar allows GIVING
+  to carry a comma/space-separated list of result targets (each value
+  computed once, stored to every target) — symmetric with the TO/FROM
+  target list already fixed for ADD/SUBTRACT in the 2026-07-22/23 sweep,
+  but that fix only extended the TO/FROM side; GIVING still used
+  `consume_keyword_and_operand`, which returns a single string and had no
+  list-continuation logic (a warned drop: extra GIVING targets triggered
+  the generic "Unparsed tokens" warning). Fixed by adding
+  `ArithmeticStatement.givings: list[str]` (mirrors the existing `target`/
+  `targets` split — `.giving` keeps the first for back-compat) and a new
+  `_consume_additional_giving_targets` helper, mirroring
+  `_consume_additional_arithmetic_targets`'s comma/space/ROUNDED/
+  paragraph-boundary-guard logic exactly, called after the first GIVING
+  target is captured in all five call sites (ADD's TO and GIVING branches,
+  SUBTRACT's FROM and GIVING branches, and the shared MULTIPLY/DIVIDE
+  `_parse_binary_arithmetic`). DIVIDE's `REMAINDER` clause (which follows
+  GIVING) is in the new helper's stop-keyword set so it isn't swallowed as
+  a bogus extra GIVING target.
+
+**Fifth instance, found by a second-opinion review of this pass rather
+than by the corpus/repro sweep above:** MULTIPLY/DIVIDE format 1 (no
+GIVING) has the identical multi-target gap on its *own* side, not just
+GIVING's. Format 1 (`MULTIPLY x BY id-2 [ROUNDED] [id-3 [ROUNDED]] ...` /
+`DIVIDE x INTO id-2 [ROUNDED] [id-3 [ROUNDED]] ...`) overwrites its second
+operand(s) in place — unlike format 2 (GIVING), where the second operand
+is just a multiplicand/divisor left untouched — so it is itself a
+comma/space-separated target list, and `_parse_binary_arithmetic` only
+ever consumed a single second operand via `_consume_arithmetic_operand`
+(warned drop for anything after a comma). Fixed by having
+`_parse_binary_arithmetic`, when no GIVING clause follows, additionally
+call `stmt.set_target(second_operand)` (seeding `.target`/`.targets` —
+new for MULTIPLY/DIVIDE, previously these only ever appeared in
+`.operands` as untyped strings) and then reuse the *same*
+`_consume_additional_arithmetic_targets` helper ADD/SUBTRACT's TO/FROM
+list already uses, rather than writing a parallel implementation.
+Deliberately scoped to the no-GIVING branch only: format 2 (GIVING) must
+**not** gain a spurious `.target` — the second operand there is not a
+result — verified by an explicit regression case
+(`test_divide_format2_giving_unaffected_by_format1_fix`).
+`_ADDITIONAL_TARGET_STOP_KEYWORDS` (shared with ADD/SUBTRACT's TO/FROM
+list) gained `"REMAINDER"` so DIVIDE's tolerated no-GIVING
+`DIVIDE x INTO y REMAINDER r` form (see the REMAINDER note above) doesn't
+have its REMAINDER clause swallowed as a bogus extra target — safe to add
+to the shared set since REMAINDER is a COBOL reserved word and can never
+be a legal ADD/SUBTRACT target data-name either. The `_BinaryArithmeticNode`
+structural `Protocol` (used to type-check the shared MULTIPLY/DIVIDE
+helper against both node classes without a common base class) gained
+`set_target` alongside its existing `add_operand`/`set_giving`/
+`set_rounded` methods.
+
+**Targeted follow-up round (still 2026-07-24), scoped by user decision:**
+after presenting the five fixes above, checked the remaining known
+list-collecting loops in the parser (per the enumeration in the
+2026-07-08 "unsupported-verb boundary gap" audit above) for the same
+comma-truncation property. Two more real, live bugs found and fixed,
+pinned in the same test file; two candidates checked and confirmed to
+need no fix:
+
+* **`CALL ... USING BY REFERENCE|CONTENT|VALUE` mode does not persist
+  across a comma-separated parameter list within one BY-phrase group**
+  (`call_parser.py::_parse_using_clause`): `passing_mode = "REFERENCE"`
+  was reset at the top of *every* loop iteration (i.e. every parameter),
+  not just when a fresh `BY` keyword was actually seen. `CALL 'P' USING
+  BY CONTENT a, b` — comma-separated within the same BY CONTENT group —
+  correctly tagged `a` as CONTENT but silently mode-tagged `b` back to
+  the REFERENCE default. Not a data-drop (both parameter *names* survived
+  intact), but a silent semantic corruption: `b` would need to be passed
+  by content (a copy) but was recorded as passed by reference (the actual
+  variable), a distinction that matters for whether the called program
+  can mutate the caller's data. Fixed by initializing `passing_mode` once
+  before the loop instead of inside it, so it only changes when a `BY`
+  keyword is actually encountered.
+* **`COMPUTE id-1, id-2 = expr` (comma-separated multi-target) was a hard
+  parse failure**, not a silent/warned drop (`arithmetic_parsers.py`,
+  `ComputeStatementParser.parse`'s additional-target loop): unlike every
+  other instance in this bug class, the target-collection loop had *no*
+  comma handling at all — a comma was left unconsumed, the loop broke
+  immediately (comma is neither ROUNDED nor an IDENTIFIER target), and
+  the subsequent `if token.value == "=": ...` check saw the comma instead
+  and reported `ParseError("COMPUTE statement missing '=' operator")`
+  with **no** `ComputeStatement` node produced at all — a full parse
+  failure (`result.success == False`), worse than every other fix in
+  this file's bug class. Fixed with the same comma-skip pattern as the
+  other loops.
+* **Checked and found NOT to need a fix:** SEARCH's WHEN-condition
+  collector (each `WHEN` clause takes exactly one condition — no list in
+  the grammar) and READ/WRITE's `INTO`/`FROM` clauses (each takes exactly
+  one identifier — also no list). Verified by direct `parse_cobol()` repro
+  before concluding, not by grammar inspection alone.
+
+**Methodology note:** the first draft of the SORT/MERGE regression test
+used a single long fixture line that itself exceeded fixed-format column
+72 (`normalize_fixed_format` truncates columns 73+, per this repo's own
+documented, GnuCOBOL-verified semantics — see the PICTURE-clause
+column-72 entry above) — this produced a `giving_files: ['WS']`-shaped
+truncation that looked like a fifth parser bug but was purely a test-
+fixture artifact (line too long), confirmed via direct lexer/column
+inspection before concluding so. Fixed by wrapping the fixture across two
+lines rather than changing any parser code — a reminder that this
+column-72 gotcha applies to test fixtures using this repo's usual
+7-space/Area-B indentation, not just to real-world source.
 
 # See Also
 

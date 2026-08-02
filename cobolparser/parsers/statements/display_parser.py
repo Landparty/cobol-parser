@@ -96,7 +96,14 @@ class DisplayStatementParser(IStatementParser):
                 if device_token:
                     token_stream.consume()
                     stmt.set_output_device(device_token.value or "")
-                break
+                # Keep looping instead of breaking: clauses may legally
+                # follow the device name (`UPON CONSOLE WITH NO ADVANCING`),
+                # and the sentence period must be consumed like the non-UPON
+                # path does -- breaking here dropped the trailing clause and
+                # left the period in the stream, which the procedure parser
+                # then misread as an empty paragraph named ".".
+                skip_whitespace(token_stream)
+                continue
 
             # Check for AT LINE/COLUMN positioning (M3a)
             if token.type == TokenType.AT:
@@ -143,6 +150,15 @@ class DisplayStatementParser(IStatementParser):
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
+
+            if token.type == TokenType.COMMA:
+                # A comma between display items (e.g. `DISPLAY WS-A, WS-B.`)
+                # is a separator, not a terminator -- skip it and keep
+                # collecting items, mirroring the MOVE/SET parsers'
+                # target-list handling.
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
 
             # Collect display item
             if token.type in (

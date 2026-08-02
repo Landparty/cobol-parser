@@ -297,12 +297,28 @@ class CallStatementParser(IStatementParser):
     ) -> None:
         """Parse USING clause with optional BY REFERENCE|CONTENT|VALUE modifiers."""
 
+        # A BY REFERENCE|CONTENT|VALUE phrase governs every parameter that
+        # follows it until the next BY phrase (``BY CONTENT a, b`` passes
+        # BOTH a and b by content) -- so this must persist across loop
+        # iterations, not reset per parameter. Only re-initialized here,
+        # once, before the first parameter; the loop body below only
+        # overwrites it when an actual BY keyword is seen.
+        passing_mode = (
+            "REFERENCE"  # Default when no BY phrase precedes the first parameter
+        )
         while not token_stream.is_empty():
             skip_whitespace(token_stream)
             token = token_stream.peek()
 
             if not token or token.type == TokenType.PERIOD:
                 break
+
+            # Commas are pure separators between USING parameters (and
+            # between BY-phrase groups); skip them and continue to the next
+            # parameter instead of treating them as the end of the clause.
+            if token.type == TokenType.COMMA:
+                token_stream.consume()
+                continue
 
             # Check for end of USING clause
             if token.type == TokenType.IDENTIFIER and token.value:
@@ -327,11 +343,14 @@ class CallStatementParser(IStatementParser):
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
                 TokenType.VALUE,
+                TokenType.OMITTED,
             ):
                 break
 
-            # Check for BY [REFERENCE|CONTENT|VALUE]
-            passing_mode = "REFERENCE"  # Default
+            # Check for BY [REFERENCE|CONTENT|VALUE] -- only overwrites the
+            # mode established above/by a prior iteration when a BY keyword
+            # is actually present; otherwise passing_mode carries over
+            # unchanged (see the persistence note above the loop).
             if token.type == TokenType.BY or (
                 token.type == TokenType.IDENTIFIER
                 and token.value
@@ -350,9 +369,14 @@ class CallStatementParser(IStatementParser):
                         skip_whitespace(token_stream)
                         token = token_stream.peek()
 
-            # Parse parameter name
-            if token and token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
-                param_name = token.value
+            # Parse parameter name (OMITTED is a valid USING parameter
+            # placeholder per the COBOL grammar, not just a mode modifier).
+            if token and token.type in (
+                TokenType.IDENTIFIER,
+                TokenType.STRING_LITERAL,
+                TokenType.OMITTED,
+            ):
+                param_name = token.value if token.value else "OMITTED"
                 stmt.add_using_parameter(param_name, passing_mode)
                 token_stream.consume()
             else:

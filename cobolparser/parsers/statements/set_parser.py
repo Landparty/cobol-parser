@@ -57,6 +57,13 @@ class SetStatementParser(IStatementParser):
             # be folded into the target list when SET has no trailing period.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
                 break
+            if token.type == TokenType.COMMA:
+                # A comma between targets (e.g. `SET IX1, IX2 UP BY 1.`) is a
+                # separator, not a terminator -- skip it and keep collecting
+                # targets, mirroring the MOVE parser's target-list handling.
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
             if token.type in (
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,

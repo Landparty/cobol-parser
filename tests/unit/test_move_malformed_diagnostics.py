@@ -66,6 +66,30 @@ def test_valid_move_stays_error_free(body):
     )
 
 
+# --- subscripted targets must be preserved, not dropped --------------------
+
+
+@pytest.mark.parametrize(
+    "body,expected_target",
+    [
+        ("           MOVE A TO B(I).\n", "B ( I )"),
+        ("           MOVE 0 TO TBL (3, 5, 2).\n", "TBL ( 3 , 5 , 2 )"),
+        ("           MOVE 0 TO TOTAL (3, 5).\n", "TOTAL ( 3 , 5 )"),
+    ],
+)
+def test_subscripted_target_keeps_subscript(body, expected_target):
+    """A table-reference target's ``(subscript, ...)`` must survive into the
+    AST -- it was previously discarded silently, collapsing a specific table
+    element write (e.g. ``TBL (3, 5, 2)``) down to the bare table name with
+    no error or warning raised."""
+    result = parse_cobol(_program(body), filename="subscript.cob")
+    assert len(result.errors) == 0
+    moves = result.ast.find_all_by_type("MoveStatement")
+    assert any(m.targets == [expected_target] for m in moves), [
+        m.targets for m in moves
+    ]
+
+
 def test_malformed_move_does_not_block_following_statements():
     """A malformed MOVE records an error but recovery keeps parsing going."""
     src = (

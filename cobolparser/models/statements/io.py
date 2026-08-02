@@ -192,10 +192,11 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         self.record_name: str | None = None
         self.from_clause: str | None = None
         self.advancing_clause: dict[str, Any] | None = (
-            None  # {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"}
+            None  # {"type": "BEFORE"|"AFTER", "value": ..., "unit": "LINES"|"CHANNEL"|"MNEMONIC"}
         )
         self.delete_record: bool = False  # For VSAM DELETE
         self.at_eop_clause: list[CobolStatement] | None = None  # AT END-OF-PAGE
+        self.not_at_eop_clause: list[CobolStatement] | None = None  # NOT AT END-OF-PAGE
         self.invalid_key_clause: list[CobolStatement] | None = None
         self.not_invalid_key_clause: list[CobolStatement] | None = None
         self.retry_count: int | None = None
@@ -218,14 +219,35 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         self._add_unique_operand(source)
 
     def set_advancing(
-        self, mode: str, lines: int | None = None, page: bool = False
+        self,
+        mode: str,
+        lines: int | None = None,
+        page: bool = False,
+        identifier: str | None = None,
+        mnemonic: str | None = None,
     ) -> None:
-        """Set the ADVANCING clause."""
+        """Set the ADVANCING clause.
+
+        ``identifier`` is a data-name holding a line count (e.g.
+        ``ADVANCING WS-LINE-COUNT LINES``); ``mnemonic`` is a SPECIAL-NAMES
+        mnemonic-name for a printer channel (e.g. ``ADVANCING TOP-OF-PAGE``,
+        defined via ``SPECIAL-NAMES. C01 IS TOP-OF-PAGE``) and takes no
+        LINE/LINES suffix.
+        """
         mode_upper = mode.upper()
+        if mnemonic is not None:
+            value: Any = mnemonic
+            unit: str | None = "MNEMONIC"
+        elif identifier is not None:
+            value = identifier
+            unit = "LINES"
+        else:
+            value = lines if lines else ("PAGE" if page else None)
+            unit = "CHANNEL" if page else ("LINES" if lines else None)
         self.advancing_clause = {
             "type": mode_upper,  # BEFORE or AFTER
-            "value": lines if lines else ("PAGE" if page else None),
-            "unit": "CHANNEL" if page else ("LINES" if lines else None),
+            "value": value,
+            "unit": unit,
         }
         if self.advancing_clause:
             self.metadata["uses_advancing"] = True
@@ -237,6 +259,12 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
     def set_at_eop_clause(self, statements: list["CobolStatement"]) -> None:
         """Set the AT END-OF-PAGE clause."""
         self.at_eop_clause = statements
+        for stmt in statements or []:
+            self.add_child(stmt)
+
+    def set_not_at_eop_clause(self, statements: list["CobolStatement"]) -> None:
+        """Set the NOT AT END-OF-PAGE clause."""
+        self.not_at_eop_clause = statements
         for stmt in statements or []:
             self.add_child(stmt)
 
@@ -266,6 +294,7 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
         result.update(
             self._serialize_clauses(
                 "at_eop_clause",
+                "not_at_eop_clause",
                 "invalid_key_clause",
                 "not_invalid_key_clause",
             )
@@ -288,6 +317,13 @@ class IOOpenStatement(CobolStatement):
         super().__init__("OPEN", location)
         self.open_mode: str | None = None  # INPUT, OUTPUT, I-O, EXTEND
         self.file_names: list[str] = []
+        # Per-file mode, keyed by file name (e.g. {"FILE-A": "INPUT",
+        # "FILE-B": "OUTPUT"} for `OPEN INPUT FILE-A OUTPUT FILE-B`).
+        # `open_mode` above only ever reflects the *first* mode group, which
+        # is indistinguishable from every other file's mode to a downstream
+        # consumer (CRUD matrix, IO sequence analyzer) keyed off it alone --
+        # this dict is the authoritative per-file source of truth.
+        self.file_modes: dict[str, str] = {}
         self.with_reposition: bool = False
         self.reel_unit_control: str | None = None  # Contract field
         self._metadata = {
@@ -298,11 +334,19 @@ class IOOpenStatement(CobolStatement):
         """Set the OPEN mode."""
         self.open_mode = mode.upper()  # INPUT, OUTPUT, I-O, EXTEND
 
-    def add_file(self, file_name: str) -> None:
-        """Add a file to open."""
+    def add_file(self, file_name: str, mode: str | None = None) -> None:
+        """Add a file to open, optionally recording its own mode group.
+
+        *mode* is the mode keyword (INPUT/OUTPUT/I-O/EXTEND) of the mode
+        group *file_name* was parsed under -- distinct from ``open_mode``,
+        which only ever tracks the statement's first mode group. Omitted
+        (``None``) when the caller has no per-file mode to record.
+        """
         if file_name not in self.file_names:
             self.file_names.append(file_name)
             self.operands.append(file_name)
+        if mode:
+            self.file_modes[file_name] = mode.upper()
 
     def set_reposition(self, reposition: bool = True) -> None:
         """Set the REPOSITION flag for VSAM files."""
@@ -320,6 +364,7 @@ class IOOpenStatement(CobolStatement):
             {
                 "open_mode": self.open_mode,
                 "file_names": self.file_names,
+                "file_modes": self.file_modes,
                 "with_reposition": self.with_reposition,
                 "reel_unit_control": self.reel_unit_control,  # Contract field
             }

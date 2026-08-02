@@ -222,6 +222,9 @@ def parse_data_item_clauses_fast(
         # REDEFINES clause
         if value_upper == "REDEFINES":
             pos += 1  # consume REDEFINES
+            # The target may sit on the next line (continuation).
+            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                pos += 1
             if pos < n:
                 redef_token = tokens[pos]
                 if redef_token is not None and redef_token.type is identifier_type:

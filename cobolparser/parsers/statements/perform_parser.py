@@ -3,6 +3,7 @@
 import logging
 from typing import Any, cast
 
+from cobolparser.parsers.statements._conditions import build_condition_expression
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
@@ -31,6 +32,23 @@ _NOISE_TOKEN_TYPES = (
 )
 
 
+def _is_procedure_name_token(token: Token | None) -> bool:
+    """True if *token* can name a procedure: an identifier, or an all-digit
+    numeric token. COBOL permits all-digit paragraph/section names, and
+    ``PERFORM 1000 THRU 1999`` numbering is idiomatic in THRU-style code;
+    the lexer emits those names as NUMERIC_LITERAL (or LEVEL_NUMBER for 1-2
+    digit values), never IDENTIFIER.
+    """
+    if token is None or not token.value:
+        return False
+    if token.type == TokenType.IDENTIFIER:
+        return True
+    return (
+        token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+        and token.value.isdigit()
+    )
+
+
 def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | None:
     """Look ahead past whitespace/comment/newline/continuation tokens without consuming.
 
@@ -47,6 +65,32 @@ def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | No
         if token.type not in _NOISE_TOKEN_TYPES:
             return token
         offset += 1
+
+
+def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
+    """Build the UNTIL condition node from its collected token strings.
+
+    Backward-compatible shape (M12): the returned node is still a
+    ``CobolExpression("CONDITION")`` whose ``operands`` hold the single raw
+    joined condition string -- exactly what every pre-M12 consumer reads.
+    Additionally, the same tokens are decomposed with the IF parser's
+    shared condition machinery and attached as ``condition_tree`` (a
+    ConditionalExpression / LogicalExpression tree), so callers can walk
+    the condition structurally. Tree building is best-effort and never
+    fails the PERFORM parse.
+    """
+    condition_str = " ".join(condition_tokens).strip()
+    condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
+    condition_expr.operands = [condition_str]
+    try:
+        tree = build_condition_expression(list(condition_tokens), SourceLocation(0, 0))
+    except Exception:
+        # Strictly fail-soft: a condition the shared machinery cannot
+        # handle keeps the raw string with no structural tree.
+        tree = None
+    if tree is not None:
+        condition_expr.set_condition_tree(tree)
+    return condition_expr
 
 
 def _warn_stray_trailing_token(stream: ITokenStream, token: Token) -> None:
@@ -189,6 +233,12 @@ class PerformStatementParser(IStatementParser):
 
         # Check for TIMES clause (inline PERFORM n TIMES)
         # Check for numeric literals: TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER, or numeric IDENTIFIER
+        # The numeric token is only a TIMES count when TIMES/TIME actually
+        # follows -- checked via lookahead *before* consuming. COBOL also
+        # allows all-digit procedure names (PERFORM 1000 THRU 1999), so a
+        # numeric token with no TIMES after it must fall through to the
+        # procedure-name-target branch below instead of being consumed as a
+        # failed TIMES count and lost.
         if token and (
             token.type == TokenType.NUMERIC_LITERAL
             or token.type == TokenType.LEVEL_NUMBER
@@ -198,32 +248,33 @@ class PerformStatementParser(IStatementParser):
                 and token.value.isdigit()
             )
         ):
-            try:
-                times_count = int(token.value)
-                token_stream.consume()
-                token = token_stream.peek()
-                # Check for TIMES keyword: TokenType.TIMES or IDENTIFIER "TIMES"
-                if token and (
-                    token.type == TokenType.TIMES
-                    or (
-                        token.type == TokenType.IDENTIFIER
-                        and token.value
-                        and token.value.upper() in ("TIMES", "TIME")
-                    )
-                ):
-                    token_stream.consume()
+            lookahead = _peek_next_meaningful(token_stream, 1)
+            if lookahead and (
+                lookahead.type == TokenType.TIMES
+                or (
+                    lookahead.type == TokenType.IDENTIFIER
+                    and lookahead.value
+                    and lookahead.value.upper() in ("TIMES", "TIME")
+                )
+            ):
+                try:
+                    times_count = int(token.value)
+                    token_stream.consume()  # the count
+                    skip_whitespace(token_stream)
+                    token_stream.consume()  # TIMES keyword
                     stmt.set_times_clause(times_count)
                     # Parse inline statements until END-PERFORM
                     self._parse_inline_statements(token_stream, stmt)
                     return stmt
-            except (ValueError, TokenMismatch, UnexpectedEndOfInput):
-                pass
+                except (ValueError, TokenMismatch, UnexpectedEndOfInput):
+                    pass
 
             skip_whitespace(token_stream)
             token = token_stream.peek()
 
-        # Simple PERFORM paragraph-name
-        if token and token.type == TokenType.IDENTIFIER:
+        # Simple PERFORM procedure-name (an identifier, or an all-digit
+        # numeric paragraph name -- e.g. PERFORM 1000 THRU 1999)
+        if token and _is_procedure_name_token(token):
             paragraph = token.value
             stmt.set_target_paragraph(paragraph)
             try:
@@ -244,8 +295,12 @@ class PerformStatementParser(IStatementParser):
             ):
                 try:
                     token_stream.consume()  # Skip THRU/THROUGH
+                    # The end name may sit on a continuation line
+                    # (PERFORM name THRU\n    other-name), so newline and
+                    # whitespace tokens must be skipped before peeking it.
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
-                    if token and token.type == TokenType.IDENTIFIER:
+                    if token and _is_procedure_name_token(token):
                         stmt.set_thru_paragraph(token.value)
                         token_stream.consume()
                         token = token_stream.peek()
@@ -639,10 +694,9 @@ class PerformStatementParser(IStatementParser):
             skip_whitespace(stream)
             condition_tokens = self._collect_until_condition_tokens(stream)
             if condition_tokens:
-                condition_str = " ".join(condition_tokens).strip()
-                condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
-                condition_expr.operands = [condition_str]
-                stmt.set_until_clause(condition_expr)
+                stmt.set_until_clause(
+                    _make_until_condition_expression(condition_tokens)
+                )
             self._parse_inline_statements(stream, stmt)
         except ParseError as exc:
             # H4: previously silent -- see _parse_varying_clause above.
@@ -664,10 +718,7 @@ class PerformStatementParser(IStatementParser):
                 stream, for_varying=True
             )
             if condition_tokens:
-                condition_str = " ".join(condition_tokens).strip()
-                condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
-                condition_expr.operands = [condition_str]
-                return condition_expr
+                return _make_until_condition_expression(condition_tokens)
         except ParseError as exc:
             # H4: previously silent -- see _parse_varying_clause above.
             logger.debug(
@@ -725,11 +776,9 @@ class PerformStatementParser(IStatementParser):
 
             # Create CobolExpression for the condition and set it on statement
             if condition_tokens:
-                condition_str = " ".join(condition_tokens).strip()
-                location = SourceLocation(0, 0)  # Default location
-                condition_expr = CobolExpression("CONDITION", location)
-                condition_expr.operands = [condition_str]
-                stmt.set_until_clause(condition_expr)
+                stmt.set_until_clause(
+                    _make_until_condition_expression(condition_tokens)
+                )
         except (TokenMismatch, UnexpectedEndOfInput):
             pass
 

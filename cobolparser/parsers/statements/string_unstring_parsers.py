@@ -233,15 +233,24 @@ class UnstringStatementParser(IStatementParser):
                 if nxt and _val(nxt) == "BY":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    # Optional ALL
-                    nxt = token_stream.peek()
-                    if nxt and _val(nxt) == "ALL":
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                    d = token_stream.peek()
-                    if d and d.type != TokenType.PERIOD:
+                    # Optional ALL delimiter [OR [ALL] delimiter ...]
+                    while True:
+                        nxt = token_stream.peek()
+                        if nxt and _val(nxt) == "ALL":
+                            token_stream.consume()
+                            skip_whitespace(token_stream)
+                        d = token_stream.peek()
+                        if not d or d.type == TokenType.PERIOD:
+                            break
                         token_stream.consume()
                         stmt.add_delimiter(d.value or "")
+                        skip_whitespace(token_stream)
+                        nxt = token_stream.peek()
+                        if nxt and _val(nxt) == "OR":
+                            token_stream.consume()
+                            skip_whitespace(token_stream)
+                        else:
+                            break
             elif val == "INTO":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -257,6 +266,17 @@ class UnstringStatementParser(IStatementParser):
                     if pv and pv.type != TokenType.PERIOD:
                         token_stream.consume()
                         stmt.set_pointer_variable(pv.value or "")
+            elif val == "TALLYING":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                nxt = token_stream.peek()
+                if nxt and _val(nxt) == "IN":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    tv = token_stream.peek()
+                    if tv and tv.type != TokenType.PERIOD:
+                        token_stream.consume()
+                        stmt.set_tallying_variable(tv.value or "")
             elif val == "ON":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -356,6 +376,11 @@ class UnstringStatementParser(IStatementParser):
                     current_count_var = None
                 token_stream.consume()
                 current_target = tgt.value or ""
+            elif tgt.type == TokenType.COMMA:
+                # A comma between INTO targets (normal COBOL style) is a
+                # separator, not a terminator -- skip it and keep collecting
+                # targets rather than ending the list here.
+                token_stream.consume()
             else:
                 break
             skip_whitespace(token_stream)

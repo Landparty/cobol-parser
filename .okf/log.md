@@ -1,5 +1,675 @@
 # OKF Update Log
 
+## 2026-07-27 (validate_copybook_content: multiline missing-period regex + comment-only misreport)
+
+User-reported pair of bugs in `cobolparser/preprocess/__init__.py`'s
+`validate_copybook_content`, both specific to copybooks that start with (or
+contain) comment lines — confirmed by direct script reproduction before any
+fix was written, per this repo's TDD convention.
+
+* **Updated** [preprocessing.md](preprocessing.md): documented both fixes
+  under "Copybook Expansion".
+  1. `_DATA_DEF_RE` used bare `\s`, which matches newlines. Since
+     `remove_comment_lines` blanks comment lines to whitespace *before*
+     `validate_copybook_content` runs, `^\s*` could bridge across those
+     blanked lines and `[^\s]+` (not excluding `.`) swallowed a trailing
+     period — producing false "missing terminating period" warnings on
+     correctly-terminated lines, misattributed to the wrong line (reproduced:
+     a copybook with 2 leading comment lines + 2 correctly-terminated code
+     lines got both flagged, warnings attached to line 1 and line 4 instead
+     of neither). Fixed by switching internal `\s`/`\s+`/`\s*` to
+     `[ \t]`/`[ \t]+`/`[ \t]*` (can't cross a line) and the value token to
+     `[^\s]*[^\s.]` ("non-whitespace, not ending in a period" — excludes
+     only a trailing period, not a PICTURE's own internal decimal point).
+     An initial `[^\s.]+` draft excluded periods everywhere in the token,
+     which silently broke detection for decimal-point PICs like
+     `PIC 9(5).99` with a genuinely missing terminator — caught by the
+     advisor review before landing, fixed, and pinned with two more tests.
+  2. The "contains only comments" check was dead code in the real pipeline:
+     `remove_comment_lines` already blanks every comment line before
+     `validate_copybook_content` sees the content, so a genuinely
+     comment-only copybook fell into the earlier "is empty" branch instead —
+     misleading, since comment-only is a legitimate documentation-only
+     pattern. Fixed by adding an optional `raw_content` parameter (the
+     pre-strip source); `_expand_source_recursive` now captures and passes
+     it so the correct message is reported.
+* Added regression tests to
+  `tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
+  (6 new cases, written and confirmed failing before each fix) and
+  strengthened `tests/unit/test_copybook_expander_coverage.py::
+  TestExpandCopybooks::test_content_validation` to assert the exact message
+  instead of just "warnings is non-empty".
+* Full suite green: 7102 passed / 13 skipped / 1 xfailed, 92.20% coverage
+  (up from 7096, no regressions). `ruff check`, `black --check`, and
+  `mypy cobolparser/` clean on touched files.
+
+## 2026-07-24 (targeted follow-up round: CALL BY-mode persistence, COMPUTE comma targets; vendor sync)
+
+User-scoped follow-up after reviewing the five-fix sweep below ("one more
+targeted round: SEARCH WHEN conditions, CALL BY CONTENT/REFERENCE groups,
+READ/WRITE INTO clauses"). Checked those plus COMPUTE (an obvious sibling
+of the just-fixed ADD/SUBTRACT/MULTIPLY/DIVIDE target lists). Found and
+fixed two more real bugs, confirmed two candidates needed no fix:
+
+* **Updated** [parser.md](parser.md): CALL's `BY REFERENCE`/`CONTENT`/
+  `VALUE` passing mode didn't persist across a comma-separated parameter
+  list within one BY-phrase group (`passing_mode` was reset to the
+  REFERENCE default every loop iteration instead of only when a fresh
+  `BY` keyword appeared) — a silent semantic corruption (parameter names
+  intact, mode wrong), not a data-drop. COMPUTE's multi-target comma list
+  (`COMPUTE A, B = expr`) had zero comma handling and was a **hard parse
+  failure** ("COMPUTE statement missing '=' operator", no AST node at
+  all) — worse than every other fix in this bug class, which were all
+  silent/warned drops rather than outright failures. SEARCH's
+  WHEN-condition collector and READ/WRITE's INTO/FROM clauses were
+  checked and confirmed (by direct repro, not grammar inspection alone)
+  to need no fix — neither takes a list per the standard grammar.
+* **Updated** [ast-models.md](ast-models.md): new note on
+  `CallStatement.using_parameters`' mode-persistence fix.
+* Extended `tests/unit/test_initialize_sort_arithmetic_comma_gaps.py` to
+  29 tests (was 22): `TestCallByModePersistsAcrossCommaList` (3),
+  `TestComputeCommaTargets` (4).
+* Full suite green: 7096 passed / 13 skipped / 1 xfailed, 92.20% coverage
+  (up from 7089, no regressions). `ruff check .`, `black --check .`, and
+  `mypy cobolparser/` all clean on touched files.
+* **Vendor sync**: `backend/_vendor/cobol-parser/cobolparser/` was stale
+  (predated even PR #99-#101) — user approved syncing it. Copied via
+  `cp -r cobolparser/. ../backend/_vendor/cobol-parser/cobolparser/`
+  (note the trailing `/.`: a bare `cp -r src/ dst/` against an
+  **already-existing** `dst/` nests `dst/src/` instead of overwriting —
+  hit this on the first attempt, caught via `diff -rq`, corrected).
+  Also found and removed one genuinely stale leftover file in the vendor
+  copy predating this repo's own 2026-07-14 `program_flow.py` →
+  `program_flow/` package refactor (the source repo has no flat
+  `program_flow.py` anymore; the vendor copy still had both the stale
+  file and the new package, an ambiguous same-name module+package
+  situation `cp -r` alone doesn't clean up since it only adds/overwrites,
+  never deletes). Verified post-sync via a standalone import + parse
+  smoke test against the vendored copy directly (not the full backend
+  service, whose own dependencies weren't verified in this pass).
+  `diff -rq` confirms full parity with `cobol-parser/cobolparser/`
+  (excluding `__pycache__`) after the fix. Re-synced a second time after
+  the CALL/COMPUTE fixes above landed.
+* `CHANGELOG.md` (Unreleased → Fixed) and `reports/open-findings.md`
+  updated in the same pass.
+
+## 2026-07-24 (follow-up comma-list sweep: INITIALIZE, SORT/MERGE KEY/USING/GIVING, arithmetic GIVING)
+
+Continuing the gap audit (user request: "make sure there is no gaps in the
+cobolparser") after reconciling the doc debt below, re-verified the
+comma-truncation bug class the 2026-07-22/23 sweep fixed elsewhere against
+parsers that sweep didn't touch. Found and fixed four more real instances,
+via direct `parse_cobol()` repro (not spec-recitation) before writing any
+fix, per this repo's established methodology. A subsequent advisor
+second-opinion review of this same pass surfaced a fifth, adjacent
+instance (MULTIPLY/DIVIDE format-1 multi-target, distinct from the GIVING
+multi-target fix already made) that the repro sweep itself had not
+covered — confirmed empirically the same way, then fixed and pinned
+alongside the other four rather than left as a known gap.
+
+* **Updated** [parser.md](parser.md): new "Follow-up comma-list sweep:
+  INITIALIZE, SORT/MERGE KEY/USING/GIVING, arithmetic GIVING (2026-07-24)"
+  section. `INITIALIZE id-1, id-2, ...` (warned drop, now fixed).
+  `SORT`/`MERGE` `KEY field-1, field-2 ...` — **fully silent**
+  (`errors=[], warnings=[]`), the worst instance of this bug class found
+  to date. `SORT`/`MERGE` `USING`/`GIVING file-1, file-2 ...` — also fully
+  silent, same shared `_parse_file_list` helper. `ADD`/`SUBTRACT`/
+  `MULTIPLY`/`DIVIDE ... GIVING id-3, id-4 ...` (multi-target GIVING list,
+  symmetric with the TO/FROM multi-target fix from 2026-07-22/23, which
+  did not extend to GIVING).
+* **Updated** [ast-models.md](ast-models.md): new field notes for
+  `ArithmeticStatement.givings: list[str]` and `MultiplyStatement`/
+  `DivideStatement` now populating `.target`/`.targets` for format 1.
+* New test file `tests/unit/test_initialize_sort_arithmetic_comma_gaps.py`
+  (22 tests) pins all five fixes plus back-compat coverage for the
+  pre-existing single-target/space-separated forms, including an explicit
+  guard that format-2 (GIVING) MULTIPLY/DIVIDE do NOT gain a spurious
+  `.target`.
+* **Methodology note kept in parser.md:** the SORT/MERGE test's first
+  draft used a fixture line that itself exceeded fixed-format column 72,
+  producing a `giving_files: ['WS']`-shaped truncation that initially
+  looked like a fifth bug. Confirmed via direct lexer/column inspection
+  that this was a test-fixture artifact (this repo's own documented
+  column-72 truncation semantics, correctly applied) before concluding
+  so — fixed by reformatting the fixture across two lines, not by
+  changing parser code. Recorded as a reminder for future fixture
+  authoring in this repo, not as a finding.
+* Full suite green after all five fixes: 7089 passed / 13 skipped / 1
+  xfailed, 92.20% coverage (up from the 7067/92.19% baseline — +22 new
+  tests, no regressions). `ruff check .` and `mypy cobolparser/` clean
+  (107 source files; the shared `_BinaryArithmeticNode` structural
+  `Protocol` gained a `set_target` method to type-check the format-1 fix);
+  `black --check .` clean on all touched files (one pre-existing,
+  unrelated formatting drift in
+  `tests/regression/test_tier2_silent_drop_regressions.py`, not touched by
+  this pass, left alone as out of scope).
+* `CHANGELOG.md` (Unreleased → Fixed) and `reports/open-findings.md`
+  updated in the same pass.
+
+## 2026-07-24 (OKF reconciliation for PR #99-#101: statement-support verification sweep + EOF sentinel fix)
+
+Nine fixes landed on `main` 2026-07-22/23 (PR #99, #100, #101 — commits
+`5492c40`, `824f654`, `64ff7b9`, `316f0ce`, `82a82ec`, `68f68c0`,
+`ddbc688`, `50b6028`, `4a8daa3`) with no matching OKF/`CHANGELOG.md`/
+`open-findings.md` update. Reconciled retroactively while auditing this
+repo for outstanding gaps (user request: "make sure there is no gaps in
+the cobolparser").
+
+* **Updated** [parser.md](parser.md): new "Statement-Support Verification
+  Sweep (2026-07-22/23)" section — comma-separated list truncation across
+  seven parsers (CALL USING incl. OMITTED, SET, UNSTRING INTO, DISPLAY
+  items, computed GO TO, CANCEL, ENTRY USING), UNSTRING `DELIMITED BY ...
+  OR ...` + `TALLYING IN`, EXEC CICS command-verb-on-next-line loss + EXEC
+  SQL/DLI operator-rejoin spacing, INSPECT BEFORE+AFTER (both qualifiers,
+  either order), PIC N(n) sizing, USAGE IS optional-IS handling, START KEY
+  OR EQUAL TO trailing TO, WRITE AT END-OF-PAGE/NOT AT END-OF-PAGE, OPEN
+  per-file `file_modes`, ADD/SUBTRACT ROUNDED/multi-target/CORRESPONDING +
+  DIVIDE REMAINDER, DISPLAY UPON clause-continuation + period handling,
+  ENTRY comma, ACCEPT FROM ENVIRONMENT name, STOP period consumption, and
+  the EOF-sentinel phantom trailing paragraph (three distinct root causes
+  now on record for that one symptom: DISPLAY UPON, STOP, and this EOF fix).
+* **Updated** [ast-models.md](ast-models.md): new field notes for
+  `ArithmeticStatement.targets`/`.rounded`/`.is_corresponding`,
+  `DivideStatement.remainder`, `UnstringStatement.tallying_variable` +
+  multi-delimiter `.delimiters`, `IOOpenStatement.file_modes`,
+  `IOWriteStatement.not_at_eop_clause`, `IOAcceptStatement.
+  environment_name`, and `PIC N(n)` sizing.
+* Full suite re-verified green before and independent of this doc pass:
+  7067 passed / 13 skipped / 1 xfailed, 92.19% coverage (no source changes
+  in this pass — documentation only).
+* `reports/open-findings.md` and `CHANGELOG.md` (Unreleased) also updated
+  in the same pass.
+
+## 2026-07-21 (generic swallow-sweep regression test added)
+
+* **Added** `tests/regression/test_swallow_sweep.py`: formalizes the manual
+  "period-less verb + marker statement" probe used throughout the
+  2026-07-05..09 Silent-Drop Audit sections into a permanent, generic sweep
+  — one fixture per class in `create_statement_registry()` (46), cross-product
+  with a `DISPLAY 'MARKER'.` sentinel, asserting the marker survives as its
+  own top-level entry in `CobolParagraph.statements` (not merely somewhere in
+  `get_all_statements()`'s tree-wide recursion, which would false-pass a
+  marker absorbed into a clause body — see design rationale in the test
+  module docstring). A completeness guard fails the suite if a future
+  statement parser is registered with no matching fixture. Validated during
+  development by disabling `MoveStatementParser`'s boundary check and
+  confirming exactly one targeted failure (no collateral damage), then
+  reverting. A second validation pass caught a real gap: the initial
+  ADD/SUBTRACT/MULTIPLY/DIVIDE fixtures used a plain scalar target, which is
+  safe-by-construction (consumed in one shot regardless of any boundary
+  check) and stayed green even with `_consume_arithmetic_target` mutated —
+  redesigned around a subscripted `GIVING` target so they route through the
+  shared `consume_optional_subscript` paren-depth loop instead, confirmed by
+  mutating that loop (all four failed together, then reverted).
+* **Updated** [parser.md](parser.md): new "Generic swallow-sweep regression"
+  section cross-referencing this test from the audit trail it formalizes.
+* **Updated** [tests.md](tests.md): added the new file to the `regression/`
+  directory-layout annotations.
+
+## 2026-07-21 (procedure_registry.py dispatch-order invariant test)
+
+* **Updated** [parser.md](parser.md): added
+  `tests/unit/test_procedure_registry_dispatch_order.py`, closing a gap
+  flagged in review — `create_statement_registry()`'s first-match dispatch
+  order is order-sensitive by design ("more specific before general") but
+  had no automated invariant test, so a misordered future registration
+  would have failed silently at runtime instead of at test/review time.
+  Investigated every `matches()` implementation in
+  `cobolparser/parsers/statements/` to find genuine first-token overlaps;
+  confirmed the only real overlap in the current registry is the IBM EXEC
+  family (`EXEC SQL`/`EXEC CICS`/`EXEC IMS`/`EXEC DLI` all start with
+  `EXEC`, disambiguated on the second token) — every other registered verb
+  matches a distinct `TokenType`. The new test file: (1) pins
+  `create_statement_registry()`'s exact parser order in `EXPECTED_ORDER` so
+  any accidental reorder/insertion/removal in `procedure_registry.py` fails
+  immediately; (2) parametrizes `DISPATCH_CASES` — one real
+  `Token`/`TokenStream` case per registered parser (46 total) — asserting
+  `find_parser()` returns the correct class against the actual production
+  registry, so a future parser with an overly broad `matches()` inserted in
+  the wrong slot is caught by a wrong-class assertion instead of a silent
+  mis-parse; (3) a guard test asserting `DISPATCH_CASES` covers every class
+  the registry actually registers, so the invariant test itself can't
+  silently drift out of sync. Verified the order-pin test actually catches
+  breakage by temporarily swapping two adjacent registrations in a scratch
+  copy — the test failed with a clear index-level diff, then the swap was
+  reverted. Updated the "Adding a New Statement Parser" checklist in
+  parser.md with a step to update this test. Pinned by
+  `tests/unit/test_procedure_registry_dispatch_order.py`.
+
+## 2026-07-21 (copybook REPLACING/`>>IF` ran before sequence-area stripping)
+
+* **Updated** [preprocessing.md](preprocessing.md): user asked to confirm
+  that fixed-format sequence-number (columns 1-6) and identification
+  (columns 73-80) columns are always ignored "even in the copybooks."
+  Confirmed the *default* expansion path already strips them correctly, but
+  found a real gap via direct reproduction (not merely theorized —
+  `expand_copybooks` run against copybooks with real 6-digit sequence
+  numbers and column-72-flush REPLACING targets): `_expand_source_recursive`
+  ran `apply_replacing_clauses`, `preprocess_conditional_compilation`,
+  `validate_copybook_content`, and `validate_level_numbers` on the raw
+  80-column copybook line, stripping sequence/identification columns only
+  *afterward*. A length-changing `REPLACING` therefore shifted the
+  column-72 boundary relative to the original line: a shrinking replacement
+  (`==LONGPLACEHOLDERTAG==` by `==X==`) pulled the identification-area text
+  into the kept window and inserted it into the parsed program; a growing
+  replacement (`==SHORTTAG==` by a longer value) truncated real code,
+  dropping the replaced text's terminating period. Separately, `>>IF`/
+  `>>END-IF` inside a copybook using real (non-blank) sequence numbers were
+  never recognized as directives (the check saw the sequence-number digits
+  before `>>`), so conditional blocks never evaluated.
+  Fix: `_expand_source_recursive`'s copybook-content branch now strips
+  sequence/identification columns and blanks comment lines immediately
+  after reading the file — before REPLACING, conditional compilation, or
+  either validator sees it. `apply_replacing_clauses` gained an
+  `indicator_position: int = 6` parameter (mirroring
+  `normalize_continuation_lines`) so it locates the indicator column
+  correctly on both raw (index 6) and pre-stripped (index 0) content, and
+  `_expand_source_recursive` gained `already_stripped: bool = False` so its
+  own internal strip is skipped when the caller already normalized the
+  content (skipping it unconditionally would double-strip and eat 6 more
+  real characters off every line). One pre-existing unit test
+  (`test_copybook_expander_coverage.py::test_content_validation`) used a
+  synthetic single-line copybook (`"* Just a comment"`, comment marker at
+  column 1, not column 7) that only worked by coincidence against the old
+  naive `.strip().startswith("*")` check; corrected the fixture to use a
+  real fixed-format comment line (6-space sequence area + column-7 `*`).
+  Pinned by
+  `tests/regression/test_copybook_sequence_area_before_replacing.py`. Full
+  suite green (6818 passed / 13 skipped / 1 xfailed).
+
+## 2026-07-21 (PICTURE clause with no terminating period drops the next data item)
+
+* **Updated** [parser.md](parser.md): `parse_picture_clause`
+  (`parsers/divisions/data_clauses.py`) unconditionally treated a NEWLINE as
+  "more picture pattern may follow" (needed for legitimate multi-line
+  PICTURE clauses). When a clause's terminating period was missing, the loop
+  crossed the newline and picked up the *next* data item's own
+  `level-number data-name` pair as more pattern content — the lexer types
+  every 1-2 digit integer as `LEVEL_NUMBER` regardless of context, and
+  `LEVEL_NUMBER` is one of the token types the picture-pattern loop collects.
+  The next item (and all its children) vanished from the AST with
+  `result.success == True` and `result.warnings == []`.
+  Root cause confirmed via a minimal repro (`cobolparser.parse_cobol` on a
+  `REDEFINES ... PIC 9(08)` entry whose terminating period lands at column
+  73): `normalize_fixed_format` extracts only columns 8-72, silently
+  truncating the period. Empirically verified against real GnuCOBOL 3.2 (via
+  mockymock's `mockymock-cobc` Docker container, plain fixed-format `cobc`,
+  no `-free`) that the same source **fails to compile** there too
+  (`group item 'Variable-name' cannot have PICTURE clause` / `syntax error,
+  unexpected Literal`) — GnuCOBOL applies the same column-72 truncation
+  (cobolparser's semantics already match) but never silently accepts the
+  result the way cobolparser did. The bug is not fixed-format-specific: a
+  plain missing period in free-form source hits the identical defect.
+  Fix: `parse_picture_clause`'s NEWLINE branch now looks ahead past the
+  newline for a LEVEL_NUMBER that cannot legally be more PICTURE content —
+  either its value contains a digit other than `0`/`9` (the only two
+  digit-shaped PICTURE symbols), or it's immediately followed by an
+  `IDENTIFIER` (never legal inside a PICTURE pattern — occurrence counts
+  are always parenthesized, e.g. `9(05)`) — and stops the clause there
+  instead of consuming the newline, recording a `ParseResult.warnings`
+  entry — consistent with the "dropped-content signal" contract mockymock's
+  `check_whole_program` PARSE_WARNING refusal gate already depends on
+  (`mocky-mock/.okf/integration.md` Gotchas). The Cython `_data_fast` fast
+  path delegates PICTURE parsing back to this same method, so both paths are
+  fixed together with no `.pyx`/`.c` change needed. Pinned by five new
+  tests written first and confirmed failing against the old behavior:
+  `tests/regression/test_picture_clause_missing_terminator.py`
+  (`TestFixedFormatColumnTruncation` — the literal repro — and
+  `TestFreeFormMissingPeriod` — the same defect with no column truncation
+  involved). Full suite green (6813 passed / 13 skipped / 1 xfailed).
+  **Follow-up (same day, advisor review):** the initial fix keyed only on
+  "LEVEL_NUMBER followed by IDENTIFIER", missing an *anonymous* next item
+  with no data-name at all (`05  REDEFINES ...` — no IDENTIFIER token
+  follows the level number), which still silently corrupted the previous
+  item's pattern and misattached the anonymous item's children to it. Added
+  the digit-content signal above (any digit other than `0`/`9` can never be
+  legal PICTURE content, so the token is unconditionally a real level
+  number) to close that gap without reintroducing a false positive on the
+  legitimate `PIC 9\n99.`-style multi-line continuation (every character of
+  an all-`0`/`9` LEVEL_NUMBER stays ambiguous, so the IDENTIFIER check still
+  gates that case). Also strengthened the original tests to assert
+  parent/child re-attachment explicitly (not just node presence — the
+  original bug's defining symptom was children reattaching to the *wrong*
+  parent) and added `TestAnonymousNextItem`. Full suite green (6815 passed
+  / 13 skipped / 1 xfailed).
+
+## 2026-07-21 (SUBTRACT ... FROM and GIVING subscripted targets dropped)
+
+* **Updated** [parser.md](parser.md): two sibling gaps in the same bug class
+  as the ADD ... TO fix above, both in
+  `parsers/statements/arithmetic_parsers.py` /
+  `parsers/statements/_utils.py`:
+  1. `SubtractStatementParser`'s `FROM` branch consumed an identifier
+     target with a bare `stmt.set_target(tok.value); token_stream.consume()`
+     instead of `_consume_arithmetic_target`, so `SUBTRACT 1 FROM
+     VARIABLE (H, I, 1)` captured only `VARIABLE` and left `( H , I , 1 )`
+     unconsumed as an "Unparsed tokens" content-drop warning. Fixed by
+     routing the `IDENTIFIER` case through `_consume_arithmetic_target`
+     (numeric-literal/level-number/figurative-constant targets, which can
+     never carry a subscript, keep the original bare-consume branch).
+  2. `_utils.consume_keyword_and_operand` — shared by every arithmetic
+     statement's `GIVING` clause (ADD, SUBTRACT, MULTIPLY, DIVIDE) — only
+     accepted a single bare `IDENTIFIER` token, so `ADD 1 TO A GIVING
+     RESULT (H, I, 1)` dropped `(H, I, 1)` from the `GIVING` target too.
+     Fixed by extracting the paren-depth-tracking subscript loop
+     `_consume_arithmetic_target` already had into a new shared
+     `consume_optional_subscript` helper in `_utils.py`, used by both
+     `consume_keyword_and_operand` and (now refactored to call it)
+     `_consume_arithmetic_target` itself.
+  Pinned by three new tests written first and confirmed failing (dropped
+  subscript, non-empty `warnings`/wrong return value) against the old
+  behavior: `tests/unit/test_arithmetic_migration.py::test_subtract_statement_with_subscripted_target`,
+  `::test_add_statement_with_subscripted_giving_target`, and
+  `tests/unit/test_utils_clause_collection.py::TestConsumeKeywordAndOperand::test_consumes_subscripted_target`.
+  Full unit (4625 passed / 4 skipped / 1 xfailed) and regression+integration
+  (1870 passed / 4 skipped) suites all still green; `ruff`/`black`/`mypy`
+  clean on the touched files.
+
+## 2026-07-21 (ADD ... TO subscripted target dropped)
+
+* **Updated** [parser.md](parser.md): `AddStatementParser`'s `TO` branch
+  (`parsers/statements/arithmetic_parsers.py`) consumed its target via a
+  private `_consume_identifier` helper that accepted only a bare
+  `IDENTIFIER` token — unlike `COMPUTE`'s `_consume_arithmetic_target`
+  (already shared), which folds a trailing `(subscript[, subscript]...)`
+  group into the target string. `ADD 1 TO TABLE-ITEM (I, J, K)` therefore
+  captured only `TABLE-ITEM` as the target and left `( I , J , K )`
+  unconsumed as an "Unparsed tokens" content-drop warning; in a
+  two-statement paragraph the recovery was bad enough to drop a
+  *following* subscripted `ADD` statement from the AST entirely. Fixed by
+  switching `AddStatementParser` to call the same `_consume_arithmetic_target`
+  helper COMPUTE uses instead of its own bare-identifier method (removed);
+  `AddStatement.target` now produces the same `"NAME ( SUB1 , SUB2 )"`
+  shape COMPUTE already does for subscripted targets. Pinned by two new
+  tests in `tests/unit/test_arithmetic_migration.py`
+  (`test_add_statement_with_subscripted_target`,
+  `test_add_statement_with_subscripted_target_and_giving`), written first
+  and confirmed failing (dropped/truncated statement, non-empty
+  `warnings`) against the old behavior before the fix. Full unit
+  (4620 passed / 4 skipped / 1 xfailed), regression, and integration
+  suites (1870 passed) all still green; `ruff`/`mypy` clean on the
+  touched files.
+
+## 2026-07-20 (WRITE ADVANCING mnemonic-name / SPECIAL-NAMES mnemonic clauses)
+
+* **WRITE `ADVANCING` now accepts a mnemonic-name or identifier target**
+  (`parsers/statements/write_parser.py`): `BEFORE|AFTER [ADVANCING]
+  {integer-1 | identifier-1 | mnemonic-name-1}` previously only handled
+  `integer-1` — an `IDENTIFIER` token (a line-count data-name, or a
+  SPECIAL-NAMES mnemonic-name like a printer channel) was left
+  unconsumed, and the leftover token was then mis-parsed by the procedure
+  division scanner as a bogus paragraph header (`WRITE rec AFTER
+  ADVANCING TOP-OF-PAGE.` produced an empty `advancing_clause` plus a
+  phantom `TOP-OF-PAGE` paragraph). A trailing `LINE`/`LINES` after the
+  identifier distinguishes `identifier-1` (`unit="LINES"`) from
+  `mnemonic-name-1` (`unit="MNEMONIC"`, no suffix). `PAGE` still hits the
+  existing CHANNEL path.
+* **SPECIAL-NAMES mnemonic-name clauses are now captured**
+  (`parsers/divisions/environment_sections.py`): `implementor-name IS
+  mnemonic-name [ON STATUS IS cond] [OFF STATUS IS cond]` (e.g. `C01 IS
+  TOP-OF-PAGE`, `CONSOLE IS CRT`, UPSI switch forms) previously fell into
+  the SPECIAL-NAMES paragraph's generic unknown-clause fallback and was
+  discarded with no trace. Detected via one-token lookahead (`name IS
+  ...`) and collected into `special_names["mnemonic_definitions"]`.
+  Pinned by `tests/unit/test_special_names.py` and
+  `tests/unit/test_write_advancing.py`. Updated `parser.md`,
+  `ast-models.md`, and `CHANGELOG.md` (Unreleased).
+
+## 2026-07-20 (PERFORM THRU gaps: numeric procedure names + range reachability)
+
+* **All-digit procedure names** (`PERFORM 1000 THRU 1999` numbering):
+  `procedure_boundaries.py` recognizes numeric paragraph headers
+  (`_is_procedure_name_token`), and `perform_parser.py` no longer consumes
+  a numeric token as a speculative TIMES count — TIMES is checked by
+  lookahead first, and all-digit tokens are accepted as the PERFORM target
+  and the THRU end. Updated `parser.md`.
+* **THRU range members reachable**: `program_flow/graph.py`
+  `find_unreachable_nodes` treats every `FlowEdge.range_members` entry as a
+  neighbor of the edge source, ending false `unreachable_nodes` for range
+  intermediates whose fall-through edge was suppressed. Updated
+  `analysis.md`.
+* Pinned by `tests/unit/test_perform_thru_numeric.py` and
+  `tests/unit/analysis/test_program_flow_thru_reachability.py`.
+
+## 2026-07-20 (multi-line REDEFINES clause fix)
+
+A `REDEFINES` keyword separated from its target data-name by a line break
+lost the target (NEWLINE token between keyword and identifier). Fixed in
+both the pure-Python clause loop (`data_clauses.py`, via `_skip_newlines`)
+and the Cython fast path (`_data_fast.pyx`, inline newline-skip loop;
+`_data_fast.c` regenerated with Cython 3.2.4). New multi-line REDEFINES
+cases in `tests/unit/test_data_division_branches.py::TestRedefinesClause`,
+including a forced pure-Python-loop variant. Updated `parser.md`
+(multi-line clause gotcha) and `CHANGELOG.md` (Unreleased → Bug Fixes).
+
+## 2026-07-20 (WRITE BEFORE/AFTER without ADVANCING keyword)
+
+* **`WRITE ... AFTER 1` (no `ADVANCING`) no longer drops the clause**
+  (`parsers/statements/write_parser.py`): the `ADVANCING` keyword is
+  optional in the standard `BEFORE|AFTER [ADVANCING] [n] [LINES|LINE|PAGE]`
+  phrase, but the parser required it — `AFTER 1`, `AFTER 1 LINE`, and
+  `BEFORE PAGE` consumed the `BEFORE`/`AFTER` token and then recorded
+  nothing, with a trailing `LINE`/`LINES` surfacing as an "Unparsed
+  tokens" content-drop warning. The count/unit parsing now runs whether
+  or not `ADVANCING` is present. Pinned by
+  `tests/unit/test_write_advancing.py`. Updated `parser.md` and
+  `CHANGELOG.md` (Unreleased).
+
+## 2026-07-20 (open-findings M6/M10/M11/M12/M13/M15 batch fix)
+
+The six MEDIUM findings previously deferred as subsystem rewrites are
+fixed, each pinned by its own
+`tests/regression/test_open_findings_m<N>_regression.py`:
+
+* **M13** — `apply_replacing_clauses` is a context-aware line scanner
+  (comment lines and string literals protected); `:ABC:` pseudo-text
+  delimiters stripped by `CopyStatementLexer._read_operand` so colon
+  operands substitute. Updated `preprocessing.md`.
+* **M10** — `preprocess_conditional_compilation` evaluates real `>>IF`
+  conditions (comparisons, `AND`/`OR`/`NOT`, `DEFINED`) against valued
+  symbols (`dict` accepted; pre-existing CLI `--define NAME=VALUE` values
+  now take effect), and implements
+  `>>EVALUATE`/`>>WHEN`/`>>WHEN OTHER`/`>>END-EVALUATE`. Obsolete pins
+  in `test_tier4_audit_remediations.py` updated. Updated
+  `preprocessing.md`.
+* **M11** — `ExecCicsStatement.options` dict, `ExecImsStatement` DLI
+  function + positional args, tokenizer-based `parse_exec_sql`
+  (`select_columns`, `where_present`, `:VAR:IND`). Additive only.
+  Updated `parser.md`.
+* **M12** — `ComputeStatement.expression_tree` (precedence-parsed) and
+  `CobolExpression.condition_tree` for PERFORM UNTIL / IF-fallback
+  conditions, via new shared `parsers/statements/_conditions.py`. Raw
+  strings and dict output for pre-existing shapes unchanged. Updated
+  `parser.md`, `ast-models.md`.
+* **M15** — `detect_encoding` plausibility scoring over a 64 KiB prefix;
+  `encoding_errors` (`"replace"`/`"strict"`) on `CopybookSearchPath` /
+  `expand_copybooks`. Updated `preprocessing.md`.
+* **M6** — `tokenize_cobol()`/CLI `tokenize` unified onto
+  `normalize_fixed_format` + free-form lexing with COMMENT tokens
+  re-emitted at original line numbers (`_tokenize_source`). No Cython
+  mirror touched. Updated `lexer.md`.
+
+`reports/open-findings.md` and `CHANGELOG.md` (Unreleased) updated in the
+same batch. Remaining open: M17 (coverage debt) and LOW findings.
+
+## 2026-07-17 (VALUE ALL literal clause support)
+
+* **`VALUE ALL <literal>` parsed instead of dropped**
+  (`divisions/data_clauses.py`, `parse_value_clause`): `ALL` lexes as a
+  `FIGURATIVE_CONSTANT`, so the previous literal branch consumed it as a
+  complete value and the repeated literal (`'='`) fell through to the
+  unknown-clause loop as an "Unparsed token" content-drop warning —
+  which made mockymock refuse the program (PARSE_WARNING, fail-closed).
+  Surfaced by the legacy-application corpus re-sweep on `EODPROC.cbl`'s
+  report-separator idiom `05 FILLER PIC X(133) VALUE ALL '='.`. New
+  handling: `ALL` + string literal → `value_clause='ALL "="'`; `ALL` +
+  figurative constant → `'ALL ZEROS'`; bare `ALL` keeps the old
+  figurative-constant result. The literal may sit on a continuation line
+  (newlines skipped after `ALL`, same as after `VALUE`/`IS`). The Cython
+  `_data_fast` path is unaffected — it delegates VALUE parsing back to
+  this Python method. Regression suite:
+  `tests/regression/test_value_all_clause.py` (6 tests, includes a
+  no-warnings assertion). Updated `parser.md` (VALUE ALL note) and
+  `CHANGELOG.md` (Unreleased).
+
+## 2026-07-15 (PR #89 review fixes: Area A comment-entry termination, COPY warning wording, REPLACE scanner rewind)
+
+Three small fixes out of the PR #89 self-review:
+
+* **Comment-entry termination completed** (`divisions/identification.py`):
+  per COBOL-74, *any* entry starting in Area A ends a comment-entry — not
+  just recognized clause keywords. The clause-value loop now stops at a
+  line-starting Area A token (tracked via each consumed token's line, so
+  same-line values after `AUTHOR.` are unaffected), and the main loop's
+  unknown-clause recovery closes `in_comment_entry` on an Area A token.
+  Two new tests in `tests/regression/test_comment_entry_area_b.py`
+  (unknown Area A word closes the entry; an Area B `AUTHOR` keyword does
+  not open one).
+* **Un-expanded COPY warning is path-neutral**
+  (`preprocess/replace_statement.py`): now `COPY <member> was not
+  expanded; ...` — the old "(no copybook path configured)" was wrong when
+  expansion ran but couldn't resolve the member. mocky-mock's adapter
+  matches on `COPY ` + `not expanded`, unaffected.
+* **REPLACE scanner rewind** (`preprocess/replace_statement.py`): a failed
+  `_parse_replace_at` now rewinds to just past the matched keyword
+  (captured after `_match_word`), not `keyword_start + 7`, which could
+  land mid-word when separators preceded the keyword.
+
+Full suite: 6797 passed / 18 skipped / 1 xfailed; ruff/black/mypy clean.
+
+## 2026-07-14 (Area B–aware comment-entry termination; NIST KNOWN_ISSUES emptied)
+
+Made the IDENTIFICATION DIVISION parser's boundary checks comment-entry
+aware (`parsers/divisions/identification.py`,
+`_at_comment_entry_aware_boundary`): COBOL-74 comment-entries end only at
+the next **Area A** entry, and `normalize_fixed_format` preserves Area A/B
+as leading indentation. The parser now tracks an `in_comment_entry` state —
+opened when an AUTHOR/INSTALLATION/DATE-WRITTEN/DATE-COMPILED/REMARKS/
+SECURITY entry itself starts in Area A (at or left of the division's own
+header column, stashed by `BaseDivisionParser.parse` as
+`_division_header_column`), closed by PROGRAM-ID or an Area A division
+header — and **only while that state is active** does an Area B
+division-header-shaped sequence count as comment text instead of a
+boundary. Fixes NIST `OBNC1M`, whose SECURITY comment-entry embeds an
+entire phony program in Area B — previously the phony `ENVIRONMENT
+DIVISION.` ended the division early and the phony `IDENTIFICATION
+DIVISION.` spawned a bogus program unit failing "PROGRAM-ID is mandatory".
+The state-gating matters: suppressing on column geometry alone broke 31
+tests whose loosely indented sources put every real division deeper than
+the IDENTIFICATION header — outside a comment-entry the column is
+deliberately ignored and those keep terminating the division exactly as
+before. Pinned by `tests/regression/test_comment_entry_area_b.py`.
+
+Also moved `SM101A` from `KNOWN_ISSUES` to a new
+`REQUIRES_COPYBOOK_EXPANSION` set in
+`tests/integration/test_nist_cobol85_support.py`: its COPY members are
+statement fragments by design, so the strict parametrized test now parses it
+through the copybook-expansion pipeline (as a compiler must) and requires
+zero errors — a stronger guarantee than the previous strict-xfail.
+
+**`KNOWN_ISSUES` is now empty: all 459 NIST COBOL-85 programs parse
+error-free** (517 passed / 0 xfailed in the NIST support suite).
+
+## 2026-07-14 (REPLACE statement + un-expanded COPY pseudo-text substitution)
+
+Implemented COBOL source-text pseudo-text substitution as a preprocessing pass
+run before lexing, in a new module `cobolparser/preprocess/replace_statement.py`,
+wired into `CobolParser._parse_core` just before `CobolLexer`. Two NIST
+COBOL-85 programs (`SM206A`, `SM208A`) now parse error-free and were removed
+from `KNOWN_ISSUES` in `tests/integration/test_nist_cobol85_support.py`.
+
+* **`apply_replace_statements`** — the `REPLACE ==a== BY ==b== [ ... ] .`
+  compiler-directing statement (one or more operand pairs) with `REPLACE OFF.`
+  cancelling the active set. Matching is on a COBOL **text-word** stream via a
+  new `_tokenize_text_words`: space/comma/semicolon separators are equivalent
+  (not text words), a separator period IS its own text word (so `MOVE WS-A TO
+  WS-B.` matches a find of `MOVE WS-A TO WS-B` and keeps the sentence period),
+  literals are single words compared case-sensitively, other words compare
+  case-insensitively. A single left-to-right scan per segment applies the
+  active pairs (first match wins); the REPLACE statements themselves are
+  blanked. Fixes `SM208A` (30x `REPLACE`; `MOVE "*" AO ...`, `==MOVE "FAIL"
+  TO==`, giant 160-quote literals, multi-line pseudo-text, `,`/`;` separators,
+  empty `====` deletion).
+* **`strip_unexpanded_copy_statements`** — blanks `COPY` statements the
+  standalone (`parse_cobol`) pipeline will not expand, reusing the existing
+  pseudo-text-aware `CopyStatementLexer` (single COPY parser, not a divergent
+  one). This removes the whole statement — including a `REPLACING
+  ==pseudo-text==` operand that legally contains statement keywords/periods —
+  so nothing leaks into the token stream. Fixes `SM206A`, whose `COPY KP004
+  REPLACING ... BY MOVE ==DELETE== ...` leaked a bare `MOVE` as a MOVE with no
+  TO. In the copybook-expansion pipeline COPY is already inlined before this
+  point, so the strip is a no-op there (verified: `SM206A` still parses clean
+  with expansion, `SM101A`/`SM207A` expansion tests unaffected).
+
+Both passes preserve their input's physical line count (every newline in a
+removed/replaced span is re-emitted) so downstream error line numbers stay
+aligned. Both are cheap no-ops when the source contains no `REPLACE`/`COPY`
+keyword. Full suite stays green (6791 passed / 18 skipped / 3 xfailed; +24 new
+tests, and `SM206A`/`SM208A` flipped from strict-xfail to pass). Pinned by
+`tests/regression/test_replace_and_copy_pseudo_text.py`.
+
+## 2026-07-14 (H9 refinement: clause-continuation keywords + SQL special registers)
+
+Refined `looks_like_paragraph_boundary()` (`parsers/statements/_utils.py`) so
+the H9 missing-period recovery no longer misclassifies two real-world shapes
+surfaced by the mockymock legacy-application corpus sweep:
+
+* Added `CLAUSE_CONTINUATION_KEYWORDS` (`DELIMITED`, `TALLYING`, `POINTER`,
+  `GIVING`, `ROUNDED`, ...) and `SQL_SPECIAL_REGISTERS` (`SQLCODE`,
+  `SQLSTATE`) frozensets, excluded alongside `STATEMENT_KEYWORDS`. These are
+  reserved words / precompiler-provided registers that lex as plain
+  `IDENTIFIER` but can never legally be a paragraph name, so a multi-source
+  `STRING` with each `DELIMITED BY SIZE` clause on its own continuation line,
+  or a period-less `DISPLAY` before a bare `SQLCODE`, no longer truncates the
+  AST.
+* The "next token must be a period or `SECTION`" lookahead is **kept**.
+  Dropping it (as the abandoned PR #87 branch did) looked attractive for
+  catching unknown-verb shapes, but is a proven real-world regression: a
+  continuation-line operand named by an *unexpanded* COPY member is not in
+  `known_data_names`, so without the shape check it is misread as a
+  boundary and the statement truncated — mocky-mock's copybook fixtures
+  (`COMPUTE X =` / newline / `ORD-AMOUNT ...` with `COPY ORDREC.`
+  unresolved) caught exactly this.
+
+Pinned by `tests/regression/test_clause_continuation_boundary.py`.
+
+## 2026-07-15 (division-parser god-class refactor)
+
+* [parser.md](parser.md): `DataDivisionParser`
+  (`parsers/divisions/data.py`, ~1,467 lines) decomposed into collaborators
+  `data_clauses.py` (`DataItemClauseParser`), `data_file_description.py`
+  (`FileDescriptionClauseParser`), and `data_special_entries.py`
+  (`SpecialEntryParser`). The division parser keeps its import path and the
+  `_parse_picture_clause`/`_parse_value_clause`/`_parse_usage_clause`
+  wrappers required by the `_data_fast` Cython callback surface. Division
+  Parsers table updated; behavior-preserving, no public API change.
+* [parser.md](parser.md): `EnvironmentDivisionParser`
+  (`parsers/divisions/environment.py`, ~1,133 lines) decomposed into
+  `environment_sections.py` (`ConfigurationSectionParser`,
+  `InputOutputSectionParser`) and `environment_select.py`
+  (`SelectClauseParser`). The division parser keeps its import path and
+  delegates; behavior-preserving, no public API change.
+* [parser.md](parser.md): `ProcedureDivisionParser`
+  (`parsers/divisions/procedure.py`, ~912 lines) decomposed into
+  `procedure_registry.py` (`create_statement_registry()`),
+  `procedure_boundaries.py` (boundary predicates), and
+  `procedure_recovery.py` (`StatementRecoveryHandler`,
+  `STRAY_MARKERS`/`UNSUPPORTED_VERBS`). The division parser keeps its
+  import path and the paragraph/section dispatch loop; the "Adding a New
+  Statement Parser" flow now registers parsers in `procedure_registry.py`.
+  Behavior-preserving, no public API change.
+
+## 2026-07-14 (program_flow god-class refactor)
+
+* [analysis.md](analysis.md): `cobolparser/analysis/program_flow.py` (~987-line
+  `ProgramFlowAnalyzer` class) decomposed into the package
+  `cobolparser/analysis/program_flow/` with focused collaborators —
+  `models.py`, `scanner.py` (`ProcedureScanner`), `edges.py`
+  (`EdgeCollector` + edge-type category sets), `cycles.py`, `graph.py`,
+  `analyzer.py`. Behavior-preserving: public API, import paths, and
+  `to_dict()` output unchanged (verified byte-identical against the old
+  implementation across all sample programs).
+
 ## 2026-07-09 (CobolCheck test generation removed — superseded by mockymock)
 
 Removed the CobolCheck test-generation feature end to end: the

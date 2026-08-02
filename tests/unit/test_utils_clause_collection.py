@@ -70,6 +70,25 @@ class TestConsumeKeywordAndOperand:
         stream = TokenStream(tokens)
         assert consume_keyword_and_operand(stream, "GIVING") is None
 
+    def test_consumes_subscripted_target(self):
+        """A GIVING target may itself be a subscripted table reference (e.g.
+        ``ADD 1 TO A GIVING RESULT (H, I, 1)``) -- the trailing subscript
+        group must be folded into the returned value, not dropped."""
+        tokens = [
+            _make_token(TokenType.IDENTIFIER, "GIVING"),
+            _make_token(TokenType.IDENTIFIER, "RESULT"),
+            _make_token(TokenType.LEFT_PAREN, "("),
+            _make_token(TokenType.IDENTIFIER, "H"),
+            _make_token(TokenType.COMMA, ","),
+            _make_token(TokenType.IDENTIFIER, "I"),
+            _make_token(TokenType.COMMA, ","),
+            _make_token(TokenType.NUMERIC_LITERAL, "1"),
+            _make_token(TokenType.RIGHT_PAREN, ")"),
+            _make_token(TokenType.PERIOD, "."),
+        ]
+        stream = TokenStream(tokens)
+        assert consume_keyword_and_operand(stream, "GIVING") == "RESULT ( H , I , 1 )"
+
 
 class TestCollectClauseStmts:
     """Cover collect_clause_stmts boundary detection (lines 97-114)."""

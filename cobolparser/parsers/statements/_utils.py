@@ -251,6 +251,49 @@ CLAUSE_CONTINUATION_KEYWORDS: frozenset = frozenset(
 SQL_SPECIAL_REGISTERS: frozenset = frozenset({"SQLCODE", "SQLSTATE"})
 
 
+# Reserved COBOL clause-continuation words that the lexer does not tokenize
+# with a dedicated TokenType (unlike e.g. WITH/ON/FROM/TO/BY, which already
+# have their own TokenType and so can never reach looks_like_paragraph_
+# boundary's IDENTIFIER check at all) -- these lex as plain TokenType.
+# IDENTIFIER but, being reserved words, can never legally be a paragraph
+# name or an unrecognized verb, so they must never be misread as either.
+# Sourced from the clause vocabularies of the statement parsers the H9 fix
+# wired looks_like_paragraph_boundary into (DISPLAY, MOVE, COMPUTE,
+# STRING/UNSTRING, INSPECT). Guards the layout IBM/GnuCOBOL style guides
+# recommend: a multi-clause ``STRING a DELIMITED BY SIZE b DELIMITED BY
+# SIZE c`` with each ``DELIMITED BY SIZE`` clause on its own continuation
+# line, where every ``DELIMITED`` past the first would otherwise be at risk
+# of being misread as a new statement.
+CLAUSE_CONTINUATION_KEYWORDS: frozenset = frozenset(
+    {
+        "ALL",
+        "COLUMN",
+        "CONVERTING",
+        "COUNT",
+        "DELIMITED",
+        "DELIMITER",
+        "FILLER",
+        "FUNCTION",
+        "GIVING",
+        "INITIAL",
+        "OVERFLOW",
+        "POINTER",
+        "ROUNDED",
+        "TALLYING",
+    }
+)
+
+# DB2/SQL special registers that real COBOL programs legitimately reference
+# (DISPLAY SQLCODE, IF SQLCODE NOT = 0, ...) without any WORKING-STORAGE
+# declaration -- the SQL precompiler provides them, so they are never a
+# "declared DATA DIVISION name" the way looks_like_paragraph_boundary's
+# known_data_names cross-check expects. Deliberately narrow: only the two
+# special registers commonly referenced bare (unsubscripted); array members
+# like SQLERRD(3)/SQLWARN0 are followed by a token other than a clean
+# line-start period and are not affected by this heuristic.
+SQL_SPECIAL_REGISTERS: frozenset = frozenset({"SQLCODE", "SQLSTATE"})
+
+
 # ---------------------------------------------------------------------------
 # Token value helpers
 # ---------------------------------------------------------------------------
@@ -294,26 +337,35 @@ def is_statement_boundary(token: Token | None) -> bool:
 
 
 def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
-    """Detect the next statement (paragraph header or unrecognized verb)
-    swallowed by a missing period.
+    """Detect the next paragraph/section header swallowed by a missing period.
 
     An operand-collection loop with no boundary awareness (DISPLAY's item
     list, MOVE's target list, COMPUTE's expression capture, ...) has no way
     to distinguish a legitimate trailing operand from a following paragraph
-    name -- or an entirely unknown/misspelled verb with its own operands --
-    once the current statement's own period is missing: all three shapes are
-    just "IDENTIFIER [more tokens]". :func:`is_statement_boundary` only
-    catches *known* verbs lexed as plain identifiers (PURGE, RESUME, ...); an
-    ordinary user-defined paragraph name, or a verb the parser has never
-    heard of, isn't in that set. See reports/open-findings.md H9.
+    name once the current statement's own period is missing -- both are just
+    "IDENTIFIER then PERIOD". :func:`is_statement_boundary` only catches
+    *known* verbs lexed as plain identifiers (PURGE, RESUME, ...); an
+    ordinary user-defined paragraph name isn't in that set. See
+    reports/open-findings.md H9.
 
-    This resolves the ambiguity the way COBOL itself does: a new statement
+    This resolves the ambiguity the way COBOL itself does: a paragraph name
     stands alone at the start of its own source line, whereas a trailing
     operand normally continues the line the verb or a preceding operand is
-    on. So the current token counts as a boundary when *all* of:
+    on. So the current token counts as a boundary only when *all* of:
 
     * it is an IDENTIFIER, not a reserved statement verb;
+    * it is not one of :data:`CLAUSE_CONTINUATION_KEYWORDS` (reserved COBOL
+      clause words -- ``DELIMITED``, ``TALLYING``, ``POINTER``, ... -- that
+      the lexer does not give a dedicated TokenType, so they reach this
+      check as plain IDENTIFIERs even though a reserved word can never
+      legally be a paragraph name) or :data:`SQL_SPECIAL_REGISTERS`
+      (``SQLCODE``/``SQLSTATE``, which real programs reference without a
+      WORKING-STORAGE declaration);
     * it starts a new source line relative to the previously consumed token;
+    * it is immediately followed by a period or SECTION -- required because
+      a continuation-line operand named by an *unexpanded* COPY member is
+      not in ``known_data_names``, and without this shape check it would be
+      misread as a boundary, truncating the statement;
     * it is not a name declared in the DATA DIVISION -- excluded so a
       genuinely wrapped continuation-line operand (``DISPLAY\\n    WS-X.``)
       is not misread as the start of a new statement just because it opens
@@ -337,11 +389,11 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     cross-check to cover both shapes.
 
     A bare trailing operand that happens to sit on its own line but is not a
-    real paragraph name or unknown verb (e.g. an undeclared identifier from
-    an unexpanded COPY) will still be misclassified -- this is an inherent
-    ambiguity of missing-period recovery, not something a purely syntactic
-    check can resolve, so the DATA DIVISION cross-check is a best-effort
-    narrowing, not a guarantee.
+    real paragraph name (e.g. an undeclared identifier from an unexpanded
+    COPY) will still be misclassified -- this is an inherent ambiguity of
+    missing-period recovery, not something a purely syntactic check can
+    resolve, so the DATA DIVISION cross-check is a best-effort narrowing,
+    not a guarantee.
     """
     token = token_stream.peek(0)
     if token is None or token.type != TokenType.IDENTIFIER or not token.value:
@@ -360,6 +412,31 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     if prev_line is None or cur_line is None or prev_line == cur_line:
         return False
 
+    # The candidate must be immediately followed by a period or SECTION —
+    # the bare paragraph-header shape. This deliberately under-detects
+    # (an unknown verb followed by its own operands is not caught), but
+    # dropping it is a proven real-world regression: a continuation-line
+    # operand whose name comes from an *unexpanded* COPY member is not in
+    # known_data_names, so without this shape check it is misread as a
+    # boundary and the statement is truncated (caught by mocky-mock's
+    # copybook fixtures: `COMPUTE X =` / newline / `ORD-AMOUNT ...`).
+    offset = 1
+    nxt = token_stream.peek(offset)
+    while nxt is not None and nxt.type in (
+        TokenType.WHITESPACE,
+        TokenType.COMMENT,
+        TokenType.NEWLINE,
+        TokenType.CONTINUATION,
+    ):
+        offset += 1
+        nxt = token_stream.peek(offset)
+    if nxt is None:
+        return False
+    is_period = nxt.type == TokenType.PERIOD
+    is_section = bool(nxt.value) and nxt.value.upper() == "SECTION"
+    if not (is_period or is_section):
+        return False
+
     context = get_parse_context(token_stream)
     known_data_names = context.known_data_names if context else frozenset()
     return value_upper not in known_data_names
@@ -368,7 +445,7 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
 def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
     """Record a warning when :func:`looks_like_paragraph_boundary` stops an
     operand-collection loop early instead of consuming what looks like the
-    start of the next statement. See reports/open-findings.md H9.
+    next paragraph/section header. See reports/open-findings.md H9.
     """
     token = token_stream.peek(0)
     value = (token.value or "") if token is not None else ""
@@ -376,9 +453,9 @@ def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
     where = f" at line {line}" if line else ""
     message = (
         f"Statement missing its terminating period{where}: '{value}' looks "
-        "like the start of a new statement (a paragraph/section header, or "
-        "an unrecognized verb) rather than a trailing operand -- treated as "
-        "a statement boundary instead of being consumed"
+        "like the start of the next paragraph/section rather than a "
+        "trailing operand -- treated as a new paragraph boundary instead "
+        "of being consumed"
     )
     context = get_parse_context(token_stream)
     host = getattr(context, "host", None) if context else None
@@ -870,6 +947,38 @@ def parse_arithmetic_operands(
     return operands, ""
 
 
+def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
+    """Consume a trailing ``(...)`` subscript group, appending it to *parts*.
+
+    If the next token is not ``LEFT_PAREN``, *parts* is left untouched. Paren
+    depth is tracked so a nested call like ``WS-T(FUNCTION FOO(I))`` is
+    captured correctly. Shared by every target-consuming helper that must
+    fold a subscript group into its result string instead of leaving it to
+    be dropped as an unparsed trailing token -- COMPUTE/ADD/SUBTRACT targets
+    (:func:`_consume_arithmetic_target` in ``arithmetic_parsers.py``) and the
+    arithmetic ``GIVING`` clause (:func:`consume_keyword_and_operand` below).
+    """
+    next_token = stream.peek()
+    if not (next_token and next_token.type == TokenType.LEFT_PAREN):
+        return
+    depth = 0
+    while not stream.is_empty():
+        t = stream.peek()
+        if not t:
+            break
+        if t.type == TokenType.LEFT_PAREN:
+            depth += 1
+            parts.append("(")
+        elif t.type == TokenType.RIGHT_PAREN:
+            depth -= 1
+            parts.append(")")
+        else:
+            parts.append(t.value if t.value else "")
+        stream.consume()
+        if depth == 0:
+            break
+
+
 def consume_keyword_and_operand(
     stream: ITokenStream,
     keyword: str,
@@ -891,6 +1000,12 @@ def consume_keyword_and_operand(
     The same tokens between the keyword and the identifier are also skipped
     so that COBOL line continuations don't break clause recognition.
 
+    A trailing ``(subscript[, subscript]...)`` group on the operand is folded
+    into the returned string via :func:`consume_optional_subscript` (e.g.
+    ``GIVING RESULT (H, I, 1)`` -> ``"RESULT ( H , I , 1 )"``) -- a GIVING
+    target is a data item just like an ADD/SUBTRACT ``TO``/``FROM`` target
+    and may equally be table-subscripted.
+
     Returns ``None`` if the keyword is not present at the current position or
     if no identifier follows it. The keyword check is case-insensitive.
     """
@@ -901,9 +1016,10 @@ def consume_keyword_and_operand(
     skip_whitespace(stream)
     token = stream.peek()
     if token and token.type == TokenType.IDENTIFIER and token.value:
-        value = token.value
+        parts: list[str] = [token.value]
         stream.consume()
-        return value
+        consume_optional_subscript(stream, parts)
+        return " ".join(p for p in parts if p)
     return None
 
 
@@ -997,6 +1113,42 @@ _EXEC_SQL_NO_SPACE_BEFORE: frozenset[TokenType] = frozenset(
     }
 )
 
+#: (previous token type, current token type) pairs that the lexer produces
+#: for a two-character relational operator it has no dedicated token for --
+#: ``>=``, ``<=``, and ``<>`` all lex as two single-char tokens (GREATER/LESS
+#: + ASSIGN, or LESS + GREATER). Rejoining them with ``" ".join`` would
+#: corrupt ``WHERE SALARY >= :WS-ID`` into ``"...SALARY > =:WS-ID..."``.
+_EXEC_SQL_SPLIT_RELOP_PAIRS: frozenset[tuple[TokenType, TokenType]] = frozenset(
+    {
+        (TokenType.GREATER, TokenType.ASSIGN),  # >=
+        (TokenType.LESS, TokenType.ASSIGN),  # <=
+        (TokenType.LESS, TokenType.GREATER),  # <>
+    }
+)
+
+
+def _is_split_relational_operator(prev_token: Token | None, token: Token) -> bool:
+    """Return True if *token* immediately abuts *prev_token* forming ``>=``/``<=``/``<>``.
+
+    Column adjacency (same line, ``token``'s column immediately following the
+    end of ``prev_token``'s value) is used rather than a bare value check so
+    that a legitimately space-separated ``>`` ... ``=`` pair elsewhere in the
+    text is not mistakenly fused -- e.g. host code that never actually splits
+    a relational operator across whitespace still round-trips unchanged, and
+    only the lexer's own artifact of tokenizing ``>=`` as two chars is
+    repaired here.
+    """
+    if prev_token is None:
+        return False
+    if (prev_token.type, token.type) not in _EXEC_SQL_SPLIT_RELOP_PAIRS:
+        return False
+    prev_loc = prev_token.location
+    cur_loc = token.location
+    if prev_loc is None or cur_loc is None or prev_loc.line != cur_loc.line:
+        return False
+    prev_value = prev_token.value or ""
+    return cur_loc.column == prev_loc.column + len(prev_value)
+
 
 def collect_exec_sql_text(stream: ITokenStream) -> str:
     """Collect the raw SQL text from a token stream up to (and consuming) END-EXEC.
@@ -1029,6 +1181,7 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
     """
     sql_parts: list[str] = []
     prev_was_colon = False
+    prev_token: Token | None = None
     terminated = False
     first_token = stream.peek(0)
     while not stream.is_empty():
@@ -1047,7 +1200,12 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
             break
 
         if token.value:
-            if prev_was_colon or token.type in _EXEC_SQL_NO_SPACE_BEFORE:
+            no_space_before = (
+                prev_was_colon
+                or token.type in _EXEC_SQL_NO_SPACE_BEFORE
+                or _is_split_relational_operator(prev_token, token)
+            )
+            if no_space_before:
                 if sql_parts:
                     sql_parts[-1] = sql_parts[-1] + token.value
                 else:
@@ -1055,6 +1213,7 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
             else:
                 sql_parts.append(token.value)
             prev_was_colon = token.type == TokenType.COLON
+            prev_token = token
         stream.consume()
 
     if not terminated:

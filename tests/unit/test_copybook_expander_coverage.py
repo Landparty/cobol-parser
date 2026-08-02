@@ -275,15 +275,21 @@ class TestExpandCopybooks:
 
     def test_content_validation(self, tmp_path):
         """Test content validation during expansion."""
-        # Create copybook with potential issues
+        # Create copybook with potential issues. Column 7 is the fixed-format
+        # indicator column, so the comment marker needs 6 leading columns
+        # (blank sequence-number area) to be recognized as a comment line.
         cpy = tmp_path / "WARN.cpy"
-        cpy.write_text("* Just a comment")
+        cpy.write_text("      * Just a comment")
 
         source = "       COPY WARN."
         result = expand_copybooks(source, [str(tmp_path)], validate_content=True)
 
-        # Should have a warning about comment-only content
+        # Should have a warning about comment-only content -- not "is empty".
+        # remove_comment_lines() blanks comment lines before validation runs,
+        # so the copybook isn't literally empty, it's documentation-only.
         assert len(result.statistics.warnings) > 0
+        assert any("only comments" in w.lower() for w in result.statistics.warnings)
+        assert not any("is empty" in w.lower() for w in result.statistics.warnings)
 
     def test_level_validation(self, tmp_path):
         """Test level number validation."""

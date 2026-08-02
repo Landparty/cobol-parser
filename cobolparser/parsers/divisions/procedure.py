@@ -5,6 +5,18 @@ This module implements parsing of the Procedure Division which contains:
 - Statements: Program logic and control flow
 
 Uses StatementParserRegistry for pluggable statement parsing and dispatch.
+
+The :class:`ProcedureDivisionParser` owns the paragraph/section dispatch loop
+and the AST node creation. The supporting concerns are delegated to focused
+collaborator modules:
+
+- :mod:`~.procedure_registry` — builds the shared
+  :class:`StatementParserRegistry` with every statement parser
+- :mod:`~.procedure_boundaries` — paragraph/section/statement boundary
+  lookahead predicates
+- :mod:`~.procedure_recovery` — :class:`StatementRecoveryHandler`:
+  unsupported-statement warnings, error recording (FAIL_FAST/COLLECT_ALL),
+  and stream resynchronization
 """
 
 import logging
@@ -13,60 +25,23 @@ from typing import Any
 from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream, ParseContext
 from cobolparser.core.registry import StatementParserRegistry
+from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
-from cobolparser.parsers.statements import (
-    AcceptStatementParser,
-    AddStatementParser,
-    AlterStatementParser,
-    CallStatementParser,
-    CancelStatementParser,
-    CloseStatementParser,
-    CommitStatementParser,
-    ComputeStatementParser,
-    ContinueStatementParser,
-    DeleteStatementParser,
-    DisplayStatementParser,
-    DivideStatementParser,
-    EntryStatementParser,
-    EvaluateStatementParser,
-    ExecCicsStatementParser,
-    ExecImsStatementParser,
-    ExecSqlStatementParser,
-    ExitStatementParser,
-    GenerateStatementParser,
-    GobackStatementParser,
-    GoStatementParser,
-    IfStatementParser,
-    InitializeStatementParser,
-    InspectStatementParser,
-    MergeStatementParser,
-    MoveStatementParser,
-    MultiplyStatementParser,
-    OpenStatementParser,
-    PerformStatementParser,
-    ReadStatementParser,
-    ReleaseStatementParser,
-    ReturnStatementParser,
-    RewriteStatementParser,
-    RollbackStatementParser,
-    SearchStatementParser,
-    SetStatementParser,
-    SortStatementParser,
-    StartStatementParser,
-    StringStatementParser,
-    SubtractStatementParser,
-    UnlockStatementParser,
-    UnstringStatementParser,
-    UseStatementParser,
-    XmlJsonStatementParser,
-)
-from cobolparser.parsers.statements._utils import STATEMENT_KEYWORDS, skip_whitespace
-from cobolparser.parsers.statements.stop_parser import StopStatementParser
-from cobolparser.parsers.statements.write_parser import WriteStatementParser
-from cobolparser.plugins.core import ErrorRecoveryMode
+from cobolparser.parsers.statements._utils import skip_whitespace
 
 from .base import BaseDivisionParser
+from .procedure_boundaries import (
+    is_paragraph_or_section_start,
+    is_section_marker,
+    is_statement_keyword,
+)
+from .procedure_recovery import (
+    STRAY_MARKERS,
+    UNSUPPORTED_VERBS,
+    StatementRecoveryHandler,
+)
+from .procedure_registry import create_statement_registry
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +66,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
     # for every program.
     _SHARED_REGISTRY: StatementParserRegistry | None = None
 
+    # Kept as class-level aliases for discoverability/introspection; the
+    # authoritative sets live in procedure_recovery.py.
+    _STRAY_MARKERS: frozenset = STRAY_MARKERS
+    _UNSUPPORTED_VERBS: frozenset = UNSUPPORTED_VERBS
+
     def __init__(self, host: Any = None) -> None:
         """Initialize Procedure Division parser with statement registry.
 
@@ -102,6 +82,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         if ProcedureDivisionParser._SHARED_REGISTRY is None:
             ProcedureDivisionParser._SHARED_REGISTRY = self._create_statement_registry()
         self._statement_registry = ProcedureDivisionParser._SHARED_REGISTRY
+        self._recovery = StatementRecoveryHandler(self)
 
     def set_host(self, host: Any) -> None:
         """Set the host parser after initialization.
@@ -133,84 +114,13 @@ class ProcedureDivisionParser(BaseDivisionParser):
     def _create_statement_registry(self) -> StatementParserRegistry:
         """Create and populate statement registry with all available parsers.
 
-        Registers statement parsers in priority order (first-match strategy).
-        Order matters - more specific parsers should come before general ones.
-
-        IBM Enterprise COBOL extensions (EXEC SQL, EXEC CICS) are registered first
-        since they require multi-token lookahead matching.
+        Delegates to :func:`~.procedure_registry.create_statement_registry`,
+        which registers every statement parser in priority order.
 
         Returns:
             StatementParserRegistry with all statement parsers registered
         """
-        registry = StatementParserRegistry()
-
-        # IBM Enterprise COBOL extensions first - more specific matching
-        registry.register(ExecSqlStatementParser())
-        registry.register(ExecCicsStatementParser())
-        registry.register(ExecImsStatementParser())
-        registry.register(XmlJsonStatementParser())
-
-        # Core control flow statements - more specific first
-        registry.register(IfStatementParser())
-        registry.register(PerformStatementParser())
-        registry.register(EvaluateStatementParser())
-
-        # Statement types
-        registry.register(DisplayStatementParser())
-        registry.register(MoveStatementParser())
-        registry.register(CallStatementParser())
-        registry.register(StopStatementParser())
-        registry.register(EntryStatementParser())
-        registry.register(GoStatementParser())
-        registry.register(ExitStatementParser())
-        registry.register(ContinueStatementParser())
-        registry.register(GobackStatementParser())
-
-        # IO statements
-        registry.register(AcceptStatementParser())
-        registry.register(ReadStatementParser())
-        registry.register(OpenStatementParser())
-        registry.register(CloseStatementParser())
-        registry.register(RewriteStatementParser())
-        registry.register(DeleteStatementParser())
-        registry.register(StartStatementParser())
-        registry.register(WriteStatementParser())
-        registry.register(UnlockStatementParser())
-
-        # Data manipulation
-        registry.register(InitializeStatementParser())
-        registry.register(SetStatementParser())
-        registry.register(StringStatementParser())
-        registry.register(UnstringStatementParser())
-        registry.register(InspectStatementParser())
-
-        # Search
-        registry.register(SearchStatementParser())
-
-        # Sort/Merge family
-        registry.register(SortStatementParser())
-        registry.register(MergeStatementParser())
-        registry.register(ReleaseStatementParser())
-        registry.register(ReturnStatementParser())
-
-        # Arithmetic statements
-        registry.register(ComputeStatementParser())
-        registry.register(AddStatementParser())
-        registry.register(SubtractStatementParser())
-        registry.register(MultiplyStatementParser())
-        registry.register(DivideStatementParser())
-
-        # Minimal/rare verbs
-        registry.register(AlterStatementParser())
-        registry.register(CancelStatementParser())
-        registry.register(GenerateStatementParser())
-        registry.register(UseStatementParser())
-
-        # Transaction control
-        registry.register(CommitStatementParser())
-        registry.register(RollbackStatementParser())
-
-        return registry
+        return create_statement_registry()
 
     def parse_division(self, token_stream: ITokenStream) -> dict[str, Any]:
         """Parse Procedure Division content using registry-based statement parsing.
@@ -259,6 +169,14 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
             token = token_stream.peek(0)
             if not token:
+                break
+
+            # The EOF sentinel token has an empty value, which isn't in the
+            # keyword-exclusion tuple below, so without this check it falls
+            # through to the "unknown token -> paragraph name" branch and
+            # manufactures a spurious empty-named, zero-statement trailing
+            # paragraph on every program.
+            if token.type == TokenType.EOF:
                 break
 
             token_value = token.value.upper() if token.value else ""
@@ -519,207 +437,6 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
         return statements
 
-    # Stray scope/control markers left behind by error recovery; skipping
-    # these is routine resynchronization, not a dropped statement, so they
-    # do not deserve an "unsupported statement" warning.
-    _STRAY_MARKERS: frozenset = frozenset(
-        {
-            "ELSE",
-            "WHEN",
-            "THEN",
-            "END-IF",
-            "END-PERFORM",
-            "END-EVALUATE",
-            "END-READ",
-            "END-WRITE",
-            "END-SEARCH",
-            "END-CALL",
-            "END-ADD",
-            "END-SUBTRACT",
-            "END-MULTIPLY",
-            "END-DIVIDE",
-            "END-COMPUTE",
-            "END-STRING",
-            "END-UNSTRING",
-            "END-START",
-            "END-DELETE",
-            "END-REWRITE",
-            "END-RETURN",
-            "END-ACCEPT",
-            "END-DISPLAY",
-            "END-XML",
-            "END-JSON",
-        }
-    )
-
-    # Real verbs (IBM Enterprise and dialect extensions) that have no
-    # registered statement parser yet. These get a specific "unsupported
-    # statement" warning; anything else that reaches the skip path is
-    # leftover clause content from a partially-parsed statement.
-    _UNSUPPORTED_VERBS: frozenset = frozenset(
-        {
-            "ALLOCATE",
-            "CHAIN",
-            "DISABLE",
-            "ENABLE",
-            "ENTER",
-            "EXAMINE",
-            "EXECUTE",
-            "EXHIBIT",
-            "FREE",
-            "GOTO",
-            "INITIATE",
-            "INVOKE",
-            "NOTE",
-            "PURGE",
-            "RAISE",
-            "READY",
-            "RECEIVE",
-            "RECOVER",
-            "RESET",
-            "RESUME",
-            "SEND",
-            "SERVICE",
-            "SUPPRESS",
-            "TERMINATE",
-            "TRANSFORM",
-        }
-    )
-
-    def _warn_unsupported_statement(self, token: Any) -> None:
-        """Record a caller-visible warning for content skipped without a parser.
-
-        Historically unrecognized statements were consumed with only a
-        ``logger.debug`` — real IBM verbs like INVOKE or EXHIBIT vanished
-        from the AST with ``errors=0, warnings=0``, and clause tokens a
-        statement parser did not understand were dropped just as silently.
-        Route both through the host's warning channel so a "clean" parse
-        actually means a complete AST.
-        """
-        value = (token.value or "").upper() if token is not None else ""
-        if not value or value in self._STRAY_MARKERS:
-            return
-        line = getattr(getattr(token, "location", None), "line", None)
-        where = f" at line {line}" if line else ""
-        if value in self._UNSUPPORTED_VERBS:
-            message = (
-                f"Unsupported statement '{value}'{where} skipped: "
-                "no parser is registered for this verb; its tokens were "
-                "discarded up to the next statement boundary"
-            )
-        else:
-            message = (
-                f"Unparsed tokens starting at '{value}'{where} skipped: "
-                "clause or statement not fully supported; content dropped "
-                "from the AST up to the next statement boundary"
-            )
-        host = getattr(self, "host", None)
-        add_warning = getattr(host, "add_warning", None)
-        if callable(add_warning):
-            add_warning(message)
-        else:
-            logger.warning(message)
-
-    def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
-        """Check if current position starts a new paragraph or section.
-
-        A paragraph/section starts when an identifier is followed by either:
-        - A period (paragraph end/start)
-        - SECTION keyword (section definition)
-
-        Handles the case where current position is at a period (end of previous
-        paragraph), and next token is a paragraph name identifier.
-
-        Args:
-            token_stream: Token stream to check
-
-        Returns:
-            True if at paragraph/section start
-        """
-        if token_stream.is_empty():
-            return False
-
-        token = token_stream.peek(0)
-        if not token:
-            return False
-
-        # Case 1: If current token is a PERIOD, check if the next token after it
-        # is an IDENTIFIER (new paragraph name)
-        if token.value == ".":
-            # Skip the period and any whitespace/newlines
-            next_idx = 1
-            while next_idx < 10:  # Reasonable lookahead
-                next_token = token_stream.peek(next_idx)
-                if not next_token:
-                    return False
-                if next_token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
-                    next_idx += 1
-                    continue
-                # Found a non-whitespace token
-                if next_token.type.name == "IDENTIFIER":
-                    # Check if it's followed by SECTION or a period (paragraph name pattern)
-                    next_next_idx = next_idx + 1
-                    while next_next_idx < 10:
-                        next_next_token = token_stream.peek(next_next_idx)
-                        if not next_next_token:
-                            return True  # Assume it's a paragraph name
-                        if next_next_token.type.name in ("NEWLINE", "WHITESPACE"):
-                            next_next_idx += 1
-                            continue
-                        # Check for SECTION or period after identifier
-                        if next_next_token.value == "." or (
-                            next_next_token.value
-                            and next_next_token.value.upper() == "SECTION"
-                        ):
-                            return True
-                        break
-                    return False
-                return False
-            return False
-
-        # Case 2: Original logic - current token is an IDENTIFIER
-        if token.type.name != "IDENTIFIER":
-            return False
-
-        # Look ahead for SECTION or period
-        next_token = token_stream.peek(1)
-        if not next_token:
-            return False
-
-        if next_token.value == ".":
-            return True
-
-        if next_token.value and next_token.value.upper() == "SECTION":
-            return True
-
-        return False
-
-    def _is_section_marker(self, token_stream: ITokenStream) -> bool:
-        """Check if current token starts a section definition.
-
-        A section marker is followed by SECTION keyword.
-
-        Args:
-            token_stream: Token stream to check
-
-        Returns:
-            True if current position marks a section start
-        """
-        if token_stream.is_empty():
-            return False
-
-        token = token_stream.peek(0)
-        if not token:
-            return False
-
-        # Look ahead for SECTION keyword
-        for offset in range(1, 3):
-            next_tok = token_stream.peek(offset)
-            if next_tok and next_tok.value.upper() == "SECTION":
-                return True
-
-        return False
-
     def _attach_context(self, token_stream: ITokenStream) -> None:
         """Attach the statement registry and a fresh ParseContext to the stream.
 
@@ -737,17 +454,35 @@ class ProcedureDivisionParser(BaseDivisionParser):
         token_stream.context = context
         token_stream._context = context  # type: ignore[attr-defined]
 
+    # ------------------------------------------------------------------
+    # Delegating wrappers.
+    #
+    # Boundary detection lives in procedure_boundaries.py and the
+    # warn/record/recover logic in procedure_recovery.py (see the module
+    # docstring). These wrappers keep the historical method names on the
+    # division parser itself.
+    # ------------------------------------------------------------------
+
+    def _warn_unsupported_statement(self, token: Any) -> None:
+        """Warn about skipped content (delegates to StatementRecoveryHandler)."""
+        self._recovery.warn_unsupported_statement(token)
+
+    def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
+        """Check for a paragraph/section start (delegates to procedure_boundaries)."""
+        return is_paragraph_or_section_start(token_stream)
+
+    def _is_section_marker(self, token_stream: ITokenStream) -> bool:
+        """Check for a section marker (delegates to procedure_boundaries)."""
+        return is_section_marker(token_stream)
+
+    @staticmethod
+    def _is_statement_keyword(word: str) -> bool:
+        """Check for a statement keyword (delegates to procedure_boundaries)."""
+        return is_statement_keyword(word)
+
     def _wrap_unexpected(self, exc: BaseException, token: Any) -> ParseError:
-        """Convert an unexpected exception into a ParseError with location."""
-        loc = getattr(token, "location", None) if token is not None else None
-        line = getattr(loc, "line", None) if loc is not None else None
-        column = getattr(loc, "column", None) if loc is not None else None
-        return ParseError(
-            f"Unexpected error parsing statement: {exc}",
-            line_number=line,
-            column=column,
-            location=loc,
-        )
+        """Wrap an unexpected exception (delegates to StatementRecoveryHandler)."""
+        return self._recovery.wrap_unexpected(exc, token)
 
     def _handle_statement_error(
         self,
@@ -755,82 +490,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         token: Any,
         token_stream: ITokenStream,
     ) -> None:
-        """Record a statement-level parse error and continue or re-raise.
-
-        Behavior is determined by ``host.error_recovery``:
-
-        * ``COLLECT_ALL`` (default for batch runs): the error is appended to
-          the host's error list via ``add_error`` and the stream is advanced
-          past the offending statement so parsing continues.
-        * ``FAIL_FAST``: the error is recorded and re-raised so the division
-          parser's outer handler can short-circuit the parse.
-
-        Statement parsers that called :func:`report_or_raise` tag the
-        ParseError with ``_already_recorded`` so we don't double-count when
-        we receive it here.
-        """
-        loc = getattr(token, "location", None)
-        logger.debug(
-            "Statement error at line %s (token %r): %s",
-            getattr(loc, "line", None),
-            getattr(token, "value", None),
-            error,
-        )
-
-        if self.host is not None and hasattr(self.host, "add_error"):
-            if not getattr(error, "_already_recorded", False):
-                self.host.add_error(error)
-
-        mode = getattr(self.host, "error_recovery", None)
-        if mode == ErrorRecoveryMode.FAIL_FAST:
-            logger.debug("FAIL_FAST: re-raising statement error")
-            raise error
-
-        logger.debug("COLLECT_ALL: recovering past failed statement")
-        self._skip_to_next_statement(token_stream)
+        """Record/recover a statement error (delegates to StatementRecoveryHandler)."""
+        self._recovery.handle_statement_error(error, token, token_stream)
 
     def _skip_to_next_statement(self, token_stream: ITokenStream) -> None:
-        """Skip to start of next statement or paragraph.
-
-        Skips tokens until finding a period (statement end) or
-        a likely statement keyword.
-
-        Args:
-            token_stream: Token stream to advance
-        """
-        while not token_stream.is_empty():
-            token = token_stream.peek(0)
-            if not token:
-                break
-
-            if token.value == ".":
-                token_stream.consume()
-                break
-
-            if self._is_paragraph_or_section_start(token_stream):
-                break
-
-            # Stop if we hit a statement keyword that has a registered parser.
-            # Do NOT break for keywords (READ, OPEN, CLOSE, etc.) that have no
-            # registered parser — consuming them is required to avoid an infinite
-            # loop where _skip_to_next_statement keeps breaking on the same token.
-            if token.value and self._is_statement_keyword(token.value):
-                if self._statement_registry.find_parser(token_stream) is not None:
-                    break
-
-            token_stream.consume()
-
-    @staticmethod
-    def _is_statement_keyword(word: str) -> bool:
-        """Check if word is a known statement keyword.
-
-        Args:
-            word: Word to check
-
-        Returns:
-            True if word is a statement keyword
-        """
-        return word.upper() in STATEMENT_KEYWORDS
+        """Resynchronize the stream (delegates to StatementRecoveryHandler)."""
+        self._recovery.skip_to_next_statement(token_stream)
 
     def _create_ast_node(
         self,

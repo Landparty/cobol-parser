@@ -1154,3 +1154,88 @@ class TestExecMissingEndExecReportsError:
         assert result.success, f"Errors: {result.errors}"
         exec_nodes = result.ast.find_all_by_type("ExecSQLStatement")
         assert exec_nodes, "EXEC SQL node must exist"
+
+
+# ===========================================================================
+# Group 9 — ROUNDED after GIVING on MULTIPLY/DIVIDE was silently dropped
+# ===========================================================================
+#
+# _parse_binary_arithmetic() (shared by MultiplyStatementParser and
+# DivideStatementParser) called parse_size_error_clauses() right after the
+# optional GIVING clause. That helper only recognizes ON SIZE ERROR / NOT ON
+# SIZE ERROR / PERIOD / NEWLINE -- any other token (including ROUNDED) hits
+# its `else: break` and is left UNCONSUMED in the stream, with no error or
+# warning. The leftover ROUNDED token (followed by the statement's own
+# trailing period) then gets misread by the paragraph-boundary lookahead as
+# a new paragraph header ("ROUNDED."), silently reparenting every subsequent
+# statement in the real paragraph under this phantom "ROUNDED" paragraph
+# until the next genuine paragraph/section header. mocky-mock's own
+# reachability BFS depends on correct paragraph attribution, so this isn't
+# cosmetic: a MOCK'd CALL placed after a ROUNDED DIVIDE in the same
+# paragraph becomes unreachable from that paragraph's real name.
+
+
+class TestDivideRoundedClauseCaptured:
+    def test_divide_giving_rounded_does_not_create_phantom_paragraph(self):
+        """Before the fix, the statement after DIVIDE ... GIVING ... ROUNDED
+        in the same paragraph was silently reparented under a phantom
+        paragraph literally named "ROUNDED"."""
+        result = parse_cobol(
+            _proc_program(
+                "    DIVIDE WS-X BY WS-X GIVING WS-X ROUNDED.\n"
+                "    DISPLAY 'AFTER'\n"
+            ),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        proc = result.ast.get_division("PROCEDURE")
+        names = [p.paragraph_name for p in proc.paragraphs]
+        assert "ROUNDED" not in names, (
+            f"ROUNDED must not be parsed as its own paragraph; got {names}"
+        )
+        main_para = next(p for p in proc.paragraphs if p.paragraph_name == "MAIN-PARA")
+        stmt_types = [type(s).__name__ for s in main_para.statements]
+        assert "DisplayStatement" in stmt_types, (
+            "DISPLAY must stay attributed to MAIN-PARA, not swallowed into "
+            f"a phantom paragraph; MAIN-PARA statements were {stmt_types}"
+        )
+
+    def test_divide_giving_rounded_sets_rounded_flag(self):
+        result = parse_cobol(
+            _proc_program("    DIVIDE WS-X BY WS-X GIVING WS-X ROUNDED.\n"),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        stmt = _first_of_type(result, "DivideStatement")
+        assert stmt.rounded is True
+
+    def test_divide_giving_without_rounded_leaves_flag_false(self):
+        result = parse_cobol(
+            _proc_program("    DIVIDE WS-X BY WS-X GIVING WS-X.\n"),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        stmt = _first_of_type(result, "DivideStatement")
+        assert stmt.rounded is False
+
+    def test_divide_into_rounded_without_giving_sets_rounded_flag(self):
+        """ROUNDED is also legal directly after the INTO target with no
+        GIVING clause at all (DIVIDE x INTO y ROUNDED)."""
+        result = parse_cobol(
+            _proc_program("    DIVIDE WS-X INTO WS-X ROUNDED.\n"),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        stmt = _first_of_type(result, "DivideStatement")
+        assert stmt.rounded is True
+
+    def test_multiply_giving_rounded_sets_rounded_flag(self):
+        """MULTIPLY shares _parse_binary_arithmetic with DIVIDE, so it has
+        the exact same bug and fix."""
+        result = parse_cobol(
+            _proc_program("    MULTIPLY WS-X BY WS-X GIVING WS-X ROUNDED.\n"),
+            filename="reg.cbl",
+        )
+        assert result.success, f"Errors: {result.errors}"
+        stmt = _first_of_type(result, "MultiplyStatement")
+        assert stmt.rounded is True

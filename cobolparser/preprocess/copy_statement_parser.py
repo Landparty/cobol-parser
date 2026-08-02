@@ -391,7 +391,13 @@ class CopyStatementLexer:
         return False
 
     def _read_operand(self) -> str | None:
-        """Read a pseudo-text, literal, or identifier operand."""
+        """Read a pseudo-text, literal, or identifier operand.
+
+        Pseudo-text delimiters are stripped from the returned text. This
+        applies both to the standard ``==text==`` form and to the alternate
+        ``:text:`` form (e.g. ``REPLACING :ABC: BY :XYZ:`` yields the operand
+        pair ``ABC`` / ``XYZ``), mirroring :func:`parse_replacing_clause`.
+        """
         self._skip_separators()
         if self._is_at_end():
             return None
@@ -414,6 +420,21 @@ class CopyStatementLexer:
                 "and its COPY statement will not be expanded"
             )
             return None
+
+        # 1b. Alternate pseudo-text :text: (COPY REPLACING colon delimiters).
+        # The colons are delimiters, not part of the operand text:
+        # "REPLACING :ABC: BY :XYZ:" replaces ABC by XYZ. If no closing colon
+        # is found on the same line, fall through to the identifier scan so a
+        # stray colon is treated as ordinary token text (mirrors the regex in
+        # parse_replacing_clause, which also strips the delimiters).
+        if char == ":":
+            scan = self.pos + 1
+            while scan < self.length and self.source[scan] not in (":", "\n", "\r"):
+                scan += 1
+            if scan > self.pos + 1 and scan < self.length and self.source[scan] == ":":
+                text = self.source[self.pos + 1 : scan]
+                self.pos = scan + 1
+                return text
 
         # 2. String literal "..." or '...'
         if char in ('"', "'"):
@@ -771,57 +792,153 @@ def parse_replacing_clause(replacing_text: str) -> list[ReplacingClause]:
     return clauses
 
 
-def apply_replacing_clauses(content: str, clauses: list[ReplacingClause]) -> str:
+def _build_clause_pattern(clause: ReplacingClause) -> "re.Pattern[str] | None":
+    """
+    Compile the regex pattern for a single REPLACING clause.
+
+    Uses identifier-safe boundaries to avoid partial word collisions: regex
+    ``\\b`` is unsuitable because COBOL identifiers can contain hyphens, so a
+    custom boundary (not preceded/followed by ``[A-Za-z0-9-]``) is applied on
+    each side of the search text that starts/ends with an identifier
+    character. If the text starts/ends with a special character (like ``:``),
+    no boundary is enforced on that side.
+
+    Returns None when the clause cannot be applied (empty search text or an
+    unknown mode), in which case the clause is skipped.
+    """
+    find_text = clause.find_text
+    if not find_text:
+        return None
+
+    is_start_word = find_text[0].isalnum() or find_text[0] == "-"
+    is_end_word = find_text[-1].isalnum() or find_text[-1] == "-"
+
+    start_boundary = r"(?<![A-Za-z0-9-])" if is_start_word else r""
+    end_boundary = r"(?![A-Za-z0-9-])" if is_end_word else r""
+    escaped = re.escape(find_text)
+
+    if clause.mode == "ALL":
+        return re.compile(start_boundary + escaped + end_boundary, re.IGNORECASE)
+    if clause.mode == "LEADING":
+        return re.compile(
+            start_boundary + escaped + (r"(?=[A-Za-z0-9-])" if is_end_word else r""),
+            re.IGNORECASE,
+        )
+    if clause.mode == "TRAILING":
+        return re.compile(
+            (r"(?<=[A-Za-z0-9-])" if is_start_word else r"") + escaped + end_boundary,
+            re.IGNORECASE,
+        )
+    return None
+
+
+def _split_literal_segments(line: str) -> list[tuple[str, bool]]:
+    """
+    Split a single source line into (segment, is_literal) pieces.
+
+    Literal segments include their delimiting quotes. Doubled quotes inside a
+    literal (``''`` or ``""``) are treated as escapes and do not terminate it.
+    An unterminated literal runs to the end of the line (fixed-format
+    continuation of literals is not resolved at this stage).
+    """
+    segments: list[tuple[str, bool]] = []
+    length = len(line)
+    pos = 0
+    code_start = 0
+    while pos < length:
+        quote = line[pos]
+        if quote not in ('"', "'"):
+            pos += 1
+            continue
+        if pos > code_start:
+            segments.append((line[code_start:pos], False))
+        end = pos + 1
+        while end < length:
+            if line[end] == quote:
+                if end + 1 < length and line[end + 1] == quote:
+                    end += 2  # Escaped (doubled) quote inside the literal
+                    continue
+                end += 1  # Closing quote
+                break
+            end += 1
+        segments.append((line[pos:end], True))
+        pos = end
+        code_start = end
+    if code_start < length or not segments:
+        segments.append((line[code_start:], False))
+    return segments
+
+
+def apply_replacing_clauses(
+    content: str,
+    clauses: list[ReplacingClause],
+    indicator_position: int = 6,
+) -> str:
     """
     Apply REPLACING clauses to copybook content with identifier awareness.
+
+    Substitution is context-aware (open-findings M13):
+
+    - Fixed-format comment lines (``*`` or ``/`` in the indicator column) are
+      never modified.
+    - Text inside alphanumeric string literals (``'...'`` or ``"..."``,
+      including doubled-quote escapes) is never modified — unless the
+      clause's own search text contains a quote character (a pseudo-text
+      operand such as ``=='OLD'== BY =='NEW'==`` explicitly targets literal
+      text and is therefore allowed to match it).
+    - Identifier operands match whole COBOL words only (custom boundaries so
+      hyphenated identifiers are not split). Operands written with the
+      alternate ``:text:`` pseudo-text delimiters arrive here with the
+      delimiters already stripped by the tokenizer and use the same
+      whole-word semantics; because ``:`` is not an identifier character,
+      ``REPLACING :TAG: BY :EMP:`` rewrites the ``TAG`` in ``:TAG:-FIELD``
+      as well as standalone ``TAG`` tokens (whole-token-substring
+      semantics).
+
+    Args:
+        content: Copybook content. Column 7 is fixed-format's indicator
+            column; ``indicator_position`` locates it in *content*.
+        clauses: REPLACING clauses to apply.
+        indicator_position: Index of the indicator character in each line
+            (default 6, matching raw fixed-format text with the
+            sequence-number area still present). Pass 0 for content that has
+            already had ``strip_sequence_area`` applied, where the indicator
+            is the first character of each line.
     """
-    result = content
+    lines = content.split("\n")
+
+    # Comment status is decided once, from the original content, so a
+    # substitution can never shift a line into or out of comment status
+    # midway through applying the clause list.
+    is_comment = [
+        len(line) > indicator_position and line[indicator_position] in ("*", "/")
+        for line in lines
+    ]
 
     # Sort clauses by length descending to prioritize longer matches (e.g. 'ABC-1' before 'ABC')
     sorted_clauses = sorted(clauses, key=lambda c: len(c.find_text), reverse=True)
 
     for clause in sorted_clauses:
-        # We use identifier-safe boundaries for modes to avoid partial word collisions
-        # word boundaries \b in regex are good but COBOL identifiers can contain hyphens
-        # So we define a custom boundary: not followed/preceded by [A-Za-z0-9-]
-        # Determine boundaries based on whether the search text starts/ends with word chars
-        # If text starts/ends with special char (like :), don't enforce word boundary on that side
-        is_start_word = clause.find_text and (
-            clause.find_text[0].isalnum() or clause.find_text[0] == "-"
-        )
-        is_end_word = clause.find_text and (
-            clause.find_text[-1].isalnum() or clause.find_text[-1] == "-"
-        )
+        pattern = _build_clause_pattern(clause)
+        if pattern is None:
+            continue
 
-        start_boundary = r"(?<![A-Za-z0-9-])" if is_start_word else r""
-        end_boundary = r"(?![A-Za-z0-9-])" if is_end_word else r""
+        # A search text that itself contains a quote deliberately targets
+        # literal text; only then may string literals be rewritten.
+        protect_literals = '"' not in clause.find_text and "'" not in clause.find_text
 
-        if clause.mode == "ALL":
-            pattern = re.compile(
-                start_boundary + re.escape(clause.find_text) + end_boundary,
-                re.IGNORECASE,
-            )
-            result = pattern.sub(clause.replace_text, result)
+        for idx, line in enumerate(lines):
+            if is_comment[idx]:
+                continue
+            if protect_literals and ('"' in line or "'" in line):
+                lines[idx] = "".join(
+                    segment if is_literal else pattern.sub(clause.replace_text, segment)
+                    for segment, is_literal in _split_literal_segments(line)
+                )
+            else:
+                lines[idx] = pattern.sub(clause.replace_text, line)
 
-        elif clause.mode == "LEADING":
-            pattern = re.compile(
-                start_boundary
-                + re.escape(clause.find_text)
-                + (r"(?=[A-Za-z0-9-])" if is_end_word else r""),
-                re.IGNORECASE,
-            )
-            result = pattern.sub(clause.replace_text, result)
-
-        elif clause.mode == "TRAILING":
-            pattern = re.compile(
-                (r"(?<=[A-Za-z0-9-])" if is_start_word else r"")
-                + re.escape(clause.find_text)
-                + end_boundary,
-                re.IGNORECASE,
-            )
-            result = pattern.sub(clause.replace_text, result)
-
-    return result
+    return "\n".join(lines)
 
 
 def track_source_location(

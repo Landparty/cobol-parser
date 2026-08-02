@@ -51,6 +51,45 @@ class TestArithmeticMigration:
         assert isinstance(stmts[2], AddStatement)
         assert isinstance(stmts[3], AddStatement)
 
+    def test_add_statement_with_subscripted_target(self):
+        src = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST.
+       PROCEDURE DIVISION.
+           ADD 1 TO VARIABLE (H, I, 1).
+           ADD 1 TO OTHER-VARIABLE (H, I, 2).
+        """
+        result = parse_cobol(src)
+        assert result.errors == []
+        assert result.warnings == []
+
+        stmts = get_procedure_statements(result.ast.procedure_division)
+        assert len(stmts) == 2
+
+        assert isinstance(stmts[0], AddStatement)
+        assert stmts[0].target == "VARIABLE ( H , I , 1 )"
+
+        assert isinstance(stmts[1], AddStatement)
+        assert stmts[1].target == "OTHER-VARIABLE ( H , I , 2 )"
+
+    def test_add_statement_with_subscripted_target_and_giving(self):
+        src = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST.
+       PROCEDURE DIVISION.
+           ADD 1 TO TOTALS (I) GIVING RESULT.
+        """
+        result = parse_cobol(src)
+        assert result.errors == []
+        assert result.warnings == []
+
+        stmts = get_procedure_statements(result.ast.procedure_division)
+        assert len(stmts) == 1
+        stmt = stmts[0]
+        assert isinstance(stmt, AddStatement)
+        assert stmt.target == "TOTALS ( I )"
+        assert stmt.giving == "RESULT"
+
     def test_subtract_statement(self):
         src = """
        IDENTIFICATION DIVISION.
@@ -66,6 +105,45 @@ class TestArithmeticMigration:
         assert len(stmts) == 2
         assert isinstance(stmts[0], SubtractStatement)
         assert isinstance(stmts[1], SubtractStatement)
+
+    def test_subtract_statement_with_subscripted_target(self):
+        src = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST.
+       PROCEDURE DIVISION.
+           SUBTRACT 1 FROM VARIABLE (H, I, 1).
+           SUBTRACT 1 FROM OTHER-VARIABLE (H, I, 2).
+        """
+        result = parse_cobol(src)
+        assert result.errors == []
+        assert result.warnings == []
+
+        stmts = get_procedure_statements(result.ast.procedure_division)
+        assert len(stmts) == 2
+
+        assert isinstance(stmts[0], SubtractStatement)
+        assert stmts[0].target == "VARIABLE ( H , I , 1 )"
+
+        assert isinstance(stmts[1], SubtractStatement)
+        assert stmts[1].target == "OTHER-VARIABLE ( H , I , 2 )"
+
+    def test_add_statement_with_subscripted_giving_target(self):
+        src = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TEST.
+       PROCEDURE DIVISION.
+           ADD 1 TO A GIVING RESULT (H, I, 1).
+        """
+        result = parse_cobol(src)
+        assert result.errors == []
+        assert result.warnings == []
+
+        stmts = get_procedure_statements(result.ast.procedure_division)
+        assert len(stmts) == 1
+        stmt = stmts[0]
+        assert isinstance(stmt, AddStatement)
+        assert stmt.target == "A"
+        assert stmt.giving == "RESULT ( H , I , 1 )"
 
     def test_multiply_statement(self):
         src = """

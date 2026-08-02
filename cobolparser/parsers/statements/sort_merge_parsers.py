@@ -49,6 +49,13 @@ def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:
                 f = ts.peek()
                 if not f:
                     break
+                if f.type == TokenType.COMMA:
+                    # A comma between key fields (`KEY a, b`) is a
+                    # separator, not a terminator -- skip it and keep
+                    # collecting fields.
+                    ts.consume()
+                    skip_whitespace(ts)
+                    continue
                 fv = _val(f)
                 if f.type == TokenType.PERIOD or fv in (
                     "ASCENDING",
@@ -87,6 +94,12 @@ def _parse_file_list(ts: ITokenStream) -> list[str]:
         token = ts.peek()
         if not token:
             break
+        if token.type == TokenType.COMMA:
+            # A comma between file names (`USING a, b`) is a separator, not
+            # a terminator -- skip it and keep collecting files.
+            ts.consume()
+            skip_whitespace(ts)
+            continue
         val = _val(token)
         if token.type == TokenType.PERIOD or val in (
             "GIVING",

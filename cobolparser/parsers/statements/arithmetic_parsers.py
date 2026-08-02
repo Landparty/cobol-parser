@@ -11,13 +11,18 @@ from typing import Any, Protocol, TypeVar, cast
 from ...core.ast_factory import create_node
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.ast_base import ASTNode
+from ...models.ast_base import ASTNode, SourceLocation
 from ...models.statements import (
     AddStatement,
     ComputeStatement,
     DivideStatement,
     MultiplyStatement,
     SubtractStatement,
+)
+from ...models.statements.base import (
+    ArithmeticExpression,
+    CobolExpression,
+    FunctionCall,
 )
 from ._utils import (
     ARITHMETIC_OPERAND_TOKEN_TYPES,
@@ -26,6 +31,7 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     _skip_newlines,
     consume_keyword_and_operand,
+    consume_optional_subscript,
     get_parse_context,
     is_statement_boundary,
     looks_like_paragraph_boundary,
@@ -34,6 +40,7 @@ from ._utils import (
     parse_size_error_clauses,
     peek_value_upper,
     report_or_raise,
+    skip_whitespace,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -49,7 +56,11 @@ class _BinaryArithmeticNode(Protocol):
 
     def add_operand(self, value: str) -> None: ...
 
+    def set_target(self, value: str) -> None: ...
+
     def set_giving(self, value: str) -> None: ...
+
+    def set_rounded(self, value: bool = ...) -> None: ...
 
 
 _ArithT = TypeVar("_ArithT", bound=_BinaryArithmeticNode)
@@ -70,6 +81,12 @@ class AddStatementParser(IStatementParser):
         stmt: AddStatement = create_node(AddStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
+        skip_whitespace(token_stream)
+        if peek_value_upper(token_stream) in ("CORRESPONDING", "CORR"):
+            token_stream.consume()
+            stmt.set_corresponding(True)
+            skip_whitespace(token_stream)
+
         operands, separator = parse_arithmetic_operands(token_stream, {"TO", "GIVING"})
         for operand in operands:
             stmt.add_operand(operand)
@@ -82,9 +99,12 @@ class AddStatementParser(IStatementParser):
         if separator == "TO":
             token_stream.consume()  # consume TO
             _skip_newlines(token_stream)
-            target = self._consume_identifier(token_stream)
+            target = _consume_arithmetic_target(token_stream)
             if target:
                 stmt.set_target(target)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                _consume_additional_arithmetic_targets(token_stream, stmt)
             else:
                 report_or_raise(
                     ctx, "ADD ... TO requires a target identifier", start_loc
@@ -92,10 +112,16 @@ class AddStatementParser(IStatementParser):
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
             else:
                 report_or_raise(
                     ctx, "ADD ... GIVING requires a target identifier", start_loc
@@ -105,16 +131,6 @@ class AddStatementParser(IStatementParser):
 
         parse_size_error_clauses(token_stream, stmt)
         return stmt
-
-    @staticmethod
-    def _consume_identifier(stream: ITokenStream) -> str | None:
-        _skip_newlines(stream)
-        token = stream.peek()
-        if token and token.type == TokenType.IDENTIFIER and token.value:
-            value = token.value
-            stream.consume()
-            return value
-        return None
 
 
 class SubtractStatementParser(IStatementParser):
@@ -131,6 +147,12 @@ class SubtractStatementParser(IStatementParser):
         start_loc = token_location(start_token)
         stmt: SubtractStatement = create_node(SubtractStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
+
+        skip_whitespace(token_stream)
+        if peek_value_upper(token_stream) in ("CORRESPONDING", "CORR"):
+            token_stream.consume()
+            stmt.set_corresponding(True)
+            skip_whitespace(token_stream)
 
         operands, separator = parse_arithmetic_operands(
             token_stream, {"FROM", "GIVING"}
@@ -152,6 +174,7 @@ class SubtractStatementParser(IStatementParser):
                 token_stream.consume()  # consume FROM
             _skip_newlines(token_stream)
             tok = token_stream.peek()
+            target_set = False
             if tok and tok.type in (TokenType.MINUS, TokenType.PLUS):
                 # Sign-prefixed FROM target: e.g. FROM -1000000 GIVING Y
                 next_tok = token_stream.peek(1)
@@ -165,15 +188,24 @@ class SubtractStatementParser(IStatementParser):
                     token_stream.consume()
                     stmt.set_target(sign + next_tok.value)
                     token_stream.consume()
+                    target_set = True
                 else:
                     report_or_raise(
                         ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                     )
+            elif tok and tok.type == TokenType.IDENTIFIER and tok.value:
+                # Identifier targets may carry a subscript group (e.g.
+                # ``FROM VARIABLE (H, I, 1)``); reuse the same helper ADD's
+                # TO target and COMPUTE's targets already use so it isn't
+                # dropped as an unparsed trailing token.
+                target = _consume_arithmetic_target(token_stream)
+                if target:
+                    stmt.set_target(target)
+                    target_set = True
             elif (
                 tok
                 and tok.type
                 in (
-                    TokenType.IDENTIFIER,
                     TokenType.NUMERIC_LITERAL,
                     TokenType.LEVEL_NUMBER,
                     TokenType.FIGURATIVE_CONSTANT,
@@ -182,20 +214,33 @@ class SubtractStatementParser(IStatementParser):
             ):
                 stmt.set_target(tok.value)
                 token_stream.consume()
+                target_set = True
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                 )
+            if target_set:
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                # SUBTRACT allows multiple FROM targets, each individually
+                # ROUNDED: ``FROM b [ROUNDED], c [ROUNDED] ...``.
+                _consume_additional_arithmetic_targets(token_stream, stmt)
             # SUBTRACT a FROM b GIVING c: the 3-operand form stores the
             # result in c instead of back into b (mirrors ADD's TO branch,
             # which already checks for a trailing GIVING the same way).
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                if _consume_optional_rounded(token_stream):
+                    stmt.set_rounded(True)
+                _consume_additional_giving_targets(token_stream, stmt)
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... GIVING requires a target identifier", start_loc
@@ -296,6 +341,41 @@ def _parse_binary_arithmetic(
     giving = consume_keyword_and_operand(token_stream, "GIVING")
     if giving:
         stmt.set_giving(giving)
+    elif second_operand is not None:
+        # Format 1 (no GIVING): MULTIPLY/DIVIDE overwrite the second operand
+        # in place, so -- unlike format 2, where it's just a multiplicand/
+        # divisor left untouched -- it really is a result target. Track it
+        # via set_target (add_operand above already recorded it in
+        # .operands; set_target's _add_unique_operand no-ops on the
+        # duplicate) so it participates in the same target/targets/ROUNDED
+        # machinery ADD/SUBTRACT's TO/FROM already use, instead of only ever
+        # appearing as an untyped operand string.
+        stmt.set_target(second_operand)
+
+    # ROUNDED is legal here whether or not GIVING was present (e.g. both
+    # ``DIVIDE x BY y GIVING z ROUNDED`` and ``DIVIDE x INTO y ROUNDED``).
+    # Left unconsumed, it stays in the stream and gets misread by the
+    # paragraph-boundary lookahead as a new paragraph header.
+    if _consume_optional_rounded(token_stream):
+        stmt.set_rounded(True)
+
+    if giving:
+        # GIVING accepts a comma/space-separated list of result targets,
+        # each optionally ROUNDED (``GIVING z, w ROUNDED``).
+        _consume_additional_giving_targets(token_stream, stmt)
+    elif second_operand is not None:
+        # Format 1 accepts a comma/space-separated target list too:
+        # ``BY id-2 [ROUNDED], id-3 [ROUNDED] ...`` /
+        # ``INTO id-2 [ROUNDED], id-3 [ROUNDED] ...``.
+        _consume_additional_arithmetic_targets(token_stream, stmt)
+
+    # REMAINDER is DIVIDE-only (``DIVIDE x INTO y GIVING z REMAINDER r``,
+    # or the non-standard-but-tolerated ``DIVIDE x INTO y REMAINDER r``
+    # without GIVING); MULTIPLY has no such clause.
+    if verb == "DIVIDE":
+        remainder = consume_keyword_and_operand(token_stream, "REMAINDER")
+        if remainder:
+            cast(DivideStatement, stmt).set_remainder(remainder)
 
     parse_size_error_clauses(token_stream, stmt)
     return stmt
@@ -411,28 +491,346 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
     parts: list[str] = [token.value]
     stream.consume()
 
-    # Optional subscript group: ``(...)``. Track paren depth so nested calls
-    # like ``WS-T(FUNCTION FOO(I))`` are captured correctly.
-    next_token = stream.peek()
-    if next_token and next_token.type == TokenType.LEFT_PAREN:
-        depth = 0
-        while not stream.is_empty():
-            t = stream.peek()
-            if not t:
-                break
-            if t.type == TokenType.LEFT_PAREN:
-                depth += 1
-                parts.append("(")
-            elif t.type == TokenType.RIGHT_PAREN:
-                depth -= 1
-                parts.append(")")
-            else:
-                parts.append(t.value if t.value else "")
-            stream.consume()
-            if depth == 0:
-                break
+    # Optional subscript group: ``(...)``.
+    consume_optional_subscript(stream, parts)
 
     return " ".join(p for p in parts if p)
+
+
+def _consume_optional_rounded(stream: ITokenStream) -> bool:
+    """Consume a trailing ROUNDED keyword if present, skipping NEWLINEs first.
+
+    Shared by every arithmetic verb that accepts ROUNDED (ADD/SUBTRACT's
+    TO/FROM/GIVING targets -- each individually -- and MULTIPLY/DIVIDE's
+    single GIVING target via :func:`_parse_binary_arithmetic`) so ROUNDED
+    detection isn't left unconsumed to be misread by the paragraph-boundary
+    lookahead. Returns ``True`` if ROUNDED was found and consumed.
+    """
+    _skip_newlines(stream)
+    if peek_value_upper(stream) == "ROUNDED":
+        stream.consume()
+        return True
+    return False
+
+
+#: GIVING/REMAINDER have no dedicated TokenType (see e.g.
+#: consume_keyword_and_operand), so they lex as plain IDENTIFIERs and must be
+#: excluded by value here or ``_consume_additional_arithmetic_targets`` would
+#: swallow them as a bogus target -- REMAINDER matters for MULTIPLY/DIVIDE's
+#: format-1 (no GIVING) multi-target list, which this helper also serves (see
+#: _parse_binary_arithmetic): ``DIVIDE x INTO y REMAINDER r`` (the
+#: tolerated-without-GIVING form) must stop the target list at REMAINDER, not
+#: swallow it as a second target name. Safe to share with ADD/SUBTRACT's
+#: TO/FROM list too since REMAINDER is a COBOL reserved word and can never be
+#: a real data-name there. ON/NOT/END-ADD/END-SUBTRACT already have dedicated
+#: TokenTypes (or are covered by SCOPE_TERMINATORS/STATEMENT_KEYWORDS/
+#: CONTROL_FLOW_BOUNDARIES), so ``_consume_arithmetic_target``'s IDENTIFIER
+#: check already stops on those without help from this set.
+_ADDITIONAL_TARGET_STOP_KEYWORDS: frozenset[str] = (
+    frozenset({"GIVING", "REMAINDER"})
+    | STATEMENT_KEYWORDS
+    | CONTROL_FLOW_BOUNDARIES
+    | SCOPE_TERMINATORS
+)
+
+
+def _consume_additional_arithmetic_targets(stream: ITokenStream, stmt: Any) -> None:
+    """Consume further TO/FROM targets after the first, each optionally ROUNDED.
+
+    COBOL allows a comma- or space-separated target list -- ``TO id-2
+    [ROUNDED], id-3 [ROUNDED] ...`` -- for both ADD's TO clause and
+    SUBTRACT's FROM clause. *stmt* must already have its first target set via
+    :meth:`ArithmeticStatement.set_target`; this only adds the rest.
+    """
+    while True:
+        _skip_newlines(stream)
+        if peek_value_upper(stream) == ",":
+            stream.consume()
+            _skip_newlines(stream)
+        if peek_value_upper(stream) in _ADDITIONAL_TARGET_STOP_KEYWORDS:
+            break
+        # A missing period on this statement followed by the next paragraph/
+        # section header (H9): stop instead of folding the header into the
+        # target list -- without this, `ADD A TO B` with no trailing period
+        # would swallow a following `NEXT-PARA.` as a bogus extra target and
+        # the paragraph would vanish from the AST entirely.
+        if looks_like_paragraph_boundary(stream):
+            warn_paragraph_boundary_swallowed(stream)
+            break
+        extra_target = _consume_arithmetic_target(stream)
+        if extra_target is None:
+            break
+        stmt.set_target(extra_target)
+        if _consume_optional_rounded(stream):
+            stmt.set_rounded(True)
+
+
+#: GIVING may itself be followed by further comma/space-separated targets
+#: (``GIVING id-3 [ROUNDED] [id-4 [ROUNDED]] ...``); REMAINDER (DIVIDE-only)
+#: must stop the list rather than being swallowed as a bogus extra target.
+_ADDITIONAL_GIVING_STOP_KEYWORDS: frozenset[str] = (
+    frozenset({"REMAINDER"})
+    | STATEMENT_KEYWORDS
+    | CONTROL_FLOW_BOUNDARIES
+    | SCOPE_TERMINATORS
+)
+
+
+def _consume_additional_giving_targets(stream: ITokenStream, stmt: Any) -> None:
+    """Consume further GIVING targets after the first, each optionally ROUNDED.
+
+    COBOL allows a comma- or space-separated GIVING target list --
+    ``GIVING id-3 [ROUNDED] [id-4 [ROUNDED]] ...`` -- for ADD, SUBTRACT,
+    MULTIPLY, and DIVIDE alike. *stmt* must already have its first GIVING
+    target set via :meth:`ArithmeticStatement.set_giving`; this only adds
+    the rest.
+    """
+    while True:
+        _skip_newlines(stream)
+        if peek_value_upper(stream) == ",":
+            stream.consume()
+            _skip_newlines(stream)
+        if peek_value_upper(stream) in _ADDITIONAL_GIVING_STOP_KEYWORDS:
+            break
+        # Same H9-pattern guard as _consume_additional_arithmetic_targets:
+        # don't swallow a following paragraph header as a bogus extra
+        # GIVING target when this statement's period is missing.
+        if looks_like_paragraph_boundary(stream):
+            warn_paragraph_boundary_swallowed(stream)
+            break
+        extra_giving = _consume_arithmetic_target(stream)
+        if extra_giving is None:
+            break
+        stmt.set_giving(extra_giving)
+        if _consume_optional_rounded(stream):
+            stmt.set_rounded(True)
+
+
+class _ExpressionSyntaxError(Exception):
+    """Internal signal: a COMPUTE token sequence is not tree-parseable.
+
+    Never escapes :func:`build_compute_expression_tree` -- tree building is
+    strictly best-effort (M12) and must not introduce errors or warnings
+    where the raw-string path produced none.
+    """
+
+
+_EXPR_BINARY_OPS = ("+", "-", "*", "/", "**")
+
+
+def _split_top_level_commas(tokens: list[str]) -> list[list[str]]:
+    """Split a token list on commas that sit outside any parentheses."""
+    parts: list[list[str]] = [[]]
+    depth = 0
+    for tok in tokens:
+        if tok == "(":
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+        if tok == "," and depth == 0:
+            parts.append([])
+        else:
+            parts[-1].append(tok)
+    return parts
+
+
+class _ExpressionTreeParser:
+    """Recursive-descent precedence parser over COMPUTE expression tokens.
+
+    Input is the flat list of token *strings* the COMPUTE parser already
+    collects for the raw expression string, so the tree is guaranteed to be
+    derived from exactly the same tokens. Grammar (COBOL precedence, loosest
+    to tightest):
+
+        expression := term   (("+" | "-") term)*        left-associative
+        term       := unary  (("*" | "/") unary)*       left-associative
+        unary      := ("+" | "-")* power                "-" -> NEGATE node
+        power      := primary ("**" unary)?             right-associative
+        primary    := "(" expression ")"
+                    | "FUNCTION" name ["(" args ")"]    -> FunctionCall
+                    | identifier ["(" subscripts ")"]   -> leaf string
+                    | literal                           -> leaf string
+
+    Leaves are plain strings (identifiers -- subscript groups folded in as
+    ``"A ( I )"``, mirroring ``_consume_arithmetic_operand`` -- and
+    literals); interior nodes are :class:`ArithmeticExpression` (operator
+    ``+ - * / **`` or unary ``NEGATE`` with only ``right_operand`` set) and
+    :class:`FunctionCall`.
+    """
+
+    def __init__(self, tokens: list[str], location: SourceLocation) -> None:
+        self._tokens = tokens
+        self._pos = 0
+        self._location = location
+
+    def parse(self) -> CobolExpression:
+        """Parse the full token list into a single expression node."""
+        node = self._parse_full()
+        if isinstance(node, CobolExpression):
+            return node
+        # Single operand (e.g. COMPUTE X = A): wrap the leaf so the
+        # attribute is uniformly a CobolExpression.
+        leaf = CobolExpression("OPERAND", self._location)
+        leaf.operands = [node]
+        return leaf
+
+    def _parse_full(self) -> str | CobolExpression:
+        node = self._parse_expression()
+        if self._pos != len(self._tokens):
+            raise _ExpressionSyntaxError(f"trailing token {self._peek()!r}")
+        return node
+
+    def _peek(self) -> str | None:
+        return self._tokens[self._pos] if self._pos < len(self._tokens) else None
+
+    def _advance(self) -> str:
+        tok = self._tokens[self._pos]
+        self._pos += 1
+        return tok
+
+    def _binary(
+        self,
+        operator: str,
+        left: str | CobolExpression,
+        right: str | CobolExpression,
+    ) -> ArithmeticExpression:
+        node = ArithmeticExpression(operator, self._location)
+        node.set_left_operand(left)
+        node.set_right_operand(right)
+        return node
+
+    def _parse_expression(self) -> str | CobolExpression:
+        node = self._parse_term()
+        while self._peek() in ("+", "-"):
+            op = self._advance()
+            node = self._binary(op, node, self._parse_term())
+        return node
+
+    def _parse_term(self) -> str | CobolExpression:
+        node = self._parse_unary()
+        while self._peek() in ("*", "/"):
+            op = self._advance()
+            node = self._binary(op, node, self._parse_unary())
+        return node
+
+    def _parse_unary(self) -> str | CobolExpression:
+        tok = self._peek()
+        if tok == "+":
+            self._advance()
+            return self._parse_unary()
+        if tok == "-":
+            self._advance()
+            node = ArithmeticExpression("NEGATE", self._location)
+            node.set_right_operand(self._parse_unary())
+            return node
+        return self._parse_power()
+
+    def _parse_power(self) -> str | CobolExpression:
+        node = self._parse_primary()
+        if self._peek() == "**":
+            self._advance()
+            # Right-associative; the exponent may itself carry a sign
+            # (2 ** -3), hence _parse_unary on the right.
+            node = self._binary("**", node, self._parse_unary())
+        return node
+
+    def _parse_primary(self) -> str | CobolExpression:
+        tok = self._peek()
+        if tok is None:
+            raise _ExpressionSyntaxError("unexpected end of expression")
+        if tok == "(":
+            self._advance()
+            node = self._parse_expression()
+            if self._peek() != ")":
+                raise _ExpressionSyntaxError("missing closing parenthesis")
+            self._advance()
+            return node
+        if tok.upper() == "FUNCTION":
+            return self._parse_function_call()
+        if tok in _EXPR_BINARY_OPS or tok in (")", ","):
+            raise _ExpressionSyntaxError(f"unexpected token {tok!r}")
+        self._advance()
+        # Subscripted identifier: fold "NAME ( I [, J] )" into the leaf
+        # string, mirroring _consume_arithmetic_operand's "TABLE1 ( INDEX1 )"
+        # shape (COBOL has no implicit multiplication, so IDENTIFIER "("
+        # can only be a subscript/reference-modification group here).
+        if tok[:1].isalpha() and self._peek() == "(":
+            group = self._consume_balanced_group()
+            return " ".join([tok, *group])
+        return tok
+
+    def _consume_balanced_group(self) -> list[str]:
+        """Consume a balanced ``( ... )`` group, parens included."""
+        parts: list[str] = []
+        depth = 0
+        while True:
+            tok = self._peek()
+            if tok is None:
+                raise _ExpressionSyntaxError("unbalanced parentheses")
+            parts.append(self._advance())
+            if tok == "(":
+                depth += 1
+            elif tok == ")":
+                depth -= 1
+                if depth == 0:
+                    return parts
+
+    def _parse_function_call(self) -> FunctionCall:
+        self._advance()  # FUNCTION keyword
+        name = self._peek()
+        if name is None or name in _EXPR_BINARY_OPS or name in ("(", ")", ","):
+            raise _ExpressionSyntaxError("FUNCTION requires a function name")
+        self._advance()
+        call = FunctionCall(name, self._location)
+        if self._peek() == "(":
+            group = self._consume_balanced_group()
+            for arg_tokens in _split_top_level_commas(group[1:-1]):
+                if not arg_tokens:
+                    continue
+                argument: str | CobolExpression
+                try:
+                    argument = _ExpressionTreeParser(
+                        arg_tokens, self._location
+                    )._parse_full()
+                except _ExpressionSyntaxError:
+                    # Space-separated argument lists (FUNCTION MAX(A B))
+                    # and other shapes the grammar doesn't cover degrade
+                    # to the raw joined string, never to a failure.
+                    argument = " ".join(arg_tokens)
+                call.add_argument(argument)
+        return call
+
+
+def build_compute_expression_tree(
+    tokens: list[str], location: SourceLocation
+) -> CobolExpression | None:
+    """Best-effort structural parse of COMPUTE expression tokens (M12).
+
+    Returns ``None`` for any token sequence the precedence parser does not
+    understand (including the unbalanced-parentheses case already reported
+    by the COMPUTE parser itself, see H2) -- the caller keeps the raw
+    joined string either way, so failure here never adds an error or
+    warning that the pre-M12 parser did not produce.
+
+    ``**`` reaches this function as two adjacent ``"*"`` tokens (the lexer
+    emits two MULTIPLY_OP tokens); they are re-merged before parsing.
+    """
+    cleaned: list[str] = []
+    for tok in tokens:
+        if not tok or not tok.strip():
+            continue  # drop NEWLINE/empty tokens kept in the raw string
+        if tok == "*" and cleaned and cleaned[-1] == "*":
+            cleaned[-1] = "**"
+            continue
+        cleaned.append(tok)
+    if not cleaned:
+        return None
+    try:
+        return _ExpressionTreeParser(cleaned, location).parse()
+    except Exception:
+        # Strictly fail-soft: any surprise (grammar gap, odd token) leaves
+        # expression_tree as None with the raw string untouched.
+        return None
 
 
 class ComputeStatementParser(IStatementParser):
@@ -459,11 +857,23 @@ class ComputeStatementParser(IStatementParser):
             )
         stmt.add_target(target)
 
-        # Additional targets and per-target ROUNDED phrases, up to '='.
+        # Additional targets and per-target ROUNDED phrases, up to '='. COMPUTE
+        # only records whether ROUNDED appeared at all (not which target it
+        # modified), matching ADD/SUBTRACT/MULTIPLY/DIVIDE's single `rounded`
+        # flag -- previously this branch consumed and discarded the keyword.
         while True:
-            _skip_newlines(token_stream)
-            if peek_value_upper(token_stream) == "ROUNDED":
+            if _consume_optional_rounded(token_stream):
+                stmt.set_rounded(True)
+                continue
+            if peek_value_upper(token_stream) == ",":
+                # A comma between targets (`COMPUTE A, B = ...`) is a
+                # separator, not a terminator -- skip it and keep collecting
+                # targets. Without this, the comma was left unconsumed and
+                # the subsequent `=` check failed outright ("COMPUTE
+                # statement missing '=' operator"), a harder failure than
+                # the warned/silent drops this bug class usually produces.
                 token_stream.consume()
+                _skip_newlines(token_stream)
                 continue
             extra_target = _consume_arithmetic_target(token_stream)
             if extra_target is None:
@@ -542,6 +952,12 @@ class ComputeStatementParser(IStatementParser):
         if expr_tokens:
             expr_str = " ".join(expr_tokens).strip()
             stmt.set_expression(expr_str)
+            # M12: additionally attach a structural tree parsed from the
+            # exact same tokens. Best-effort only -- on failure the tree
+            # stays None and the raw string above is unaffected.
+            stmt.set_expression_tree(
+                build_compute_expression_tree(expr_tokens, start_loc)
+            )
         else:
             report_or_raise(ctx, "COMPUTE statement missing expression", start_loc)
 
