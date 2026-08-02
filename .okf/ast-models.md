@@ -180,6 +180,13 @@ Two shapes here regularly surprise consumers (both confirmed against source
   `THROUGH:` prefix, and the intermediate values are not enumerated. A
   consumer wanting the field's full domain has to expand the range itself
   (and bound the expansion — `VALUE 1 THRU 999999` is legal COBOL).
+  Worse, the marker is emitted **only when the range end is unsigned**:
+  `88 X VALUE -5 THRU -1.` arrives as `["-5", "-1"]` with no `THROUGH:` at
+  all, which is indistinguishable from two discrete values `VALUE -5, -1`.
+  A signed *start* is fine (`VALUE -2 THRU 2` → `["-2", "THROUGH:2"]`), so
+  the loss is specific to a signed endpoint. Confirmed 2026-08-02 against
+  the DATA DIVISION parser; not fixed here, since correcting it changes an
+  established `ConditionNameItem.values` shape that other consumers read.
 
 `index_names` and `key_clauses` are serialized only when non-empty. Before
 2026-07-09 `ASCENDING/DESCENDING KEY` was dropped and `INDEXED BY` kept only

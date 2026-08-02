@@ -199,6 +199,35 @@ class TestFlattenRecord:
         assert _by_name(specs, "TXN-TYPE").condition_values == ["D", "W", "T"]
         assert _by_name(specs, "TXN-STATUS").condition_values == ["1", "2", "3", "4"]
 
+    def test_signed_thru_range_expands(self):
+        source = "01 R.\n  05 B PIC S9(3).\n     88 B-SPAN VALUE -2 THRU 2.\n"
+        assert _by_name(_fields(source), "B").condition_values == [
+            "-2",
+            "-1",
+            "0",
+            "1",
+            "2",
+        ]
+
+    def test_descending_thru_range_keeps_both_endpoints(self):
+        # A descending range is swapped before expansion; iterating from the
+        # low bound is what keeps 2 from being dropped.
+        source = "01 R.\n  05 D PIC 9(3).\n     88 D-DESC VALUE 4 THRU 2.\n"
+        assert sorted(_by_name(_fields(source), "D").condition_values) == [
+            "2",
+            "3",
+            "4",
+        ]
+
+    def test_wide_thru_range_is_capped(self):
+        source = "01 R.\n  05 E PIC 9(6).\n     88 E-HUGE VALUE 1 THRU 999999.\n"
+        values = _by_name(_fields(source), "E").condition_values
+        assert 0 < len(values) <= 65
+
+    def test_non_numeric_thru_range_keeps_only_its_endpoints(self):
+        source = "01 R.\n  05 G PIC X(2).\n     88 G-TEXT VALUE 'AA' THRU 'ZZ'.\n"
+        assert _by_name(_fields(source), "G").condition_values == ["AA", "ZZ"]
+
     def test_value_clause_captured(self):
         assert _by_name(_fields(TXNDATA.read_text()), "ACTIVE-FLAG").value_clause
 

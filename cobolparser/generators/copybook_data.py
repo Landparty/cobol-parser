@@ -106,6 +106,10 @@ _PROGRAM_RE = re.compile(r"^\s*IDENTIFICATION\s+DIVISION\s*\.", re.IGNORECASE | 
 _PROGRAM_ID_RE = re.compile(r"^\s*PROGRAM-ID\s*\.", re.IGNORECASE | re.M)
 _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
 _THROUGH_RE = re.compile(r"^THROUGH:(.*)$", re.IGNORECASE)
+# An optionally-signed integer literal, used to decide whether a level-88
+# ``THRU`` range can be expanded. Both endpoints are tested the same way: the
+# sign has to be accepted on either side, not just the first.
+_INTEGER_LITERAL_RE = re.compile(r"^[+-]?\d+$")
 _WORD_SPLIT_RE = re.compile(r"[-_]+")
 # A one- or two-digit level number inside the sequence area (columns 1-6),
 # followed by a separator -- the decisive free-form signal. Six-digit sequence
@@ -270,7 +274,11 @@ class FieldSpec:
         size: Character positions the item occupies in DISPLAY form.
         integer_digits: Digit positions left of the decimal point.
         decimal_digits: Digit positions right of the decimal point.
-        is_signed: Whether the picture carries an ``S``.
+        is_signed: Whether the field can hold a negative value.  True for an
+            explicit ``S``, and also for a numeric-edited picture carrying a
+            ``+``/``-`` insertion symbol or the ``CR``/``DB`` credit-debit
+            symbols (``PIC -ZZ,ZZ9.99``) -- broader than
+            :attr:`PictureClause.is_signed`, which reports only the ``S``.
         value_clause: Raw VALUE clause literal, if any.
         condition_values: Flattened level-88 values, ranges expanded.
         subscripts: OCCURS subscript path, empty for non-table fields.
@@ -347,14 +355,23 @@ def _condition_values(item: CobolDataItem) -> list[str]:
                 continue
             end = _strip_literal_quotes(match.group(1))
             start = previous
-            if start is not None and start.lstrip("+-").isdigit() and end.isdigit():
+            if (
+                start is not None
+                and _INTEGER_LITERAL_RE.match(start)
+                and _INTEGER_LITERAL_RE.match(end)
+            ):
                 low, high = int(start), int(end)
                 if low > high:
                     low, high = high, low
                 # Cap the expansion: the point is a representative domain,
                 # not an exhaustive enumeration of a six-digit range.
-                span = min(high - low, _MAX_RANGE_EXPANSION)
-                values.extend(str(low + offset) for offset in range(1, span + 1))
+                high = min(high, low + _MAX_RANGE_EXPANSION)
+                # Emit the closed interval, both endpoints included. Iterating
+                # from ``low`` rather than from ``start`` is what makes a
+                # descending ``VALUE 4 THRU 2`` yield 2 as well as 3 and 4;
+                # the ``dict.fromkeys`` dedup below drops the repeated
+                # endpoint that ``start`` already contributed.
+                values.extend(str(value) for value in range(low, high + 1))
             elif end:
                 values.append(end)
             previous = end

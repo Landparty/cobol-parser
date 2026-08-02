@@ -130,6 +130,20 @@ Precedence, highest first:
    THRU 4` is recorded by the parser as `["2", "THROUGH:4"]` and expanded
    here to `2,3,4` (capped at `_MAX_RANGE_EXPANSION = 64` so a six-digit
    range cannot blow up memory).
+
+   Both endpoints are tested with `_INTEGER_LITERAL_RE` (`^[+-]?\d+$`), so a
+   sign is accepted on either side, and the expansion iterates the **closed
+   interval from the low bound** — a descending `VALUE 4 THRU 2` therefore
+   yields 2 as well as 3 and 4 (iterating from `start` silently dropped the
+   low endpoint). A non-numeric range (`VALUE 'AA' THRU 'ZZ'`) contributes
+   only its endpoints.
+
+   **Parser-level limitation:** when a range's *end* carries a sign, the
+   parser does not emit the `THROUGH:` marker at all — `88 X VALUE -5 THRU
+   -1.` arrives as `["-5", "-1"]`, indistinguishable from two discrete
+   values. Such a range yields its endpoints only; there is nothing the
+   generator can do about it from here. `VALUE -2 THRU 2` (signed *start*,
+   unsigned end) is unaffected and expands normally.
 2. **`VALUE` clause** — a constant for that column. Figurative constants
    (`SPACES`, `LOW-VALUES`, …) mean "no meaningful initial content" and fall
    through to generation instead of filling the column with blanks;
