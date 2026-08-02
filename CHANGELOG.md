@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/integration/test_copybook_csv_generation.py` (parametrized over the
   sample and NIST `.CPY` corpora), and
   `tests/contracts/test_copybook_data_generator_contract.py`.
+* **generators:** internal restructure — `copybook_data.py`'s implementation
+  has been decomposed into a modular package `cobolparser/generators/data/`
+  with focused modules: `options.py` (DataGeneratorOptions),
+  `errors.py` (CopybookLayoutError), `layout.py` (FieldCategory, FieldSpec,
+  flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset),
+  and `copybook.py` (parse_copybook_records, CopybookDataGenerator).
+  `copybook_data.py` is now a backwards-compatible re-export shim; every
+  existing import path (`from cobolparser.generators import
+  CopybookDataGenerator`) and the `cobol-parser gen-data` CLI subcommand are
+  unaffected. `ValueFactory` and `flatten_record` are newly usable directly
+  against any `CobolDataItem`, not just a copybook-parsed one, supporting
+  future program-data-generation initiatives.
 * **parser:** SPECIAL-NAMES mnemonic-name clauses (`implementor-name IS
   mnemonic-name [ON STATUS IS cond] [OFF STATUS IS cond]`, e.g. `C01 IS
   TOP-OF-PAGE`, `CONSOLE IS CRT`, `UPSI-0 IS SWITCH-1 ON STATUS IS ...`)
