@@ -40,7 +40,7 @@ A `PIC 9(2)` random value has a 1-in-100 chance of tripping `IF WS-CODE = 42`.
 Pieces that already exist and are reusable — this plan builds on them rather
 than restarting:
 
-**Generation (`cobolparser/generators/copybook_data.py`, 1264 lines)**
+**Generation (`cobolparser/generators/copybook_data.py`, ~1.3k lines)**
 `FieldSpec` / `flatten_record()` / `_ValueFactory` / `DataGeneratorOptions` /
 `GeneratedDataset`. Already handles PICTURE categories, digit counts, sign,
 `USAGE`, `OCCURS` expansion, `REDEFINES`/`FILLER` exclusion, level-88 domains
@@ -135,7 +135,12 @@ class BoundaryRef:
 @dataclass
 class BoundaryFixture:
     ref: BoundaryRef
-    direction: str                 # IN | OUT | BIDIRECTIONAL
+    direction: str                 # perspective is the *program under test*:
+                                   # IN  = boundary feeds the program (mock supplies)
+                                   # OUT = program feeds the boundary (assert on)
+                                   # BIDIRECTIONAL = both, e.g. a BY REFERENCE
+                                   #   CALL arg the caller sets and the callee
+                                   #   writes back
     layout: list[FieldSpec]        # resolved record/params — reuses today's FieldSpec
     sequence: list[dict[str, str]] # one dict per invocation (READ #1, #2, …)
     terminal: dict[str, str] | None# AT END / SQLCODE 100 / FILE STATUS 10 …
@@ -283,7 +288,7 @@ this; `subprogram_demo.cbl` gives a caller/callee pair.
 cobol-parser gen-fixtures PROG.cbl
     [--copybook-path DIR]...   [--callee-path DIR]...
     [--rows N] [--seed N] [--scenarios happy|branches|all]
-    [--format json|csv-dir|cut] [-o PATH]
+    [--format json|csv-dir] [-o PATH]
     [--list-boundaries] [--describe] [--strict]
 ```
 
@@ -388,7 +393,12 @@ tested; this is the machine interface other tools consume).
 `out/happy-path/INV-FILE.csv`. Reuses `GeneratedDataset.write_csv`, including
 its `_DEFAULT_LINE_TERMINATOR` agreement between `to_csv`/`write_csv`.
 
-**`--format cut`** — a `.cut` suite:
+**`.cut` suite** — **owned by mockymock, not cobol-parser** (open decision #3;
+this is the recommendation, so the rest of the plan assumes it). Emitted by
+`mockymock generate --with-data` from the JSON bundle, keeping cobol-parser
+free of `.cut` grammar. If decision #3 goes the other way, the same rules
+below become a `cobol-parser gen-fixtures --format cut` emitter — only the
+home changes, not the mapping:
 
 ```
 TESTSUITE "INVUPDT generated"
@@ -422,7 +432,7 @@ that differ only in field values ⇒ one `TESTCASE … USING PROVIDER` instead o
 N cases (this is precisely what `PROVIDER` was built for); shared mocks ⇒
 `BEFORE-EACH`.
 
-Every emitted `.cut` must **parse and lint clean** — a CI test that runs
+Every emitted `.cut` must **parse and lint cleanly** — a CI test that runs
 `mockymock lint` over the generated suites for the mockymock examples corpus.
 A generator that emits refusable `.cut` is worse than no generator.
 
@@ -493,7 +503,7 @@ the repo that actually executes COBOL.
 | 3 `gen-fixtures` random baseline | 1,2 | M | **Yes — first usable release** |
 | 4 Constraints + solver | 1,2 | L | No (feeds 5) |
 | 5 `ScenarioPlanner` | 3,4 | M | **Yes — the "fully test" claim** |
-| 6 Emitters (json/csv/cut) | 3,5 | M | Yes |
+| 6 Emitters (json/csv here, `.cut` mapping in mockymock) | 3,5 | M | Yes |
 | 7 Expectations tiers 1–2 | 5,6 | M | Yes |
 | 7b Golden mode (mockymock) | 6 | M | Yes |
 | 8 mockymock `--with-data` | 6 | S–M | **Yes — the end-to-end story** |
@@ -542,6 +552,7 @@ runnable `.cut`". Phases 4–5 are the larger investment and are what turn
    mockymock's grammar. The alternative is cobol-parser emitting only JSON and
    mockymock owning all `.cut` text (it already is the only text producer, via
    `scaffold_cut`). Recommendation: **the latter** — cobol-parser stays
-   grammar-agnostic, `--format cut` lives in mockymock as `generate --with-data`.
+   grammar-agnostic and `.cut` emission lives in mockymock's
+   `generate --with-data`. §6 is written on that assumption.
 4. **Golden/characterization mode (7b)** — worth the extra surface, or keep
    generated suites input-only and let people write their own `EXPECT`s?
