@@ -103,6 +103,31 @@ cobol-parser expand <file.cbl> --copybook-path ./copybooks
 Runs copybook expansion and prints the expanded source. `--copybook-path` may be
 specified multiple times for multiple search directories.
 
+## Gen-Data
+
+```bash
+cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] \
+    [--list-records] [--describe] [--header-style short|path] \
+    [--include-filler] [--include-redefines] [--no-expand-occurs] \
+    [--max-occurs N] [--no-semantic] [--ignore-values] [--unique FIELD] \
+    [--blank-rate RATE] [--compact] [--output FILE]
+```
+
+Generates synthetic CSV test data from a copybook record layout — see
+[generators.md](generators.md) for the generation rules. Emits **CSV on
+stdout** (not JSON), so it pipes directly into a fixture file; `--output`
+writes through the `csv` module so quoted cells round-trip.
+
+* `--rows`/`-n` — record count (default 10). `--seed` pins the RNG; the same
+  seed and copybook always produce byte-identical CSV.
+* `--list-records` and `--describe` are the two JSON modes.
+  `--list-records` emits `{"source_file", "records": [{name, level, size}]}`;
+  `--describe` emits the resolved layout plus rows, including the `seed`
+  actually used — the way to recover the seed of an unseeded run.
+* `--record NAME` picks among multiple level-01 records (default: the first).
+  An unknown name errors and lists what is available.
+* Layout errors (`CopybookLayoutError`) exit 1 with the message on stderr.
+
 ## Analyze
 
 ```bash

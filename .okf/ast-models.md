@@ -164,6 +164,23 @@ class OccursClause(ASTNode):
                                #  "keys": [...]} — SEARCH ALL keys (2026-07-09)
 ```
 
+Two shapes here regularly surprise consumers (both confirmed against source
+2026-08-02, and both compensated for in
+[generators.md](generators.md)'s data generator):
+
+* **`PictureClause.is_signed` reports only an explicit `S`.** A
+  numeric-edited picture whose sign lives in an insertion symbol —
+  `PIC -ZZ,ZZ9.99`, `PIC +999`, `PIC 999CR`, `PIC 999DB` — can hold a
+  negative value but reports `is_signed=False`. Code deciding "may this
+  field be negative?" must also test `is_numeric_edited` plus the presence
+  of `-`/`+`/`CR`/`DB` in the pattern.
+* **Level-88 `THRU` ranges are marked, not expanded.**
+  `ConditionNameItem.values` for `88 ST-OK VALUE 2 THRU 4.` is
+  `["2", "THROUGH:4"]` — the second entry is the range *end*, tagged with a
+  `THROUGH:` prefix, and the intermediate values are not enumerated. A
+  consumer wanting the field's full domain has to expand the range itself
+  (and bound the expansion — `VALUE 1 THRU 999999` is legal COBOL).
+
 `index_names` and `key_clauses` are serialized only when non-empty. Before
 2026-07-09 `ASCENDING/DESCENDING KEY` was dropped and `INDEXED BY` kept only
 its last name (and was lost entirely when a KEY clause preceded it). See

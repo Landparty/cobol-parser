@@ -53,6 +53,30 @@ cobol-parser analyze program.cbl      # dynamic call analysis
 cobol-parser dead-code program.cbl    # unreferenced paragraphs
 ```
 
+### Generate test data from a copybook
+
+`gen-data` turns a copybook record layout into a CSV of synthetic records —
+one column per elementary field, values that always fit the field's PICTURE,
+`USAGE`, and level-88 domain:
+
+```bash
+cobol-parser gen-data CUSTOMER.cpy --rows 100 --seed 7 -o customers.csv
+```
+
+```python
+from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
+
+dataset = CopybookDataGenerator(
+    DataGeneratorOptions(rows=100, seed=7)
+).generate_from_file("CUSTOMER.cpy")
+print(dataset.to_csv())
+```
+
+A `seed` makes output byte-identical across runs; omit it and the seed that
+was drawn is reported on `dataset.seed` (and by `gen-data --describe`) so any
+run can be replayed. `REDEFINES` and `FILLER` are excluded by default, and
+`OCCURS` tables expand to one column per occurrence.
+
 ## Commands
 
 ```bash

@@ -18,6 +18,7 @@ _SUBCOMMANDS = frozenset(
         "tokenize",
         "preprocess",
         "expand",
+        "gen-data",
         "analyze",
         "dead-code",
         "program-flow",
@@ -689,6 +690,177 @@ def _cmd_expand(args: argparse.Namespace) -> None:
     )
 
 
+# -- Subcommand: gen-data -----------------------------------------------------
+
+
+def _build_gen_data_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "gen-data",
+        help="Generate synthetic CSV test data from a copybook record layout",
+    )
+    p.add_argument("file", help="Path to the copybook (or COBOL source) file")
+    p.add_argument(
+        "--rows",
+        "-n",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Number of records to generate (default: 10)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        metavar="N",
+        help="RNG seed for reproducible output (default: random, reported in --describe)",
+    )
+    p.add_argument(
+        "--record",
+        default=None,
+        metavar="NAME",
+        help="Level-01 record to generate from (default: the first in the copybook)",
+    )
+    p.add_argument(
+        "--list-records",
+        action="store_true",
+        help="List the level-01 records in the copybook and exit",
+    )
+    p.add_argument(
+        "--describe",
+        action="store_true",
+        help="Emit the resolved layout and rows as JSON instead of CSV",
+    )
+    p.add_argument(
+        "--header-style",
+        choices=["short", "path"],
+        default="short",
+        help="CSV header naming: short field name (default) or dotted record path",
+    )
+    p.add_argument(
+        "--include-filler",
+        action="store_true",
+        help="Include FILLER items as columns (skipped by default)",
+    )
+    p.add_argument(
+        "--include-redefines",
+        action="store_true",
+        help="Include REDEFINES fields, which alias bytes another column covers",
+    )
+    p.add_argument(
+        "--no-expand-occurs",
+        action="store_true",
+        help="Emit only the first occurrence of each OCCURS table",
+    )
+    p.add_argument(
+        "--max-occurs",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Cap the occurrences expanded per OCCURS table",
+    )
+    p.add_argument(
+        "--no-semantic",
+        action="store_true",
+        help="Disable field-name value heuristics (NAME, CITY, DATE, ...)",
+    )
+    p.add_argument(
+        "--ignore-values",
+        action="store_true",
+        help="Ignore VALUE clauses and level-88 values when generating",
+    )
+    p.add_argument(
+        "--unique",
+        action="append",
+        default=[],
+        metavar="FIELD",
+        help="Field whose column must hold distinct values (repeatable)",
+    )
+    p.add_argument(
+        "--blank-rate",
+        type=float,
+        default=0.0,
+        metavar="RATE",
+        help="Fraction of cells (0.0-1.0) to leave blank (default: 0.0)",
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_gen_data)
+
+
+def _cmd_gen_data(args: argparse.Namespace) -> None:
+    from ..generators.copybook_data import (
+        CopybookDataGenerator,
+        CopybookLayoutError,
+        DataGeneratorOptions,
+        parse_copybook_records,
+    )
+
+    source = _read_source(args.file)
+
+    if args.list_records:
+        try:
+            records = parse_copybook_records(source, filename=args.file)
+        except CopybookLayoutError as exc:
+            _fail(str(exc))
+        _json_out(
+            {
+                "source_file": args.file,
+                "records": [
+                    {"name": r.name, "level": r.level, "size": r.calculate_size()}
+                    for r in records
+                ],
+            },
+            args.compact,
+            getattr(args, "output", None),
+        )
+        return
+
+    try:
+        options = DataGeneratorOptions(
+            rows=args.rows,
+            seed=args.seed,
+            include_filler=args.include_filler,
+            include_redefines=args.include_redefines,
+            expand_occurs=not args.no_expand_occurs,
+            max_occurs=args.max_occurs,
+            respect_values=not args.ignore_values,
+            use_condition_values=not args.ignore_values,
+            semantic_hints=not args.no_semantic,
+            header_style=args.header_style,
+            unique_fields=tuple(args.unique),
+            blank_rate=args.blank_rate,
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+
+    try:
+        dataset = CopybookDataGenerator(options).generate_from_source(
+            source, filename=args.file, record=args.record
+        )
+    except CopybookLayoutError as exc:
+        _fail(str(exc))
+
+    if args.describe:
+        _json_out(
+            {"source_file": args.file, **dataset.to_dict()},
+            args.compact,
+            getattr(args, "output", None),
+        )
+        return
+
+    output_path = getattr(args, "output", None)
+    if output_path:
+        # Write through the csv module so embedded newlines round-trip.
+        try:
+            dataset.write_csv(output_path)
+        except OSError as e:
+            _fail(f"Cannot write output file: {e}")
+    else:
+        print(dataset.to_csv(), end="")
+
+
 # -- Shared analyzer subcommand builder ---------------------------------------
 
 
@@ -1040,6 +1212,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_tokenize_parser(subparsers)
     _build_preprocess_parser(subparsers)
     _build_expand_parser(subparsers)
+    _build_gen_data_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
         "analyze",

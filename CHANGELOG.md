@@ -17,6 +17,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** copybook → CSV synthetic test-data generation
+  (`cobolparser/generators/copybook_data.py`, 2026-08-02). New
+  `CopybookDataGenerator` / `DataGeneratorOptions` / `GeneratedDataset` /
+  `FieldSpec` / `FieldCategory` / `CopybookLayoutError` public API, exported
+  from `cobolparser.generators`, plus a `cobol-parser gen-data` CLI
+  subcommand that writes CSV to stdout or `--output`.
+
+  Flattens a copybook record into one CSV column per elementary field and
+  generates N rows of values that are always assignable to the field they
+  came from: PICTURE category, size, digit counts and sign are enforced
+  after every value provider. Level-88 `VALUE`s (including `THRU` ranges)
+  bound a field's domain, `VALUE` clauses become constants, and optional
+  field-name heuristics (NAME, CITY, ZIP, DATE, AMT, FLAG, …) make the data
+  readable. `OCCURS` expands to one column per occurrence (`ITEM-CODE(1)`);
+  `REDEFINES` and `FILLER` are excluded by default — a redefining item
+  aliases bytes another column already covers, so emitting both would put
+  contradictory values in one row.
+
+  Generation is deterministic per `seed`: the same seed and copybook produce
+  byte-identical CSV. An unseeded run records the seed it drew on
+  `GeneratedDataset.seed` (surfaced by `gen-data --describe`) so it can be
+  replayed. Copybook fragments are parsed by wrapping them in a program
+  skeleton, with free-form fragments shifted into Area B first; a copybook
+  holding only level-02+ items (meant to be `COPY`d inside an existing 01)
+  gets a synthesised record root rather than being rejected. Documented in
+  `.okf/generators.md`; covered by
+  `tests/unit/test_copybook_data_generator.py`,
+  `tests/unit/cli/test_gen_data_cli.py`,
+  `tests/integration/test_copybook_csv_generation.py` (parametrized over the
+  sample and NIST `.CPY` corpora), and
+  `tests/contracts/test_copybook_data_generator_contract.py`.
 * **parser:** SPECIAL-NAMES mnemonic-name clauses (`implementor-name IS
   mnemonic-name [ON STATUS IS cond] [OFF STATUS IS cond]`, e.g. `C01 IS
   TOP-OF-PAGE`, `CONSOLE IS CRT`, `UPSI-0 IS SWITCH-1 ON STATUS IS ...`)
