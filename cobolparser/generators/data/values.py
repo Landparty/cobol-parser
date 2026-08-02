@@ -5,14 +5,9 @@ from __future__ import annotations
 import random
 import re
 import string
-from typing import TYPE_CHECKING
 
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
 from .options import DataGeneratorOptions
-
-if TYPE_CHECKING:
-    pass
-
 
 # Figurative constants: the standard COBOL literal values
 _FIGURATIVE_CONSTANTS: dict[str, str] = {

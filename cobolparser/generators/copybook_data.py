@@ -1,9 +1,8 @@
 """Backwards-compatible re-exports.
 
 The canonical home is :mod:`cobolparser.generators.data`.  This module is
-kept because `tests/unit/test_copybook_data_generator.py`, the CLI's lazy
-import in `cli/parse.py`, and the vendored backend copy all import from
-this path.
+kept because `tests/unit/test_copybook_data_generator.py` and the CLI's
+lazy import in `cli/parse.py` both import from this path.
 """
 
 from __future__ import annotations

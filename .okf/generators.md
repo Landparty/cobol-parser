@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, and synthetic CSV test data from a copybook record layout.
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot]
-timestamp: 2026-08-02T00:00:00Z
+timestamp: 2026-08-02T17:40:00Z
 ---
 
 # Overview
@@ -50,7 +50,7 @@ into focused, reusable modules:
 
 - **`options.py`** — `DataGeneratorOptions` configuration (rows, seed, include/exclude flags, value hints).
 - **`errors.py`** — `CopybookLayoutError` exception for layout validation failures.
-- **`layout.py`** — `FieldCategory` enum, `FieldSpec` namedtuple, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns.
+- **`layout.py`** — `FieldCategory` enum, `FieldSpec` dataclass, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns.
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints.
 - **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods.
 - **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
