@@ -147,6 +147,7 @@ Thumbs.db
 
 # IA stuff
 .kilo*
+.worktrees/
 
 # tests
 baselines
