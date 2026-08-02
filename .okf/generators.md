@@ -50,7 +50,9 @@ parse_copybook_records(source, *, filename=...) -> list[CobolDataItem]
 flatten_record(record, options=None)            -> list[FieldSpec]
 
 GeneratedDataset:  .record_name .fields .rows .seed .header
-                   .to_csv() .write_csv(path) .to_dicts() .to_dict()
+                   .to_csv(*, line_terminator="\n")
+                   .write_csv(path, *, line_terminator="\n")
+                   .to_dicts() .to_dict()
 FieldSpec:         .name .path .column .level .picture .usage .category
                    .size .integer_digits .decimal_digits .is_signed
                    .value_clause .condition_values .subscripts .redefines
@@ -180,6 +182,17 @@ display field and would otherwise never generate a negative.
 display form: a CSV is consumed by tooling that wants the value, and the
 edit mask is a presentation concern of the COBOL program. Likewise `COMP-3`
 carries the decimal value, not packed bytes.
+
+**Line terminator.** `to_csv()` and `write_csv()` share
+`_DEFAULT_LINE_TERMINATOR = "\n"`, deliberately *not* the `csv` module's
+RFC 4180 `"\r\n"`. Both must agree or the byte-identical guarantee breaks
+across output paths — `gen-data -o out.csv` (which goes through
+`write_csv`) would write different bytes than `gen-data > out.csv` (which
+goes through `to_csv`) for the same seed. `write_csv` originally took the
+`csv` default and did exactly that. Either method accepts
+`line_terminator="\r\n"` for strict RFC 4180 output. Note that a test
+comparing *parsed* rows cannot catch this — the regression test compares
+raw bytes.
 
 **Determinism.** `random.Random(seed)`. The same seed and copybook always
 produce byte-identical CSV. When `seed is None` one is drawn and recorded on

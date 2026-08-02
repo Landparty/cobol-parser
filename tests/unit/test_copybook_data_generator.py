@@ -560,6 +560,25 @@ class TestGeneratedDataset:
         written = list(csv.reader(target.open(newline="")))
         assert written == [dataset.header, *dataset.rows]
 
+    def test_write_csv_is_byte_identical_to_to_csv(self, tmp_path):
+        # Comparing parsed rows is not enough: the csv module defaults to a
+        # "\r\n" terminator, so write_csv once produced different bytes than
+        # to_csv for the same dataset, breaking the reproducibility claim
+        # between `gen-data -o out.csv` and `gen-data > out.csv`.
+        dataset = _generate(TXNDATA, rows=6, seed=857)
+        target = tmp_path / "out.csv"
+        dataset.write_csv(target)
+        assert target.read_bytes() == dataset.to_csv().encode("utf-8")
+
+    def test_line_terminator_is_overridable_on_both_paths(self, tmp_path):
+        dataset = _generate(CUSTOMER, rows=2, seed=859)
+        target = tmp_path / "crlf.csv"
+        dataset.write_csv(target, line_terminator="\r\n")
+        assert target.read_bytes() == dataset.to_csv(line_terminator="\r\n").encode(
+            "utf-8"
+        )
+        assert b"\r\n" in target.read_bytes()
+
     def test_to_dict_describes_the_layout_and_the_rows(self):
         dataset = _generate(CUSTOMER, rows=2, seed=89)
         payload = dataset.to_dict()
