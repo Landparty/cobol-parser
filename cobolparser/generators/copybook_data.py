@@ -47,12 +47,11 @@ import os
 import random
 import re
 import string
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from ..models.data_items import (
     CobolDataItem,
-    PictureClause,
 )
 from ..models.program import CobolProgram
 from ..parser import parse_cobol
@@ -77,7 +76,6 @@ __all__ = [
 
 from .data.errors import CopybookLayoutError
 from .data.options import DataGeneratorOptions
-
 
 # ---------------------------------------------------------------------------
 # Copybook parsing
