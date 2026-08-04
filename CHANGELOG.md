@@ -450,6 +450,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.3.0](https://github.com/Landparty/cobol-parser/compare/v1.2.0...v1.3.0) (2026-08-04)
+
+
+### Features
+
+* **generators:** generate synthetic CSV test data from a copybook ([e03c6ba](https://github.com/Landparty/cobol-parser/commit/e03c6ba839b4da8a4f386d78d49fedffe9d9e44c))
+* **parser:** close PERFORM THRU gaps — numeric procedure names and range reachability ([ea57842](https://github.com/Landparty/cobol-parser/commit/ea57842602d225ee1187e3e848828051794c94cb))
+* **parser:** structural expression trees for COMPUTE and condition parsing ([968c705](https://github.com/Landparty/cobol-parser/commit/968c705837725ee45bd94d7feb4fb59cbb41d9fa))
+* **parser:** structured EXEC CICS/IMS parsing and tokenizer-based EXEC SQL ([b6b40b6](https://github.com/Landparty/cobol-parser/commit/b6b40b62f8595be67ecf53c5045ae11e9c9ab3ef))
+* **preprocess:** evaluate &gt;&gt;IF conditions and implement &gt;&gt;EVALUATE ([c00fd7f](https://github.com/Landparty/cobol-parser/commit/c00fd7f7245fc94b67dd13ca77971340f67d6903))
+
+
+### Bug Fixes
+
+* address PR [#89](https://github.com/Landparty/cobol-parser/issues/89) review findings ([b3e81ed](https://github.com/Landparty/cobol-parser/commit/b3e81ede60c76d8d5dfec8e28c6954793670aa0e))
+* **arithmetic:** consume ROUNDED after DIVIDE/MULTIPLY GIVING ([4db8394](https://github.com/Landparty/cobol-parser/commit/4db83941dccefbf3d185d02a518378c37c392d46))
+* **arithmetic:** ROUNDED, REMAINDER, multi-target, CORRESPONDING ([82a82ec](https://github.com/Landparty/cobol-parser/commit/82a82ec8ea79e09f307781780785506eb1c513dd))
+* **data:** PIC N sizing and USAGE IS keyword recognition ([64ff7b9](https://github.com/Landparty/cobol-parser/commit/64ff7b9f607e7cf1443b9a49bb5fa5a733778cca))
+* **generators:** cleanup unused imports and formatting in copybook_data.py ([cf5eb08](https://github.com/Landparty/cobol-parser/commit/cf5eb08675acbf55556d8036c9af86649b2a3050))
+* **generators:** keep both endpoints of a level-88 THRU range ([12e1ac4](https://github.com/Landparty/cobol-parser/commit/12e1ac439221b68b5c50f5f9d10ce0145434391d))
+* **generators:** share one CSV line terminator across output paths ([2736ae4](https://github.com/Landparty/cobol-parser/commit/2736ae41d5907761fe694cb6036701591e9118b2))
+* **io:** START KEY OR EQUAL TO, WRITE AT END-OF-PAGE, OPEN per-file mode ([316f0ce](https://github.com/Landparty/cobol-parser/commit/316f0ce39ca48fcf68863ea9d4a10116f274cba5))
+* **lexer:** unify tokenize_cobol and CLI tokenize with the parse pipeline ([5de2306](https://github.com/Landparty/cobol-parser/commit/5de230693861cf68ca92437d7827e6c4655a623f))
+* **move:** preserve subscript on MOVE targets ([2c45838](https://github.com/Landparty/cobol-parser/commit/2c45838d86220d39e8b397135ec27ca6936c55f7))
+* **okf:** add missing generators/ entry to staleness-check OKF_MAP ([500026d](https://github.com/Landparty/cobol-parser/commit/500026da5be06376b5ac0a38dd15c53e542dba02))
+* **parser:** comment-entry aware division boundaries; all 459 NIST programs parse error-free ([af08deb](https://github.com/Landparty/cobol-parser/commit/af08deb8c2debea84b7d24b5bebed389e93d01b0))
+* **parser:** DISPLAY UPON/comma, computed GO TO comma, CANCEL comma ([ddbc688](https://github.com/Landparty/cobol-parser/commit/ddbc688fd42461b0060efb6ee92e2a0ecc3206c8))
+* **parser:** ENTRY comma params, ACCEPT ENVIRONMENT name, STOP period ([50b6028](https://github.com/Landparty/cobol-parser/commit/50b6028e25e844efd9b65776745e0eed8d56ff50))
+* **parser:** exclude clause-continuation keywords & SQL registers from paragraph-boundary detection ([3a3b304](https://github.com/Landparty/cobol-parser/commit/3a3b3040d7fb4efdd9f4f0eab545e10e5e4b467b))
+* **parser:** EXEC CICS command loss and INSPECT BEFORE+AFTER ([824f654](https://github.com/Landparty/cobol-parser/commit/824f6547a2ec8cc5534da0dc17d26143d76911ba))
+* **parser:** fix silent data loss in PICTURE and arithmetic clauses ([4917576](https://github.com/Landparty/cobol-parser/commit/4917576a2354878ddcd945924defb3ce8bf469d1))
+* **parser:** handle PIC newline IS continuation ([d9f700e](https://github.com/Landparty/cobol-parser/commit/d9f700e27b3bb68b9e9af92ea48ffdfef9b1275b))
+* **parser:** parse VALUE ALL &lt;literal&gt; instead of dropping the literal ([56e86b4](https://github.com/Landparty/cobol-parser/commit/56e86b4c628d65a1747d7c5f8971d38dfe85215c))
+* **parser:** parse VALUE ALL &lt;literal&gt; instead of dropping the literal ([392f8ce](https://github.com/Landparty/cobol-parser/commit/392f8ce82b183243b4faba2b0b7a523526e6abf3))
+* **parser:** preserve comma-separated lists in CALL/SET/UNSTRING ([5492c40](https://github.com/Landparty/cobol-parser/commit/5492c4001053f4ece9909f288486890b6c945116))
+* **parser:** resolve comma-separated list truncation and semantic bugs ([5d5fd11](https://github.com/Landparty/cobol-parser/commit/5d5fd11dcdd347cfbc375050d70a3ac00b4d0afd))
+* **parser:** restore period/SECTION lookahead in paragraph-boundary detection ([b130ec8](https://github.com/Landparty/cobol-parser/commit/b130ec8887acd8ebf33b4821c8aa3b13046b38c9))
+* **parser:** stop EOF sentinel from manufacturing a phantom trailing paragraph ([4a8daa3](https://github.com/Landparty/cobol-parser/commit/4a8daa38cfa5000181ba3418f940af83878a67bc))
+* **parser:** support REDEFINES clause split across multiple lines ([7c13bfd](https://github.com/Landparty/cobol-parser/commit/7c13bfd1fb6d1997927eade677b649f49cef7532))
+* **parser:** VALUE/PICTURE clause operand may start on the next physical line ([d2bc7c2](https://github.com/Landparty/cobol-parser/commit/d2bc7c2093f71e13789da29f0a39b92d203f90c6))
+* **parser:** VALUE/PICTURE clause operand may start on the next physical line ([662b347](https://github.com/Landparty/cobol-parser/commit/662b347461f814d3a18cacbaacb55abd1ec90174))
+* **preprocess,parser:** copybook REPLACING sequence-area leak/truncation; PICTURE anonymous-item edge case ([3eaf120](https://github.com/Landparty/cobol-parser/commit/3eaf1207f95856327e57a55c01a3821185ca31a9))
+* **preprocess:** correct missing-period regex and comment-only misreport in validate_copybook_content ([a68c69d](https://github.com/Landparty/cobol-parser/commit/a68c69dc0ace9960e401f89fe13f5f9a67324027))
+* **preprocess:** correct missing-period regex and comment-only misreport in validate_copybook_content ([52a5f8a](https://github.com/Landparty/cobol-parser/commit/52a5f8a40e4724785c220d768fe08c54827f11f6))
+* **preprocess:** make COPY REPLACING context-aware and support :...: delimiters ([2f4b2fb](https://github.com/Landparty/cobol-parser/commit/2f4b2fb52f9f8ec522fe2875301730b7ad86f253))
+* **preprocess:** plausibility-scored encoding detection and strict decode mode ([6dcad8c](https://github.com/Landparty/cobol-parser/commit/6dcad8c298dfd5c88c3d401b349c39ff4dbf7ad1))
+* **preprocess:** warn on mid-token truncation past column 72 ([76d1c12](https://github.com/Landparty/cobol-parser/commit/76d1c122150f811b9009f98e9bf3c7b0e5b8ee8b))
+* **preprocess:** warn on mid-token truncation past column 72 ([49f880f](https://github.com/Landparty/cobol-parser/commit/49f880f7b651ec1ebf5782788af64c6928056a30))
+* **review:** paragraph-swallow guard and INSPECT qualifier order ([68f68c0](https://github.com/Landparty/cobol-parser/commit/68f68c0b054411aefc7898492294bcdad818c889))
+
+
+### Documentation
+
+* fix final whole-branch-review gaps in generators/data/ split ([ec87e99](https://github.com/Landparty/cobol-parser/commit/ec87e997d83f4c8ee4f3263a19a55203cfbfa996))
+* mark open findings M6/M10-M13/M15 fixed; update CHANGELOG and OKF ([6382cc8](https://github.com/Landparty/cobol-parser/commit/6382cc86545436ef319fd607759889837eca501b))
+* **plans:** design plan for program-scoped test-data generation ([b953d61](https://github.com/Landparty/cobol-parser/commit/b953d615374307602eb6d879923f78fc9ea8affc))
+* **plans:** design plan for program-scoped test-data generation ([79469fb](https://github.com/Landparty/cobol-parser/commit/79469fb3b28de434f7b4db42eeba21648774e2a0))
+* **plans:** detailed implementation plans for Phases 1-9 ([c7eaa9b](https://github.com/Landparty/cobol-parser/commit/c7eaa9b110bc0481a7168e55b5a250602ac21786))
+* **plans:** implementation plan for Phase 0 value-engine refactor ([8f8412d](https://github.com/Landparty/cobol-parser/commit/8f8412da0ee47305cc028adf75c7e8fef57af413))
+* **plans:** resolve .cut ownership contradiction, define direction ([a9f90cb](https://github.com/Landparty/cobol-parser/commit/a9f90cbdb36ea19464228e3e31a144b8da02fc3f))
+* reflect generators/data/ package split in OKF, CLAUDE.md, CHANGELOG ([701d485](https://github.com/Landparty/cobol-parser/commit/701d485ba9d62f7d9ad0c665aa5f917d84e67902))
+
 ## [1.2.0](https://github.com/Landparty/cobol-parser/compare/v1.1.0...v1.2.0) (2026-07-09)
 
 
