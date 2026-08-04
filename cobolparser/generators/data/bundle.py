@@ -223,7 +223,7 @@ class FixtureBundle:
         manifest = self.to_dict()
         for scenario_dict in manifest["scenarios"]:
             for fixture_dict in scenario_dict["fixtures"]:
-                fixture_dict["sequence"] = f"see {_slugify(scenario_dict['name'])}/"
+                fixture_dict["sequence"] = []
         with open(os.path.join(root, "MANIFEST.json"), "w", encoding="utf-8") as handle:
             _json.dump(manifest, handle, indent=2)
             handle.write("\n")
