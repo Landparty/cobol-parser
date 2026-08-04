@@ -440,6 +440,98 @@ full bundle with each fixture's `sequence` replaced by a pointer string, so
 a consumer can discover what scenarios/fixtures exist without walking the
 directory tree first.
 
+# Scenario Planning (`scenarios.py`)
+
+Phase 5 of the `gen-fixtures` program-scoped test-data initiative. Turns
+Phase 4's `ConstraintReport` and `ProgramFlowAnalyzer`'s control-flow graph
+into a set of named `PlannedScenario`s -- one (or a merge of several) per
+reachable, satisfiable branch arm -- with exact coverage accounting.
+
+```python
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
+from cobolparser.generators import ProgramLayoutIndex
+from cobolparser.generators.scenarios import ScenarioPlanner
+
+index = ProgramLayoutIndex.build(ast)
+boundary_report = BoundaryInventoryAnalyzer().analyze(ast, index)
+constraint_report = ConstraintExtractor().extract(ast, index, boundary_report)
+flow_report = ProgramFlowAnalyzer().analyze(ast)
+
+plan = ScenarioPlanner().plan(
+    constraint_report, flow_report, boundary_report, mode="all"
+)
+plan.scenarios           # list[PlannedScenario]: field_constraints, witnesses,
+                         # sequence_constraints, status_overrides, arm_keys
+plan.coverage            # ScenarioCoverage: total_arms == targeted + merged + missed
+plan.coverage.details    # list[ArmOutcome]: one per arm, with a reason on every miss
+```
+
+**v1 path-condition simplification** (stated up front in the module
+docstring, not discovered later): a scenario targets *one* arm and takes
+only that arm's own conjuncts; enclosing branches on the path to it are not
+accumulated. `ArmOutcome` records "targeted" the same way regardless, so
+this is arm coverage, not full path coverage -- a v2 item.
+
+**Joining a `BranchConstraints` to its `BranchNode`.** Not by string-matching
+`branch_id` to `BranchNode.node_id` (Phase 4's own docstring already flags
+why: replicating `program_flow/scanner.py`'s sequential counter would
+couple this module to that scanner's exact traversal order) and *not* by
+comparing `parent_proc` strings either -- `scanner.py` uppercases its own
+`parent_proc` (`pname.upper()`) while `ConstraintExtractor` preserves the
+source's original casing, so the two are not directly comparable even when
+they name the same paragraph. The actual join is `(line, column)`, both
+derived from the identical statement's `SourceLocation` in both walks.
+`BranchConstraints.column` (new field, additive) exists specifically for
+this join.
+
+**OR-split arms and the flow graph.** `BranchNode` always has exactly one
+`BranchArm` per THEN/ELSE/WHEN/WHEN_OTHER slot, but Phase 4 may have
+OR-split one of those into several arm-ids (`"ELSE#1"`, `"ELSE#2"`, ...) --
+see constraints.py's own De Morgan section. A base arm-id with *any*
+representation in `BranchConstraints.arms` (bare or `#N`-suffixed) counts as
+covered; only a base arm-id with **zero** representation at all is a
+genuine `"missed: ..."` gap. Found and fixed writing this module's own
+tests: the first draft treated a bare `"ELSE"` lookup as missing whenever
+Phase 4 had split it into `"ELSE#1"`/`"ELSE#2"`, double-reporting an already
+-covered arm as also missed.
+
+**Merging.** Two candidate scenarios merge when their constraint sets touch
+disjoint fields *and* their sequence constraints agree on every shared
+boundary (same length, or one side doesn't mention it) -- greedy,
+deterministic: candidates are processed in `(line, column, arm_id)` order,
+each merging into the first open scenario it is compatible with. "Fewer,
+richer scenarios" rather than one per arm.
+
+**Unsatisfiable arms.** Every distinct field an arm's conjuncts touch is
+solved independently via `domains.solve()`; if *any* field's constraint set
+is `Unsatisfiable`, the whole arm is unsatisfiable (all of an arm's
+conjuncts must hold simultaneously) and lands in `coverage.missed` with
+`"unsatisfiable: <domains.py's own reason>"`.
+
+**Fixed families (`mode="all"` only):**
+
+* **empty input** — one combined scenario: every `IN`-direction READ
+  boundary gets a `SequenceConstraint(length=0)`; every `IN`-direction SQL
+  boundary gets a `status_overrides` entry of `"100"` (SQLCODE not found).
+* **error status** — one scenario per *declared* handler, never a status
+  the program has no path for: `INVALID_KEY` in `Boundary.handlers` ->
+  `"23"`; a CALL's `ON_EXCEPTION` -> `"12"`; an OPEN with a `status_field`
+  -> `"35"`.
+* **boundary values** — two combined scenarios (`"minimum"`/`"maximum"`),
+  every numeric field any constraint touches pinned to its picture's true
+  extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`).
+  Pinned via an `eq` constraint, not `ge`/`le` -- found writing this
+  family's own test: `domains.solve()`'s witness is always the *midpoint*
+  of the resulting interval, so a `ge("0")` constraint alone produced a
+  mid-range witness, not `0`.
+
+**Not yet wired into `gen-fixtures`.** The CLI's `--scenarios branches|all`
+values are accepted (Phase 3) but still produce the same happy-path-only
+bundle as `--scenarios happy` -- turning a `PlannedScenario` into an actual
+`BoundaryFixture`-populated `bundle.Scenario` is deferred to Phase 6.
+
 # Tests
 
 * `tests/unit/test_copybook_data_generator.py` — flattening, categories,
@@ -471,6 +563,13 @@ directory tree first.
   `bundle_version`, generator signatures, `to_dict()` key sets across
   `FixtureBundle`/`Scenario`/`BoundaryFixture`/`Expectation`/`CoverageSummary`,
   reproducibility guarantee
+* `tests/unit/test_scenario_planner.py` — single-IF THEN/ELSE targeting with
+  differing witnesses, disjoint-field merging, unsatisfiable-arm handling,
+  the three fixed families (`mode="all"`), exact coverage accounting
+* `tests/integration/test_scenario_planner_corpus.py` — every
+  `examples/cobol/shamrice/*.cbl` plans (both `branches` and `all` modes)
+  without raising; coverage accounting sums to the arm count for every
+  program; every miss/merge carries a reason/target
 
 # See Also
 
@@ -478,13 +577,13 @@ directory tree first.
   `OccursClause` / `ConditionNameItem`, the inputs to flattening
 * [cli.md](cli.md) — `gen-data` and `gen-fixtures` (Phases 1-3) and
   `program-flow` subcommands
-* [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts;
-  `BoundaryInventoryAnalyzer` (Phase 2), the input `report` this file's
-  `ProgramFixtureGenerator` (Phase 3) consumes; `ConstraintExtractor` /
-  `domains.solve()` (Phase 4), which consume this file's `ProgramLayoutIndex`
-  (Phase 1) and `BoundaryInventoryAnalyzer`'s report the same way Phase 3 does
+* [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts and
+  joined against by `scenarios.py`; `BoundaryInventoryAnalyzer` (Phase 2),
+  the input `report` this file's `ProgramFixtureGenerator` (Phase 3) and
+  `ScenarioPlanner` (Phase 5) both consume; `ConstraintExtractor` /
+  `domains.solve()` (Phase 4), which `scenarios.py` consumes directly
 * [parser.md](parser.md) — the DATA DIVISION parser's `fd_file_name` /
   `fd_clauses` / `fd_record_type` metadata tags this index reads
 * `docs/plans/2026-08-02-program-data-generation-design.md` and
   `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
-  full 9-phase plan this file documents Phases 1 and 3 of
+  full 9-phase plan this file documents Phases 1, 3, and 5 of

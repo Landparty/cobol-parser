@@ -401,9 +401,14 @@ alternatives are represented as separate arms rather than nested lists.
 Replicating `program_flow/scanner.py`'s exact sequential counter would
 couple this module to that scanner's specific traversal order; instead
 `branch_id` self-encodes `f"{parent_proc}@{line}:{column}"`, the same join
-key `BranchNode` really is keyed by in substance. A later phase joins by
-comparing `parent_proc`/`line` against `BranchNode.parent_proc`/`.location`
-directly, never by string-matching `branch_id` to `node_id`.
+key `BranchNode` really is keyed by in substance. The actual join a later
+phase should perform is `(line, column)` alone, via the dedicated `line`/
+`column` fields (`column` added when Phase 5's `ScenarioPlanner` needed it --
+see [generators.md](generators.md)) -- **not** by comparing `parent_proc`
+strings: `program_flow/scanner.py` uppercases its own `parent_proc`
+(`pname.upper()`) while this module preserves the source's original casing,
+so the two are not directly comparable even when they name the same
+paragraph (found writing Phase 5's own tests).
 
 **PERFORM UNTIL's `until_condition` is never itself a `ConditionalExpression`
 /`LogicalExpression`.** It is always the historical

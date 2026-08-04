@@ -164,9 +164,14 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   byte-identical JSON (`ProgramFixtureGenerator.generate`'s own per-boundary
   sub-seed scheme -- see generators.md -- means adding one boundary never
   reshuffles another's already-generated values).
-* `--scenarios happy` is the only value in Phase 3 (`branches`/`all` arrive
-  with Phase 5's `ScenarioPlanner`); accepted now so scripts written against
-  the eventual full flag set do not need to change later.
+* `--scenarios happy` is still the only value that changes this command's
+  output. `branches`/`all` are accepted (validated against the full flag
+  set so scripts written against it do not need to change later) but
+  currently produce the same happy-path-only bundle as `happy` --
+  `cobolparser.generators.scenarios.ScenarioPlanner` (Phase 5) exists and is
+  fully tested, but wiring its `ScenarioPlan` into an actual multi-scenario
+  `FixtureBundle` is deferred to Phase 6. See generators.md's "Scenario
+  Planning" section.
 * `--format json` (default) emits the full bundle; `--format csv-dir`
   requires `--output DIR` and emits one CSV per file-shaped boundary fixture
   under `DIR/<scenario-slug>/<KEY>.csv` plus a `DIR/MANIFEST.json`.

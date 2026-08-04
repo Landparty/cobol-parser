@@ -205,14 +205,19 @@ class BranchConstraints:
     this module to the exact traversal order `program_flow/scanner.py`
     happens to use). Instead it encodes the same join key that scanner.py's
     node really is keyed by in substance -- `(parent_proc, location)` -- as a
-    self-contained string, so a later phase joins by comparing
-    `parent_proc`/`line` against `BranchNode.parent_proc`/`.location`
-    directly rather than by string-matching `branch_id` to `node_id`.
+    self-contained string. The actual join a later phase should perform is on
+    `(line, column)` alone, via the dedicated fields below, not by
+    string-matching `branch_id` to `node_id` or comparing `parent_proc`
+    text: `program_flow/scanner.py` uppercases its own `parent_proc`
+    (`pname.upper()`) while this module preserves the source's original
+    casing, so the two are not directly comparable strings even when they
+    name the same paragraph.
     """
 
     branch_id: str
     parent_proc: str | None
     line: int | None
+    column: int | None = None
     arms: dict[str, list[FieldConstraint]] = field(default_factory=dict)
     unsupported: list[str] = field(default_factory=list)
 
@@ -221,6 +226,7 @@ class BranchConstraints:
             "branch_id": self.branch_id,
             "parent_proc": self.parent_proc,
             "line": self.line,
+            "column": self.column,
             "arms": {
                 arm: [c.to_dict() for c in constraints]
                 for arm, constraints in self.arms.items()
@@ -307,6 +313,7 @@ class ConstraintExtractor:
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
+        column = statement.location.column if statement.location else None
         arms: dict[str, list[FieldConstraint]] = {}
         unsupported: list[str] = []
 
@@ -327,7 +334,14 @@ class ConstraintExtractor:
 
         if arms or unsupported:
             report.branches.append(
-                BranchConstraints(branch_id, paragraph_name, line, arms, unsupported)
+                BranchConstraints(
+                    branch_id=branch_id,
+                    parent_proc=paragraph_name,
+                    line=line,
+                    column=column,
+                    arms=arms,
+                    unsupported=unsupported,
+                )
             )
 
     # -- EVALUATE -----------------------------------------------------------
@@ -342,13 +356,21 @@ class ConstraintExtractor:
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
+        column = statement.location.column if statement.location else None
         arms: dict[str, list[FieldConstraint]] = {}
         unsupported: list[str] = []
 
         if len(statement.subjects) != 1:
             unsupported.append("multi-subject EVALUATE (ALSO) not supported in v1")
             report.branches.append(
-                BranchConstraints(branch_id, paragraph_name, line, arms, unsupported)
+                BranchConstraints(
+                    branch_id=branch_id,
+                    parent_proc=paragraph_name,
+                    line=line,
+                    column=column,
+                    arms=arms,
+                    unsupported=unsupported,
+                )
             )
             return
 
@@ -387,7 +409,14 @@ class ConstraintExtractor:
 
         if arms or unsupported:
             report.branches.append(
-                BranchConstraints(branch_id, paragraph_name, line, arms, unsupported)
+                BranchConstraints(
+                    branch_id=branch_id,
+                    parent_proc=paragraph_name,
+                    line=line,
+                    column=column,
+                    arms=arms,
+                    unsupported=unsupported,
+                )
             )
 
     # -- SEARCH ---------------------------------------------------------------
@@ -402,6 +431,7 @@ class ConstraintExtractor:
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
+        column = statement.location.column if statement.location else None
         arms: dict[str, list[FieldConstraint]] = {}
         unsupported: list[str] = []
 
@@ -422,7 +452,14 @@ class ConstraintExtractor:
 
         if arms or unsupported:
             report.branches.append(
-                BranchConstraints(branch_id, paragraph_name, line, arms, unsupported)
+                BranchConstraints(
+                    branch_id=branch_id,
+                    parent_proc=paragraph_name,
+                    line=line,
+                    column=column,
+                    arms=arms,
+                    unsupported=unsupported,
+                )
             )
 
     # -- PERFORM UNTIL --------------------------------------------------------

@@ -181,6 +181,7 @@ COBOL source (.cbl/.cob)
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
 - `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
 - `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle` -- one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`
+- `scenarios.py` -- `ScenarioPlanner` (Phase 5 of the `gen-fixtures` initiative): turns a Phase 4 `ConstraintReport` and `ProgramFlowAnalyzer`'s CFG into a set of named `PlannedScenario`s -- one (or a merge of several) per reachable, satisfiable branch arm, plus fixed families (empty-input/error-status/boundary-values) for `mode="all"` -- with exact arm-coverage accounting (`ScenarioCoverage`: targeted + merged + missed == total, every miss carrying a reason). Not yet wired into the `gen-fixtures` CLI (`--scenarios branches|all` still behave like `happy`; wiring lands in Phase 6). See `.okf/generators.md`
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
 
@@ -351,6 +352,17 @@ branch = creport.branches[0]
 witness = solve(branch.arms["THEN"][0].field.spec, branch.arms["THEN"])
 if isinstance(witness, Witness):
     witness.value               # a value satisfying every conjunct, PICTURE-valid
+
+# Scenario planning (Phase 5): constraints + CFG -> a named scenario set
+from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
+from cobolparser.generators.scenarios import ScenarioPlanner
+
+flow_report = ProgramFlowAnalyzer().analyze(ast)
+plan = ScenarioPlanner().plan(creport, flow_report, report, mode="all")
+plan.scenarios                 # list[PlannedScenario]: field_constraints, witnesses,
+                                # sequence_constraints, status_overrides, arm_keys
+plan.coverage                  # ScenarioCoverage: total_arms == targeted + merged + missed
+plan.coverage.details          # list[ArmOutcome]: one per arm, a reason on every miss
 ```
 
 ### Adding a New Statement Parser

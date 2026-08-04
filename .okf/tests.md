@@ -8,16 +8,17 @@ timestamp: 2026-08-04T00:00:00Z
 
 # Overview
 
-7,616 passed / 13 skipped / 1 xfailed (2026-08-04: +278 tests across Phases
-1-4 of the `gen-fixtures` program-scoped test-data initiative —
+7,674 passed / 13 skipped / 1 xfailed (2026-08-04: +336 tests across Phases
+1-5 of the `gen-fixtures` program-scoped test-data initiative —
 `ProgramLayoutIndex` (Phase 1), `BoundaryInventoryAnalyzer` (Phase 2),
-`ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3), and
-`ConstraintExtractor` + the `domains.py` solver (Phase 4); see
-[generators.md](generators.md) and [analysis.md](analysis.md). Phase 4 also
-fixed a pre-existing, unrelated parser bug it uncovered: `>=`/`<=`/`<>` were
-silently mis-parsed as `>`/`<`/`<` with a garbled operand in every IF/PERFORM
-UNTIL condition (see [parser.md](parser.md)) — zero regressions across the
-783 IF/PERFORM/shamrice/NIST tests re-run after that fix. Earlier,
+`ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3),
+`ConstraintExtractor` + the `domains.py` solver (Phase 4), and
+`ScenarioPlanner` (Phase 5); see [generators.md](generators.md) and
+[analysis.md](analysis.md). Phase 4 also fixed a pre-existing, unrelated
+parser bug it uncovered: `>=`/`<=`/`<>` were silently mis-parsed as
+`>`/`<`/`<` with a garbled operand in every IF/PERFORM UNTIL condition (see
+[parser.md](parser.md)) — zero regressions across the 783 IF/PERFORM/
+shamrice/NIST tests re-run after that fix. Earlier,
 2026-07-09: CobolCheck test generation — `CoverageAnalyzer`,
 `TestPlanGenerator`, `CobolCheckGenerator`, the `generate-tests` CLI
 subcommand, and their ~180 dedicated tests — was removed, superseded by
@@ -48,6 +49,7 @@ tests/
     test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
     test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, record_named(), multi-program units, from_file errors (see generators.md)
     test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (see generators.md)
+    test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting (see generators.md)
     io_statements/             # IO parser unit tests
     cli/
       test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
@@ -63,6 +65,7 @@ tests/
     test_boundary_inventory_corpus.py  # parametrised over examples/cobol/shamrice/: BoundaryInventoryAnalyzer must build without raising and report zero unexpected unresolved entries
     test_gen_fixtures_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramFixtureGenerator must build a bundle without raising, every generated cell fits its field's category, and determinism holds across the corpus
     test_constraint_extractor_corpus.py  # parametrised over examples/cobol/shamrice/: every branch/loop either produces constraints or a reason in unsupported (no silent drop); every solved witness is layout-valid (see analysis.md)
+    test_scenario_planner_corpus.py  # parametrised over examples/cobol/shamrice/ x {branches,all}: coverage accounting sums to the arm count for every program; every miss/merge carries a reason/target (see generators.md)
     io/                        # IO coverage reporting integration
     io_statements/             # IO statement parsing, VSAM
   contracts/                   # API contract tests — stability guarantees

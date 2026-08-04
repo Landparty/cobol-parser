@@ -17,6 +17,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `ScenarioPlanner` — constraints + control flow -> a named
+  scenario set (`cobolparser/generators/scenarios.py`, 2026-08-04). Phase 5
+  of the `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`): turns Phase
+  4's `ConstraintReport` and `ProgramFlowAnalyzer`'s control-flow graph into
+  a set of named `PlannedScenario`s — one (or a merge of several) per
+  reachable, satisfiable branch arm — with exact arm-coverage accounting.
+
+  Joins a `BranchConstraints` to its `BranchNode` via `(line, column)` only
+  (`BranchConstraints` gained a new `column` field for this) — not by
+  comparing `parent_proc` strings, since `program_flow/scanner.py`
+  uppercases its own `parent_proc` while `ConstraintExtractor` preserves the
+  source's casing, so the two are not directly comparable even for the same
+  paragraph (found writing this phase's own tests). An OR-split arm
+  (`"ELSE#1"`/`"ELSE#2"`) counts as full coverage of its base arm (`"ELSE"`)
+  for coverage purposes; only a base arm with zero representation at all —
+  bare or split — is a genuine miss (also found and fixed writing this
+  phase's tests, which had double-reported an already-covered split arm as
+  also missing).
+
+  Two candidate scenarios merge when their constraints touch disjoint
+  fields and their sequence constraints agree on every shared boundary
+  (greedy, deterministic: `(line, column, arm_id)` order) — "fewer, richer
+  scenarios" instead of one per arm. An arm is unsatisfiable (and lands in
+  `coverage.missed`) when any field its conjuncts touch fails to solve via
+  Phase 4's `domains.solve()` — every conjunct in an arm must hold
+  simultaneously.
+
+  `mode="all"` adds three fixed scenario families regardless of branching:
+  empty input (every `IN` READ boundary at sequence length 0, every `IN`
+  SQL boundary at SQLCODE 100), error status (one scenario per *declared*
+  handler — `INVALID KEY` -> FILE STATUS 23, a CALL's `ON EXCEPTION` ->
+  RETURN-CODE 12, an OPEN with a status field -> FILE STATUS 35 — never a
+  status the program has no path for), and boundary values (every
+  constrained numeric field pinned to its picture's true minimum/maximum).
+  The boundary-values family pins via an `eq` constraint, not `ge`/`le` —
+  found writing its own test: `domains.solve()`'s witness is always the
+  interval's *midpoint*, so a bare `ge("0")` constraint produced a
+  mid-range value, not `0`.
+
+  v1 path-condition simplification, stated up front in the module
+  docstring: a scenario targets one arm and takes only that arm's own
+  conjuncts; enclosing branches on the path to it are not accumulated —
+  full path-sensitivity is a v2 item.
+
+  New `ArmOutcome` / `ScenarioCoverage` / `PlannedScenario` / `ScenarioPlan`
+  / `ScenarioPlanner` public API in `cobolparser.generators.scenarios`.
+  **Not yet wired into the `gen-fixtures` CLI**: `--scenarios branches|all`
+  are still accepted but produce the same happy-path-only bundle as
+  `happy` — turning a `PlannedScenario` into an actual `BoundaryFixture`
+  -populated `bundle.Scenario` is deferred to Phase 6, matching Phase 3's
+  own stated deferral of this flag's real behavior.
+
+  Documented in `.okf/generators.md` (new "Scenario Planning" section),
+  `.okf/analysis.md` (corrected `BranchConstraints` join guidance), and
+  `.okf/cli.md`. Covered by `tests/unit/test_scenario_planner.py` and
+  `tests/integration/test_scenario_planner_corpus.py` (parametrized over
+  the shamrice corpus x `{branches, all}` modes: coverage accounting sums
+  to the arm count for every program).
 * **analysis:** `ConstraintExtractor` and the `domains.py` constraint solver —
   what a program's branches require of boundary data
   (`cobolparser/analysis/constraints.py`, `cobolparser/analysis/domains.py`,
