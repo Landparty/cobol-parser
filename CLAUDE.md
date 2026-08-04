@@ -176,7 +176,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator)
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts. See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`)
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
 
@@ -306,6 +306,14 @@ dataset.to_csv()               # header row + 100 generated records
 dataset.write_csv("out.csv")
 dataset.fields                 # list[FieldSpec] — the resolved layout
 dataset.seed                   # replay this run with DataGeneratorOptions(seed=...)
+
+# Whole-program layout index (Phase 1 of program-scoped test-data generation)
+from cobolparser.generators import ProgramLayoutIndex
+index = ProgramLayoutIndex.from_file("INVUPDT.cbl")   # or .build(ast)
+index.record_for_file("INV-FILE")      # CobolDataItem | None, via FD -> record
+index.file_facts("INV-FILE")           # FileFacts: organization/keys/record size/FD-or-SD
+index.resolve("INV-QTY OF INV-REC")    # ResolvedField | None (bare/qualified/level-88 names)
+index.unresolved                       # reasons nothing was silently dropped
 ```
 
 ### Adding a New Statement Parser

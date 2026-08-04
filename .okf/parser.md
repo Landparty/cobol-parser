@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-24T00:00:00Z
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
@@ -128,6 +128,19 @@ CobolParser.parse(source)
 signatures — the compiled `_data_fast` extension receives the division parser
 as `parser_self` and calls those three back by name. New clause logic goes in
 `DataItemClauseParser`; the wrappers must stay.
+
+**FD/SD metadata tags on FILE SECTION 01-items (`data.py`, `_parse_section`):**
+while scanning under an `FD`/`SD` header, every level-01 item is tagged with
+`fd_file_name` (the file name) and, when present, `fd_clauses` (the
+`FileDescriptionClauseParser`-structured dict — `record`, `recording_mode`,
+`label_records`, `data_records`, ...). A third tag, `fd_record_type` (`"FD"`
+or `"SD"`, 2026-08-04), records which keyword declared the file — previously
+untracked, since nothing downstream needed the distinction before
+`ProgramLayoutIndex` (generators.md) started using it to flag SORT/MERGE work
+files as non-mockable rather than treating every FILE SECTION entry as a real
+file a program can `OPEN`. Purely additive metadata; no existing behavior
+changed. Pinned by
+`tests/unit/test_program_layout_index.py::TestFdRecordTypeMetadata`.
 
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside

@@ -43,9 +43,10 @@ from __future__ import annotations
 
 from .copybook import CopybookDataGenerator, parse_copybook_records
 from .dataset import GeneratedDataset
-from .errors import CopybookLayoutError
+from .errors import CopybookLayoutError, ProgramLayoutError
 from .layout import FieldCategory, FieldSpec, flatten_record
 from .options import DataGeneratorOptions
+from .program_layout import FileFacts, ProgramLayoutIndex, ResolvedField
 from .values import ValueFactory
 
 __all__ = [
@@ -54,7 +55,11 @@ __all__ = [
     "DataGeneratorOptions",
     "FieldCategory",
     "FieldSpec",
+    "FileFacts",
     "GeneratedDataset",
+    "ProgramLayoutError",
+    "ProgramLayoutIndex",
+    "ResolvedField",
     "ValueFactory",
     "flatten_record",
     "parse_copybook_records",

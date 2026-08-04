@@ -1,9 +1,9 @@
 ---
 type: Module
 title: Generators
-description: Output generators — flowcharts from a program-flow report, and synthetic CSV test data from a copybook record layout.
-tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot]
-timestamp: 2026-08-02T17:40:00Z
+description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and (Phase 1 of program-scoped fixture generation) a whole-program layout index.
+tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures]
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
@@ -226,6 +226,106 @@ after the fact (surfaced by `gen-data --describe`).
 falls back to a deterministic counter — a narrow field (`PIC 9`, ten possible
 values) asked for 40 unique rows must terminate, not spin.
 
+# Program Layout Index (`data/program_layout.py`)
+
+Phase 1 of program-scoped test-data generation (the `gen-fixtures` initiative
+— see `docs/plans/2026-08-02-program-data-generation-design.md` and its
+per-phase implementation plan). Resolves a whole program's FD/record/field
+names into layout facts a later boundary walker (Phase 2) can join against.
+Reuses `FieldSpec`/`flatten_record` directly — no parallel value engine.
+
+```python
+from cobolparser.generators import ProgramLayoutIndex
+
+index = ProgramLayoutIndex.build(ast)              # from an already-parsed CobolProgram
+index = ProgramLayoutIndex.from_file("PROG.cbl")   # parses for you
+
+index.record_for_file("INV-FILE")      -> CobolDataItem | None
+index.records_for_file("INV-FILE")     -> list[CobolDataItem]   # multi-01 FDs
+index.file_facts("INV-FILE")           -> FileFacts | None
+index.resolve("INV-QTY")               -> ResolvedField | None
+index.resolve("INV-QTY OF INV-REC")    -> ResolvedField | None  # qualified
+index.resolve("INV-REC.INV-QTY")       -> ResolvedField | None  # dotted, same meaning
+index.section_of("WS-EOF")             -> "working_storage"
+index.linkage_records()                -> list[CobolDataItem]
+index.working_storage_records()        -> list[CobolDataItem]
+index.ambiguities                      # name -> qualified paths it maps to
+index.unresolved                       # human-readable reasons, never silently dropped
+```
+
+## FD -> record resolution
+
+The DATA DIVISION parser tags every level-01 FILE SECTION item with
+`fd_file_name` (`parsers/divisions/data.py`) while scanning under an FD/SD —
+that tag is the *only* source of truth this index uses (no positional
+fallback: an untagged FILE SECTION record is reported in `unresolved`, never
+guessed from source order). An FD with more than one 01-level record (a
+legal "record redefinition" idiom) tags all of them, so `records_for_file`
+naturally returns every variant.
+
+**FD vs SD.** The parser now also tags `fd_record_type` (`"FD"` or `"SD"`) —
+previously untracked, since nothing needed the distinction before this
+index. An SD is a SORT/MERGE work file, not a file a program `OPEN`s;
+`FileFacts.record_type` surfaces it so a later phase can mark it
+`unconstrained` instead of mock-eligible (mockymock refuses SORT/MERGE
+outright).
+
+**`FileFacts`** merges two independent parses by uppercased file name: the
+ENVIRONMENT DIVISION's `SelectStatement` (organization, access mode, keys,
+`FILE STATUS` field, `OPTIONAL`) and the FILE SECTION's `fd_clauses` metadata
+dict (`RECORD CONTAINS`, `RECORDING MODE`) that `FileDescriptionClauseParser`
+already captures. Either side may be missing — a `SELECT` with no matching
+FD/SD, or vice versa — and that gap goes to `unresolved` rather than
+producing a half-true `FileFacts`. `record_contains` is a plain int for a
+fixed-length record; a variable-length record (`RECORD IS VARYING` or a bare
+`min TO max` range with no `VARYING` keyword) populates
+`record_contains_min`/`_max` instead and leaves `record_contains` `None`.
+
+## Name resolution
+
+Every section's top-level records are flattened once via `flatten_record(...,
+DataGeneratorOptions(include_filler=True, include_redefines=True))` — the
+index must see *all* storage (FILLER, REDEFINES included); which fields are
+generation-eligible is a later phase's concern, not an indexing one. A bare
+name unique across the program resolves directly; one that exists at more
+than one path returns `None` and is recorded in `ambiguities` instead of
+guessed. Two qualified forms disambiguate it, and they read in **opposite**
+segment orders for the same concept:
+
+* `"A OF B"` / `"A IN B"` — COBOL's own syntax; the field name comes first,
+  qualifiers follow.
+* `"B.A"` — mirrors `FieldSpec.qualified_name` (root-first, field-last), so
+  here the field name is the *last* segment and the qualifier(s) precede it.
+  Treating both forms as "first segment is the field" was an actual bug
+  caught by `test_dotted_qualifier_form_also_disambiguates` during
+  development.
+
+A level-88 condition name resolves to its *parent* field's `ResolvedField`
+(a separate recursive walk over each record's raw `CobolDataItem` tree, keyed
+by qualified path, since `flatten_record` does not emit a `FieldSpec` for
+level-88/66 items).
+
+## Multi-program compilation units
+
+`build()` indexes exactly the `CobolProgram` node it is given — for a file
+with stacked/nested programs (`CobolProgram.contained_programs`, e.g.
+`tests/samples/subprogram_demo.cbl`'s caller + two callees), build a separate
+index per program unit rather than expecting one index to see all of them.
+This composes cleanly with Phase 2's planned `--callee-path` resolution rung,
+whether the callee comes from a separate file or a contained program in the
+same one.
+
+## `from_file`
+
+Raises `ProgramLayoutError` (not a bare `FileNotFoundError`/`ParseError`) for
+every failure mode this module owns: a nonexistent path (checked explicitly
+— `parse_cobol()` otherwise falls back to treating a bad path string as
+literal, unparseable source text), a program that does not parse to an AST
+at all, or — in the default `strict_copybooks=True` mode — a COPY member
+`copybook_paths` cannot resolve (a layout with a hole in it is wrong, not
+partial). `strict_copybooks=False` downgrades the last case to an
+`unresolved` entry and falls back to parsing without expansion.
+
 # Tests
 
 * `tests/unit/test_copybook_data_generator.py` — flattening, categories,
@@ -237,6 +337,13 @@ values) asked for 40 unique rows must terminate, not spin.
 * `tests/contracts/test_copybook_data_generator_contract.py` — exported names,
   signatures, `to_dict()` key sets, reproducibility guarantee
 * `tests/unit/test_flowchart_generator.py` — flowchart generators
+* `tests/unit/test_program_layout_index.py` — FD/record resolution, FD-vs-SD
+  tagging, `FileFacts` merging, bare/qualified/level-88 name resolution,
+  multi-program compilation units, `from_file` error modes
+* `tests/integration/test_program_layout_corpus.py` — every
+  `examples/cobol/shamrice/*.cbl` indexes without raising; zero unexpected
+  `unresolved`/`ambiguities` entries (`report_test.cbl`'s Report Writer FD is
+  the one expected, documented exception)
 
 # See Also
 
@@ -244,3 +351,8 @@ values) asked for 40 unique rows must terminate, not spin.
   `OccursClause` / `ConditionNameItem`, the inputs to flattening
 * [cli.md](cli.md) — `gen-data` and `program-flow` subcommands
 * [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts
+* [parser.md](parser.md) — the DATA DIVISION parser's `fd_file_name` /
+  `fd_clauses` / `fd_record_type` metadata tags this index reads
+* `docs/plans/2026-08-02-program-data-generation-design.md` and
+  `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
+  full 9-phase plan this index is Phase 1 of

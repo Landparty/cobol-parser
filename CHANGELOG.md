@@ -17,6 +17,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `ProgramLayoutIndex` — whole-program FD/record/field layout
+  resolution (`cobolparser/generators/data/program_layout.py`, 2026-08-04).
+  Phase 1 of the `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`): resolves a
+  program's FILE SECTION FDs to their owning records, merges FD clauses with
+  the matching `SelectStatement` into a `FileFacts` summary (organization,
+  access mode, keys, `FILE STATUS` field, record size, FD-vs-SD), and
+  resolves data-names (bare, `A OF B`, dotted `B.A`, and level-88 condition
+  names) to a `ResolvedField` across all four DATA DIVISION sections. New
+  `ProgramLayoutIndex` / `FileFacts` / `ResolvedField` / `ProgramLayoutError`
+  public API, exported from `cobolparser.generators`.
+
+  `ProgramLayoutIndex.build(ast)` indexes an already-parsed program;
+  `.from_file(path, copybook_paths=..., strict_copybooks=...)` parses first,
+  raising `ProgramLayoutError` on a missing file, a program that fails to
+  parse, or (by default) an unresolved COPY member — a layout with a hole in
+  it is wrong, not partial. Nothing is silently dropped or guessed: an
+  ambiguous bare name (the same name at more than one path) is recorded on
+  `.ambiguities`, and an unownable FILE SECTION record or a `SELECT` with no
+  matching FD is recorded on `.unresolved`. A file with stacked/nested
+  program units (`CobolProgram.contained_programs`) is indexed one program at
+  a time — `build()` covers exactly the node it is given.
+
+  The DATA DIVISION parser also gained a small, purely additive metadata tag:
+  every FILE SECTION 01-item is now tagged `fd_record_type` (`"FD"` or
+  `"SD"`) alongside the existing `fd_file_name`/`fd_clauses` tags, so an SD
+  (sort/merge work file) can be told apart from a real file. Documented in
+  `.okf/generators.md` and `.okf/parser.md`; covered by
+  `tests/unit/test_program_layout_index.py` and
+  `tests/integration/test_program_layout_corpus.py` (parametrized over the
+  shamrice corpus).
 * **generators:** copybook → CSV synthetic test-data generation
   (`cobolparser/generators/copybook_data.py`, 2026-08-02). New
   `CopybookDataGenerator` / `DataGeneratorOptions` / `GeneratedDataset` /

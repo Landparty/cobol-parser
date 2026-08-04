@@ -10,6 +10,7 @@ from .copybook_data import (
     flatten_record,
     parse_copybook_records,
 )
+from .data import FileFacts, ProgramLayoutError, ProgramLayoutIndex, ResolvedField
 from .flowchart import (
     DotFlowchartGenerator,
     FlowchartOptions,
@@ -23,9 +24,13 @@ __all__ = [
     "DotFlowchartGenerator",
     "FieldCategory",
     "FieldSpec",
+    "FileFacts",
     "FlowchartOptions",
     "GeneratedDataset",
     "MermaidFlowchartGenerator",
+    "ProgramLayoutError",
+    "ProgramLayoutIndex",
+    "ResolvedField",
     "flatten_record",
     "parse_copybook_records",
 ]
