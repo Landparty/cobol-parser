@@ -17,6 +17,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `--scenarios branches|all` wiring, `scenario_coverage`, and
+  a hand-written fixture-bundle schema doc (`cobolparser/generators/program_fixtures.py`,
+  `cobolparser/generators/data/bundle.py`, `docs/fixture-bundle-schema.md`,
+  2026-08-04). Phase 6 ("Emitters hardening") of the `gen-fixtures`
+  program-scoped test-data initiative: turns Phase 5's `ScenarioPlanner`
+  output into an actual multi-scenario `FixtureBundle` instead of the
+  happy-path-only bundle every mode produced through Phase 5.
+
+  New `ProgramFixtureGenerator.generate_with_scenarios(ast, index, report,
+  mode="happy"|"branches"|"all", seed=...)` and its `_from_file` counterpart.
+  `mode="happy"` delegates to the existing `generate()` unchanged — byte-
+  identical output for the same seed, pinned by a contract test, since this
+  is an additive capability, not a change to `generate`'s existing one. For
+  `"branches"`/`"all"`, every `PlannedScenario` becomes a real `Scenario`
+  with a complete fixture for *every* boundary the program touches (the
+  program under test still hits all of them regardless of which arm is
+  targeted); only the fields/sequence-lengths/status values a scenario
+  actually constrains are pinned to their solved witness via a new optional
+  `override: PlannedScenario` parameter threaded through the existing
+  `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers — everything
+  else still comes from the same `ValueFactory` path the happy path always
+  used. `FixtureBundle` gained one new field, `scenario_coverage: dict |
+  None` (Phase 5's `ScenarioCoverage.to_dict()` verbatim, `None` in
+  `mode="happy"`) — additive, `bundle_version` stays `1`.
+
+  `--scenarios` on the `gen-fixtures` CLI now accepts and genuinely acts on
+  `branches`/`all` (previously accepted but silently behaved like `happy`).
+
+  Also fixes two gaps found closing out this phase: (1) `ArmOutcome.parent_proc`
+  was always `None` on a "merged" outcome — recovered from `arm_key`
+  (`"<paragraph>@<line>:<column>/<arm_id>"`) instead of hardcoding it; (2) a
+  third occurrence of the circular-import shape first seen in Phase 4
+  (`constraints.py`'s newly-added top-level `ProgramLayoutIndex`/
+  `ResolvedField` import now collided with `program_fixtures.py`'s new
+  top-level `ConstraintExtractor` import; a fourth edge then surfaced between
+  `domains.py` and `scenarios.py` via `generators/__init__.py`'s own import
+  chain) — fixed at the root this time instead of with another one-off
+  `TYPE_CHECKING` patch: `cobolparser/generators/__init__.py` is now
+  `__getattr__`-based lazy loading, mirroring `cobolparser/analysis/__init__.py`'s
+  already-established pattern, so importing the package no longer eagerly
+  pulls in every submodule's own transitive dependencies. `__all__` is
+  unchanged (same 21 public names).
+
+  `write_csv_dir` gained an explicit round-trip guarantee test: reading a
+  written `<KEY>.csv` back with `csv.reader` and zipping it against the same
+  fixture's `sequence` in the JSON output produces byte-identical cells, and
+  a multi-scenario bundle produces one CSV directory per scenario slug.
+
+  Documented in `docs/fixture-bundle-schema.md` (new — the full bundle JSON
+  shape key by key, hand-written prose per the zero-dependency/no-JSON-Schema
+  convention, with a worked example), `.okf/generators.md` (scenario-mode
+  generation, the override mechanism, the import-architecture fix),
+  `.okf/cli.md`, and `CLAUDE.md`. Also documents a pre-existing, not
+  previously written down v1 solver limitation surfaced while building the
+  schema doc's worked example: `domains.py` treats `class_numeric`/
+  `class_alphabetic` constraints as a no-op when picking a witness, so an
+  `IS NUMERIC`/`IS ALPHABETIC`-gated arm is correctly targeted/covered but its
+  pinned value is not yet guaranteed to satisfy that specific test (every
+  other constraint form is fully solved). Covered by new tests in
+  `tests/unit/test_program_fixtures.py` (`TestScenarioModes`, the csv-dir
+  round-trip test) and `tests/contracts/test_fixture_bundle_contract.py`
+  (`TestScenarioModeContract`).
 * **generators:** `ScenarioPlanner` — constraints + control flow -> a named
   scenario set (`cobolparser/generators/scenarios.py`, 2026-08-04). Phase 5
   of the `gen-fixtures` program-scoped test-data initiative (see

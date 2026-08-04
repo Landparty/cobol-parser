@@ -2,22 +2,62 @@
 
 Covers bundle assembly per boundary category, determinism (same seed ->
 byte-identical JSON; adding a boundary leaves other boundaries' values
-unchanged -- pins the sub-seed scheme), the CALL-argument IN/OUT split, and
-write_csv_dir's directory/MANIFEST shape.
+unchanged -- pins the sub-seed scheme), the CALL-argument IN/OUT split,
+write_csv_dir's directory/MANIFEST shape, and (Phase 6) generate_with_scenarios
+actually applying a PlannedScenario's witnesses/status_overrides/sequence
+lengths into the generated fixture values, not just planning them.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import tempfile
 
-from cobolparser.generators.data.bundle import BUNDLE_VERSION
+from cobolparser import parse_cobol
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.generators.data.bundle import BUNDLE_VERSION, _slugify
+from cobolparser.generators.data.program_layout import ProgramLayoutIndex
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
 FILE_OPERATIONS = "tests/samples/file_operations.cbl"
 SUBPROGRAM_DEMO = "tests/samples/subprogram_demo.cbl"
 IBM_EXTENSIONS = "tests/samples/ibm_extensions.cbl"
+
+_SCENARIO_MODE_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SCENMODE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F1 ASSIGN TO 'F1.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  F1.
+       01  F1-REC.
+           05  F1-QTY          PIC 9(3).
+       WORKING-STORAGE SECTION.
+       01  WS-EOF              PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           READ F1
+               AT END MOVE 'Y' TO WS-EOF
+           END-READ
+           IF F1-QTY > 100
+               DISPLAY 'HIGH'
+           END-IF.
+"""
+
+
+def _scenario_mode_bundle(mode: str, seed: int = 1):
+    result = parse_cobol(_SCENARIO_MODE_HEADER, filename="scenmode.cbl")
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    return ProgramFixtureGenerator().generate_with_scenarios(
+        result.ast, index, report, mode=mode, seed=seed
+    )
 
 
 class TestBundleAssembly:
@@ -178,3 +218,83 @@ class TestWriteCsvDir:
                 lines = handle.read().splitlines()
             assert lines[0] == "SEQ-RECORD,SEQ-ALTERNATE"
             assert len(lines) == 1 + 10  # header + default rows=10
+
+    def test_csv_dir_round_trips_byte_for_cell_against_the_json(self):
+        """Phase 6 exit criterion: `--format csv-dir` output round-trips
+        through `csv.reader` and matches the JSON rows byte-for-cell."""
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            for scenario in bundle.scenarios:
+                slug = _slugify(scenario.name)
+                for fixture in scenario.fixtures:
+                    if not fixture.layout or not fixture.sequence:
+                        continue
+                    csv_path = os.path.join(tmp, slug, f"{fixture.ref.key}.csv")
+                    with open(csv_path, newline="") as handle:
+                        rows = list(csv.reader(handle))
+                    header, data_rows = rows[0], rows[1:]
+                    assert len(data_rows) == len(fixture.sequence)
+                    for csv_row, json_row in zip(
+                        data_rows, fixture.sequence, strict=True
+                    ):
+                        for column, cell in zip(header, csv_row, strict=True):
+                            assert cell == json_row[column], (
+                                f"{fixture.ref.key}.{column}: csv {cell!r} != "
+                                f"json {json_row[column]!r}"
+                            )
+
+    def test_multi_scenario_csv_dir_has_one_directory_per_scenario(self):
+        bundle = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode="all", seed=1
+        )
+        assert len(bundle.scenarios) > 1
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            for scenario in bundle.scenarios:
+                slug = _slugify(scenario.name)
+                assert os.path.isdir(os.path.join(tmp, slug)), scenario.name
+
+
+class TestScenarioModes:
+    """generate_with_scenarios actually applies a PlannedScenario into the
+    generated fixture -- not just plans it (that's Phase 5's own coverage)."""
+
+    def test_branch_arm_witness_is_pinned_in_the_generated_row(self):
+        bundle = _scenario_mode_bundle("branches")
+        # Locate the scenario whose READ fixture's F1-QTY value is > 100 (the
+        # THEN witness) and the one whose value is <= 100 (the ELSE witness).
+        qty_values = []
+        for scenario in bundle.scenarios:
+            read_fixture = next(
+                (f for f in scenario.fixtures if f.ref.category == "READ"), None
+            )
+            assert read_fixture is not None, scenario.name
+            qty_values.append(int(read_fixture.sequence[0]["F1-QTY"]))
+        assert any(v > 100 for v in qty_values)
+        assert any(v <= 100 for v in qty_values)
+
+    def test_empty_input_scenario_has_zero_length_read_sequence(self):
+        bundle = _scenario_mode_bundle("all")
+        empty = next(s for s in bundle.scenarios if s.name == "empty input")
+        read_fixture = next(f for f in empty.fixtures if f.ref.category == "READ")
+        assert read_fixture.sequence == []
+
+    def test_boundary_value_scenarios_pin_min_and_max(self):
+        bundle = _scenario_mode_bundle("all")
+        minimum = next(
+            s for s in bundle.scenarios if s.name == "boundary values: minimum"
+        )
+        maximum = next(
+            s for s in bundle.scenarios if s.name == "boundary values: maximum"
+        )
+        min_read = next(f for f in minimum.fixtures if f.ref.category == "READ")
+        max_read = next(f for f in maximum.fixtures if f.ref.category == "READ")
+        assert int(min_read.sequence[0]["F1-QTY"]) == 0
+        assert int(max_read.sequence[0]["F1-QTY"]) == 999
+
+    def test_scenario_coverage_is_attached_to_the_bundle(self):
+        bundle = _scenario_mode_bundle("branches")
+        assert bundle.scenario_coverage is not None
+        c = bundle.scenario_coverage
+        assert c["targeted"] + c["merged"] + c["missed"] == c["total_arms"]

@@ -8,12 +8,14 @@ timestamp: 2026-08-04T00:00:00Z
 
 # Overview
 
-7,674 passed / 13 skipped / 1 xfailed (2026-08-04: +336 tests across Phases
-1-5 of the `gen-fixtures` program-scoped test-data initiative —
+7,689 passed / 13 skipped / 1 xfailed (2026-08-04: +351 tests across Phases
+1-6 of the `gen-fixtures` program-scoped test-data initiative —
 `ProgramLayoutIndex` (Phase 1), `BoundaryInventoryAnalyzer` (Phase 2),
 `ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3),
-`ConstraintExtractor` + the `domains.py` solver (Phase 4), and
-`ScenarioPlanner` (Phase 5); see [generators.md](generators.md) and
+`ConstraintExtractor` + the `domains.py` solver (Phase 4), `ScenarioPlanner`
+(Phase 5), and wiring `--scenarios branches|all` into a populated
+`FixtureBundle` plus a hand-written schema doc (Phase 6, +15 tests: see
+`docs/fixture-bundle-schema.md`); see [generators.md](generators.md) and
 [analysis.md](analysis.md). Phase 4 also fixed a pre-existing, unrelated
 parser bug it uncovered: `>=`/`<=`/`<>` were silently mis-parsed as
 `>`/`<`/`<` with a garbled operand in every IF/PERFORM UNTIL condition (see
@@ -32,7 +34,7 @@ for the M4/M5/M7/M8/M14 write-ups; also includes the earlier same-day +21
 in `tests/regression/test_open_findings_high_regressions.py` for HIGH
 findings H1-H8). Coverage floor: **81% line coverage** enforced by
 `--cov-fail-under=81` in `pyproject.toml`; full-suite run measured
-92.44%. Branch coverage is enabled.
+91.69%. Branch coverage is enabled.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
 
@@ -48,7 +50,7 @@ tests/
     generators/                # Flowchart generator tests
     test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
     test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, record_named(), multi-program units, from_file errors (see generators.md)
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (see generators.md)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence (see generators.md)
     test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting (see generators.md)
     io_statements/             # IO parser unit tests
     cli/
@@ -69,7 +71,7 @@ tests/
     io/                        # IO coverage reporting integration
     io_statements/             # IO statement parsing, VSAM
   contracts/                   # API contract tests — stability guarantees
-    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility (see generators.md)
+    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility; TestScenarioModeContract: generate_with_scenarios(_from_file) signatures, happy-mode byte-identity with generate, scenario_coverage population/absence, seed reproducibility, unknown-mode ValueError (see generators.md, docs/fixture-bundle-schema.md)
     io_statements/
   regression/                  # backward compatibility
                                #   test_swallow_sweep.py: generic cross-product

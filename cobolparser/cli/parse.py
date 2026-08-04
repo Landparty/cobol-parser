@@ -896,9 +896,12 @@ def _build_gen_fixtures_parser(
     )
     p.add_argument(
         "--scenarios",
-        choices=["happy"],
+        choices=["happy", "branches", "all"],
         default="happy",
-        help="Scenario strategy (default: happy; 'branches'/'all' arrive in a later phase)",
+        help="Scenario strategy: happy (one unconstrained scenario, default), "
+        "branches (one scenario per reachable/satisfiable branch arm, merged "
+        "where possible), all (branches + fixed empty-input/error-status/"
+        "boundary-values families)",
     )
     p.add_argument(
         "--format",
@@ -965,10 +968,11 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         from ..generators.data.options import DataGeneratorOptions
 
         generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=args.rows))
-        bundle = generator.generate_from_file(
+        bundle = generator.generate_with_scenarios_from_file(
             args.file,
             copybook_paths=copybook_paths,
             callee_paths=callee_paths,
+            mode=args.scenarios,
             seed=args.seed,
         )
     except ProgramLayoutError as exc:

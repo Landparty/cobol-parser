@@ -20,6 +20,8 @@ from ..analysis.boundary_inventory import (
     BoundaryInventoryAnalyzer,
     BoundaryReport,
 )
+from ..analysis.constraints import ConstraintExtractor
+from ..analysis.program_flow import ProgramFlowAnalyzer
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
 from .data.bundle import (
@@ -34,8 +36,10 @@ from .data.layout import FieldSpec, flatten_record
 from .data.options import DataGeneratorOptions
 from .data.program_layout import ProgramLayoutIndex
 from .data.values import ValueFactory
+from .scenarios import PlannedScenario, ScenarioPlanner
 
 _SCENARIO_NAME = "happy path"
+_SCENARIO_MODES = ("happy", "branches", "all")
 
 #: Extensions tried, in order, when searching --callee-path directories for
 #: a program name's source file.
@@ -82,7 +86,7 @@ class ProgramFixtureGenerator:
 
         for boundary in report.boundaries:
             fixture, expectations, extra_unresolved = self._build_fixture(
-                boundary, index, bundle_seed, layouts
+                boundary, index, bundle_seed, layouts, _SCENARIO_NAME
             )
             if fixture is not None:
                 scenario.fixtures.append(fixture)
@@ -105,6 +109,83 @@ class ProgramFixtureGenerator:
             unresolved=unresolved,
         )
 
+    def generate_with_scenarios(
+        self,
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+        *,
+        mode: str = "happy",
+        seed: int | None = None,
+    ) -> FixtureBundle:
+        """Phase 5/6: `mode="branches"`/`"all"` drive scenario selection
+        through `ScenarioPlanner` instead of emitting only the "happy path".
+
+        `mode="happy"` delegates to :meth:`generate` unchanged (byte-identical
+        output, same seed -- this method adds a capability, it does not
+        change the existing one). For `"branches"`/`"all"`, every scenario
+        still gets a complete fixture for *every* boundary (the program under
+        test touches all of them regardless of which branch is targeted) --
+        only the specific fields a `PlannedScenario` constrains are pinned to
+        its solved witness; everything else is generated the same
+        `ValueFactory` way the happy path already is.
+        """
+        if mode not in _SCENARIO_MODES:
+            raise ValueError(
+                f"unknown scenario mode: {mode!r} (expected one of {_SCENARIO_MODES})"
+            )
+        if mode == "happy":
+            return self.generate(ast, index, report, seed=seed)
+
+        bundle_seed = seed if seed is not None else random.randrange(2**31)
+        constraint_report = ConstraintExtractor().extract(ast, index, report)
+        flow_report = ProgramFlowAnalyzer().analyze(ast)
+        scenario_plan = ScenarioPlanner().plan(
+            constraint_report, flow_report, report, mode=mode
+        )
+
+        layouts: dict[str, list[FieldSpec]] = {}
+        unresolved: list[str] = list(report.unresolved)
+        scenarios: list[Scenario] = []
+
+        for planned in scenario_plan.scenarios:
+            scenario = Scenario(
+                name=planned.name,
+                intent=planned.intent,
+                entry=self._entry_paragraph(ast),
+            )
+            for boundary in report.boundaries:
+                fixture, expectations, extra_unresolved = self._build_fixture(
+                    boundary,
+                    index,
+                    bundle_seed,
+                    layouts,
+                    planned.name,
+                    override=planned,
+                )
+                if fixture is not None:
+                    scenario.fixtures.append(fixture)
+                scenario.expectations.extend(expectations)
+                unresolved.extend(extra_unresolved)
+            scenarios.append(scenario)
+
+        unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
+        coverage = CoverageSummary(
+            total_boundaries=len(report.boundaries),
+            resolved_boundaries=len(report.boundaries) - unresolved_count,
+            unresolved_boundaries=unresolved_count,
+        )
+
+        return FixtureBundle(
+            program_name=ast.program_name,
+            seed=bundle_seed,
+            scenarios=scenarios,
+            layouts=layouts,
+            coverage=coverage,
+            unresolved=unresolved,
+            scenario_coverage=scenario_plan.coverage.to_dict(),
+        )
+
     def generate_from_file(
         self,
         path: str,
@@ -117,6 +198,20 @@ class ProgramFixtureGenerator:
             path, copybook_paths=copybook_paths, callee_paths=callee_paths
         )
         return self.generate(ast, index, report, seed=seed)
+
+    def generate_with_scenarios_from_file(
+        self,
+        path: str,
+        *,
+        copybook_paths: list[str] | None = None,
+        callee_paths: list[str] | None = None,
+        mode: str = "happy",
+        seed: int | None = None,
+    ) -> FixtureBundle:
+        ast, index, report = self.analyze_from_file(
+            path, copybook_paths=copybook_paths, callee_paths=callee_paths
+        )
+        return self.generate_with_scenarios(ast, index, report, mode=mode, seed=seed)
 
     def analyze_from_file(
         self,
@@ -147,22 +242,27 @@ class ProgramFixtureGenerator:
         index: ProgramLayoutIndex,
         bundle_seed: int,
         layouts: dict[str, list[FieldSpec]],
+        scenario_name: str,
+        *,
+        override: PlannedScenario | None = None,
     ) -> tuple[BoundaryFixture | None, list[Expectation], list[str]]:
         ref = boundary.ref
         rng = random.Random(
-            _sub_seed(bundle_seed, _SCENARIO_NAME, ref.category, ref.key)
+            _sub_seed(bundle_seed, scenario_name, ref.category, ref.key)
         )
         factory = ValueFactory(rng, self.options)
         unresolved = list(boundary.unresolved)
 
         if ref.category in ("CALL", "DYNCALL"):
-            return self._build_call_fixture(boundary, index, factory, layouts)
+            return self._build_call_fixture(
+                boundary, index, factory, layouts, override=override
+            )
 
         if boundary.direction == "STATUS_ONLY":
             status_fixture = BoundaryFixture(
                 ref=ref,
                 direction=boundary.direction,
-                status=self._status_dict(boundary, index),
+                status=self._status_dict(boundary, index, override=override),
             )
             return status_fixture, [], unresolved
 
@@ -184,9 +284,12 @@ class ProgramFixtureGenerator:
                 )
             fixture = None
         else:
-            rows_count = self.options.rows if ref.category == "READ" else 1
+            rows_count = self._sequence_length(boundary, override, self.options.rows)
             sequence = [
-                {spec.column: factory.value_for(spec, row) for spec in fields}
+                {
+                    spec.column: self._value_for(spec, factory, row, override)
+                    for spec in fields
+                }
                 for row in range(rows_count)
             ]
             self._register_layout(layouts, boundary, fields)
@@ -199,7 +302,7 @@ class ProgramFixtureGenerator:
                 layout=fields,
                 sequence=sequence,
                 terminal=terminal,
-                status=self._status_dict(boundary, index),
+                status=self._status_dict(boundary, index, override=override),
                 unresolved=list(boundary.unresolved),
             )
 
@@ -214,12 +317,39 @@ class ProgramFixtureGenerator:
             )
         return fixture, expectations, unresolved
 
+    @staticmethod
+    def _sequence_length(
+        boundary: Boundary, override: PlannedScenario | None, default_rows: int
+    ) -> int:
+        if override is not None:
+            for seq in override.sequence_constraints:
+                if (
+                    seq.boundary.category == boundary.ref.category
+                    and seq.boundary.key == boundary.ref.key
+                    and seq.length is not None
+                ):
+                    return seq.length
+        return default_rows if boundary.ref.category == "READ" else 1
+
+    @staticmethod
+    def _value_for(
+        spec: FieldSpec,
+        factory: ValueFactory,
+        row: int,
+        override: PlannedScenario | None,
+    ) -> str:
+        if override is not None and spec.qualified_name in override.witnesses:
+            return override.witnesses[spec.qualified_name]
+        return factory.value_for(spec, row)
+
     def _build_call_fixture(
         self,
         boundary: Boundary,
         index: ProgramLayoutIndex,
         factory: ValueFactory,
         layouts: dict[str, list[FieldSpec]],
+        *,
+        override: PlannedScenario | None = None,
     ) -> tuple[BoundaryFixture | None, list[Expectation], list[str]]:
         ref = boundary.ref
         unresolved = list(boundary.unresolved)
@@ -258,7 +388,9 @@ class ProgramFixtureGenerator:
         if not fields:
             return None, expectations, unresolved
 
-        row = {spec.column: factory.value_for(spec, 0) for spec in fields}
+        row = {
+            spec.column: self._value_for(spec, factory, 0, override) for spec in fields
+        }
         self._register_layout(layouts, boundary, fields)
         fixture = BoundaryFixture(
             ref=ref,
@@ -306,15 +438,29 @@ class ProgramFixtureGenerator:
         layouts.setdefault(key, fields)
 
     @staticmethod
-    def _status_dict(boundary: Boundary, index: ProgramLayoutIndex) -> dict[str, str]:
+    def _status_dict(
+        boundary: Boundary,
+        index: ProgramLayoutIndex,
+        *,
+        override: PlannedScenario | None = None,
+    ) -> dict[str, str]:
+        field_name: str | None
+        default: str
         if boundary.ref.category == "SQL":
-            return {"SQLCODE": "0"}
-        if boundary.status_field:
-            return {boundary.status_field: "00"}
-        facts = index.file_facts(boundary.ref.key)
-        if facts is not None and facts.file_status_field:
-            return {facts.file_status_field: "00"}
-        return {}
+            field_name, default = "SQLCODE", "0"
+        elif boundary.status_field:
+            field_name, default = boundary.status_field, "00"
+        else:
+            facts = index.file_facts(boundary.ref.key)
+            field_name = facts.file_status_field if facts is not None else None
+            default = "00"
+
+        if field_name is None:
+            return {}
+        override_key = f"{boundary.ref.category}:{boundary.ref.key}"
+        if override is not None and override_key in override.status_overrides:
+            return {field_name: override.status_overrides[override_key]}
+        return {field_name: default}
 
     @staticmethod
     def _entry_paragraph(ast: CobolProgram) -> str | None:

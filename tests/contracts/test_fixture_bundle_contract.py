@@ -31,6 +31,7 @@ _BUNDLE_KEYS = {
     "layouts",
     "coverage",
     "unresolved",
+    "scenario_coverage",
 }
 _SCENARIO_KEYS = {
     "name",
@@ -137,3 +138,65 @@ class TestReproducibilityContract:
             FILE_OPERATIONS, seed=first.seed
         )
         assert first.to_json() == replay.to_json()
+
+
+class TestScenarioModeContract:
+    """`generate_with_scenarios` (Phase 6): additive capability, not a change
+    to `generate`'s existing contract."""
+
+    def test_generate_with_scenarios_signature(self):
+        sig = inspect.signature(ProgramFixtureGenerator.generate_with_scenarios)
+        params = set(sig.parameters) - {"self"}
+        assert params == {"ast", "index", "report", "mode", "seed"}
+
+    def test_generate_with_scenarios_from_file_signature(self):
+        sig = inspect.signature(
+            ProgramFixtureGenerator.generate_with_scenarios_from_file
+        )
+        params = set(sig.parameters) - {"self"}
+        assert params == {"path", "copybook_paths", "callee_paths", "mode", "seed"}
+
+    def test_happy_mode_is_byte_identical_to_generate(self):
+        a = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=555)
+        b = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode="happy", seed=555
+        )
+        assert a.to_json() == b.to_json()
+
+    def test_happy_mode_scenario_coverage_is_none(self):
+        bundle = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode="happy", seed=555
+        )
+        assert bundle.scenario_coverage is None
+
+    @pytest.mark.parametrize("mode", ["branches", "all"])
+    def test_branch_modes_populate_scenario_coverage(self, mode):
+        bundle = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode=mode, seed=555
+        )
+        assert bundle.scenario_coverage is not None
+        assert set(bundle.scenario_coverage.keys()) == {
+            "total_arms",
+            "targeted",
+            "merged",
+            "missed",
+            "details",
+        }
+        c = bundle.scenario_coverage
+        assert c["targeted"] + c["merged"] + c["missed"] == c["total_arms"]
+
+    @pytest.mark.parametrize("mode", ["branches", "all"])
+    def test_branch_modes_are_seed_reproducible(self, mode):
+        a = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode=mode, seed=777
+        )
+        b = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode=mode, seed=777
+        )
+        assert a.to_json() == b.to_json()
+
+    def test_unknown_mode_raises(self):
+        with pytest.raises(ValueError):
+            ProgramFixtureGenerator().generate_with_scenarios_from_file(
+                FILE_OPERATIONS, mode="bogus", seed=1
+            )

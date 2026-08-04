@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..generators.data.program_layout import ProgramLayoutIndex, ResolvedField
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.base import (
@@ -39,6 +38,16 @@ from ..models.statements.control import (
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import IOReadStatement
 from .boundary_inventory import BoundaryRef, BoundaryReport
+
+if TYPE_CHECKING:
+    # Deferred: cobolparser.generators (reached via generators/__init__.py's
+    # own import chain, e.g. program_fixtures.py genuinely constructs
+    # ConstraintExtractor) imports this module back at runtime, so a
+    # top-level import here would be circular -- the same shape as
+    # boundary_inventory.py's own ProgramLayoutIndex import. Every use below
+    # is a type annotation only; `from __future__ import annotations` keeps
+    # it a lazy string at runtime.
+    from ..generators.data.program_layout import ProgramLayoutIndex, ResolvedField
 
 # -- statement-walk discipline ------------------------------------------------
 #

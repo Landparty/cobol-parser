@@ -379,6 +379,18 @@ getting their own domain-handling branch. `negated` only carries meaning for
 op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
 directly into the op choice).
 
+**`class_numeric`/`class_alphabetic` extract cleanly but do not narrow a
+witness in v1.** `domains.py`'s `solve()` treats both ops as a no-op on
+whichever domain (`NumericDomain`/`TextDomain`) the field's category picked —
+the arm containing an `IS NUMERIC`/`IS ALPHABETIC` test is still correctly
+`"targeted"` (or `"merged"`) in `ScenarioPlanner`'s coverage accounting, and
+every *other* constraint on the same field still narrows normally, but the
+generated value for a field constrained *only* by a class test is not
+guaranteed to actually satisfy that test — found producing
+`docs/fixture-bundle-schema.md`'s worked example (Phase 6): an `IS NUMERIC`
+arm's witness rendered as an arbitrary alphanumeric value, not a digit
+string. Every other op in the vocabulary above is fully solved.
+
 **AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
 THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`) --
 there is no structural "NOT" node in this parser to walk instead (confirmed

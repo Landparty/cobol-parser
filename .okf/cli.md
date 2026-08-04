@@ -137,7 +137,7 @@ writes through the `csv` module so quoted cells round-trip.
 
 ```bash
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR]... [--callee-path DIR]... \
-    [--rows N] [--seed N] [--scenarios happy] [--format json|csv-dir] \
+    [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] \
     [--list-boundaries] [--describe] [--strict] [--compact] [--output PATH]
 ```
 
@@ -164,14 +164,15 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   byte-identical JSON (`ProgramFixtureGenerator.generate`'s own per-boundary
   sub-seed scheme -- see generators.md -- means adding one boundary never
   reshuffles another's already-generated values).
-* `--scenarios happy` is still the only value that changes this command's
-  output. `branches`/`all` are accepted (validated against the full flag
-  set so scripts written against it do not need to change later) but
-  currently produce the same happy-path-only bundle as `happy` --
-  `cobolparser.generators.scenarios.ScenarioPlanner` (Phase 5) exists and is
-  fully tested, but wiring its `ScenarioPlan` into an actual multi-scenario
-  `FixtureBundle` is deferred to Phase 6. See generators.md's "Scenario
-  Planning" section.
+* `--scenarios happy` (default) emits the single unconstrained "happy path"
+  scenario (Phase 3). `branches` targets every reachable, satisfiable branch
+  arm with its own (or a merged) scenario; `all` additionally adds the fixed
+  empty-input / error-status / boundary-values scenario families -- both
+  route through `cobolparser.generators.scenarios.ScenarioPlanner` (Phase 5)
+  via `ProgramFixtureGenerator.generate_with_scenarios_from_file` (Phase 6)
+  and populate the bundle's `scenario_coverage` key (`null` under `happy`).
+  See generators.md's "Scenario Planning" and "Scenario-mode generation"
+  sections, and `docs/fixture-bundle-schema.md` for the full JSON shape.
 * `--format json` (default) emits the full bundle; `--format csv-dir`
   requires `--output DIR` and emits one CSV per file-shaped boundary fixture
   under `DIR/<scenario-slug>/<KEY>.csv` plus a `DIR/MANIFEST.json`.
@@ -274,7 +275,10 @@ Runs `IMSSegmentAnalyzer` and reports IMS DLI segment calls.
 # See Also
 
 * [analysis.md](analysis.md) — the underlying analyzers, including
-  `BoundaryInventoryAnalyzer` (`gen-fixtures`, Phase 2)
+  `BoundaryInventoryAnalyzer` (`gen-fixtures`, Phase 2) and
+  `ConstraintExtractor`/`domains.solve()` (Phase 4, feeds `--scenarios`)
 * [parser.md](parser.md) — `parse_cobol` used by most subcommands
 * [generators.md](generators.md) — `ProgramLayoutIndex` / `ProgramFixtureGenerator`
-  / `FixtureBundle` (`gen-fixtures`, Phases 1 and 3)
+  / `FixtureBundle` / `ScenarioPlanner` (`gen-fixtures`, Phases 1, 3, 5-6)
+* [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
+  full `FixtureBundle` JSON shape `gen-fixtures --format json` produces

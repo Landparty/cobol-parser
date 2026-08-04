@@ -1,0 +1,374 @@
+# Fixture Bundle Schema
+
+**Produced by:** `cobolparser.generators.ProgramFixtureGenerator` (`generate`,
+`generate_with_scenarios`, and their `_from_file` counterparts) — backs the
+`cobol-parser gen-fixtures` CLI subcommand.
+**Consumed by:** mockymock's `generate --with-data` (Phase 8 of the
+`gen-fixtures` program-scoped test-data initiative; see
+[`docs/plans/2026-08-02-program-data-generation-design.md`](plans/2026-08-02-program-data-generation-design.md)).
+**Current `bundle_version`:** `1`.
+
+This is hand-written prose, not a JSON-Schema document — the repo has a
+zero-runtime-dependency rule for the core library, and a schema validator is
+one more thing a consumer would need to install. Every shape below is a
+Python `dataclass` with a `to_dict()` method in
+`cobolparser/generators/data/bundle.py` (bundle-level types) or
+`cobolparser/generators/scenarios.py` (`scenario_coverage`); that source is
+the actual contract, this document is a guide to reading it.
+`tests/contracts/test_fixture_bundle_contract.py` pins every key set named
+below — a key added or removed there without a matching edit here is a bug in
+one of the two.
+
+## Getting a bundle
+
+```python
+from cobolparser.generators import ProgramFixtureGenerator
+
+generator = ProgramFixtureGenerator()
+
+# "happy path" only -- one scenario, no branch targeting
+bundle = generator.generate_from_file("DOCEX.cbl", seed=7)
+
+# Phase 5/6: branch-targeted scenarios plus fixed families
+bundle = generator.generate_with_scenarios_from_file(
+    "DOCEX.cbl", mode="all", seed=7,   # mode: "happy" | "branches" | "all"
+)
+
+bundle.to_json()          # str -- what gen-fixtures --format json prints
+bundle.write_csv_dir(...) # one CSV per file-shaped fixture -- see below
+```
+
+`mode="happy"` and `generate()`/`generate_from_file()` are exactly the same
+bundle (`generate_with_scenarios(..., mode="happy")` delegates to `generate()`
+unchanged, byte-for-byte) — `scenario_coverage` is `None` and there is always
+exactly one scenario. `mode="branches"`/`"all"` route through Phase 5's
+`ScenarioPlanner` instead; every field described below exists in both modes,
+`scenario_coverage` is the only key that is `None` in happy mode and populated
+otherwise.
+
+## Top level: `FixtureBundle`
+
+| Key | Type | Notes |
+|---|---|---|
+| `bundle_version` | `int` | Currently `1`. Bumped only on a breaking change to this shape — see "Versioning" below. |
+| `program_name` | `str \| null` | The `PROGRAM-ID`, or `null` if the program has none. |
+| `seed` | `int` | The RNG seed that produced this bundle. If you didn't pass one, this is the one that was drawn — replay with `seed=bundle["seed"]`. |
+| `scenarios` | `list[Scenario]` | One entry per scenario (see below). Always at least one. |
+| `layouts` | `dict[str, list[FieldSpec]]` | Record name → its resolved field layout, emitted **once per record** — scenarios reference a layout by name rather than repeating it inline. |
+| `coverage` | `CoverageSummary` | Boundary-level counts (Phase 3, present in every bundle). |
+| `unresolved` | `list[str]` | Program-level gaps not tied to one scenario/boundary — an unresolved COPY member, a dynamic CALL with no traceable target, etc. Merges Phase 1 (`ProgramLayoutIndex.unresolved`), Phase 2 (`Boundary.unresolved`), and Phase 3's own field-resolution gaps. |
+| `scenario_coverage` | `ScenarioCoverage \| null` | Phase 5/6 arm-coverage accounting. `null` in `mode="happy"`, populated in `"branches"`/`"all"`. See below. |
+
+## `Scenario`
+
+| Key | Type | Notes |
+|---|---|---|
+| `name` | `str` | E.g. `"happy path"`, `"CHECK-QTY: THEN"`, `"empty input"`, `"boundary values: minimum"`. Human-readable, not a stable identifier — don't parse it; `scenario_coverage.details[].arm_key` is the stable per-arm key. |
+| `intent` | `str` | One sentence: what this scenario is for. |
+| `entry` | `str \| null` | The program's first PROCEDURE DIVISION paragraph, if any. |
+| `fixtures` | `list[BoundaryFixture]` | Mock in-data for every boundary the scenario touches. |
+| `expectations` | `list[Expectation]` | Assert-on stubs (see below). |
+| `unconstrained` | `list[str]` | Reserved for a future phase; always `[]` today (a happy-path scenario doesn't attempt branch coverage, and Phase 5/6 record misses in `scenario_coverage` instead, not here). |
+
+**Every scenario carries a fixture for every boundary the program touches**,
+not just the ones its targeted branch arm constrains. A `mode="all"` bundle
+for a program with 3 boundaries and 6 branch-arm-derived scenarios has 6
+complete, independently runnable fixture sets — the arm's own witness pins
+whichever field(s) that arm's condition touches, and every other field is
+generated exactly the way the happy-path scenario would generate it. This is
+deliberate: a scenario is meant to be handed to a mock runner as a complete
+input, not a diff against some baseline.
+
+## `BoundaryFixture`
+
+One entry per boundary the scenario resolved.
+
+| Key | Type | Notes |
+|---|---|---|
+| `category` | `str` | `"READ"`, `"WRITE"`, `"OPEN"`, `"CLOSE"`, `"DELETE"`, `"START"`, `"UNLOCK"`, `"REWRITE"`, `"SQL"`, `"CICS"`, `"DLI"`, `"ACCEPT"`, `"CALL"`, or `"DYNCALL"` — the same category vocabulary as `BoundaryInventoryAnalyzer` (`.okf/analysis.md`). |
+| `key` | `str` | The file/program/host-variable name identifying this boundary — same `key` mockymock's own `mock_surface` uses. |
+| `paragraph` | `str \| null` | Where in PROCEDURE DIVISION this boundary is invoked. |
+| `line` | `int \| null` | Source line of the invoking statement. |
+| `direction` | `str` | `"IN"`, `"OUT"`, `"BIDIRECTIONAL"`, or `"STATUS_ONLY"` (OPEN/CLOSE/DELETE/START/UNLOCK: nothing to generate, only a status code). |
+| `layout` | `list[FieldSpec]` | Empty for `STATUS_ONLY` and for an OUT boundary (no fixture is generated for those — see `direction` rules below). |
+| `sequence` | `list[dict[str, str]]` | One dict per invocation, each a column-name → generated-value mapping aligned to `layout` — the same string-cell convention `GeneratedDataset.rows` uses. A READ gets `--rows` entries; every other IN/BIDIRECTIONAL boundary gets exactly one. |
+| `terminal` | `dict[str, str] \| null` | What happens after `sequence` is exhausted — e.g. `{"FILE-STATUS": "10"}` when the boundary has an `AT END` handler. `null` when there's no such handler. |
+| `status` | `dict[str, str]` | E.g. `{"SQLCODE": "0"}` or `{"WS-FILE-STATUS": "00"}`. Present on every fixture with a status concept, not just `STATUS_ONLY` ones. Empty `{}` when the boundary has no status field at all. |
+| `provenance` | `str` | Why these values: `"picture-random"` (no constraint touched this field) or `"constraint:<field>=<value>"` / `"88-domain"` once Phase 4's witnesses are wired into fixture provenance tracking (that tagging is a Phase 7 item — today every fixture reports `"picture-random"` regardless of whether a scenario pinned one of its fields; the *value itself* is still correctly pinned via `witnesses`, only the provenance label lags). |
+| `unresolved` | `list[str]` | Names/reasons this specific fixture could not fully resolve. |
+
+**No fixture at all** is emitted (the boundary contributes only to
+`expectations`) for an OUT-direction boundary — a WRITE/REWRITE, an SQL
+INSERT/UPDATE/DELETE, an OUT-direction CALL argument. There is nothing to
+mock; the program produces that value, so it becomes a
+`kind="stub"` expectation instead (see below).
+
+## `FieldSpec` (inside `layout` and the top-level `layouts` map)
+
+Identical to the copybook generator's own field-spec shape (see
+[generators.md](../.okf/generators.md)) — `gen-fixtures` reuses the Phase 0
+value engine directly, no parallel type:
+
+```
+name, column, qualified_name, level, picture, usage, category,
+size, integer_digits, decimal_digits, is_signed,
+value_clause, condition_values, subscripts, redefines
+```
+
+`category` is one of `alphanumeric | alphabetic | national | numeric |
+numeric-edited | alphanumeric-edited | float`.
+
+## `Expectation`
+
+| Key | Type | Notes |
+|---|---|---|
+| `kind` | `str` | `"call_count"`, `"field_equals"`, or `"stub"` (see the three-tier note below). |
+| `ref` | `str` | What this expectation is about — a boundary key (`"CATEGORY:KEY"`) or a CALL argument name. |
+| `value` | `str \| int \| null` | The asserted value, when known. Always `null` for `kind="stub"`. |
+| `note` | `str \| null` | Human-readable explanation, e.g. `"value produced by the program under test"` or `"bidirectional: OUT aspect not asserted in v1"`. |
+
+**Three confidence tiers** (Phase 7 fills tiers 1–2; every bundle through
+Phase 6 emits `"stub"` only — a happy-path or scenario-targeted bundle has no
+scenario-specific branch outcome to assert on yet):
+
+1. `"call_count"` — structural, always safe: a boundary was invoked exactly
+   `value` times. Derivable directly from the scenario's own sequence length.
+2. `"field_equals"` — a field's value is knowable by constant-folding a chain
+   of MOVE/arithmetic from mock-supplied inputs (`analysis/const_fold.py`,
+   Phase 7).
+3. `"stub"` — everything else: a placeholder, never a live assertion.
+
+## `CoverageSummary`
+
+Boundary-level counts, present in every bundle regardless of mode:
+
+```
+total_boundaries, resolved_boundaries, unresolved_boundaries
+```
+
+`resolved_boundaries + unresolved_boundaries == total_boundaries` always.
+This predates scenario planning (Phase 3) and does not change shape between
+modes — it counts *boundaries*, not *branch arms*. For arm-level accounting,
+see `scenario_coverage` below.
+
+## `scenario_coverage` (Phase 5/6, `"branches"`/`"all"` only)
+
+`null` in `mode="happy"`. Otherwise a `ScenarioCoverage.to_dict()`:
+
+| Key | Type | Notes |
+|---|---|---|
+| `total_arms` | `int` | Every branch arm the control-flow graph knows about. |
+| `targeted` | `int` | Arms that got their own scenario. |
+| `merged` | `int` | Arms folded into another (disjoint-field) scenario instead of getting their own. |
+| `missed` | `int` | Arms that could not be covered at all — see `details[].reason`. |
+| `details` | `list[ArmOutcome]` | One entry per arm. |
+
+**`total_arms == targeted + merged + missed`, always** — this is the whole
+point of the accounting: every arm the CFG sees is accounted for, none silently
+dropped. Each `ArmOutcome`:
+
+```
+arm_key       "<paragraph>@<line>:<column>/<arm-id>", e.g. "CHECK-QTY@31:5/THEN"
+parent_proc   the enclosing paragraph name, or null
+status        "targeted" | "merged" | "missed"
+merged_into   the scenario name it was folded into, when status == "merged"
+reason        why, when status == "missed" -- e.g. "unreachable",
+              "unsatisfiable: <domain reason>", or an extraction gap
+              carried over from Phase 4's ConstraintReport.unsupported
+```
+
+A `reason` is **never** blank when `status == "missed"` — a silent miss with
+no explanation is treated as a bug in the planner, not an acceptable output.
+
+**v1 path-condition simplification**: a targeted scenario constrains only its
+*own* arm's conditions, not the conjunction of every enclosing branch on the
+path to it. Two arms nested inside each other each get independently solved,
+single-arm witnesses — full path-sensitivity is a later-version item. See
+[generators.md](../.okf/generators.md)'s "Scenario Planning" section for the
+merge/unsatisfiable/fixed-family rules that produced these scenarios.
+
+**Known v1 limitation worth knowing before you read a witness**: a class
+test (`IS NUMERIC`/`IS ALPHABETIC`) produces a real `FieldConstraint` and a
+correctly `"targeted"` (or `"merged"`) arm, but `domains.py`'s solver treats
+`class_numeric`/`class_alphabetic` as a no-op when picking a witness value —
+it does not currently narrow the generated value to something that actually
+*is* (or isn't) numeric-looking. The arm accounting is exact; the pinned
+*value* for a class-tested field is not yet guaranteed to satisfy that
+specific test. Every other constraint form (relational, level-88 `in_set`,
+figurative, sign/zero) is fully solved.
+
+## Worked example
+
+`DOCEX.cbl` (an OPEN/READ-loop/CLOSE program with one `IF ORDER-QTY > 100`
+branch in `CHECK-QTY`) run through `generate_with_scenarios_from_file(...,
+mode="all", seed=7)` produces five scenarios: `"CHECK-QTY: ELSE"`,
+`"CHECK-QTY: THEN"`, `"empty input"`, `"boundary values: minimum"`, and
+`"boundary values: maximum"` (the `"error status"` family emits nothing here
+— the program declares no `INVALID KEY`/`ON EXCEPTION`/status-checked `OPEN`
+handler for the planner to target). Trimmed to two scenarios plus the
+bundle-level keys:
+
+```json
+{
+  "bundle_version": 1,
+  "program_name": "DOCEX",
+  "seed": 7,
+  "scenarios": [
+    {
+      "name": "CHECK-QTY: ELSE",
+      "intent": "targets branch arm CHECK-QTY@31:5/ELSE",
+      "entry": "MAIN-PARA",
+      "fixtures": [
+        {
+          "category": "OPEN", "key": "ORDER-FILE", "paragraph": "MAIN-PARA",
+          "line": 20, "direction": "STATUS_ONLY", "layout": [], "sequence": [],
+          "terminal": null, "status": {"WS-ORDER-STATUS": "00"},
+          "provenance": "picture-random", "unresolved": []
+        },
+        {
+          "category": "READ", "key": "ORDER-FILE", "paragraph": "MAIN-PARA",
+          "line": 22, "direction": "IN",
+          "layout": [{
+            "name": "ORDER-QTY", "column": "ORDER-QTY",
+            "qualified_name": "ORDER-RECORD.ORDER-QTY", "level": 5,
+            "picture": "9(3)", "usage": "DISPLAY", "category": "numeric",
+            "size": 3, "integer_digits": 3, "decimal_digits": 0,
+            "is_signed": false, "value_clause": null, "condition_values": [],
+            "subscripts": [], "redefines": null
+          }],
+          "sequence": [{"ORDER-QTY": "50"}, {"ORDER-QTY": "50"}, "... x10"],
+          "terminal": {"WS-ORDER-STATUS": "10"},
+          "status": {"WS-ORDER-STATUS": "00"},
+          "provenance": "picture-random", "unresolved": []
+        },
+        {
+          "category": "CLOSE", "key": "ORDER-FILE", "paragraph": "MAIN-PARA",
+          "line": 27, "direction": "STATUS_ONLY", "layout": [], "sequence": [],
+          "terminal": null, "status": {"WS-ORDER-STATUS": "00"},
+          "provenance": "picture-random", "unresolved": []
+        }
+      ],
+      "expectations": [],
+      "unconstrained": []
+    },
+    {
+      "name": "CHECK-QTY: THEN",
+      "intent": "targets branch arm CHECK-QTY@31:5/THEN",
+      "entry": "MAIN-PARA",
+      "fixtures": [
+        "... same OPEN/CLOSE STATUS_ONLY fixtures ...",
+        {
+          "category": "READ", "key": "ORDER-FILE", "paragraph": "MAIN-PARA",
+          "line": 22, "direction": "IN",
+          "layout": ["... same FieldSpec as above ..."],
+          "sequence": [{"ORDER-QTY": "550"}, "... x10"],
+          "terminal": {"WS-ORDER-STATUS": "10"},
+          "status": {"WS-ORDER-STATUS": "00"},
+          "provenance": "picture-random", "unresolved": []
+        }
+      ],
+      "expectations": [],
+      "unconstrained": []
+    }
+  ],
+  "layouts": {
+    "ORDER-RECORD": ["... the same ORDER-QTY FieldSpec ..."]
+  },
+  "coverage": {
+    "total_boundaries": 3, "resolved_boundaries": 3, "unresolved_boundaries": 0
+  },
+  "unresolved": [],
+  "scenario_coverage": {
+    "total_arms": 2, "targeted": 2, "merged": 0, "missed": 0,
+    "details": [
+      {"arm_key": "CHECK-QTY@31:5/ELSE", "parent_proc": "CHECK-QTY",
+       "status": "targeted", "merged_into": null, "reason": null},
+      {"arm_key": "CHECK-QTY@31:5/THEN", "parent_proc": "CHECK-QTY",
+       "status": "targeted", "merged_into": null, "reason": null}
+    ]
+  }
+}
+```
+
+`ORDER-QTY` is `PIC 9(3)` (0-999, unsigned) with a branch at `> 100`: the
+`ELSE` scenario pins every generated row to `"50"` (a witness in `[0, 100]`),
+the `THEN` scenario pins to `"550"` (the domain solver's midpoint of
+`[101, 999]`) — both scenarios still generate a full 10-row READ sequence
+(`--rows` default) because only the *value*, not the row count, is
+constrained by this particular arm. The two `"boundary values"` scenarios
+(elided above) pin the same field to `"0"` and `"999"` respectively — the
+picture's true extremes, not `domains.solve()`'s usual interval midpoint (see
+generators.md's "Scenario Planning" section for why an `eq` constraint is
+used to pin those specifically).
+
+## `write_csv_dir` (the `--format csv-dir` layout)
+
+```
+<path>/
+  MANIFEST.json                       # the full bundle, minus row data
+  <scenario-slug>/
+    <KEY>.csv                         # one per file-shaped fixture
+```
+
+* **Scenario slugging** (`_slugify` in `bundle.py`): lowercase, everything
+  that isn't alphanumeric collapses to a single `-`, leading/trailing `-`
+  stripped. `"CHECK-QTY: THEN"` → `check-qty-then`. Deterministic and
+  filesystem-safe by construction.
+* **Which fixtures get a CSV**: only those with both a non-empty `layout` and
+  a non-empty `sequence` — `STATUS_ONLY` fixtures and OUT-direction
+  expectation-only boundaries produce nothing to write (there are no rows).
+* **CSV shape**: header row is `[f.column for f in fixture.layout]`; each
+  data row looks up every header column in that invocation's `sequence[i]`
+  dict (missing keys become `""`). Written with `\n` line endings via the
+  stdlib `csv` module — the same `_DEFAULT_LINE_TERMINATOR` convention
+  `gen-data`'s `GeneratedDataset.write_csv` uses, so both CLI paths agree
+  byte-for-byte on newline style.
+* **`MANIFEST.json`**: `bundle.to_dict()` with every fixture's `"sequence"`
+  key replaced by the string `"see <scenario-slug>/"` — everything else
+  (layouts, coverage, scenario_coverage, expectations) is unchanged, so a
+  consumer can discover what scenarios/fixtures/expectations exist by reading
+  one small file, without walking the directory tree or parsing every CSV
+  first.
+* **Round-trip guarantee**: reading a `<KEY>.csv` back with `csv.reader` and
+  zipping its rows against the same fixture's `sequence` in the JSON output
+  produces byte-identical cells — pinned by
+  `test_program_fixtures.py::TestWriteCsvDir::test_csv_dir_round_trips_byte_for_cell_against_the_json`.
+
+## Versioning and compatibility policy
+
+`bundle_version` bumps **only** on a breaking change — a key removed, a key's
+type changed, or a key's meaning changed under an unchanged name. Every
+change so far, including this document's own Phase 6 (`scenario_coverage`),
+has been **additive**: a new key that is `None`/absent-equivalent unless a
+new capability (a new `mode=`, a new CLI flag) is actually used. A consumer
+that only reads keys it knows about is unaffected by a bundle produced by a
+newer `cobolparser` gaining one more key. Phase 8 (mockymock integration)
+checks `bundle_version` before consuming a bundle and fails closed on an
+unrecognized value rather than guessing at a schema that changed underneath
+it — this is the reason the field exists at all rather than being inferred
+from key presence.
+
+## Determinism
+
+Every bundle is reproducible: the same `(program source, seed, mode)` always
+produces byte-identical `to_json()` output, including `scenario_coverage` and
+scenario ordering. Each boundary derives its own sub-seed
+(`zlib.crc32(f"{scenario}|{category}|{key}") ^ bundle_seed`) so that adding an
+unrelated boundary never reshuffles another boundary's already-generated
+values — see generators.md's "Determinism: per-boundary sub-seeds" section.
+An unseeded call draws a seed and reports it on `bundle.seed`, so an
+interesting unseeded run is always replayable after the fact.
+
+## See also
+
+* [`.okf/generators.md`](../.okf/generators.md) — the generators that produce
+  this bundle (`ProgramFixtureGenerator`, `ScenarioPlanner`), and the value
+  engine (`ValueFactory`/`FieldSpec`/`flatten_record`) it reuses.
+* [`.okf/analysis.md`](../.okf/analysis.md) — `BoundaryInventoryAnalyzer`
+  (Phase 2, produces the boundaries this bundle covers), `ConstraintExtractor`
+  / `domains.py` (Phase 4, produce the witnesses scenarios pin).
+* [`.okf/cli.md`](../.okf/cli.md) — the `gen-fixtures` CLI subcommand's flags.
+* [`docs/plans/2026-08-02-program-data-generation-design.md`](plans/2026-08-02-program-data-generation-design.md)
+  and
+  [`docs/plans/2026-08-02-program-data-generation-implementation.md`](plans/2026-08-02-program-data-generation-implementation.md)
+  — the full 9-phase plan this bundle is Phase 3/5/6's deliverable of.

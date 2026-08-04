@@ -166,6 +166,13 @@ class FixtureBundle:
     #: unresolved COPY, a dynamic CALL with no traceable target, etc.
     unresolved: list[str] = field(default_factory=list)
     bundle_version: int = BUNDLE_VERSION
+    #: Phase 5's ScenarioPlanner arm-coverage accounting
+    #: (`ScenarioCoverage.to_dict()`), present only for a `branches`/`all`
+    #: -mode bundle; `None` for a "happy"-mode bundle, which never attempts
+    #: branch targeting. Additive (2026-08-04, Phase 6) -- `bundle_version`
+    #: stays 1, since existing consumers reading known keys are unaffected
+    #: by one more key appearing.
+    scenario_coverage: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -179,6 +186,7 @@ class FixtureBundle:
             },
             "coverage": self.coverage.to_dict(),
             "unresolved": list(self.unresolved),
+            "scenario_coverage": self.scenario_coverage,
         }
 
     def to_json(self, *, indent: int | None = 2) -> str:

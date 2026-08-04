@@ -354,10 +354,14 @@ def _merge_candidates(
 
     for _, candidate in candidates:
         arm_key = candidate.arm_keys[0]
+        # arm_key is "<parent_proc>@<line>:<column>/<arm_id>" (see _branch_id
+        # in constraints.py) -- recovering parent_proc here avoids losing it
+        # off ArmOutcome just because PlannedScenario itself doesn't carry it.
+        parent_proc = arm_key.split("@", 1)[0] or None
         target = next((s for s in open_scenarios if _compatible(s, candidate)), None)
         if target is None:
             open_scenarios.append(candidate)
-            outcomes.append(ArmOutcome(arm_key, None, "targeted"))
+            outcomes.append(ArmOutcome(arm_key, parent_proc, "targeted"))
         else:
             target.field_constraints.update(candidate.field_constraints)
             target.witnesses.update(candidate.witnesses)
@@ -365,7 +369,7 @@ def _merge_candidates(
             target.arm_keys.append(arm_key)
             target.intent = f"targets {len(target.arm_keys)} branch arms: {', '.join(target.arm_keys)}"
             outcomes.append(
-                ArmOutcome(arm_key, None, "merged", merged_into=target.name)
+                ArmOutcome(arm_key, parent_proc, "merged", merged_into=target.name)
             )
 
     return open_scenarios, outcomes
