@@ -400,6 +400,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **generators:** internal restructure — `copybook_data.py`'s implementation
+  has been decomposed into a modular package `cobolparser/generators/data/`
+  with focused modules: `options.py` (DataGeneratorOptions),
+  `errors.py` (CopybookLayoutError), `layout.py` (FieldCategory, FieldSpec,
+  flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset),
+  and `copybook.py` (parse_copybook_records, CopybookDataGenerator).
+  `copybook_data.py` is now a backwards-compatible re-export shim; every
+  existing import path (`from cobolparser.generators import
+  CopybookDataGenerator`) and the `cobol-parser gen-data` CLI subcommand are
+  unaffected. `ValueFactory` and `flatten_record` are newly usable directly
+  against any `CobolDataItem`, not just a copybook-parsed one, supporting
+  future program-data-generation initiatives.
 * **parser:** internal refactor — `DataDivisionParser`
   (`cobolparser/parsers/divisions/data.py`, ~1,467 lines) decomposed into
   focused collaborators: `data_clauses.py` (`DataItemClauseParser` — data-item

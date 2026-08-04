@@ -46,6 +46,63 @@ this same way.
   intentionally left unchanged, out of scope for this fix) refuses instead
   of silently writing a corrupted "durable deliverable" and exiting 0. See
   mocky-mock's own `.okf/log.md` for that side of the fix.
+## 2026-08-02 (generators/data/ package split: final whole-branch-review fixes)
+
+Seven-task, zero-behavior-change refactor split `cobolparser/generators/
+copybook_data.py` into a modular package `cobolparser/generators/data/`
+(`options.py`, `errors.py`, `layout.py`, `values.py`, `dataset.py`,
+`copybook.py`, `__init__.py`), with `copybook_data.py` reduced to a
+backwards-compatible re-export shim — see the entry below for the original
+feature. Each of the 7 tasks passed its own task-level review; a final
+whole-branch review then caught a handful of doc/cosmetic gaps no single
+task's diff could see on its own. Fixed here in one pass, no source-logic
+changes:
+
+* **Updated** [generators.md](generators.md): corrected `FieldSpec`'s
+  description from "namedtuple" to "dataclass" — `layout.py` defines it
+  with `@dataclass`, and `_assign_columns()` relies on that mutability to
+  assign `spec.column` in place after construction, which a namedtuple
+  could not support. Frontmatter `timestamp` bumped.
+* **Relocated** the subsystem's module docstring (overview, `Typical
+  use::` example, determinism/seed-replay guarantee, and the four "Design
+  notes" bullets on REDEFINES/OCCURS/edited-pictures/FILLER defaults) from
+  `copybook_data.py` onto `cobolparser/generators/data/__init__.py` — the
+  new canonical home for the subsystem. The refactor had deleted it from
+  `copybook_data.py` (flagged during Task 6 as a possible gap for Task 7)
+  with no relocation target; Task 7 did not carry it forward, so the final
+  review caught it. Also added the package's missing `from __future__
+  import annotations` for consistency with every other module in `data/`
+  (flagged during Task 1, deferred to final review).
+* Removed a vestigial `if TYPE_CHECKING: pass` block (and its now-unused
+  `TYPE_CHECKING` import) left in `data/values.py` from the Task 3
+  extraction (flagged during Task 3, deferred to final review) — guarded
+  nothing, served no purpose.
+* Softened `copybook_data.py`'s shim docstring: it claimed the vendored
+  backend copy (`backend/_vendor/cobol-parser/`) imports from this path.
+  Checked directly against the sibling repo — the vendored copy predates
+  the `gen-data` feature entirely (no `copybook_data.py`, no `data/`
+  package, no reference anywhere), so that claim was dropped. The other
+  two reasons already in the docstring (the unit test, `cli/parse.py`'s
+  lazy import) were independently re-verified correct and kept.
+* **Updated** root `CLAUDE.md`: the `cobolparser/generators/` section had
+  lost its behavioral summary (honors PICTURE/USAGE/OCCURS/REDEFINES/
+  level-88/VALUE, deterministic per `seed`, backs `gen-data`) when Task 7
+  rewrote the bullet to describe the new file layout. Restored the
+  behavioral sentence alongside the file-structure description rather
+  than reverting Task 7's structural update.
+* **Moved** `CHANGELOG.md`'s Task-7 "internal restructure" bullet from
+  `## Unreleased` → `### Added` to `## Unreleased` → `### Changed` (Keep a
+  Changelog, which this file's header cites: a no-API-change internal
+  restructure is a "Changed", not an "Added"). Placed at the top of that
+  section, alongside this repo's other god-class/module-decomposition
+  refactor entries, consistent with the section's newest-first ordering.
+
+Full suite green after the fix wave: 7327 passed / 13 skipped / 1 xfailed
+(unchanged), coverage 92.11% (up from the pre-fix-wave 92.10% — removing
+`values.py`'s dead `if TYPE_CHECKING: pass` block also removes an
+always-missed branch/statement, so the uptick is an expected side effect
+of finding 3, not a regression). `ruff check .`, `black --check .`, and
+`mypy cobolparser/` all clean.
 
 ## 2026-08-02 (copybook → CSV synthetic test-data generation)
 
