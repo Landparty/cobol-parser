@@ -1,8 +1,8 @@
 ---
 type: Module
 title: Static Analysis
-description: 15 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, and more.
-tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints]
+description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
+tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
 timestamp: 2026-08-04T00:00:00Z
 ---
 
@@ -480,6 +480,120 @@ introduced by this phase. Fixed by recombining `">"+"="`, `"<"+"="`, and
 already recombines `NOT`-prefixed operators (`_COMPOUND_SYMBOL_OPS`, see
 [parser.md](parser.md)).
 
+## ConstantFolder (`const_fold.py`)
+
+Phase 7 tier 2 of the `gen-fixtures` initiative (see
+`docs/plans/2026-08-02-program-data-generation-design.md`): a single forward
+walk of a program's entry paragraph chain, seeded by one scenario's own
+mock-supplied inputs, that tracks which data items hold a knowable literal
+value after a MOVE or a simple arithmetic/COMPUTE statement. Wired into
+`ProgramFixtureGenerator` (`generators/program_fixtures.py`'s
+`_tier2_expectations`), which builds the seed dict from every
+`BoundaryFixture` with *exactly one* generated row and turns every field
+still knowable at a `DISPLAY`/`WRITE` into a `kind="field_equals"`
+`Expectation` -- see `docs/fixture-bundle-schema.md`'s Expectation section
+for the full worked example.
+
+```python
+from cobolparser.analysis.const_fold import ConstantFolder
+
+folder = ConstantFolder()
+result = folder.fold(ast, index, seed_values={"WS-QTY": "622"})
+result.known   # dict[qualified_name, str]: fields still knowable at a
+               # DISPLAY/WRITE, by the end of the walk
+```
+
+**"Exact by construction, or absent" -- never a guess.** Every ambiguity
+below resolves by leaving a field unknown (poisoned: removed from the
+internal env) rather than approximating:
+
+* A `PERFORM ... UNTIL`/`VARYING`/`TIMES` loop may run zero or many times,
+  so nothing inside it is knowable at fold time -- every field its body
+  (including through a nested `PERFORM` to another paragraph) could write is
+  poisoned, and the walk continues *after* the loop, since it still runs;
+  the walk just cannot see inside it. A non-looping `PERFORM` (a plain
+  paragraph call, optionally `THRU` a range) is walked inline exactly once,
+  including into paragraphs it in turn `PERFORM`s, guarded against a
+  non-looping `PERFORM` cycle by tracking which paragraphs are already on
+  the current call stack.
+* An `IF`/`EVALUATE` branches on data this walk does not evaluate (Phase 5's
+  `ScenarioPlanner` already owns targeting one specific arm elsewhere), so
+  every field either arm could write is poisoned the same way as a loop
+  body -- this is a conjunctive walk, not per-scenario branch evaluation.
+* `DIVIDE` is poisoned unconditionally: `DivideStatement` does not record
+  whether `BY` or `INTO` was used (`_parse_binary_arithmetic` shares one
+  code path for both, see [parser.md](parser.md)), and the two invert
+  dividend/divisor order -- there is no way to compute the correct value
+  from the node alone. A `/` inside a `COMPUTE` expression tree has no such
+  ambiguity (both operands are structurally explicit, M12's
+  `expression_tree`) and folds normally, including a divide-by-zero or
+  non-terminating-decimal guard (both poison, not truncate).
+* `ROUNDED`, `CORRESPONDING`, and any target that does not resolve to an
+  elementary field are poisoned rather than approximated. A numeric
+  MOVE/arithmetic result is only ever recorded when it fits its target
+  field's PICTURE *exactly* (`_fits_exactly`: no truncated decimal digits,
+  no truncated integer digits, no sign coercion into an unsigned field) --
+  real COBOL's MOVE truncation rules are well-defined, but replicating them
+  exactly is out of scope for v1; an overflowing result is poisoned instead.
+* **A well-formed ADD/SUBTRACT self-reference is poisoned, not
+  under-computed.** `ArithmeticStatement.operands` is a deduplicated union
+  of the real addend/subtrahend tokens *and* the target/giving names
+  (`set_target`/`set_giving` both call the same `_add_unique_operand` the
+  addend-collection phase does) -- so `ADD X TO X` (doubling X) and "X was
+  never a separate addend at all" produce the *identical* `.operands`
+  shape, and the distinction is unrecoverable from the final AST. Since a
+  well-formed ADD/SUBTRACT always has >= 1 real addend (parser-enforced),
+  filtering target/giving names out of `.operands` and finding *nothing
+  left* proves every addend coincided with a target -- the one shape this
+  module can safely detect and poison. A blanket "poison on any operand/
+  target overlap" was tried and rejected during development: a target's own
+  name *always* ends up in `.operands` by construction (regardless of any
+  genuine overlap), so that check fired on every ordinary `ADD 1 TO WS-X`,
+  not just a self-reference -- found immediately via this module's own
+  tests, before it ever reached the corpus sweep. A *partial* overlap
+  (`ADD X, Y TO X`) is not caught and silently undercounts -- narrower and
+  rarer, and documented in the source rather than silently. `MULTIPLY`'s
+  format-1 (`MULTIPLY A BY B`, no GIVING) has no analogous issue:
+  reusing the target's own name as the second operand is directly what the
+  statement means (multiplication has no target-is-also-an-addend hidden
+  term the way ADD/SUBTRACT's TO/FROM accumulation does), so only GIVING
+  names are filtered from its operand list, never targets.
+* **ACCEPT/READ are a deliberate no-op, not an omission.** They are exactly
+  the boundary categories `_tier2_expectations` seeds `env` from before the
+  walk starts; falling through to the generic "unmodeled write" fallback
+  below would poison that seed the instant the walk reached the very
+  statement it represents. `CALL`/`EXEC SQL`/`CICS`/`DLI` are *not* given
+  the same treatment -- their operand lists mix genuinely-unknowable
+  OUT-direction values with seedable IN ones, and the raw AST does not carry
+  resolved direction to tell them apart (only `BoundaryInventoryAnalyzer`'s
+  own richer analysis does) -- deferred to a future version rather than risk
+  treating an OUT value as still-known.
+* Any other statement type this module has no specific rule for
+  (`INITIALIZE`, `SET`, `STRING`/`UNSTRING`, `INSPECT`, and the CALL/SQL/
+  CICS/DLI cases above) conservatively poisons every name in its `.operands`
+  -- a fail-safe default, not a silent skip.
+* Only a `DISPLAY`/`WRITE` operand that resolves *directly* to an elementary
+  field is an observation point -- a whole-record `WRITE`'s individual
+  member fields are not (yet) walked, so some real `field_equals`
+  opportunities are silently not offered. Never wrong, sometimes just
+  quieter than it could be. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
+  PROGRAM` all stop the walk outright (unreachable code after them is never
+  folded or observed).
+
+**Bug found via a NIST-corpus smoke sweep, fixed at the root (not worked
+around): `ProgramLayoutIndex.resolve()` crashed (`IndexError`) on an
+all-punctuation name** (`"."`, from a stray token that leaks into some
+statement's `.operands` for at least one real-world program -- a parser
+artifact this module cannot prevent at the source). `resolve()`'s dotted-
+name and `OF`/`IN` branches both stripped every segment to nothing and then
+indexed into the resulting empty list; both now return `None` instead. Also
+hardened at this module's own call site (`_safe_resolve`, a thin wrapper
+that rejects empty/punctuation-only tokens before ever calling `resolve()`)
+as a second line of defense, since the generic "poison via `.operands`"
+fallback above is exactly the path most exposed to non-name garbage.
+Verified against the full 459-file NIST COBOL-85 corpus (zero crashes, zero
+layout violations) in addition to the 24-file shamrice corpus test below.
+
 ## Module File Map
 
 | File | Analyzer |
@@ -498,6 +612,9 @@ already recombines `NOT`-prefixed operators (`_COMPOUND_SYMBOL_OPS`, see
 | `move_type_checker.py` | `MoveTypeChecker` |
 | `program_flow/` | `ProgramFlowAnalyzer` (package: `models` / `scanner` / `edges` / `cycles` / `graph` / `analyzer`) |
 | `boundary_inventory.py` | `BoundaryInventoryAnalyzer` (Phase 2 of `gen-fixtures`) |
+| `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
+| `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
+| `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
 
 # Silent-Failure Audit (2026-07-08)
 
@@ -517,7 +634,11 @@ apply elsewhere (see [cli.md](cli.md) M10). Pinned by
 * [cli.md](cli.md) — CLI wrappers for the most common analyzers
 * [tests.md](tests.md) — `tests/unit/analysis/` covers each analyzer
 * [generators.md](generators.md) — `ProgramLayoutIndex` (Phase 1), the layout
-  source `BoundaryInventoryAnalyzer` resolves record/field names through
+  source `BoundaryInventoryAnalyzer`/`ConstraintExtractor`/`ConstantFolder`
+  all resolve record/field names through; `ProgramFixtureGenerator`, which
+  wires `ConstantFolder` into `field_equals` expectations (Phase 7)
+* [`../docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) —
+  the full `Expectation` shape `call_count`/`field_equals`/`stub` produce
 * `docs/plans/2026-08-02-program-data-generation-design.md` and its per-phase
-  implementation plan — the full 9-phase `gen-fixtures` plan this analyzer
-  is Phase 2 of
+  implementation plan — the full 9-phase `gen-fixtures` plan this file
+  documents Phases 2, 4, and 7 of

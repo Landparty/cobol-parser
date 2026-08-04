@@ -18,8 +18,10 @@ import zlib
 from ..analysis.boundary_inventory import (
     Boundary,
     BoundaryInventoryAnalyzer,
+    BoundaryRef,
     BoundaryReport,
 )
+from ..analysis.const_fold import ConstantFolder
 from ..analysis.constraints import ConstraintExtractor
 from ..analysis.program_flow import ProgramFlowAnalyzer
 from ..models.program import CobolProgram
@@ -52,6 +54,21 @@ def _sub_seed(bundle_seed: int, scenario: str, category: str, key: str) -> int:
     would). `zlib.crc32` is stdlib -- the zero-dependency rule holds."""
     text = f"{scenario}|{category}|{key}".encode()
     return zlib.crc32(text) ^ bundle_seed
+
+
+def _call_count_expectation(ref: BoundaryRef, times: int) -> Expectation:
+    """Tier 1 (Phase 7): a structural expectation derivable exactly from the
+    scenario's own generated sequence -- the scenario *defines* how many
+    times a mocked boundary is invoked, so this is always safe, never a
+    guess. Emitted for every boundary that gets an actual fixture (STATUS_ONLY
+    included, always exactly once); an OUT-only boundary has nothing mocked
+    to count, so it gets no call_count expectation."""
+    return Expectation(
+        kind="call_count",
+        ref=f"{ref.category}:{ref.key}",
+        value=times,
+        note="derived from this scenario's own generated sequence length",
+    )
 
 
 class ProgramFixtureGenerator:
@@ -92,6 +109,7 @@ class ProgramFixtureGenerator:
                 scenario.fixtures.append(fixture)
             scenario.expectations.extend(expectations)
             unresolved.extend(extra_unresolved)
+        scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
         coverage = CoverageSummary(
@@ -167,6 +185,7 @@ class ProgramFixtureGenerator:
                     scenario.fixtures.append(fixture)
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
+            scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
             scenarios.append(scenario)
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
@@ -264,7 +283,7 @@ class ProgramFixtureGenerator:
                 direction=boundary.direction,
                 status=self._status_dict(boundary, index, override=override),
             )
-            return status_fixture, [], unresolved
+            return status_fixture, [_call_count_expectation(ref, 1)], unresolved
 
         if boundary.direction == "OUT":
             expectation = Expectation(
@@ -307,6 +326,9 @@ class ProgramFixtureGenerator:
             )
 
         expectations = []
+        if fixture is not None:
+            times = len(fixture.sequence) + (1 if fixture.terminal else 0)
+            expectations.append(_call_count_expectation(ref, times))
         if boundary.direction == "BIDIRECTIONAL":
             expectations.append(
                 Expectation(
@@ -399,7 +421,7 @@ class ProgramFixtureGenerator:
             sequence=[row],
             unresolved=list(boundary.unresolved),
         )
-        return fixture, expectations, unresolved
+        return fixture, [_call_count_expectation(ref, 1), *expectations], unresolved
 
     # -- helpers -------------------------------------------------------------
 
@@ -461,6 +483,38 @@ class ProgramFixtureGenerator:
         if override is not None and override_key in override.status_overrides:
             return {field_name: override.status_overrides[override_key]}
         return {field_name: default}
+
+    @staticmethod
+    def _tier2_expectations(
+        ast: CobolProgram, index: ProgramLayoutIndex, scenario: Scenario
+    ) -> list[Expectation]:
+        """Tier 2 (Phase 7): constant-fold this scenario's own straight-line
+        chain, seeded by its own single-invocation mocked inputs, and turn
+        every field still knowable at a DISPLAY/WRITE into a `field_equals`
+        expectation. Only a fixture with *exactly one* generated row seeds
+        the fold -- a multi-row READ sequence (or a zero-row "empty input"
+        one) has no single representative value, and (not coincidentally)
+        every field a `PERFORM UNTIL`/`VARYING` loop writes is poisoned by
+        the folder's own loop-abort rule anyway, since that is exactly where
+        a multi-row READ is read from in practice."""
+        seed_values: dict[str, str] = {}
+        for fixture in scenario.fixtures:
+            if len(fixture.sequence) != 1:
+                continue
+            for spec in fixture.layout:
+                seed_values[spec.qualified_name] = fixture.sequence[0].get(
+                    spec.column, ""
+                )
+        fold_result = ConstantFolder().fold(ast, index, seed_values=seed_values)
+        return [
+            Expectation(
+                kind="field_equals",
+                ref=qualified_name,
+                value=value,
+                note="constant-folded from this scenario's own mock-supplied inputs",
+            )
+            for qualified_name, value in fold_result.known.items()
+        ]
 
     @staticmethod
     def _entry_paragraph(ast: CobolProgram) -> str | None:

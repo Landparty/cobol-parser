@@ -438,6 +438,38 @@ verbatim, `None` for a `mode="happy"` bundle since that mode never attempts
 branch targeting. Full key-by-key shape:
 [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md).
 
+## Expectations: tiers 1-2 (Phase 7)
+
+Every scenario's `expectations` (in both `generate()` and
+`generate_with_scenarios()`) now carries structural and computed assertions
+alongside Phase 3's OUT-boundary stubs, via two small helpers in
+`program_fixtures.py`:
+
+* **Tier 1 — `_call_count_expectation`.** For every boundary that gets an
+  actual fixture (an OUT-only boundary has nothing mocked to count, so it
+  gets none), `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
+  value=times)` where `times = len(sequence) + (1 if terminal else 0)` --
+  except a `STATUS_ONLY` fixture, always `1` (its `sequence` is empty by
+  design, not because zero invocations happened). Derivable exactly from the
+  scenario's own already-generated sequence -- never a guess.
+* **Tier 2 — `_tier2_expectations`, backed by
+  `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
+  for the folder's own extensive "exact by construction, or absent" rules).
+  Builds a seed dict from every `BoundaryFixture` in the scenario with
+  *exactly one* generated row -- a multi-row READ sequence has no single
+  representative value to seed with, keyed by `spec.qualified_name` from
+  `fixture.layout`/`fixture.sequence[0]` -- then folds the program's entry
+  paragraph chain seeded with those values, turning every field still
+  knowable at a `DISPLAY`/`WRITE` into `Expectation(kind="field_equals",
+  ref=qualified_name, value=folded_value)`.
+
+Both run once per scenario, after that scenario's `fixtures` list is fully
+populated (so Tier 2 sees the *actual* generated/witness-pinned values for
+that specific scenario, not the happy path's). `mode="happy"`'s byte-
+identity guarantee with `generate()` is unaffected -- both tiers run inside
+`generate()` itself, so `generate_with_scenarios(mode="happy")` (which
+delegates to `generate()` unchanged) carries the exact same expectations.
+
 Reuses the Phase 0 value engine directly: each boundary's field list —
 however it was resolved (`ProgramLayoutIndex.resolve()` for an elementary
 field, `.record_named()` for a whole record) — is generated with a

@@ -211,12 +211,19 @@ class ProgramLayoutIndex:
         if _OF_IN_RE.search(text):
             # "A OF B [OF C ...]" -- the field comes first, qualifiers follow.
             parts = [p.strip() for p in _OF_IN_RE.split(text) if p.strip()]
+            if not parts:
+                # e.g. text is just "OF"/"IN" with nothing either side --
+                # every segment stripped to empty. Not a resolvable name.
+                return None
             base = parts[0].upper()
             qualifiers = [p.upper() for p in parts[1:]]
         elif "." in text:
             # "B.A" mirrors FieldSpec.qualified_name (root-first, field-last),
             # so the field is the *last* segment and qualifiers precede it.
             parts = [p.strip() for p in text.split(".") if p.strip()]
+            if not parts:
+                # e.g. text is "."/".." -- every segment stripped to empty.
+                return None
             base = parts[-1].upper()
             qualifiers = [p.upper() for p in parts[:-1]]
         else:

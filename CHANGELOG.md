@@ -17,6 +17,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis/generators:** `ConstantFolder` and `Expectation` tiers 1-2 --
+  structural and computed assertions, not just stubs
+  (`cobolparser/analysis/const_fold.py`, `cobolparser/generators/program_fixtures.py`,
+  2026-08-04). Phase 7 ("Expectations tiers 1-2") of the `gen-fixtures`
+  program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`).
+
+  **Tier 1 (`call_count`)**: every boundary that gets an actual fixture in a
+  scenario now also gets `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
+  value=times)`, `times` derived exactly from that fixture's own generated
+  sequence (`len(sequence) + 1` when a `terminal`/`AT END` is present, else
+  `len(sequence)`; always `1` for a `STATUS_ONLY` fixture) -- never a guess,
+  since the scenario itself defines the sequence.
+
+  **Tier 2 (`field_equals`)**: `ConstantFolder` performs a single forward
+  walk of a program's entry paragraph chain -- following non-looping
+  `PERFORM`s (including `THRU` ranges) inline, exactly like a subroutine
+  call executed once -- tracking which data items hold a knowable literal
+  value after a MOVE or a simple ADD/SUBTRACT/MULTIPLY/COMPUTE. Wired via a
+  new `_tier2_expectations` helper that seeds the walk from every
+  `BoundaryFixture` in the scenario with *exactly one* generated row (a
+  multi-row READ sequence has no single representative value to seed with),
+  and turns every field still knowable at a `DISPLAY`/`WRITE` into
+  `Expectation(kind="field_equals", ref=qualified_name, value=folded_value)`.
+
+  "Exact by construction, or absent" throughout, never a guess:
+  - A `PERFORM ... UNTIL`/`VARYING`/`TIMES` loop, or an `IF`/`EVALUATE`
+    branch, poisons every field its body could write (including through a
+    nested `PERFORM`) rather than assume which arm runs or how many
+    iterations occur; the walk continues past it, since it still executes.
+  - `DIVIDE` is poisoned unconditionally: `DivideStatement` does not record
+    whether `BY` or `INTO` was used, and the two invert dividend/divisor
+    order, so the correct value cannot be computed from the AST node alone.
+    A `/` inside a `COMPUTE` expression tree has no such ambiguity (both
+    operands are structurally explicit) and folds normally.
+  - `ROUNDED`, `CORRESPONDING`, and any numeric result that would need
+    rounding/truncation/sign-coercion to fit its target field's PICTURE are
+    all poisoned rather than approximated.
+  - A well-formed ADD/SUBTRACT self-reference (`ADD X TO X`, doubling X) is
+    poisoned rather than silently under-computed as a no-op: `.operands` is
+    a deduplicated union of the real addend tokens and the target/giving
+    names (both populated via the same `_add_unique_operand`), so a genuine
+    self-reference and "the target was never a separate addend at all"
+    produce an identical shape, unrecoverable from the final AST. Since a
+    well-formed ADD/SUBTRACT always has >= 1 real addend, filtering
+    target/giving names out of `.operands` and finding nothing left proves
+    total self-overlap -- the one shape this can safely detect. A blanket
+    "poison on any operand/target overlap" was tried and rejected during
+    development: a target's own name always ends up in `.operands`
+    regardless of any genuine overlap, so it fired on every ordinary
+    `ADD 1 TO WS-X` -- found via this module's own tests before it reached
+    the corpus sweep.
+  - ACCEPT/READ are a deliberate no-op rather than poisoned: they are
+    exactly the boundary categories the seed dict is built from, so treating
+    them as an "unmodeled write" would poison the seed the instant the walk
+    reached the very statement it represents. CALL/EXEC SQL/CICS/DLI are not
+    given the same treatment (their operand lists mix genuinely-unknowable
+    OUT values with seedable IN ones, and the raw AST does not carry
+    resolved argument direction) -- deferred to a later version.
+  - Only a `DISPLAY`/`WRITE` operand resolving directly to an elementary
+    field is an observation point; a whole-record `WRITE`'s individual
+    member fields are not (yet) walked -- narrower than possible, never wrong.
+
+  Also fixes a crash found via a full 459-file NIST COBOL-85 corpus smoke
+  sweep (beyond this initiative's usual 24-file shamrice corpus, given the
+  correctness stakes of arithmetic folding): `ProgramLayoutIndex.resolve()`
+  raised `IndexError` on an all-punctuation name (`"."`, a stray token that
+  leaks into some statement's `.operands` for at least one real-world
+  program) -- both the dotted-name and `OF`/`IN` branches could strip every
+  segment to nothing and then index into the resulting empty list; both now
+  return `None` instead. `const_fold.py` additionally hardens its own call
+  site (`_safe_resolve`) as a second line of defense. Also caught by the
+  same review pass: `_eval_expr`'s `COMPUTE`-expression arithmetic caught
+  only `InvalidOperation`/the builtin `OverflowError`/`ValueError`, but
+  `decimal.Overflow` and `decimal.DivisionByZero` are not subclasses of
+  `OverflowError` -- an extreme exponent (`2 ** 99999`) could crash the
+  whole walk instead of poisoning its target; widened to catch
+  `ArithmeticError` (the common base of every `decimal` signal exception).
+
+  New `ConstantFoldResult` / `ConstantFolder` public API in
+  `cobolparser.analysis.const_fold`. Documented in `.okf/analysis.md` (new
+  "ConstantFolder" section), `.okf/generators.md` (new "Expectations: tiers
+  1-2" section), `CLAUDE.md`, and `docs/fixture-bundle-schema.md` (updated
+  Expectation tier descriptions + worked example). Covered by 104 new tests:
+  `tests/unit/analysis/test_const_fold.py` (44), a full-corpus
+  `tests/integration/test_const_fold_corpus.py` (50, parametrized over the
+  shamrice corpus, plus an ad-hoc sweep of the full 459-file NIST corpus),
+  and 10 new tests in `tests/unit/test_program_fixtures.py` covering the
+  `ProgramFixtureGenerator` wiring end-to-end.
 * **generators:** `--scenarios branches|all` wiring, `scenario_coverage`, and
   a hand-written fixture-bundle schema doc (`cobolparser/generators/program_fixtures.py`,
   `cobolparser/generators/data/bundle.py`, `docs/fixture-bundle-schema.md`,

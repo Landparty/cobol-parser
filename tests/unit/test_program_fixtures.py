@@ -298,3 +298,173 @@ class TestScenarioModes:
         assert bundle.scenario_coverage is not None
         c = bundle.scenario_coverage
         assert c["targeted"] + c["merged"] + c["missed"] == c["total_arms"]
+
+
+class TestTier1CallCountExpectations:
+    """Phase 7 tier 1 (structural): call_count is derivable exactly from a
+    scenario's own generated sequence, so it is emitted for every boundary
+    that actually got a fixture -- never a guess, never absent when it could
+    be exact."""
+
+    def test_status_only_boundary_gets_call_count_of_one(self):
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        opens = [
+            e
+            for e in bundle.scenarios[0].expectations
+            if e.kind == "call_count" and e.ref.startswith("OPEN:")
+        ]
+        assert opens
+        assert all(e.value == 1 for e in opens)
+
+    def test_read_with_at_end_handler_counts_rows_plus_one(self):
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        seq_file_read = next(
+            f
+            for f in bundle.scenarios[0].fixtures
+            if f.ref.category == "READ" and f.ref.key == "SEQ-FILE"
+        )
+        assert seq_file_read.terminal is not None
+        expectation = next(
+            e
+            for e in bundle.scenarios[0].expectations
+            if e.kind == "call_count" and e.ref == "READ:SEQ-FILE"
+        )
+        assert expectation.value == len(seq_file_read.sequence) + 1 == 11
+
+    def test_read_without_at_end_handler_counts_rows_only(self):
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        # IDX-FILE has two distinct READ boundaries: a keyed random read (no
+        # AT END, INVALID KEY only) and a NEXT RECORD read (has AT END) --
+        # only the former should have no "+1".
+        idx_reads = [
+            f
+            for f in bundle.scenarios[0].fixtures
+            if f.ref.category == "READ" and f.ref.key == "IDX-FILE"
+        ]
+        no_at_end = next(f for f in idx_reads if f.terminal is None)
+        expectation = next(
+            e
+            for e in bundle.scenarios[0].expectations
+            if e.kind == "call_count"
+            and e.ref == "READ:IDX-FILE"
+            and e.value == len(no_at_end.sequence)
+        )
+        assert expectation.value == 10
+
+    def test_call_boundary_gets_call_count_of_one(self):
+        bundle = ProgramFixtureGenerator().generate_from_file(
+            SUBPROGRAM_DEMO, seed=3, callee_paths=[]
+        )
+        calculator_count = next(
+            e
+            for e in bundle.scenarios[0].expectations
+            if e.kind == "call_count" and e.ref == "CALL:CALCULATOR"
+        )
+        assert calculator_count.value == 1
+
+    def test_out_boundary_gets_no_call_count_expectation(self):
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        write_expectations = [
+            e for e in bundle.scenarios[0].expectations if e.ref.startswith("WRITE:")
+        ]
+        assert write_expectations
+        assert all(e.kind == "stub" for e in write_expectations)
+
+    def test_empty_input_scenario_call_count_is_one_not_zero(self):
+        bundle = _scenario_mode_bundle("all")
+        empty = next(s for s in bundle.scenarios if s.name == "empty input")
+        read_fixture = next(f for f in empty.fixtures if f.ref.category == "READ")
+        assert read_fixture.sequence == []
+        assert read_fixture.terminal is not None
+        expectation = next(
+            e for e in empty.expectations if e.kind == "call_count" and "F1" in e.ref
+        )
+        assert expectation.value == 1
+
+    def test_happy_mode_and_branch_modes_both_get_call_count(self):
+        # Tier 1 is not gated on mode -- generate_with_scenarios(mode="happy")
+        # delegates to generate() unchanged, so it must carry the exact same
+        # call_count expectations, not a mode-specific subset.
+        happy = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        via_scenarios = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+            FILE_OPERATIONS, mode="happy", seed=1
+        )
+        assert happy.to_json() == via_scenarios.to_json()
+        assert any(e.kind == "call_count" for e in happy.scenarios[0].expectations)
+
+
+_TIER2_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TIER2TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-QTY               PIC 9(3).
+       01  WS-DOUBLE            PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           ACCEPT WS-QTY.
+           MULTIPLY WS-QTY BY 2 GIVING WS-DOUBLE.
+           DISPLAY WS-DOUBLE.
+           STOP RUN.
+"""
+
+
+def _tier2_bundle(seed: int = 7):
+    result = parse_cobol(_TIER2_HEADER, filename="tier2test.cbl")
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    return ProgramFixtureGenerator().generate(result.ast, index, report, seed=seed)
+
+
+class TestTier2FieldEqualsExpectations:
+    """Phase 7 tier 2: ConstantFolder wired into the generator, seeded from
+    each scenario's own single-invocation mocked inputs."""
+
+    def test_field_equals_expectation_matches_the_mocked_input(self):
+        bundle = _tier2_bundle(seed=7)
+        scenario = bundle.scenarios[0]
+        accept_fixture = next(
+            f for f in scenario.fixtures if f.ref.category == "ACCEPT"
+        )
+        qty = int(accept_fixture.sequence[0]["WS-QTY"])
+        expectation = next(e for e in scenario.expectations if e.kind == "field_equals")
+        assert expectation.ref == "WS-DOUBLE"
+        assert expectation.value == str(qty * 2)
+        assert "mock-supplied" in expectation.note
+
+    def test_field_equals_is_reproducible_for_the_same_seed(self):
+        a = _tier2_bundle(seed=42)
+        b = _tier2_bundle(seed=42)
+        assert a.to_json() == b.to_json()
+
+    def test_read_boundary_is_never_seeded_for_tier2(self):
+        # A multi-row READ sequence has no single representative value, so
+        # it must never seed the fold -- a bare DISPLAY of the READ record
+        # with no intervening MOVE would only produce a field_equals if the
+        # (wrong) mock-generated row leaked in as a seed.
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. READNOFOLD.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F1 ASSIGN TO 'F1.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  F1.
+       01  F1-QTY               PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           READ F1.
+           DISPLAY F1-QTY.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="readnofold.cbl")
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        bundle = ProgramFixtureGenerator().generate(result.ast, index, report, seed=1)
+        assert not any(
+            e.kind == "field_equals" for e in bundle.scenarios[0].expectations
+        )

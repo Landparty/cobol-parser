@@ -127,16 +127,37 @@ numeric-edited | alphanumeric-edited | float`.
 | `value` | `str \| int \| null` | The asserted value, when known. Always `null` for `kind="stub"`. |
 | `note` | `str \| null` | Human-readable explanation, e.g. `"value produced by the program under test"` or `"bidirectional: OUT aspect not asserted in v1"`. |
 
-**Three confidence tiers** (Phase 7 fills tiers 1–2; every bundle through
-Phase 6 emits `"stub"` only — a happy-path or scenario-targeted bundle has no
-scenario-specific branch outcome to assert on yet):
+**Three confidence tiers** (tiers 1–2 wired as of Phase 7; every bundle
+carries all three kinds that apply):
 
-1. `"call_count"` — structural, always safe: a boundary was invoked exactly
-   `value` times. Derivable directly from the scenario's own sequence length.
-2. `"field_equals"` — a field's value is knowable by constant-folding a chain
-   of MOVE/arithmetic from mock-supplied inputs (`analysis/const_fold.py`,
-   Phase 7).
-3. `"stub"` — everything else: a placeholder, never a live assertion.
+1. `"call_count"` — structural, always safe: a mocked boundary was invoked
+   exactly `value` times. Derivable directly from the scenario's own sequence
+   length (`len(sequence) + 1` when a `terminal` is present, else
+   `len(sequence)`; always `1` for a `STATUS_ONLY` fixture). Emitted for
+   every boundary that actually got a fixture — an OUT-only boundary has
+   nothing mocked to count, so it gets no `call_count` entry.
+2. `"field_equals"` — a field's value is knowable by constant-folding a
+   straight-line chain of MOVE/arithmetic statements from the scenario's own
+   mock-supplied inputs (`cobolparser.analysis.const_fold.ConstantFolder`).
+   Only a boundary fixture with *exactly one* generated row seeds the fold
+   (ACCEPT, a single SQL row, a CALL's combined IN row) — a multi-row READ
+   sequence has no single representative value to seed with, and in
+   practice a READ's own fields are usually written inside the very
+   `PERFORM UNTIL`/`VARYING` loop the folder already refuses to see inside
+   of. The walk starts at the program's entry paragraph and follows
+   non-looping `PERFORM`s (including `THRU` ranges) inline; a looping
+   `PERFORM`, an `IF`/`EVALUATE`, `DIVIDE` (the AST does not record `BY` vs
+   `INTO`, and the two invert dividend/divisor order), `ROUNDED`,
+   `CORRESPONDING`, and any numeric result that would need rounding or
+   truncation to fit its target field's PICTURE all leave the affected
+   field(s) unknown rather than guess. Only a `DISPLAY`/`WRITE` operand that
+   resolves directly to an elementary field is an observation point — never
+   wrong, just narrower than a full interpreter would be. `ref` is the
+   field's qualified name (not a `"CATEGORY:KEY"` pair).
+3. `"stub"` — everything else: a placeholder note (e.g. "value produced by
+   the program under test"), never a live assertion. This is what a
+   happy-path/branch-targeted bundle's OUT-direction boundaries and any
+   field tier 2 could not fold down to a value both fall back to.
 
 ## `CoverageSummary`
 
@@ -248,7 +269,14 @@ bundle-level keys:
           "provenance": "picture-random", "unresolved": []
         }
       ],
-      "expectations": [],
+      "expectations": [
+        {"kind": "call_count", "ref": "OPEN:ORDER-FILE", "value": 1,
+         "note": "derived from this scenario's own generated sequence length"},
+        {"kind": "call_count", "ref": "READ:ORDER-FILE", "value": 11,
+         "note": "derived from this scenario's own generated sequence length"},
+        {"kind": "call_count", "ref": "CLOSE:ORDER-FILE", "value": 1,
+         "note": "derived from this scenario's own generated sequence length"}
+      ],
       "unconstrained": []
     },
     {
@@ -267,7 +295,9 @@ bundle-level keys:
           "provenance": "picture-random", "unresolved": []
         }
       ],
-      "expectations": [],
+      "expectations": [
+        "... the same three call_count entries as CHECK-QTY: ELSE above ..."
+      ],
       "unconstrained": []
     }
   ],
@@ -300,6 +330,25 @@ constrained by this particular arm. The two `"boundary values"` scenarios
 picture's true extremes, not `domains.solve()`'s usual interval midpoint (see
 generators.md's "Scenario Planning" section for why an `eq` constraint is
 used to pin those specifically).
+
+Every scenario's `expectations` carries tier 1's three `call_count` entries
+(`READ:ORDER-FILE`'s `11` is the 10-row default sequence plus one more call
+for the `AT END` that stops the loop); none carries a `field_equals`. That
+absence is correct, not a gap: `CHECK-QTY`'s two `DISPLAY` statements sit
+inside the very `PERFORM UNTIL END-OF-FILE` loop tier 2's folder refuses to
+see inside of (`ORDER-QTY`'s value changes every iteration, so no single
+value is "the" value it displayed), and nothing outside that loop displays
+or writes a computed field. A program that instead did
+`ACCEPT WS-QTY. MULTIPLY WS-QTY BY 2 GIVING WS-DOUBLE. DISPLAY WS-DOUBLE.` —
+straight-line, no loop — would get:
+
+```json
+{"kind": "field_equals", "ref": "WS-DOUBLE", "value": "1244",
+ "note": "constant-folded from this scenario's own mock-supplied inputs"}
+```
+
+with `"1244"` computed from whatever value that scenario's own mocked
+`ACCEPT WS-QTY` fixture happened to generate (here, `622`).
 
 ## `write_csv_dir` (the `--format csv-dir` layout)
 
@@ -366,9 +415,10 @@ interesting unseeded run is always replayable after the fact.
   engine (`ValueFactory`/`FieldSpec`/`flatten_record`) it reuses.
 * [`.okf/analysis.md`](../.okf/analysis.md) — `BoundaryInventoryAnalyzer`
   (Phase 2, produces the boundaries this bundle covers), `ConstraintExtractor`
-  / `domains.py` (Phase 4, produce the witnesses scenarios pin).
+  / `domains.py` (Phase 4, produce the witnesses scenarios pin), and
+  `ConstantFolder` (Phase 7, produces `field_equals` expectations).
 * [`.okf/cli.md`](../.okf/cli.md) — the `gen-fixtures` CLI subcommand's flags.
 * [`docs/plans/2026-08-02-program-data-generation-design.md`](plans/2026-08-02-program-data-generation-design.md)
   and
   [`docs/plans/2026-08-02-program-data-generation-implementation.md`](plans/2026-08-02-program-data-generation-implementation.md)
-  — the full 9-phase plan this bundle is Phase 3/5/6's deliverable of.
+  — the full 9-phase plan this bundle is Phase 3/5/6/7's deliverable of.
