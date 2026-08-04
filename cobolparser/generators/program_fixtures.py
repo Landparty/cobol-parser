@@ -312,9 +312,19 @@ class ProgramFixtureGenerator:
                 for row in range(rows_count)
             ]
             self._register_layout(layouts, boundary, fields)
+            # "Does exhaustion happen at all" (has_terminal_invocation) and
+            # "do we know a field name to report it in" (terminal, the
+            # dict) are independent: a program with an AT END handler but
+            # no resolvable FILE STATUS field still genuinely invokes the
+            # boundary one more time to hit end-of-file -- call_count must
+            # count that invocation even when there's no field to name in
+            # the dict itself (see _resolve_status_field's docstring).
+            has_terminal_invocation = "AT_END" in boundary.handlers
             terminal = None
-            if "AT_END" in boundary.handlers:
-                terminal = {(boundary.status_field or "FILE-STATUS"): "10"}
+            if has_terminal_invocation:
+                terminal_field = self._resolve_status_field(boundary, index)
+                if terminal_field is not None:
+                    terminal = {terminal_field: "10"}
             fixture = BoundaryFixture(
                 ref=ref,
                 direction=boundary.direction,
@@ -327,7 +337,7 @@ class ProgramFixtureGenerator:
 
         expectations = []
         if fixture is not None:
-            times = len(fixture.sequence) + (1 if fixture.terminal else 0)
+            times = len(fixture.sequence) + (1 if has_terminal_invocation else 0)
             expectations.append(_call_count_expectation(ref, times))
         if boundary.direction == "BIDIRECTIONAL":
             expectations.append(
@@ -460,25 +470,40 @@ class ProgramFixtureGenerator:
         layouts.setdefault(key, fields)
 
     @staticmethod
+    def _resolve_status_field(
+        boundary: Boundary, index: ProgramLayoutIndex
+    ) -> str | None:
+        """The real WORKING-STORAGE/FILE SECTION field name to report this
+        boundary's status in, or None when the program declares none.
+
+        Never invents a placeholder name: a MOVE to a name that doesn't
+        exist in the program's DATA DIVISION fails to compile downstream
+        (mockymock splices this straight into generated COBOL). Checks
+        `boundary.status_field` first (resolved by BoundaryInventoryAnalyzer
+        from an explicit `FILE STATUS IS` clause), then falls back to
+        `index.file_facts(...)` (a second, independent resolution path) --
+        only when both come up empty is there truly nothing to report a
+        status into.
+        """
+        if boundary.ref.category == "SQL":
+            return "SQLCODE"
+        if boundary.status_field:
+            return boundary.status_field
+        facts = index.file_facts(boundary.ref.key)
+        return facts.file_status_field if facts is not None else None
+
+    @classmethod
     def _status_dict(
+        cls,
         boundary: Boundary,
         index: ProgramLayoutIndex,
         *,
         override: PlannedScenario | None = None,
     ) -> dict[str, str]:
-        field_name: str | None
-        default: str
-        if boundary.ref.category == "SQL":
-            field_name, default = "SQLCODE", "0"
-        elif boundary.status_field:
-            field_name, default = boundary.status_field, "00"
-        else:
-            facts = index.file_facts(boundary.ref.key)
-            field_name = facts.file_status_field if facts is not None else None
-            default = "00"
-
+        field_name = cls._resolve_status_field(boundary, index)
         if field_name is None:
             return {}
+        default = "0" if boundary.ref.category == "SQL" else "00"
         override_key = f"{boundary.ref.category}:{boundary.ref.key}"
         if override is not None and override_key in override.status_overrides:
             return {field_name: override.status_overrides[override_key]}

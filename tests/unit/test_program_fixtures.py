@@ -300,6 +300,44 @@ class TestScenarioModes:
         assert c["targeted"] + c["merged"] + c["missed"] == c["total_arms"]
 
 
+class TestTerminalStatusFieldResolution:
+    """Regression coverage for a bug the mockymock Phase 8 integration
+    uncovered: `terminal`'s field name used to fall back to the literal
+    string "FILE-STATUS" whenever a boundary had no resolvable FILE STATUS
+    field, instead of mirroring `_status_dict`'s safer (and pre-existing)
+    two-step resolution (`boundary.status_field`, then
+    `index.file_facts(...)`) and giving up with `None` only when both fail.
+    A consumer that spliced that placeholder in as a literal MOVE target
+    (exactly what mockymock's `.cut` scaffolder does) would generate COBOL
+    that fails to compile, since "FILE-STATUS" is not a real data-name in
+    the target program."""
+
+    def test_terminal_is_none_not_a_placeholder_when_no_status_field_exists(self):
+        # F1 (_SCENARIO_MODE_HEADER) has an AT END handler but declares no
+        # FILE STATUS clause at all -- there is truly nothing to name.
+        bundle = _scenario_mode_bundle("happy")
+        read_fixture = next(
+            f for f in bundle.scenarios[0].fixtures if f.ref.category == "READ"
+        )
+        assert read_fixture.terminal is None
+
+    def test_terminal_resolves_the_real_declared_status_field(self):
+        # SEQ-FILE (tests/samples/file_operations.cbl) declares
+        # FILE STATUS IS WS-SEQ-STATUS and has a READ ... AT END -- terminal
+        # must name that real field, not a placeholder.
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        read_fixture = next(
+            (
+                f
+                for f in bundle.scenarios[0].fixtures
+                if f.ref.category == "READ" and f.ref.key == "SEQ-FILE"
+            ),
+            None,
+        )
+        assert read_fixture is not None
+        assert read_fixture.terminal == {"WS-SEQ-STATUS": "10"}
+
+
 class TestTier1CallCountExpectations:
     """Phase 7 tier 1 (structural): call_count is derivable exactly from a
     scenario's own generated sequence, so it is emitted for every boundary
@@ -371,11 +409,17 @@ class TestTier1CallCountExpectations:
         assert all(e.kind == "stub" for e in write_expectations)
 
     def test_empty_input_scenario_call_count_is_one_not_zero(self):
+        # F1 (see _SCENARIO_MODE_HEADER) declares no FILE STATUS clause, so
+        # read_fixture.terminal is correctly None here (nothing to name in
+        # the dict) -- but the boundary still has an AT END handler, so the
+        # READ is genuinely invoked once (the call that hits end-of-file)
+        # even with a zero-length sequence. call_count must count that
+        # invocation regardless of whether a status field could be named.
         bundle = _scenario_mode_bundle("all")
         empty = next(s for s in bundle.scenarios if s.name == "empty input")
         read_fixture = next(f for f in empty.fixtures if f.ref.category == "READ")
         assert read_fixture.sequence == []
-        assert read_fixture.terminal is not None
+        assert read_fixture.terminal is None
         expectation = next(
             e for e in empty.expectations if e.kind == "call_count" and "F1" in e.ref
         )
