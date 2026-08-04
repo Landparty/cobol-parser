@@ -1,5 +1,52 @@
 # OKF Update Log
 
+## 2026-08-04 (READ terminal status: unsafe placeholder field name)
+
+Found integrating mockymock's `gen-fixtures` Phase 8 (`generate
+--with-data`): `ProgramFixtureGenerator`'s READ `terminal` dict fell back to
+a literal placeholder field name, `"FILE-STATUS"`, whenever a READ boundary
+had no resolvable `FILE STATUS` clause — confirmed live, not theoretical,
+against `INVUPDT.cbl`'s `INV-FILE`, which declares no `FILE STATUS` clause
+at all. A consumer that splices that placeholder into a real `MOVE`
+target — exactly what mockymock's `.cut` scaffolder does — generates COBOL
+that fails to compile, since `"FILE-STATUS"` is not a data-name that exists
+in the target program.
+
+* **Root cause**: the `terminal` computation had its own ad hoc fallback
+  (`status_field or "FILE-STATUS"`) instead of reusing `_status_dict`'s
+  already-correct two-step resolution (`boundary.status_field`, then
+  `index.file_facts(key).file_status_field`, else give up).
+* **Fixed** `cobolparser/generators/program_fixtures.py`: extracted the
+  shared two-step lookup into `_resolve_status_field(boundary, index) ->
+  str | None`, used by both `_status_dict` and the `terminal` computation.
+  `terminal` is now `None` (never a placeholder string) when neither step
+  resolves — "exact by construction, or absent," the same rule this
+  initiative's `ConstantFolder` (Phase 7) already follows.
+* **A second bug in the same code path**, found while fixing the first:
+  the READ fixture's `call_count` expectation derived "did an AT-END
+  invocation happen" from whether `terminal` was truthy — after the fix
+  above, that conflates "the sequence exhausts" (a fact about the program's
+  `AT END` handler, independent of whether a status field can be named)
+  with "we know a field name to report it in." A program that reads to EOF
+  with an unresolvable status field still genuinely invokes the boundary
+  one more time; undercounting it would make `VERIFY ... WAS CALLED n
+  TIMES` wrong. Fixed by checking `"AT_END" in boundary.handlers` directly
+  or a `has_terminal_invocation` flag, independent of `terminal`'s
+  resolution.
+* **Updated** [generators.md](generators.md): the Tier 1 `call_count`
+  formula and the READ per-category generation-rules row both still
+  described the old, buggy behavior verbatim (`terminal` set to
+  `{status_field or "FILE-STATUS": "10"}`, `times = len(sequence) + (1 if
+  terminal else 0)`) — corrected to match the fix.
+* **Tests**: `tests/unit/test_program_fixtures.py` gained
+  `TestTerminalStatusFieldResolution` (both the safe-`None` and the
+  real-field-resolves cases, using `tests/samples/file_operations.cbl`'s
+  `SEQ-FILE`/`WS-SEQ-STATUS`) and a corrected assertion in the pre-existing
+  `test_empty_input_scenario_call_count_is_one_not_zero` (previously
+  asserted the placeholder dict; now asserts `terminal is None` with the
+  count still `1`). Full suite: 7,795 passed / 13 skipped / 1 xfailed,
+  91.44% coverage. Commit `b3e2b32`, `CHANGELOG.md` Bug Fixes.
+
 ## 2026-08-03 (normalize_fixed_format column-73+ overflow warning)
 
 Fixed a silent-truncation bug found during a whole-branch review of

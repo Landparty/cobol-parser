@@ -448,9 +448,16 @@ alongside Phase 3's OUT-boundary stubs, via two small helpers in
 * **Tier 1 — `_call_count_expectation`.** For every boundary that gets an
   actual fixture (an OUT-only boundary has nothing mocked to count, so it
   gets none), `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
-  value=times)` where `times = len(sequence) + (1 if terminal else 0)` --
-  except a `STATUS_ONLY` fixture, always `1` (its `sequence` is empty by
-  design, not because zero invocations happened). Derivable exactly from the
+  value=times)` where `times = len(sequence) + (1 if has_terminal_invocation
+  else 0)` -- except a `STATUS_ONLY` fixture, always `1` (its `sequence` is
+  empty by design, not because zero invocations happened).
+  `has_terminal_invocation` is `"AT_END" in boundary.handlers`, checked
+  directly rather than derived from whether `terminal` resolved to a dict
+  (bug fixed 2026-08-04: a READ with an `AT END` handler but no resolvable
+  status field still genuinely invokes the boundary one more time to hit
+  end-of-file -- "does exhaustion happen" and "do we know a field name to
+  report it in" are independent questions; `call_count` must not go stale
+  just because `terminal` came back `None`). Derivable exactly from the
   scenario's own already-generated sequence -- never a guess.
 * **Tier 2 — `_tier2_expectations`, backed by
   `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
@@ -479,7 +486,7 @@ field, `.record_named()` for a whole record) — is generated with a
 
 | Category / direction | What gets generated |
 |---|---|
-| `READ` (IN) | `options.rows` rows; `terminal` set to `{status_field or "FILE-STATUS": "10"}` when `"AT_END"` is in the boundary's `handlers` |
+| `READ` (IN) | `options.rows` rows; when `"AT_END"` is in the boundary's `handlers`, `terminal` is set to `{resolved_field: "10"}` if `_resolve_status_field` finds a real field name (`boundary.status_field`, else `index.file_facts(key).file_status_field`), or stays `None` -- never a placeholder string -- if neither resolves (bug fixed 2026-08-04: previously fell back to a literal `"FILE-STATUS"` key that is not a real data-name in the target program) |
 | `WRITE`/`REWRITE` (OUT) | No fixture (nothing to mock) — one `Expectation(kind="stub")` noting the program produces this value |
 | `OPEN`/`CLOSE`/`DELETE`/`START`/`UNLOCK` (`STATUS_ONLY`) | A fixture with `status` only (e.g. `{"WS-FS": "00"}`), no `layout`/`sequence` |
 | `SQL`, `sql_type` SELECT/FETCH (IN) | One generated row; `status={"SQLCODE": "0"}` |

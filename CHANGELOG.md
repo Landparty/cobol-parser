@@ -509,6 +509,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **generators:** `ProgramFixtureGenerator`'s READ `terminal` (the `AT END`
+  status dict) fell back to a literal placeholder field name, `"FILE-STATUS"`,
+  when a READ boundary had no declared `FILE STATUS` clause and no file-level
+  default either (2026-08-04, found empirically integrating mockymock's
+  `generate --with-data` against a real bundle — INVUPDT's `INV-FILE` has no
+  status field at all). That placeholder is not a real data item in the
+  program, so a `MOVE "10" TO FILE-STATUS` mock body would either target a
+  nonexistent field or, worse, a coincidentally-real one with an unrelated
+  meaning. Fixed by `_resolve_status_field` returning `None` (not a string)
+  when neither `Boundary.status_field` nor `ProgramLayoutIndex.file_facts(...)
+  .file_status_field` resolves, and `terminal`/`status` staying `None`/`{}`
+  rather than synthesizing a name — mirroring this initiative's own established
+  "exact by construction, or absent" rule (see `ConstantFolder` above) instead
+  of guessing. A second, related bug in the same code path was fixed in the
+  same commit: the READ fixture's `call_count` expectation derived "does this
+  boundary have an AT-END invocation" from whether `terminal` was non-`None`,
+  which after this fix conflates "the sequence exhausts" with "the exhaustion
+  has a nameable status field" — the two are now tracked independently
+  (`has_terminal_invocation` vs. the resolved field name), so `call_count`
+  stays correct (`len(sequence) + 1`) even when the terminal status itself
+  can't be named. `tests/unit/test_program_fixtures.py` gained
+  `TestTerminalStatusFieldResolution` (both the no-field and the
+  real-field-resolves cases) and an updated assertion in
+  `test_empty_input_scenario_call_count_is_one_not_zero`. See
+  [.okf/log.md](.okf/log.md) and mocky-mock's own
+  `tests/unit/test_fixture_bundle_contract.py`, which surfaced this via its
+  Phase 8 `generate --with-data` integration.
 * **parser:** `>=`, `<=`, and `<>` in an IF condition or a `PERFORM ...
   UNTIL` loop guard were silently mis-parsed as `>`, `<`, and `<` with a
   garbled right-hand operand (2026-08-04, found writing Phase 4 of
