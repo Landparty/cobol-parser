@@ -40,8 +40,12 @@ class TestFileOps:
             "START",
             "DELETE",
         }
-        # No boundary should carry a resolution failure over this sample.
-        assert report.unresolved == []
+        # OPT-FILE's SELECT has no matching FD in this fixture -- a known,
+        # pre-existing gap surfaced by ProgramLayoutIndex itself (Phase 1)
+        # and merged into this report; not a Phase 2 resolution failure.
+        assert report.unresolved == [
+            "file 'OPT-FILE' has a SELECT but no matching FD/SD record"
+        ]
 
         reads = [b for b in report.boundaries if b.ref.category == "READ"]
         assert all(b.direction == "IN" for b in reads)
@@ -401,3 +405,32 @@ class TestIOLoggerCrossCheck:
         }
         # Every file-op category IOLogger saw, this inventory saw too.
         assert io_ops <= boundary_categories
+
+
+class TestLayoutIndexUnresolvedPropagation:
+    """ProgramLayoutIndex.unresolved (Phase 1 gaps -- an unownable FILE
+    SECTION record, a SELECT with no matching FD/SD) must ride along on the
+    BoundaryReport, not be silently lost between phases."""
+
+    def test_index_unresolved_is_merged_into_the_report(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GHOSTFILE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT GHOST-FILE ASSIGN TO 'GHOST.DAT'.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-DUMMY            PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY 'HI'.
+"""
+        result = parse_cobol(source, filename="ghostfile.cbl")
+        assert result.ast is not None
+        index = ProgramLayoutIndex.build(result.ast)
+        assert index.unresolved  # sanity: the index itself found the gap
+
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        assert report.unresolved == index.unresolved

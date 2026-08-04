@@ -17,6 +17,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `ProgramFixtureGenerator` and the `cobol-parser gen-fixtures`
+  CLI subcommand — whole-program mock-data + expectation-stub generation
+  (`cobolparser/generators/program_fixtures.py`,
+  `cobolparser/generators/data/bundle.py`, 2026-08-04). Phase 3 of the
+  `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`) — the first
+  shippable release of the initiative: combines a Phase 1 `ProgramLayoutIndex`
+  and a Phase 2 `BoundaryReport` into a `FixtureBundle` containing one "happy
+  path" `Scenario` per program, with a `BoundaryFixture` (generated rows) for
+  every IN/BIDIRECTIONAL boundary and an `Expectation` stub for every OUT
+  boundary.
+
+  Reuses the Phase 0 value engine (`ValueFactory`/`flatten_record`/`FieldSpec`)
+  directly against arbitrary `CobolDataItem`s resolved through the layout
+  index — the capability Phase 0 was built to unlock. Each boundary gets its
+  own deterministic sub-seed (`zlib.crc32("scenario|category|key") ^ seed`),
+  so adding or removing an unrelated boundary never reshuffles another
+  boundary's already-generated values. `bundle.to_json()` is byte-identical
+  for the same `(program, seed)` across runs and across unrelated corpus
+  changes. CALL/DYNCALL fixtures generate one row per IN/BIDIRECTIONAL
+  argument and an expectation stub per OUT/BIDIRECTIONAL argument (an OUT
+  argument's note correctly reads "supplied by the program under test, not
+  mock-generated" — the reverse of an IN argument's note). SQL fixtures stub
+  `SQLCODE=0`; other status-bearing boundaries stub `"00"`. READ boundaries
+  generate `--rows` rows per sequence; every other IN boundary (SQL
+  SELECT/FETCH, ACCEPT, a CALL argument) generates exactly one value, matching
+  one invocation in the happy-path scenario. `--callee-path` resolves a
+  statically-CALLed program's own source (tried across `NAME`/`name` ×
+  `""`/`.cbl`/`.CBL`/`.cob`/`.COB`) to feed Phase 2's callee-source rung; a
+  compilation unit's own `contained_programs` need no path search at all.
+
+  `report.unresolved`/`bundle.unresolved` now merge Phase 1's index-level
+  gaps forward (previously dropped between phases — found via a `--strict`
+  CLI smoke test against `report_test.cbl`'s known Report-Writer-FD gap
+  incorrectly exiting 0 instead of 2). `--strict` exits 2 (not 1, which stays
+  "could not run at all") when anything from Phase 1, 2, or 3 could not be
+  pinned down. `--format csv-dir` writes one CSV per file-shaped fixture
+  under `<dir>/<scenario-slug>/<KEY>.csv` plus a `MANIFEST.json` covering the
+  full bundle. `--list-boundaries` runs Phases 1-2 only, for a cheap
+  boundary-walk cross-check against a downstream consumer's own.
+
+  New `BUNDLE_VERSION` / `FixtureBundle` / `Scenario` / `BoundaryFixture` /
+  `Expectation` / `CoverageSummary` / `ProgramFixtureGenerator` public API,
+  exported from `cobolparser.generators`. `bundle_version` is a schema
+  version pinned for mockymock's Phase 8 `generate --with-data` consumer
+  across the repo boundary.
+
+  Documented in `.okf/generators.md` (new "Program Fixtures" section) and
+  `.okf/cli.md` (new "Gen-Fixtures" section); covered by
+  `tests/unit/test_program_fixtures.py`,
+  `tests/unit/cli/test_gen_fixtures_cli.py`,
+  `tests/integration/test_gen_fixtures_corpus.py` (parametrized over the
+  shamrice corpus), and `tests/contracts/test_fixture_bundle_contract.py`
+  (key-set and reproducibility pins for the cross-repo consumer).
 * **analysis:** `BoundaryInventoryAnalyzer` — whole-program boundary inventory
   (`cobolparser/analysis/boundary_inventory.py`, 2026-08-04). Phase 2 of the
   `gen-fixtures` program-scoped test-data initiative (see

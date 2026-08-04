@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-07-09T00:00:00Z
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
@@ -37,6 +37,11 @@ pinned by `tests/unit/cli/test_output_identification.py`):
   comment; DOT names the digraph after the program. `preprocess`
   output is deliberately unidentified (it is transformed source meant to be
   fed onward).
+* **`gen-fixtures`** — `--format json` (default) follows the standard
+  convention (`{"source_file", "bundle_version", "program_name", ...}`,
+  `program_name` already inside the bundle rather than a separate
+  `program_id` key). `--format csv-dir` writes a directory instead of
+  stdout; its `MANIFEST.json` carries the same identification.
 
 # Subcommand Reference
 
@@ -128,6 +133,52 @@ writes through the `csv` module so quoted cells round-trip.
   An unknown name errors and lists what is available.
 * Layout errors (`CopybookLayoutError`) exit 1 with the message on stderr.
 
+## Gen-Fixtures
+
+```bash
+cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR]... [--callee-path DIR]... \
+    [--rows N] [--seed N] [--scenarios happy] [--format json|csv-dir] \
+    [--list-boundaries] [--describe] [--strict] [--compact] [--output PATH]
+```
+
+Phase 3 of the `gen-fixtures` program-scoped test-data initiative (see
+[generators.md](generators.md)'s "Program fixtures" section): points at a
+whole **program** rather than a copybook, and produces mock in-data /
+assert-on stubs for every boundary it touches (files, CALL/DYNCALL, SQL,
+CICS, DLI, console ACCEPT) — not just one record's CSV rows.
+
+* `--copybook-path DIR` (repeatable) expands COPY statements before
+  analysis; an unresolved COPY member refuses (`ProgramLayoutError`, exit 1)
+  rather than generate a bundle from a layout with a hole in it.
+* `--callee-path DIR` (repeatable) searches for a statically-CALLed
+  program's own source (tries `NAME`, `name` × `""`/`.cbl`/`.CBL`/`.cob`/
+  `.COB` in each directory) to resolve its LINKAGE writes for the CALL
+  argument-direction ladder's "callee source" rung. A caller/callee pair
+  already bundled in one compilation unit (`CobolProgram.contained_programs`,
+  e.g. `subprogram_demo.cbl`) needs no `--callee-path` at all.
+* `--rows`/`-n` — rows generated per **READ** boundary's sequence (default
+  10); every other IN boundary (SQL SELECT/FETCH, ACCEPT, a CALL argument)
+  generates exactly one value, matching one invocation in the "happy path"
+  scenario.
+* `--seed` pins the RNG; the same seed and program always produce
+  byte-identical JSON (`ProgramFixtureGenerator.generate`'s own per-boundary
+  sub-seed scheme -- see generators.md -- means adding one boundary never
+  reshuffles another's already-generated values).
+* `--scenarios happy` is the only value in Phase 3 (`branches`/`all` arrive
+  with Phase 5's `ScenarioPlanner`); accepted now so scripts written against
+  the eventual full flag set do not need to change later.
+* `--format json` (default) emits the full bundle; `--format csv-dir`
+  requires `--output DIR` and emits one CSV per file-shaped boundary fixture
+  under `DIR/<scenario-slug>/<KEY>.csv` plus a `DIR/MANIFEST.json`.
+* `--list-boundaries` runs Phases 1-2 only (no value generation) and emits
+  `{"source_file", "boundaries": [{category, key, paragraph, line,
+  direction}, ...]}` — the cheap debugging view, and the natural cross-check
+  against a downstream consumer's own boundary walk.
+* `--strict` exits **2** (not 1 -- that stays "could not run at all") when
+  `bundle.unresolved` is non-empty: anything Phase 1's index, Phase 2's
+  inventory, or Phase 3's own field resolution could not pin down. The
+  CI-friendly "no silent gaps" switch.
+
 ## Analyze
 
 ```bash
@@ -217,5 +268,8 @@ Runs `IMSSegmentAnalyzer` and reports IMS DLI segment calls.
 
 # See Also
 
-* [analysis.md](analysis.md) — the underlying analyzers
+* [analysis.md](analysis.md) — the underlying analyzers, including
+  `BoundaryInventoryAnalyzer` (`gen-fixtures`, Phase 2)
 * [parser.md](parser.md) — `parse_cobol` used by most subcommands
+* [generators.md](generators.md) — `ProgramLayoutIndex` / `ProgramFixtureGenerator`
+  / `FixtureBundle` (`gen-fixtures`, Phases 1 and 3)

@@ -341,6 +341,105 @@ at all, or — in the default `strict_copybooks=True` mode — a COPY member
 partial). `strict_copybooks=False` downgrades the last case to an
 `unresolved` entry and falls back to parsing without expansion.
 
+`build()`/`from_file()` also stamp `index.ast` with the `CobolProgram` the
+index was built from, so a caller that only kept the index (typically after
+`from_file()`) can still reach the AST without re-parsing — the capability
+`ProgramFixtureGenerator.generate_from_file` (below) depends on.
+
+# Program Fixtures (`program_fixtures.py`, `data/bundle.py`)
+
+Phase 3 of the `gen-fixtures` initiative — the first shippable release per
+the parent plan. `ProgramFixtureGenerator` turns a program's
+`ProgramLayoutIndex` (Phase 1) and `BoundaryReport` (Phase 2,
+`.okf/analysis.md`) into a `FixtureBundle`: layout-valid random values for
+every boundary, assembled into one "happy path" `Scenario`. Backs the
+`cobol-parser gen-fixtures` CLI subcommand (`.okf/cli.md`).
+
+```python
+from cobolparser.generators import ProgramFixtureGenerator
+
+generator = ProgramFixtureGenerator()                  # or pass DataGeneratorOptions
+bundle = generator.generate_from_file(
+    "INVUPDT.cbl", copybook_paths=[...], callee_paths=[...], seed=7,
+)
+bundle.scenarios[0].fixtures       # list[BoundaryFixture]: mock in-data
+bundle.scenarios[0].expectations   # list[Expectation]: assert-on stubs
+bundle.coverage                    # CoverageSummary (boundary-level, v1)
+bundle.unresolved                  # every gap from Phases 1-2-3, merged
+bundle.to_json()                   # bundle_version, program_name, seed, ...
+bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
+```
+
+Reuses the Phase 0 value engine directly: each boundary's field list —
+however it was resolved (`ProgramLayoutIndex.resolve()` for an elementary
+field, `.record_named()` for a whole record) — is generated with a
+`ValueFactory` exactly like `CopybookDataGenerator` uses, no parallel engine.
+
+## Per-category generation rules
+
+| Category / direction | What gets generated |
+|---|---|
+| `READ` (IN) | `options.rows` rows; `terminal` set to `{status_field or "FILE-STATUS": "10"}` when `"AT_END"` is in the boundary's `handlers` |
+| `WRITE`/`REWRITE` (OUT) | No fixture (nothing to mock) — one `Expectation(kind="stub")` noting the program produces this value |
+| `OPEN`/`CLOSE`/`DELETE`/`START`/`UNLOCK` (`STATUS_ONLY`) | A fixture with `status` only (e.g. `{"WS-FS": "00"}`), no `layout`/`sequence` |
+| `SQL`, `sql_type` SELECT/FETCH (IN) | One generated row; `status={"SQLCODE": "0"}` |
+| `SQL`, INSERT/UPDATE/DELETE (OUT) | Expectation stub, like WRITE |
+| `CICS`/`DLI` (`BIDIRECTIONAL`, best-effort) | Whatever fields resolved get generated values *and* an expectation stub — Phase 2's own layout resolution here is already best-effort (no fixed INTO/FROM attributes), so this phase does not pretend otherwise |
+| `ACCEPT` (IN) | One generated value |
+| `CALL`/`DYNCALL` | Per-argument: IN/BIDIRECTIONAL args' fields are generated into **one combined row** (one CALL invocation, all its IN arguments at once); OUT args get an expectation stub reading "value supplied by the program under test, not mock-generated"; BIDIRECTIONAL args get both a generated value **and** a stub noting the OUT aspect isn't asserted yet; `RETURNING`/`GIVING` parameters always get a generated value (`provenance="giving-parameter"`) |
+
+A name may resolve to either an elementary field or a whole record
+(`_fields_for_name`/`_fields_for_names`, private helpers using the same
+`resolve()`-then-`record_named()` fallback `BoundaryInventoryAnalyzer` uses)
+— a CALL argument or SQL host variable can legally be either.
+
+## Determinism: per-boundary sub-seeds
+
+One `bundle.seed`. Each boundary derives its own
+`zlib.crc32(f"{scenario}|{category}|{key}".encode()) ^ bundle_seed`, feeding
+a fresh `random.Random`/`ValueFactory`. Deliberate: a single shared RNG
+consumed in iteration order would reshuffle every later boundary's values
+the moment an earlier one changed shape (a new field, a resized OCCURS) —
+sub-seeding keeps a bundle stable under unrelated additions. `zlib` is
+stdlib; the zero-dependency rule holds. Pinned by
+`test_program_fixtures.py::TestDeterminism` and the corpus-wide
+`test_gen_fixtures_corpus.py::test_determinism_across_the_corpus`.
+
+## `unresolved` propagation
+
+`bundle.unresolved` is the union of three layers, because a consumer must
+never have to separately check Phase 1/2/3's own gap lists to get the full
+picture: `ProgramLayoutIndex.unresolved` (Phase 1 — merged into
+`BoundaryReport.unresolved` by `BoundaryInventoryAnalyzer.analyze()` itself,
+see `.okf/analysis.md`), `Boundary.unresolved` (Phase 2, per boundary), and
+anything Phase 3's own field resolution additionally fails to pin down (an
+argument name that resolves to nothing generatable). Found and fixed during
+Phase 3 development: the Phase 1→2 merge did not exist until a `--strict`
+CLI smoke test against a program with a known Phase-1-level gap
+(`report_test.cbl`'s Report Writer FD) exited 0 instead of 2.
+
+## `--callee-path` resolution
+
+`ProgramFixtureGenerator._resolve_callees` builds `callee_indexes`/
+`callee_asts` for `BoundaryInventoryAnalyzer`'s Phase 2b "callee source"
+rung two ways, merged: every `CobolProgram.contained_programs` entry (free —
+no file search, e.g. `subprogram_demo.cbl`'s bundled caller + callees), then
+— for any remaining statically-CALLed program name — a search across
+`callee_paths` directories trying `NAME`/`name` × `""`/`.cbl`/`.CBL`/`.cob`/
+`.COB`. A callee that fails to parse is skipped (falls through to the
+caller-dataflow rung), not a hard error — one bad `--callee-path` entry
+should not sink the whole bundle.
+
+## `write_csv_dir`
+
+One `GeneratedDataset`-shaped CSV per fixture whose `layout`/`sequence` are
+both non-empty (file-shaped boundaries only — `STATUS_ONLY`/OUT/expectation
+-only fixtures produce nothing to write), under
+`<path>/<scenario-slug>/<KEY>.csv`. A `MANIFEST.json` at the root is the
+full bundle with each fixture's `sequence` replaced by a pointer string, so
+a consumer can discover what scenarios/fixtures exist without walking the
+directory tree first.
+
 # Tests
 
 * `tests/unit/test_copybook_data_generator.py` — flattening, categories,
@@ -360,15 +459,30 @@ partial). `strict_copybooks=False` downgrades the last case to an
   `examples/cobol/shamrice/*.cbl` indexes without raising; zero unexpected
   `unresolved`/`ambiguities` entries (`report_test.cbl`'s Report Writer FD is
   the one expected, documented exception)
+* `tests/unit/test_program_fixtures.py` — bundle assembly, CALL-argument
+  fixtures (IN/OUT/BIDIRECTIONAL expectation notes), SQL fixtures
+  (SQLCODE stub), determinism, `write_csv_dir`
+* `tests/unit/cli/test_gen_fixtures_cli.py` — `gen-fixtures` flags,
+  `--list-boundaries`, `--format json|csv-dir`, `--strict` exit codes
+* `tests/integration/test_gen_fixtures_corpus.py` — every
+  `examples/cobol/shamrice/*.cbl` generates a bundle without raising; every
+  generated cell fits its field's category; determinism across the corpus
+* `tests/contracts/test_fixture_bundle_contract.py` — exported names,
+  `bundle_version`, generator signatures, `to_dict()` key sets across
+  `FixtureBundle`/`Scenario`/`BoundaryFixture`/`Expectation`/`CoverageSummary`,
+  reproducibility guarantee
 
 # See Also
 
 * [ast-models.md](ast-models.md) — `CobolDataItem` / `PictureClause` /
   `OccursClause` / `ConditionNameItem`, the inputs to flattening
-* [cli.md](cli.md) — `gen-data` and `program-flow` subcommands
-* [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts
+* [cli.md](cli.md) — `gen-data` and `gen-fixtures` (Phases 1-3) and
+  `program-flow` subcommands
+* [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts;
+  `BoundaryInventoryAnalyzer` (Phase 2), the input `report` this file's
+  `ProgramFixtureGenerator` (Phase 3) consumes
 * [parser.md](parser.md) — the DATA DIVISION parser's `fd_file_name` /
   `fd_clauses` / `fd_record_type` metadata tags this index reads
 * `docs/plans/2026-08-02-program-data-generation-design.md` and
   `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
-  full 9-phase plan this index is Phase 1 of
+  full 9-phase plan this file documents Phases 1 and 3 of

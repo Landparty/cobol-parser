@@ -91,6 +91,10 @@ class ProgramLayoutIndex:
     """
 
     def __init__(self) -> None:
+        #: The program this index was built from (set by build()/from_file()).
+        #: Lets a caller that only kept the index (e.g. across a from_file()
+        #: call) still reach the AST without re-parsing.
+        self.ast: CobolProgram | None = None
         self._records_by_file: dict[str, list[CobolDataItem]] = {}
         self._file_facts: dict[str, FileFacts] = {}
         self._name_index: dict[str, list[ResolvedField]] = {}
@@ -288,6 +292,7 @@ class ProgramLayoutIndex:
     # -- build mechanics ------------------------------------------------------
 
     def _build(self, ast: CobolProgram) -> None:
+        self.ast = ast
         data_div = ast.get_division("DATA")
         if data_div is not None:
             for canonical, attr in _SECTION_NAMES.items():

@@ -8,10 +8,15 @@ timestamp: 2026-08-04T00:00:00Z
 
 # Overview
 
-6,638 passed / 13 skipped / 5 xfailed (2026-07-09: CobolCheck test
-generation — `CoverageAnalyzer`, `TestPlanGenerator`, `CobolCheckGenerator`,
-the `generate-tests` CLI subcommand, and their ~180 dedicated tests — was
-removed, superseded by the mockymock framework. Earlier the same day: +30 in
+7,529 passed / 13 skipped / 1 xfailed (2026-08-04: +191 tests across Phases
+1-3 of the `gen-fixtures` program-scoped test-data initiative —
+`ProgramLayoutIndex` (Phase 1), `BoundaryInventoryAnalyzer` (Phase 2), and
+`ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3); see
+[generators.md](generators.md) and [analysis.md](analysis.md). Earlier,
+2026-07-09: CobolCheck test generation — `CoverageAnalyzer`,
+`TestPlanGenerator`, `CobolCheckGenerator`, the `generate-tests` CLI
+subcommand, and their ~180 dedicated tests — was removed, superseded by
+the mockymock framework. Earlier the same day: +30 in
 `tests/regression/test_open_findings_medium_regressions.py`, one test
 class per MEDIUM finding M1, M2, M3, M4, M5, M7, M8, M9, M14, M16 fixed
 that day, plus a Cython/pure-Python parity check — see
@@ -37,7 +42,10 @@ tests/
     generators/                # Flowchart generator tests
     test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
     test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, record_named(), multi-program units, from_file errors (see generators.md)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (see generators.md)
     io_statements/             # IO parser unit tests
+    cli/
+      test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
     analysis/
       test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering, IOLogger cross-check (see analysis.md)
   integration/                 # end-to-end parsing
@@ -46,9 +54,11 @@ tests/
     test_copybook_csv_generation.py  # parametrised over the sample + NIST *.CPY corpora: no copybook may crash gen-data; a copybook with no record layout must raise CopybookLayoutError, and every generated cell must be assignable to its field (see generators.md)
     test_program_layout_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramLayoutIndex must build without raising and report zero unexpected unresolved/ambiguities entries
     test_boundary_inventory_corpus.py  # parametrised over examples/cobol/shamrice/: BoundaryInventoryAnalyzer must build without raising and report zero unexpected unresolved entries
+    test_gen_fixtures_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramFixtureGenerator must build a bundle without raising, every generated cell fits its field's category, and determinism holds across the corpus
     io/                        # IO coverage reporting integration
     io_statements/             # IO statement parsing, VSAM
   contracts/                   # API contract tests — stability guarantees
+    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility (see generators.md)
     io_statements/
   regression/                  # backward compatibility
                                #   test_swallow_sweep.py: generic cross-product
@@ -163,6 +173,7 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
 # See Also
 
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
-* [generators.md](generators.md) — flowchart and copybook → CSV generator tests
+* [generators.md](generators.md) — flowchart, copybook → CSV, program layout
+  index, and program fixture bundle generator tests
 * [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
 * [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing

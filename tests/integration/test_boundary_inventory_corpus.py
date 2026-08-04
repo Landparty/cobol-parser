@@ -33,6 +33,13 @@ _ALL_CBL = sorted(SHAMRICE_DIR.glob("*.cbl"))
 # third state" contract this test otherwise enforces.
 _EXPECTED_UNRESOLVED = {
     "unstring.cbl": ["START: no file name"],
+    # report_test.cbl's FD names a Report Writer REPORT SECTION record (RD),
+    # not a FILE SECTION 01 -- a ProgramLayoutIndex-level gap (Phase 1, no
+    # REPORT SECTION support) that this analyzer now merges into its own
+    # `unresolved` list rather than silently losing it. See
+    # test_program_layout_corpus.py, which pins the same gap at the index
+    # level.
+    "report_test.cbl": ["FD-REPORT-FILE"],
 }
 
 

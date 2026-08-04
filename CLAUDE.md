@@ -90,6 +90,7 @@ cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [-o out.csv]
+cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser program-flow <file.cbl>
@@ -177,7 +178,8 @@ COBOL source (.cbl/.cob)
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts. See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`)
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
+- `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle` -- one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
 
@@ -324,6 +326,16 @@ report.boundaries                      # list[Boundary]: category/key, direction
                                         # record_names, status_field, handlers, call_args
 report.boundaries[0].call_args         # CALL/DYNCALL only: per-argument IN/OUT/
                                         # BIDIRECTIONAL direction + provenance
+
+# Program fixture bundle (Phase 3): generated mock data + expectation stubs
+from cobolparser.generators import ProgramFixtureGenerator
+bundle = ProgramFixtureGenerator().generate_from_file("INVUPDT.cbl", seed=7)
+bundle.scenarios[0].fixtures           # list[BoundaryFixture]: generated rows per boundary
+bundle.scenarios[0].expectations       # list[Expectation]: assert-on stubs for OUT boundaries
+bundle.coverage                        # CoverageSummary: total/resolved/unresolved boundaries
+bundle.unresolved                      # merged Phase 1 + Phase 2 + Phase 3 resolution gaps
+bundle.to_json()                       # byte-identical for the same (program, seed)
+bundle.write_csv_dir("fixtures/")      # one CSV per file-shaped fixture + MANIFEST.json
 ```
 
 ### Adding a New Statement Parser

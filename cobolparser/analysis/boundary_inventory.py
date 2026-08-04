@@ -244,6 +244,12 @@ class BoundaryInventoryAnalyzer:
         callee_asts: dict[str, CobolProgram] | None = None,
     ) -> BoundaryReport:
         report = BoundaryReport(program_name=ast.program_name)
+        # Phase 1's own gaps (an unownable FILE SECTION record, a SELECT
+        # with no matching FD/SD) are program-level layout facts, not
+        # boundary-walk facts -- but they are exactly the kind of thing a
+        # consumer of this report must not have silently dropped underneath
+        # it, so they ride along on the boundary report too.
+        report.unresolved.extend(index.unresolved)
         procedure = ast.get_division("PROCEDURE")
         if procedure is None:
             return report
