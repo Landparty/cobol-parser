@@ -221,9 +221,28 @@ class FixtureBundle:
                     writer.writerows(rows)
 
         manifest = self.to_dict()
-        for scenario_dict in manifest["scenarios"]:
-            for fixture_dict in scenario_dict["fixtures"]:
+        for scenario, scenario_dict in zip(
+            self.scenarios, manifest["scenarios"], strict=True
+        ):
+            slug = _slugify(scenario.name)
+            for fixture, fixture_dict in zip(
+                scenario.fixtures, scenario_dict["fixtures"], strict=True
+            ):
+                wrote_csv = bool(fixture.layout and fixture.sequence)
+                # Keep `sequence`'s type identical to the normal bundle schema
+                # (always a list) rather than overwriting it with a hint
+                # string -- a consumer that runs MANIFEST.json through the
+                # same deserializer as a real bundle (a reasonable thing to
+                # try, since the top-level shape otherwise matches) would
+                # silently iterate a string character-by-character instead
+                # of getting a type error, rather than crash cleanly. The
+                # path hint lives in its own key instead, `None` when this
+                # fixture had no CSV written for it (mirrors the skip
+                # condition above exactly).
                 fixture_dict["sequence"] = []
+                fixture_dict["csv_path"] = (
+                    f"{slug}/{fixture.ref.key}.csv" if wrote_csv else None
+                )
         with open(os.path.join(root, "MANIFEST.json"), "w", encoding="utf-8") as handle:
             _json.dump(manifest, handle, indent=2)
             handle.write("\n")

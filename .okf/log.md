@@ -1,5 +1,42 @@
 # OKF Update Log
 
+## 2026-08-04 (PR #108 Copilot review: dead --describe flag, MANIFEST.json type mismatch)
+
+GitHub Copilot's automated review of PR #108 left two comments; verified
+both against the actual code before acting (per this repo's own "check the
+claim, don't just trust or dismiss the bot" discipline) — both were real.
+
+* **`gen-fixtures --describe` was a silent no-op.** Registered on the
+  argument parser (`cobolparser/cli/parse.py`) with help text "Emit the
+  resolved bundle as JSON (implied by --format json)" but `args.describe`
+  was never read anywhere in `_cmd_gen_fixtures` — confirmed by grepping
+  the whole file for `.describe` and finding only `gen-data`'s own,
+  unrelated, correctly-wired `--describe` handling. Not in `CLAUDE.md`'s
+  own `gen-fixtures` command-line documentation, not exercised by any
+  test. Removed the flag entirely (its own help text already admits
+  `--format json`, the default, already does what it would do — nothing
+  distinct was left to implement).
+* **`write_csv_dir()`'s `MANIFEST.json` changed a field's type.** Every
+  fixture's `"sequence"` (normally `list[dict[str, str]]`) was replaced
+  with a hint string (`"see <scenario-slug>/"`). A consumer that ran
+  `MANIFEST.json` through the same deserializer as a real bundle JSON —
+  reasonable, since every other key matches — would silently iterate the
+  string character-by-character in place of real rows, rather than hit a
+  clean type error. Fixed: `sequence` now stays `[]`; a new `csv_path` key
+  per fixture (the CSV's path relative to the output dir, or `null` for a
+  fixture with no CSV) carries the same information the hint string did,
+  without the type mismatch.
+
+Both fixed in `cobolparser/cli/parse.py` / `cobolparser/generators/data/bundle.py`.
+New test: `test_program_fixtures.py::TestWriteCsvDir::test_manifest_sequence_stays_a_list_not_a_hint_string`
+(zips the real `Scenario`/`BoundaryFixture` objects against their `to_dict()`
+counterparts in the manifest, positionally, to check `csv_path` against
+each fixture's *actual* layout/sequence state, not just spot-check one
+value). Updated: [cli.md](cli.md) (removed the `--describe` flag from
+`gen-fixtures`'s command line and documented the manifest fix),
+[generators.md](generators.md) (`write_csv_dir` section),
+`docs/fixture-bundle-schema.md` (`write_csv_dir` section), `CHANGELOG.md`.
+
 ## 2026-08-04 (READ terminal status: unsafe placeholder field name)
 
 Found integrating mockymock's `gen-fixtures` Phase 8 (`generate

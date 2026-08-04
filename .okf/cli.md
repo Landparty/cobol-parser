@@ -138,7 +138,7 @@ writes through the `csv` module so quoted cells round-trip.
 ```bash
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR]... [--callee-path DIR]... \
     [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] \
-    [--list-boundaries] [--describe] [--strict] [--compact] [--output PATH]
+    [--list-boundaries] [--strict] [--compact] [--output PATH]
 ```
 
 Phase 3 of the `gen-fixtures` program-scoped test-data initiative (see
@@ -175,7 +175,11 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   sections, and `docs/fixture-bundle-schema.md` for the full JSON shape.
 * `--format json` (default) emits the full bundle; `--format csv-dir`
   requires `--output DIR` and emits one CSV per file-shaped boundary fixture
-  under `DIR/<scenario-slug>/<KEY>.csv` plus a `DIR/MANIFEST.json`.
+  under `DIR/<scenario-slug>/<KEY>.csv` plus a `DIR/MANIFEST.json` (the
+  bundle with every fixture's `sequence` emptied to `[]` -- never replaced
+  with a hint string, so the manifest stays type-compatible with a normal
+  bundle -- and a new `csv_path` key per fixture: the relative CSV path, or
+  `null` for a fixture with no CSV written, e.g. a STATUS_ONLY boundary).
 * `--list-boundaries` runs Phases 1-2 only (no value generation) and emits
   `{"source_file", "boundaries": [{category, key, paragraph, line,
   direction}, ...]}` — the cheap debugging view, and the natural cross-check

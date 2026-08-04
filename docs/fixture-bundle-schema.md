@@ -373,11 +373,19 @@ with `"1244"` computed from whatever value that scenario's own mocked
   `gen-data`'s `GeneratedDataset.write_csv` uses, so both CLI paths agree
   byte-for-byte on newline style.
 * **`MANIFEST.json`**: `bundle.to_dict()` with every fixture's `"sequence"`
-  key replaced by the string `"see <scenario-slug>/"` — everything else
-  (layouts, coverage, scenario_coverage, expectations) is unchanged, so a
-  consumer can discover what scenarios/fixtures/expectations exist by reading
-  one small file, without walking the directory tree or parsing every CSV
-  first.
+  emptied to `[]` and a new `"csv_path"` key added: the CSV's path relative
+  to `<path>/` (`"<scenario-slug>/<KEY>.csv"`) for a fixture that got one
+  written, else `null`. `sequence` stays a list rather than being replaced
+  with a hint string (an earlier version did this) so the manifest's
+  per-fixture shape stays type-compatible with a normal bundle — a consumer
+  that runs `MANIFEST.json` through the same deserializer as a real bundle
+  JSON (reasonable, since every other key matches) would otherwise silently
+  iterate a string character-by-character in place of real rows instead of
+  hitting a clean type error. Everything else (layouts, coverage,
+  scenario_coverage, expectations) is unchanged, so a consumer can discover
+  what scenarios/fixtures/expectations exist — and where each fixture's own
+  CSV lives, if it has one — by reading one small file, without walking the
+  directory tree or parsing every CSV first.
 * **Round-trip guarantee**: reading a `<KEY>.csv` back with `csv.reader` and
   zipping its rows against the same fixture's `sequence` in the JSON output
   produces byte-identical cells — pinned by

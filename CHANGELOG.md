@@ -509,6 +509,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **cli:** two issues found by GitHub Copilot's automated review of PR #108
+  (2026-08-04), both fixed rather than dismissed since verifying against the
+  actual code confirmed both were real:
+  - `gen-fixtures --describe` was registered on the argument parser but
+    never read anywhere in `_cmd_gen_fixtures` -- a silent no-op with
+    misleading help text ("Emit the resolved bundle as JSON (implied by
+    --format json)", acknowledging its own redundancy with the already-
+    default `--format json`). Removed the flag rather than implementing
+    behavior for it, since there was nothing distinct left for it to do.
+    Not previously documented in `CLAUDE.md`'s own `gen-fixtures` command
+    line and not exercised by any test, consistent with it having been an
+    unintentional carry-over from `gen-data`'s own (real, still-working)
+    `--describe` flag.
+  - `FixtureBundle.write_csv_dir()`'s `MANIFEST.json` replaced every
+    fixture's `"sequence"` (normally `list[dict[str, str]]`) with a hint
+    string (`"see <scenario-slug>/"`), silently changing its type. A
+    consumer that ran `MANIFEST.json` through the same deserializer as a
+    real bundle JSON -- reasonable, since every other key matches the
+    normal schema -- would iterate the string character-by-character in
+    place of real rows rather than hit a clean type error. Fixed:
+    `sequence` now stays `[]` in the manifest; a new `csv_path` key (the
+    CSV's path relative to the output directory, or `null` for a fixture
+    that got no CSV written) carries the same "where are the rows"
+    information the removed hint string carried, without the type
+    mismatch. New test:
+    `test_program_fixtures.py::TestWriteCsvDir::test_manifest_sequence_stays_a_list_not_a_hint_string`.
+    Documented in `docs/fixture-bundle-schema.md` and `.okf/generators.md`.
 * **generators:** `ProgramFixtureGenerator`'s READ `terminal` (the `AT END`
   status dict) fell back to a literal placeholder field name, `"FILE-STATUS"`,
   when a READ boundary had no declared `FILE STATUS` clause and no file-level
