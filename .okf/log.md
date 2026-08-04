@@ -1,5 +1,52 @@
 # OKF Update Log
 
+## 2026-08-03 (normalize_fixed_format column-73+ overflow warning)
+
+Fixed a silent-truncation bug found during a whole-branch review of
+mocky-mock's not-yet-merged `export` command: `normalize_fixed_format`'s
+`line[TEXT_START_COL - 1 : TEXT_END_COL]` slice never bounds-checked the
+line length, so any non-comment line longer than 72 columns had its
+columns-73+ tail silently dropped — no warning, no error, no signal to the
+caller. Repro: a hand-written 77-column `DISPLAY "X" WS-FIELD.` line (56
+columns of indentation) silently became `DISPLAY "X" WS-F` (no closing
+quote, no period) with mocky-mock still writing it to its "durable
+deliverable" output and exiting 0. Confirmed as a live, not just
+theoretical, bug: `legacy-application/cobol/ACCTMNT.cbl:388` already splits
+the identifier `WS-PARM-DORM-DAYS` into `WS-PARM-DORM-D` + dropped `AYS`
+this same way.
+
+* **Updated** [preprocessing.md](preprocessing.md): documented the new
+  `warnings: list[str] | None = None` parameter and the mid-token detection
+  rule (column 72 *and* column 73 both non-blank — content actually split a
+  token, as opposed to a traditional 80-column identification field like
+  NIST CCVS85's `IC1014.2`, which must **not** warn; empirically checked
+  against both `legacy-application/cobol/*.cbl` and the vendored
+  `examples/nist-cobol85` corpus before picking this rule over a naive "any
+  non-blank content past column 72" check, which would have fired on nearly
+  every line of the NIST corpus).
+* **Changed** `cobolparser/preprocess/__init__.py` and
+  `cobolparser/_preprocess_fast.pyx` (mirrored, rebuilt via `python setup.py
+  build_ext --inplace`, regenerated `.c` committed) — both now track the
+  1-based physical line number and append one `f"Line {n}: content beyond
+  column 72 was dropped mid-token: {dropped!r}"` message per qualifying
+  line when a `warnings` list is passed. Comment lines are never checked
+  (their text is discarded whether truncated or not). Default `None`
+  preserves the exact old (silently-truncating) behavior for every existing
+  caller.
+* **Added**
+  `tests/regression/test_normalize_column_overflow_warning.py`: pins the
+  mid-token-warns / traditional-field-does-not-warn / comment-line-does-not-
+  warn / `debug_lines_as_comments=False` D-line flip / no-`warnings`-arg
+  backward-compatibility cases, plus a pure-vs-Cython parity test over the
+  `warnings` list itself (the existing parity tests only ever compared the
+  returned string).
+* **mocky-mock side** (separate repo): `mockymock/cli/checks.py` now
+  threads a `warnings` list through its `normalize_fixed_format` calls and
+  exposes it on `StaticCheckResult`; `mockymock export` (only — `run`/`lint`
+  intentionally left unchanged, out of scope for this fix) refuses instead
+  of silently writing a corrupted "durable deliverable" and exiting 0. See
+  mocky-mock's own `.okf/log.md` for that side of the fix.
+
 ## 2026-08-02 (copybook → CSV synthetic test-data generation)
 
 New feature: `cobolparser/generators/copybook_data.py` plus a

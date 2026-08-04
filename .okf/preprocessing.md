@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-07-27T00:00:00Z
+timestamp: 2026-08-03T00:00:00Z
 ---
 
 # Overview
@@ -71,6 +71,7 @@ def normalize_fixed_format(
     *,
     merge_continued_literals: bool = True,
     debug_lines_as_comments: bool = True,
+    warnings: list[str] | None = None,
 ) -> str: ...
 ```
 
@@ -122,6 +123,44 @@ bad literal no longer collapses the whole parse to `ast=None` under
 `COLLECT_ALL`. `parse_cobol` defers to the parser for this recovery rather than
 returning early. Both the pure-Python and Cython (`_preprocess_fast`) paths accept
 `merge_continued_literals` identically.
+
+**Column 73+ overflow warning** (added 2026-08-03): the `line[TEXT_START_COL
+- 1 : TEXT_END_COL]` slice never bounds-checked the line length, so any
+non-comment line longer than 72 columns had its columns-73+ tail silently
+dropped — no warning, no error. Found via a whole-branch review of
+mocky-mock's `export` command: a hand-written 77-column `DISPLAY "X"
+WS-FIELD.` line (56 columns of indentation) was silently chopped to
+`DISPLAY "X" WS-F` — no closing quote, no period — and mocky-mock still
+wrote it to its "durable deliverable" output and exited 0.
+
+Columns 73–80 are the identification area, and real fixed-format compilers
+ignore them regardless of content — traditional 80-column source
+legitimately puts non-blank sequence/identification text there (e.g. NIST
+CCVS85's `IC1014.2`, repeated on every line of the vendored
+`examples/nist-cobol85` corpus). Flagging every such line would be noise. So
+`normalize_fixed_format` only flags a line whose column 72 (the last kept
+character) **and** column 73 (the first dropped character) are *both*
+non-blank — content actually split mid-token, not merely followed by an
+unrelated identification field. Comment lines (column-7 `*`/`/`, or `D`/`d`
+when `debug_lines_as_comments` is true) are never checked: their text is
+discarded whether truncated or not, so truncation there changes nothing.
+
+When `warnings` is passed a list, each qualifying line appends one
+`f"Line {n}: content beyond column {TEXT_END_COL} was dropped mid-token:
+{dropped!r}"` message (`n` is the 1-based physical line number). Default
+`None` means the check still runs but nothing is collected — existing
+callers that don't pass `warnings` see no behavior change (still silently
+truncates). The pure-Python and Cython (`_preprocess_fast`) paths produce
+byte-identical warning text; pinned by
+`tests/regression/test_normalize_column_overflow_warning.py`, including a
+parity test over the `warnings` list itself (not just the returned string).
+
+Callers that want to turn this into a hard refusal (mocky-mock's `export`
+command does, via `checks.py` → `mockymock/analysis/refusal.py`'s
+`check_normalize_warnings`) should treat every entry in the returned list as
+actionable — the mid-token filter above already excludes the traditional
+sequence-number/identification-area case, so there is no further filtering
+to do caller-side.
 
 # Copybook Expansion
 
