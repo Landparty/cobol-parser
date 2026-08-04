@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-07-24T00:00:00Z
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
@@ -128,6 +128,19 @@ CobolParser.parse(source)
 signatures — the compiled `_data_fast` extension receives the division parser
 as `parser_self` and calls those three back by name. New clause logic goes in
 `DataItemClauseParser`; the wrappers must stay.
+
+**FD/SD metadata tags on FILE SECTION 01-items (`data.py`, `_parse_section`):**
+while scanning under an `FD`/`SD` header, every level-01 item is tagged with
+`fd_file_name` (the file name) and, when present, `fd_clauses` (the
+`FileDescriptionClauseParser`-structured dict — `record`, `recording_mode`,
+`label_records`, `data_records`, ...). A third tag, `fd_record_type` (`"FD"`
+or `"SD"`, 2026-08-04), records which keyword declared the file — previously
+untracked, since nothing downstream needed the distinction before
+`ProgramLayoutIndex` (generators.md) started using it to flag SORT/MERGE work
+files as non-mockable rather than treating every FILE SECTION entry as a real
+file a program can `OPEN`. Purely additive metadata; no existing behavior
+changed. Pinned by
+`tests/unit/test_program_layout_index.py::TestFdRecordTypeMetadata`.
 
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside
@@ -1234,6 +1247,25 @@ path (class/sign/condition-name conditions like `A IS NUMERIC`) now
 produces a structured node while `metadata.raw_condition` stays
 populated. Pinned by
 `tests/regression/test_open_findings_m12_regression.py`.
+
+**`>=`/`<=`/`<>` mis-parsed as `>`/`<`/`<` with a garbled operand
+(2026-08-04, found writing Phase 4 of `gen-fixtures`):** the lexer emits
+these as two separate single-character tokens (`>` then `=`, never a
+combined `>=`) -- confirmed empirically, not assumed. `_conditions.py`'s
+token-cleaning pass only recombined `NOT`-prefixed pairs (`NOT EQUAL`, `NOT
+<`, ...), so the comparison scan matched the bare `>`/`<` first and left the
+trailing `=`/`>` dangling in the right-hand operand text: `IF WS-X >= 5`
+parsed as `operator="GREATER", right_operand="= 5"` instead of
+`operator="GREATER_OR_EQUAL", right_operand="5"`. This affected every
+consumer of `build_condition_expression` (IF and PERFORM UNTIL both), for
+as long as M12 has existed -- not a regression from this fix, a
+pre-existing gap this fix closes. `_COMPOUND_SYMBOL_OPS` (`{">=", "<=",
+"<>"}`) now recombines the pair during the same cleaning pass, before the
+`NOT`-prefix check's sibling logic runs. See
+[analysis.md](analysis.md)'s `ConstraintExtractor` section for how this was
+found; covered by the existing IF/PERFORM/shamrice/NIST suites (783 tests,
+zero regressions) plus `tests/unit/analysis/test_constraints.py`'s
+`test_greater_less_and_or_equal`.
 
 # Generic swallow-sweep regression (2026-07-21)
 

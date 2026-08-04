@@ -1,9 +1,9 @@
 ---
 type: Module
 title: Generators
-description: Output generators — flowcharts from a program-flow report, and synthetic CSV test data from a copybook record layout.
-tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot]
-timestamp: 2026-08-02T17:40:00Z
+description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
+tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
@@ -16,6 +16,30 @@ artefact rather than an analysis report.
 | `flowchart.py` | Mermaid / Graphviz DOT flowcharts from a `ProgramFlowReport` |
 | `copybook_data.py` | Backwards-compatible re-export shim for copybook → CSV; implementation in `data/` |
 | `data/` | Copybook test data generation — modular internal implementation |
+| `program_fixtures.py` | `ProgramFixtureGenerator` — whole-program `FixtureBundle`s (Phase 3/6) |
+| `scenarios.py` | `ScenarioPlanner` — constraints + CFG -> named scenarios (Phase 5) |
+
+**Import architecture: `__init__.py` is lazy (`__getattr__`-based), not
+eager.** `program_fixtures.py` genuinely depends at runtime on
+`cobolparser.analysis.constraints`/`.domains`/`.program_flow` (Phase 6 added
+the first two), which are themselves reachable from other
+`cobolparser.analysis` modules that need `generators.data.*` utilities
+(`FieldSpec`, `ValueFactory`, `ProgramLayoutIndex`). Eagerly importing every
+submodule at package-init time — the original shape — meant the *first*
+touch of either package from anywhere in the process could fail with
+"partially initialized module", depending on unrelated import order
+elsewhere. This surfaced three separate times as the initiative grew
+(`bundle.py` ↔ `boundary_inventory.py` in Phase 4, `constraints.py` ↔
+`program_fixtures.py` and `domains.py` ↔ `scenarios.py` both in Phase 6)
+before the third occurrence prompted fixing the actual root cause instead of
+patching each edge individually: `__init__.py` now resolves every public name
+through `__getattr__` on first access (mirroring
+`cobolparser.analysis.__init__`'s already-established pattern), so importing
+`cobolparser.generators` itself never touches `program_fixtures.py` (or
+anything else) until a caller actually asks for
+`ProgramFixtureGenerator`/`FixtureBundle`/etc. `__all__` is unchanged — same
+21 public names as before; `__getattr__` does not change `dir()` output, only
+what resolves on attribute access.
 
 # Flowcharts (`flowchart.py`)
 
@@ -226,6 +250,398 @@ after the fact (surfaced by `gen-data --describe`).
 falls back to a deterministic counter — a narrow field (`PIC 9`, ten possible
 values) asked for 40 unique rows must terminate, not spin.
 
+# Program Layout Index (`data/program_layout.py`)
+
+Phase 1 of program-scoped test-data generation (the `gen-fixtures` initiative
+— see `docs/plans/2026-08-02-program-data-generation-design.md` and its
+per-phase implementation plan). Resolves a whole program's FD/record/field
+names into layout facts a later boundary walker (Phase 2) can join against.
+Reuses `FieldSpec`/`flatten_record` directly — no parallel value engine.
+
+```python
+from cobolparser.generators import ProgramLayoutIndex
+
+index = ProgramLayoutIndex.build(ast)              # from an already-parsed CobolProgram
+index = ProgramLayoutIndex.from_file("PROG.cbl")   # parses for you
+
+index.record_for_file("INV-FILE")      -> CobolDataItem | None
+index.records_for_file("INV-FILE")     -> list[CobolDataItem]   # multi-01 FDs
+index.file_facts("INV-FILE")           -> FileFacts | None
+index.resolve("INV-QTY")               -> ResolvedField | None
+index.resolve("INV-QTY OF INV-REC")    -> ResolvedField | None  # qualified
+index.resolve("INV-REC.INV-QTY")       -> ResolvedField | None  # dotted, same meaning
+index.record_named("INV-REC")          -> CobolDataItem | None  # whole record/group, any section
+index.section_of("WS-EOF")             -> "working_storage"
+index.linkage_records()                -> list[CobolDataItem]
+index.working_storage_records()        -> list[CobolDataItem]
+index.ambiguities                      # name -> qualified paths it maps to
+index.unresolved                       # human-readable reasons, never silently dropped
+```
+
+## FD -> record resolution
+
+The DATA DIVISION parser tags every level-01 FILE SECTION item with
+`fd_file_name` (`parsers/divisions/data.py`) while scanning under an FD/SD —
+that tag is the *only* source of truth this index uses (no positional
+fallback: an untagged FILE SECTION record is reported in `unresolved`, never
+guessed from source order). An FD with more than one 01-level record (a
+legal "record redefinition" idiom) tags all of them, so `records_for_file`
+naturally returns every variant.
+
+**FD vs SD.** The parser now also tags `fd_record_type` (`"FD"` or `"SD"`) —
+previously untracked, since nothing needed the distinction before this
+index. An SD is a SORT/MERGE work file, not a file a program `OPEN`s;
+`FileFacts.record_type` surfaces it so a later phase can mark it
+`unconstrained` instead of mock-eligible (mockymock refuses SORT/MERGE
+outright).
+
+**`FileFacts`** merges two independent parses by uppercased file name: the
+ENVIRONMENT DIVISION's `SelectStatement` (organization, access mode, keys,
+`FILE STATUS` field, `OPTIONAL`) and the FILE SECTION's `fd_clauses` metadata
+dict (`RECORD CONTAINS`, `RECORDING MODE`) that `FileDescriptionClauseParser`
+already captures. Either side may be missing — a `SELECT` with no matching
+FD/SD, or vice versa — and that gap goes to `unresolved` rather than
+producing a half-true `FileFacts`. `record_contains` is a plain int for a
+fixed-length record; a variable-length record (`RECORD IS VARYING` or a bare
+`min TO max` range with no `VARYING` keyword) populates
+`record_contains_min`/`_max` instead and leaves `record_contains` `None`.
+
+## Name resolution
+
+Every section's top-level records are flattened once via `flatten_record(...,
+DataGeneratorOptions(include_filler=True, include_redefines=True))` — the
+index must see *all* storage (FILLER, REDEFINES included); which fields are
+generation-eligible is a later phase's concern, not an indexing one. A bare
+name unique across the program resolves directly; one that exists at more
+than one path returns `None` and is recorded in `ambiguities` instead of
+guessed. Two qualified forms disambiguate it, and they read in **opposite**
+segment orders for the same concept:
+
+* `"A OF B"` / `"A IN B"` — COBOL's own syntax; the field name comes first,
+  qualifiers follow.
+* `"B.A"` — mirrors `FieldSpec.qualified_name` (root-first, field-last), so
+  here the field name is the *last* segment and the qualifier(s) precede it.
+  Treating both forms as "first segment is the field" was an actual bug
+  caught by `test_dotted_qualifier_form_also_disambiguates` during
+  development.
+
+A level-88 condition name resolves to its *parent* field's `ResolvedField`
+(a separate recursive walk over each record's raw `CobolDataItem` tree, keyed
+by qualified path, since `flatten_record` does not emit a `FieldSpec` for
+level-88/66 items).
+
+**`record_named(name)` — whole records, not fields.** `resolve()` only ever
+finds *elementary* fields, because `flatten_record` never emits a `FieldSpec`
+for a group item (it descends through groups to their leaves). A WRITE/
+REWRITE target, a READ `INTO` target, and an SQL/ACCEPT/CICS/DLI operand can
+all legally name a *whole record* instead of a field — `resolve("INV-REC")`
+returns `None` for exactly this reason. `record_named()` fills that gap: it
+indexes every top-level (01/77) record by its own name, across all four
+sections, independent of `flatten_record`. Same ambiguity policy as
+`resolve()` (a name shared by records in more than one section returns `None`
+and is recorded in `ambiguities`, never guessed). Found via direct
+reproduction while building Phase 2's `BoundaryInventoryAnalyzer` — a
+REWRITE's record target came back `None` from `resolve()` even though
+`records_for_file()` proved the record was indexed; not theorized.
+
+## Multi-program compilation units
+
+`build()` indexes exactly the `CobolProgram` node it is given — for a file
+with stacked/nested programs (`CobolProgram.contained_programs`, e.g.
+`tests/samples/subprogram_demo.cbl`'s caller + two callees), build a separate
+index per program unit rather than expecting one index to see all of them.
+This composes cleanly with Phase 2's planned `--callee-path` resolution rung,
+whether the callee comes from a separate file or a contained program in the
+same one.
+
+## `from_file`
+
+Raises `ProgramLayoutError` (not a bare `FileNotFoundError`/`ParseError`) for
+every failure mode this module owns: a nonexistent path (checked explicitly
+— `parse_cobol()` otherwise falls back to treating a bad path string as
+literal, unparseable source text), a program that does not parse to an AST
+at all, or — in the default `strict_copybooks=True` mode — a COPY member
+`copybook_paths` cannot resolve (a layout with a hole in it is wrong, not
+partial). `strict_copybooks=False` downgrades the last case to an
+`unresolved` entry and falls back to parsing without expansion.
+
+`build()`/`from_file()` also stamp `index.ast` with the `CobolProgram` the
+index was built from, so a caller that only kept the index (typically after
+`from_file()`) can still reach the AST without re-parsing — the capability
+`ProgramFixtureGenerator.generate_from_file` (below) depends on.
+
+# Program Fixtures (`program_fixtures.py`, `data/bundle.py`)
+
+Phase 3 of the `gen-fixtures` initiative — the first shippable release per
+the parent plan. `ProgramFixtureGenerator` turns a program's
+`ProgramLayoutIndex` (Phase 1) and `BoundaryReport` (Phase 2,
+`.okf/analysis.md`) into a `FixtureBundle`: layout-valid random values for
+every boundary, assembled into one "happy path" `Scenario`. Backs the
+`cobol-parser gen-fixtures` CLI subcommand (`.okf/cli.md`).
+
+```python
+from cobolparser.generators import ProgramFixtureGenerator
+
+generator = ProgramFixtureGenerator()                  # or pass DataGeneratorOptions
+bundle = generator.generate_from_file(
+    "INVUPDT.cbl", copybook_paths=[...], callee_paths=[...], seed=7,
+)
+bundle.scenarios[0].fixtures       # list[BoundaryFixture]: mock in-data
+bundle.scenarios[0].expectations   # list[Expectation]: assert-on stubs
+bundle.coverage                    # CoverageSummary (boundary-level, v1)
+bundle.unresolved                  # every gap from Phases 1-2-3, merged
+bundle.to_json()                   # bundle_version, program_name, seed, ...
+bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
+```
+
+## Scenario-mode generation (`generate_with_scenarios`, Phase 6)
+
+`generate_with_scenarios(ast, index, report, mode="happy"|"branches"|"all",
+seed=...)` (and its `_from_file` counterpart) is the Phase 5→6 wiring: it
+routes `mode="happy"` straight to `generate()` (byte-identical output, same
+seed — pinned by
+`test_fixture_bundle_contract.py::TestScenarioModeContract::test_happy_mode_is_byte_identical_to_generate`),
+and for `"branches"`/`"all"` runs `ConstraintExtractor` + `ProgramFlowAnalyzer`
++ `ScenarioPlanner` internally and turns every `PlannedScenario` into a real
+`Scenario` with populated fixtures — not just a name and an intent string.
+
+```python
+bundle = generator.generate_with_scenarios_from_file(
+    "INVUPDT.cbl", mode="all", seed=7,
+)
+bundle.scenario_coverage   # ScenarioCoverage.to_dict(), None in mode="happy"
+```
+
+**Every scenario still gets a complete fixture for every boundary** — the
+program under test touches all of them regardless of which branch arm a
+scenario targets. Only the specific field(s) a `PlannedScenario` constrains
+are pinned to their solved witness; everything else is generated by the same
+`ValueFactory` path the happy-path scenario already uses. This is threaded
+through via an optional `override: PlannedScenario | None` parameter on the
+internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
+
+* **Witnesses** — `override.witnesses` is keyed by `FieldSpec.qualified_name`;
+  a matching field's generated value is replaced by the witness verbatim
+  (already PICTURE-valid from `domains.solve()`), everything else still comes
+  from `ValueFactory.value_for()`.
+* **Sequence length** — `override.sequence_constraints` (matched by
+  `(category, key)`) overrides a READ boundary's row count, e.g. the "empty
+  input" family's `length=0`. Falls back to `--rows` (READ) / `1` (everything
+  else) exactly like the happy path when no override applies.
+* **Status** — `override.status_overrides` (keyed by `"<CATEGORY>:<KEY>"`)
+  replaces the default status value (`"00"`/`"0"`) for the fixed
+  error-status family and any future status-targeting scenario.
+
+`FixtureBundle.scenario_coverage` (new, additive field —
+`bundle_version` stays `1`) carries `ScenarioPlan.coverage.to_dict()`
+verbatim, `None` for a `mode="happy"` bundle since that mode never attempts
+branch targeting. Full key-by-key shape:
+[`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md).
+
+## Expectations: tiers 1-2 (Phase 7)
+
+Every scenario's `expectations` (in both `generate()` and
+`generate_with_scenarios()`) now carries structural and computed assertions
+alongside Phase 3's OUT-boundary stubs, via two small helpers in
+`program_fixtures.py`:
+
+* **Tier 1 — `_call_count_expectation`.** For every boundary that gets an
+  actual fixture (an OUT-only boundary has nothing mocked to count, so it
+  gets none), `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
+  value=times)` where `times = len(sequence) + (1 if has_terminal_invocation
+  else 0)` -- except a `STATUS_ONLY` fixture, always `1` (its `sequence` is
+  empty by design, not because zero invocations happened).
+  `has_terminal_invocation` is `"AT_END" in boundary.handlers`, checked
+  directly rather than derived from whether `terminal` resolved to a dict
+  (bug fixed 2026-08-04: a READ with an `AT END` handler but no resolvable
+  status field still genuinely invokes the boundary one more time to hit
+  end-of-file -- "does exhaustion happen" and "do we know a field name to
+  report it in" are independent questions; `call_count` must not go stale
+  just because `terminal` came back `None`). Derivable exactly from the
+  scenario's own already-generated sequence -- never a guess.
+* **Tier 2 — `_tier2_expectations`, backed by
+  `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
+  for the folder's own extensive "exact by construction, or absent" rules).
+  Builds a seed dict from every `BoundaryFixture` in the scenario with
+  *exactly one* generated row -- a multi-row READ sequence has no single
+  representative value to seed with, keyed by `spec.qualified_name` from
+  `fixture.layout`/`fixture.sequence[0]` -- then folds the program's entry
+  paragraph chain seeded with those values, turning every field still
+  knowable at a `DISPLAY`/`WRITE` into `Expectation(kind="field_equals",
+  ref=qualified_name, value=folded_value)`.
+
+Both run once per scenario, after that scenario's `fixtures` list is fully
+populated (so Tier 2 sees the *actual* generated/witness-pinned values for
+that specific scenario, not the happy path's). `mode="happy"`'s byte-
+identity guarantee with `generate()` is unaffected -- both tiers run inside
+`generate()` itself, so `generate_with_scenarios(mode="happy")` (which
+delegates to `generate()` unchanged) carries the exact same expectations.
+
+Reuses the Phase 0 value engine directly: each boundary's field list —
+however it was resolved (`ProgramLayoutIndex.resolve()` for an elementary
+field, `.record_named()` for a whole record) — is generated with a
+`ValueFactory` exactly like `CopybookDataGenerator` uses, no parallel engine.
+
+## Per-category generation rules
+
+| Category / direction | What gets generated |
+|---|---|
+| `READ` (IN) | `options.rows` rows; when `"AT_END"` is in the boundary's `handlers`, `terminal` is set to `{resolved_field: "10"}` if `_resolve_status_field` finds a real field name (`boundary.status_field`, else `index.file_facts(key).file_status_field`), or stays `None` -- never a placeholder string -- if neither resolves (bug fixed 2026-08-04: previously fell back to a literal `"FILE-STATUS"` key that is not a real data-name in the target program) |
+| `WRITE`/`REWRITE` (OUT) | No fixture (nothing to mock) — one `Expectation(kind="stub")` noting the program produces this value |
+| `OPEN`/`CLOSE`/`DELETE`/`START`/`UNLOCK` (`STATUS_ONLY`) | A fixture with `status` only (e.g. `{"WS-FS": "00"}`), no `layout`/`sequence` |
+| `SQL`, `sql_type` SELECT/FETCH (IN) | One generated row; `status={"SQLCODE": "0"}` |
+| `SQL`, INSERT/UPDATE/DELETE (OUT) | Expectation stub, like WRITE |
+| `CICS`/`DLI` (`BIDIRECTIONAL`, best-effort) | Whatever fields resolved get generated values *and* an expectation stub — Phase 2's own layout resolution here is already best-effort (no fixed INTO/FROM attributes), so this phase does not pretend otherwise |
+| `ACCEPT` (IN) | One generated value |
+| `CALL`/`DYNCALL` | Per-argument: IN/BIDIRECTIONAL args' fields are generated into **one combined row** (one CALL invocation, all its IN arguments at once); OUT args get an expectation stub reading "value supplied by the program under test, not mock-generated"; BIDIRECTIONAL args get both a generated value **and** a stub noting the OUT aspect isn't asserted yet; `RETURNING`/`GIVING` parameters always get a generated value (`provenance="giving-parameter"`) |
+
+A name may resolve to either an elementary field or a whole record
+(`_fields_for_name`/`_fields_for_names`, private helpers using the same
+`resolve()`-then-`record_named()` fallback `BoundaryInventoryAnalyzer` uses)
+— a CALL argument or SQL host variable can legally be either.
+
+## Determinism: per-boundary sub-seeds
+
+One `bundle.seed`. Each boundary derives its own
+`zlib.crc32(f"{scenario}|{category}|{key}".encode()) ^ bundle_seed`, feeding
+a fresh `random.Random`/`ValueFactory`. Deliberate: a single shared RNG
+consumed in iteration order would reshuffle every later boundary's values
+the moment an earlier one changed shape (a new field, a resized OCCURS) —
+sub-seeding keeps a bundle stable under unrelated additions. `zlib` is
+stdlib; the zero-dependency rule holds. Pinned by
+`test_program_fixtures.py::TestDeterminism` and the corpus-wide
+`test_gen_fixtures_corpus.py::test_determinism_across_the_corpus`.
+
+## `unresolved` propagation
+
+`bundle.unresolved` is the union of three layers, because a consumer must
+never have to separately check Phase 1/2/3's own gap lists to get the full
+picture: `ProgramLayoutIndex.unresolved` (Phase 1 — merged into
+`BoundaryReport.unresolved` by `BoundaryInventoryAnalyzer.analyze()` itself,
+see `.okf/analysis.md`), `Boundary.unresolved` (Phase 2, per boundary), and
+anything Phase 3's own field resolution additionally fails to pin down (an
+argument name that resolves to nothing generatable). Found and fixed during
+Phase 3 development: the Phase 1→2 merge did not exist until a `--strict`
+CLI smoke test against a program with a known Phase-1-level gap
+(`report_test.cbl`'s Report Writer FD) exited 0 instead of 2.
+
+## `--callee-path` resolution
+
+`ProgramFixtureGenerator._resolve_callees` builds `callee_indexes`/
+`callee_asts` for `BoundaryInventoryAnalyzer`'s Phase 2b "callee source"
+rung two ways, merged: every `CobolProgram.contained_programs` entry (free —
+no file search, e.g. `subprogram_demo.cbl`'s bundled caller + callees), then
+— for any remaining statically-CALLed program name — a search across
+`callee_paths` directories trying `NAME`/`name` × `""`/`.cbl`/`.CBL`/`.cob`/
+`.COB`. A callee that fails to parse is skipped (falls through to the
+caller-dataflow rung), not a hard error — one bad `--callee-path` entry
+should not sink the whole bundle.
+
+## `write_csv_dir`
+
+One `GeneratedDataset`-shaped CSV per fixture whose `layout`/`sequence` are
+both non-empty (file-shaped boundaries only — `STATUS_ONLY`/OUT/expectation
+-only fixtures produce nothing to write), under
+`<path>/<scenario-slug>/<KEY>.csv`. A `MANIFEST.json` at the root is the
+full bundle with each fixture's `sequence` replaced by a pointer string, so
+a consumer can discover what scenarios/fixtures exist without walking the
+directory tree first.
+
+# Scenario Planning (`scenarios.py`)
+
+Phase 5 of the `gen-fixtures` program-scoped test-data initiative. Turns
+Phase 4's `ConstraintReport` and `ProgramFlowAnalyzer`'s control-flow graph
+into a set of named `PlannedScenario`s -- one (or a merge of several) per
+reachable, satisfiable branch arm -- with exact coverage accounting.
+
+```python
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
+from cobolparser.generators import ProgramLayoutIndex
+from cobolparser.generators.scenarios import ScenarioPlanner
+
+index = ProgramLayoutIndex.build(ast)
+boundary_report = BoundaryInventoryAnalyzer().analyze(ast, index)
+constraint_report = ConstraintExtractor().extract(ast, index, boundary_report)
+flow_report = ProgramFlowAnalyzer().analyze(ast)
+
+plan = ScenarioPlanner().plan(
+    constraint_report, flow_report, boundary_report, mode="all"
+)
+plan.scenarios           # list[PlannedScenario]: field_constraints, witnesses,
+                         # sequence_constraints, status_overrides, arm_keys
+plan.coverage            # ScenarioCoverage: total_arms == targeted + merged + missed
+plan.coverage.details    # list[ArmOutcome]: one per arm, with a reason on every miss
+```
+
+**v1 path-condition simplification** (stated up front in the module
+docstring, not discovered later): a scenario targets *one* arm and takes
+only that arm's own conjuncts; enclosing branches on the path to it are not
+accumulated. `ArmOutcome` records "targeted" the same way regardless, so
+this is arm coverage, not full path coverage -- a v2 item.
+
+**Joining a `BranchConstraints` to its `BranchNode`.** Not by string-matching
+`branch_id` to `BranchNode.node_id` (Phase 4's own docstring already flags
+why: replicating `program_flow/scanner.py`'s sequential counter would
+couple this module to that scanner's exact traversal order) and *not* by
+comparing `parent_proc` strings either -- `scanner.py` uppercases its own
+`parent_proc` (`pname.upper()`) while `ConstraintExtractor` preserves the
+source's original casing, so the two are not directly comparable even when
+they name the same paragraph. The actual join is `(line, column)`, both
+derived from the identical statement's `SourceLocation` in both walks.
+`BranchConstraints.column` (new field, additive) exists specifically for
+this join.
+
+**OR-split arms and the flow graph.** `BranchNode` always has exactly one
+`BranchArm` per THEN/ELSE/WHEN/WHEN_OTHER slot, but Phase 4 may have
+OR-split one of those into several arm-ids (`"ELSE#1"`, `"ELSE#2"`, ...) --
+see constraints.py's own De Morgan section. A base arm-id with *any*
+representation in `BranchConstraints.arms` (bare or `#N`-suffixed) counts as
+covered; only a base arm-id with **zero** representation at all is a
+genuine `"missed: ..."` gap. Found and fixed writing this module's own
+tests: the first draft treated a bare `"ELSE"` lookup as missing whenever
+Phase 4 had split it into `"ELSE#1"`/`"ELSE#2"`, double-reporting an already
+-covered arm as also missed.
+
+**Merging.** Two candidate scenarios merge when their constraint sets touch
+disjoint fields *and* their sequence constraints agree on every shared
+boundary (same length, or one side doesn't mention it) -- greedy,
+deterministic: candidates are processed in `(line, column, arm_id)` order,
+each merging into the first open scenario it is compatible with. "Fewer,
+richer scenarios" rather than one per arm.
+
+**Unsatisfiable arms.** Every distinct field an arm's conjuncts touch is
+solved independently via `domains.solve()`; if *any* field's constraint set
+is `Unsatisfiable`, the whole arm is unsatisfiable (all of an arm's
+conjuncts must hold simultaneously) and lands in `coverage.missed` with
+`"unsatisfiable: <domains.py's own reason>"`.
+
+**Fixed families (`mode="all"` only):**
+
+* **empty input** — one combined scenario: every `IN`-direction READ
+  boundary gets a `SequenceConstraint(length=0)`; every `IN`-direction SQL
+  boundary gets a `status_overrides` entry of `"100"` (SQLCODE not found).
+* **error status** — one scenario per *declared* handler, never a status
+  the program has no path for: `INVALID_KEY` in `Boundary.handlers` ->
+  `"23"`; a CALL's `ON_EXCEPTION` -> `"12"`; an OPEN with a `status_field`
+  -> `"35"`.
+* **boundary values** — two combined scenarios (`"minimum"`/`"maximum"`),
+  every numeric field any constraint touches pinned to its picture's true
+  extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`).
+  Pinned via an `eq` constraint, not `ge`/`le` -- found writing this
+  family's own test: `domains.solve()`'s witness is always the *midpoint*
+  of the resulting interval, so a `ge("0")` constraint alone produced a
+  mid-range witness, not `0`.
+
+**Wired into `gen-fixtures` as of Phase 6.** The CLI's `--scenarios
+branches|all` now drive real scenario selection via
+`ProgramFixtureGenerator.generate_with_scenarios_from_file` (see "Scenario-mode
+generation" under "Program Fixtures" above) -- each `PlannedScenario` becomes
+an actual `BoundaryFixture`-populated `bundle.Scenario`, and
+`FixtureBundle.scenario_coverage` carries this module's own
+`ScenarioCoverage.to_dict()` verbatim.
+
 # Tests
 
 * `tests/unit/test_copybook_data_generator.py` — flattening, categories,
@@ -237,10 +653,56 @@ values) asked for 40 unique rows must terminate, not spin.
 * `tests/contracts/test_copybook_data_generator_contract.py` — exported names,
   signatures, `to_dict()` key sets, reproducibility guarantee
 * `tests/unit/test_flowchart_generator.py` — flowchart generators
+* `tests/unit/test_program_layout_index.py` — FD/record resolution, FD-vs-SD
+  tagging, `FileFacts` merging, bare/qualified/level-88 name resolution,
+  `record_named()` (whole-record lookup + cross-section ambiguity),
+  multi-program compilation units, `from_file` error modes
+* `tests/integration/test_program_layout_corpus.py` — every
+  `examples/cobol/shamrice/*.cbl` indexes without raising; zero unexpected
+  `unresolved`/`ambiguities` entries (`report_test.cbl`'s Report Writer FD is
+  the one expected, documented exception)
+* `tests/unit/test_program_fixtures.py` — bundle assembly, CALL-argument
+  fixtures (IN/OUT/BIDIRECTIONAL expectation notes), SQL fixtures
+  (SQLCODE stub), determinism, `write_csv_dir` (including
+  `TestScenarioModes`: witness pinning, empty-input zero-length sequences,
+  boundary-value min/max, `scenario_coverage` presence; and
+  `test_csv_dir_round_trips_byte_for_cell_against_the_json` / the
+  multi-scenario-directory test, both Phase 6)
+* `tests/unit/cli/test_gen_fixtures_cli.py` — `gen-fixtures` flags,
+  `--list-boundaries`, `--format json|csv-dir`, `--strict` exit codes
+* `tests/integration/test_gen_fixtures_corpus.py` — every
+  `examples/cobol/shamrice/*.cbl` generates a bundle without raising; every
+  generated cell fits its field's category; determinism across the corpus
+* `tests/contracts/test_fixture_bundle_contract.py` — exported names,
+  `bundle_version`, generator signatures, `to_dict()` key sets across
+  `FixtureBundle`/`Scenario`/`BoundaryFixture`/`Expectation`/`CoverageSummary`,
+  reproducibility guarantee; `TestScenarioModeContract` (Phase 6) — signature
+  pins for `generate_with_scenarios`/`_from_file`, happy-mode byte-identity
+  with `generate`, `scenario_coverage` population/absence, seed
+  reproducibility across `branches`/`all`, unknown-mode `ValueError`
+* `tests/unit/test_scenario_planner.py` — single-IF THEN/ELSE targeting with
+  differing witnesses, disjoint-field merging, unsatisfiable-arm handling,
+  the three fixed families (`mode="all"`), exact coverage accounting
+* `tests/integration/test_scenario_planner_corpus.py` — every
+  `examples/cobol/shamrice/*.cbl` plans (both `branches` and `all` modes)
+  without raising; coverage accounting sums to the arm count for every
+  program; every miss/merge carries a reason/target
 
 # See Also
 
 * [ast-models.md](ast-models.md) — `CobolDataItem` / `PictureClause` /
   `OccursClause` / `ConditionNameItem`, the inputs to flattening
-* [cli.md](cli.md) — `gen-data` and `program-flow` subcommands
-* [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts
+* [cli.md](cli.md) — `gen-data` and `gen-fixtures` (Phases 1-3, 5-6) and
+  `program-flow` subcommands
+* [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts and
+  joined against by `scenarios.py`; `BoundaryInventoryAnalyzer` (Phase 2),
+  the input `report` this file's `ProgramFixtureGenerator` (Phase 3) and
+  `ScenarioPlanner` (Phase 5) both consume; `ConstraintExtractor` /
+  `domains.solve()` (Phase 4), which `scenarios.py` consumes directly
+* [parser.md](parser.md) — the DATA DIVISION parser's `fd_file_name` /
+  `fd_clauses` / `fd_record_type` metadata tags this index reads
+* [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
+  full `FixtureBundle` JSON shape, key by key, with a worked example (Phase 6)
+* `docs/plans/2026-08-02-program-data-generation-design.md` and
+  `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
+  full 9-phase plan this file documents Phases 1, 3, 5, and 6 of

@@ -19,6 +19,7 @@ _SUBCOMMANDS = frozenset(
         "preprocess",
         "expand",
         "gen-data",
+        "gen-fixtures",
         "analyze",
         "dead-code",
         "program-flow",
@@ -861,6 +862,143 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         print(dataset.to_csv(), end="")
 
 
+def _build_gen_fixtures_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "gen-fixtures",
+        help="Generate program-scoped test fixtures (boundary mocks/asserts) for a COBOL program",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_copybook_args(p)
+    p.add_argument(
+        "--callee-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Directory to search for a CALLed program's source, to resolve "
+        "CALL argument direction (repeatable)",
+    )
+    p.add_argument(
+        "--rows",
+        "-n",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Rows to generate per IN file/SQL boundary (default: 10)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        metavar="N",
+        help="RNG seed for reproducible output (default: random, reported in the bundle)",
+    )
+    p.add_argument(
+        "--scenarios",
+        choices=["happy", "branches", "all"],
+        default="happy",
+        help="Scenario strategy: happy (one unconstrained scenario, default), "
+        "branches (one scenario per reachable/satisfiable branch arm, merged "
+        "where possible), all (branches + fixed empty-input/error-status/"
+        "boundary-values families)",
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "csv-dir"],
+        default="json",
+        help="Output format: one JSON bundle, or one CSV per file boundary "
+        "under --output DIR (default: json)",
+    )
+    p.add_argument(
+        "--list-boundaries",
+        action="store_true",
+        help="List every boundary (category/key/paragraph/line/direction) and exit",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 2 if the bundle has any unresolved boundary/argument",
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_gen_fixtures)
+
+
+def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
+    from ..generators.data.errors import ProgramLayoutError
+    from ..generators.program_fixtures import ProgramFixtureGenerator
+
+    generator = ProgramFixtureGenerator()
+    copybook_paths = args.copybook_path or None
+    callee_paths = args.callee_path or None
+
+    if args.list_boundaries:
+        try:
+            _, _, report = generator.analyze_from_file(
+                args.file, copybook_paths=copybook_paths, callee_paths=callee_paths
+            )
+        except ProgramLayoutError as exc:
+            _fail(str(exc))
+        _json_out(
+            {
+                "source_file": args.file,
+                "boundaries": [
+                    {
+                        "category": b.ref.category,
+                        "key": b.ref.key,
+                        "paragraph": b.ref.paragraph,
+                        "line": b.ref.line,
+                        "direction": b.direction,
+                    }
+                    for b in report.boundaries
+                ],
+            },
+            args.compact,
+            getattr(args, "output", None),
+        )
+        return
+
+    try:
+        from ..generators.data.options import DataGeneratorOptions
+
+        generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=args.rows))
+        bundle = generator.generate_with_scenarios_from_file(
+            args.file,
+            copybook_paths=copybook_paths,
+            callee_paths=callee_paths,
+            mode=args.scenarios,
+            seed=args.seed,
+        )
+    except ProgramLayoutError as exc:
+        _fail(str(exc))
+
+    if args.strict and bundle.unresolved:
+        print(
+            f"error: {len(bundle.unresolved)} unresolved item(s) in strict mode:",
+            file=sys.stderr,
+        )
+        for item in bundle.unresolved:
+            print(f"  {item}", file=sys.stderr)
+        sys.exit(2)
+
+    if args.format == "csv-dir":
+        output_dir = getattr(args, "output", None)
+        if not output_dir:
+            _fail("--format csv-dir requires --output DIR")
+        try:
+            bundle.write_csv_dir(output_dir)
+        except OSError as e:
+            _fail(f"Cannot write output directory: {e}")
+        return
+
+    _json_out(
+        {"source_file": args.file, **bundle.to_dict()},
+        args.compact,
+        getattr(args, "output", None),
+    )
+
+
 # -- Shared analyzer subcommand builder ---------------------------------------
 
 
@@ -1213,6 +1351,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_preprocess_parser(subparsers)
     _build_expand_parser(subparsers)
     _build_gen_data_parser(subparsers)
+    _build_gen_fixtures_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
         "analyze",

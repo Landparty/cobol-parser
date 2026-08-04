@@ -90,6 +90,7 @@ cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [-o out.csv]
+cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser program-flow <file.cbl>
@@ -158,7 +159,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 13 static analysis modules:
+**`cobolparser/analysis/`** -- 16 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -172,11 +173,16 @@ COBOL source (.cbl/.cob)
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
 - `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`; public API re-exported from the package `__init__.py`)
+- `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
+- `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
+- `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE is poisoned unconditionally since the AST does not record BY vs INTO; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field still knowable at a DISPLAY/WRITE. See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator)
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
+- `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3/6/7 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle`. `generate`/`generate_from_file` produce one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. `generate_with_scenarios`/`generate_with_scenarios_from_file` (Phase 6) additionally accept `mode="branches"|"all"`, routing through Phase 5's `ScenarioPlanner` and pinning each `PlannedScenario`'s witnesses/sequence-lengths/status-overrides into an otherwise normally-generated fixture set; `mode="happy"` delegates to `generate()` unchanged (byte-identical). Every scenario's `expectations` also carries tier 1 (`Expectation(kind="call_count", ...)`, derived exactly from that scenario's own generated sequence length) and tier 2 (`Expectation(kind="field_equals", ...)`, from `analysis.const_fold.ConstantFolder` seeded with the scenario's own single-invocation mocked inputs) -- Phase 7. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`, `.okf/analysis.md`, and `docs/fixture-bundle-schema.md`
+- `scenarios.py` -- `ScenarioPlanner` (Phase 5 of the `gen-fixtures` initiative): turns a Phase 4 `ConstraintReport` and `ProgramFlowAnalyzer`'s CFG into a set of named `PlannedScenario`s -- one (or a merge of several) per reachable, satisfiable branch arm, plus fixed families (empty-input/error-status/boundary-values) for `mode="all"` -- with exact arm-coverage accounting (`ScenarioCoverage`: targeted + merged + missed == total, every miss carrying a reason). Wired into the `gen-fixtures` CLI as of Phase 6 via `program_fixtures.py`'s `generate_with_scenarios`. See `.okf/generators.md`
 
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
 
@@ -306,7 +312,82 @@ dataset.to_csv()               # header row + 100 generated records
 dataset.write_csv("out.csv")
 dataset.fields                 # list[FieldSpec] — the resolved layout
 dataset.seed                   # replay this run with DataGeneratorOptions(seed=...)
+
+# Whole-program layout index (Phase 1 of program-scoped test-data generation)
+from cobolparser.generators import ProgramLayoutIndex
+index = ProgramLayoutIndex.from_file("INVUPDT.cbl")   # or .build(ast)
+index.record_for_file("INV-FILE")      # CobolDataItem | None, via FD -> record
+index.file_facts("INV-FILE")           # FileFacts: organization/keys/record size/FD-or-SD
+index.resolve("INV-QTY OF INV-REC")    # ResolvedField | None (bare/qualified/level-88 names)
+index.record_named("INV-REC")          # CobolDataItem | None (whole record, any section)
+index.unresolved                       # reasons nothing was silently dropped
+
+# Boundary inventory (Phase 2): every mockable touchpoint of a program
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+report = BoundaryInventoryAnalyzer().analyze(ast, index)
+report.boundaries                      # list[Boundary]: category/key, direction,
+                                        # record_names, status_field, handlers, call_args
+report.boundaries[0].call_args         # CALL/DYNCALL only: per-argument IN/OUT/
+                                        # BIDIRECTIONAL direction + provenance
+
+# Program fixture bundle (Phase 3): generated mock data + expectation stubs
+from cobolparser.generators import ProgramFixtureGenerator
+bundle = ProgramFixtureGenerator().generate_from_file("INVUPDT.cbl", seed=7)
+bundle.scenarios[0].fixtures           # list[BoundaryFixture]: generated rows per boundary
+bundle.scenarios[0].expectations       # list[Expectation]: assert-on stubs for OUT boundaries
+bundle.coverage                        # CoverageSummary: total/resolved/unresolved boundaries
+bundle.unresolved                      # merged Phase 1 + Phase 2 + Phase 3 resolution gaps
+bundle.to_json()                       # byte-identical for the same (program, seed)
+bundle.write_csv_dir("fixtures/")      # one CSV per file-shaped fixture + MANIFEST.json
+
+# Constraint extraction + solving (Phase 4): what branches require of boundary data
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.domains import Witness, solve
+
+creport = ConstraintExtractor().extract(ast, index, report)
+creport.branches               # list[BranchConstraints]: one per IF/EVALUATE/SEARCH
+creport.sequence_constraints   # list[SequenceConstraint]: READ/AT-END/PERFORM-UNTIL EOF idiom
+creport.unsupported            # program-level gaps (never silently dropped)
+
+branch = creport.branches[0]
+witness = solve(branch.arms["THEN"][0].field.spec, branch.arms["THEN"])
+if isinstance(witness, Witness):
+    witness.value               # a value satisfying every conjunct, PICTURE-valid
+
+# Scenario planning (Phase 5): constraints + CFG -> a named scenario set
+from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
+from cobolparser.generators.scenarios import ScenarioPlanner
+
+flow_report = ProgramFlowAnalyzer().analyze(ast)
+plan = ScenarioPlanner().plan(creport, flow_report, report, mode="all")
+plan.scenarios                 # list[PlannedScenario]: field_constraints, witnesses,
+                                # sequence_constraints, status_overrides, arm_keys
+plan.coverage                  # ScenarioCoverage: total_arms == targeted + merged + missed
+plan.coverage.details          # list[ArmOutcome]: one per arm, a reason on every miss
+
+# Wired end-to-end (Phase 6): scenario planning -> a populated FixtureBundle
+bundle = ProgramFixtureGenerator().generate_with_scenarios_from_file(
+    "INVUPDT.cbl", mode="all", seed=7,   # mode: "happy" | "branches" | "all"
+)
+bundle.scenarios                # one Scenario per PlannedScenario, each with real
+                                 # BoundaryFixtures (witnesses/sequence-lengths/status
+                                 # pinned, everything else generated as usual)
+bundle.scenario_coverage        # ScenarioCoverage.to_dict(), None for mode="happy"
+
+# Every scenario's own expectations (Phase 7): structural + computed, not just stubs
+for e in bundle.scenarios[0].expectations:
+    e.kind    # "call_count" (Tier 1, exact from the sequence length) |
+              # "field_equals" (Tier 2, constant-folded) | "stub" (everything else)
+
+# Tier 2 standalone: constant-fold a program's entry-paragraph chain
+from cobolparser.analysis.const_fold import ConstantFolder
+
+fold = ConstantFolder().fold(ast, index, seed_values={"WS-QTY": "622"})
+fold.known                      # dict[qualified_name, str]: fields still knowable
+                                 # at a DISPLAY/WRITE by the end of the walk
 ```
+
+Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.md`.
 
 ### Adding a New Statement Parser
 

@@ -1,16 +1,19 @@
 ---
 type: Module
 title: Static Analysis
-description: 13 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, and more.
-tags: [analysis, dead-code, program-flow, io, crud]
-timestamp: 2026-07-20T00:00:00Z
+description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
+tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 13 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 15 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
-which uses `.resolve(ast)`.
+which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
+takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
+`ConstraintExtractor`, which uses `.extract(ast, index, boundary_report) ->
+ConstraintReport` (Phase 1's index *and* Phase 2's boundary report).
 
 # Public API
 
@@ -209,7 +212,389 @@ resolved = HostVariableResolver().resolve(ast)   # note: .resolve(), not .analyz
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
 definitions.
 
-# Module File Map
+## BoundaryInventoryAnalyzer
+
+Phase 2 of program-scoped test-data generation (the `gen-fixtures` initiative
+-- see `docs/plans/2026-08-02-program-data-generation-design.md` and
+`.okf/generators.md`'s `ProgramLayoutIndex` section, Phase 1). Walks the
+PROCEDURE DIVISION and emits one `Boundary` per mockable statement, using the
+same `(category, key)` convention mockymock's own `mock_surface` module uses
+-- two independent walks over the same AST that must agree on keys (the
+dependency direction is mockymock -> cobol-parser, never the reverse; the
+unique-prefix key algorithm and the non-interactive-ACCEPT-sources list are
+re-derived independently against that module's source, not imported).
+
+```python
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.generators import ProgramLayoutIndex
+
+index = ProgramLayoutIndex.build(ast)
+report = BoundaryInventoryAnalyzer().analyze(
+    ast, index,
+    callee_indexes={"CALCULATOR": callee_index},   # optional, Phase 2b rung 2
+    callee_asts={"CALCULATOR": callee_ast},
+)
+report.boundaries          # list[Boundary]: ref (category/key/paragraph/line),
+                           # direction, record_names, status_field, handlers,
+                           # call_args, unresolved
+report.unresolved          # program-level gaps (never silently dropped)
+```
+
+**Categories**: `CALL`/`DYNCALL` (per-argument direction, see below),
+`OPEN`/`CLOSE`/`READ`/`WRITE`/`REWRITE`/`DELETE`/`START`/`UNLOCK` (the eight
+file-op verbs), `SQL`, `CICS`, `DLI`, `ACCEPT` (console only --
+non-interactive sources filtered). `DISPLAY` is never a boundary (assert-only,
+out of scope for this phase, matching mockymock's own `mock_surface`).
+
+**File ops.** WRITE/REWRITE key on the *record* name (COBOL syntax names the
+record, not the FD) and READ's `INTO` target also names a whole record --
+both resolved via `ProgramLayoutIndex.record_named()`, not `.resolve()`
+(`.resolve()` only ever finds elementary fields; a WRITE/REWRITE/READ-INTO
+target is a group item, which `flatten_record` never emits a `FieldSpec`
+for -- this gap is exactly why `record_named()` exists; found via direct
+reproduction against `tests/samples/file_operations.cbl`, not theorized).
+OPEN/CLOSE emit one `Boundary` per file named (COBOL allows `OPEN INPUT A
+OUTPUT B` in one statement). DELETE/START/UNLOCK are `STATUS_ONLY` (no data
+payload); READ is `IN`; WRITE/REWRITE are `OUT`.
+
+**CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
+`CallArg.provenance` records which:
+
+1. `passing_mode` in `CONTENT`/`VALUE` -> **OUT**, always (language rule --
+   the callee cannot write back through either mode).
+2. Callee source available (`callee_indexes`/`callee_asts`, keyed by
+   uppercased called-program name): does the callee write to its Nth
+   LINKAGE 01 *at all* -> **IN**; read-only -> **OUT**. "Writes" is checked
+   generically via `.targets` (shared verbatim by `MoveStatement`,
+   `ArithmeticStatement` -- ADD/SUBTRACT/MULTIPLY/DIVIDE --, `ComputeStatement`,
+   `InitializeStatement`, `SetStatement`) plus `.givings` (arithmetic GIVING)
+   and `.into_target`/`.into_targets` (READ INTO, STRING/UNSTRING) -- **not**
+   just `MoveStatement`, which would miss a `COMPUTE LK-RESULT = ...`
+   subprogram entirely (found via `tests/samples/subprogram_demo.cbl`'s
+   CALCULATOR, which computes its result exactly that way; a MOVE-only
+   check silently mis-classified it as OUT).
+3. Caller-side dataflow in the enclosing paragraph's own statement list
+   (source order): last write before the CALL with no read after -> **OUT**;
+   first read after with no write before -> **IN**; both -> **BIDIRECTIONAL**.
+   A write to a *parent group* counts as touching a child field (and vice
+   versa), checked via `FieldSpec.path` prefix comparison through the index,
+   not bare string equality. "Read" for a write-shaped statement (rung 2's
+   list above) checks only its own read-only attribute (MOVE's `.source`);
+   the generic `.operands` fallback is reserved for statement types with no
+   write-shape at all (DISPLAY, IF conditions, ...) since a write-shaped
+   statement's own `.operands` also contains its target, which would
+   otherwise misread a write as a read of the same name.
+4. Otherwise **BIDIRECTIONAL**, `provenance="assumed-bidirectional"`.
+
+`RETURNING`/`GIVING` parameters are always `IN` (`provenance=
+"giving-parameter"`) -- the callee produces them by definition.
+
+**SQL.** `into_variables` is unreliable in practice: an inline `SELECT ...
+INTO :a FROM t WHERE x = :b` places *both* `:a` and `:b` in `host_variables`,
+never populating `into_variables` at all (verified empirically against
+`tests/samples/ibm_extensions.cbl` and `database_interface.cbl` -- the parent
+plan's Phase 2 table assumed `into_variables` cleanly separated IN from OUT
+variables; it does not). `host_variables` is therefore the only layout
+source used, for every SQL shape; direction comes from `sql_type`
+(`SELECT`/`FETCH` -> IN, `INSERT`/`UPDATE`/`DELETE` -> OUT, else
+`STATUS_ONLY`), independent of which variables are attached.
+`status_field="SQLCODE"` always.
+
+**CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
+resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
+argument-text dict, and `ExecImsStatement.arguments` is a positional list
+with no fixed role per position. Best-effort in v1: every option
+value/argument is tried against the layout index (via the same
+`resolve()`-then-`record_named()` fallback used elsewhere), direction
+defaults to `BIDIRECTIONAL`, and an unresolved entry on the `Boundary` itself
+(not the report-level list) notes the limitation rather than claiming
+precision this phase does not have.
+
+**ACCEPT.** Non-interactive sources (`DATE`, `DAY`, `DAY-OF-WEEK`, `TIME`,
+`COMMAND-LINE`, `ENVIRONMENT`, `ENVIRONMENT-VALUE`, `ARGUMENT-NUMBER`,
+`ARGUMENT-VALUE`) are not boundaries at all -- resolved without touching
+stdin, mirroring mockymock's own `_NON_INTERACTIVE_ACCEPT_SOURCES`.
+`ACCEPT OMITTED` (waits for console input but stores nothing -- a real COBOL
+idiom, not a gap) is still recorded as a boundary but with no fields to
+resolve and no unresolved note.
+
+**Key convention.** Static CALL keys keep the literal's original case (a
+COBOL program name is written case-sensitively); dynamic CALL/SQL/CICS/DLI
+keys are uppercased/normalized. SQL/CICS/DLI keys are the shortest
+word-prefix of the normalized command text no other same-category site in
+the program shares (`_unique_prefix`, re-derived from mockymock's
+`generator._unique_prefix`), falling back to the full text on a genuine tie.
+
+**Nested-body walk**: the same discipline `IOLogger` and mockymock's
+`mock_surface` both converged on independently -- a fixed set of
+`getattr()`-checked attributes (`then_statements`, `else_statements`,
+`inline_statements`, the IO/CALL clause bodies) plus two special cases:
+`EvaluateStatement.when_clauses`/`.default_when` are `WhenClause` *nodes*
+with a `.statements` attribute, while `SearchStatement.when_clauses` is a
+**list of dicts** with a `"statements"` key -- a different shape, and a
+documented trap (mixing the two loop variables up trips mypy immediately,
+which is how this was caught).
+
+## ConstraintExtractor
+
+Phase 4 of program-scoped test-data generation (the `gen-fixtures` initiative
+-- see `docs/plans/2026-08-02-program-data-generation-design.md`). Walks
+IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards and, for every
+operand that resolves (via Phase 1's `ProgramLayoutIndex`) to a field a
+boundary actually feeds (per Phase 2's `BoundaryReport`), emits a
+`FieldConstraint`; the domain-propagation solver in `domains.py` (same PR)
+turns a field's constraints into a concrete witness value.
+
+```python
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.domains import solve
+
+report = ConstraintExtractor().extract(ast, index, boundary_report)
+report.branches              # list[BranchConstraints]: one per IF/EVALUATE/
+                              # SEARCH decision point
+report.sequence_constraints  # list[SequenceConstraint]: the READ/AT-END/
+                              # PERFORM-UNTIL EOF-loop idiom
+report.unsupported           # program-level gaps (never silently dropped)
+
+branch = report.branches[0]
+branch.arms                  # dict[str, list[FieldConstraint]]: arm_id ->
+                              # conjuncts, e.g. {"THEN": [...], "ELSE": [...]}
+
+witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
+```
+
+**Extraction sources and op vocabulary** (`FieldConstraint.op`): `eq ne lt le
+gt ge in_set not_in_set class_numeric class_alphabetic figurative`.
+Relational comparisons (`=`, `>`, `<`, `>=`, `<=`, `NOT =`/`<>`) map directly;
+a level-88 bare condition-name (`IF ORDER-VALID`) resolves through
+`ProgramLayoutIndex.resolve()` to its *parent* field and becomes `in_set`
+over the 88's already-parsed `condition_values` (THRU ranges included);
+figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`
+with the symbolic name preserved in `values`, not its literal expansion;
+class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
+`class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
+directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
+getting their own domain-handling branch. `negated` only carries meaning for
+`class_numeric`/`class_alphabetic`/`figurative`, which have no separate "not"
+op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
+directly into the op choice).
+
+**`class_numeric`/`class_alphabetic` extract cleanly but do not narrow a
+witness in v1.** `domains.py`'s `solve()` treats both ops as a no-op on
+whichever domain (`NumericDomain`/`TextDomain`) the field's category picked —
+the arm containing an `IS NUMERIC`/`IS ALPHABETIC` test is still correctly
+`"targeted"` (or `"merged"`) in `ScenarioPlanner`'s coverage accounting, and
+every *other* constraint on the same field still narrows normally, but the
+generated value for a field constrained *only* by a class test is not
+guaranteed to actually satisfy that test — found producing
+`docs/fixture-bundle-schema.md`'s worked example (Phase 6): an `IS NUMERIC`
+arm's witness rendered as an arbitrary alphanumeric value, not a digit
+string. Every other op in the vocabulary above is fully solved.
+
+**AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
+THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`) --
+there is no structural "NOT" node in this parser to walk instead (confirmed
+against `_conditions.py`: negation is baked directly into concrete operator
+strings like `NOT_EQUAL`/`IS NOT NUMERIC`, or resolved by the caller passing
+`negate=True`). An AND stays a single conjunct list; a negated AND becomes a
+disjunction (`NOT(A AND B) = NOT A OR NOT B`) and vice versa for OR --
+implemented as one `(operator == "AND") != negate` boolean flip, not two
+separate code paths. A conjunction drops the *whole* variant if either side
+fails to extract (keeping only one conjunct would silently widen the modeled
+domain past what the source requires); a disjunction safely keeps whichever
+side(s) did extract (narrowing to fewer alternatives is still sound for
+witness generation, just incomplete). More than one variant means an OR was
+present; each becomes its own arm via a `#1`/`#2` suffix (`arms["THEN"]` vs.
+`arms["THEN#1"]`/`arms["THEN#2"]`) -- the parent plan's dataclass models one
+flat conjunct list per arm *id*, not a list of variants per arm, so OR
+alternatives are represented as separate arms rather than nested lists.
+
+**`branch_id` is not `ProgramFlowAnalyzer`'s `BranchNode.node_id`.**
+Replicating `program_flow/scanner.py`'s exact sequential counter would
+couple this module to that scanner's specific traversal order; instead
+`branch_id` self-encodes `f"{parent_proc}@{line}:{column}"`, the same join
+key `BranchNode` really is keyed by in substance. The actual join a later
+phase should perform is `(line, column)` alone, via the dedicated `line`/
+`column` fields (`column` added when Phase 5's `ScenarioPlanner` needed it --
+see [generators.md](generators.md)) -- **not** by comparing `parent_proc`
+strings: `program_flow/scanner.py` uppercases its own `parent_proc`
+(`pname.upper()`) while this module preserves the source's original casing,
+so the two are not directly comparable even when they name the same
+paragraph (found writing Phase 5's own tests).
+
+**PERFORM UNTIL's `until_condition` is never itself a `ConditionalExpression`
+/`LogicalExpression`.** It is always the historical
+`CobolExpression("CONDITION")` wrapper holding the raw joined string in
+`.operands`; the real structural tree (when `_conditions.py`'s shared
+machinery could build one) lives on its `.condition_tree` attribute (M12 --
+see `perform_parser.py`'s `_make_until_condition_expression`). Walking
+`until_condition` directly instead of `until_condition.condition_tree` was
+the first bug found writing this module's own tests -- every PERFORM UNTIL
+condition came back `"unsupported expression node: CobolExpression"`.
+
+**The EOF/loop-flag idiom -> `SequenceConstraint`.** `_collect_eof_flags`
+walks `ast.get_all_statements()` for every `IOReadStatement` whose
+`at_end_clause` contains a `MoveStatement`, mapping the MOVE's target field
+name to that READ's file name. When a `PERFORM UNTIL`'s condition mentions
+that same field (by name only -- exact value match is not required, matching
+on field identity is simpler and more robust to minor variations), the
+`SequenceConstraint.boundary` is looked up from the *existing* `Boundary` in
+`boundary_report.boundaries` (never freshly synthesized) so it is always a
+real, already-resolved `BoundaryRef`. `length` is `None` in v1 -- "the flag
+pattern exists" -- picking a concrete record count is Phase 5's job. A
+condition that touches a boundary-fed field but matches no such pattern gets
+one `unsupported` note rather than silence; a pure internal counter loop
+(`PERFORM UNTIL I > 10`, `I` not boundary-fed) is correctly silent -- out of
+scope, not a gap.
+
+**SEARCH WHEN and `EVALUATE TRUE`'s non-compound selectors share one text
+parser.** `SearchStatement.when_clauses`' `"condition"` key is a single raw
+joined string, not a structured tree (unlike IF/PERFORM, SEARCH conditions
+were never given the M12 structural treatment) -- confirmed against
+`search_parser.py`. `EVALUATE TRUE WHEN <selector>` also lacks structure for
+a simple relational selector: `evaluate_parser.py`'s `_build_selector` never
+emits an `"Identifier"` selector type at all (a documented assumption this
+module's first draft got wrong) -- a bare condition-name like `WHEN
+F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
+`{"type": "Literal", ...}` / `{"type": "Condition", "text": ...}` with no
+`"operator"` key, the *same* raw-text shapes SEARCH already has to handle.
+Both route through the same minimal relational-text parser
+(`_parse_relational_text`); a compound `AND`/`OR` selector text (`sel
+["operator"]` present) stays unsupported in v1, same limitation as a
+compound SEARCH WHEN.
+
+**Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
+stated as a parent-plan limitation, not attempted.
+
+**Bug found writing this module's tests, fixed at the root (not worked
+around): `>=`/`<=`/`<>` were silently mis-parsed everywhere**, not just
+here. The lexer emits these as two separate single-character tokens (`>`
+then `=`, never a combined `>=`); `_conditions.py`'s normalisation pass only
+recombined `NOT`-prefixed pairs, so the comparison scan grabbed the bare `>`
+as `GREATER` and left `= 5` dangling in the right-hand operand text --
+confirmed empirically (`IF WS-X >= 5` parsed as `operator="GREATER",
+right_operand="= 5"`) before this fix, for *every* consumer of
+`build_condition_expression` (IF and PERFORM UNTIL both), not something
+introduced by this phase. Fixed by recombining `">"+"="`, `"<"+"="`, and
+`"<"+">"` into their compound tokens during the same cleaning pass that
+already recombines `NOT`-prefixed operators (`_COMPOUND_SYMBOL_OPS`, see
+[parser.md](parser.md)).
+
+## ConstantFolder (`const_fold.py`)
+
+Phase 7 tier 2 of the `gen-fixtures` initiative (see
+`docs/plans/2026-08-02-program-data-generation-design.md`): a single forward
+walk of a program's entry paragraph chain, seeded by one scenario's own
+mock-supplied inputs, that tracks which data items hold a knowable literal
+value after a MOVE or a simple arithmetic/COMPUTE statement. Wired into
+`ProgramFixtureGenerator` (`generators/program_fixtures.py`'s
+`_tier2_expectations`), which builds the seed dict from every
+`BoundaryFixture` with *exactly one* generated row and turns every field
+still knowable at a `DISPLAY`/`WRITE` into a `kind="field_equals"`
+`Expectation` -- see `docs/fixture-bundle-schema.md`'s Expectation section
+for the full worked example.
+
+```python
+from cobolparser.analysis.const_fold import ConstantFolder
+
+folder = ConstantFolder()
+result = folder.fold(ast, index, seed_values={"WS-QTY": "622"})
+result.known   # dict[qualified_name, str]: fields still knowable at a
+               # DISPLAY/WRITE, by the end of the walk
+```
+
+**"Exact by construction, or absent" -- never a guess.** Every ambiguity
+below resolves by leaving a field unknown (poisoned: removed from the
+internal env) rather than approximating:
+
+* A `PERFORM ... UNTIL`/`VARYING`/`TIMES` loop may run zero or many times,
+  so nothing inside it is knowable at fold time -- every field its body
+  (including through a nested `PERFORM` to another paragraph) could write is
+  poisoned, and the walk continues *after* the loop, since it still runs;
+  the walk just cannot see inside it. A non-looping `PERFORM` (a plain
+  paragraph call, optionally `THRU` a range) is walked inline exactly once,
+  including into paragraphs it in turn `PERFORM`s, guarded against a
+  non-looping `PERFORM` cycle by tracking which paragraphs are already on
+  the current call stack.
+* An `IF`/`EVALUATE` branches on data this walk does not evaluate (Phase 5's
+  `ScenarioPlanner` already owns targeting one specific arm elsewhere), so
+  every field either arm could write is poisoned the same way as a loop
+  body -- this is a conjunctive walk, not per-scenario branch evaluation.
+* `DIVIDE` is poisoned unconditionally: `DivideStatement` does not record
+  whether `BY` or `INTO` was used (`_parse_binary_arithmetic` shares one
+  code path for both, see [parser.md](parser.md)), and the two invert
+  dividend/divisor order -- there is no way to compute the correct value
+  from the node alone. A `/` inside a `COMPUTE` expression tree has no such
+  ambiguity (both operands are structurally explicit, M12's
+  `expression_tree`) and folds normally, including a divide-by-zero or
+  non-terminating-decimal guard (both poison, not truncate).
+* `ROUNDED`, `CORRESPONDING`, and any target that does not resolve to an
+  elementary field are poisoned rather than approximated. A numeric
+  MOVE/arithmetic result is only ever recorded when it fits its target
+  field's PICTURE *exactly* (`_fits_exactly`: no truncated decimal digits,
+  no truncated integer digits, no sign coercion into an unsigned field) --
+  real COBOL's MOVE truncation rules are well-defined, but replicating them
+  exactly is out of scope for v1; an overflowing result is poisoned instead.
+* **A well-formed ADD/SUBTRACT self-reference is poisoned, not
+  under-computed.** `ArithmeticStatement.operands` is a deduplicated union
+  of the real addend/subtrahend tokens *and* the target/giving names
+  (`set_target`/`set_giving` both call the same `_add_unique_operand` the
+  addend-collection phase does) -- so `ADD X TO X` (doubling X) and "X was
+  never a separate addend at all" produce the *identical* `.operands`
+  shape, and the distinction is unrecoverable from the final AST. Since a
+  well-formed ADD/SUBTRACT always has >= 1 real addend (parser-enforced),
+  filtering target/giving names out of `.operands` and finding *nothing
+  left* proves every addend coincided with a target -- the one shape this
+  module can safely detect and poison. A blanket "poison on any operand/
+  target overlap" was tried and rejected during development: a target's own
+  name *always* ends up in `.operands` by construction (regardless of any
+  genuine overlap), so that check fired on every ordinary `ADD 1 TO WS-X`,
+  not just a self-reference -- found immediately via this module's own
+  tests, before it ever reached the corpus sweep. A *partial* overlap
+  (`ADD X, Y TO X`) is not caught and silently undercounts -- narrower and
+  rarer, and documented in the source rather than silently. `MULTIPLY`'s
+  format-1 (`MULTIPLY A BY B`, no GIVING) has no analogous issue:
+  reusing the target's own name as the second operand is directly what the
+  statement means (multiplication has no target-is-also-an-addend hidden
+  term the way ADD/SUBTRACT's TO/FROM accumulation does), so only GIVING
+  names are filtered from its operand list, never targets.
+* **ACCEPT/READ are a deliberate no-op, not an omission.** They are exactly
+  the boundary categories `_tier2_expectations` seeds `env` from before the
+  walk starts; falling through to the generic "unmodeled write" fallback
+  below would poison that seed the instant the walk reached the very
+  statement it represents. `CALL`/`EXEC SQL`/`CICS`/`DLI` are *not* given
+  the same treatment -- their operand lists mix genuinely-unknowable
+  OUT-direction values with seedable IN ones, and the raw AST does not carry
+  resolved direction to tell them apart (only `BoundaryInventoryAnalyzer`'s
+  own richer analysis does) -- deferred to a future version rather than risk
+  treating an OUT value as still-known.
+* Any other statement type this module has no specific rule for
+  (`INITIALIZE`, `SET`, `STRING`/`UNSTRING`, `INSPECT`, and the CALL/SQL/
+  CICS/DLI cases above) conservatively poisons every name in its `.operands`
+  -- a fail-safe default, not a silent skip.
+* Only a `DISPLAY`/`WRITE` operand that resolves *directly* to an elementary
+  field is an observation point -- a whole-record `WRITE`'s individual
+  member fields are not (yet) walked, so some real `field_equals`
+  opportunities are silently not offered. Never wrong, sometimes just
+  quieter than it could be. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
+  PROGRAM` all stop the walk outright (unreachable code after them is never
+  folded or observed).
+
+**Bug found via a NIST-corpus smoke sweep, fixed at the root (not worked
+around): `ProgramLayoutIndex.resolve()` crashed (`IndexError`) on an
+all-punctuation name** (`"."`, from a stray token that leaks into some
+statement's `.operands` for at least one real-world program -- a parser
+artifact this module cannot prevent at the source). `resolve()`'s dotted-
+name and `OF`/`IN` branches both stripped every segment to nothing and then
+indexed into the resulting empty list; both now return `None` instead. Also
+hardened at this module's own call site (`_safe_resolve`, a thin wrapper
+that rejects empty/punctuation-only tokens before ever calling `resolve()`)
+as a second line of defense, since the generic "poison via `.operands`"
+fallback above is exactly the path most exposed to non-name garbage.
+Verified against the full 459-file NIST COBOL-85 corpus (zero crashes, zero
+layout violations) in addition to the 24-file shamrice corpus test below.
+
+## Module File Map
 
 | File | Analyzer |
 |------|---------|
@@ -226,6 +611,10 @@ definitions.
 | `linkage_checker.py` | `LinkageChecker` |
 | `move_type_checker.py` | `MoveTypeChecker` |
 | `program_flow/` | `ProgramFlowAnalyzer` (package: `models` / `scanner` / `edges` / `cycles` / `graph` / `analyzer`) |
+| `boundary_inventory.py` | `BoundaryInventoryAnalyzer` (Phase 2 of `gen-fixtures`) |
+| `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
+| `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
+| `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
 
 # Silent-Failure Audit (2026-07-08)
 
@@ -244,3 +633,12 @@ apply elsewhere (see [cli.md](cli.md) M10). Pinned by
 * [ast-models.md](ast-models.md) — input AST structure
 * [cli.md](cli.md) — CLI wrappers for the most common analyzers
 * [tests.md](tests.md) — `tests/unit/analysis/` covers each analyzer
+* [generators.md](generators.md) — `ProgramLayoutIndex` (Phase 1), the layout
+  source `BoundaryInventoryAnalyzer`/`ConstraintExtractor`/`ConstantFolder`
+  all resolve record/field names through; `ProgramFixtureGenerator`, which
+  wires `ConstantFolder` into `field_equals` expectations (Phase 7)
+* [`../docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) —
+  the full `Expectation` shape `call_count`/`field_equals`/`stub` produce
+* `docs/plans/2026-08-02-program-data-generation-design.md` and its per-phase
+  implementation plan — the full 9-phase `gen-fixtures` plan this file
+  documents Phases 2, 4, and 7 of

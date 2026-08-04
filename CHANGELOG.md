@@ -17,6 +17,399 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis/generators:** `ConstantFolder` and `Expectation` tiers 1-2 --
+  structural and computed assertions, not just stubs
+  (`cobolparser/analysis/const_fold.py`, `cobolparser/generators/program_fixtures.py`,
+  2026-08-04). Phase 7 ("Expectations tiers 1-2") of the `gen-fixtures`
+  program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`).
+
+  **Tier 1 (`call_count`)**: every boundary that gets an actual fixture in a
+  scenario now also gets `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
+  value=times)`, `times` derived exactly from that fixture's own generated
+  sequence (`len(sequence) + 1` when a `terminal`/`AT END` is present, else
+  `len(sequence)`; always `1` for a `STATUS_ONLY` fixture) -- never a guess,
+  since the scenario itself defines the sequence.
+
+  **Tier 2 (`field_equals`)**: `ConstantFolder` performs a single forward
+  walk of a program's entry paragraph chain -- following non-looping
+  `PERFORM`s (including `THRU` ranges) inline, exactly like a subroutine
+  call executed once -- tracking which data items hold a knowable literal
+  value after a MOVE or a simple ADD/SUBTRACT/MULTIPLY/COMPUTE. Wired via a
+  new `_tier2_expectations` helper that seeds the walk from every
+  `BoundaryFixture` in the scenario with *exactly one* generated row (a
+  multi-row READ sequence has no single representative value to seed with),
+  and turns every field still knowable at a `DISPLAY`/`WRITE` into
+  `Expectation(kind="field_equals", ref=qualified_name, value=folded_value)`.
+
+  "Exact by construction, or absent" throughout, never a guess:
+  - A `PERFORM ... UNTIL`/`VARYING`/`TIMES` loop, or an `IF`/`EVALUATE`
+    branch, poisons every field its body could write (including through a
+    nested `PERFORM`) rather than assume which arm runs or how many
+    iterations occur; the walk continues past it, since it still executes.
+  - `DIVIDE` is poisoned unconditionally: `DivideStatement` does not record
+    whether `BY` or `INTO` was used, and the two invert dividend/divisor
+    order, so the correct value cannot be computed from the AST node alone.
+    A `/` inside a `COMPUTE` expression tree has no such ambiguity (both
+    operands are structurally explicit) and folds normally.
+  - `ROUNDED`, `CORRESPONDING`, and any numeric result that would need
+    rounding/truncation/sign-coercion to fit its target field's PICTURE are
+    all poisoned rather than approximated.
+  - A well-formed ADD/SUBTRACT self-reference (`ADD X TO X`, doubling X) is
+    poisoned rather than silently under-computed as a no-op: `.operands` is
+    a deduplicated union of the real addend tokens and the target/giving
+    names (both populated via the same `_add_unique_operand`), so a genuine
+    self-reference and "the target was never a separate addend at all"
+    produce an identical shape, unrecoverable from the final AST. Since a
+    well-formed ADD/SUBTRACT always has >= 1 real addend, filtering
+    target/giving names out of `.operands` and finding nothing left proves
+    total self-overlap -- the one shape this can safely detect. A blanket
+    "poison on any operand/target overlap" was tried and rejected during
+    development: a target's own name always ends up in `.operands`
+    regardless of any genuine overlap, so it fired on every ordinary
+    `ADD 1 TO WS-X` -- found via this module's own tests before it reached
+    the corpus sweep.
+  - ACCEPT/READ are a deliberate no-op rather than poisoned: they are
+    exactly the boundary categories the seed dict is built from, so treating
+    them as an "unmodeled write" would poison the seed the instant the walk
+    reached the very statement it represents. CALL/EXEC SQL/CICS/DLI are not
+    given the same treatment (their operand lists mix genuinely-unknowable
+    OUT values with seedable IN ones, and the raw AST does not carry
+    resolved argument direction) -- deferred to a later version.
+  - Only a `DISPLAY`/`WRITE` operand resolving directly to an elementary
+    field is an observation point; a whole-record `WRITE`'s individual
+    member fields are not (yet) walked -- narrower than possible, never wrong.
+
+  Also fixes a crash found via a full 459-file NIST COBOL-85 corpus smoke
+  sweep (beyond this initiative's usual 24-file shamrice corpus, given the
+  correctness stakes of arithmetic folding): `ProgramLayoutIndex.resolve()`
+  raised `IndexError` on an all-punctuation name (`"."`, a stray token that
+  leaks into some statement's `.operands` for at least one real-world
+  program) -- both the dotted-name and `OF`/`IN` branches could strip every
+  segment to nothing and then index into the resulting empty list; both now
+  return `None` instead. `const_fold.py` additionally hardens its own call
+  site (`_safe_resolve`) as a second line of defense. Also caught by the
+  same review pass: `_eval_expr`'s `COMPUTE`-expression arithmetic caught
+  only `InvalidOperation`/the builtin `OverflowError`/`ValueError`, but
+  `decimal.Overflow` and `decimal.DivisionByZero` are not subclasses of
+  `OverflowError` -- an extreme exponent (`2 ** 99999`) could crash the
+  whole walk instead of poisoning its target; widened to catch
+  `ArithmeticError` (the common base of every `decimal` signal exception).
+
+  New `ConstantFoldResult` / `ConstantFolder` public API in
+  `cobolparser.analysis.const_fold`. Documented in `.okf/analysis.md` (new
+  "ConstantFolder" section), `.okf/generators.md` (new "Expectations: tiers
+  1-2" section), `CLAUDE.md`, and `docs/fixture-bundle-schema.md` (updated
+  Expectation tier descriptions + worked example). Covered by 104 new tests:
+  `tests/unit/analysis/test_const_fold.py` (44), a full-corpus
+  `tests/integration/test_const_fold_corpus.py` (50, parametrized over the
+  shamrice corpus, plus an ad-hoc sweep of the full 459-file NIST corpus),
+  and 10 new tests in `tests/unit/test_program_fixtures.py` covering the
+  `ProgramFixtureGenerator` wiring end-to-end.
+* **generators:** `--scenarios branches|all` wiring, `scenario_coverage`, and
+  a hand-written fixture-bundle schema doc (`cobolparser/generators/program_fixtures.py`,
+  `cobolparser/generators/data/bundle.py`, `docs/fixture-bundle-schema.md`,
+  2026-08-04). Phase 6 ("Emitters hardening") of the `gen-fixtures`
+  program-scoped test-data initiative: turns Phase 5's `ScenarioPlanner`
+  output into an actual multi-scenario `FixtureBundle` instead of the
+  happy-path-only bundle every mode produced through Phase 5.
+
+  New `ProgramFixtureGenerator.generate_with_scenarios(ast, index, report,
+  mode="happy"|"branches"|"all", seed=...)` and its `_from_file` counterpart.
+  `mode="happy"` delegates to the existing `generate()` unchanged — byte-
+  identical output for the same seed, pinned by a contract test, since this
+  is an additive capability, not a change to `generate`'s existing one. For
+  `"branches"`/`"all"`, every `PlannedScenario` becomes a real `Scenario`
+  with a complete fixture for *every* boundary the program touches (the
+  program under test still hits all of them regardless of which arm is
+  targeted); only the fields/sequence-lengths/status values a scenario
+  actually constrains are pinned to their solved witness via a new optional
+  `override: PlannedScenario` parameter threaded through the existing
+  `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers — everything
+  else still comes from the same `ValueFactory` path the happy path always
+  used. `FixtureBundle` gained one new field, `scenario_coverage: dict |
+  None` (Phase 5's `ScenarioCoverage.to_dict()` verbatim, `None` in
+  `mode="happy"`) — additive, `bundle_version` stays `1`.
+
+  `--scenarios` on the `gen-fixtures` CLI now accepts and genuinely acts on
+  `branches`/`all` (previously accepted but silently behaved like `happy`).
+
+  Also fixes two gaps found closing out this phase: (1) `ArmOutcome.parent_proc`
+  was always `None` on a "merged" outcome — recovered from `arm_key`
+  (`"<paragraph>@<line>:<column>/<arm_id>"`) instead of hardcoding it; (2) a
+  third occurrence of the circular-import shape first seen in Phase 4
+  (`constraints.py`'s newly-added top-level `ProgramLayoutIndex`/
+  `ResolvedField` import now collided with `program_fixtures.py`'s new
+  top-level `ConstraintExtractor` import; a fourth edge then surfaced between
+  `domains.py` and `scenarios.py` via `generators/__init__.py`'s own import
+  chain) — fixed at the root this time instead of with another one-off
+  `TYPE_CHECKING` patch: `cobolparser/generators/__init__.py` is now
+  `__getattr__`-based lazy loading, mirroring `cobolparser/analysis/__init__.py`'s
+  already-established pattern, so importing the package no longer eagerly
+  pulls in every submodule's own transitive dependencies. `__all__` is
+  unchanged (same 21 public names).
+
+  `write_csv_dir` gained an explicit round-trip guarantee test: reading a
+  written `<KEY>.csv` back with `csv.reader` and zipping it against the same
+  fixture's `sequence` in the JSON output produces byte-identical cells, and
+  a multi-scenario bundle produces one CSV directory per scenario slug.
+
+  Documented in `docs/fixture-bundle-schema.md` (new — the full bundle JSON
+  shape key by key, hand-written prose per the zero-dependency/no-JSON-Schema
+  convention, with a worked example), `.okf/generators.md` (scenario-mode
+  generation, the override mechanism, the import-architecture fix),
+  `.okf/cli.md`, and `CLAUDE.md`. Also documents a pre-existing, not
+  previously written down v1 solver limitation surfaced while building the
+  schema doc's worked example: `domains.py` treats `class_numeric`/
+  `class_alphabetic` constraints as a no-op when picking a witness, so an
+  `IS NUMERIC`/`IS ALPHABETIC`-gated arm is correctly targeted/covered but its
+  pinned value is not yet guaranteed to satisfy that specific test (every
+  other constraint form is fully solved). Covered by new tests in
+  `tests/unit/test_program_fixtures.py` (`TestScenarioModes`, the csv-dir
+  round-trip test) and `tests/contracts/test_fixture_bundle_contract.py`
+  (`TestScenarioModeContract`).
+* **generators:** `ScenarioPlanner` — constraints + control flow -> a named
+  scenario set (`cobolparser/generators/scenarios.py`, 2026-08-04). Phase 5
+  of the `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`): turns Phase
+  4's `ConstraintReport` and `ProgramFlowAnalyzer`'s control-flow graph into
+  a set of named `PlannedScenario`s — one (or a merge of several) per
+  reachable, satisfiable branch arm — with exact arm-coverage accounting.
+
+  Joins a `BranchConstraints` to its `BranchNode` via `(line, column)` only
+  (`BranchConstraints` gained a new `column` field for this) — not by
+  comparing `parent_proc` strings, since `program_flow/scanner.py`
+  uppercases its own `parent_proc` while `ConstraintExtractor` preserves the
+  source's casing, so the two are not directly comparable even for the same
+  paragraph (found writing this phase's own tests). An OR-split arm
+  (`"ELSE#1"`/`"ELSE#2"`) counts as full coverage of its base arm (`"ELSE"`)
+  for coverage purposes; only a base arm with zero representation at all —
+  bare or split — is a genuine miss (also found and fixed writing this
+  phase's tests, which had double-reported an already-covered split arm as
+  also missing).
+
+  Two candidate scenarios merge when their constraints touch disjoint
+  fields and their sequence constraints agree on every shared boundary
+  (greedy, deterministic: `(line, column, arm_id)` order) — "fewer, richer
+  scenarios" instead of one per arm. An arm is unsatisfiable (and lands in
+  `coverage.missed`) when any field its conjuncts touch fails to solve via
+  Phase 4's `domains.solve()` — every conjunct in an arm must hold
+  simultaneously.
+
+  `mode="all"` adds three fixed scenario families regardless of branching:
+  empty input (every `IN` READ boundary at sequence length 0, every `IN`
+  SQL boundary at SQLCODE 100), error status (one scenario per *declared*
+  handler — `INVALID KEY` -> FILE STATUS 23, a CALL's `ON EXCEPTION` ->
+  RETURN-CODE 12, an OPEN with a status field -> FILE STATUS 35 — never a
+  status the program has no path for), and boundary values (every
+  constrained numeric field pinned to its picture's true minimum/maximum).
+  The boundary-values family pins via an `eq` constraint, not `ge`/`le` —
+  found writing its own test: `domains.solve()`'s witness is always the
+  interval's *midpoint*, so a bare `ge("0")` constraint produced a
+  mid-range value, not `0`.
+
+  v1 path-condition simplification, stated up front in the module
+  docstring: a scenario targets one arm and takes only that arm's own
+  conjuncts; enclosing branches on the path to it are not accumulated —
+  full path-sensitivity is a v2 item.
+
+  New `ArmOutcome` / `ScenarioCoverage` / `PlannedScenario` / `ScenarioPlan`
+  / `ScenarioPlanner` public API in `cobolparser.generators.scenarios`.
+  **Not yet wired into the `gen-fixtures` CLI**: `--scenarios branches|all`
+  are still accepted but produce the same happy-path-only bundle as
+  `happy` — turning a `PlannedScenario` into an actual `BoundaryFixture`
+  -populated `bundle.Scenario` is deferred to Phase 6, matching Phase 3's
+  own stated deferral of this flag's real behavior.
+
+  Documented in `.okf/generators.md` (new "Scenario Planning" section),
+  `.okf/analysis.md` (corrected `BranchConstraints` join guidance), and
+  `.okf/cli.md`. Covered by `tests/unit/test_scenario_planner.py` and
+  `tests/integration/test_scenario_planner_corpus.py` (parametrized over
+  the shamrice corpus x `{branches, all}` modes: coverage accounting sums
+  to the arm count for every program).
+* **analysis:** `ConstraintExtractor` and the `domains.py` constraint solver —
+  what a program's branches require of boundary data
+  (`cobolparser/analysis/constraints.py`, `cobolparser/analysis/domains.py`,
+  2026-08-04). Phase 4 of the `gen-fixtures` program-scoped test-data
+  initiative (see `docs/plans/2026-08-02-program-data-generation-design.md`):
+  walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards and, for
+  every operand that resolves (via Phase 1's `ProgramLayoutIndex`) to a field
+  a boundary actually feeds (per Phase 2's `BoundaryReport`), emits a
+  `FieldConstraint` — relational comparisons, level-88 domains (`in_set`/
+  `not_in_set` over the 88's already-parsed `condition_values`, THRU ranges
+  included), figurative constants, class tests (`IS NUMERIC`/`ALPHABETIC`),
+  and sign/zero tests (folded directly into the relational vocabulary rather
+  than a separate domain branch). AND/OR/NOT compose via De Morgan — an IF's
+  THEN and ELSE arms are the same expression tree walked with `negate=False`/
+  `True`; a conjunction drops the whole variant if either side fails to
+  extract (unsafe to narrow), a disjunction safely keeps whichever side(s)
+  did (narrowing to fewer alternatives is still sound for witness
+  generation). A READ's `AT END` flag tested by an enclosing `PERFORM UNTIL`
+  becomes a `SequenceConstraint` instead — the "how many records before EOF"
+  knob mockymock's own tally idiom needs, not a field value — cross-referenced
+  against Phase 2's own `BoundaryReport` rather than a freshly synthesized
+  reference.
+
+  `domains.py`'s solver picks a deterministic witness (midpoint for a numeric
+  interval, first allowed literal in sorted order for text, first remaining
+  value for an enumerated level-88 domain) over a small zero-dependency
+  domain lattice (`NumericDomain`/`TextDomain`/`EnumDomain`), always rendered
+  through a new public `ValueFactory.render()` wrapper so a solved value can
+  never violate the field's PICTURE — the same invariant the copybook
+  generator's own value providers already guarantee. An unsatisfiable
+  constraint set returns `Unsatisfiable(reason)`, never a value.
+
+  New `FieldConstraint` / `SequenceConstraint` / `BranchConstraints` /
+  `ConstraintReport` / `ConstraintExtractor` public API in
+  `cobolparser.analysis.constraints`; `Witness` / `Unsatisfiable` / `solve()`
+  in `cobolparser.analysis.domains`.
+
+  Also fixes two issues found writing this phase's own tests: (1) a
+  circular import between `cobolparser.generators.data.bundle` and
+  `cobolparser.analysis.boundary_inventory` that only avoided surfacing by
+  luck of import order (both edges were type-annotation-only or resolvable
+  via `TYPE_CHECKING`, so no runtime behavior changes); (2) `>=`/`<=`/`<>`
+  were silently mis-parsed as `>`/`<`/`<` with a garbled right-hand operand
+  in *every* IF/PERFORM UNTIL condition — see Bug Fixes below.
+
+  Documented in `.okf/analysis.md` (new `ConstraintExtractor` section) and
+  `.okf/parser.md`; covered by `tests/unit/analysis/test_constraints.py`,
+  `tests/unit/analysis/test_domains.py`, and
+  `tests/integration/test_constraint_extractor_corpus.py` (parametrized over
+  the shamrice corpus: every branch/loop either produces constraints or a
+  reason in `unsupported`, and every solved witness is layout-valid).
+* **generators:** `ProgramFixtureGenerator` and the `cobol-parser gen-fixtures`
+  CLI subcommand — whole-program mock-data + expectation-stub generation
+  (`cobolparser/generators/program_fixtures.py`,
+  `cobolparser/generators/data/bundle.py`, 2026-08-04). Phase 3 of the
+  `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`) — the first
+  shippable release of the initiative: combines a Phase 1 `ProgramLayoutIndex`
+  and a Phase 2 `BoundaryReport` into a `FixtureBundle` containing one "happy
+  path" `Scenario` per program, with a `BoundaryFixture` (generated rows) for
+  every IN/BIDIRECTIONAL boundary and an `Expectation` stub for every OUT
+  boundary.
+
+  Reuses the Phase 0 value engine (`ValueFactory`/`flatten_record`/`FieldSpec`)
+  directly against arbitrary `CobolDataItem`s resolved through the layout
+  index — the capability Phase 0 was built to unlock. Each boundary gets its
+  own deterministic sub-seed (`zlib.crc32("scenario|category|key") ^ seed`),
+  so adding or removing an unrelated boundary never reshuffles another
+  boundary's already-generated values. `bundle.to_json()` is byte-identical
+  for the same `(program, seed)` across runs and across unrelated corpus
+  changes. CALL/DYNCALL fixtures generate one row per IN/BIDIRECTIONAL
+  argument and an expectation stub per OUT/BIDIRECTIONAL argument (an OUT
+  argument's note correctly reads "supplied by the program under test, not
+  mock-generated" — the reverse of an IN argument's note). SQL fixtures stub
+  `SQLCODE=0`; other status-bearing boundaries stub `"00"`. READ boundaries
+  generate `--rows` rows per sequence; every other IN boundary (SQL
+  SELECT/FETCH, ACCEPT, a CALL argument) generates exactly one value, matching
+  one invocation in the happy-path scenario. `--callee-path` resolves a
+  statically-CALLed program's own source (tried across `NAME`/`name` ×
+  `""`/`.cbl`/`.CBL`/`.cob`/`.COB`) to feed Phase 2's callee-source rung; a
+  compilation unit's own `contained_programs` need no path search at all.
+
+  `report.unresolved`/`bundle.unresolved` now merge Phase 1's index-level
+  gaps forward (previously dropped between phases — found via a `--strict`
+  CLI smoke test against `report_test.cbl`'s known Report-Writer-FD gap
+  incorrectly exiting 0 instead of 2). `--strict` exits 2 (not 1, which stays
+  "could not run at all") when anything from Phase 1, 2, or 3 could not be
+  pinned down. `--format csv-dir` writes one CSV per file-shaped fixture
+  under `<dir>/<scenario-slug>/<KEY>.csv` plus a `MANIFEST.json` covering the
+  full bundle. `--list-boundaries` runs Phases 1-2 only, for a cheap
+  boundary-walk cross-check against a downstream consumer's own.
+
+  New `BUNDLE_VERSION` / `FixtureBundle` / `Scenario` / `BoundaryFixture` /
+  `Expectation` / `CoverageSummary` / `ProgramFixtureGenerator` public API,
+  exported from `cobolparser.generators`. `bundle_version` is a schema
+  version pinned for mockymock's Phase 8 `generate --with-data` consumer
+  across the repo boundary.
+
+  Documented in `.okf/generators.md` (new "Program Fixtures" section) and
+  `.okf/cli.md` (new "Gen-Fixtures" section); covered by
+  `tests/unit/test_program_fixtures.py`,
+  `tests/unit/cli/test_gen_fixtures_cli.py`,
+  `tests/integration/test_gen_fixtures_corpus.py` (parametrized over the
+  shamrice corpus), and `tests/contracts/test_fixture_bundle_contract.py`
+  (key-set and reproducibility pins for the cross-repo consumer).
+* **analysis:** `BoundaryInventoryAnalyzer` — whole-program boundary inventory
+  (`cobolparser/analysis/boundary_inventory.py`, 2026-08-04). Phase 2 of the
+  `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`): walks the
+  PROCEDURE DIVISION and emits one `Boundary` per mockable statement
+  (CALL/DYNCALL, the eight file-op verbs, EXEC SQL/CICS/DLI, console ACCEPT),
+  keyed the same way mockymock's own `mock_surface` module keys them (two
+  independent walks over the same AST, re-deriving mockymock's unique-prefix
+  key algorithm and non-interactive-ACCEPT-sources list rather than
+  importing them — the dependency direction is mockymock -> cobol-parser,
+  never the reverse). Each boundary's record/field layout resolves through
+  a Phase 1 `ProgramLayoutIndex` built for the same program.
+
+  CALL/DYNCALL arguments resolve through a 4-rung direction ladder
+  (`CallArg.direction`/`.provenance`): `BY CONTENT`/`BY VALUE` is always OUT;
+  a known callee's LINKAGE write (checked generically across MOVE,
+  ADD/SUBTRACT/MULTIPLY/DIVIDE, COMPUTE, INITIALIZE, and SET — not just
+  MOVE, which would miss a `COMPUTE LK-RESULT = ...` subprogram entirely) is
+  IN; caller-side dataflow in the enclosing paragraph (last write
+  before/first read after, in source order) is OUT/IN/BIDIRECTIONAL; the
+  remaining fallback is BIDIRECTIONAL with `provenance="assumed-bidirectional"`.
+  `RETURNING`/`GIVING` parameters are always IN. WRITE/REWRITE and READ
+  `INTO` resolve through `ProgramLayoutIndex.record_named()` (new, see
+  below) rather than `.resolve()`, since both name a whole record, not a
+  field. SQL direction comes from `sql_type` over `host_variables` (the
+  parent plan's assumed `into_variables`/`host_variables` split does not
+  hold in practice — verified empirically, an inline `SELECT ... INTO`
+  places every host variable in `host_variables`). CICS/DLI layout
+  resolution is best-effort in v1 (no fixed INTO/FROM-shaped attributes to
+  key off) and reports the limitation on the boundary rather than claiming
+  false precision. `ACCEPT OMITTED` (waits for input, stores nothing) is
+  recognized as a real idiom, not an unresolved gap.
+
+  New `BoundaryInventoryAnalyzer` / `BoundaryRef` / `Boundary` / `CallArg` /
+  `BoundaryReport` public API. Also adds `ProgramLayoutIndex.record_named()`
+  — finds a whole record/group by name across all sections, filling a real
+  gap `resolve()` cannot (it only ever indexes elementary fields, since
+  `flatten_record` emits no `FieldSpec` for a group item), found via direct
+  reproduction against `tests/samples/file_operations.cbl`'s REWRITE
+  statement while building this analyzer.
+
+  Documented in `.okf/analysis.md` (new `BoundaryInventoryAnalyzer` section)
+  and `.okf/generators.md` (`record_named()`); covered by
+  `tests/unit/analysis/test_boundary_inventory.py`,
+  `tests/integration/test_boundary_inventory_corpus.py` (parametrized over
+  the shamrice corpus), plus new `record_named()` cases in
+  `tests/unit/test_program_layout_index.py`.
+* **generators:** `ProgramLayoutIndex` — whole-program FD/record/field layout
+  resolution (`cobolparser/generators/data/program_layout.py`, 2026-08-04).
+  Phase 1 of the `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`): resolves a
+  program's FILE SECTION FDs to their owning records, merges FD clauses with
+  the matching `SelectStatement` into a `FileFacts` summary (organization,
+  access mode, keys, `FILE STATUS` field, record size, FD-vs-SD), and
+  resolves data-names (bare, `A OF B`, dotted `B.A`, and level-88 condition
+  names) to a `ResolvedField` across all four DATA DIVISION sections. New
+  `ProgramLayoutIndex` / `FileFacts` / `ResolvedField` / `ProgramLayoutError`
+  public API, exported from `cobolparser.generators`.
+
+  `ProgramLayoutIndex.build(ast)` indexes an already-parsed program;
+  `.from_file(path, copybook_paths=..., strict_copybooks=...)` parses first,
+  raising `ProgramLayoutError` on a missing file, a program that fails to
+  parse, or (by default) an unresolved COPY member — a layout with a hole in
+  it is wrong, not partial. Nothing is silently dropped or guessed: an
+  ambiguous bare name (the same name at more than one path) is recorded on
+  `.ambiguities`, and an unownable FILE SECTION record or a `SELECT` with no
+  matching FD is recorded on `.unresolved`. A file with stacked/nested
+  program units (`CobolProgram.contained_programs`) is indexed one program at
+  a time — `build()` covers exactly the node it is given.
+
+  The DATA DIVISION parser also gained a small, purely additive metadata tag:
+  every FILE SECTION 01-item is now tagged `fd_record_type` (`"FD"` or
+  `"SD"`) alongside the existing `fd_file_name`/`fd_clauses` tags, so an SD
+  (sort/merge work file) can be told apart from a real file. Documented in
+  `.okf/generators.md` and `.okf/parser.md`; covered by
+  `tests/unit/test_program_layout_index.py` and
+  `tests/integration/test_program_layout_corpus.py` (parametrized over the
+  shamrice corpus).
 * **generators:** copybook → CSV synthetic test-data generation
   (`cobolparser/generators/copybook_data.py`, 2026-08-02). New
   `CopybookDataGenerator` / `DataGeneratorOptions` / `GeneratedDataset` /
@@ -116,6 +509,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **generators:** `ProgramFixtureGenerator`'s READ `terminal` (the `AT END`
+  status dict) fell back to a literal placeholder field name, `"FILE-STATUS"`,
+  when a READ boundary had no declared `FILE STATUS` clause and no file-level
+  default either (2026-08-04, found empirically integrating mockymock's
+  `generate --with-data` against a real bundle — INVUPDT's `INV-FILE` has no
+  status field at all). That placeholder is not a real data item in the
+  program, so a `MOVE "10" TO FILE-STATUS` mock body would either target a
+  nonexistent field or, worse, a coincidentally-real one with an unrelated
+  meaning. Fixed by `_resolve_status_field` returning `None` (not a string)
+  when neither `Boundary.status_field` nor `ProgramLayoutIndex.file_facts(...)
+  .file_status_field` resolves, and `terminal`/`status` staying `None`/`{}`
+  rather than synthesizing a name — mirroring this initiative's own established
+  "exact by construction, or absent" rule (see `ConstantFolder` above) instead
+  of guessing. A second, related bug in the same code path was fixed in the
+  same commit: the READ fixture's `call_count` expectation derived "does this
+  boundary have an AT-END invocation" from whether `terminal` was non-`None`,
+  which after this fix conflates "the sequence exhausts" with "the exhaustion
+  has a nameable status field" — the two are now tracked independently
+  (`has_terminal_invocation` vs. the resolved field name), so `call_count`
+  stays correct (`len(sequence) + 1`) even when the terminal status itself
+  can't be named. `tests/unit/test_program_fixtures.py` gained
+  `TestTerminalStatusFieldResolution` (both the no-field and the
+  real-field-resolves cases) and an updated assertion in
+  `test_empty_input_scenario_call_count_is_one_not_zero`. See
+  [.okf/log.md](.okf/log.md) and mocky-mock's own
+  `tests/unit/test_fixture_bundle_contract.py`, which surfaced this via its
+  Phase 8 `generate --with-data` integration.
+* **parser:** `>=`, `<=`, and `<>` in an IF condition or a `PERFORM ...
+  UNTIL` loop guard were silently mis-parsed as `>`, `<`, and `<` with a
+  garbled right-hand operand (2026-08-04, found writing Phase 4 of
+  `gen-fixtures`, see Added above). The lexer emits these as two separate
+  single-character tokens — confirmed empirically, not assumed — and
+  `parsers/statements/_conditions.py`'s token-cleaning pass only recombined
+  `NOT`-prefixed pairs (`NOT EQUAL`, `NOT <`, ...), so the comparison scan
+  matched the bare `>`/`<` first and left the trailing `=`/`>` dangling in
+  the operand text: `IF WS-X >= 5` parsed as `operator="GREATER",
+  right_operand="= 5"` instead of `operator="GREATER_OR_EQUAL",
+  right_operand="5"`. Affected every consumer of
+  `build_condition_expression` (IF and PERFORM UNTIL both) for as long as
+  the M12 structural-condition machinery has existed — not a regression
+  from this fix, a pre-existing gap it closes. Fixed by recombining the
+  pair (`_COMPOUND_SYMBOL_OPS`) during the same cleaning pass, before the
+  scan runs. Zero regressions across the existing 783 IF/PERFORM/
+  shamrice/NIST tests re-run after the fix. See
+  [.okf/parser.md](.okf/parser.md).
 * **preprocess:** copybook content's sequence-number (columns 1-6) and
   identification (columns 73-80) areas are now stripped immediately after a
   copybook is read from disk, before `REPLACING`, `>>IF` conditional

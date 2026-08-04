@@ -41,20 +41,39 @@ Design notes
 
 from __future__ import annotations
 
+from .bundle import (
+    BUNDLE_VERSION,
+    BoundaryFixture,
+    CoverageSummary,
+    Expectation,
+    FixtureBundle,
+    Scenario,
+)
 from .copybook import CopybookDataGenerator, parse_copybook_records
 from .dataset import GeneratedDataset
-from .errors import CopybookLayoutError
+from .errors import CopybookLayoutError, ProgramLayoutError
 from .layout import FieldCategory, FieldSpec, flatten_record
 from .options import DataGeneratorOptions
+from .program_layout import FileFacts, ProgramLayoutIndex, ResolvedField
 from .values import ValueFactory
 
 __all__ = [
+    "BUNDLE_VERSION",
+    "BoundaryFixture",
     "CopybookDataGenerator",
     "CopybookLayoutError",
+    "CoverageSummary",
     "DataGeneratorOptions",
+    "Expectation",
     "FieldCategory",
     "FieldSpec",
+    "FileFacts",
+    "FixtureBundle",
     "GeneratedDataset",
+    "ProgramLayoutError",
+    "ProgramLayoutIndex",
+    "ResolvedField",
+    "Scenario",
     "ValueFactory",
     "flatten_record",
     "parse_copybook_records",

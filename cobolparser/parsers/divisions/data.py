@@ -168,6 +168,11 @@ class DataDivisionParser(BaseDivisionParser):
         # current 01-level records belong to. Captured rather than discarded so
         # the record layout's physical attributes survive into the AST.
         current_fd_clauses: dict[str, Any] = {}
+        # Whether the current record's file description used "FD" or "SD" --
+        # an SD (sort/merge work file) is not a real file a program OPENs, and
+        # downstream tooling (e.g. a boundary inventory) needs to tell the two
+        # apart rather than treating every FILE SECTION entry as an FD.
+        current_fd_record_type: str | None = None
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -227,6 +232,7 @@ class DataDivisionParser(BaseDivisionParser):
                     )
                 )
             ):
+                current_fd_record_type = "SD" if value_upper == "SD" else "FD"
                 token_stream.consume()  # consume FD/SD
                 fd_name_tok = token_stream.peek()
                 if fd_name_tok and fd_name_tok.type == TokenType.IDENTIFIER:
@@ -287,6 +293,10 @@ class DataDivisionParser(BaseDivisionParser):
                             if current_fd_clauses:
                                 data_item.set_metadata(
                                     "fd_clauses", dict(current_fd_clauses)
+                                )
+                            if current_fd_record_type is not None:
+                                data_item.set_metadata(
+                                    "fd_record_type", current_fd_record_type
                                 )
                         data_items.append(data_item)
             else:
