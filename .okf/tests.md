@@ -8,11 +8,16 @@ timestamp: 2026-08-04T00:00:00Z
 
 # Overview
 
-7,529 passed / 13 skipped / 1 xfailed (2026-08-04: +191 tests across Phases
-1-3 of the `gen-fixtures` program-scoped test-data initiative —
-`ProgramLayoutIndex` (Phase 1), `BoundaryInventoryAnalyzer` (Phase 2), and
-`ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3); see
-[generators.md](generators.md) and [analysis.md](analysis.md). Earlier,
+7,616 passed / 13 skipped / 1 xfailed (2026-08-04: +278 tests across Phases
+1-4 of the `gen-fixtures` program-scoped test-data initiative —
+`ProgramLayoutIndex` (Phase 1), `BoundaryInventoryAnalyzer` (Phase 2),
+`ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3), and
+`ConstraintExtractor` + the `domains.py` solver (Phase 4); see
+[generators.md](generators.md) and [analysis.md](analysis.md). Phase 4 also
+fixed a pre-existing, unrelated parser bug it uncovered: `>=`/`<=`/`<>` were
+silently mis-parsed as `>`/`<`/`<` with a garbled operand in every IF/PERFORM
+UNTIL condition (see [parser.md](parser.md)) — zero regressions across the
+783 IF/PERFORM/shamrice/NIST tests re-run after that fix. Earlier,
 2026-07-09: CobolCheck test generation — `CoverageAnalyzer`,
 `TestPlanGenerator`, `CobolCheckGenerator`, the `generate-tests` CLI
 subcommand, and their ~180 dedicated tests — was removed, superseded by
@@ -48,6 +53,8 @@ tests/
       test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
     analysis/
       test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering, IOLogger cross-check (see analysis.md)
+      test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN, PERFORM-UNTIL SequenceConstraint (see analysis.md)
+      test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value (see analysis.md)
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
     test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation
@@ -55,6 +62,7 @@ tests/
     test_program_layout_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramLayoutIndex must build without raising and report zero unexpected unresolved/ambiguities entries
     test_boundary_inventory_corpus.py  # parametrised over examples/cobol/shamrice/: BoundaryInventoryAnalyzer must build without raising and report zero unexpected unresolved entries
     test_gen_fixtures_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramFixtureGenerator must build a bundle without raising, every generated cell fits its field's category, and determinism holds across the corpus
+    test_constraint_extractor_corpus.py  # parametrised over examples/cobol/shamrice/: every branch/loop either produces constraints or a reason in unsupported (no silent drop); every solved witness is layout-valid (see analysis.md)
     io/                        # IO coverage reporting integration
     io_statements/             # IO statement parsing, VSAM
   contracts/                   # API contract tests — stability guarantees

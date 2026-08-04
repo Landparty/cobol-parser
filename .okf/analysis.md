@@ -1,17 +1,19 @@
 ---
 type: Module
 title: Static Analysis
-description: 14 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, and more.
-tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures]
+description: 15 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, and more.
+tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints]
 timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 14 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 15 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
-which uses `.resolve(ast)`, and `BoundaryInventoryAnalyzer`, which additionally
-takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`).
+which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
+takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
+`ConstraintExtractor`, which uses `.extract(ast, index, boundary_report) ->
+ConstraintReport` (Phase 1's index *and* Phase 2's boundary report).
 
 # Public API
 
@@ -332,6 +334,134 @@ with a `.statements` attribute, while `SearchStatement.when_clauses` is a
 **list of dicts** with a `"statements"` key -- a different shape, and a
 documented trap (mixing the two loop variables up trips mypy immediately,
 which is how this was caught).
+
+## ConstraintExtractor
+
+Phase 4 of program-scoped test-data generation (the `gen-fixtures` initiative
+-- see `docs/plans/2026-08-02-program-data-generation-design.md`). Walks
+IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards and, for every
+operand that resolves (via Phase 1's `ProgramLayoutIndex`) to a field a
+boundary actually feeds (per Phase 2's `BoundaryReport`), emits a
+`FieldConstraint`; the domain-propagation solver in `domains.py` (same PR)
+turns a field's constraints into a concrete witness value.
+
+```python
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.domains import solve
+
+report = ConstraintExtractor().extract(ast, index, boundary_report)
+report.branches              # list[BranchConstraints]: one per IF/EVALUATE/
+                              # SEARCH decision point
+report.sequence_constraints  # list[SequenceConstraint]: the READ/AT-END/
+                              # PERFORM-UNTIL EOF-loop idiom
+report.unsupported           # program-level gaps (never silently dropped)
+
+branch = report.branches[0]
+branch.arms                  # dict[str, list[FieldConstraint]]: arm_id ->
+                              # conjuncts, e.g. {"THEN": [...], "ELSE": [...]}
+
+witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
+```
+
+**Extraction sources and op vocabulary** (`FieldConstraint.op`): `eq ne lt le
+gt ge in_set not_in_set class_numeric class_alphabetic figurative`.
+Relational comparisons (`=`, `>`, `<`, `>=`, `<=`, `NOT =`/`<>`) map directly;
+a level-88 bare condition-name (`IF ORDER-VALID`) resolves through
+`ProgramLayoutIndex.resolve()` to its *parent* field and becomes `in_set`
+over the 88's already-parsed `condition_values` (THRU ranges included);
+figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`
+with the symbolic name preserved in `values`, not its literal expansion;
+class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
+`class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
+directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
+getting their own domain-handling branch. `negated` only carries meaning for
+`class_numeric`/`class_alphabetic`/`figurative`, which have no separate "not"
+op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
+directly into the op choice).
+
+**AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
+THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`) --
+there is no structural "NOT" node in this parser to walk instead (confirmed
+against `_conditions.py`: negation is baked directly into concrete operator
+strings like `NOT_EQUAL`/`IS NOT NUMERIC`, or resolved by the caller passing
+`negate=True`). An AND stays a single conjunct list; a negated AND becomes a
+disjunction (`NOT(A AND B) = NOT A OR NOT B`) and vice versa for OR --
+implemented as one `(operator == "AND") != negate` boolean flip, not two
+separate code paths. A conjunction drops the *whole* variant if either side
+fails to extract (keeping only one conjunct would silently widen the modeled
+domain past what the source requires); a disjunction safely keeps whichever
+side(s) did extract (narrowing to fewer alternatives is still sound for
+witness generation, just incomplete). More than one variant means an OR was
+present; each becomes its own arm via a `#1`/`#2` suffix (`arms["THEN"]` vs.
+`arms["THEN#1"]`/`arms["THEN#2"]`) -- the parent plan's dataclass models one
+flat conjunct list per arm *id*, not a list of variants per arm, so OR
+alternatives are represented as separate arms rather than nested lists.
+
+**`branch_id` is not `ProgramFlowAnalyzer`'s `BranchNode.node_id`.**
+Replicating `program_flow/scanner.py`'s exact sequential counter would
+couple this module to that scanner's specific traversal order; instead
+`branch_id` self-encodes `f"{parent_proc}@{line}:{column}"`, the same join
+key `BranchNode` really is keyed by in substance. A later phase joins by
+comparing `parent_proc`/`line` against `BranchNode.parent_proc`/`.location`
+directly, never by string-matching `branch_id` to `node_id`.
+
+**PERFORM UNTIL's `until_condition` is never itself a `ConditionalExpression`
+/`LogicalExpression`.** It is always the historical
+`CobolExpression("CONDITION")` wrapper holding the raw joined string in
+`.operands`; the real structural tree (when `_conditions.py`'s shared
+machinery could build one) lives on its `.condition_tree` attribute (M12 --
+see `perform_parser.py`'s `_make_until_condition_expression`). Walking
+`until_condition` directly instead of `until_condition.condition_tree` was
+the first bug found writing this module's own tests -- every PERFORM UNTIL
+condition came back `"unsupported expression node: CobolExpression"`.
+
+**The EOF/loop-flag idiom -> `SequenceConstraint`.** `_collect_eof_flags`
+walks `ast.get_all_statements()` for every `IOReadStatement` whose
+`at_end_clause` contains a `MoveStatement`, mapping the MOVE's target field
+name to that READ's file name. When a `PERFORM UNTIL`'s condition mentions
+that same field (by name only -- exact value match is not required, matching
+on field identity is simpler and more robust to minor variations), the
+`SequenceConstraint.boundary` is looked up from the *existing* `Boundary` in
+`boundary_report.boundaries` (never freshly synthesized) so it is always a
+real, already-resolved `BoundaryRef`. `length` is `None` in v1 -- "the flag
+pattern exists" -- picking a concrete record count is Phase 5's job. A
+condition that touches a boundary-fed field but matches no such pattern gets
+one `unsupported` note rather than silence; a pure internal counter loop
+(`PERFORM UNTIL I > 10`, `I` not boundary-fed) is correctly silent -- out of
+scope, not a gap.
+
+**SEARCH WHEN and `EVALUATE TRUE`'s non-compound selectors share one text
+parser.** `SearchStatement.when_clauses`' `"condition"` key is a single raw
+joined string, not a structured tree (unlike IF/PERFORM, SEARCH conditions
+were never given the M12 structural treatment) -- confirmed against
+`search_parser.py`. `EVALUATE TRUE WHEN <selector>` also lacks structure for
+a simple relational selector: `evaluate_parser.py`'s `_build_selector` never
+emits an `"Identifier"` selector type at all (a documented assumption this
+module's first draft got wrong) -- a bare condition-name like `WHEN
+F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
+`{"type": "Literal", ...}` / `{"type": "Condition", "text": ...}` with no
+`"operator"` key, the *same* raw-text shapes SEARCH already has to handle.
+Both route through the same minimal relational-text parser
+(`_parse_relational_text`); a compound `AND`/`OR` selector text (`sel
+["operator"]` present) stays unsupported in v1, same limitation as a
+compound SEARCH WHEN.
+
+**Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
+stated as a parent-plan limitation, not attempted.
+
+**Bug found writing this module's tests, fixed at the root (not worked
+around): `>=`/`<=`/`<>` were silently mis-parsed everywhere**, not just
+here. The lexer emits these as two separate single-character tokens (`>`
+then `=`, never a combined `>=`); `_conditions.py`'s normalisation pass only
+recombined `NOT`-prefixed pairs, so the comparison scan grabbed the bare `>`
+as `GREATER` and left `= 5` dangling in the right-hand operand text --
+confirmed empirically (`IF WS-X >= 5` parsed as `operator="GREATER",
+right_operand="= 5"`) before this fix, for *every* consumer of
+`build_condition_expression` (IF and PERFORM UNTIL both), not something
+introduced by this phase. Fixed by recombining `">"+"="`, `"<"+"="`, and
+`"<"+">"` into their compound tokens during the same cleaning pass that
+already recombines `NOT`-prefixed operators (`_COMPOUND_SYMBOL_OPS`, see
+[parser.md](parser.md)).
 
 ## Module File Map
 

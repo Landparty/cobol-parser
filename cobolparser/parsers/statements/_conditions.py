@@ -31,6 +31,11 @@ COMPARISON_OPS = {
     "<>": "NOT_EQUAL",
 }
 
+# Two-character symbolic operators the lexer tokenizes as two separate
+# single-character tokens (never as one combined token) -- recombined during
+# the cleaning pass so the comparison scan below sees them whole.
+_COMPOUND_SYMBOL_OPS = frozenset({">=", "<=", "<>"})
+
 # Multi-word NOT-prefixed operators normalised during the cleaning pass.
 _NEGATED_OPS = {
     "NOT EQUAL": "NOT_EQUAL",
@@ -74,7 +79,13 @@ def build_condition_expression(
     class conditions (``A IS NUMERIC``), sign conditions (``A IS
     POSITIVE``), and bare condition-names.
     """
-    # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.)
+    # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.) and
+    # two-character symbolic operators the lexer emits as separate
+    # single-character tokens (">=", "<=", "<>" -- confirmed empirically:
+    # the lexer never produces a combined ">=" token, so without this pass
+    # the scan below saw a bare ">" and silently swallowed the trailing "="
+    # into the right-hand operand text instead of recognising
+    # GREATER_OR_EQUAL/LESS_OR_EQUAL/NOT_EQUAL).
     cleaned: list[str] = []
     i = 0
     while i < len(tokens):
@@ -84,6 +95,12 @@ def build_condition_expression(
             combined = _NEGATED_OPS.get(f"NOT {nxt}")
             if combined:
                 cleaned.append(combined)
+                i += 2
+                continue
+        if i + 1 < len(tokens):
+            pair = tok + tokens[i + 1].upper()
+            if pair in _COMPOUND_SYMBOL_OPS:
+                cleaned.append(pair)
                 i += 2
                 continue
         cleaned.append(tokens[i])

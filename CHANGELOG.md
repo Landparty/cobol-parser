@@ -17,6 +17,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis:** `ConstraintExtractor` and the `domains.py` constraint solver —
+  what a program's branches require of boundary data
+  (`cobolparser/analysis/constraints.py`, `cobolparser/analysis/domains.py`,
+  2026-08-04). Phase 4 of the `gen-fixtures` program-scoped test-data
+  initiative (see `docs/plans/2026-08-02-program-data-generation-design.md`):
+  walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards and, for
+  every operand that resolves (via Phase 1's `ProgramLayoutIndex`) to a field
+  a boundary actually feeds (per Phase 2's `BoundaryReport`), emits a
+  `FieldConstraint` — relational comparisons, level-88 domains (`in_set`/
+  `not_in_set` over the 88's already-parsed `condition_values`, THRU ranges
+  included), figurative constants, class tests (`IS NUMERIC`/`ALPHABETIC`),
+  and sign/zero tests (folded directly into the relational vocabulary rather
+  than a separate domain branch). AND/OR/NOT compose via De Morgan — an IF's
+  THEN and ELSE arms are the same expression tree walked with `negate=False`/
+  `True`; a conjunction drops the whole variant if either side fails to
+  extract (unsafe to narrow), a disjunction safely keeps whichever side(s)
+  did (narrowing to fewer alternatives is still sound for witness
+  generation). A READ's `AT END` flag tested by an enclosing `PERFORM UNTIL`
+  becomes a `SequenceConstraint` instead — the "how many records before EOF"
+  knob mockymock's own tally idiom needs, not a field value — cross-referenced
+  against Phase 2's own `BoundaryReport` rather than a freshly synthesized
+  reference.
+
+  `domains.py`'s solver picks a deterministic witness (midpoint for a numeric
+  interval, first allowed literal in sorted order for text, first remaining
+  value for an enumerated level-88 domain) over a small zero-dependency
+  domain lattice (`NumericDomain`/`TextDomain`/`EnumDomain`), always rendered
+  through a new public `ValueFactory.render()` wrapper so a solved value can
+  never violate the field's PICTURE — the same invariant the copybook
+  generator's own value providers already guarantee. An unsatisfiable
+  constraint set returns `Unsatisfiable(reason)`, never a value.
+
+  New `FieldConstraint` / `SequenceConstraint` / `BranchConstraints` /
+  `ConstraintReport` / `ConstraintExtractor` public API in
+  `cobolparser.analysis.constraints`; `Witness` / `Unsatisfiable` / `solve()`
+  in `cobolparser.analysis.domains`.
+
+  Also fixes two issues found writing this phase's own tests: (1) a
+  circular import between `cobolparser.generators.data.bundle` and
+  `cobolparser.analysis.boundary_inventory` that only avoided surfacing by
+  luck of import order (both edges were type-annotation-only or resolvable
+  via `TYPE_CHECKING`, so no runtime behavior changes); (2) `>=`/`<=`/`<>`
+  were silently mis-parsed as `>`/`<`/`<` with a garbled right-hand operand
+  in *every* IF/PERFORM UNTIL condition — see Bug Fixes below.
+
+  Documented in `.okf/analysis.md` (new `ConstraintExtractor` section) and
+  `.okf/parser.md`; covered by `tests/unit/analysis/test_constraints.py`,
+  `tests/unit/analysis/test_domains.py`, and
+  `tests/integration/test_constraint_extractor_corpus.py` (parametrized over
+  the shamrice corpus: every branch/loop either produces constraints or a
+  reason in `unsupported`, and every solved witness is layout-valid).
 * **generators:** `ProgramFixtureGenerator` and the `cobol-parser gen-fixtures`
   CLI subcommand — whole-program mock-data + expectation-stub generation
   (`cobolparser/generators/program_fixtures.py`,
@@ -248,6 +299,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **parser:** `>=`, `<=`, and `<>` in an IF condition or a `PERFORM ...
+  UNTIL` loop guard were silently mis-parsed as `>`, `<`, and `<` with a
+  garbled right-hand operand (2026-08-04, found writing Phase 4 of
+  `gen-fixtures`, see Added above). The lexer emits these as two separate
+  single-character tokens — confirmed empirically, not assumed — and
+  `parsers/statements/_conditions.py`'s token-cleaning pass only recombined
+  `NOT`-prefixed pairs (`NOT EQUAL`, `NOT <`, ...), so the comparison scan
+  matched the bare `>`/`<` first and left the trailing `=`/`>` dangling in
+  the operand text: `IF WS-X >= 5` parsed as `operator="GREATER",
+  right_operand="= 5"` instead of `operator="GREATER_OR_EQUAL",
+  right_operand="5"`. Affected every consumer of
+  `build_condition_expression` (IF and PERFORM UNTIL both) for as long as
+  the M12 structural-condition machinery has existed — not a regression
+  from this fix, a pre-existing gap it closes. Fixed by recombining the
+  pair (`_COMPOUND_SYMBOL_OPS`) during the same cleaning pass, before the
+  scan runs. Zero regressions across the existing 783 IF/PERFORM/
+  shamrice/NIST tests re-run after the fix. See
+  [.okf/parser.md](.okf/parser.md).
 * **preprocess:** copybook content's sequence-number (columns 1-6) and
   identification (columns 73-80) areas are now stripped immediately after a
   copybook is read from disk, before `REPLACING`, `>>IF` conditional

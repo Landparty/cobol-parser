@@ -480,7 +480,9 @@ directory tree first.
   `program-flow` subcommands
 * [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts;
   `BoundaryInventoryAnalyzer` (Phase 2), the input `report` this file's
-  `ProgramFixtureGenerator` (Phase 3) consumes
+  `ProgramFixtureGenerator` (Phase 3) consumes; `ConstraintExtractor` /
+  `domains.solve()` (Phase 4), which consume this file's `ProgramLayoutIndex`
+  (Phase 1) and `BoundaryInventoryAnalyzer`'s report the same way Phase 3 does
 * [parser.md](parser.md) — the DATA DIVISION parser's `fd_file_name` /
   `fd_clauses` / `fd_record_type` metadata tags this index reads
 * `docs/plans/2026-08-02-program-data-generation-design.md` and

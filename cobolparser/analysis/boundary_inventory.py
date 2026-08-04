@@ -18,9 +18,8 @@ built for the same program (Phase 1).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..generators.data.program_layout import ProgramLayoutIndex
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.sql_statements import ExecSQLStatement, FetchStatement
 from ..models.statements.call import CallStatement
@@ -39,6 +38,15 @@ from ..models.statements.io import (
 )
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
 from .value_tracker import DynamicCallAnalyzer
+
+if TYPE_CHECKING:
+    # Deferred: cobolparser.generators (reached via generators/__init__.py's
+    # own import chain) imports this module back at runtime -- see
+    # generators/program_fixtures.py, which genuinely constructs
+    # BoundaryInventoryAnalyzer -- so a top-level import here would be
+    # circular. Every use below is a type annotation only; `from __future__
+    # import annotations` keeps it a lazy string at runtime.
+    from ..generators.data.program_layout import ProgramLayoutIndex
 
 # -- statement-walk discipline ------------------------------------------------
 #

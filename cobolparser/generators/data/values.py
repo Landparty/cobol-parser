@@ -282,6 +282,19 @@ class ValueFactory:
             return self._format_number(number, spec, allow_random_sign=False)
         return self._fit_text(value, spec)
 
+    def render(self, spec: FieldSpec, value: str) -> str:
+        """Render an already-chosen *value* through the field's PICTURE.
+
+        Thin public wrapper over :meth:`_fit_domain_value` -- the same
+        numeric/text fitting a declared level-88 or VALUE-clause literal
+        already goes through -- exposed so the Phase 4 constraint solver
+        (``cobolparser.analysis.domains``) can render a solved witness the
+        same way. ``allow_random_sign`` stays off, same reasoning: a solver
+        picked *this exact* value to satisfy a constraint, so a random sign
+        flip could silently produce a value that no longer does.
+        """
+        return self._fit_domain_value(str(value), spec)
+
     # -- numeric ------------------------------------------------------------
 
     def _numeric_value(self, spec: FieldSpec, row: int) -> str:

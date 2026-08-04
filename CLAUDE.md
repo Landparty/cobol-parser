@@ -159,7 +159,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 13 static analysis modules:
+**`cobolparser/analysis/`** -- 14 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -174,6 +174,7 @@ COBOL source (.cbl/.cob)
 - `move_type_checker.py` -- MOVE statement type compatibility checking
 - `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`; public API re-exported from the package `__init__.py`)
 - `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
+- `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
@@ -336,6 +337,20 @@ bundle.coverage                        # CoverageSummary: total/resolved/unresol
 bundle.unresolved                      # merged Phase 1 + Phase 2 + Phase 3 resolution gaps
 bundle.to_json()                       # byte-identical for the same (program, seed)
 bundle.write_csv_dir("fixtures/")      # one CSV per file-shaped fixture + MANIFEST.json
+
+# Constraint extraction + solving (Phase 4): what branches require of boundary data
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.domains import Witness, solve
+
+creport = ConstraintExtractor().extract(ast, index, report)
+creport.branches               # list[BranchConstraints]: one per IF/EVALUATE/SEARCH
+creport.sequence_constraints   # list[SequenceConstraint]: READ/AT-END/PERFORM-UNTIL EOF idiom
+creport.unsupported            # program-level gaps (never silently dropped)
+
+branch = creport.branches[0]
+witness = solve(branch.arms["THEN"][0].field.spec, branch.arms["THEN"])
+if isinstance(witness, Witness):
+    witness.value               # a value satisfying every conjunct, PICTURE-valid
 ```
 
 ### Adding a New Statement Parser

@@ -1248,6 +1248,25 @@ produces a structured node while `metadata.raw_condition` stays
 populated. Pinned by
 `tests/regression/test_open_findings_m12_regression.py`.
 
+**`>=`/`<=`/`<>` mis-parsed as `>`/`<`/`<` with a garbled operand
+(2026-08-04, found writing Phase 4 of `gen-fixtures`):** the lexer emits
+these as two separate single-character tokens (`>` then `=`, never a
+combined `>=`) -- confirmed empirically, not assumed. `_conditions.py`'s
+token-cleaning pass only recombined `NOT`-prefixed pairs (`NOT EQUAL`, `NOT
+<`, ...), so the comparison scan matched the bare `>`/`<` first and left the
+trailing `=`/`>` dangling in the right-hand operand text: `IF WS-X >= 5`
+parsed as `operator="GREATER", right_operand="= 5"` instead of
+`operator="GREATER_OR_EQUAL", right_operand="5"`. This affected every
+consumer of `build_condition_expression` (IF and PERFORM UNTIL both), for
+as long as M12 has existed -- not a regression from this fix, a
+pre-existing gap this fix closes. `_COMPOUND_SYMBOL_OPS` (`{">=", "<=",
+"<>"}`) now recombines the pair during the same cleaning pass, before the
+`NOT`-prefix check's sibling logic runs. See
+[analysis.md](analysis.md)'s `ConstraintExtractor` section for how this was
+found; covered by the existing IF/PERFORM/shamrice/NIST suites (783 tests,
+zero regressions) plus `tests/unit/analysis/test_constraints.py`'s
+`test_greater_less_and_or_equal`.
+
 # Generic swallow-sweep regression (2026-07-21)
 
 Every Silent-Drop Audit section above (2026-07-05 through 2026-07-09) was

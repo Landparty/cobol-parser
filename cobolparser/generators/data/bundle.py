@@ -13,10 +13,19 @@ import csv
 import io
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ...analysis.boundary_inventory import BoundaryRef
 from .layout import FieldSpec
+
+if TYPE_CHECKING:
+    # Deferred: cobolparser.analysis.boundary_inventory imports
+    # cobolparser.generators.data.program_layout, so a top-level import here
+    # would be circular (this module is reached via generators/__init__.py ->
+    # copybook_data.py -> data/__init__.py -> here). `BoundaryRef` is only
+    # ever used as a type annotation below -- `from __future__ import
+    # annotations` keeps it a lazy string at runtime, so the import only
+    # needs to exist for type checkers.
+    from ...analysis.boundary_inventory import BoundaryRef
 
 #: Bumped only on a breaking change to the JSON shape. Phase 8 (mockymock
 #: integration) checks this before consuming a bundle; fail closed on an
