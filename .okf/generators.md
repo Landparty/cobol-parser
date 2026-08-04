@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, and synthetic CSV test data from a copybook record layout.
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot]
-timestamp: 2026-08-02T00:00:00Z
+timestamp: 2026-08-02T17:40:00Z
 ---
 
 # Overview
@@ -14,7 +14,8 @@ artefact rather than an analysis report.
 | File | Produces |
 |------|----------|
 | `flowchart.py` | Mermaid / Graphviz DOT flowcharts from a `ProgramFlowReport` |
-| `copybook_data.py` | Synthetic CSV test data from a copybook record layout |
+| `copybook_data.py` | Backwards-compatible re-export shim for copybook → CSV; implementation in `data/` |
+| `data/` | Copybook test data generation — modular internal implementation |
 
 # Flowcharts (`flowchart.py`)
 
@@ -24,11 +25,15 @@ string. `FlowchartOptions` controls statement counts, edge labels,
 fall-through edges, unreachable nodes, and synthetic external-CALL nodes.
 Driven by `cobol-parser program-flow --format mermaid|dot`.
 
-# Copybook Test Data (`copybook_data.py`)
+# Copybook Test Data (`data/` package, shimmed via `copybook_data.py`)
 
 Turns a copybook into a CSV: **one column per elementary field, one row per
 generated record**. Driven by `cobol-parser gen-data` (see
 [cli.md](cli.md)).
+
+The implementation is modular in `cobolparser/generators/data/` (internal
+refactor; `copybook_data.py` is a backwards-compatible re-export shim with
+zero API change).
 
 ```python
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
@@ -37,6 +42,24 @@ generator = CopybookDataGenerator(DataGeneratorOptions(rows=100, seed=7))
 dataset = generator.generate_from_file("CUSTOMER.cpy")
 dataset.write_csv("customers.csv")
 ```
+
+## Internal Implementation Modules
+
+`cobolparser/generators/data/` decomposes the copybook-data generation logic
+into focused, reusable modules:
+
+- **`options.py`** — `DataGeneratorOptions` configuration (rows, seed, include/exclude flags, value hints).
+- **`errors.py`** — `CopybookLayoutError` exception for layout validation failures.
+- **`layout.py`** — `FieldCategory` enum, `FieldSpec` dataclass, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns.
+- **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints.
+- **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods.
+- **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
+- **`__init__.py`** — Package exports of the above plus re-exports for backwards compatibility.
+
+All modules are importable from `cobolparser.generators.data`, and
+`ValueFactory` + `flatten_record` are usable directly against any
+`CobolDataItem` (not just a copybook-parsed one), supporting future
+program-data-generation initiatives that build on the same value/layout logic.
 
 ## Public API
 
