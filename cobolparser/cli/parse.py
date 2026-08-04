@@ -916,11 +916,6 @@ def _build_gen_fixtures_parser(
         help="List every boundary (category/key/paragraph/line/direction) and exit",
     )
     p.add_argument(
-        "--describe",
-        action="store_true",
-        help="Emit the resolved bundle as JSON (implied by --format json)",
-    )
-    p.add_argument(
         "--strict",
         action="store_true",
         help="Exit 2 if the bundle has any unresolved boundary/argument",
