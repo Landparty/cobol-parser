@@ -164,6 +164,55 @@ class TestResolve:
         assert index.resolve("   ") is None
 
 
+class TestRecordNamed:
+    """record_named() finds a whole record/group by its own name -- resolve()
+    only ever indexes *elementary* fields (flatten_record never emits a
+    FieldSpec for a group item), so a WRITE/REWRITE target or a READ INTO
+    target (both name the whole record) cannot go through resolve()."""
+
+    def test_finds_a_group_record_resolve_cannot_see(self):
+        index = _build_index()
+        assert index.resolve("INV-REC") is None  # group item, no FieldSpec
+        record = index.record_named("INV-REC")
+        assert record is not None
+        assert record.name == "INV-REC"
+
+    def test_case_insensitive(self):
+        index = _build_index()
+        assert index.record_named("inv-rec").name == "INV-REC"
+
+    def test_unknown_name_returns_none(self):
+        index = _build_index()
+        assert index.record_named("NOPE") is None
+        assert index.record_named("") is None
+
+    def test_ambiguous_name_across_sections_returns_none_and_is_recorded(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPRECORD.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F1 ASSIGN TO 'F1.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  F1.
+       01  SAME-NAME.
+           05  F1-FIELD        PIC X(5).
+       WORKING-STORAGE SECTION.
+       01  SAME-NAME.
+           05  WS-FIELD        PIC X(5).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY 'HI'.
+"""
+        result = parse_cobol(source, filename="duprecord.cbl")
+        assert result.ast is not None
+        index = ProgramLayoutIndex.build(result.ast)
+        assert index.record_named("SAME-NAME") is None
+        assert "SAME-NAME" in index.ambiguities
+
+
 class TestSectionOf:
     def test_section_of_each_kind(self):
         index = _build_index()

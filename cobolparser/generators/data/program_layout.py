@@ -95,6 +95,7 @@ class ProgramLayoutIndex:
         self._file_facts: dict[str, FileFacts] = {}
         self._name_index: dict[str, list[ResolvedField]] = {}
         self._condition_index: dict[str, ResolvedField] = {}
+        self._records_by_name: dict[str, list[tuple[str, CobolDataItem]]] = {}
         self._section_records: dict[str, list[CobolDataItem]] = {
             attr: [] for attr in _SECTION_NAMES.values()
         }
@@ -253,6 +254,29 @@ class ProgramLayoutIndex:
         resolved = self.resolve(name)
         return resolved.section if resolved else None
 
+    def record_named(self, name: str) -> CobolDataItem | None:
+        """The top-level (01/77) record named *name*, in any section.
+
+        Unlike :meth:`resolve` (which only finds *elementary* fields --
+        ``flatten_record`` never emits a ``FieldSpec`` for a group item),
+        this finds a whole record by its own name: the shape a WRITE/REWRITE
+        target, a READ ``INTO`` target, or a CALL argument naming an entire
+        01-level group takes. A name shared by records in more than one
+        section (legal but unusual) returns ``None`` and is recorded on
+        :attr:`ambiguities`, mirroring :meth:`resolve`'s own policy.
+        """
+        if not name or not name.strip():
+            return None
+        candidates = self._records_by_name.get(name.strip().upper())
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][1]
+        self.ambiguities[name] = sorted(
+            f"{section}:{record.name}" for section, record in candidates
+        )
+        return None
+
     def linkage_records(self) -> list[CobolDataItem]:
         """Top-level (01/77) LINKAGE SECTION records, in source order."""
         return list(self._section_records["linkage"])
@@ -282,6 +306,9 @@ class ProgramLayoutIndex:
         self._collect_file_facts(ast)
 
     def _index_record(self, record: CobolDataItem, section: str) -> None:
+        self._records_by_name.setdefault(record.name.upper(), []).append(
+            (section, record)
+        )
         if section == "file":
             fd_file = record.get_metadata("fd_file_name")
             if fd_file:

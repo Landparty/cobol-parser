@@ -1,16 +1,17 @@
 ---
 type: Module
 title: Static Analysis
-description: 13 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, and more.
-tags: [analysis, dead-code, program-flow, io, crud]
-timestamp: 2026-07-20T00:00:00Z
+description: 14 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, and more.
+tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures]
+timestamp: 2026-08-04T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 13 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 14 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
-which uses `.resolve(ast)`.
+which uses `.resolve(ast)`, and `BoundaryInventoryAnalyzer`, which additionally
+takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`).
 
 # Public API
 
@@ -209,7 +210,130 @@ resolved = HostVariableResolver().resolve(ast)   # note: .resolve(), not .analyz
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
 definitions.
 
-# Module File Map
+## BoundaryInventoryAnalyzer
+
+Phase 2 of program-scoped test-data generation (the `gen-fixtures` initiative
+-- see `docs/plans/2026-08-02-program-data-generation-design.md` and
+`.okf/generators.md`'s `ProgramLayoutIndex` section, Phase 1). Walks the
+PROCEDURE DIVISION and emits one `Boundary` per mockable statement, using the
+same `(category, key)` convention mockymock's own `mock_surface` module uses
+-- two independent walks over the same AST that must agree on keys (the
+dependency direction is mockymock -> cobol-parser, never the reverse; the
+unique-prefix key algorithm and the non-interactive-ACCEPT-sources list are
+re-derived independently against that module's source, not imported).
+
+```python
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.generators import ProgramLayoutIndex
+
+index = ProgramLayoutIndex.build(ast)
+report = BoundaryInventoryAnalyzer().analyze(
+    ast, index,
+    callee_indexes={"CALCULATOR": callee_index},   # optional, Phase 2b rung 2
+    callee_asts={"CALCULATOR": callee_ast},
+)
+report.boundaries          # list[Boundary]: ref (category/key/paragraph/line),
+                           # direction, record_names, status_field, handlers,
+                           # call_args, unresolved
+report.unresolved          # program-level gaps (never silently dropped)
+```
+
+**Categories**: `CALL`/`DYNCALL` (per-argument direction, see below),
+`OPEN`/`CLOSE`/`READ`/`WRITE`/`REWRITE`/`DELETE`/`START`/`UNLOCK` (the eight
+file-op verbs), `SQL`, `CICS`, `DLI`, `ACCEPT` (console only --
+non-interactive sources filtered). `DISPLAY` is never a boundary (assert-only,
+out of scope for this phase, matching mockymock's own `mock_surface`).
+
+**File ops.** WRITE/REWRITE key on the *record* name (COBOL syntax names the
+record, not the FD) and READ's `INTO` target also names a whole record --
+both resolved via `ProgramLayoutIndex.record_named()`, not `.resolve()`
+(`.resolve()` only ever finds elementary fields; a WRITE/REWRITE/READ-INTO
+target is a group item, which `flatten_record` never emits a `FieldSpec`
+for -- this gap is exactly why `record_named()` exists; found via direct
+reproduction against `tests/samples/file_operations.cbl`, not theorized).
+OPEN/CLOSE emit one `Boundary` per file named (COBOL allows `OPEN INPUT A
+OUTPUT B` in one statement). DELETE/START/UNLOCK are `STATUS_ONLY` (no data
+payload); READ is `IN`; WRITE/REWRITE are `OUT`.
+
+**CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
+`CallArg.provenance` records which:
+
+1. `passing_mode` in `CONTENT`/`VALUE` -> **OUT**, always (language rule --
+   the callee cannot write back through either mode).
+2. Callee source available (`callee_indexes`/`callee_asts`, keyed by
+   uppercased called-program name): does the callee write to its Nth
+   LINKAGE 01 *at all* -> **IN**; read-only -> **OUT**. "Writes" is checked
+   generically via `.targets` (shared verbatim by `MoveStatement`,
+   `ArithmeticStatement` -- ADD/SUBTRACT/MULTIPLY/DIVIDE --, `ComputeStatement`,
+   `InitializeStatement`, `SetStatement`) plus `.givings` (arithmetic GIVING)
+   and `.into_target`/`.into_targets` (READ INTO, STRING/UNSTRING) -- **not**
+   just `MoveStatement`, which would miss a `COMPUTE LK-RESULT = ...`
+   subprogram entirely (found via `tests/samples/subprogram_demo.cbl`'s
+   CALCULATOR, which computes its result exactly that way; a MOVE-only
+   check silently mis-classified it as OUT).
+3. Caller-side dataflow in the enclosing paragraph's own statement list
+   (source order): last write before the CALL with no read after -> **OUT**;
+   first read after with no write before -> **IN**; both -> **BIDIRECTIONAL**.
+   A write to a *parent group* counts as touching a child field (and vice
+   versa), checked via `FieldSpec.path` prefix comparison through the index,
+   not bare string equality. "Read" for a write-shaped statement (rung 2's
+   list above) checks only its own read-only attribute (MOVE's `.source`);
+   the generic `.operands` fallback is reserved for statement types with no
+   write-shape at all (DISPLAY, IF conditions, ...) since a write-shaped
+   statement's own `.operands` also contains its target, which would
+   otherwise misread a write as a read of the same name.
+4. Otherwise **BIDIRECTIONAL**, `provenance="assumed-bidirectional"`.
+
+`RETURNING`/`GIVING` parameters are always `IN` (`provenance=
+"giving-parameter"`) -- the callee produces them by definition.
+
+**SQL.** `into_variables` is unreliable in practice: an inline `SELECT ...
+INTO :a FROM t WHERE x = :b` places *both* `:a` and `:b` in `host_variables`,
+never populating `into_variables` at all (verified empirically against
+`tests/samples/ibm_extensions.cbl` and `database_interface.cbl` -- the parent
+plan's Phase 2 table assumed `into_variables` cleanly separated IN from OUT
+variables; it does not). `host_variables` is therefore the only layout
+source used, for every SQL shape; direction comes from `sql_type`
+(`SELECT`/`FETCH` -> IN, `INSERT`/`UPDATE`/`DELETE` -> OUT, else
+`STATUS_ONLY`), independent of which variables are attached.
+`status_field="SQLCODE"` always.
+
+**CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
+resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
+argument-text dict, and `ExecImsStatement.arguments` is a positional list
+with no fixed role per position. Best-effort in v1: every option
+value/argument is tried against the layout index (via the same
+`resolve()`-then-`record_named()` fallback used elsewhere), direction
+defaults to `BIDIRECTIONAL`, and an unresolved entry on the `Boundary` itself
+(not the report-level list) notes the limitation rather than claiming
+precision this phase does not have.
+
+**ACCEPT.** Non-interactive sources (`DATE`, `DAY`, `DAY-OF-WEEK`, `TIME`,
+`COMMAND-LINE`, `ENVIRONMENT`, `ENVIRONMENT-VALUE`, `ARGUMENT-NUMBER`,
+`ARGUMENT-VALUE`) are not boundaries at all -- resolved without touching
+stdin, mirroring mockymock's own `_NON_INTERACTIVE_ACCEPT_SOURCES`.
+`ACCEPT OMITTED` (waits for console input but stores nothing -- a real COBOL
+idiom, not a gap) is still recorded as a boundary but with no fields to
+resolve and no unresolved note.
+
+**Key convention.** Static CALL keys keep the literal's original case (a
+COBOL program name is written case-sensitively); dynamic CALL/SQL/CICS/DLI
+keys are uppercased/normalized. SQL/CICS/DLI keys are the shortest
+word-prefix of the normalized command text no other same-category site in
+the program shares (`_unique_prefix`, re-derived from mockymock's
+`generator._unique_prefix`), falling back to the full text on a genuine tie.
+
+**Nested-body walk**: the same discipline `IOLogger` and mockymock's
+`mock_surface` both converged on independently -- a fixed set of
+`getattr()`-checked attributes (`then_statements`, `else_statements`,
+`inline_statements`, the IO/CALL clause bodies) plus two special cases:
+`EvaluateStatement.when_clauses`/`.default_when` are `WhenClause` *nodes*
+with a `.statements` attribute, while `SearchStatement.when_clauses` is a
+**list of dicts** with a `"statements"` key -- a different shape, and a
+documented trap (mixing the two loop variables up trips mypy immediately,
+which is how this was caught).
+
+## Module File Map
 
 | File | Analyzer |
 |------|---------|
@@ -226,6 +350,7 @@ definitions.
 | `linkage_checker.py` | `LinkageChecker` |
 | `move_type_checker.py` | `MoveTypeChecker` |
 | `program_flow/` | `ProgramFlowAnalyzer` (package: `models` / `scanner` / `edges` / `cycles` / `graph` / `analyzer`) |
+| `boundary_inventory.py` | `BoundaryInventoryAnalyzer` (Phase 2 of `gen-fixtures`) |
 
 # Silent-Failure Audit (2026-07-08)
 
@@ -244,3 +369,8 @@ apply elsewhere (see [cli.md](cli.md) M10). Pinned by
 * [ast-models.md](ast-models.md) — input AST structure
 * [cli.md](cli.md) — CLI wrappers for the most common analyzers
 * [tests.md](tests.md) — `tests/unit/analysis/` covers each analyzer
+* [generators.md](generators.md) — `ProgramLayoutIndex` (Phase 1), the layout
+  source `BoundaryInventoryAnalyzer` resolves record/field names through
+* `docs/plans/2026-08-02-program-data-generation-design.md` and its per-phase
+  implementation plan — the full 9-phase `gen-fixtures` plan this analyzer
+  is Phase 2 of

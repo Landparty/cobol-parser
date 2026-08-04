@@ -1,0 +1,911 @@
+"""Boundary inventory: every external touchpoint of a program's PROCEDURE DIVISION.
+
+Phase 2 of program-scoped test-data generation (the `gen-fixtures` initiative
+-- see `docs/plans/2026-08-02-program-data-generation-design.md`). Walks the
+PROCEDURE DIVISION and emits one :class:`Boundary` per mockable statement
+(CALL/DYNCALL, the eight file-op verbs, EXEC SQL/CICS/DLI, console ACCEPT),
+using the same `(category, key)` convention mockymock's own ``mock_surface``
+module uses -- the two are independent walks over the same AST that must
+agree on keys, not a shared implementation (the dependency direction is
+mockymock -> cobol-parser, never the reverse; see that module's own
+docstring in the sibling repo).
+
+Each boundary's record/field layout is resolved through a
+:class:`~cobolparser.generators.data.program_layout.ProgramLayoutIndex`
+built for the same program (Phase 1).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from ..generators.data.program_layout import ProgramLayoutIndex
+from ..models.program import CobolDivision, CobolParagraph, CobolProgram
+from ..models.sql_statements import ExecSQLStatement, FetchStatement
+from ..models.statements.call import CallStatement
+from ..models.statements.control import EvaluateStatement, SearchStatement
+from ..models.statements.data import DisplayStatement
+from ..models.statements.io import (
+    IOAcceptStatement,
+    IOCloseStatement,
+    IODeleteStatement,
+    IOOpenStatement,
+    IOReadStatement,
+    IORewriteStatement,
+    IOStartStatement,
+    IOUnlockStatement,
+    IOWriteStatement,
+)
+from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
+from .value_tracker import DynamicCallAnalyzer
+
+# -- statement-walk discipline ------------------------------------------------
+#
+# Mirrors the walking discipline mockymock's own `mock_surface.py` and this
+# repo's `IOLogger` both converged on independently: a fixed set of
+# nested-body attributes, recursed via getattr() (CobolStatement's base class
+# defines none of them, so a plain getattr(..., None) never misfires on an
+# unrelated statement type), plus two shapes that need special-casing.
+
+_NESTED_STATEMENT_ATTRS = (
+    "then_statements",
+    "else_statements",
+    "inline_statements",
+    "at_end_clause",
+    "not_at_end_clause",
+    "invalid_key_clause",
+    "not_invalid_key_clause",
+    "at_eop_clause",
+    "on_exception",
+    "not_on_exception",
+    "on_overflow",
+)
+
+# Which of the generic clause attributes above signal a *declared error
+# handler* on a boundary statement (as opposed to just being a nested-body
+# source) -- feeds Boundary.handlers, which later phases use to decide which
+# error-status scenarios the program actually has a path for.
+_HANDLER_LABELS: tuple[tuple[str, str], ...] = (
+    ("at_end_clause", "AT_END"),
+    ("invalid_key_clause", "INVALID_KEY"),
+    ("on_exception", "ON_EXCEPTION"),
+    ("on_overflow", "ON_OVERFLOW"),
+    ("at_eop_clause", "AT_EOP"),
+)
+
+# ACCEPT sources that never read the console: system registers and runtime
+# values GnuCOBOL resolves without touching stdin. Mirrors mockymock's
+# `_NON_INTERACTIVE_ACCEPT_SOURCES` (re-derived independently, not imported --
+# see module docstring).
+_NON_INTERACTIVE_ACCEPT_SOURCES = frozenset(
+    {
+        "DATE",
+        "DAY",
+        "DAY-OF-WEEK",
+        "TIME",
+        "COMMAND-LINE",
+        "ENVIRONMENT",
+        "ENVIRONMENT-VALUE",
+        "ARGUMENT-NUMBER",
+        "ARGUMENT-VALUE",
+    }
+)
+
+# SQL types that read data the program did not supply (a boundary that feeds
+# the program). Everything else that mutates (INSERT/UPDATE/DELETE) is OUT;
+# anything else again (OPEN/CLOSE/COMMIT/ROLLBACK/DECLARE/...) is status-only.
+_SQL_IN_TYPES = frozenset({"SELECT", "FETCH"})
+_SQL_OUT_TYPES = frozenset({"INSERT", "UPDATE", "DELETE"})
+
+
+def _write_targets(statement: Any) -> list[str]:
+    """Every name `statement` writes to, for the CALL argument-direction ladder.
+
+    ``.targets`` is shared verbatim by MOVE, ADD/SUBTRACT/MULTIPLY/DIVIDE
+    (`ArithmeticStatement`), COMPUTE, INITIALIZE, and SET -- a `CALCULATOR`
+    subprogram writing its result via `COMPUTE LK-RESULT = ...` is exactly
+    why arithmetic must count here, not just MOVE. ``.givings`` covers the
+    arithmetic GIVING clause. ``.into_target``/``.into_targets`` covers
+    READ INTO and STRING/UNSTRING (the latter a list of dicts).
+    """
+    names: list[str] = []
+    names.extend(getattr(statement, "targets", None) or [])
+    names.extend(getattr(statement, "givings", None) or [])
+    single = getattr(statement, "target", None)
+    if single:
+        names.append(single)
+    into_target = getattr(statement, "into_target", None)
+    if into_target:
+        names.append(into_target)
+    for entry in getattr(statement, "into_targets", None) or []:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if name:
+            names.append(name)
+    return names
+
+
+_WRITE_SHAPED_ATTRS = ("targets", "givings", "target", "into_target", "into_targets")
+
+
+def _is_write_shaped(statement: Any) -> bool:
+    """True for a statement type this module knows how to read *precisely*
+    (MOVE/arithmetic/COMPUTE/INITIALIZE/SET/READ-INTO/STRING/UNSTRING).
+
+    Its generic ``.operands`` list also contains its own write targets (a
+    MOVE's ``.operands`` holds both source and target), so a write-shaped
+    statement's "did this read `arg`" check must use only its own read-only
+    attribute (MOVE's ``.source``), never the generic operands fallback --
+    otherwise a plain write would be misread as a read of the same name.
+    """
+    return any(getattr(statement, attr, None) for attr in _WRITE_SHAPED_ATTRS)
+
+
+_FILE_OP_SPECS: tuple[tuple[type, str], ...] = (
+    (IOReadStatement, "READ"),
+    (IOWriteStatement, "WRITE"),
+    (IORewriteStatement, "REWRITE"),
+    (IOOpenStatement, "OPEN"),
+    (IOCloseStatement, "CLOSE"),
+    (IODeleteStatement, "DELETE"),
+    (IOStartStatement, "START"),
+    (IOUnlockStatement, "UNLOCK"),
+)
+
+
+@dataclass(frozen=True)
+class BoundaryRef:
+    """Identifies one boundary site: what it is, and where in the source."""
+
+    category: str  # CALL DYNCALL OPEN CLOSE READ WRITE REWRITE DELETE
+    # START UNLOCK SQL CICS DLI ACCEPT
+    key: str
+    paragraph: str | None
+    line: int | None
+
+
+@dataclass
+class CallArg:
+    """One CALL/DYNCALL USING argument, with its resolved data direction."""
+
+    name: str
+    passing_mode: str  # REFERENCE | CONTENT | VALUE
+    direction: str  # IN | OUT | BIDIRECTIONAL
+    provenance: str  # "by-content-rule" | "callee-source" | "caller-dataflow"
+    # | "assumed-bidirectional" | "giving-parameter"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "passing_mode": self.passing_mode,
+            "direction": self.direction,
+            "provenance": self.provenance,
+        }
+
+
+@dataclass
+class Boundary:
+    """One mockable boundary statement, with its resolved layout/direction."""
+
+    ref: BoundaryRef
+    direction: str  # IN | OUT | STATUS_ONLY | BIDIRECTIONAL
+    record_names: list[str] = field(default_factory=list)
+    status_field: str | None = None
+    handlers: list[str] = field(default_factory=list)
+    call_args: list[CallArg] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "category": self.ref.category,
+            "key": self.ref.key,
+            "paragraph": self.ref.paragraph,
+            "line": self.ref.line,
+            "direction": self.direction,
+            "record_names": list(self.record_names),
+            "status_field": self.status_field,
+            "handlers": list(self.handlers),
+            "call_args": [a.to_dict() for a in self.call_args],
+            "unresolved": list(self.unresolved),
+        }
+
+
+@dataclass
+class BoundaryReport:
+    program_name: str | None
+    boundaries: list[Boundary] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "program_name": self.program_name,
+            "boundaries": [b.to_dict() for b in self.boundaries],
+            "unresolved": list(self.unresolved),
+        }
+
+
+class BoundaryInventoryAnalyzer:
+    """Walks a program's PROCEDURE DIVISION and inventories its boundaries.
+
+    ``analyze(ast, index, callee_indexes=None)`` -- ``index`` is the Phase 1
+    :class:`ProgramLayoutIndex` built for the *same* program; ``callee_indexes``
+    optionally maps an uppercased called-program name to that callee's own
+    index (built separately, e.g. from ``--callee-path`` or a sibling
+    ``CobolProgram.contained_programs`` entry), enabling the CALL
+    argument-direction ladder's "callee source available" rung.
+    """
+
+    def analyze(
+        self,
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        *,
+        callee_indexes: dict[str, ProgramLayoutIndex] | None = None,
+        callee_asts: dict[str, CobolProgram] | None = None,
+    ) -> BoundaryReport:
+        report = BoundaryReport(program_name=ast.program_name)
+        procedure = ast.get_division("PROCEDURE")
+        if procedure is None:
+            return report
+
+        DynamicCallAnalyzer().analyze(ast)
+
+        for paragraph in self._all_paragraphs(procedure):
+            statements = paragraph.statements
+            for position, statement in enumerate(statements):
+                self._visit(
+                    statement,
+                    paragraph.paragraph_name,
+                    index,
+                    report,
+                    callee_indexes or {},
+                    callee_asts or {},
+                    enclosing_statements=statements,
+                    position=position,
+                )
+        return report
+
+    # -- traversal ------------------------------------------------------
+
+    @staticmethod
+    def _all_paragraphs(procedure_division: CobolDivision) -> list[CobolParagraph]:
+        paragraphs = list(procedure_division.paragraphs)
+        for section in procedure_division.sections:
+            if isinstance(section, CobolParagraph):
+                continue
+            paragraphs.extend(section.paragraphs)
+        return paragraphs
+
+    @staticmethod
+    def _nested_statement_lists(statement: Any) -> list[list]:
+        lists = [
+            value
+            for attr in _NESTED_STATEMENT_ATTRS
+            if (value := getattr(statement, attr, None))
+        ]
+        if isinstance(statement, EvaluateStatement):
+            for when in statement.when_clauses:
+                if when.statements:
+                    lists.append(when.statements)
+            if statement.default_when is not None and statement.default_when.statements:
+                lists.append(statement.default_when.statements)
+        if isinstance(statement, SearchStatement):
+            # SearchStatement.when_clauses is list[dict] with a "statements"
+            # key -- a different shape than EvaluateStatement's WhenClause
+            # nodes. Its AT END body is already covered by "at_end_clause".
+            for when_dict in statement.when_clauses:
+                if when_dict.get("statements"):
+                    lists.append(when_dict["statements"])
+        return lists
+
+    def _visit(
+        self,
+        statement: Any,
+        paragraph_name: str,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+        callee_indexes: dict[str, ProgramLayoutIndex],
+        callee_asts: dict[str, CobolProgram],
+        *,
+        enclosing_statements: list,
+        position: int,
+    ) -> None:
+        self._classify(
+            statement,
+            paragraph_name,
+            index,
+            report,
+            callee_indexes,
+            callee_asts,
+            enclosing_statements,
+            position,
+        )
+        for nested_list in self._nested_statement_lists(statement):
+            for nested_position, nested_statement in enumerate(nested_list):
+                self._visit(
+                    nested_statement,
+                    paragraph_name,
+                    index,
+                    report,
+                    callee_indexes,
+                    callee_asts,
+                    enclosing_statements=nested_list,
+                    position=nested_position,
+                )
+
+    # -- per-statement classification ------------------------------------
+
+    def _classify(
+        self,
+        statement: Any,
+        paragraph_name: str,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+        callee_indexes: dict[str, ProgramLayoutIndex],
+        callee_asts: dict[str, CobolProgram],
+        enclosing_statements: list,
+        position: int,
+    ) -> None:
+        line = statement.location.line if statement.location else None
+
+        def ref(category: str, key: str) -> BoundaryRef:
+            return BoundaryRef(
+                category=category, key=key, paragraph=paragraph_name, line=line
+            )
+
+        for statement_type, category in _FILE_OP_SPECS:
+            if isinstance(statement, statement_type):
+                self._classify_file_op(statement, category, ref, index, report)
+                return
+
+        if isinstance(statement, CallStatement):
+            self._classify_call(
+                statement,
+                ref,
+                index,
+                report,
+                callee_indexes,
+                callee_asts,
+                enclosing_statements,
+                position,
+            )
+            return
+
+        if isinstance(statement, ExecSQLStatement):
+            self._classify_sql(statement, ref, index, report)
+            return
+
+        if isinstance(statement, ExecCicsStatement):
+            self._classify_cics(statement, ref, index, report)
+            return
+
+        if isinstance(statement, ExecImsStatement):
+            self._classify_dli(statement, ref, index, report)
+            return
+
+        if isinstance(statement, IOAcceptStatement):
+            self._classify_accept(statement, ref, index, report)
+            return
+
+        # DisplayStatement and everything else: not a mockable boundary.
+        _ = DisplayStatement  # referenced for clarity of scope, no action
+
+    @staticmethod
+    def _handlers_present(statement: Any) -> list[str]:
+        return [
+            label for attr, label in _HANDLER_LABELS if getattr(statement, attr, None)
+        ]
+
+    def _classify_file_op(
+        self,
+        statement: Any,
+        category: str,
+        ref: Any,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+    ) -> None:
+        handlers = self._handlers_present(statement)
+
+        if category in ("OPEN", "CLOSE"):
+            for file_name in getattr(statement, "file_names", []) or []:
+                if not file_name:
+                    continue
+                report.boundaries.append(
+                    Boundary(
+                        ref=ref(category, file_name.upper()),
+                        direction="STATUS_ONLY",
+                        handlers=handlers,
+                    )
+                )
+            return
+
+        if category in ("WRITE", "REWRITE"):
+            record_name = getattr(statement, "record_name", None)
+            if not record_name:
+                report.unresolved.append(
+                    f"{category} in {ref(category, '').paragraph}: no record name"
+                )
+                return
+            # WRITE/REWRITE name the whole *record* (COBOL syntax, not the
+            # FD) -- a group item, which flatten_record/resolve() never
+            # indexes on its own name (it only emits FieldSpecs for
+            # elementary leaves). record_named() looks up the group itself.
+            record = index.record_named(record_name)
+            record_names = [record.name] if record else []
+            if not record:
+                report.unresolved.append(
+                    f"{category} {record_name}: record not resolvable in layout index"
+                )
+            report.boundaries.append(
+                Boundary(
+                    ref=ref(category, record_name.upper()),
+                    direction="OUT",
+                    record_names=record_names,
+                    handlers=handlers,
+                )
+            )
+            return
+
+        # READ / DELETE / START / UNLOCK: keyed on the file name.
+        file_name = getattr(statement, "file_name", None)
+        if not file_name:
+            report.unresolved.append(f"{category}: no file name")
+            return
+
+        record_names = []
+        status_field = None
+        facts = index.file_facts(file_name)
+        if facts is not None:
+            status_field = facts.file_status_field
+
+        if category == "READ":
+            into_target = getattr(statement, "into_target", None)
+            if into_target:
+                # INTO names a whole record (typically a WORKING-STORAGE
+                # group the FD's record gets copied into), not a field.
+                into_record = index.record_named(into_target)
+                if into_record:
+                    record_names = [into_record.name]
+            if not record_names:
+                record_names = [r.name for r in index.records_for_file(file_name)]
+            if not record_names:
+                report.unresolved.append(
+                    f"READ {file_name}: no record layout resolvable"
+                )
+            report.boundaries.append(
+                Boundary(
+                    ref=ref(category, file_name.upper()),
+                    direction="IN",
+                    record_names=record_names,
+                    status_field=status_field,
+                    handlers=handlers,
+                )
+            )
+            return
+
+        # DELETE / START / UNLOCK: no data payload, status-only.
+        if facts is not None and facts.record_key:
+            record_names = [facts.record_key]
+        report.boundaries.append(
+            Boundary(
+                ref=ref(category, file_name.upper()),
+                direction="STATUS_ONLY",
+                record_names=record_names,
+                status_field=status_field,
+                handlers=handlers,
+            )
+        )
+
+    # -- CALL / DYNCALL ---------------------------------------------------
+
+    def _classify_call(
+        self,
+        statement: CallStatement,
+        ref: Any,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+        callee_indexes: dict[str, ProgramLayoutIndex],
+        callee_asts: dict[str, CobolProgram],
+        enclosing_statements: list,
+        position: int,
+    ) -> None:
+        is_dynamic = bool(getattr(statement, "is_dynamic", False))
+        name = statement.called_program or ""
+        category = "DYNCALL" if is_dynamic else "CALL"
+        # Static CALL keys keep the literal's original case (COBOL program
+        # names are written case-sensitively); dynamic CALL keys -- COBOL
+        # identifiers -- are uppercased. Mirrors mockymock's own asymmetry so
+        # both walks agree on the same key for the same site.
+        key = name.upper() if is_dynamic else name
+
+        handlers = self._handlers_present(statement)
+        call_args = self._resolve_call_args(
+            statement,
+            index,
+            callee_indexes,
+            callee_asts,
+            enclosing_statements,
+            position,
+        )
+
+        boundary = Boundary(
+            ref=ref(category, key),
+            direction="",  # per-arg; no single statement-level direction
+            handlers=handlers,
+            call_args=call_args,
+        )
+        if is_dynamic:
+            possible = getattr(statement, "possible_values", None) or []
+            if not name:
+                report.unresolved.append("dynamic CALL with no identifier captured")
+            elif not possible:
+                report.unresolved.append(
+                    f"dynamic CALL {name}: no possible target values resolved"
+                )
+        elif not name:
+            report.unresolved.append("CALL with no program name captured")
+
+        report.boundaries.append(boundary)
+
+    def _resolve_call_args(
+        self,
+        statement: CallStatement,
+        index: ProgramLayoutIndex,
+        callee_indexes: dict[str, ProgramLayoutIndex],
+        callee_asts: dict[str, CobolProgram],
+        enclosing_statements: list,
+        position: int,
+    ) -> list[CallArg]:
+        args: list[CallArg] = []
+        callee_index = None
+        callee_ast = None
+        if not statement.is_dynamic and statement.called_program:
+            key = statement.called_program.upper().strip("\"'")
+            callee_index = callee_indexes.get(key)
+            callee_ast = callee_asts.get(key)
+
+        for i, param in enumerate(statement.using_parameters):
+            mode = (param.passing_mode or "REFERENCE").upper()
+            if mode in ("CONTENT", "VALUE"):
+                args.append(
+                    CallArg(
+                        name=param.name,
+                        passing_mode=mode,
+                        direction="OUT",
+                        provenance="by-content-rule",
+                    )
+                )
+                continue
+
+            if callee_index is not None and callee_ast is not None:
+                direction = self._callee_source_direction(i, callee_index, callee_ast)
+                if direction is not None:
+                    args.append(
+                        CallArg(
+                            name=param.name,
+                            passing_mode=mode,
+                            direction=direction,
+                            provenance="callee-source",
+                        )
+                    )
+                    continue
+
+            direction, provenance = self._caller_dataflow_direction(
+                param.name, index, enclosing_statements, position
+            )
+            args.append(
+                CallArg(
+                    name=param.name,
+                    passing_mode=mode,
+                    direction=direction,
+                    provenance=provenance,
+                )
+            )
+
+        for name in (statement.returning_parameter, statement.giving_parameter):
+            if name:
+                args.append(
+                    CallArg(
+                        name=name,
+                        passing_mode="REFERENCE",
+                        direction="IN",
+                        provenance="giving-parameter",
+                    )
+                )
+
+        return args
+
+    @staticmethod
+    def _callee_source_direction(
+        position: int, callee_index: ProgramLayoutIndex, callee_ast: CobolProgram
+    ) -> str | None:
+        """Rung 2: does the callee write to its Nth LINKAGE 01 at all?
+
+        v1 simplification (stated in the parent plan): writes-at-all -> IN
+        (the callee produces a value the caller needs back), reads-only ->
+        OUT (the caller's own value passes through unchanged). No attempt is
+        made here to distinguish "writes after reading" (BIDIRECTIONAL);
+        that refinement is left to a later phase.
+        """
+        linkage_records = callee_index.linkage_records()
+        if position >= len(linkage_records):
+            return None
+        linkage_root = linkage_records[position]
+        candidate_names = {linkage_root.name.upper()}
+        for child in linkage_root.get_all_children():
+            candidate_names.add(child.name.upper())
+
+        for statement in callee_ast.get_all_statements():
+            for target in _write_targets(statement):
+                if target and target.upper() in candidate_names:
+                    return "IN"
+        return "OUT"
+
+    @staticmethod
+    def _caller_dataflow_direction(
+        arg_name: str,
+        index: ProgramLayoutIndex,
+        enclosing_statements: list,
+        position: int,
+    ) -> tuple[str, str]:
+        """Rung 3: last write before the CALL / first read after it, in the
+        enclosing paragraph's own statement list (source order).
+
+        A write to a *parent group* counts as a write to `arg_name` (and vice
+        versa for a read) -- checked by comparing `FieldSpec.path` prefixes
+        through the layout index, not by bare string equality.
+        """
+        resolved_arg = index.resolve(arg_name)
+        arg_path = resolved_arg.spec.path if resolved_arg else (arg_name.upper(),)
+
+        def touches(name: str | None) -> bool:
+            if not name:
+                return False
+            if name.upper() == arg_name.upper():
+                return True
+            other = index.resolve(name)
+            other_path = other.spec.path if other else (name.upper(),)
+            shorter, longer = sorted((arg_path, other_path), key=len)
+            return longer[: len(shorter)] == shorter
+
+        wrote_before = any(
+            touches(t)
+            for statement in enclosing_statements[:position]
+            for t in _write_targets(statement)
+        )
+
+        read_after = False
+        write_after = False
+        for statement in enclosing_statements[position + 1 :]:
+            if any(touches(t) for t in _write_targets(statement)):
+                write_after = True
+                break
+            if _is_write_shaped(statement):
+                # A write-shaped statement that did not touch arg via its
+                # own write targets -- MOVE's .source is its only precise
+                # read-only attribute; other write-shaped types (arithmetic
+                # expressions, SET's .value) have no such attribute captured
+                # today, so they contribute no read signal here.
+                source = getattr(statement, "source", None)
+                if source and touches(source):
+                    read_after = True
+                    break
+                continue
+            if any(touches(op) for op in getattr(statement, "operands", None) or []):
+                read_after = True
+                break
+
+        if wrote_before and not read_after:
+            return "OUT", "caller-dataflow"
+        if read_after and not wrote_before:
+            return "IN", "caller-dataflow"
+        if wrote_before and read_after:
+            return "BIDIRECTIONAL", "caller-dataflow"
+        if write_after:
+            # Written only after the call, never before or read from --
+            # nothing observed the caller-supplied value, so it is the
+            # callee that must be producing it.
+            return "IN", "caller-dataflow"
+        return "BIDIRECTIONAL", "assumed-bidirectional"
+
+    # -- EXEC SQL / CICS / DLI -------------------------------------------
+
+    @staticmethod
+    def _unique_prefix(match_text: str, others: list[str]) -> str:
+        """Shortest word-prefix of `match_text` no other same-category site
+        shares -- mirrors mockymock's `generator._unique_prefix` (re-derived
+        independently; see module docstring)."""
+        words = match_text.split()
+        if not words:
+            return ""
+        for length in range(1, len(words) + 1):
+            prefix = " ".join(words[:length])
+            if not any(o.startswith(prefix) for o in others):
+                return prefix
+        return " ".join(words)
+
+    @staticmethod
+    def _resolve_display_name(name: str, index: ProgramLayoutIndex) -> str | None:
+        """Resolve *name* whether it names an elementary field or a whole
+        record/group -- an SQL host variable, ACCEPT target, or CICS/DLI
+        operand can legally be either, but `index.resolve()` alone only ever
+        finds elementary fields (`flatten_record` emits no `FieldSpec` for a
+        group item; `record_named()` exists precisely to fill that gap --
+        see .okf/generators.md)."""
+        resolved = index.resolve(name)
+        if resolved:
+            return resolved.spec.qualified_name
+        record = index.record_named(name)
+        return record.name if record else None
+
+    def _classify_sql(
+        self,
+        statement: ExecSQLStatement,
+        ref: Any,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+    ) -> None:
+        sql_type = (statement.sql_type or "").upper()
+        # into_variables is unreliable in practice -- an inline
+        # "SELECT ... INTO :a FROM t WHERE x = :b" places both :a and :b in
+        # host_variables, not into_variables (verified empirically; see
+        # .okf/analysis.md). host_variables is therefore the only layout
+        # source this uses, for every SQL statement shape.
+        host_vars = list(statement.host_variables) + list(
+            getattr(statement, "into_variables", []) or []
+        )
+        record_names: list[str] = []
+        for var in dict.fromkeys(v.lstrip(":") for v in host_vars if v):
+            display_name = self._resolve_display_name(var, index)
+            if display_name:
+                record_names.append(display_name)
+            else:
+                report.unresolved.append(
+                    f"SQL host variable {var} not resolvable in layout index"
+                )
+
+        if sql_type in _SQL_IN_TYPES or isinstance(statement, FetchStatement):
+            direction = "IN"
+        elif sql_type in _SQL_OUT_TYPES:
+            direction = "OUT"
+        else:
+            direction = "STATUS_ONLY"
+
+        others = [b.ref.key for b in report.boundaries if b.ref.category == "SQL"]
+        text = statement.sql_text or sql_type
+        key = self._unique_prefix(text, others) if text else sql_type
+
+        report.boundaries.append(
+            Boundary(
+                ref=ref("SQL", key),
+                direction=direction,
+                record_names=record_names,
+                status_field="SQLCODE",
+            )
+        )
+
+    def _classify_cics(
+        self,
+        statement: ExecCicsStatement,
+        ref: Any,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+    ) -> None:
+        # EXEC CICS has no fixed INTO/FROM attributes -- its data-transfer
+        # operand is one of many command-specific keywords captured
+        # generically in `.options` (option keyword -> argument text).
+        # Resolving it precisely per CICS command is out of scope for this
+        # phase; best-effort: try every option value against the layout
+        # index, and record what wasn't resolvable rather than guess a
+        # direction with false confidence.
+        record_names: list[str] = []
+        for option_value in statement.options.values():
+            if not option_value:
+                continue
+            display_name = self._resolve_display_name(option_value, index)
+            if display_name:
+                record_names.append(display_name)
+
+        text = f"{statement.cics_command} {statement.cics_text}".strip()
+        others = [b.ref.key for b in report.boundaries if b.ref.category == "CICS"]
+        key = self._unique_prefix(text, others) if text else statement.cics_command
+
+        unresolved: list[str] = []
+        if not record_names:
+            unresolved.append(
+                "CICS command data-transfer operand not resolvable "
+                "(best-effort v1: no fixed INTO/FROM attribute to key off)"
+            )
+
+        report.boundaries.append(
+            Boundary(
+                ref=ref("CICS", key),
+                direction="BIDIRECTIONAL",
+                record_names=record_names,
+                unresolved=unresolved,
+            )
+        )
+
+    def _classify_dli(
+        self,
+        statement: ExecImsStatement,
+        ref: Any,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+    ) -> None:
+        # Same best-effort posture as CICS: arguments is a positional list
+        # (PCB reference, I/O area, SSAs) with no fixed role per position.
+        record_names: list[str] = []
+        for argument in statement.arguments:
+            display_name = self._resolve_display_name(argument, index)
+            if display_name:
+                record_names.append(display_name)
+
+        text = f"{statement.ims_command} {statement.ims_text}".strip()
+        others = [b.ref.key for b in report.boundaries if b.ref.category == "DLI"]
+        key = self._unique_prefix(text, others) if text else statement.ims_command
+
+        unresolved: list[str] = []
+        if not record_names:
+            unresolved.append(
+                "DLI call argument not resolvable to a layout field "
+                "(best-effort v1: positional arguments, no fixed role)"
+            )
+
+        report.boundaries.append(
+            Boundary(
+                ref=ref("DLI", key),
+                direction="BIDIRECTIONAL",
+                record_names=record_names,
+                unresolved=unresolved,
+            )
+        )
+
+    def _classify_accept(
+        self,
+        statement: IOAcceptStatement,
+        ref: Any,
+        index: ProgramLayoutIndex,
+        report: BoundaryReport,
+    ) -> None:
+        source = (statement.from_source or "").upper()
+        if source in _NON_INTERACTIVE_ACCEPT_SOURCES:
+            return  # not a boundary: resolved without touching stdin
+
+        target = (statement.target or "").upper()
+        if not target:
+            report.unresolved.append("ACCEPT with no target captured")
+            return
+
+        if target == "OMITTED":
+            # ACCEPT OMITTED: a real COBOL idiom -- waits for console input
+            # (still a boundary: it blocks on stdin) but stores nothing, so
+            # there is deliberately no field to resolve. Not a gap.
+            report.boundaries.append(
+                Boundary(ref=ref("ACCEPT", target), direction="IN")
+            )
+            return
+
+        display_name = self._resolve_display_name(target, index)
+        record_names = [display_name] if display_name else []
+        if not display_name:
+            report.unresolved.append(
+                f"ACCEPT target {target} not resolvable in layout index"
+            )
+
+        report.boundaries.append(
+            Boundary(
+                ref=ref("ACCEPT", target),
+                direction="IN",
+                record_names=record_names,
+            )
+        )
+
+
+__all__ = [
+    "BoundaryRef",
+    "CallArg",
+    "Boundary",
+    "BoundaryReport",
+    "BoundaryInventoryAnalyzer",
+]

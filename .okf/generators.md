@@ -246,6 +246,7 @@ index.file_facts("INV-FILE")           -> FileFacts | None
 index.resolve("INV-QTY")               -> ResolvedField | None
 index.resolve("INV-QTY OF INV-REC")    -> ResolvedField | None  # qualified
 index.resolve("INV-REC.INV-QTY")       -> ResolvedField | None  # dotted, same meaning
+index.record_named("INV-REC")          -> CobolDataItem | None  # whole record/group, any section
 index.section_of("WS-EOF")             -> "working_storage"
 index.linkage_records()                -> list[CobolDataItem]
 index.working_storage_records()        -> list[CobolDataItem]
@@ -305,6 +306,20 @@ A level-88 condition name resolves to its *parent* field's `ResolvedField`
 by qualified path, since `flatten_record` does not emit a `FieldSpec` for
 level-88/66 items).
 
+**`record_named(name)` — whole records, not fields.** `resolve()` only ever
+finds *elementary* fields, because `flatten_record` never emits a `FieldSpec`
+for a group item (it descends through groups to their leaves). A WRITE/
+REWRITE target, a READ `INTO` target, and an SQL/ACCEPT/CICS/DLI operand can
+all legally name a *whole record* instead of a field — `resolve("INV-REC")`
+returns `None` for exactly this reason. `record_named()` fills that gap: it
+indexes every top-level (01/77) record by its own name, across all four
+sections, independent of `flatten_record`. Same ambiguity policy as
+`resolve()` (a name shared by records in more than one section returns `None`
+and is recorded in `ambiguities`, never guessed). Found via direct
+reproduction while building Phase 2's `BoundaryInventoryAnalyzer` — a
+REWRITE's record target came back `None` from `resolve()` even though
+`records_for_file()` proved the record was indexed; not theorized.
+
 ## Multi-program compilation units
 
 `build()` indexes exactly the `CobolProgram` node it is given — for a file
@@ -339,6 +354,7 @@ partial). `strict_copybooks=False` downgrades the last case to an
 * `tests/unit/test_flowchart_generator.py` — flowchart generators
 * `tests/unit/test_program_layout_index.py` — FD/record resolution, FD-vs-SD
   tagging, `FileFacts` merging, bare/qualified/level-88 name resolution,
+  `record_named()` (whole-record lookup + cross-section ambiguity),
   multi-program compilation units, `from_file` error modes
 * `tests/integration/test_program_layout_corpus.py` — every
   `examples/cobol/shamrice/*.cbl` indexes without raising; zero unexpected

@@ -172,6 +172,7 @@ COBOL source (.cbl/.cob)
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
 - `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`; public API re-exported from the package `__init__.py`)
+- `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
@@ -313,7 +314,16 @@ index = ProgramLayoutIndex.from_file("INVUPDT.cbl")   # or .build(ast)
 index.record_for_file("INV-FILE")      # CobolDataItem | None, via FD -> record
 index.file_facts("INV-FILE")           # FileFacts: organization/keys/record size/FD-or-SD
 index.resolve("INV-QTY OF INV-REC")    # ResolvedField | None (bare/qualified/level-88 names)
+index.record_named("INV-REC")          # CobolDataItem | None (whole record, any section)
 index.unresolved                       # reasons nothing was silently dropped
+
+# Boundary inventory (Phase 2): every mockable touchpoint of a program
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+report = BoundaryInventoryAnalyzer().analyze(ast, index)
+report.boundaries                      # list[Boundary]: category/key, direction,
+                                        # record_names, status_field, handlers, call_args
+report.boundaries[0].call_args         # CALL/DYNCALL only: per-argument IN/OUT/
+                                        # BIDIRECTIONAL direction + provenance
 ```
 
 ### Adding a New Statement Parser

@@ -17,6 +17,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis:** `BoundaryInventoryAnalyzer` — whole-program boundary inventory
+  (`cobolparser/analysis/boundary_inventory.py`, 2026-08-04). Phase 2 of the
+  `gen-fixtures` program-scoped test-data initiative (see
+  `docs/plans/2026-08-02-program-data-generation-design.md`): walks the
+  PROCEDURE DIVISION and emits one `Boundary` per mockable statement
+  (CALL/DYNCALL, the eight file-op verbs, EXEC SQL/CICS/DLI, console ACCEPT),
+  keyed the same way mockymock's own `mock_surface` module keys them (two
+  independent walks over the same AST, re-deriving mockymock's unique-prefix
+  key algorithm and non-interactive-ACCEPT-sources list rather than
+  importing them — the dependency direction is mockymock -> cobol-parser,
+  never the reverse). Each boundary's record/field layout resolves through
+  a Phase 1 `ProgramLayoutIndex` built for the same program.
+
+  CALL/DYNCALL arguments resolve through a 4-rung direction ladder
+  (`CallArg.direction`/`.provenance`): `BY CONTENT`/`BY VALUE` is always OUT;
+  a known callee's LINKAGE write (checked generically across MOVE,
+  ADD/SUBTRACT/MULTIPLY/DIVIDE, COMPUTE, INITIALIZE, and SET — not just
+  MOVE, which would miss a `COMPUTE LK-RESULT = ...` subprogram entirely) is
+  IN; caller-side dataflow in the enclosing paragraph (last write
+  before/first read after, in source order) is OUT/IN/BIDIRECTIONAL; the
+  remaining fallback is BIDIRECTIONAL with `provenance="assumed-bidirectional"`.
+  `RETURNING`/`GIVING` parameters are always IN. WRITE/REWRITE and READ
+  `INTO` resolve through `ProgramLayoutIndex.record_named()` (new, see
+  below) rather than `.resolve()`, since both name a whole record, not a
+  field. SQL direction comes from `sql_type` over `host_variables` (the
+  parent plan's assumed `into_variables`/`host_variables` split does not
+  hold in practice — verified empirically, an inline `SELECT ... INTO`
+  places every host variable in `host_variables`). CICS/DLI layout
+  resolution is best-effort in v1 (no fixed INTO/FROM-shaped attributes to
+  key off) and reports the limitation on the boundary rather than claiming
+  false precision. `ACCEPT OMITTED` (waits for input, stores nothing) is
+  recognized as a real idiom, not an unresolved gap.
+
+  New `BoundaryInventoryAnalyzer` / `BoundaryRef` / `Boundary` / `CallArg` /
+  `BoundaryReport` public API. Also adds `ProgramLayoutIndex.record_named()`
+  — finds a whole record/group by name across all sections, filling a real
+  gap `resolve()` cannot (it only ever indexes elementary fields, since
+  `flatten_record` emits no `FieldSpec` for a group item), found via direct
+  reproduction against `tests/samples/file_operations.cbl`'s REWRITE
+  statement while building this analyzer.
+
+  Documented in `.okf/analysis.md` (new `BoundaryInventoryAnalyzer` section)
+  and `.okf/generators.md` (`record_named()`); covered by
+  `tests/unit/analysis/test_boundary_inventory.py`,
+  `tests/integration/test_boundary_inventory_corpus.py` (parametrized over
+  the shamrice corpus), plus new `record_named()` cases in
+  `tests/unit/test_program_layout_index.py`.
 * **generators:** `ProgramLayoutIndex` — whole-program FD/record/field layout
   resolution (`cobolparser/generators/data/program_layout.py`, 2026-08-04).
   Phase 1 of the `gen-fixtures` program-scoped test-data initiative (see
