@@ -20,11 +20,13 @@ _TEXT_START = 7   # TEXT_START_COL - 1
 _TEXT_END   = 72  # TEXT_END_COL
 
 
-def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True):
+def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True, warnings=None):
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
     Identical contract to the pure-Python version; see that function for
-    full documentation.
+    full documentation, including the column-73+ overflow warning rule
+    (columns 72 and 73 both non-blank -- a real mid-token split, not a
+    traditional identification-area field).
     """
     cdef int  i, n
     cdef bint quote_open    = False
@@ -36,7 +38,7 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     result = []
     parts  = []
 
-    for raw in lines:
+    for line_no, raw in enumerate(lines, start=1):
         line = raw.rstrip("\n").expandtabs(8)
 
         if len(line) < _TEXT_START:
@@ -72,6 +74,15 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             quote_ch      = None
             pending_literal = False
             continue
+
+        if warnings is not None and len(line) > _TEXT_END:
+            before, after = line[_TEXT_END - 1], line[_TEXT_END]
+            if not before.isspace() and not after.isspace():
+                dropped = line[_TEXT_END:].rstrip()
+                warnings.append(
+                    f"Line {line_no}: content beyond column {_TEXT_END} "
+                    f"was dropped mid-token: {dropped!r}"
+                )
 
         is_cont = indicator == "-"
 

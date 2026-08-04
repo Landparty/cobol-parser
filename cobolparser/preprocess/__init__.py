@@ -405,6 +405,7 @@ def normalize_fixed_format(
     *,
     merge_continued_literals: bool = True,
     debug_lines_as_comments: bool = True,
+    warnings: list[str] | None = None,
 ) -> str:
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
@@ -421,6 +422,21 @@ def normalize_fixed_format(
     - Otherwise join with newlines.
 
     This does NOT attempt full column-sensitive semantics (debugging helper).
+
+    **Column 73+ overflow.** Columns 73-80 are the identification area:
+    real fixed-format compilers ignore them regardless of content, and so
+    does this slice (``line[TEXT_START_COL - 1 : TEXT_END_COL]`` never
+    bounds-checks the line length). Traditional 80-column source
+    legitimately puts non-blank sequence/identification text there (e.g.
+    NIST CCVS85's ``IC1014.2`` on every line) -- flagging that would be
+    noise, not signal. What *is* worth flagging: a non-comment line whose
+    real program text runs past column 72 with no separating blank, i.e.
+    columns 72 and 73 are both non-blank -- content was actually split
+    mid-token, not merely followed by an unrelated identification field.
+    When `warnings` is given, each such line appends one
+    ``f"Line {n}: ..."`` message to it (comment lines are never checked:
+    their text is discarded whether truncated or not, so truncation there
+    changes nothing).
     """
     result: list[str] = []
     pending_literal = False
@@ -488,7 +504,7 @@ def normalize_fixed_format(
         pending_literal = False
         quote_char = None
 
-    for raw in lines:
+    for line_no, raw in enumerate(lines, start=1):
         line = raw.rstrip("\n").expandtabs(8)
         if len(line) < TEXT_START_COL - 1:
             # Blank/short line: flush whatever logical line was in progress,
@@ -511,6 +527,16 @@ def normalize_fixed_format(
             pending_literal = False
             result.append("")
             continue
+
+        if warnings is not None and len(line) > TEXT_END_COL:
+            before, after = line[TEXT_END_COL - 1], line[TEXT_END_COL]
+            if not before.isspace() and not after.isspace():
+                dropped = line[TEXT_END_COL:].rstrip()
+                warnings.append(
+                    f"Line {line_no}: content beyond column {TEXT_END_COL} "
+                    f"was dropped mid-token: {dropped!r}"
+                )
+
         is_cont = indicator == "-"
 
         # Handle continuation lines
