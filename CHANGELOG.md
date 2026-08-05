@@ -760,6 +760,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser (2026-08-05): INVOKE, ALLOCATE, and FREE are now parsed instead of
+  silently discarded.** All three are real, valid IBM Enterprise COBOL verbs
+  (`INVOKE` for Object-Oriented method calls; `ALLOCATE`/`FREE` for dynamic
+  storage) that previously had no registered statement parser: they hit
+  `ProcedureDivisionParser`'s "unsupported statement" recovery path, which
+  discards the statement's tokens up to the next boundary and records only a
+  warning, leaving `result.success` `True` with an incomplete AST. Added
+  `InvokeStatementParser` -> `InvokeStatement` (object identifier, literal or
+  identifier-held method name, `USING [BY REFERENCE|CONTENT|VALUE]`
+  parameters, `RETURNING`) and `AllocateStatementParser`/
+  `FreeStatementParser` -> `AllocateStatement`/`FreeStatement` (byte-count
+  `CHARACTERS` form or `BASED` data-item form, `INITIALIZED`, `RETURNING`;
+  one or more pointer names). `ALLOCATE`/`FREE` deliberately have no
+  dedicated lexer `TokenType` — they are matched by value only at a genuine
+  statement-start position, so a data item legitimately named `ALLOCATE` or
+  `FREE` is unaffected everywhere else. See
+  [.okf/parser.md](.okf/parser.md). Pinned by
+  `tests/regression/test_invoke_allocate_free_statements.py`.
+* **lexer (2026-08-05): seven `KEYWORDS` entries reserved words that never
+  matched real syntax, silently corrupting legitimately-named data items,
+  paragraphs, and condition names.** `FILE-STATUS`, `RECORD-DELIMITER`, and
+  `READ-ONLY` were mapped as single hyphenated tokens, but real COBOL syntax
+  always writes them as two separate words (`FILE STATUS`, `RECORD
+  DELIMITER`, `READ ONLY`) — every clause parser that recognizes them
+  (`environment_select.py`) already dispatches on the leading word and
+  consumes the second as plain text, so the fused-word entry never matched
+  genuine syntax. `END-SET` and `OTHERWISE` are not COBOL reserved words at
+  all (`SET` has no scope terminator; EVALUATE's default branch is `WHEN
+  OTHER`, not `OTHERWISE`). `END-OF-FILE`/`EOF` are not reserved words either
+  — they are exactly the condition-name real IBM programs conventionally
+  give their end-of-file level-88 flag (confirmed by the project's own
+  `parsers/statements/_conditions.py` docstring, which already cited `IF
+  END-OF-FILE` as the canonical bare condition-name example this bug broke).
+  Verified via a full sweep of all 194 `KEYWORDS` entries: these seven were
+  the only ones with zero non-lexer consumers anywhere in the codebase.
+  Removed from `KEYWORDS` so all seven now lex as plain `IDENTIFIER`; the
+  two-word clauses they were named after are unaffected. See
+  [.okf/lexer.md](.okf/lexer.md). Pinned by
+  `tests/regression/test_dead_keyword_removal.py`.
 * **parser (2026-08-05): EJECT compiler-directing statements were misparsed
   as bogus paragraphs, or warned about as unsupported.** `EJECT` (the
   page-eject listing directive) had no `TokenType`/keyword entry and no

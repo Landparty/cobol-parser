@@ -8,7 +8,16 @@ timestamp: 2026-08-04T00:00:00Z
 
 # Overview
 
-7,793 passed / 13 skipped / 1 xfailed (2026-08-04: +454 tests across Phases
+7,859 passed / 13 skipped / 1 xfailed (2026-08-05: +39 net across two fixes
+— `test_dead_keyword_removal.py` (+16: seven dead `lexer.KEYWORDS` entries
+that never matched real syntax, see [lexer.md](lexer.md)) and
+`test_invoke_allocate_free_statements.py` (+10, plus new
+`TestInvokeAllocateFreeNoLongerSwallowed` classes in
+`test_tier5_silent_drip_audit.py` and `test_tier7_unsupported_verb_boundary.py`,
+and a swapped-in `TRANSFORM` case replacing the now-supported `INVOKE` in
+`test_tier3_silent_drop_fixes.py`/`test_tier5_silent_drip_audit.py`: `INVOKE`/
+`ALLOCATE`/`FREE` now have registered statement parsers, see
+[parser.md](parser.md)). 2026-08-04: +454 tests across Phases
 1-7 of the `gen-fixtures` program-scoped test-data initiative —
 `ProgramLayoutIndex` (Phase 1), `BoundaryInventoryAnalyzer` (Phase 2),
 `ProgramFixtureGenerator` + the `gen-fixtures` CLI subcommand (Phase 3),

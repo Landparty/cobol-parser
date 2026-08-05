@@ -188,6 +188,51 @@ picks up the change automatically with no `.pyx`/`.c` regeneration needed.
 Pinned by `tests/regression/test_null_pointer_value_clause.py` and
 `tests/unit/test_lexer.py::TestCobolLexerFigurativeConstants::test_null_figurative_constants`.
 
+# Dead KEYWORDS entries removed (2026-08-05)
+
+A full sweep of all 194 `CobolLexer.KEYWORDS` entries against the actual
+parser (fed each keyword as a data-item name, a paragraph name, and checked
+every non-lexer reference to its `TokenType`) found seven entries that were
+pure landmines: mapped to a `TokenType` **zero parsers anywhere consumed**,
+so the entry never matched any real COBOL syntax and existed only to steal a
+legitimately-named data item/paragraph/condition-name, silently corrupting
+it to an `ANONYMOUS-N` item or an empty paragraph with `result.success` still
+`True`.
+
+* `"FILE-STATUS"`, `"RECORD-DELIMITER"`, `"READ-ONLY"` -- real COBOL syntax
+  always writes these as two separate words (`FILE STATUS`, `RECORD
+  DELIMITER`, `READ ONLY`); every clause parser that recognizes them
+  (`environment_select.py`'s `_parse_file_status_clause` /
+  `_parse_record_key_clause` / `_parse_sharing_clause`) already dispatches on
+  the leading word (`"FILE"`/`"RECORD"`/`"READ"`, each already a keyword in
+  its own right) and consumes the second word as plain text -- the fused
+  single-token spelling was never how the parser actually recognized these
+  clauses, so it could never fire on real input.
+* `"END-SET"`, `"OTHERWISE"` -- not COBOL reserved words at all. `SET` has no
+  scope terminator in the grammar (it carries no conditional/nested body,
+  unlike `MOVE`/`PERFORM`/etc.), and EVALUATE's default branch keyword is
+  `WHEN OTHER`, never `OTHERWISE`.
+* `"END-OF-FILE"`, `"EOF"` -- not reserved words either. End-of-file testing
+  in COBOL is done via a `READ` statement's `AT END` clause plus a
+  programmer-defined level-88 condition-name, and `EOF`/`END-OF-FILE` are
+  exactly the names real IBM COBOL programs conventionally give that
+  condition (or its backing flag). This one was independently confirmed by
+  the project's own `parsers/statements/_conditions.py` docstring, which
+  already documented `IF END-OF-FILE` as *the* canonical bare
+  condition-name example -- the code's own comment describes the behavior
+  this bug prevented.
+
+All seven were removed from `KEYWORDS` (comments left in place explaining
+why, so a future contributor doesn't re-add them by "completeness"); the word
+now lexes as a plain `IDENTIFIER` in every position. Because `_lexer_fast.pyx`
+consults the inherited `self.KEYWORDS` dict rather than defining its own copy
+(see "Cython Acceleration" above), this fix applies to both the pure-Python
+and compiled lexer paths with no `.pyx`/`.c` regeneration needed. The real,
+two-word SELECT clauses these words are named after (`FILE STATUS IS`,
+`RECORD DELIMITER IS`, `SHARING WITH READ ONLY`) are unaffected -- verified
+by an end-to-end SELECT-clause test. Pinned by
+`tests/regression/test_dead_keyword_removal.py`.
+
 # Unified tokenize pipeline (2026-07-20, M6)
 
 `tokenize_cobol()` and CLI `tokenize` no longer run the lexer's own

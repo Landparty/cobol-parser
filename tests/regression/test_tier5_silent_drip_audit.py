@@ -74,10 +74,14 @@ class TestEntryUsingClauseDoesNotSwallowFollowingStatement:
 
 class TestCallHandlerWarnsOnUnsupportedVerb:
     def test_unsupported_verb_in_on_exception_warns_and_is_dropped(self):
+        # TRANSFORM is a genuinely unsupported (obsolete) verb. INVOKE was
+        # originally used here, but it now has a registered parser
+        # (invoke_parser.py) -- see test_invoke_dispatches_inside_on_exception_handler
+        # below for its coverage of this same handler-body position.
         result = _parse_proc(
             "           CALL 'SUB' USING WS-X\n"
             "              ON EXCEPTION\n"
-            "                  INVOKE FOO 'bar'\n"
+            "                  TRANSFORM WS-Y CHARACTERS FROM 'a' TO 'b'\n"
             "                  DISPLAY 'HANDLED'\n"
             "           END-CALL."
         )
@@ -85,6 +89,23 @@ class TestCallHandlerWarnsOnUnsupportedVerb:
         handler_types = [type(s).__name__ for s in (call.on_exception or [])]
         assert handler_types == ["DisplayStatement"]
         assert any(
-            "INVOKE" in w and "no parser is registered" in w for w in result.warnings
+            "TRANSFORM" in w and "no parser is registered" in w for w in result.warnings
         )
+        assert result.errors == []
+
+    def test_invoke_dispatches_inside_on_exception_handler(self):
+        """INVOKE now has a registered parser (invoke_parser.py) and must
+        dispatch to a real InvokeStatement inside a CALL handler body instead
+        of hitting the unsupported-verb warn-and-skip path above."""
+        result = _parse_proc(
+            "           CALL 'SUB' USING WS-X\n"
+            "              ON EXCEPTION\n"
+            "                  INVOKE WS-OBJ 'bar'\n"
+            "                  DISPLAY 'HANDLED'\n"
+            "           END-CALL."
+        )
+        call = result.ast.get_all_statements()[0]
+        handler_types = [type(s).__name__ for s in (call.on_exception or [])]
+        assert handler_types == ["InvokeStatement", "DisplayStatement"]
+        assert not any("INVOKE" in w for w in result.warnings)
         assert result.errors == []

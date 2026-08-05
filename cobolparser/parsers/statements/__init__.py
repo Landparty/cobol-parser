@@ -26,6 +26,7 @@ Example:
 """
 
 from .accept_parser import AcceptStatementParser
+from .allocate_free_parsers import AllocateStatementParser, FreeStatementParser
 from .arithmetic_parsers import (
     AddStatementParser,
     ComputeStatementParser,
@@ -50,6 +51,7 @@ from .initialize_inspect_parsers import (
     InitializeStatementParser,
     InspectStatementParser,
 )
+from .invoke_parser import InvokeStatementParser
 from .move_parser import MoveStatementParser
 from .open_parser import OpenStatementParser
 from .perform_parser import PerformStatementParser
@@ -127,4 +129,7 @@ __all__ = [
     "UnlockStatementParser",
     "CommitStatementParser",
     "RollbackStatementParser",
+    "InvokeStatementParser",
+    "AllocateStatementParser",
+    "FreeStatementParser",
 ]

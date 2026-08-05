@@ -13,7 +13,8 @@ Family modules:
     data        — MoveStatement, DisplayStatement, StringStatement, UnstringStatement
     io          — IO* statement classes (IOReadStatement, IOWriteStatement, etc.)
     call        — CallStatement, EntryStatement, CallParameter
-    misc        — SelectStatement, CopyStatement
+    misc        — SelectStatement, CopyStatement, InvokeStatement,
+                  AllocateStatement, FreeStatement
 """
 
 from .arithmetic import (
@@ -67,6 +68,7 @@ from .io import (
     IOWriteStatement,
 )
 from .misc import (
+    AllocateStatement,
     AlterStatement,
     CancelStatement,
     CommitStatement,
@@ -74,8 +76,10 @@ from .misc import (
     CopyStatement,
     EjectStatement,
     ExitStatement,
+    FreeStatement,
     GenerateStatement,
     GobackStatement,
+    InvokeStatement,
     MergeStatement,
     ReleaseStatement,
     ReturnStatement,
@@ -128,6 +132,9 @@ __all__ = [
     "SortStatement",
     "XmlJsonStatement",
     "MergeStatement",
+    "InvokeStatement",
+    "AllocateStatement",
+    "FreeStatement",
     # Other exports
     "CobolExpression",
     "ArithmeticExpression",

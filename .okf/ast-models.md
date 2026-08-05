@@ -208,7 +208,20 @@ AST nodes for EXEC SQL, EXEC CICS, and EXEC IMS DLI blocks captured by
 | `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` |
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
-| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement` |
+| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
+
+**`InvokeStatement`/`AllocateStatement`/`FreeStatement` (2026-08-05, `misc.py`):**
+back the new `invoke_parser.py`/`allocate_free_parsers.py` statement parsers
+(see [parser.md](parser.md)) for three previously-unsupported IBM Enterprise
+verbs. `InvokeStatement` — `object_name`, `method_name` +
+`method_is_literal`, `using_parameters` (reuses `call.py`'s `CallParameter`
+— same `{name, passing_mode}` shape CALL's USING clause already produces),
+`returning_target`. `AllocateStatement` — `is_characters`/`size_expr` (the
+`identifier-1 CHARACTERS` byte-count form) xor `data_item` (the `BASED`
+data-item form), `initialized`, `returning_target`. `FreeStatement` —
+`pointer_names: list[str]`. All three follow the established
+`to_dict()`/`_add_unique_operand()` pattern every other statement node in
+this file uses; no new AST plumbing.
 
 Notes (2026-07-07 audit remediation):
 
