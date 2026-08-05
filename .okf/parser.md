@@ -242,7 +242,7 @@ sibling) and a dedicated anonymous-item case.
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
-| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE |
 | `sort_merge_parsers.py` | SORT, MERGE |
 | `start_parser.py` | START |
 | `stop_parser.py` | STOP |
@@ -1660,6 +1660,60 @@ inspection before concluding so. Fixed by wrapping the fixture across two
 lines rather than changing any parser code — a reminder that this
 column-72 gotcha applies to test fixtures using this repo's usual
 7-space/Area-B indentation, not just to real-world source.
+
+# EJECT compiler-directing statement was unrecognized (2026-08-05)
+
+`EJECT` (the source-listing page-eject directive — not the column-7 `/`
+page-eject comment convention, which was already handled; see
+[lexer.md](lexer.md)'s "Unified tokenize pipeline" section) had no
+`TokenType`, no `KEYWORDS` entry, and no registered statement parser, so it
+lexed as a bare `TokenType.IDENTIFIER`. Two failure modes, both found by
+direct repro against `parse_cobol()`:
+
+* **`EJECT.` (trailing period, the common real-world style) was misread as
+  a new paragraph header.** `is_paragraph_or_section_start`
+  (`procedure_boundaries.py`) treats an `IDENTIFIER` token followed by a
+  period as a paragraph name — indistinguishable from a real one at the
+  token-type level. `MAIN-PARA. ... EJECT. SECOND-PARA. ...` silently
+  became three paragraphs (`MAIN-PARA`, an empty bogus `EJECT`, and
+  `SECOND-PARA`) instead of two, splitting `MAIN-PARA`'s own statements
+  across the phantom boundary.
+* **`EJECT` with no trailing period fell through to the "unsupported
+  statement" recovery path** (`procedure_recovery.py`), which does not
+  recognize it as a real, known-but-unimplemented verb (it isn't in
+  `UNSUPPORTED_VERBS`) and so emits the more alarming generic warning:
+  `"Unparsed tokens starting at 'EJECT' ... clause or statement not fully
+  supported; content dropped from the AST up to the next statement
+  boundary"` — misleading, since EJECT is a well-defined no-op, not
+  malformed input. (The following statement itself was not actually
+  swallowed in this case — `skip_to_next_statement` stops as soon as it
+  reaches the next registered statement keyword — but the spurious warning
+  made an otherwise-clean parse look broken.)
+
+Both failure modes reproduce identically when EJECT arrives via
+COPY-expanded copybook text (common: copybooks holding shared/common
+paragraphs, or multiple record layouts, often use EJECT between sections
+for print-listing formatting) — expansion flattens the copybook into the
+surrounding source before the lexer ever sees it, so there is nothing
+copybook-specific to fix separately.
+
+Fixed the same way `CONTINUE` (a genuine no-op statement) is handled:
+`TokenType.EJECT` + a `"EJECT"` `KEYWORDS` entry (`lexer.py`) so it can
+never be mistaken for an `IDENTIFIER`-typed paragraph name; added to
+`STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` (`_utils.py`) so the
+boundary-detection guards across every other statement parser's
+trailing-token loop recognize it as a known verb (same bug class the
+2026-07-08 "unsupported-verb boundary gap" audit above fixed for
+DISABLE/ENABLE/COMMIT/ROLLBACK/etc.); a new `EjectStatementParser` ->
+`EjectStatement` no-op AST node (`simple_statement_parsers.py` /
+`models/statements/misc.py`), registered in `create_statement_registry()`
+right after `ContinueStatementParser`. Pinned by
+`tests/regression/test_eject_statement.py` (bogus-paragraph-splitting via
+both a plain trailing period and copybook expansion; the swallow-sweep
+period-less boundary check; consecutive EJECTs; AST node shape) and by two
+completeness guards that would otherwise fail on an unfixtured new parser:
+`tests/unit/test_procedure_registry_dispatch_order.py` (`EXPECTED_ORDER`,
+`DISPATCH_CASES`) and `tests/regression/test_swallow_sweep.py` (`FIXTURES`).
 
 # See Also
 

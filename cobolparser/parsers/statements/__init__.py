@@ -62,6 +62,7 @@ from .simple_statement_parsers import (
     CancelStatementParser,
     CommitStatementParser,
     ContinueStatementParser,
+    EjectStatementParser,
     ExitStatementParser,
     GenerateStatementParser,
     GobackStatementParser,
@@ -105,6 +106,7 @@ __all__ = [
     # New parsers
     "AcceptStatementParser",
     "ContinueStatementParser",
+    "EjectStatementParser",
     "ExitStatementParser",
     "GobackStatementParser",
     "CancelStatementParser",

@@ -760,6 +760,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser (2026-08-05): EJECT compiler-directing statements were misparsed
+  as bogus paragraphs, or warned about as unsupported.** `EJECT` (the
+  page-eject listing directive) had no `TokenType`/keyword entry and no
+  statement parser, so `EJECT.` — written between two real paragraphs, the
+  common real-world style — was indistinguishable from a paragraph name to
+  the PROCEDURE DIVISION's boundary scanner (a bare `IDENTIFIER` token
+  followed by a period) and silently split the enclosing paragraph in two,
+  inserting an empty `EJECT` paragraph into the AST. Written without a
+  trailing period, it instead fell through to the "unsupported statement"
+  recovery path and emitted a spurious `"Unparsed tokens starting at
+  'EJECT' ... clause or statement not fully supported"` warning. Both
+  failure modes reproduced identically through COPY-expanded copybook text,
+  since expansion flattens the copybook into the surrounding source before
+  the lexer ever sees it. Fixed by giving EJECT its own `TokenType` (so it
+  can never be mistaken for an `IDENTIFIER`-typed paragraph name) and a real
+  `EjectStatementParser` -> `EjectStatement` no-op node, mirroring
+  `ContinueStatementParser`/`ContinueStatement`. See
+  [.okf/parser.md](.okf/parser.md). Pinned by
+  `tests/regression/test_eject_statement.py`.
 * **parser (2026-07-24 targeted follow-up round):** two more bugs found by
   checking the remaining known list-collecting loops for the same
   comma-handling property — see [.okf/parser.md](.okf/parser.md) "Follow-up

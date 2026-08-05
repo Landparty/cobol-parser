@@ -123,6 +123,7 @@ FIXTURES: dict[str, Fixture] = {
     "GoStatementParser": Fixture("GoStatement", "    GO TO OTHER-PARA"),
     "ExitStatementParser": Fixture("ExitStatement", "    EXIT PROGRAM"),
     "ContinueStatementParser": Fixture("ContinueStatement", "    CONTINUE"),
+    "EjectStatementParser": Fixture("EjectStatement", "    EJECT"),
     "GobackStatementParser": Fixture("GobackStatement", "    GOBACK"),
     "AcceptStatementParser": Fixture("IOAcceptStatement", "    ACCEPT WS-VAR"),
     "ReadStatementParser": Fixture(
