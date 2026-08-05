@@ -543,9 +543,15 @@ One `GeneratedDataset`-shaped CSV per fixture whose `layout`/`sequence` are
 both non-empty (file-shaped boundaries only — `STATUS_ONLY`/OUT/expectation
 -only fixtures produce nothing to write), under
 `<path>/<scenario-slug>/<KEY>.csv`. A `MANIFEST.json` at the root is the
-full bundle with each fixture's `sequence` replaced by a pointer string, so
-a consumer can discover what scenarios/fixtures exist without walking the
-directory tree first.
+full bundle with each fixture's `sequence` emptied to `[]` (never replaced
+with a pointer string — a consumer that ran the manifest through the same
+deserializer as a real bundle would silently iterate a string character-
+by-character instead of hitting a type error) plus a new `csv_path` key
+(the relative CSV path, or `null` if this fixture got no CSV), so a
+consumer can discover what scenarios/fixtures exist — and where each one's
+CSV lives — without walking the directory tree first. See
+`docs/fixture-bundle-schema.md`'s own "write_csv_dir" section for the full
+manifest shape.
 
 # Scenario Planning (`scenarios.py`)
 

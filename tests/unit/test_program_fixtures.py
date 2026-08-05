@@ -219,6 +219,42 @@ class TestWriteCsvDir:
             assert lines[0] == "SEQ-RECORD,SEQ-ALTERNATE"
             assert len(lines) == 1 + 10  # header + default rows=10
 
+    def test_manifest_sequence_stays_a_list_not_a_hint_string(self):
+        """A consumer that runs MANIFEST.json through the same deserializer
+        as a real bundle (a reasonable thing to try, since the top-level
+        shape otherwise matches) must not silently iterate a hint string
+        character-by-character in place of real rows -- `sequence`'s type
+        must match the normal bundle schema (always a list) everywhere in
+        the manifest, never a "see <slug>/" string. The path hint lives in
+        its own `csv_path` key instead, correctly `None` for a fixture that
+        got no CSV written for it (STATUS_ONLY/no-sequence boundaries)."""
+        bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            with open(os.path.join(tmp, "MANIFEST.json")) as handle:
+                manifest = json.load(handle)
+
+            wrote_any_csv_path = False
+            for scenario, scenario_dict in zip(
+                bundle.scenarios, manifest["scenarios"], strict=True
+            ):
+                slug = _slugify(scenario.name)
+                for fixture, fixture_dict in zip(
+                    scenario.fixtures, scenario_dict["fixtures"], strict=True
+                ):
+                    assert fixture_dict["sequence"] == []
+                    if fixture.layout and fixture.sequence:
+                        assert (
+                            fixture_dict["csv_path"] == f"{slug}/{fixture.ref.key}.csv"
+                        )
+                        assert os.path.isfile(
+                            os.path.join(tmp, fixture_dict["csv_path"])
+                        )
+                        wrote_any_csv_path = True
+                    else:
+                        assert fixture_dict["csv_path"] is None
+            assert wrote_any_csv_path  # the assertions above weren't vacuous
+
     def test_csv_dir_round_trips_byte_for_cell_against_the_json(self):
         """Phase 6 exit criterion: `--format csv-dir` output round-trips
         through `csv.reader` and matches the JSON rows byte-for-cell."""
