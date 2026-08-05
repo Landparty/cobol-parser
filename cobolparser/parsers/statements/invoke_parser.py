@@ -9,7 +9,9 @@ from ._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     consume_period,
+    get_parse_context,
     matches_keyword,
+    report_parse_error,
     skip_whitespace,
     token_location,
     token_value_upper,
@@ -38,16 +40,30 @@ class InvokeStatementParser(IStatementParser):
     ) -> InvokeStatement:
         start = token_stream.consume()
         stmt = InvokeStatement(token_location(start))
+        parse_ctx = get_parse_context(token_stream)
         skip_whitespace(token_stream)
 
         # Object identifier (SELF, SUPER, or an OBJECT REFERENCE data item).
+        # Its absence is a syntax error -- COBOL requires an object
+        # reference between INVOKE and the method name -- mirroring how
+        # MoveStatementParser reports a missing TO rather than returning a
+        # plausible-but-empty node (see move_parser.py / parser.md's
+        # "MOVE silently accepted malformed/incomplete input" audit).
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value:
             stmt.set_object_name(token.value)
             token_stream.consume()
             skip_whitespace(token_stream)
+        else:
+            report_parse_error(
+                parse_ctx,
+                "INVOKE statement requires an object identifier",
+                stmt.location,
+            )
+            return stmt
 
-        # Method name: literal or identifier holding the method name.
+        # Method name: literal or identifier holding the method name. Its
+        # absence is likewise a syntax error, not a silently-empty INVOKE.
         token = token_stream.peek()
         if token and token.type == TokenType.STRING_LITERAL and token.value is not None:
             stmt.set_method_name(token.value.strip("\"'"), is_literal=True)
@@ -57,6 +73,13 @@ class InvokeStatementParser(IStatementParser):
             stmt.set_method_name(token.value, is_literal=False)
             token_stream.consume()
             skip_whitespace(token_stream)
+        else:
+            report_parse_error(
+                parse_ctx,
+                "INVOKE statement requires a method name (literal or identifier)",
+                stmt.location,
+            )
+            return stmt
 
         while not token_stream.is_empty():
             token = token_stream.peek()

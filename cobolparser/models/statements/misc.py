@@ -639,11 +639,16 @@ class InvokeStatement(CobolStatement):
         self._add_unique_operand(name, front=True)
 
     def set_method_name(self, name: str, is_literal: bool) -> None:
-        """Set the method name (literal or identifier-held)."""
+        """Set the method name (literal or identifier-held).
+
+        Recorded as an operand regardless of ``is_literal``, mirroring
+        ``CallStatement.set_called_program()`` (``call.py``), which adds its
+        program name to ``operands`` whether the CALL is static (literal) or
+        dynamic (identifier).
+        """
         self.method_name = name
         self.method_is_literal = is_literal
-        if not is_literal:
-            self._add_unique_operand(name)
+        self._add_unique_operand(name)
 
     def add_using_parameter(
         self, param_name: str, passing_mode: str = "REFERENCE"

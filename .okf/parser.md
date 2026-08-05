@@ -1768,9 +1768,37 @@ trace, so `find_all_by_type`/`get_all_statements` never saw it.
   bare-word verb with no dedicated `TokenType` and no registered parser
   before this fix (`PURGE`, `RESUME`, ...); what changed is that ALLOCATE/
   FREE no longer hit the severe pre-existing failure mode documented below
-  when used this way — no statement content is lost, `result.success` stays
-  `True`, and (critically) the parse **terminates**, where it previously did
-  not.
+  when used this way — no statement content is lost and (critically) the
+  parse **terminates**, where it previously did not. The parse is correctly
+  flagged `result.success is False` in this shape (see the required-operand
+  validation below), rather than silently succeeding.
+
+  **Required-operand validation (2026-08-05, Copilot review on PR #113):**
+  all three parsers initially followed the lightweight "Minimal/rare verbs"
+  style of tolerating a missing operand by leaving the corresponding field
+  `None`/empty with no diagnostic — indistinguishable from `result.success ==
+  True` on genuinely malformed input, which undercuts the whole point of
+  fixing these verbs. Brought in line with `MoveStatementParser`'s established
+  precedent (`move_parser.py`, audit finding H3 — "MOVE silently accepted
+  malformed/incomplete input") via the same `report_parse_error` +
+  `get_parse_context` mechanism: `INVOKE` now requires both an object
+  identifier and a method name (either check failing reports a specific error
+  and returns immediately, mirroring MOVE's missing-`TO` bail-out);
+  `ALLOCATE` requires its first operand (a size expression or a `BASED` data
+  item); `FREE` requires at least one pointer identifier (checked *after* the
+  collection loop, so `FREE.` reports the error while `FREE WS-PTR.` does
+  not — mirrors MOVE's post-loop `target_count == 0` check). A second review
+  comment on the same PR caught that `InvokeStatement.set_method_name()`
+  only added the method name to `operands` when it was identifier-held,
+  inconsistent with `CallStatement.set_called_program()` (`call.py`), which
+  records its program name regardless of whether the CALL is static
+  (literal) or dynamic — fixed to always record the operand. Pinned by
+  `test_invoke_missing_object_identifier_reports_error`,
+  `test_invoke_missing_method_name_reports_error`,
+  `test_invoke_literal_method_name_recorded_as_operand`,
+  `test_allocate_requires_an_operand`, and
+  `test_free_requires_at_least_one_pointer` in
+  `tests/regression/test_invoke_allocate_free_statements.py`.
 
   **Related, separate discovery — not fixed here:** a paragraph (or a
   trailing operand of another statement, e.g. `DISPLAY PURGE`) named after a

@@ -16,8 +16,10 @@ from ...lexer import TokenType
 from ...models.statements import AllocateStatement, FreeStatement
 from ._utils import (
     consume_period,
+    get_parse_context,
     is_statement_boundary,
     peek_token,
+    report_parse_error,
     skip_whitespace,
     token_location,
     token_value_upper,
@@ -57,10 +59,15 @@ class AllocateStatementParser(IStatementParser):
     ) -> AllocateStatement:
         start = token_stream.consume()
         stmt = AllocateStatement(token_location(start))
+        parse_ctx = get_parse_context(token_stream)
         skip_whitespace(token_stream)
 
         # First operand: either a byte-count (identifier or literal) followed
-        # by CHARACTERS, or the name of a BASED data item.
+        # by CHARACTERS, or the name of a BASED data item. Its absence is a
+        # syntax error, not a silently-empty ALLOCATE -- mirroring how
+        # MoveStatementParser reports a missing TO rather than returning a
+        # plausible-but-empty node (see move_parser.py / parser.md's "MOVE
+        # silently accepted malformed/incomplete input" audit).
         token = token_stream.peek()
         if token and token.type in (
             TokenType.IDENTIFIER,
@@ -78,6 +85,13 @@ class AllocateStatementParser(IStatementParser):
                 stmt.set_size_expr(operand)
             else:
                 stmt.set_data_item(operand)
+        else:
+            report_parse_error(
+                parse_ctx,
+                "ALLOCATE statement requires a size expression or a BASED " "data item",
+                stmt.location,
+            )
+            return stmt
 
         # Optional INITIALIZED
         token = token_stream.peek()
@@ -115,6 +129,7 @@ class FreeStatementParser(IStatementParser):
     ) -> FreeStatement:
         start = token_stream.consume()
         stmt = FreeStatement(token_location(start))
+        parse_ctx = get_parse_context(token_stream)
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -130,6 +145,16 @@ class FreeStatementParser(IStatementParser):
             stmt.add_pointer_name(token.value or "")
             token_stream.consume()
             skip_whitespace(token_stream)
+
+        # At least one pointer identifier is required by the grammar; a bare
+        # `FREE.` is a syntax error, not a valid zero-operand statement --
+        # same MOVE-precedent reasoning as AllocateStatementParser above.
+        if not stmt.pointer_names:
+            report_parse_error(
+                parse_ctx,
+                "FREE statement requires at least one pointer identifier",
+                stmt.location,
+            )
 
         consume_period(token_stream)
         return stmt

@@ -223,6 +223,12 @@ data-item form), `initialized`, `returning_target`. `FreeStatement` —
 `to_dict()`/`_add_unique_operand()` pattern every other statement node in
 this file uses; no new AST plumbing.
 
+`InvokeStatement.set_method_name()` records the method name in `operands`
+unconditionally (Copilot review on PR #113 caught that it originally skipped
+this for a literal method name — inconsistent with
+`CallStatement.set_called_program()` in `call.py`, which records its program
+name regardless of static vs. dynamic CALL).
+
 Notes (2026-07-07 audit remediation):
 
 * `PerformStatement.after_clauses` — list of AFTER dimensions of a

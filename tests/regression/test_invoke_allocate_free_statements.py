@@ -79,6 +79,61 @@ MAIN.
         result = parse_cobol(src)
         assert not any("INVOKE" in w for w in result.warnings)
 
+    def test_invoke_literal_method_name_recorded_as_operand(self):
+        """set_method_name() must record the method name as an operand
+        regardless of is_literal, mirroring CallStatement.set_called_program()
+        (call.py), which adds its program name to `operands` whether the
+        CALL is static (literal) or dynamic (identifier)."""
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T3B.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-OBJ PIC X(8).
+PROCEDURE DIVISION.
+MAIN.
+    INVOKE WS-OBJ 'run'.
+    STOP RUN.
+"""
+        result = parse_cobol(src)
+        stmt = result.ast.find_all_by_type("InvokeStatement")[0]
+        assert stmt.method_is_literal is True
+        assert "run" in stmt.to_dict()["operands"]
+
+    def test_invoke_missing_object_identifier_reports_error(self):
+        """A malformed INVOKE with no object identifier must not silently
+        succeed with an empty node -- mirrors MOVE's missing-TO diagnostic
+        (move_parser.py)."""
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T3C.
+PROCEDURE DIVISION.
+MAIN.
+    INVOKE.
+    STOP RUN.
+"""
+        result = parse_cobol(src)
+        assert not result.success
+        assert any(
+            "INVOKE statement requires an object identifier" in str(e)
+            for e in result.errors
+        )
+
+    def test_invoke_missing_method_name_reports_error(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T3D.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-OBJ PIC X(8).
+PROCEDURE DIVISION.
+MAIN.
+    INVOKE WS-OBJ.
+    STOP RUN.
+"""
+        result = parse_cobol(src)
+        assert not result.success
+        assert any(
+            "INVOKE statement requires a method name" in str(e) for e in result.errors
+        )
+
 
 class TestAllocateStatement:
     def test_allocate_characters_form(self):
@@ -139,6 +194,25 @@ MAIN.
         result = parse_cobol(src)
         assert not any("ALLOCATE" in w for w in result.warnings)
 
+    def test_allocate_requires_an_operand(self):
+        """A malformed ALLOCATE with no size expression or data item must
+        not silently succeed with an empty node -- mirrors MOVE's
+        missing-TO diagnostic (move_parser.py)."""
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T6B.
+PROCEDURE DIVISION.
+MAIN.
+    ALLOCATE.
+    STOP RUN.
+"""
+        result = parse_cobol(src)
+        assert not result.success
+        assert any(
+            "ALLOCATE statement requires a size expression or a BASED "
+            "data item" in str(e)
+            for e in result.errors
+        )
+
 
 class TestFreeStatement:
     def test_free_single_pointer(self):
@@ -178,6 +252,24 @@ MAIN.
         assert stmt.pointer_names == ["WS-PTR-A", "WS-PTR-B"]
         assert len(result.ast.find_all_by_type("DisplayStatement")) == 1
 
+    def test_free_requires_at_least_one_pointer(self):
+        """A bare FREE with no pointer identifiers must not silently succeed
+        with an empty node -- mirrors MOVE's zero-target diagnostic
+        (move_parser.py)."""
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T8B.
+PROCEDURE DIVISION.
+MAIN.
+    FREE.
+    STOP RUN.
+"""
+        result = parse_cobol(src)
+        assert not result.success
+        assert any(
+            "FREE statement requires at least one pointer identifier" in str(e)
+            for e in result.errors
+        )
+
     def test_free_and_allocate_remain_valid_data_item_declarations(self):
         """FREE/ALLOCATE have no dedicated TokenType (see the module
         docstring on allocate_free_parsers.py) -- they are recognized only by
@@ -215,7 +307,12 @@ MAIN.
         ``ProcedureDivisionParser``'s ``is_statement_keyword`` boundary check
         (``procedure_boundaries.py``) resolves that ambiguity in favor of the
         statement reading -- both are folded into one implicit unnamed
-        paragraph instead of two correctly-named ones.
+        paragraph instead of two correctly-named ones. Since FREE/ALLOCATE
+        require at least one operand each, the zero-operand reading is
+        itself invalid and now correctly reports a parse error (rather than
+        silently succeeding with an empty node) -- see
+        TestAllocateStatement::test_allocate_requires_an_operand and
+        TestFreeStatement::test_free_requires_at_least_one_pointer.
 
         This ambiguity is NOT introduced by this fix and is not something it
         attempts to resolve: it already existed for every other bare-word
@@ -226,7 +323,7 @@ MAIN.
         terminates). What this fix *does* guarantee -- because ALLOCATE/FREE
         now have real registered parsers -- is that the same shape no longer
         hangs and loses no statement content, even though the paragraph
-        structure is imperfect.
+        structure is imperfect and the parse is correctly flagged as failed.
         """
         src = """IDENTIFICATION DIVISION.
 PROGRAM-ID. T10.
@@ -238,8 +335,10 @@ ALLOCATE.
     STOP RUN.
 """
         result = parse_cobol(src)
-        assert result.success
-        assert result.errors == []
+        assert not result.success
+        assert len(result.errors) == 2
+        assert any("FREE" in str(e) for e in result.errors)
+        assert any("ALLOCATE" in str(e) for e in result.errors)
         assert result.warnings == []
         stmt_types = [type(s).__name__ for s in result.ast.get_all_statements()]
         assert stmt_types == [
