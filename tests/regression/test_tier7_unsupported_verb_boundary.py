@@ -121,6 +121,10 @@ def _statement_types(result):
 
 # Verbs with no registered parser: previously vanished with zero warnings,
 # now must produce a PARSE_WARNING and leave the MOVE's target list alone.
+# NOTE: ALLOCATE, FREE, and INVOKE were originally listed here too -- they
+# now have registered parsers (allocate_free_parsers.py, invoke_parser.py)
+# and correctly produce NO warning; see TestInvokeAllocateFreeNoLongerSwallowed
+# below, which mirrors TestCommitRollbackNoLongerSwallowed for them.
 UNSUPPORTED_VERBS = [
     "SEND",
     "RECEIVE",
@@ -132,7 +136,6 @@ UNSUPPORTED_VERBS = [
     "TRANSFORM",
     "EXHIBIT",
     "EXECUTE",
-    "INVOKE",
     "PURGE",
     "RAISE",
     "RESUME",
@@ -221,6 +224,60 @@ class TestCommitRollbackNoLongerSwallowed:
             "RollbackStatement",
             "StopStatement",
         ]
+
+
+class TestInvokeAllocateFreeNoLongerSwallowed:
+    """ALLOCATE, FREE, and INVOKE have registered parsers -- these must
+    dispatch to a real AllocateStatement/FreeStatement/InvokeStatement node
+    instead of vanishing, mirroring TestCommitRollbackNoLongerSwallowed."""
+
+    def test_invoke_after_period_less_move(self):
+        result = _parse(
+            "           MOVE WS-A TO WS-B\n"
+            "           INVOKE WS-OBJ 'run'\n"
+            "           STOP RUN."
+        )
+        assert result.success
+        assert result.warnings == []
+        assert _statement_types(result) == [
+            "MoveStatement",
+            "InvokeStatement",
+            "StopStatement",
+        ]
+        move = result.ast.get_division("PROCEDURE").paragraphs[0].statements[0]
+        assert move.to_dict()["targets"] == ["WS-B"]
+
+    def test_allocate_after_period_less_move(self):
+        result = _parse(
+            "           MOVE WS-A TO WS-B\n"
+            "           ALLOCATE WS-REC RETURNING WS-PTR\n"
+            "           STOP RUN."
+        )
+        assert result.success
+        assert result.warnings == []
+        assert _statement_types(result) == [
+            "MoveStatement",
+            "AllocateStatement",
+            "StopStatement",
+        ]
+        move = result.ast.get_division("PROCEDURE").paragraphs[0].statements[0]
+        assert move.to_dict()["targets"] == ["WS-B"]
+
+    def test_free_after_period_less_move(self):
+        result = _parse(
+            "           MOVE WS-A TO WS-B\n"
+            "           FREE WS-PTR\n"
+            "           STOP RUN."
+        )
+        assert result.success
+        assert result.warnings == []
+        assert _statement_types(result) == [
+            "MoveStatement",
+            "FreeStatement",
+            "StopStatement",
+        ]
+        move = result.ast.get_division("PROCEDURE").paragraphs[0].statements[0]
+        assert move.to_dict()["targets"] == ["WS-B"]
 
 
 # Verbs with no dedicated lexer TokenType -- they lex as plain IDENTIFIER,

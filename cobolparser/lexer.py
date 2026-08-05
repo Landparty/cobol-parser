@@ -417,13 +417,24 @@ class _CobolLexerPure:
         "KEY": TokenType.KEY,
         "ALTERNATE": TokenType.ALTERNATE,
         "DUPLICATES": TokenType.DUPLICATES,
-        "FILE-STATUS": TokenType.FILE_STATUS,
+        # NOTE: "FILE-STATUS", "RECORD-DELIMITER", and "READ-ONLY" are
+        # deliberately NOT mapped here. Real COBOL syntax always writes these
+        # as separate words (FILE STATUS, RECORD DELIMITER, READ ONLY) --
+        # every clause parser that recognizes them (environment_select.py's
+        # _parse_file_status_clause / _parse_record_key_clause /
+        # _parse_sharing_clause) already dispatches on the leading word
+        # ("FILE"/"RECORD"/"READ") and consumes the second word as plain
+        # text, never as one of these fused tokens. Reserving the hyphenated
+        # spelling as a single keyword therefore never matches real syntax --
+        # it only ever fires when a program legitimately names a data item or
+        # paragraph "FILE-STATUS"/"RECORD-DELIMITER"/"READ-ONLY" (all common
+        # in real IBM COBOL), silently corrupting that name. See
+        # tests/regression/test_dead_keyword_removal.py.
         "RESERVE": TokenType.RESERVE,
         "AREA": TokenType.AREA,
         "AREAS": TokenType.AREAS,
         "PADDING": TokenType.PADDING,
         "CHARACTER": TokenType.CHARACTER,
-        "RECORD-DELIMITER": TokenType.RECORD_DELIMITER,
         "STANDARD-1": TokenType.STANDARD_1,
         "PASSWORD": TokenType.PASSWORD,
         "LOCK": TokenType.LOCK,
@@ -431,7 +442,6 @@ class _CobolLexerPure:
         "WITH": TokenType.WITH,
         "OTHER": TokenType.OTHER,
         "NO": TokenType.NO,
-        "READ-ONLY": TokenType.READ_ONLY,
         "SEQUENTIAL": TokenType.SEQUENTIAL,
         "INDEXED": TokenType.INDEXED,
         "RELATIVE": TokenType.RELATIVE,
@@ -514,7 +524,10 @@ class _CobolLexerPure:
         "ENABLE": TokenType.ENABLE,
         "END-INVOKE": TokenType.END_INVOKE,
         "END-PERFORM": TokenType.END_PERFORM,
-        "END-SET": TokenType.END_SET,
+        # NOTE: "END-SET" is deliberately NOT mapped -- SET has no scope
+        # terminator in real COBOL grammar (it carries no conditional/nested
+        # body), so this entry never matched real syntax; it only stole a
+        # legitimate data-name/paragraph-name spelled "END-SET".
         "ENTER": TokenType.ENTER,
         "ENTRY": TokenType.ENTRY,
         "EXAMINE": TokenType.EXAMINE,
@@ -530,7 +543,10 @@ class _CobolLexerPure:
         "NEXT": TokenType.NEXT,
         "NOTE": TokenType.NOTE,
         "ON": TokenType.ON,
-        "OTHERWISE": TokenType.OTHERWISE,
+        # NOTE: "OTHERWISE" is deliberately NOT mapped -- it is not a COBOL
+        # reserved word (EVALUATE's default branch is "WHEN OTHER", not
+        # "OTHERWISE"); this entry never matched real syntax and only stole
+        # a legitimate data-name/paragraph-name spelled "OTHERWISE".
         "READY": TokenType.READY,
         "RECEIVE": TokenType.RECEIVE,
         "RECOVER": TokenType.RECOVER,
@@ -570,8 +586,14 @@ class _CobolLexerPure:
         "UNIT": TokenType.UNIT,
         "ADVANCING": TokenType.ADVANCING,
         "NO ADVANCING": TokenType.NO_ADVANCING,
-        "END-OF-FILE": TokenType.END_OF_FILE,
-        "EOF": TokenType.END_OF_FILE,
+        # NOTE: "END-OF-FILE" and "EOF" are deliberately NOT mapped. Neither
+        # is a COBOL reserved word -- end-of-file testing is done via a
+        # READ statement's AT END clause plus a programmer-defined
+        # condition-name (level-88), and "EOF"/"END-OF-FILE" are exactly the
+        # names real IBM COBOL programs conventionally give that condition
+        # (or its backing flag). Reserving them here only ever stole that
+        # legitimate name -- see the bare-condition-name handling this
+        # breaks in parsers/statements/_conditions.py.
         "POSITION": TokenType.POSITION,
         # Control flow
         "TIMES": TokenType.TIMES,

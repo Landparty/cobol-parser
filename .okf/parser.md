@@ -1715,6 +1715,111 @@ completeness guards that would otherwise fail on an unfixtured new parser:
 `tests/unit/test_procedure_registry_dispatch_order.py` (`EXPECTED_ORDER`,
 `DISPATCH_CASES`) and `tests/regression/test_swallow_sweep.py` (`FIXTURES`).
 
+# INVOKE / ALLOCATE / FREE now have registered parsers (2026-08-05)
+
+All three were real, valid IBM Enterprise COBOL verbs previously listed in
+`UNSUPPORTED_VERBS` (`procedure_recovery.py`): `INVOKE` for Object-Oriented
+COBOL method calls, `ALLOCATE`/`FREE` for dynamic storage. A program using
+any of them parsed "successfully" with an incomplete AST — the statement's
+tokens were discarded up to the next boundary with only a warning as a
+trace, so `find_all_by_type`/`get_all_statements` never saw it.
+
+* **`invoke_parser.py` -> `InvokeStatement`
+  (`models/statements/misc.py`).** Syntax: `INVOKE object-identifier-1
+  {identifier-2 | literal-1} [USING [BY REFERENCE|CONTENT|VALUE]
+  {identifier-3 | literal-2} ...] [RETURNING identifier-4] [END-INVOKE]`.
+  `object_name` (the object reference, typically `SELF`/`SUPER`/an `OBJECT
+  REFERENCE` data item), `method_name` + `method_is_literal` (a literal
+  method name or an identifier holding one), `using_parameters` (reuses
+  `CallParameter` from `models/statements/call.py` — same
+  name/passing-mode shape as CALL's USING clause, including `BY
+  REFERENCE|CONTENT|VALUE` mode persistence across a comma-separated
+  parameter group), and `returning_target`. No `ON EXCEPTION`/`ON OVERFLOW`
+  handler clauses — unlike CALL, INVOKE's grammar doesn't have them.
+  Registered right after `EntryStatementParser` (both are CALL-adjacent).
+* **`allocate_free_parsers.py` -> `AllocateStatement`/`FreeStatement`
+  (`models/statements/misc.py`).** `ALLOCATE {identifier-1 CHARACTERS |
+  identifier-2} [INITIALIZED] [RETURNING identifier-3]` —
+  `is_characters`/`size_expr` for the byte-count form (identifier or numeric
+  literal), `data_item` for the `BASED` data-item form, `initialized`,
+  `returning_target`. `FREE identifier-1 [identifier-2] ...` — one or more
+  `pointer_names`. Both registered in the "Minimal/rare verbs" group, right
+  after `UseStatementParser`.
+
+  **Deliberately no lexer `TokenType` for ALLOCATE/FREE.** Unlike INVOKE
+  (which already had `TokenType.INVOKE` from before this fix), ALLOCATE and
+  FREE are recognized purely by value — `matches()` checks `token.type ==
+  IDENTIFIER and token.value.upper() == "ALLOCATE"` directly (a bespoke
+  helper, `_matches_bare_verb`, mirroring how `XmlJsonStatementParser`
+  recognizes bare `"XML"`/`"JSON"` — see `xml_json_parser.py`) rather than
+  reserving the word globally via `KEYWORDS`. This keeps a data item
+  legitimately named `ALLOCATE`/`FREE` usable as an ordinary `IDENTIFIER`
+  everywhere except a genuine statement-start position, the same tradeoff
+  the dead-`KEYWORDS`-entry removal above is about.
+
+  **Known limitation, not introduced by this fix:** a paragraph named
+  exactly `FREE.`/`ALLOCATE.` (nothing else on that line) is ambiguous with
+  a zero-operand FREE/ALLOCATE statement; `ProcedureDivisionParser`'s
+  `is_statement_keyword` check (`procedure_boundaries.py`) — which already
+  treated both words as known statement keywords via `STATEMENT_KEYWORDS`,
+  independent of whether a parser existed — resolves this in favor of the
+  statement reading, folding what should be two named paragraphs into one
+  implicit unnamed paragraph. This ambiguity already existed for every other
+  bare-word verb with no dedicated `TokenType` and no registered parser
+  before this fix (`PURGE`, `RESUME`, ...); what changed is that ALLOCATE/
+  FREE no longer hit the severe pre-existing failure mode documented below
+  when used this way — no statement content is lost and (critically) the
+  parse **terminates**, where it previously did not. The parse is correctly
+  flagged `result.success is False` in this shape (see the required-operand
+  validation below), rather than silently succeeding.
+
+  **Required-operand validation (2026-08-05, Copilot review on PR #113):**
+  all three parsers initially followed the lightweight "Minimal/rare verbs"
+  style of tolerating a missing operand by leaving the corresponding field
+  `None`/empty with no diagnostic — indistinguishable from `result.success ==
+  True` on genuinely malformed input, which undercuts the whole point of
+  fixing these verbs. Brought in line with `MoveStatementParser`'s established
+  precedent (`move_parser.py`, audit finding H3 — "MOVE silently accepted
+  malformed/incomplete input") via the same `report_parse_error` +
+  `get_parse_context` mechanism: `INVOKE` now requires both an object
+  identifier and a method name (either check failing reports a specific error
+  and returns immediately, mirroring MOVE's missing-`TO` bail-out);
+  `ALLOCATE` requires its first operand (a size expression or a `BASED` data
+  item); `FREE` requires at least one pointer identifier (checked *after* the
+  collection loop, so `FREE.` reports the error while `FREE WS-PTR.` does
+  not — mirrors MOVE's post-loop `target_count == 0` check). A second review
+  comment on the same PR caught that `InvokeStatement.set_method_name()`
+  only added the method name to `operands` when it was identifier-held,
+  inconsistent with `CallStatement.set_called_program()` (`call.py`), which
+  records its program name regardless of whether the CALL is static
+  (literal) or dynamic — fixed to always record the operand. Pinned by
+  `test_invoke_missing_object_identifier_reports_error`,
+  `test_invoke_missing_method_name_reports_error`,
+  `test_invoke_literal_method_name_recorded_as_operand`,
+  `test_allocate_requires_an_operand`, and
+  `test_free_requires_at_least_one_pointer` in
+  `tests/regression/test_invoke_allocate_free_statements.py`.
+
+  **Related, separate discovery — not fixed here:** a paragraph (or a
+  trailing operand of another statement, e.g. `DISPLAY PURGE`) named after a
+  `STATEMENT_KEYWORDS` word with **no** registered parser and **no**
+  dedicated `TokenType` (`PURGE`, `RAISE`, `RESUME`, `DISABLE`, `ENABLE`,
+  `RECEIVE`, `SEND`, `SERVICE`, `SUPPRESS`, `TERMINATE`, `ENTER`,
+  `INITIATE`, `NOTE`, `RECOVER`, `RESET`, `READY`) hangs `parse_cobol()`
+  indefinitely (confirmed against the unmodified parser: `PROCEDURE
+  DIVISION. PURGE. DISPLAY '...'.` never returns — killed after 2m17s of
+  100% CPU and multi-GB memory growth). This predates and is unrelated to
+  this fix; it is not yet tracked by a regression test or filed issue.
+
+Pinned by `tests/regression/test_invoke_allocate_free_statements.py`,
+extended cases in `tests/regression/test_tier5_silent_drip_audit.py`
+(`TestInvokeAllocateFreeNoLongerSwallowed`... covers the CALL-handler-body
+position too) and `tests/regression/test_tier7_unsupported_verb_boundary.py`
+(`TestInvokeAllocateFreeNoLongerSwallowed`), and the two completeness guards
+every new parser must satisfy: `tests/unit/test_procedure_registry_dispatch_order.py`
+(`EXPECTED_ORDER`, `DISPATCH_CASES`) and `tests/regression/test_swallow_sweep.py`
+(`FIXTURES`).
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

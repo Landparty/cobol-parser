@@ -14,6 +14,7 @@ from cobolparser.core.registry import StatementParserRegistry
 from cobolparser.parsers.statements import (
     AcceptStatementParser,
     AddStatementParser,
+    AllocateStatementParser,
     AlterStatementParser,
     CallStatementParser,
     CancelStatementParser,
@@ -31,12 +32,14 @@ from cobolparser.parsers.statements import (
     ExecImsStatementParser,
     ExecSqlStatementParser,
     ExitStatementParser,
+    FreeStatementParser,
     GenerateStatementParser,
     GobackStatementParser,
     GoStatementParser,
     IfStatementParser,
     InitializeStatementParser,
     InspectStatementParser,
+    InvokeStatementParser,
     MergeStatementParser,
     MoveStatementParser,
     MultiplyStatementParser,
@@ -93,6 +96,7 @@ def create_statement_registry() -> StatementParserRegistry:
     registry.register(CallStatementParser())
     registry.register(StopStatementParser())
     registry.register(EntryStatementParser())
+    registry.register(InvokeStatementParser())
     registry.register(GoStatementParser())
     registry.register(ExitStatementParser())
     registry.register(ContinueStatementParser())
@@ -138,6 +142,8 @@ def create_statement_registry() -> StatementParserRegistry:
     registry.register(CancelStatementParser())
     registry.register(GenerateStatementParser())
     registry.register(UseStatementParser())
+    registry.register(AllocateStatementParser())
+    registry.register(FreeStatementParser())
 
     # Transaction control
     registry.register(CommitStatementParser())

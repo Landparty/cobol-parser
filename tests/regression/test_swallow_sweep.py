@@ -120,6 +120,9 @@ FIXTURES: dict[str, Fixture] = {
     "CallStatementParser": Fixture("CallStatement", '    CALL "SUBPROGRAM"'),
     "StopStatementParser": Fixture("StopStatement", "    STOP RUN"),
     "EntryStatementParser": Fixture("EntryStatement", "    ENTRY 'MAINENTRY'"),
+    "InvokeStatementParser": Fixture(
+        "InvokeStatement", "    INVOKE WS-VAR 'run' RETURNING WS-VAR2"
+    ),
     "GoStatementParser": Fixture("GoStatement", "    GO TO OTHER-PARA"),
     "ExitStatementParser": Fixture("ExitStatement", "    EXIT PROGRAM"),
     "ContinueStatementParser": Fixture("ContinueStatement", "    CONTINUE"),
@@ -229,6 +232,10 @@ FIXTURES: dict[str, Fixture] = {
     "UseStatementParser": Fixture(
         "UseStatement", "    USE AFTER STANDARD EXCEPTION PROCEDURE ON INPUT"
     ),
+    "AllocateStatementParser": Fixture(
+        "AllocateStatement", "    ALLOCATE WS-C CHARACTERS RETURNING WS-VAR2"
+    ),
+    "FreeStatementParser": Fixture("FreeStatement", "    FREE WS-VAR"),
     "CommitStatementParser": Fixture("CommitStatement", "    COMMIT"),
     "RollbackStatementParser": Fixture("RollbackStatement", "    ROLLBACK WORK"),
 }

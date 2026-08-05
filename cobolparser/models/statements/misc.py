@@ -7,6 +7,7 @@ from typing import Any
 
 from ..ast_base import SourceLocation
 from .base import CobolStatement
+from .call import CallParameter
 
 
 class SelectStatement(CobolStatement):
@@ -606,4 +607,151 @@ class RollbackStatement(CobolStatement):
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         result["rollback_work"] = self.rollback_work
+        return result
+
+
+class InvokeStatement(CobolStatement):
+    """AST node for INVOKE statements (Object-Oriented COBOL method calls).
+
+    Syntax:
+        INVOKE object-identifier-1 {identifier-2 | literal-1}
+            [USING [BY REFERENCE|BY CONTENT|BY VALUE] {identifier-3 | literal-2} ...]
+            [RETURNING identifier-4]
+        [END-INVOKE]
+
+    ``object-identifier-1`` is the object reference the method is invoked on
+    (commonly ``SELF``, ``SUPER``, or a data item declared ``USAGE OBJECT
+    REFERENCE``); the method name is either a literal or an identifier holding
+    the method name string.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("INVOKE", location)
+        self.object_name: str | None = None
+        self.method_name: str | None = None
+        self.method_is_literal: bool = False
+        self.using_parameters: list[CallParameter] = []
+        self.returning_target: str | None = None
+
+    def set_object_name(self, name: str) -> None:
+        """Set the object-identifier the method is invoked on."""
+        self.object_name = name
+        self._add_unique_operand(name, front=True)
+
+    def set_method_name(self, name: str, is_literal: bool) -> None:
+        """Set the method name (literal or identifier-held).
+
+        Recorded as an operand regardless of ``is_literal``, mirroring
+        ``CallStatement.set_called_program()`` (``call.py``), which adds its
+        program name to ``operands`` whether the CALL is static (literal) or
+        dynamic (identifier).
+        """
+        self.method_name = name
+        self.method_is_literal = is_literal
+        self._add_unique_operand(name)
+
+    def add_using_parameter(
+        self, param_name: str, passing_mode: str = "REFERENCE"
+    ) -> None:
+        """Add a parameter to the USING clause."""
+        self.using_parameters.append(CallParameter(param_name, passing_mode))
+        self._add_unique_operand(param_name)
+
+    def set_returning_target(self, target: str) -> None:
+        """Set the RETURNING target."""
+        self.returning_target = target
+        self._add_unique_operand(target)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "object_name": self.object_name,
+                "method_name": self.method_name,
+                "method_is_literal": self.method_is_literal,
+                "using_parameters": [
+                    {"name": p.name, "mode": p.passing_mode}
+                    for p in self.using_parameters
+                ],
+                "returning_target": self.returning_target,
+            }
+        )
+        return result
+
+
+class AllocateStatement(CobolStatement):
+    """AST node for ALLOCATE statements (IBM Enterprise dynamic storage).
+
+    Syntax:
+        ALLOCATE {identifier-1 CHARACTERS | identifier-2}
+            [INITIALIZED]
+            [RETURNING identifier-3]
+
+    Either a byte count (``identifier-1 CHARACTERS``, a size held in a
+    numeric field or literal) or the name of a ``BASED`` data item
+    (``identifier-2``) is allocated; ``RETURNING`` receives the address as a
+    ``POINTER``.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("ALLOCATE", location)
+        self.is_characters: bool = False
+        self.size_expr: str | None = None  # ALLOCATE <size> CHARACTERS form
+        self.data_item: str | None = None  # ALLOCATE <based-item> form
+        self.initialized: bool = False
+        self.returning_target: str | None = None
+
+    def set_size_expr(self, expr: str) -> None:
+        """Set the byte-count expression of the CHARACTERS form."""
+        self.is_characters = True
+        self.size_expr = expr
+        self._add_unique_operand(expr, front=True)
+
+    def set_data_item(self, name: str) -> None:
+        """Set the BASED data item name of the plain-identifier form."""
+        self.data_item = name
+        self._add_unique_operand(name, front=True)
+
+    def set_initialized(self, value: bool = True) -> None:
+        """Mark that the INITIALIZED keyword was present."""
+        self.initialized = value
+
+    def set_returning_target(self, target: str) -> None:
+        """Set the RETURNING pointer target."""
+        self.returning_target = target
+        self._add_unique_operand(target)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "is_characters": self.is_characters,
+                "size_expr": self.size_expr,
+                "data_item": self.data_item,
+                "initialized": self.initialized,
+                "returning_target": self.returning_target,
+            }
+        )
+        return result
+
+
+class FreeStatement(CobolStatement):
+    """AST node for FREE statements (IBM Enterprise dynamic storage release).
+
+    Syntax: FREE identifier-1 [identifier-2] ...
+    Releases storage previously obtained via ALLOCATE ... RETURNING for one
+    or more POINTER data items.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("FREE", location)
+        self.pointer_names: list[str] = []
+
+    def add_pointer_name(self, name: str) -> None:
+        self.pointer_names.append(name)
+        self._add_unique_operand(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["pointer_names"] = self.pointer_names
         return result

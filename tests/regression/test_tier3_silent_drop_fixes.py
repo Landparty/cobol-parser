@@ -128,13 +128,17 @@ class TestMultiProgramCompilationUnits:
 class TestUnknownStatementWarning:
     """C2 — unknown verbs must be visible on ParseResult.warnings."""
 
-    def test_invoke_is_skipped_with_warning(self):
+    def test_transform_is_skipped_with_warning(self):
+        # TRANSFORM is a genuinely unsupported (obsolete) verb. INVOKE was
+        # originally used here, but it now has a registered parser
+        # (invoke_parser.py) and no longer takes this path -- see
+        # test_invoke_allocate_free_statements.py for its coverage.
         result = _parse_proc(
             "           MOVE 'A' TO WS-A.\n"
-            "           INVOKE FOO 'bar'.\n"
+            "           TRANSFORM WS-B CHARACTERS FROM 'a' TO 'b'.\n"
             "           MOVE 'B' TO WS-A."
         )
-        assert any("INVOKE" in w and "skipped" in w for w in result.warnings)
+        assert any("TRANSFORM" in w and "skipped" in w for w in result.warnings)
         # surrounding statements survive
         types = _statement_types(result)
         assert types.count("MOVE") == 2

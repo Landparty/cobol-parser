@@ -58,7 +58,10 @@ STRAY_MARKERS: frozenset = frozenset(
 # leftover clause content from a partially-parsed statement.
 UNSUPPORTED_VERBS: frozenset = frozenset(
     {
-        "ALLOCATE",
+        # ALLOCATE, FREE, and INVOKE have registered parsers
+        # (allocate_free_parsers.py, invoke_parser.py) and are deliberately
+        # NOT listed here -- they now dispatch through the registry instead
+        # of reaching this warn-and-discard path.
         "CHAIN",
         "DISABLE",
         "ENABLE",
@@ -66,10 +69,8 @@ UNSUPPORTED_VERBS: frozenset = frozenset(
         "EXAMINE",
         "EXECUTE",
         "EXHIBIT",
-        "FREE",
         "GOTO",
         "INITIATE",
-        "INVOKE",
         "NOTE",
         "PURGE",
         "RAISE",
