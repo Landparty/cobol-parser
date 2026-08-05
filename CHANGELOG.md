@@ -779,6 +779,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ContinueStatementParser`/`ContinueStatement`. See
   [.okf/parser.md](.okf/parser.md). Pinned by
   `tests/regression/test_eject_statement.py`.
+* **lexer (2026-08-05):** `NULL`/`NULLS` are now recognized as figurative
+  constants (`TokenType.FIGURATIVE_CONSTANT`), matching the COBOL standard's
+  use of `VALUE IS NULL` for `USAGE POINTER`/`PROCEDURE-POINTER`/
+  `FUNCTION-POINTER` data items in WORKING-STORAGE, and `SET ptr TO NULL` /
+  `IF ptr = NULL` in the PROCEDURE DIVISION. Previously the word fell through
+  to a generic `IDENTIFIER` token, indistinguishable from a real data-name —
+  several analysis modules already carried private `NULL`/`NULLS`
+  figurative-constant lists in anticipation of this, but the lexer itself had
+  never been updated to match. See
+  [.okf/lexer.md](.okf/lexer.md#null--nulls-figurative-constants-2026-08-05).
+  Pinned by `tests/regression/test_null_pointer_value_clause.py`.
 * **parser (2026-07-24 targeted follow-up round):** two more bugs found by
   checking the remaining known list-collecting loops for the same
   comma-handling property — see [.okf/parser.md](.okf/parser.md) "Follow-up

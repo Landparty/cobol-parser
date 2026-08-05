@@ -163,6 +163,31 @@ either form (that would require a codepage decision this fix doesn't
 make). Pinned by
 `tests/regression/test_open_findings_medium_regressions.py::TestM7TypedLiteralHexValidation`.
 
+# NULL / NULLS figurative constants (2026-08-05)
+
+`FIGURATIVE_CONSTANTS` previously omitted `NULL`/`NULLS` -- the standard
+COBOL figurative constants used as the `VALUE` of `USAGE POINTER` /
+`PROCEDURE-POINTER` / `FUNCTION-POINTER` data items (`VALUE IS NULL`) and as
+the operand of `SET ptr TO NULL` / relational pointer comparisons (`IF ptr =
+NULL`). The word instead fell through to the generic `IDENTIFIER` branch of
+`read_word_from_text`/`read_identifier`, making it lexically indistinguishable
+from a real data-name reference. Notably, several downstream analysis modules
+(`analysis/move_type_checker.py`, `analysis/constraints.py`,
+`generators/data/values.py`) already carried their own private
+`NULL`/`NULLS` figurative-constant lists in anticipation of this classification,
+but the lexer -- the single source of truth for token typing -- had never
+actually been updated to match. `parse_value_clause`
+([parser.md](parser.md)) happened to also accept a bare `IDENTIFIER` as a
+VALUE operand, so `01 WS-PTR USAGE POINTER VALUE IS NULL.` already produced
+`value_clause == "NULL"` by accident even before this fix; the fix corrects
+the token's *type*, not its round-tripped text. `NULL`/`NULLS` were added to
+the one `FIGURATIVE_CONSTANTS` set class attribute that both
+`read_word_from_text` and `read_identifier` consult via `self.` lookup, so
+the compiled `_lexer_fast` Cython subclass (which does not redefine that set)
+picks up the change automatically with no `.pyx`/`.c` regeneration needed.
+Pinned by `tests/regression/test_null_pointer_value_clause.py` and
+`tests/unit/test_lexer.py::TestCobolLexerFigurativeConstants::test_null_figurative_constants`.
+
 # Unified tokenize pipeline (2026-07-20, M6)
 
 `tokenize_cobol()` and CLI `tokenize` no longer run the lexer's own
