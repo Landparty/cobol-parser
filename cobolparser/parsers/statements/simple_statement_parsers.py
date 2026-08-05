@@ -1,4 +1,4 @@
-"""Simple statement parsers for CONTINUE, EXIT, GOBACK, CANCEL, ALTER,
+"""Simple statement parsers for CONTINUE, EJECT, EXIT, GOBACK, CANCEL, ALTER,
 GENERATE, RELEASE, RETURN, USE, COMMIT, and ROLLBACK.
 
 Each parser implements IStatementParser for registry-based dispatch.
@@ -13,6 +13,7 @@ from ...models.statements import (
     CancelStatement,
     CommitStatement,
     ContinueStatement,
+    EjectStatement,
     ExitStatement,
     GenerateStatement,
     GobackStatement,
@@ -47,6 +48,29 @@ class ContinueStatementParser(IStatementParser):
     ) -> ContinueStatement:
         start = token_stream.consume()
         stmt = ContinueStatement(token_location(start))
+        skip_whitespace(token_stream)
+        consume_period(token_stream)
+        return stmt
+
+
+class EjectStatementParser(IStatementParser):
+    """Parser for EJECT statements (compiler-directing listing no-op).
+
+    Syntax: EJECT
+    A page-eject directive for the compiler's source listing -- no runtime
+    effect. Registering a dedicated parser (rather than leaving EJECT as an
+    unrecognized bare word) keeps ``EJECT.`` from being misread as a new
+    paragraph name by the PROCEDURE DIVISION boundary scanner.
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        return matches_keyword(token_stream, TokenType.EJECT, "EJECT")
+
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> EjectStatement:
+        start = token_stream.consume()
+        stmt = EjectStatement(token_location(start))
         skip_whitespace(token_stream)
         consume_period(token_stream)
         return stmt

@@ -176,6 +176,7 @@ class TokenType(IntEnum):
     DELETE = auto()
     DISABLE = auto()
     DISPLAY_1 = auto()
+    EJECT = auto()
     ENABLE = auto()
     END_INVOKE = auto()
     END_PERFORM = auto()
@@ -509,6 +510,7 @@ class _CobolLexerPure:
         "DELETE": TokenType.DELETE,
         "DISABLE": TokenType.DISABLE,
         "DISPLAY-1": TokenType.DISPLAY_1,
+        "EJECT": TokenType.EJECT,
         "ENABLE": TokenType.ENABLE,
         "END-INVOKE": TokenType.END_INVOKE,
         "END-PERFORM": TokenType.END_PERFORM,

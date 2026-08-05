@@ -1,5 +1,36 @@
 # OKF Update Log
 
+## 2026-08-05 (EJECT compiler-directing statement unrecognized)
+
+User report: "make sure the ejects in the program are ignored, and
+copybooks [too]." Confirmed via direct `parse_cobol()` repro: `EJECT` (the
+source-listing page-eject directive) had no `TokenType`, no keyword entry,
+and no statement parser, so it lexed as a bare `IDENTIFIER`. Two concrete
+failures: (1) `EJECT.` (trailing period, the common real-world style) was
+indistinguishable from a paragraph name to `is_paragraph_or_section_start`
+and silently split the enclosing paragraph in two around a bogus empty
+`EJECT` paragraph; (2) `EJECT` with no period fell through to the
+"unsupported statement" recovery path and emitted a spurious "Unparsed
+tokens ... clause or statement not fully supported" warning. Both
+reproduced identically through COPY-expanded copybook text (copybooks with
+shared paragraphs or multiple record layouts commonly use EJECT between
+sections), confirmed with a dedicated repro before concluding it needed no
+copybook-specific fix.
+
+Fixed the same way `CONTINUE` (a genuine no-op) is handled: `TokenType.EJECT`
++ `KEYWORDS` entry (`lexer.py`), added to `STATEMENT_TOKEN_TYPES`/
+`STATEMENT_KEYWORDS` (`_utils.py`), a new `EjectStatementParser` ->
+`EjectStatement` no-op node (`simple_statement_parsers.py` /
+`models/statements/misc.py`), registered in `create_statement_registry()`
+right after `ContinueStatementParser`. New test:
+`tests/regression/test_eject_statement.py`. Updated:
+`tests/unit/test_procedure_registry_dispatch_order.py` and
+`tests/regression/test_swallow_sweep.py` (both have completeness guards
+that fail on an unfixtured newly-registered parser). Full detail:
+[parser.md](parser.md) ("EJECT compiler-directing statement was
+unrecognized"). Also updated: `CLAUDE.md` (Statement Parsers / AST
+Statement Models tables), `CHANGELOG.md`.
+
 ## 2026-08-04 (PR #108 Copilot review: dead --describe flag, MANIFEST.json type mismatch)
 
 GitHub Copilot's automated review of PR #108 left two comments; verified

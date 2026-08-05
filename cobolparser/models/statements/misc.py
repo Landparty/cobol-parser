@@ -238,6 +238,23 @@ class ContinueStatement(CobolStatement):
         return super().to_dict()
 
 
+class EjectStatement(CobolStatement):
+    """AST node for EJECT statements (compiler-directing listing no-op).
+
+    EJECT forces a page break in the compiler source listing; it has no
+    effect on program logic. Recognizing it as its own statement (rather
+    than leaving it as a bare unrecognized IDENTIFIER) keeps it from being
+    misread as a paragraph name when written ``EJECT.`` between two real
+    paragraphs -- see tests/regression/test_eject_statement.py.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("EJECT", location)
+
+    def to_dict(self) -> dict[str, Any]:
+        return super().to_dict()
+
+
 class ExitStatement(CobolStatement):
     """AST node for EXIT statements."""
 

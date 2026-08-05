@@ -72,6 +72,7 @@ from .misc import (
     CommitStatement,
     ContinueStatement,
     CopyStatement,
+    EjectStatement,
     ExitStatement,
     GenerateStatement,
     GobackStatement,
@@ -110,6 +111,7 @@ __all__ = [
     "IOUnlockStatement",
     # New statement types
     "ContinueStatement",
+    "EjectStatement",
     "ExitStatement",
     "GobackStatement",
     "CancelStatement",
