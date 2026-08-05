@@ -728,6 +728,30 @@ class TestCobolLexerFigurativeConstants:
         assert "QUOTE" in fig_values
         assert "ALL" in fig_values
 
+    def test_null_figurative_constants(self):
+        """Test NULL, NULLS figurative constants (POINTER VALUE clause)."""
+        from cobolparser.lexer import CobolLexer, TokenType
+
+        cobol_source = "       SET WS-PTR TO NULL.\n       SET WS-PTR2 TO NULLS."
+        lexer = CobolLexer(cobol_source)
+        tokens = lexer.tokenize()
+
+        # Find figurative constant tokens
+        fig_tokens = [t for t in tokens if t.type == TokenType.FIGURATIVE_CONSTANT]
+        assert len(fig_tokens) >= 2
+
+        # Check values
+        fig_values = [t.value.upper() for t in fig_tokens]
+        assert "NULL" in fig_values
+        assert "NULLS" in fig_values
+
+        # NULL must not be classified as a plain identifier (which would
+        # make it indistinguishable from a data-name reference).
+        assert not any(
+            t.value.upper() in ("NULL", "NULLS") and t.type == TokenType.IDENTIFIER
+            for t in tokens
+        )
+
 
 class TestCobolLexerCommentMethods:
     """Unit tests for comment tokenization methods."""
