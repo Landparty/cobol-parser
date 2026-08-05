@@ -1,6 +1,9 @@
 # Backend Integration Contract — cobol-parser
 
-This document describes exactly what `backend/src/parsers/cobol/parser.py` (the `CobolLegacyParser` adapter) calls into `cobolparser`, and what shapes it expects back. Change these APIs or their return shapes in `cobolparser` and the adapter breaks.
+This document describes exactly what two external consumers call into `cobolparser`, and what shapes they expect back. Change these APIs or their return shapes in `cobolparser` and the consumer breaks.
+
+1. **`backend/src/parsers/cobol/parser.py`** (the `CobolLegacyParser` adapter) — the LegacyLens backend service. See "Entry Points Called by the Adapter" through "File Extensions Handled" below.
+2. **The sibling `mocky-mock` repo's generators surface** (`mockymock generate --with-data` / `mockymock fixtures`) — see "Generators Surface (mocky-mock)" near the end of this document.
 
 **Adapter source:** `backend/src/parsers/cobol/parser.py`
 **Import path in backend:** `from ..dependencies import CobolParser, CobolProgram, DialectType, ErrorRecoveryMode, DynamicCallAnalyzer, ProgramFlowAnalyzer, CobolParseError`
@@ -178,3 +181,54 @@ Error message prefixes the backend uses to classify failures: `EMPTY_CONTENT`, `
 `.cbl`, `.cob`, `.cobol`, `.cpy`, `.copy` (and uppercase variants).
 
 `.cpy`/`.copy` files are detected as copybooks and wrapped in a synthetic COBOL program shell before parsing; line numbers are shifted back to the original after conversion.
+
+---
+
+## Generators Surface (mocky-mock)
+
+Unlike the backend adapter above, `mocky-mock`'s `mockymock generate
+--with-data` and `mockymock fixtures` subcommands call the **generators**
+package directly, not the parser/analyzer entry points sections 1-5
+describe. This section pins that surface. The canonical, exhaustive schema
+for the `FixtureBundle` shape this surface returns lives in
+[`docs/fixture-bundle-schema.md`](docs/fixture-bundle-schema.md) — this
+section names the symbols mocky-mock imports and the one gate it checks
+before consuming a bundle; it does not restate the full key table (see that
+document for every `FixtureBundle`/`Scenario`/`BoundaryFixture`/
+`Expectation` key, the versioning policy, and a worked example).
+`mocky-mock`'s own `.okf/integration.md` summarizes this same surface from
+the consumer side.
+
+```python
+from cobolparser.generators import DataGeneratorOptions, ProgramFixtureGenerator
+
+generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=10))  # rows= optional
+bundle = generator.generate_with_scenarios_from_file(
+    "PROGRAM.cbl",
+    copybook_paths=["path/to/copybooks"],   # optional, same convention as expand_copybooks
+    mode="happy",                            # "happy" | "branches" | "all"
+    seed=7,                                  # optional; a drawn seed is reported on bundle.seed
+)
+
+bundle.to_dict()   # dict -- consumed by mockymock.generation.with_data.scaffold_cut_with_data
+bundle.to_json()   # str  -- printed verbatim as `mockymock fixtures`'s entire stdout output
+```
+
+| Symbol | mocky-mock use |
+|---|---|
+| `cobolparser.generators.ProgramFixtureGenerator` | constructor; optionally takes a `DataGeneratorOptions` |
+| `cobolparser.generators.DataGeneratorOptions` | `rows=` is the only field mocky-mock ever overrides (from its own `--rows` flag; only passed when given, so the generator's own default otherwise applies) |
+| `ProgramFixtureGenerator.generate_with_scenarios_from_file(path, *, copybook_paths=None, mode="happy", seed=None) -> FixtureBundle` | the single entry point both mocky-mock subcommands call |
+| `FixtureBundle.to_dict() -> dict` | input to `mockymock generate --with-data`'s bundle→surface join |
+| `FixtureBundle.to_json() -> str` | `mockymock fixtures`'s entire stdout output |
+| `dict["bundle_version"]` | **the gate**: mocky-mock raises its own `WithDataError` and refuses to consume the bundle (stderr + exit 1) the moment this isn't `1`, rather than guess at a schema that may have changed meaning underneath it |
+| `BoundaryFixture` keys `"category"`, `"key"`, `"line"`, `"direction"`, `"layout"`, `"sequence"`, `"terminal"`, `"status"` | joined against mocky-mock's own `mock_surface.BoundarySite`s — non-EXEC categories by `(category, key)`; SQL/CICS/DLI categories by `(category, line)` instead, since mocky-mock's surface records no stable key for those sites (matched by normalized-text prefix). See `docs/fixture-bundle-schema.md`'s `BoundaryFixture` table for every key's full type and meaning. |
+
+**Versioning contract this surface must honor:** any change to
+`generate_with_scenarios_from_file`'s signature, a key removed or
+retyped from `FixtureBundle`/`Scenario`/`BoundaryFixture`/`Expectation`, or
+a key's meaning changed under an unchanged name, is a breaking change for
+mocky-mock exactly as it would be for the backend adapter above — bump
+`bundle_version` (see `docs/fixture-bundle-schema.md`'s "Versioning and
+compatibility policy") so mocky-mock's gate catches it instead of silently
+emitting corrupted `.cut` data.

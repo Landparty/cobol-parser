@@ -68,6 +68,27 @@ value). Updated: [cli.md](cli.md) (removed the `--describe` flag from
 [generators.md](generators.md) (`write_csv_dir` section),
 `docs/fixture-bundle-schema.md` (`write_csv_dir` section), `CHANGELOG.md`.
 
+## 2026-08-04 (interface-contract.md: pin the mocky-mock generators surface)
+
+`interface-contract.md` gained a new "Generators Surface (mocky-mock)"
+section, documenting the second external consumer of this repo alongside
+the LegacyLens backend adapter it already covered: mocky-mock's `mockymock
+generate --with-data` / `mockymock fixtures` subcommands (Phase 8 of the
+`gen-fixtures` program-scoped test-data initiative) call
+`cobolparser.generators.ProgramFixtureGenerator`/`DataGeneratorOptions`/
+`generate_with_scenarios_from_file` directly and consume
+`FixtureBundle.to_dict()`/`.to_json()`, gated on `bundle_version`. This is a
+documentation-only change (no `cobolparser/` source touched, so
+`scripts/okf_staleness_check.py`'s `OKF_MAP` — which only tracks
+`cobolparser/*`/`tests/` source prefixes, not root-level docs — has nothing
+to flag for it); the entry exists per this repo's own convention of logging
+every `.okf`-bundle-adjacent change, not because the staleness gate fired.
+No detail is duplicated here that isn't already canonical in
+[`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
+new section links to it rather than restating its key tables, so the two
+documents can't drift apart from a future bundle-shape change landing in
+only one of them.
+
 ## 2026-08-04 (READ terminal status: unsafe placeholder field name)
 
 Found integrating mockymock's `gen-fixtures` Phase 8 (`generate
