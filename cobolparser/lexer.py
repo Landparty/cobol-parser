@@ -617,6 +617,16 @@ class _CobolLexerPure:
         "QUOTE",
         "QUOTES",
         "ALL",
+        # NULL/NULLS: the VALUE of USAGE POINTER / PROCEDURE-POINTER /
+        # FUNCTION-POINTER data items (VALUE IS NULL) and the operand of
+        # SET ptr TO NULL / relational pointer comparisons. Several
+        # analysis modules (analysis/move_type_checker.py,
+        # analysis/constraints.py, generators/data/values.py) already
+        # carried their own private NULL/NULLS figurative-constant lists in
+        # anticipation of this; the lexer is the single source of truth for
+        # token classification, so it belongs here too.
+        "NULL",
+        "NULLS",
     }
 
     # Typed-literal prefixes (IBM Enterprise COBOL and ISO COBOL).
