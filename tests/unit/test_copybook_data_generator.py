@@ -178,6 +178,27 @@ class TestFlattenRecord:
         ]
         assert len(specs) == 2
 
+    def test_pathological_occurs_count_is_hard_capped(self):
+        # A copybook is free to declare an enormous OCCURS count; nothing
+        # requires expanding it 1:1 into FieldSpecs when no caller-supplied
+        # max_occurs is given. An internal hard ceiling protects against
+        # a multi-million-row copybook exhausting memory.
+        from cobolparser.generators.data.layout import _MAX_OCCURS_HARD_CAP
+
+        source = "01 R.\n  05 TBL OCCURS 50000 TIMES PIC X.\n"
+        specs = _fields(source)
+        assert len(specs) == _MAX_OCCURS_HARD_CAP
+        assert specs[-1].subscripts == (_MAX_OCCURS_HARD_CAP,)
+
+    def test_max_occurs_beyond_hard_cap_is_still_clamped(self):
+        # The hard ceiling applies regardless of the caller's own config --
+        # an explicit --max-occurs larger than the ceiling must not bypass it.
+        from cobolparser.generators.data.layout import _MAX_OCCURS_HARD_CAP
+
+        source = "01 R.\n  05 TBL OCCURS 50000 TIMES PIC X.\n"
+        specs = _fields(source, max_occurs=_MAX_OCCURS_HARD_CAP + 500)
+        assert len(specs) == _MAX_OCCURS_HARD_CAP
+
     def test_redefines_excluded_by_default(self):
         names = [f.name for f in _fields(TXNDATA.read_text())]
         assert "RAW-AREA" in names

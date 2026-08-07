@@ -1,5 +1,31 @@
 # OKF Update Log
 
+## 2026-08-06 (Unbounded OCCURS count in test-data generation)
+
+Code-review finding: `generators/data/layout.py::_occurrence_indexes` read
+the OCCURS numeral straight from the parser with no upper bound, then
+materialized `list(range(1, times + 1))`. Confirmed live: `05 TBL OCCURS
+5000000 TIMES PIC X.` made `flatten_record()` take ~47s and add ~2.6GB
+resident memory. `DataGeneratorOptions.max_occurs` defaults to no cap for
+both `gen-data` and `gen-fixtures`, and `gen-fixtures` didn't even expose
+the `--max-occurs` flag that `gen-data` did.
+
+Fixed with a hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in
+`generators/data/layout.py`, applied inside `_occurrence_indexes`
+regardless of caller config (i.e. it also clamps an explicit `max_occurs`
+larger than the ceiling) — same pattern as the existing
+`_MAX_RANGE_EXPANSION` cap on level-88 THRU ranges. Added the missing
+`--max-occurs` flag to the `gen-fixtures` CLI, threaded into its
+`DataGeneratorOptions`. Re-ran the 5,000,000-occurrence repro after the fix:
+0.18s / ~5MB, 10,000 specs. New tests:
+`test_pathological_occurs_count_is_hard_capped` and
+`test_max_occurs_beyond_hard_cap_is_still_clamped` in
+`tests/unit/test_copybook_data_generator.py`;
+`test_max_occurs_flag_defaults_to_none`,
+`test_max_occurs_flag_parses`, `test_max_occurs_flag_is_accepted_end_to_end`
+in `tests/unit/cli/test_gen_fixtures_cli.py`. Updated:
+[generators.md](generators.md) (flattening rules table note).
+
 ## 2026-08-05 (EJECT compiler-directing statement unrecognized)
 
 User report: "make sure the ejects in the program are ignored, and

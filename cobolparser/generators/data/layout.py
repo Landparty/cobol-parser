@@ -101,6 +101,11 @@ class FieldSpec:
 
 # Module-level constants
 _MAX_RANGE_EXPANSION = 64
+# Hard ceiling on OCCURS expansion, independent of ``max_occurs``. A copybook
+# with a bogus or pathological ``OCCURS`` count (e.g. millions of times) would
+# otherwise materialize one FieldSpec per occurrence per field, exhausting
+# memory well before any caller-supplied cap kicks in.
+_MAX_OCCURS_HARD_CAP = 10_000
 
 _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
 _THROUGH_RE = re.compile(r"^THROUGH:(.*)$", re.IGNORECASE)
@@ -305,8 +310,10 @@ def _occurrence_indexes(
     times = occurs.max_times or occurs.min_times or 1
     if not opts.expand_occurs:
         times = 1
-    elif opts.max_occurs is not None:
-        times = min(times, opts.max_occurs)
+    else:
+        if opts.max_occurs is not None:
+            times = min(times, opts.max_occurs)
+        times = min(times, _MAX_OCCURS_HARD_CAP)
     return list(range(1, max(1, times) + 1))
 
 
