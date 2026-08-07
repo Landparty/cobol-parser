@@ -102,6 +102,50 @@ class TestExternalGlobalClauses:
         item = _find_item(result, "WS-SHARED")
         assert item.to_dict()["is_external"] is True
 
+    def test_leading_is_does_not_warn(self):
+        """[IS] EXTERNAL / [IS] GLOBAL put IS *before* the clause keyword
+        (unlike PICTURE/VALUE/USAGE, where IS follows it); the dispatch loop
+        previously had nowhere to consume that leading IS, so it fell
+        through as an "Unparsed token 'IS'" warning even though the clause
+        itself parsed fine.
+        """
+        result = parse_cobol(
+            _ws_program(
+                "01  WS-SHARED IS EXTERNAL.\n" "01  WS-VIS PIC X(10) IS GLOBAL."
+            ),
+            filename="reg.cbl",
+        )
+        assert result.success
+        assert result.warnings == []
+
+
+class TestSynchronizedJustifiedIsClause:
+    """SYNCHRONIZED/JUSTIFIED accept an optional IS before LEFT/RIGHT
+    (``SYNCHRONIZED IS LEFT``, ``JUSTIFIED IS RIGHT``); the dispatch loop
+    consumed the clause keyword but never checked for IS, so it dropped IS
+    *and* the LEFT/RIGHT direction as two separate unparsed-token warnings.
+    """
+
+    def test_synchronized_is_left(self):
+        result = parse_cobol(
+            _ws_program("01  WS-SYNC PIC 9(4) SYNCHRONIZED IS LEFT."),
+            filename="reg.cbl",
+        )
+        assert result.success
+        assert result.warnings == []
+        item = _find_item(result, "WS-SYNC")
+        assert item.synchronized is True
+
+    def test_justified_is_right(self):
+        result = parse_cobol(
+            _ws_program("01  WS-JUST PIC X(10) JUSTIFIED IS RIGHT."),
+            filename="reg.cbl",
+        )
+        assert result.success
+        assert result.warnings == []
+        item = _find_item(result, "WS-JUST")
+        assert item.justified is True
+
 
 # ===========================================================================
 # FD / SD file-description clauses

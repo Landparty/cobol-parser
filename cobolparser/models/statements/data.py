@@ -244,6 +244,7 @@ class SetStatement(CobolStatement):
         self.set_type: str | None = None  # TO, UP_BY, DOWN_BY, TRUE, FALSE
         self.targets: list[str] = []
         self.value: str | None = None
+        self.value_is_address_of: bool = False
 
     def set_set_type(self, set_type: str) -> None:
         self.set_type = set_type.upper()
@@ -252,8 +253,9 @@ class SetStatement(CobolStatement):
         self.targets.append(target)
         self._add_unique_operand(target)
 
-    def set_value(self, value: str) -> None:
+    def set_value(self, value: str, *, is_address_of: bool = False) -> None:
         self.value = value
+        self.value_is_address_of = is_address_of
         self._add_unique_operand(value)
 
     def to_dict(self) -> dict[str, Any]:
@@ -263,6 +265,7 @@ class SetStatement(CobolStatement):
                 "set_type": self.set_type,
                 "targets": self.targets,
                 "value": self.value,
+                "value_is_address_of": self.value_is_address_of,
             }
         )
         return result

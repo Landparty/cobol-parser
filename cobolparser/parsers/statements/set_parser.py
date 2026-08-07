@@ -99,6 +99,23 @@ class SetStatementParser(IStatementParser):
                 elif vv == "FALSE":
                     stmt.set_set_type("FALSE")
                     token_stream.consume()
+                elif vv == "ADDRESS":
+                    # SET pointer-var TO ADDRESS OF identifier -- ADDRESS OF
+                    # is a prefix on the *value* here (mirrors the target-side
+                    # ADDRESS OF handling in the target-collection loop above).
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    of_token = token_stream.peek()
+                    if of_token and _val(of_token) == "OF":
+                        token_stream.consume()
+                        skip_whitespace(token_stream)
+                    stmt.set_set_type("TO")
+                    v2 = token_stream.peek()
+                    if v2 and v2.type != TokenType.PERIOD:
+                        token_stream.consume()
+                        stmt.set_value(
+                            _strip_period(v2.value or ""), is_address_of=True
+                        )
                 elif v.type != TokenType.PERIOD:
                     stmt.set_set_type("TO")
                     token_stream.consume()
