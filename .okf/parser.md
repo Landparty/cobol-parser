@@ -1831,6 +1831,28 @@ every new parser must satisfy: `tests/unit/test_procedure_registry_dispatch_orde
 (`EXPECTED_ORDER`, `DISPATCH_CASES`) and `tests/regression/test_swallow_sweep.py`
 (`FIXTURES`).
 
+**Leading `IS` of `[IS] EXTERNAL`/`[IS] GLOBAL`, and missing `IS` on
+`SYNCHRONIZED`/`JUSTIFIED` (`divisions/data_clauses.py`, 2026-08-07):**
+`EXTERNAL`/`GLOBAL` are written `[IS] EXTERNAL`/`[IS] GLOBAL` — `IS` comes
+*before* the clause keyword, unlike `PICTURE`/`VALUE`/`USAGE`/`SIGN`, where
+an optional `IS` follows the keyword and is consumed inside that clause's own
+parse method. The main dispatch loop had no branch for a bare `IS` token, so
+it fell into the generic drop-with-warning case even on fully standard
+syntax — `EXTERNAL`/`GLOBAL` still parsed correctly on the next loop
+iteration (so `is_external`/`is_global` were set right and
+`result.success` stayed `True`), but every such data item picked up a
+spurious "Unparsed token 'IS' ... clause not fully supported" warning.
+`SYNCHRONIZED IS LEFT`/`JUSTIFIED IS RIGHT` had the mirror-image gap: the
+clause keyword consumed itself but never checked for a following `IS`,
+which then also stranded `LEFT`/`RIGHT` as a second dropped token (neither
+matches any dispatch branch on its own). Fixed by adding a peek-ahead
+branch on `TokenType.IS` that consumes it when the next token is
+`EXTERNAL`/`GLOBAL`, and `IS` consumption to the `SYNCHRONIZED`/`JUSTIFIED`
+branches, mirroring the existing `SIGN` clause's `[IS]` handling. Pinned by
+`TestExternalGlobalClauses.test_leading_is_does_not_warn` and
+`TestSynchronizedJustifiedIsClause` in
+`tests/regression/test_parser_completeness.py`.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

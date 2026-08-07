@@ -349,19 +349,25 @@ class DataItemClauseParser:
                         direction = direction + " SEPARATE"
                     data_item.sign_clause = direction
 
-            # SYNCHRONIZED / SYNC clause
+            # SYNCHRONIZED / SYNC [IS] [LEFT|RIGHT] clause
             elif value_upper in {"SYNCHRONIZED", "SYNC"}:
                 data_item.synchronized = True
                 token_stream.consume()
                 nxt = token_stream.peek()
+                if nxt and nxt.type == TokenType.IS:
+                    token_stream.consume()
+                    nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() in {"LEFT", "RIGHT"}:
                     token_stream.consume()
 
-            # JUSTIFIED / JUST [RIGHT] clause
+            # JUSTIFIED / JUST [IS] [RIGHT] clause
             elif value_upper in {"JUSTIFIED", "JUST"}:
                 data_item.justified = True
                 token_stream.consume()
                 nxt = token_stream.peek()
+                if nxt and nxt.type == TokenType.IS:
+                    token_stream.consume()
+                    nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() == "RIGHT":
                     token_stream.consume()
 

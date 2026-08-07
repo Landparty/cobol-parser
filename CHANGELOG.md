@@ -776,6 +776,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser (2026-08-07): `SYNCHRONIZED IS LEFT` and `JUSTIFIED IS RIGHT` dropped
+  both the `IS` and the `LEFT`/`RIGHT` direction as two separate "unparsed
+  token" warnings on a clean, standards-compliant parse.**
+  `DataItemClauseParser`'s `SYNCHRONIZED`/`JUSTIFIED` branches
+  (`cobolparser/parsers/divisions/data_clauses.py`) consumed the clause
+  keyword but never checked for a following optional `IS`, so it fell
+  through to the generic drop-with-warning branch, and the `LEFT`/`RIGHT`
+  token after it doesn't match any dispatch branch on its own either — two
+  warnings for one clause. (This is the same family of bug as the leading
+  `IS` before `[IS] EXTERNAL`/`[IS] GLOBAL`/bare `POINTER`-family usage,
+  fixed independently the same day in the same dispatch loop — see the `IS`
+  branch above `REDEFINES` in `data_clauses.py`.) Added `IS` consumption to
+  both branches, mirroring the existing `SIGN` clause's `[IS]` handling.
+  Pinned by the new
+  `TestSynchronizedJustifiedIsClause` class in
+  `tests/regression/test_parser_completeness.py`.
 * **parser (2026-08-07): `SET pointer-var TO ADDRESS OF identifier` was
   misparsed, silently corrupting the surrounding PROCEDURE DIVISION.**
   `SetStatementParser`'s `TO` branch (`cobolparser/parsers/statements/set_parser.py`)
