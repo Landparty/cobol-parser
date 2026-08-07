@@ -26,6 +26,30 @@ larger than the ceiling) — same pattern as the existing
 in `tests/unit/cli/test_gen_fixtures_cli.py`. Updated:
 [generators.md](generators.md) (flattening rules table note).
 
+## 2026-08-06 (ConstantFolder RecursionError on long PERFORM chains)
+
+Code-review finding: `const_fold.py`'s `_walk_perform` followed a chain of
+out-of-line `PERFORM`s (`P1` performs `P2` performs `P3` ... `PN`) by
+recursing through Python's own call stack, one frame per paragraph — a few
+hundred chained paragraphs (well under `sys.getrecursionlimit()`'s default
+of 1000) raised an uncaught `RecursionError`, and every `gen-fixtures` call
+reaches this path unconditionally (both `generate()` and
+`generate_with_scenarios()`). Reproduced: 300 chained paragraphs folded
+fine, 500 crashed. `_poison_written_names` had the identical defect for a
+`PERFORM`-to-paragraph chain reached from inside a poisoned loop/branch body
+— reproduced separately at ~1500 chained paragraphs (a higher threshold
+since it recurses through fewer stack frames per paragraph). Both converted
+to an explicit frame stack, the same fix `program_flow/cycles.py` already
+uses for its own paragraph-graph traversal; recursion is still used for
+genuinely nested statement lists (bounded by real source nesting, not
+paragraph-chain length), left alone deliberately. New regression tests:
+`tests/unit/analysis/test_const_fold.py::TestPerformChaining` — 2000-chain
+tests for both paths, plus a sequential-re-PERFORM-of-the-same-paragraph
+test pinning that the `visiting` add/discard lifetime (now bracketing a
+frame push/pop instead of a recursive call/return) is unchanged. Full
+detail: [analysis.md](analysis.md) (`ConstantFolder` section). Also
+updated: `CHANGELOG.md`.
+
 ## 2026-08-05 (EJECT compiler-directing statement unrecognized)
 
 User report: "make sure the ejects in the program are ignored, and

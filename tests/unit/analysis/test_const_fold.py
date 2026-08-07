@@ -419,6 +419,22 @@ class TestPerformChaining:
         )
         assert fold.known == {"WS-A": "15"}
 
+    def test_sequential_perform_of_the_same_paragraph_walks_both_times(self):
+        # Pins the `visiting` add/discard lifetime: a paragraph performed
+        # twice in a row (not a cycle -- the second PERFORM starts only
+        # after the first has fully returned) must be walked both times,
+        # not skipped the second time as if it were still "in progress".
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 0 TO WS-A.\n"
+            "           PERFORM HELPER.\n"
+            "           PERFORM HELPER.\n"
+            "           DISPLAY WS-A.\n"
+            "       HELPER.\n"
+            "           ADD 10 TO WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "20"}
+
     def test_perform_thru_walks_the_full_range(self):
         fold = _fold(
             "       MAIN-PARA.\n"
@@ -459,6 +475,48 @@ class TestPerformChaining:
         # Just needs to terminate; the exact value is secondary to proving
         # the recursion guard stops a non-looping PERFORM cycle.
         assert "WS-A" in fold.known
+
+    def test_long_straight_line_perform_chain_does_not_blow_the_stack(self):
+        # Regression: `_walk_perform` used to follow a chain of out-of-line
+        # PERFORMs by recursing through Python's own call stack, one frame
+        # per paragraph -- an ordinary large program (a few hundred chained
+        # paragraphs, well under sys.getrecursionlimit()'s default of 1000)
+        # was enough to raise an uncaught RecursionError. 2000 paragraphs
+        # exercises the fix (an explicit frame stack) well past that.
+        n = 2000
+        paras = [
+            "       MAIN-PARA.\n           MOVE 1 TO WS-A.\n           PERFORM PARA-1.\n"
+        ]
+        for i in range(1, n):
+            nxt = i + 1
+            if nxt < n:
+                paras.append(f"       PARA-{i}.\n           PERFORM PARA-{nxt}.\n")
+            else:
+                paras.append(f"       PARA-{i}.\n           DISPLAY WS-A.\n")
+        fold = _fold("".join(paras))
+        assert fold.known == {"WS-A": "1"}
+
+    def test_long_perform_chain_inside_a_loop_body_does_not_blow_the_stack(self):
+        # Same regression as above, for `_poison_written_names`'s own
+        # PERFORM-chain-following (reached when a loop body performs into a
+        # long chain of paragraphs, poisoning what each could write).
+        n = 2000
+        paras = [
+            "       MAIN-PARA.\n"
+            "           PERFORM UNTIL WS-FLAG = 'Y'\n"
+            "               PERFORM PARA-1\n"
+            "           END-PERFORM.\n"
+        ]
+        for i in range(1, n):
+            nxt = i + 1
+            if nxt < n:
+                paras.append(f"       PARA-{i}.\n           PERFORM PARA-{nxt}.\n")
+            else:
+                paras.append(f"       PARA-{i}.\n           MOVE 1 TO WS-A.\n")
+        fold = _fold("".join(paras))
+        # Reaching this line without a RecursionError is the point; every
+        # field in the poisoned loop body is unknowable by construction.
+        assert fold.known == {}
 
 
 class TestObservationPoints:

@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-04T00:00:00Z
+timestamp: 2026-08-06T00:00:00Z
 ---
 
 # Overview
@@ -593,6 +593,33 @@ as a second line of defense, since the generic "poison via `.operands`"
 fallback above is exactly the path most exposed to non-name garbage.
 Verified against the full 459-file NIST COBOL-85 corpus (zero crashes, zero
 layout violations) in addition to the 24-file shamrice corpus test below.
+
+**Bug found via a manual stress repro, fixed at the root: an uncaught
+`RecursionError` on an ordinary large program.** `_walk_perform` followed a
+chain of out-of-line `PERFORM`s (`P1` performs `P2` performs `P3` ... `PN`)
+by recursing through Python's own call stack, one frame per paragraph in the
+chain -- a few hundred chained paragraphs (well under
+`sys.getrecursionlimit()`'s default of 1000) was enough to crash, and a
+"long straight-line paragraph chain" is not an adversarial input shape, it's
+an ordinary large COBOL program. `_poison_written_names` had the identical
+defect for a `PERFORM`-to-paragraph chain reached from inside a poisoned
+loop/branch body (confirmed reproducible around ~1000-1500 chained
+paragraphs, a higher threshold since it recurses through fewer stack frames
+per paragraph than `_walk_perform`'s three-function call chain did). Both
+now follow the chain via an explicit frame stack -- one entry per open
+paragraph, `visiting` add/discard bracketing the frame's lifetime exactly as
+the recursive version did -- the same fix this file's `ProgramFlowAnalyzer`
+section above documents `program_flow/cycles.py`'s own paragraph-graph
+traversal already applying, for the identical reason. Recursion is still
+used for genuinely *nested* statement lists (an
+`IF`/`EVALUATE` arm or loop body found within a block already being
+poisoned, and an inline `PERFORM ... END-PERFORM` nested inside another
+inline `PERFORM`) -- that depth is bounded by real source nesting, not by
+paragraph-chain length, so it was left alone rather than rewritten
+speculatively. Pinned by
+`tests/unit/analysis/test_const_fold.py::TestPerformChaining::test_long_straight_line_perform_chain_does_not_blow_the_stack`
+and `::test_long_perform_chain_inside_a_loop_body_does_not_blow_the_stack`
+(2000-paragraph chains, both directions).
 
 ## Module File Map
 
