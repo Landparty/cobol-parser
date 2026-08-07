@@ -46,6 +46,7 @@ than guessing:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
@@ -260,10 +261,39 @@ def _walk_statements(
     state: _WalkState,
     visiting: set[str],
 ) -> None:
-    for stmt in statements:
+    """Iterative driver over a statement list, including every SIMPLE
+    PERFORM it transitively reaches (inline or out-of-line).
+
+    A non-looping PERFORM to another paragraph is a subroutine jump that
+    must eventually return to the calling list -- naively recursing through
+    Python's own call stack for that (one frame per paragraph in the chain)
+    blows the interpreter's recursion limit on an ordinary large program (a
+    few hundred chained paragraphs is enough). An explicit frame stack is
+    walked instead, the same fix `program_flow/cycles.py` already applies to
+    its own paragraph-graph traversal for the identical reason. Each frame
+    is (iterator over a statement list, the paragraph name entered to reach
+    it or None) so `visiting` can be added/discarded with the same lifetime
+    the recursive version gave it.
+    """
+    frames: list[tuple[Iterator[Any], str | None]] = [(iter(statements), None)]
+    while frames:
         if state.stopped:
             return
-        _walk_one(stmt, index, by_name, ordered_names, state, visiting)
+        iterator, entered = frames[-1]
+        stmt = next(iterator, None)
+        if stmt is None:
+            frames.pop()
+            if entered is not None:
+                visiting.discard(entered)
+            continue
+        jump = _walk_one(stmt, index, by_name, ordered_names, state)
+        if jump is not None:
+            target, body = jump
+            if target is not None:
+                if target in visiting:
+                    continue  # non-looping PERFORM cycle: stop rather than recurse forever
+                visiting.add(target)
+            frames.append((iter(body), target))
 
 
 def _walk_one(
@@ -272,8 +302,10 @@ def _walk_one(
     by_name: dict[str, CobolParagraph],
     ordered_names: list[str],
     state: _WalkState,
-    visiting: set[str],
-) -> None:
+) -> tuple[str | None, list[Any]] | None:
+    """Fold one statement in place; return a (paragraph-name-or-None, body)
+    pair when `_walk_statements` must push a new frame to keep walking (a
+    SIMPLE PERFORM, inline or to another paragraph), else None."""
     if isinstance(stmt, MoveStatement):
         _fold_move(stmt, index, state.env)
     elif isinstance(stmt, AddStatement):
@@ -310,7 +342,7 @@ def _walk_one(
         # than risk treating an OUT value as still-known.
         pass
     elif isinstance(stmt, PerformStatement):
-        _walk_perform(stmt, index, by_name, ordered_names, state, visiting)
+        return _walk_perform(stmt, index, by_name, ordered_names, state)
     elif isinstance(stmt, IfStatement):
         _poison_written_names(
             stmt.then_statements, index, state.env, by_name, ordered_names
@@ -337,6 +369,7 @@ def _walk_one(
         # surviving an unrecognized write (INITIALIZE, SET, STRING,
         # UNSTRING, INSPECT, ACCEPT, CALL, SQL/CICS/DLI host variables, ...).
         _poison_names(list(getattr(stmt, "operands", [])), index, state.env)
+    return None
 
 
 def _mark_observed(operand: str, index: ProgramLayoutIndex, state: _WalkState) -> None:
@@ -351,8 +384,12 @@ def _walk_perform(
     by_name: dict[str, CobolParagraph],
     ordered_names: list[str],
     state: _WalkState,
-    visiting: set[str],
-) -> None:
+) -> tuple[str | None, list[Any]] | None:
+    """Return the (paragraph-name-or-None, body) frame `_walk_statements`
+    should push to keep walking a SIMPLE PERFORM's body, or None when there
+    is nothing further for the caller to walk. The cycle guard on an
+    out-of-line target lives in `_walk_statements` (it owns `visiting`'s
+    add/discard lifetime); this function only resolves *what* to walk."""
     if stmt.perform_type != "SIMPLE":
         # UNTIL / VARYING / TIMES: zero-or-many iterations, nothing inside is
         # knowable -- poison what the body could write, then keep walking
@@ -364,23 +401,16 @@ def _walk_perform(
             stmt, by_name, ordered_names
         )
         _poison_written_names(body, index, state.env, by_name, ordered_names)
-        return
+        return None
 
     if stmt.inline_statements:
-        _walk_statements(
-            stmt.inline_statements, index, by_name, ordered_names, state, visiting
-        )
-        return
+        return (None, stmt.inline_statements)
 
     if not stmt.target_paragraph:
-        return
+        return None
     target = stmt.target_paragraph.upper()
-    if target in visiting:
-        return  # non-looping PERFORM cycle: stop rather than recurse forever
     body = _perform_body_statements(stmt, by_name, ordered_names)
-    visiting.add(target)
-    _walk_statements(body, index, by_name, ordered_names, state, visiting)
-    visiting.discard(target)
+    return (target, body)
 
 
 def _perform_body_statements(
@@ -457,23 +487,36 @@ def _poison_written_names(
     could possibly write -- including through a PERFORM to another
     paragraph, which must be followed back to that paragraph's own
     statements (a PERFORM's own `.operands` is just the target paragraph
-    name, not a field)."""
+    name, not a field).
+
+    A PERFORM-to-paragraph chain is followed via an explicit frame stack
+    rather than recursing into this function -- same reasoning as
+    `_walk_statements`: one Python stack frame per paragraph in the chain
+    blows the recursion limit on an ordinary large program. Recursion is
+    still used for genuinely nested statement lists (an IF/EVALUATE arm or
+    loop body found *within* a block already being poisoned); that depth is
+    bounded by real source nesting, not by paragraph-chain length."""
     if visiting is None:
         visiting = set()
-    for stmt in statements:
+    frames: list[tuple[Iterator[Any], str | None]] = [(iter(statements), None)]
+    while frames:
+        iterator, entered = frames[-1]
+        stmt = next(iterator, None)
+        if stmt is None:
+            frames.pop()
+            if entered is not None:
+                visiting.discard(entered)
+            continue
         if isinstance(stmt, PerformStatement):
             if stmt.inline_statements:
-                _poison_written_names(
-                    stmt.inline_statements, index, env, by_name, ordered_names, visiting
-                )
+                frames.append((iter(stmt.inline_statements), None))
                 continue
             target = (stmt.target_paragraph or "").upper()
             if not target or target in visiting:
-                continue
+                continue  # non-looping PERFORM cycle: stop rather than recurse forever
             body = _perform_body_statements(stmt, by_name, ordered_names)
             visiting.add(target)
-            _poison_written_names(body, index, env, by_name, ordered_names, visiting)
-            visiting.discard(target)
+            frames.append((iter(body), target))
             continue
         _poison_names(_write_targets(stmt), index, env)
         for nested in _nested_statement_lists(stmt):

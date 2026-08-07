@@ -757,6 +757,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropping it misreads continuation-line operands named by *unexpanded*
   COPY members as boundaries (caught by mocky-mock's copybook fixtures).
   Pinned by `tests/regression/test_clause_continuation_boundary.py`.
+* **analysis (2026-08-06): `ConstantFolder` no longer crashes with an
+  uncaught `RecursionError` on an ordinary large program.** `_walk_perform`
+  followed a chain of out-of-line `PERFORM`s (`P1` performs `P2` performs
+  `P3` ... `PN`) by recursing through Python's own call stack, one frame per
+  paragraph — a few hundred chained paragraphs (well under
+  `sys.getrecursionlimit()`'s default of 1000) was enough to crash, and
+  every `gen-fixtures` call reaches this path unconditionally.
+  `_poison_written_names` had the identical defect for a
+  `PERFORM`-to-paragraph chain reached from inside a poisoned loop/branch
+  body. Both now follow the chain via an explicit frame stack instead of
+  recursion — the same fix `program_flow/cycles.py` already applies to its
+  own paragraph-graph traversal — while genuinely nested statement lists
+  (bounded by real source nesting, not paragraph-chain length) still use
+  ordinary recursion. Pinned by
+  `tests/unit/analysis/test_const_fold.py::TestPerformChaining` (2000-chain
+  tests for both paths, plus a sequential-re-PERFORM regression test).
 
 ### Fixed
 
