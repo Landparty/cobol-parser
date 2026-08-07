@@ -100,7 +100,7 @@ class TestH1bSetToAddressOf:
     """Companion to H1 — SET x TO ADDRESS OF y (ADDRESS OF on the *value*
     side) left ``OF``/the identifier unconsumed after the TO branch only
     captured the ``ADDRESS`` token itself as the value. The leftover
-    ``OF WS-REC`` tokens were then silently reinterpreted as spurious
+    ``OF <identifier>`` tokens were then silently reinterpreted as spurious
     paragraph headers by the enclosing PROCEDURE DIVISION parser, with
     ``result.success`` still True and no errors/warnings raised.
     """
