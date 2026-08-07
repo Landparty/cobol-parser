@@ -939,6 +939,17 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   `else: break` fired immediately on `OF` and never reached the pointer/
   `TO`/target tokens (`targets: [], set_type: null, value: null`). `OF` is
   now explicitly recognized and skipped in that loop.
+* **H1b (2026-08-07) — `set_parser.py`, the value-side mirror of H1:**
+  `SET pointer-var TO ADDRESS OF identifier` was not covered by the H1 fix.
+  The `TO` branch consumed only the single token after `TO` as `value`, so
+  for `ADDRESS OF identifier` it captured `value: "ADDRESS"` and left
+  `OF identifier` on the stream — silently reinterpreted by the enclosing
+  PROCEDURE DIVISION parser as spurious paragraph headers, with
+  `result.success` still `True` and no errors/warnings. The `TO` branch now
+  special-cases a leading `ADDRESS OF` prefix on the value: it consumes
+  both keywords and stores the underlying identifier as `value`, setting a
+  new `SetStatement.value_is_address_of` flag. Pinned by
+  `tests/regression/test_open_findings_high_regressions.py::TestH1bSetToAddressOf`.
 * **H2 — `arithmetic_parsers.py`:** `paren_depth` in the COMPUTE
   expression loop was only used to gate the `paren_depth == 0` boundary
   check; once left non-zero by a stray `(` with no matching `)`, the

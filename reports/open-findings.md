@@ -119,6 +119,15 @@ it only appears if `CobolLexer` is instantiated directly with
 `free_form=False`, bypassing preprocessing. The real, current bug is the
 `set_parser.py` `OF` type check.)
 
+**H1b (found and fixed 2026-08-07)** — the mirror-image bug on the *value*
+side, `SET pointer-var TO ADDRESS OF identifier`, was not covered by the H1
+fix or its regression tests and remained broken: the `TO` branch consumed
+only the `ADDRESS` token as `value`, leaving `OF identifier` on the stream
+to be silently reinterpreted as spurious paragraph headers by the enclosing
+PROCEDURE DIVISION parser (`result.success` stayed `True`, zero
+errors/warnings). See `CHANGELOG.md` (Unreleased → Fixed) and
+`tests/regression/test_open_findings_high_regressions.py::TestH1bSetToAddressOf`.
+
 ### H2 — `COMPUTE` with unbalanced parentheses is silently accepted, and can swallow the next statement
 `cobolparser/parsers/statements/arithmetic_parsers.py:479-514`. `paren_depth`
 is tracked only to gate the statement-boundary check (which only fires at

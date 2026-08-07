@@ -776,27 +776,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-* **parser (2026-08-07): the leading `IS` of `[IS] EXTERNAL`, `[IS] GLOBAL`,
-  `SYNCHRONIZED IS LEFT`, and `JUSTIFIED IS RIGHT` was dropped as an
-  "unparsed token" warning even on a clean, standards-compliant parse.**
-  `DataItemClauseParser`'s clause dispatch loop consumes an optional `IS`
-  *after* the clause keyword for `PICTURE`/`VALUE`/`USAGE`/`SIGN`, but
-  `EXTERNAL`/`GLOBAL` put `IS` *before* the keyword, so by the time the loop
-  saw the bare `IS` token there was no clause name yet to attach the
-  consumption to — it fell straight into the generic drop-with-warning
-  branch, and the following `EXTERNAL`/`GLOBAL` clause parsed correctly on
-  the next iteration anyway, so `result.success` stayed `True` and the
-  `is_external`/`is_global` flags were still set correctly; only the warning
-  was spurious. `SYNCHRONIZED`/`JUSTIFIED` had the opposite gap — the clause
-  keyword was consumed but never checked for a following `IS` — which was
-  worse, since it dropped `IS` *and* the `LEFT`/`RIGHT` direction as two
-  separate warnings (the direction itself still doesn't match any dispatch
-  branch on its own). Added an `IS`-before-`EXTERNAL`/`GLOBAL` peek-ahead
-  branch to the dispatch loop, and `IS` consumption to the
-  `SYNCHRONIZED`/`JUSTIFIED` branches, mirroring the existing `SIGN`
-  handling. Pinned by `TestExternalGlobalClauses.test_leading_is_does_not_warn`
-  and the new `TestSynchronizedJustifiedIsClause` class in
+* **parser (2026-08-07): `SYNCHRONIZED IS LEFT` and `JUSTIFIED IS RIGHT` dropped
+  both the `IS` and the `LEFT`/`RIGHT` direction as two separate "unparsed
+  token" warnings on a clean, standards-compliant parse.**
+  `DataItemClauseParser`'s `SYNCHRONIZED`/`JUSTIFIED` branches
+  (`cobolparser/parsers/divisions/data_clauses.py`) consumed the clause
+  keyword but never checked for a following optional `IS`, so it fell
+  through to the generic drop-with-warning branch, and the `LEFT`/`RIGHT`
+  token after it doesn't match any dispatch branch on its own either — two
+  warnings for one clause. (This is the same family of bug as the leading
+  `IS` before `[IS] EXTERNAL`/`[IS] GLOBAL`/bare `POINTER`-family usage,
+  fixed independently the same day in the same dispatch loop — see the `IS`
+  branch above `REDEFINES` in `data_clauses.py`.) Added `IS` consumption to
+  both branches, mirroring the existing `SIGN` clause's `[IS]` handling.
+  Pinned by the new
+  `TestSynchronizedJustifiedIsClause` class in
   `tests/regression/test_parser_completeness.py`.
+* **parser (2026-08-07): `SET pointer-var TO ADDRESS OF identifier` was
+  misparsed, silently corrupting the surrounding PROCEDURE DIVISION.**
+  `SetStatementParser`'s `TO` branch (`cobolparser/parsers/statements/set_parser.py`)
+  captured only the single token immediately after `TO` as the statement's
+  value; for `ADDRESS OF identifier`, that consumed just the `ADDRESS`
+  token, leaving `value: "ADDRESS"` and the trailing `OF identifier` tokens
+  unconsumed on the stream. Those leftover tokens were then silently
+  reinterpreted by the enclosing PROCEDURE DIVISION parser as spurious
+  paragraph headers (`OF` and the identifier each became an empty
+  paragraph) — `result.success` stayed `True` with zero errors/warnings.
+  This is the mirror image of H1 (`reports/open-findings.md`), which fixed
+  the same `ADDRESS OF` construct on the *target* side
+  (`SET ADDRESS OF x TO y`); the value-side form was never covered by that
+  fix or its regression tests. The `TO` branch now recognizes a leading
+  `ADDRESS OF` prefix on the value, consumes both keywords, and stores the
+  underlying identifier as `value` with a new `SetStatement.value_is_address_of`
+  boolean flag so downstream consumers can distinguish a pointer/address
+  assignment from a plain `SET x TO y`. Pinned by
+  `tests/regression/test_open_findings_high_regressions.py::TestH1bSetToAddressOf`.
 * **parser (2026-08-05): INVOKE, ALLOCATE, and FREE are now parsed instead of
   silently discarded.** All three are real, valid IBM Enterprise COBOL verbs
   (`INVOKE` for Object-Oriented method calls; `ALLOCATE`/`FREE` for dynamic
