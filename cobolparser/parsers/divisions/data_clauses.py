@@ -258,6 +258,35 @@ class DataItemClauseParser:
             if tok_type in _DIVISION_TOKEN_TYPES:
                 break
 
+            # An EXEC SQL block ends this data item without consuming it.
+            # A data-division EXEC SQL statement (e.g. DCLGEN's
+            # ``EXEC SQL INCLUDE SQLCA END-EXEC``) is recognized by the
+            # section-level scan loop (``DataDivisionParser._parse_section``)
+            # -- but only when that loop sees the leading EXEC token fresh.
+            # If the previous data item's terminating period was omitted
+            # (a common real-world slip, especially right before a COPY- or
+            # DCLGEN-inserted block), this per-item clause loop would
+            # otherwise treat EXEC/SQL/INCLUDE/SQLCA/END-EXEC one token at a
+            # time as unrecognized clauses and drop the whole SQL statement
+            # from the AST. Breaking here (implicitly closing the item, same
+            # as the LEVEL_NUMBER/division-token cases above) hands the EXEC
+            # token back to the section loop so it parses normally.
+            if tok_type == TokenType.EXEC or (
+                tok_type == TokenType.IDENTIFIER
+                and token.value
+                and token.value.upper() == "EXEC"
+            ):
+                nxt = token_stream.peek(1)
+                if nxt and (
+                    nxt.type == TokenType.SQL
+                    or (
+                        nxt.type == TokenType.IDENTIFIER
+                        and nxt.value
+                        and nxt.value.upper() == "SQL"
+                    )
+                ):
+                    break
+
             # Compute upper-cased token value once -- the chain of clause
             # checks below would otherwise call ``.upper()`` up to six times
             # per loop iteration on the same string.
@@ -369,6 +398,30 @@ class DataItemClauseParser:
             elif value_upper == "GLOBAL":
                 data_item.is_global = True
                 token_stream.consume()
+
+            # Leading "IS" ahead of EXTERNAL / GLOBAL / a bare
+            # USAGE-family keyword (POINTER, PROCEDURE-POINTER,
+            # FUNCTION-POINTER). EXTERNAL and GLOBAL are standard
+            # "[IS] <keyword>" clauses; the USAGE-omitted POINTER forms
+            # accept the same optional "IS" as a real-world IBM
+            # Enterprise convention. The keyword itself is handled by its
+            # own branch above/below on the very next loop iteration, so
+            # this branch only needs to swallow the "IS" -- silently,
+            # since nothing is actually lost. Falling through to the
+            # generic "unknown token" branch instead would misreport a
+            # dropped-content warning for a clause that in fact parsed
+            # completely.
+            elif value_upper == "IS":
+                nxt = token_stream.peek(1)
+                nxt_upper = nxt.value.upper() if nxt and nxt.value else ""
+                if nxt_upper in _POINTER_KEYWORDS or nxt_upper in (
+                    "EXTERNAL",
+                    "GLOBAL",
+                ):
+                    token_stream.consume()  # Consume the optional IS
+                else:
+                    self._warn_dropped_data_token(token, data_item)
+                    token_stream.consume()
 
             # REDEFINES clause
             elif value_upper == "REDEFINES":
