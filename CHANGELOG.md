@@ -776,6 +776,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser (2026-08-07): `SET pointer-var TO ADDRESS OF identifier` was
+  misparsed, silently corrupting the surrounding PROCEDURE DIVISION.**
+  `SetStatementParser`'s `TO` branch (`cobolparser/parsers/statements/set_parser.py`)
+  captured only the single token immediately after `TO` as the statement's
+  value; for `ADDRESS OF identifier`, that consumed just the `ADDRESS`
+  token, leaving `value: "ADDRESS"` and the trailing `OF identifier` tokens
+  unconsumed on the stream. Those leftover tokens were then silently
+  reinterpreted by the enclosing PROCEDURE DIVISION parser as spurious
+  paragraph headers (`OF` and the identifier each became an empty
+  paragraph) — `result.success` stayed `True` with zero errors/warnings.
+  This is the mirror image of H1 (`reports/open-findings.md`), which fixed
+  the same `ADDRESS OF` construct on the *target* side
+  (`SET ADDRESS OF x TO y`); the value-side form was never covered by that
+  fix or its regression tests. The `TO` branch now recognizes a leading
+  `ADDRESS OF` prefix on the value, consumes both keywords, and stores the
+  underlying identifier as `value` with a new `SetStatement.value_is_address_of`
+  boolean flag so downstream consumers can distinguish a pointer/address
+  assignment from a plain `SET x TO y`. Pinned by
+  `tests/regression/test_open_findings_high_regressions.py::TestH1bSetToAddressOf`.
 * **parser (2026-08-05): INVOKE, ALLOCATE, and FREE are now parsed instead of
   silently discarded.** All three are real, valid IBM Enterprise COBOL verbs
   (`INVOKE` for Object-Oriented method calls; `ALLOCATE`/`FREE` for dynamic
