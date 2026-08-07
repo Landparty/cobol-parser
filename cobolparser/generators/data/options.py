@@ -20,7 +20,9 @@ class DataGeneratorOptions:
         expand_occurs: Emit one column per OCCURS occurrence.  When off, only
             the first occurrence is emitted.
         max_occurs: Cap on occurrences expanded per table, or ``None`` for the
-            table's own maximum.
+            table's own maximum. Always subject to an internal hard ceiling
+            (``layout._MAX_OCCURS_HARD_CAP``) regardless of this value, so a
+            pathological ``OCCURS`` count in the source cannot exhaust memory.
         respect_values: Treat a VALUE clause as a fixed value for that column.
         use_condition_values: Draw from level-88 VALUEs when the field has any.
         semantic_hints: Use field-name heuristics (NAME, CITY, ZIP, DATE, ...)

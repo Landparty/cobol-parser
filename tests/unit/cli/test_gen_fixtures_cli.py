@@ -26,6 +26,16 @@ class TestGenFixturesParser:
         assert args.format == "json"
         assert args.scenarios == "happy"
 
+    def test_max_occurs_flag_defaults_to_none(self):
+        args = _build_parser().parse_args(["gen-fixtures", FILE_OPERATIONS])
+        assert args.max_occurs is None
+
+    def test_max_occurs_flag_parses(self):
+        args = _build_parser().parse_args(
+            ["gen-fixtures", FILE_OPERATIONS, "--max-occurs", "5"]
+        )
+        assert args.max_occurs == 5
+
     def test_repeatable_path_flags(self):
         args = _build_parser().parse_args(
             [
@@ -70,6 +80,19 @@ class TestGenFixturesOutput:
         ]
         assert reads
         assert all(len(f["sequence"]) == 3 for f in reads)
+
+    def test_max_occurs_flag_is_accepted_end_to_end(self, monkeypatch, capsys):
+        _run(
+            monkeypatch,
+            FILE_OPERATIONS,
+            "--seed",
+            "1",
+            "--max-occurs",
+            "5",
+            "--compact",
+        )
+        out = json.loads(capsys.readouterr().out)
+        assert out["source_file"] == FILE_OPERATIONS
 
     def test_list_boundaries(self, monkeypatch, capsys):
         _run(monkeypatch, FILE_OPERATIONS, "--list-boundaries", "--compact")

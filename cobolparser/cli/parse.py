@@ -895,6 +895,13 @@ def _build_gen_fixtures_parser(
         help="RNG seed for reproducible output (default: random, reported in the bundle)",
     )
     p.add_argument(
+        "--max-occurs",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Cap the occurrences expanded per OCCURS table",
+    )
+    p.add_argument(
         "--scenarios",
         choices=["happy", "branches", "all"],
         default="happy",
@@ -962,7 +969,9 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
     try:
         from ..generators.data.options import DataGeneratorOptions
 
-        generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=args.rows))
+        generator = ProgramFixtureGenerator(
+            DataGeneratorOptions(rows=args.rows, max_occurs=args.max_occurs)
+        )
         bundle = generator.generate_with_scenarios_from_file(
             args.file,
             copybook_paths=copybook_paths,

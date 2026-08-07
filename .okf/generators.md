@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-04T00:00:00Z
+timestamp: 2026-08-06T00:00:00Z
 ---
 
 # Overview
@@ -161,7 +161,13 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 | `COMP-1`/`COMP-2` | No picture → `FieldCategory.FLOAT` |
 
 `include_redefines` / `include_filler` / `expand_occurs` / `max_occurs`
-override the first four.
+override the first four. Occurrence expansion is additionally subject to a
+hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in `generators/data/layout.py`
+— applied on top of (never widened by) a caller's own `max_occurs`, so a
+pathological `OCCURS 5000000 TIMES` in the source cannot materialize
+millions of `FieldSpec`s. `gen-data --max-occurs` and `gen-fixtures
+--max-occurs` both expose the caller-facing cap; only the hard ceiling is
+internal.
 
 **Column naming.** Short field name by default; falls back to the dotted
 qualified path when the *same name appears at more than one path* (COBOL
