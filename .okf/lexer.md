@@ -233,6 +233,35 @@ two-word SELECT clauses these words are named after (`FILE STATUS IS`,
 by an end-to-end SELECT-clause test. Pinned by
 `tests/regression/test_dead_keyword_removal.py`.
 
+# Free-form `*>` inline comments now stripped (2026-08-07)
+
+`*>` (the free-form COBOL inline-comment marker -- legal in both fixed- and
+free-form source, anywhere on a line) was previously recognized nowhere in
+the pipeline: `normalize_fixed_format` only strips *whole* comment lines
+(column-7 indicator `*`/`/`/`D`; see [preprocessing.md](preprocessing.md)),
+and the lexer had no `*>` handling at all -- `*` tokenized as `MULTIPLY_OP`,
+`>` as `GREATER`, and the comment's English words as ordinary
+identifiers/keywords. A comment like `*> start at 2 ...` could lex "start"
+as the `START` keyword and produce a real (bogus) `IOStartStatement` with no
+actual START verb anywhere in the source -- confirmed via
+`examples/cobol/shamrice/unstring.cbl:243`, previously special-cased as a
+known-unresolved entry in `tests/integration/test_boundary_inventory_corpus.py`
+(now removed, since the underlying bug is fixed).
+
+`tokenize_program_text` (pure-Python `_CobolLexerPure` in `lexer.py`, and the
+Cython `_lexer_fast.pyx` mirror) now checks `char == "*" and text[pos+1] ==
+">"` immediately before the single-character-token dispatch (so `*` isn't
+read as `MULTIPLY_OP` first) and, when it matches, emits the rest of the
+line as one `COMMENT` token rather than continuing to tokenize it. The check
+runs after the string-literal branch, so `*>` inside a quoted literal
+(`"A *> B"`) is unaffected -- it's already consumed as literal text before
+the comment check is reached. `**` (exponentiation) is also unaffected: it
+only matches `SINGLE_CHAR_TOKENS` twice in a row, never `text[pos+1] ==
+">"`. No parser changes were needed: every statement parser already skips
+`COMMENT` tokens via `skip_whitespace()` (`parsers/statements/_utils.py`).
+Pinned by `tests/regression/test_inline_comment_stripping.py`, including a
+pure/Cython parity check.
+
 # Unified tokenize pipeline (2026-07-20, M6)
 
 `tokenize_cobol()` and CLI `tokenize` no longer run the lexer's own

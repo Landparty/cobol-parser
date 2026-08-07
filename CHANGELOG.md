@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+* **lexer:** free-form `*>` inline comments are now stripped (2026-08-07).
+  `*>` (legal anywhere on a line, in both fixed- and free-form source) was
+  previously recognized nowhere in the pipeline: `normalize_fixed_format`
+  only strips whole comment lines, and the lexer read `*` as `MULTIPLY_OP`
+  and tokenized the comment's words as ordinary identifiers/keywords. A
+  comment word colliding with a COBOL verb could produce a real, bogus AST
+  node -- confirmed via `examples/cobol/shamrice/unstring.cbl:243`, whose
+  `*> start at 2 ...` comment lexed "start" as `START` and produced a
+  phantom `IOStartStatement` with no actual START verb in the source.
+  `tokenize_program_text` (pure-Python `lexer.py` and the Cython
+  `_lexer_fast.pyx` mirror) now emits `*>` through end-of-line as a single
+  `COMMENT` token, which every statement parser already skips via
+  `skip_whitespace()`. Pinned by
+  `tests/regression/test_inline_comment_stripping.py`.
+
 ### Removed
 
 * **CobolCheck test generation** (2026-07-09): the `cobol-parser generate-tests`

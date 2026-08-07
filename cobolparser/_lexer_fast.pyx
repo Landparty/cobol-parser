@@ -445,6 +445,14 @@ class CobolLexer(_CobolLexerBase):
                 pos = new_pos
                 continue
 
+            # ---- free-form inline comment (`*> ... EOL`) ------------
+            # Mirrors lexer.py: must run before the single-character
+            # dispatch below, else `*` is read as MULTIPLY_OP.
+            if char == "*" and pos + 1 < length and text[pos + 1] == ">":
+                tokens.append(Token(TokenType.COMMENT, text[pos:], location))
+                pos = length
+                continue
+
             # ---- single-character tokens ---------------------------
             if char in self.SINGLE_CHAR_TOKENS:
                 # Leading-decimal numeric literals: .7  .25  .003 — valid COBOL.

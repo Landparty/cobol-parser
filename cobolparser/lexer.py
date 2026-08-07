@@ -1260,6 +1260,19 @@ class _CobolLexerPure:
                 pos = new_pos
                 continue
 
+            # Free-form inline comment: `*>` marks everything from here to
+            # end of line as a comment (COBOL free-form syntax, legal in
+            # both fixed- and free-form source). Checked before the
+            # single-character-token dispatch below so `*` isn't read as
+            # MULTIPLY_OP when followed by `>`. Emitted as a COMMENT token
+            # (rather than dropped outright) to match the whole-line
+            # comment handling elsewhere in the lexer — statement parsers
+            # already skip COMMENT tokens via skip_whitespace().
+            if char == "*" and pos + 1 < length and text[pos + 1] == ">":
+                tokens.append(Token(TokenType.COMMENT, text[pos:], location))
+                pos = length
+                continue
+
             # Single character tokens (class-level dict for performance)
             if char in self.SINGLE_CHAR_TOKENS:
                 # Leading-decimal numeric literals: .7  .25  .003 — valid COBOL.
