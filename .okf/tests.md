@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-04T00:00:00Z
+timestamp: 2026-08-06T00:00:00Z
 ---
 
 # Overview
@@ -209,7 +209,13 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
 
 1. **lint** — `ruff check .` + `black --check .` (Python 3.13)
 2. **typecheck** — `mypy cobolparser/` (Python 3.13)
-3. **test** — `pytest tests/ -v` on matrix: Python 3.11, 3.12, 3.13
+3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (install + Cython extension build only, no tests)
+
+The full `pytest tests/ -v` suite (~5,969 tests) is **not** run automatically —
+too slow for every push/PR. It's wired as a `test` job gated to
+`if: github.event_name == 'workflow_dispatch'`, so it only runs when manually
+triggered from the Actions tab. Run the full suite locally during development
+(see commands above).
 
 # See Also
 

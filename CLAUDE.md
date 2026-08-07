@@ -461,7 +461,9 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13)
-3. **test** -- `pytest tests/ -v` on matrix: Python 3.11, 3.12, 3.13
+3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (verifies install and Cython extension build; no tests)
+
+The full pytest suite (`pytest tests/ -v`, ~5,969 tests) no longer runs automatically -- it's wired as a `test` job gated to `workflow_dispatch` only, since it's too slow to run on every push/PR. Run it locally during development, or trigger the workflow manually from the Actions tab when CI needs to confirm.
 
 ## Code Style and Conventions
 

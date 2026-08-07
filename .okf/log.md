@@ -1,5 +1,18 @@
 # OKF Update Log
 
+## 2026-08-06 (CI no longer runs the full pytest suite automatically)
+
+Requested change: too many tests (~5,969) to run on every push/PR; run them
+locally instead. In `.github/workflows/ci.yml`, replaced the `test` job's
+automatic-on-push/PR pytest run with a new `build` job (matrix Python
+3.11/3.12/3.13: `pip install -e ".[dev,fast]"` + `python setup.py build_ext
+--inplace`, no tests) that runs on every push/PR as before. The original
+`test` job (`pytest tests/ -v`) is kept in the file but gated with
+`if: github.event_name == 'workflow_dispatch'`, so it's available as a
+manual Actions-tab trigger when CI needs to confirm the full suite, without
+slowing down normal push/PR runs. Updated: [tests.md](tests.md) (CI/CD
+section), root `CLAUDE.md` (CI/CD section).
+
 ## 2026-08-06 (Unbounded OCCURS count in test-data generation)
 
 Code-review finding: `generators/data/layout.py::_occurrence_indexes` read
