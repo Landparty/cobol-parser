@@ -320,19 +320,25 @@ class DataItemClauseParser:
                         direction = direction + " SEPARATE"
                     data_item.sign_clause = direction
 
-            # SYNCHRONIZED / SYNC clause
+            # SYNCHRONIZED / SYNC [IS] [LEFT|RIGHT] clause
             elif value_upper in {"SYNCHRONIZED", "SYNC"}:
                 data_item.synchronized = True
                 token_stream.consume()
                 nxt = token_stream.peek()
+                if nxt and nxt.type == TokenType.IS:
+                    token_stream.consume()
+                    nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() in {"LEFT", "RIGHT"}:
                     token_stream.consume()
 
-            # JUSTIFIED / JUST [RIGHT] clause
+            # JUSTIFIED / JUST [IS] [RIGHT] clause
             elif value_upper in {"JUSTIFIED", "JUST"}:
                 data_item.justified = True
                 token_stream.consume()
                 nxt = token_stream.peek()
+                if nxt and nxt.type == TokenType.IS:
+                    token_stream.consume()
+                    nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() == "RIGHT":
                     token_stream.consume()
 
@@ -369,6 +375,22 @@ class DataItemClauseParser:
             elif value_upper == "GLOBAL":
                 data_item.is_global = True
                 token_stream.consume()
+
+            # Leading IS of an [IS] EXTERNAL / [IS] GLOBAL clause: unlike
+            # PICTURE/VALUE/USAGE/SIGN (where IS follows the clause
+            # keyword), EXTERNAL and GLOBAL put IS *before* the keyword, so
+            # by the time this loop reaches it there is no clause name yet
+            # to attach the consumption to. Peek past it so EXTERNAL/GLOBAL
+            # is handled by the branches above on the next iteration instead
+            # of IS falling through to the generic drop-with-warning case
+            # below.
+            elif tok_type == TokenType.IS:
+                nxt = token_stream.peek(1)
+                if nxt and nxt.value and nxt.value.upper() in {"EXTERNAL", "GLOBAL"}:
+                    token_stream.consume()
+                else:
+                    self._warn_dropped_data_token(token, data_item)
+                    token_stream.consume()
 
             # REDEFINES clause
             elif value_upper == "REDEFINES":

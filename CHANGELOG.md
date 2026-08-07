@@ -776,6 +776,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser (2026-08-07): the leading `IS` of `[IS] EXTERNAL`, `[IS] GLOBAL`,
+  `SYNCHRONIZED IS LEFT`, and `JUSTIFIED IS RIGHT` was dropped as an
+  "unparsed token" warning even on a clean, standards-compliant parse.**
+  `DataItemClauseParser`'s clause dispatch loop consumes an optional `IS`
+  *after* the clause keyword for `PICTURE`/`VALUE`/`USAGE`/`SIGN`, but
+  `EXTERNAL`/`GLOBAL` put `IS` *before* the keyword, so by the time the loop
+  saw the bare `IS` token there was no clause name yet to attach the
+  consumption to — it fell straight into the generic drop-with-warning
+  branch, and the following `EXTERNAL`/`GLOBAL` clause parsed correctly on
+  the next iteration anyway, so `result.success` stayed `True` and the
+  `is_external`/`is_global` flags were still set correctly; only the warning
+  was spurious. `SYNCHRONIZED`/`JUSTIFIED` had the opposite gap — the clause
+  keyword was consumed but never checked for a following `IS` — which was
+  worse, since it dropped `IS` *and* the `LEFT`/`RIGHT` direction as two
+  separate warnings (the direction itself still doesn't match any dispatch
+  branch on its own). Added an `IS`-before-`EXTERNAL`/`GLOBAL` peek-ahead
+  branch to the dispatch loop, and `IS` consumption to the
+  `SYNCHRONIZED`/`JUSTIFIED` branches, mirroring the existing `SIGN`
+  handling. Pinned by `TestExternalGlobalClauses.test_leading_is_does_not_warn`
+  and the new `TestSynchronizedJustifiedIsClause` class in
+  `tests/regression/test_parser_completeness.py`.
 * **parser (2026-08-05): INVOKE, ALLOCATE, and FREE are now parsed instead of
   silently discarded.** All three are real, valid IBM Enterprise COBOL verbs
   (`INVOKE` for Object-Oriented method calls; `ALLOCATE`/`FREE` for dynamic
