@@ -276,7 +276,7 @@ class DataItemClauseParser:
                 and token.value
                 and token.value.upper() == "EXEC"
             ):
-                nxt = token_stream.peek(1)
+                nxt = self._peek_next_meaningful(token_stream)
                 if nxt and (
                     nxt.type == TokenType.SQL
                     or (
@@ -412,7 +412,7 @@ class DataItemClauseParser:
             # dropped-content warning for a clause that in fact parsed
             # completely.
             elif value_upper == "IS":
-                nxt = token_stream.peek(1)
+                nxt = self._peek_next_meaningful(token_stream)
                 nxt_upper = nxt.value.upper() if nxt and nxt.value else ""
                 if nxt_upper in _POINTER_KEYWORDS or nxt_upper in (
                     "EXTERNAL",
@@ -606,6 +606,28 @@ class DataItemClauseParser:
                 f"Unparsed token '{value}'{where} in data item '{item_name}' "
                 "skipped: clause not fully supported; content dropped from the AST"
             )
+
+    @staticmethod
+    def _peek_next_meaningful(
+        token_stream: ITokenStream, offset: int = 1, max_lookahead: int = 32
+    ) -> Any:
+        """Look ahead past layout-only tokens (NEWLINE/WHITESPACE/COMMENT/
+        CONTINUATION), starting at ``offset`` token(s) past the current
+        position. Unlike a plain ``peek(offset)``, this tolerates a clause
+        keyword landing on a later source line than the token that precedes
+        it (e.g. ``IS`` at end of line, the keyword on the next), which a
+        fixed-offset peek would otherwise misclassify as "not this pattern".
+        """
+        i = offset
+        limit = offset + max_lookahead
+        while i < limit:
+            tok = token_stream.peek(i)
+            if tok is None:
+                return None
+            if tok.type not in _WHITESPACE_TOKEN_TYPES:
+                return tok
+            i += 1
+        return None
 
     @staticmethod
     def _skip_newlines(token_stream: ITokenStream) -> None:

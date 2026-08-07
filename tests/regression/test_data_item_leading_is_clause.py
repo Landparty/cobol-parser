@@ -54,8 +54,8 @@ def _find_item(result, name: str):
 
 
 class TestLeadingIsBeforeBarePointerUsage:
-    """ "IS POINTER." / "IS PROCEDURE-POINTER." / "IS FUNCTION-POINTER."
-    with no USAGE keyword must not warn and must still set the usage."""
+    """Bare IS POINTER / IS PROCEDURE-POINTER / IS FUNCTION-POINTER (no
+    USAGE keyword) must not warn and must still set the usage."""
 
     def test_is_pointer_no_usage_keyword(self):
         result = _parse("       01  WS-PTR  IS POINTER.\n")
@@ -88,7 +88,7 @@ class TestLeadingIsBeforeBarePointerUsage:
 
 
 class TestLeadingIsBeforeExternalGlobal:
-    """ "[IS] EXTERNAL" / "[IS] GLOBAL" clauses, standard COBOL grammar."""
+    """Standard COBOL [IS] EXTERNAL / [IS] GLOBAL clauses."""
 
     def test_is_global_before_pointer(self):
         result = _parse("       01  WS-GPTR  IS GLOBAL POINTER.\n")
@@ -120,6 +120,28 @@ class TestLeadingIsBeforeExternalGlobal:
         item = _find_item(result, "WS-GRP")
         assert item is not None
         assert item.is_external is True
+
+
+class TestLeadingIsSplitAcrossLineBreak:
+    """The IS lookahead must skip NEWLINE tokens: "IS" at end of line and
+    the real keyword starting the next line is legal COBOL layout, not a
+    different clause."""
+
+    def test_is_then_pointer_on_next_line(self):
+        result = _parse("       01  WS-PTR\n           IS\n           POINTER.\n")
+        assert result.warnings == []
+        item = _find_item(result, "WS-PTR")
+        assert item is not None
+        assert item.usage == "POINTER"
+
+    def test_is_then_global_on_next_line(self):
+        result = _parse(
+            "       01  WS-GRP  PIC X(5)\n           IS\n           GLOBAL.\n"
+        )
+        assert result.warnings == []
+        item = _find_item(result, "WS-GRP")
+        assert item is not None
+        assert item.is_global is True
 
 
 class TestLeadingIsUnrecognizedStillWarns:

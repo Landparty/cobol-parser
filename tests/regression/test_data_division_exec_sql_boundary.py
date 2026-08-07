@@ -87,3 +87,35 @@ class TestMissingPeriodDoesNotSwallowExecSql:
         sql_stmt = result.ast.find_first_by_type("ExecSQLStatement")
         assert sql_stmt is not None
         assert "SQLCA" in sql_stmt.sql_text
+
+    def test_exec_sql_split_across_line_break_does_not_reintroduce_swallow(self):
+        """EXEC and SQL landing on separate source lines (legal COBOL
+        layout) must not make the boundary check miss the block and fall
+        back to consuming EXEC token-by-token as an unrecognized clause --
+        that would reintroduce the exact "clause not fully supported"
+        warning spray this module exists to prevent. The boundary check
+        itself must still fire cleanly (no warnings, no phantom
+        ANONYMOUS-* item, WS-DUMMY/WS-FIELD undamaged) even though whether
+        the resulting ExecSQLStatement node is actually built is governed
+        by a separate, pre-existing section-level lookahead in data.py, not
+        by this boundary check.
+        """
+        source = (
+            "       01  WS-DUMMY PIC X(5)\n"
+            "           EXEC\n"
+            "           SQL\n"
+            "               INCLUDE SQLCA\n"
+            "           END-EXEC.\n"
+            "       01  WS-FIELD PIC X(10).\n"
+        )
+        result = _parse(source)
+        assert result.warnings == []
+
+        names = {
+            item.name
+            for item in result.ast.find_all_by_type("DataItem")
+            if getattr(item, "name", None)
+        }
+        assert "WS-DUMMY" in names
+        assert "WS-FIELD" in names
+        assert not any(name.startswith("ANONYMOUS-") for name in names)
