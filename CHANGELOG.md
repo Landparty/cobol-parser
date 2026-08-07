@@ -1000,6 +1000,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.4.0](https://github.com/Landparty/cobol-parser/compare/v1.3.0...v1.4.0) (2026-08-07)
+
+
+### Features
+
+* **analysis:** BoundaryInventoryAnalyzer -- Phase 2 of program-scoped fixture generation ([f9532c1](https://github.com/Landparty/cobol-parser/commit/f9532c1b746016abac1b94b08901e10508a3c61f))
+* **analysis:** ConstraintExtractor + domains.py solver -- Phase 4 of program-scoped fixture generation ([022b262](https://github.com/Landparty/cobol-parser/commit/022b2621d70f8639ae6968247e50316c4d503633))
+* **generators:** ProgramFixtureGenerator + gen-fixtures CLI -- Phase 3 of program-scoped fixture generation ([b4c71ad](https://github.com/Landparty/cobol-parser/commit/b4c71adea20ca53bc289ca2c1f5488169e12c7cd))
+* **generators:** ProgramLayoutIndex -- Phase 1 of program-scoped fixture generation ([565b764](https://github.com/Landparty/cobol-parser/commit/565b7641ff327afb53c2c5f578ac62c95889f7f4))
+* **generators:** ProgramLayoutIndex -- Phase 1 of program-scoped fixture generation ([fe5ce8f](https://github.com/Landparty/cobol-parser/commit/fe5ce8f114d4ec4c7e1aa9b0fee562aba449dc6e))
+* **generators:** ScenarioPlanner -- Phase 5 of program-scoped fixture generation ([1d68b34](https://github.com/Landparty/cobol-parser/commit/1d68b3457d63701f103a917564327fe4ee6d4105))
+* **generators:** wire --scenarios branches|all into FixtureBundle -- Phase 6 of program-scoped fixture generation ([03dca60](https://github.com/Landparty/cobol-parser/commit/03dca6025a2ed915dd3978697af9216d654b2991))
+
+
+### Bug Fixes
+
+* **cli:** remove dead gen-fixtures --describe flag; fix write_csv_dir manifest type ([33b984e](https://github.com/Landparty/cobol-parser/commit/33b984e8b366d6767166fc707ef4b9ad32211a84))
+* **generators:** hard-cap OCCURS expansion to prevent memory blowup ([1631219](https://github.com/Landparty/cobol-parser/commit/1631219fe93dbe02352badf604e46217bcb141e8))
+* **generators:** restore csv_path info in write_csv_dir manifest ([2a56db0](https://github.com/Landparty/cobol-parser/commit/2a56db0a95b4ed1cdbc70b081569edf9f1d62f3b))
+* **lexer:** recognize NULL/NULLS as figurative constants ([0a09fd1](https://github.com/Landparty/cobol-parser/commit/0a09fd1a7b0f47a6562019fbb49031493da36c8d))
+* **parser:** recognize EJECT so it can't be misparsed as a paragraph or copybook boundary ([e41dff9](https://github.com/Landparty/cobol-parser/commit/e41dff95c68d597a9e70eb8a7210fe9483e0ca22))
+
+
+### Documentation
+
+* CHANGELOG.md, .okf/generators.md, .okf/cli.md, docs/fixture-bundle-schema.md, .okf/log.md. ([33b984e](https://github.com/Landparty/cobol-parser/commit/33b984e8b366d6767166fc707ef4b9ad32211a84))
+* **interface-contract:** pin the mocky-mock generators surface ([bd30781](https://github.com/Landparty/cobol-parser/commit/bd30781fc8aa5a89f00a7037825af1e4a78b88c1))
+
 ## [1.3.0](https://github.com/Landparty/cobol-parser/compare/v1.2.0...v1.3.0) (2026-08-04)
 
 
