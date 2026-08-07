@@ -20,6 +20,8 @@ are already skipped by every statement parser via `skip_whitespace()`
 (`parsers/statements/_utils.py`), so no parser changes were needed.
 """
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators import ProgramLayoutIndex
@@ -110,7 +112,7 @@ class TestInlineCommentStripping:
 
     def test_pure_and_cython_lexers_agree_on_inline_comment(self):
         if _FastLexer is None:
-            return  # Cython extension not built in this environment
+            pytest.skip("Cython extension not built in this environment")
         line = 'MOVE "ABC" TO WS-STR *> trailing comment with keywords MOVE TO'
         pure_tokens = CobolLexer(line, free_form=True).tokenize()
         fast_tokens = _FastLexer(line, free_form=True).tokenize()
