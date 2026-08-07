@@ -106,9 +106,10 @@ class MoveStatementParser(IStatementParser):
 
         # Expect TO keyword. Its absence (e.g. `MOVE A` or `MOVE A B.`) is a
         # syntax error — COBOL requires TO between the source and its targets.
-        # (A missing *source* is deliberately not flagged here: `MOVE TO x` is
-        # indistinguishable from stray `*>`-comment text that the preprocessor
-        # does not yet strip, so flagging it would fault valid programs.)
+        # (A missing *source* is deliberately not flagged here: `MOVE TO x`
+        # can arise from stray `REPLACE`/`COPY ... REPLACING` pseudo-text
+        # (`==MOVE==`) leaking a bare verb with no source, so flagging it
+        # would fault otherwise-valid programs.)
         if not try_consume_keyword(token_stream, TokenType.TO, "TO"):
             report_parse_error(
                 context,

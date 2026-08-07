@@ -606,6 +606,16 @@ error-free guarantee *only* through this silent acceptance, now strict-xfail
 split literal `-999.777` into `- 9 9 9 . 7 7 7`, the embedded `.` truncating
 the MOVE source — a preprocessing defect, filed separately).
 
+**Update (2026-08-07):** the `*>`-comment half of this rationale is now
+stale — the lexer strips `*>` inline comments before the parser ever sees
+them (see [lexer.md](lexer.md)'s "Free-form `*>` inline comments now
+stripped" entry), so `read_specific_cmd_line_args.cbl`'s line-25 comment no
+longer reaches the MOVE parser at all. The missing-source check remains
+intentionally lenient regardless, since `REPLACE`/`COPY ... REPLACING`
+pseudo-text can still leak a bare `MOVE` token with no source (`SM206A`,
+`SM208A` above); the code comment in `move_parser.py` was updated to drop
+the now-inaccurate `*>` justification and cite only the pseudo-text case.
+
 **ON SIZE ERROR / NOT ON SIZE ERROR bodies (`_utils.py::_parse_size_error_stmts`,
 audit 2026-07-07 H1):** handler bodies dispatch through the statement
 registry (same mechanism as `collect_clause_stmts` for IO clauses), so any

@@ -22,17 +22,7 @@ SHAMRICE_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol" / "sha
 
 _ALL_CBL = sorted(SHAMRICE_DIR.glob("*.cbl"))
 
-# unstring.cbl:243 has a free-form `*>` inline comment containing the English
-# word "start" ("*> start at 2 to not include '$'"), which the lexer's
-# comment-stripping does not fully absorb in this position -- a pre-existing,
-# unrelated cobolparser quirk (confirmed by direct inspection: the AST
-# contains a real IOStartStatement with file_name=None at that line, and no
-# actual START verb exists anywhere in the source). Out of scope for this
-# phase to fix; this analyzer correctly reports it via `unresolved` rather
-# than crashing or silently dropping it, which is exactly the "no silent
-# third state" contract this test otherwise enforces.
 _EXPECTED_UNRESOLVED = {
-    "unstring.cbl": ["START: no file name"],
     # report_test.cbl's FD names a Report Writer REPORT SECTION record (RD),
     # not a FILE SECTION 01 -- a ProgramLayoutIndex-level gap (Phase 1, no
     # REPORT SECTION support) that this analyzer now merges into its own

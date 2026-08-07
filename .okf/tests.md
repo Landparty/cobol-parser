@@ -8,14 +8,19 @@ timestamp: 2026-08-06T00:00:00Z
 
 # Overview
 
-7,869 passed / 13 skipped / 1 xfailed (2026-08-07: +5 in
-`tests/regression/test_parser_completeness.py` — `TestExternalGlobalClauses.
-test_leading_is_does_not_warn` plus the new `TestSynchronizedJustifiedIsClause`
-class, covering a data-item clause dispatch fix: the leading `IS` of `[IS]
-EXTERNAL`/`[IS] GLOBAL`, and the missing `IS` before `SYNCHRONIZED`/
-`JUSTIFIED`'s `LEFT`/`RIGHT` direction, were dropped as spurious "Unparsed
-token" warnings even on fully standard syntax — see [parser.md](parser.md).
-2026-08-05: +44 net across two fixes
+2026-08-07: +7 — `tests/regression/test_inline_comment_stripping.py`, pinning
+the lexer's new `*>` free-form inline-comment stripping, including a
+pure/Cython parity check; see [lexer.md](lexer.md). Also removed the now-stale
+`unstring.cbl` entry from `_EXPECTED_UNRESOLVED` in
+`test_boundary_inventory_corpus.py` — the phantom `IOStartStatement` that
+entry documented no longer occurs. Also 2026-08-07: +5 in
+`tests/regression/test_parser_completeness.py` —
+`TestExternalGlobalClauses.test_leading_is_does_not_warn` plus the new
+`TestSynchronizedJustifiedIsClause` class, covering a data-item clause
+dispatch fix: the leading `IS` of `[IS] EXTERNAL`/`[IS] GLOBAL`, and the
+missing `IS` before `SYNCHRONIZED`/`JUSTIFIED`'s `LEFT`/`RIGHT` direction,
+were dropped as spurious "Unparsed token" warnings even on fully standard
+syntax — see [parser.md](parser.md). 2026-08-05: +44 net across two fixes
 — `test_dead_keyword_removal.py` (+16: seven dead `lexer.KEYWORDS` entries
 that never matched real syntax, see [lexer.md](lexer.md)) and
 `test_invoke_allocate_free_statements.py` (+15, plus new
