@@ -96,6 +96,37 @@ class TestH1SetAddressOf:
         assert not any("Unparsed tokens" in w for w in result.warnings), result.warnings
 
 
+class TestH1bSetToAddressOf:
+    """Companion to H1 — SET x TO ADDRESS OF y (ADDRESS OF on the *value*
+    side) left ``OF``/the identifier unconsumed after the TO branch only
+    captured the ``ADDRESS`` token itself as the value. The leftover
+    ``OF WS-REC`` tokens were then silently reinterpreted as spurious
+    paragraph headers by the enclosing PROCEDURE DIVISION parser, with
+    ``result.success`` still True and no errors/warnings raised.
+    """
+
+    def test_set_to_address_of_populates_value_and_flag(self):
+        result = parse_cobol(_proc_program("    SET WS-PTR TO ADDRESS OF WS-TARGET.\n"))
+        set_stmts = [s for s in _statements(result) if isinstance(s, SetStatement)]
+        assert len(set_stmts) == 1
+        stmt = set_stmts[0]
+        assert stmt.targets == ["WS-PTR"]
+        assert stmt.set_type == "TO"
+        assert stmt.value == "WS-TARGET"
+        assert stmt.value_is_address_of is True
+
+    def test_set_to_address_of_does_not_create_spurious_paragraphs(self):
+        result = parse_cobol(_proc_program("    SET WS-PTR TO ADDRESS OF WS-TARGET.\n"))
+        proc = result.ast.procedure_division
+        assert [p.paragraph_name for p in proc.paragraphs] == ["MAIN-PARA"]
+
+    def test_set_to_plain_value_flag_stays_false(self):
+        result = parse_cobol(_proc_program("    SET WS-PTR TO NULL.\n"))
+        set_stmts = [s for s in _statements(result) if isinstance(s, SetStatement)]
+        assert len(set_stmts) == 1
+        assert set_stmts[0].value_is_address_of is False
+
+
 class TestH2ComputeUnbalancedParens:
     """H2 — COMPUTE with unbalanced parentheses was silently accepted and
     could swallow the following statement.
