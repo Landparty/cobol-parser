@@ -73,9 +73,7 @@ class TestEvaluateExecSqlPeriodRegression:
         ]
 
         assert when_100.selectors == [{"type": "Literal", "value": "+ 100"}]
-        assert [type(s).__name__ for s in when_100.statements] == [
-            "ContinueStatement"
-        ]
+        assert [type(s).__name__ for s in when_100.statements] == ["ContinueStatement"]
 
         assert stmt.default_when is not None
         assert [type(s).__name__ for s in stmt.default_when.statements] == [
@@ -87,9 +85,7 @@ class TestEvaluateExecSqlPeriodRegression:
         # top-level paragraph statements sitting alongside the EVALUATE.
         procedure = result.ast.get_division("PROCEDURE")
         paragraph = procedure.paragraphs[0]
-        assert [type(s).__name__ for s in paragraph.statements] == [
-            "EvaluateStatement"
-        ]
+        assert [type(s).__name__ for s in paragraph.statements] == ["EvaluateStatement"]
 
     def test_unqualified_table_name_still_parses(self):
         """Guard: a plain (unqualified) UPDATE target -- no embedded period
