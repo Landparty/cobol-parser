@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -214,7 +215,15 @@ class FixtureBundle:
                 rows = [
                     [row.get(col, "") for col in header] for row in fixture.sequence
                 ]
-                csv_path = os.path.join(scenario_dir, f"{fixture.ref.key}.csv")
+                safe_key = _sanitize_key(fixture.ref.key)
+                csv_path = os.path.join(scenario_dir, f"{safe_key}.csv")
+                if os.path.dirname(os.path.abspath(csv_path)) != os.path.abspath(
+                    scenario_dir
+                ):
+                    raise ValueError(
+                        f"boundary key {fixture.ref.key!r} would escape the "
+                        "output directory"
+                    )
                 with open(csv_path, "w", encoding="utf-8", newline="") as handle:
                     writer = csv.writer(handle, lineterminator="\n")
                     writer.writerow(header)
@@ -241,7 +250,9 @@ class FixtureBundle:
                 # condition above exactly).
                 fixture_dict["sequence"] = []
                 fixture_dict["csv_path"] = (
-                    f"{slug}/{fixture.ref.key}.csv" if wrote_csv else None
+                    f"{slug}/{_sanitize_key(fixture.ref.key)}.csv"
+                    if wrote_csv
+                    else None
                 )
         with open(os.path.join(root, "MANIFEST.json"), "w", encoding="utf-8") as handle:
             _json.dump(manifest, handle, indent=2)
@@ -262,6 +273,25 @@ def _slugify(name: str) -> str:
             previous_was_sep = True
     slug = out.getvalue().strip("-")
     return slug or "scenario"
+
+
+_UNSAFE_KEY_CHARS = re.compile(r"[\\/\x00]+")
+
+
+def _sanitize_key(key: str) -> str:
+    """Make a boundary key safe as a single filesystem path component.
+
+    Most boundary keys are COBOL identifiers and already filesystem-safe,
+    but a static CALL boundary's key is the literal's raw source text with
+    no character restrictions -- e.g. ``CALL "/etc/passwd"`` or
+    ``CALL "../../../etc/passwd"`` round-trips straight through to here.
+    Collapsing every path separator (and stray NUL) into a single ``_``
+    guarantees the key can never introduce an extra path segment, so
+    ``os.path.join(scenario_dir, f"{key}.csv")`` can never resolve outside
+    ``scenario_dir`` regardless of what the source literal contains.
+    """
+    sanitized = _UNSAFE_KEY_CHARS.sub("_", key).strip()
+    return sanitized or "boundary"
 
 
 __all__ = [

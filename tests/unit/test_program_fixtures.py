@@ -291,6 +291,82 @@ class TestWriteCsvDir:
                 slug = _slugify(scenario.name)
                 assert os.path.isdir(os.path.join(tmp, slug)), scenario.name
 
+    def _call_literal_bundle(self, literal: str):
+        """A program whose only fixture-worthy boundary is a static CALL
+        with an attacker-controlled literal as its program name -- the
+        literal becomes the boundary key untouched (see
+        boundary_inventory.py's `_classify_call`)."""
+        source = f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLKEY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-RESULT           PIC 9(5).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL '{literal}' GIVING WS-RESULT.
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".cbl", delete=False) as handle:
+            handle.write(source)
+            path = handle.name
+        try:
+            return ProgramFixtureGenerator().generate_from_file(path, seed=1)
+        finally:
+            os.unlink(path)
+
+    def test_call_key_with_absolute_path_does_not_escape_output_dir(self):
+        bundle = self._call_literal_bundle("/tmp/pwned-oob")
+        target = os.path.join(os.sep, "tmp", "pwned-oob.csv")
+        existed_before = os.path.isfile(target)
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            # Nothing escaped into the absolute path the literal names.
+            assert os.path.isfile(target) == existed_before
+            # The fixture still got written -- flattened into scenario_dir.
+            scenario_dir = os.path.join(tmp, "happy-path")
+            written = os.listdir(scenario_dir)
+            assert any(name.endswith(".csv") for name in written)
+            for name in written:
+                assert os.sep not in name.removesuffix(".csv")
+                assert "/" not in name
+
+    def test_call_key_with_traversal_does_not_escape_output_dir(self):
+        bundle = self._call_literal_bundle("../../../../tmp/pwned-traversal")
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            scenario_dir = os.path.join(tmp, "happy-path")
+            written = os.listdir(scenario_dir)
+            assert any(name.endswith(".csv") for name in written)
+            for name in written:
+                # No path separator survives sanitization, so the name is
+                # necessarily a single component -- any ".." substrings left
+                # over (e.g. ".._.._tmp_pwned-traversal.csv") are inert.
+                assert "/" not in name
+                assert os.sep not in name
+            # Nothing was written outside the requested output tree.
+            for root, _dirs, files in os.walk(tmp):
+                for f in files:
+                    full = os.path.abspath(os.path.join(root, f))
+                    assert full.startswith(
+                        os.path.abspath(tmp) + os.sep
+                    ) or full == os.path.abspath(os.path.join(tmp, "MANIFEST.json"))
+
+    def test_manifest_csv_path_matches_the_sanitized_filename_on_disk(self):
+        bundle = self._call_literal_bundle("/tmp/pwned-oob")
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            with open(os.path.join(tmp, "MANIFEST.json")) as handle:
+                manifest = json.load(handle)
+            csv_paths = [
+                fixture["csv_path"]
+                for scenario in manifest["scenarios"]
+                for fixture in scenario["fixtures"]
+                if fixture["csv_path"] is not None
+            ]
+            assert csv_paths
+            for rel_path in csv_paths:
+                assert os.path.isfile(os.path.join(tmp, rel_path))
+
 
 class TestScenarioModes:
     """generate_with_scenarios actually applies a PlannedScenario into the
