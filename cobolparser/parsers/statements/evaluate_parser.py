@@ -375,13 +375,32 @@ class EvaluateStatementParser(IStatementParser):
             nested = try_parse_nested_statement(token_stream)
             if nested is not None:
                 statements.append(nested)
-                # Check whether the nested parser consumed a PERIOD (IBM-style
-                # period-terminated EVALUATE where the scope ends mid-WHEN body).
+                # Check whether the nested parser consumed a PERIOD as its own
+                # trailing terminator (IBM-style period-terminated EVALUATE
+                # where the scope ends mid-WHEN body, e.g. a statement parser
+                # that consumes its own trailing period internally via
+                # parse_size_error_clauses). Only the LAST meaningful
+                # (non-NEWLINE) token consumed counts -- not "any" PERIOD in
+                # the whole range: an EXEC SQL/CICS/DLI statement's embedded
+                # text can legally contain periods that are not COBOL
+                # statement terminators at all (e.g. a schema-qualified SQL
+                # table name like "BANK.GL_ACCOUNT"), and treating one of
+                # those as ending the EVALUATE misparses everything after it
+                # in the WHEN clause as trailing top-level paragraph
+                # statements instead of the clause's own body.
                 if pos_before is not None and tokens_list is not None:
                     pos_after = getattr(token_stream, "_pos", 0)
-                    if any(
-                        t.type == TokenType.PERIOD
-                        for t in tokens_list[pos_before:pos_after]
+                    last_meaningful = next(
+                        (
+                            t
+                            for t in reversed(tokens_list[pos_before:pos_after])
+                            if t.type != TokenType.NEWLINE
+                        ),
+                        None,
+                    )
+                    if (
+                        last_meaningful is not None
+                        and last_meaningful.type == TokenType.PERIOD
                     ):
                         period_terminated = True
                         break
