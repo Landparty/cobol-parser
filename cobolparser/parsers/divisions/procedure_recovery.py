@@ -13,6 +13,7 @@ from typing import Any
 
 from cobolparser._errors import ParseError
 from cobolparser.core.interfaces import ITokenStream
+from cobolparser.lexer import TokenType
 from cobolparser.plugins.core import ErrorRecoveryMode
 
 from .procedure_boundaries import is_paragraph_or_section_start, is_statement_keyword
@@ -192,6 +193,16 @@ class StatementRecoveryHandler:
         logger.debug("COLLECT_ALL: recovering past failed statement")
         self.skip_to_next_statement(token_stream)
 
+    # Filler token types that carry no statement content -- consuming one
+    # of these must not count as "we've started discarding the statement's
+    # tokens" (see the at_call_start comment below).
+    _FILLER_TOKEN_TYPES = (
+        TokenType.WHITESPACE,
+        TokenType.NEWLINE,
+        TokenType.COMMENT,
+        TokenType.CONTINUATION,
+    )
+
     def skip_to_next_statement(self, token_stream: ITokenStream) -> None:
         """Skip to start of next statement or paragraph.
 
@@ -211,13 +222,15 @@ class StatementRecoveryHandler:
                 token_stream.consume()
                 break
 
-            # Only trust the paragraph/section-boundary heuristic on the
-            # very first token examined by this call. It exists to avoid
-            # overrunning into a real next paragraph when the cursor is
-            # already sitting at one (e.g. handle_statement_error recovering
-            # after a partially-parsed statement whose own terminating
-            # period was already consumed). Once this call has started
-            # discarding a statement's tokens, everything up to that
+            # Only trust the paragraph/section-boundary heuristic before any
+            # meaningful (non-filler) token has been consumed by this call.
+            # It exists to avoid overrunning into a real next paragraph when
+            # the cursor is already sitting at one (e.g. handle_statement_error
+            # recovering after a partially-parsed statement whose own
+            # terminating period was already consumed -- a caller that gives
+            # no guarantee the cursor isn't sitting on leading whitespace/
+            # comment tokens first). Once this call has consumed a real
+            # token of the statement being discarded, everything up to that
             # statement's own terminating period belongs to it -- COBOL
             # never nests a paragraph header inside an unterminated
             # statement -- so re-checking the heuristic on a later token
@@ -238,4 +251,5 @@ class StatementRecoveryHandler:
                     break
 
             token_stream.consume()
-            at_call_start = False
+            if token.type not in self._FILLER_TOKEN_TYPES:
+                at_call_start = False

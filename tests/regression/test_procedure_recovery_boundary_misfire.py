@@ -74,7 +74,9 @@ def _lexes_as_plain_identifier(verb: str) -> bool:
 
 # Computed, not hand-picked, so this stays correct as UNSUPPORTED_VERBS gains
 # or loses entries (e.g. a verb getting a real registered parser).
-HANG_CANDIDATE_VERBS = sorted(v for v in UNSUPPORTED_VERBS if _lexes_as_plain_identifier(v))
+HANG_CANDIDATE_VERBS = sorted(
+    v for v in UNSUPPORTED_VERBS if _lexes_as_plain_identifier(v)
+)
 
 
 PROC_TEMPLATE = """       IDENTIFICATION DIVISION.
@@ -114,7 +116,7 @@ class TestSkipToNextStatementMakesForwardProgress:
     """Direct, hang-proof unit test on the recovery primitive itself: given
     an unsupported bare verb immediately followed by its terminating period,
     skip_to_next_statement must consume both, never return with the cursor
-    unchanged. This is the actual invariant whose violation causes the H1's
+    unchanged. This is the actual invariant whose violation causes H11's
     infinite loop -- pinning it here means a regression is caught by a fast,
     bounded test instead of a hung end-to-end parse."""
 
@@ -168,6 +170,46 @@ class TestSkipToNextStatementMakesForwardProgress:
             )
 
 
+class TestLeadingFillerTokensDoNotDisableTheBoundaryCheck:
+    """skip_to_next_statement's paragraph-boundary heuristic must stay live
+    across leading filler tokens (NEWLINE/WHITESPACE/COMMENT) at the start
+    of a call, not just the literal first-peeked token. handle_statement_error
+    invokes skip_to_next_statement right where a failing statement parser
+    left the cursor -- which is not guaranteed to be a meaningful token --
+    so if a run of filler tokens preceded a genuine next paragraph, consuming
+    the filler must not flip the recovery loop into "mid-statement, boundary
+    check disabled" before it has seen a real token at all."""
+
+    def test_boundary_still_detected_after_leading_newline(self):
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROBE.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       DUMMY.\n"
+            "           MOVE 1 TO WS-X\n"
+            "\n"
+            "       NEXT-PARA.\n"
+            '           DISPLAY "X".\n'
+        )
+        tokens = tokenize_cobol(src)
+        start = next(i for i, t in enumerate(tokens) if t.value == "WS-X") + 1
+        assert tokens[start].type == TokenType.NEWLINE, (
+            "test fixture assumption broken: expected a leading NEWLINE "
+            f"token, got {tokens[start]!r}"
+        )
+        stream = TokenStream(tokens[start:])
+
+        handler = TestSkipToNextStatementMakesForwardProgress._make_handler()
+        handler.skip_to_next_statement(stream)
+
+        assert not stream.is_empty()
+        remaining = stream.peek(0)
+        assert remaining is not None and remaining.value == "NEXT-PARA", (
+            "leading filler tokens flipped the boundary check off before "
+            f"the real paragraph header was seen: stopped at {remaining!r}"
+        )
+
+
 class TestBareUnsupportedVerbDoesNotHangAndPreservesParagraph:
     """End-to-end: a bare unsupported verb (no operand) inside a named
     paragraph must not hang the parser, must warn, and must leave the
@@ -182,8 +224,7 @@ class TestBareUnsupportedVerbDoesNotHangAndPreservesParagraph:
                 f"got {result.warnings!r}"
             )
             assert _paragraph_names(result) == ["CLEAN-PARA", "DIRTY-PARA"], (
-                f"{verb}: spurious paragraph invented: "
-                f"{_paragraph_names(result)!r}"
+                f"{verb}: spurious paragraph invented: " f"{_paragraph_names(result)!r}"
             )
             dirty = _dirty_para(result)
             assert [type(s).__name__ for s in dirty.statements] == [
