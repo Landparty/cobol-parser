@@ -34,6 +34,15 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     cdef str  quote_ch      = None
     cdef str  ch
     cdef bint is_debug_comment
+    # True once a non-comment, non-short physical line has started (or
+    # continued) the logical line currently buffered in `parts`. Distinguishes
+    # "no logical line accumulated yet" (nothing to flush) from "a logical
+    # line was accumulated but its merged text happens to be empty" (a blank
+    # placeholder must still be emitted). Mirrors the pure-Python fix: the
+    # old `if combined:` guard silently dropped a full-width blank line (all-
+    # whitespace program text, non-comment indicator) whenever it followed
+    # another blank/comment line, shifting every later line number.
+    cdef bint has_line = False
 
     result = []
     parts  = []
@@ -47,11 +56,11 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             # their true line number (mirrors the pure-Python fix — a
             # dropped line here would silently shift every subsequent
             # error/warning location).
-            combined = "".join(parts)
-            if combined:
-                result.append(combined)
+            if has_line:
+                result.append("".join(parts))
             result.append("")
             parts         = []
+            has_line      = False
             quote_open    = False
             quote_ch      = None
             pending_literal = False
@@ -65,11 +74,11 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             # Comment line (incl. page eject, debug lines): flush buffer,
             # discard comment text, but still emit an empty placeholder to
             # preserve line numbering.
-            combined = "".join(parts)
-            if combined:
-                result.append(combined)
+            if has_line:
+                result.append("".join(parts))
             result.append("")
             parts         = []
+            has_line      = False
             quote_open    = False
             quote_ch      = None
             pending_literal = False
@@ -148,10 +157,10 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                     pending_literal = quote_open
         else:
             # Non-continuation: flush previous logical line
-            combined = "".join(parts)
-            if combined:
-                result.append(combined)
+            if has_line:
+                result.append("".join(parts))
             parts         = []
+            has_line      = False
             quote_open    = False
             quote_ch      = None
             pending_literal = False
@@ -181,9 +190,13 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             else:
                 parts.append(text_slice.rstrip())
 
-    combined = "".join(parts)
-    if combined:
-        result.append(combined)
+        # Either branch above (continuation or new logical line) always
+        # appends to `parts` (even an empty string), so this physical line
+        # has real content pending flush.
+        has_line = True
+
+    if has_line:
+        result.append("".join(parts))
 
     if pending_literal and merge_continued_literals:
         raise ValueError(

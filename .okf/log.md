@@ -1,5 +1,22 @@
 # OKF Update Log
 
+## 2026-08-10 (Copybook-triggered comment-line drift in normalize_fixed_format)
+
+GitHub issue #123: `program-flow`'s `location.line` drifted backward from a
+paragraph's real source line by one per full-line comment anywhere earlier
+in the file, but only when a `COPY` statement preceded it — traced to
+`normalize_fixed_format`'s `flush_parts()` silently dropping (no
+placeholder at all) a full-width, blank-indicator physical line whose
+program-text is itself entirely blank. That exact shape never arises in a
+plain fixed-format parse, only after `copy_statement_parser.
+remove_comment_lines` blanks a `*`-comment line ahead of a second
+`normalize_fixed_format` pass over copybook-expanded source. Fixed in both
+`cobolparser/preprocess/__init__.py` and `cobolparser/_preprocess_fast.pyx`
+by tracking whether a logical line was actually started rather than
+inferring it from whether its merged text is non-empty. Rebuilt the Cython
+extension in-place to regenerate `_preprocess_fast.c`. Updated:
+[preprocessing.md](preprocessing.md) (Line-Number Preservation section).
+
 ## 2026-08-06 (CI no longer runs the full pytest suite automatically)
 
 Requested change: too many tests (~5,969) to run on every push/PR; run them
