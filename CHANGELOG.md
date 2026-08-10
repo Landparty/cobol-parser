@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **procedure division:** a bare unsupported verb with no dedicated lexer
+  `TokenType` (`PURGE`, `RAISE`, `RESUME`) immediately followed by its own
+  terminating period could hang `parse_cobol()` forever, and any
+  unsupported verb with a bare trailing identifier operand (`PURGE WS-X.`)
+  could truncate the enclosing paragraph and invent a spurious paragraph
+  named after the operand (2026-08-10). Both traced to
+  `is_paragraph_or_section_start()`
+  (`cobolparser/parsers/divisions/procedure_boundaries.py`) misreading a
+  token that is part of the statement currently being discarded as a new
+  paragraph header -- the same class of ambiguity H9 fixed for individual
+  statement parsers' own operand loops, but never applied to the PROCEDURE
+  DIVISION's own generic recovery path
+  (`StatementRecoveryHandler.skip_to_next_statement`). See
+  `reports/open-findings.md` H11. Pinned by
+  `tests/regression/test_procedure_recovery_boundary_misfire.py`.
+
 * **lexer:** free-form `*>` inline comments are now stripped (2026-08-07).
   `*>` (legal anywhere on a line, in both fixed- and free-form source) was
   previously recognized nowhere in the pipeline: `normalize_fixed_format`

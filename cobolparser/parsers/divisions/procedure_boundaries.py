@@ -19,8 +19,23 @@ _NAME_TOKEN_TYPES = ("IDENTIFIER", "NUMERIC_LITERAL", "LEVEL_NUMBER")
 
 def _is_procedure_name_token(token: Token | None) -> bool:
     """True if *token* can be a procedure name: an identifier, or an
-    all-digit token (numeric paragraph names like ``1000``)."""
+    all-digit token (numeric paragraph names like ``1000``).
+
+    A reserved statement verb can never legally be a paragraph name, so it
+    is excluded even when the lexer has no dedicated ``TokenType`` for it
+    and it would otherwise lex as a plain ``IDENTIFIER`` (e.g. ``PURGE``,
+    ``RAISE``, ``RESUME``). Without this guard a bare unsupported verb
+    immediately followed by its own terminating period -- ``RESUME.`` -- is
+    indistinguishable by shape alone from a paragraph header ``RESUME.``,
+    which stops the PROCEDURE DIVISION's statement loop from ever consuming
+    it and can leave the token stream cursor unable to advance. Mirrors the
+    same guard :func:`~cobolparser.parsers.statements._utils.
+    looks_like_paragraph_boundary` already applies (H9,
+    ``reports/open-findings.md``).
+    """
     if token is None or not token.value:
+        return False
+    if token.value.upper() in STATEMENT_KEYWORDS:
         return False
     if token.type.name == "IDENTIFIER":
         return True
