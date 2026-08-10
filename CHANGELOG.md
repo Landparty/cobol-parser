@@ -1068,6 +1068,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.5.0](https://github.com/Landparty/cobol-parser/compare/v1.4.0...v1.5.0) (2026-08-10)
+
+
+### Features
+
+* **bundle:** sanitize boundary keys to prevent directory traversal attacks ([1761898](https://github.com/Landparty/cobol-parser/commit/17618983f584f13032952c15b47c585ade9eda00))
+
+
+### Bug Fixes
+
+* **data-division:** stop dropping content on IS-prefixed clauses and EXEC SQL after a missing period ([621705a](https://github.com/Landparty/cobol-parser/commit/621705aa0e072caa598485d3096e810d475535ae))
+* **data-division:** stop dropping content on IS-prefixed clauses and EXEC SQL after a missing period ([46e1e0a](https://github.com/Landparty/cobol-parser/commit/46e1e0a7d043999453fd30c3f03e6af33c0326a4))
+* **data-division:** tolerate line breaks in the IS/EXEC-SQL clause lookaheads ([c7731df](https://github.com/Landparty/cobol-parser/commit/c7731dfb7b1bf440e8f4dcd09b9d23d6f0de01c2))
+* **lexer:** strip free-form *&gt; inline comments before parsing ([e1eba54](https://github.com/Landparty/cobol-parser/commit/e1eba54c7fdac014387fb8f2901b47181656794a))
+* **lexer:** strip free-form *&gt; inline comments before parsing ([a2a6f3b](https://github.com/Landparty/cobol-parser/commit/a2a6f3b26ddc9f2c361af33b3feb43a27d57185c))
+* **parser:** SET var TO ADDRESS OF x was misparsed, corrupting following paragraphs ([c64deb1](https://github.com/Landparty/cobol-parser/commit/c64deb11c75fd9716264fe4203afbe07068bf2c8))
+* SET var TO ADDRESS OF x was misparsed, corrupting following paragraphs ([6885637](https://github.com/Landparty/cobol-parser/commit/6885637eba2e26a930c8d19e8b19975636e4590b))
+* **tests:** use pytest.skip for missing Cython extension in parity test ([961715d](https://github.com/Landparty/cobol-parser/commit/961715df7601b07abeda8a8e1a57d3911bcba3de))
+
 ## [1.4.0](https://github.com/Landparty/cobol-parser/compare/v1.3.0...v1.4.0) (2026-08-07)
 
 
