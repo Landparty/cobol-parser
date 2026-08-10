@@ -724,6 +724,36 @@ unverified — is worse than at the original audit.
   AST node** — downgraded from "silent drop" to "warned, unmodeled."
   Tracking here only as a reminder these constructs still aren't captured
   in the AST, not as a live bug.
+- **Every `COPY` statement inserts one extra phantom line into the
+  copybook-expansion pipeline** (found while fixing issue #123's
+  comment-driven `location.line` drift — see `CHANGELOG.md` and
+  `.okf/preprocessing.md`, "Line-Number Preservation"). In
+  `copybook_expander.py::_expand_source_recursive`, the splice
+  `expanded_source[:statement_start] + expanded_copybook +
+  expanded_source[statement_end:]` (around `copybook_expander.py:927-931`)
+  inserts `expanded_copybook` — which still carries the copybook file's own
+  trailing `"\n"` — into a span that already ends in a newline (the COPY
+  statement's own terminating period line), so each copybook contributes
+  one extra blank physical line beyond its real content. Confirmed
+  empirically to be exactly `+1` per `COPY` statement, not a one-time
+  constant:
+
+  | fixture | copybook lines | `COPY`s | content growth | measured offset | excess |
+  |---|---|---|---|---|---|
+  | 1 copybook, 2 lines | 2 | 1 | +1 | +2 | +1 |
+  | 1 copybook, 4 lines (incl. 2 comments) | 4 | 1 | +3 | +4 | +1 |
+  | 2 copybooks, 2+1 lines | 3 | 2 | +1 | +3 | +2 |
+
+  This makes the *base* offset between a copybook-expanded `location.line`
+  and the true original-file line number larger than the copybooks' real
+  combined content by one line per `COPY` — on top of, and independent
+  from, the per-comment drift issue #123 fixed. It is constant per file
+  (doesn't grow with unrelated comments/blanks elsewhere), so it does not
+  reintroduce the drift bug, but it does mean `location.line` still cannot
+  be used directly against the original source file for any file with a
+  `COPY` statement — the issue's suggested option (b), a real
+  original-file location map, remains the only fix that removes the need
+  to guess at this offset at all.
 
 ---
 

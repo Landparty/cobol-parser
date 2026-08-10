@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocessing:** `normalize_fixed_format` silently dropped a physical
+  line whose extracted program-text (columns 8-72) was entirely blank but
+  which was neither a short/blank line nor a `*`/`/`/debug comment line
+  (indicator column itself blank) -- `flush_parts()`'s `if combined:` guard
+  only emitted a result entry for a logical line's merged text when that
+  text was non-empty, so this line shape vanished with no placeholder at
+  all instead of the empty-string placeholder used everywhere else,
+  shifting every subsequent line number. This never occurs in a plain
+  fixed-format parse (blank lines are always short; comment lines always
+  have a non-blank indicator), but it is exactly what
+  `copy_statement_parser.remove_comment_lines` turns a `*`-comment line
+  into ahead of `CobolParser._parse_core`'s second `normalize_fixed_format`
+  pass over copybook-expanded source -- reported as `program-flow`
+  `location.line` drifting backward by one per full-line comment anywhere
+  earlier in the file, but only when a `COPY` statement preceded it
+  (issue #123). Fixed in both the pure-Python implementation and the
+  Cython `_preprocess_fast.pyx` mirror by tracking whether a logical line
+  was actually started (`has_line`) instead of inferring it from whether
+  the merged text happens to be non-empty. Pinned by
+  `tests/regression/test_normalize_line_number_preservation.py`.
+
 * **procedure division:** a bare unsupported verb with no dedicated lexer
   `TokenType` (`PURGE`, `RAISE`, `RESUME`) immediately followed by its own
   terminating period could hang `parse_cobol()` forever, and any

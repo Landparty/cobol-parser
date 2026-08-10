@@ -442,6 +442,12 @@ def normalize_fixed_format(
     pending_literal = False
     quote_char: str | None = None
     parts: list[str] = []  # accumulates chunks for the current logical line
+    # True once a non-comment, non-short physical line has started (or
+    # continued) the logical line currently buffered in `parts`. Distinguishes
+    # "no logical line accumulated yet" (nothing to flush) from "a logical
+    # line was accumulated but its merged text happens to be empty" (a blank
+    # placeholder must still be emitted -- see flush_parts below).
+    has_line = False
     # Track quote state incrementally to avoid O(n²) rescanning
     _quote_open = False
     _quote_ch: str | None = None
@@ -493,11 +499,18 @@ def normalize_fixed_format(
         quote_char = _quote_ch
 
     def flush_parts() -> None:
-        nonlocal parts, _quote_open, _quote_ch, pending_literal, quote_char
-        combined = "".join(parts)
-        if combined:
-            result.append(combined)
+        nonlocal parts, has_line, _quote_open, _quote_ch, pending_literal, quote_char
+        # A logical line that was actually started (has_line) must always get
+        # a result entry, even when its merged text is empty -- e.g. a
+        # full-width blank line (all-whitespace program text, non-comment
+        # indicator). Silently skipping it here (the pre-fix `if combined:`
+        # guard) shifted every later line's number, exactly like the
+        # already-fixed short-line/comment-line cases below, but only when
+        # nothing else on the line ever produced non-blank text.
+        if has_line:
+            result.append("".join(parts))
         parts = []
+        has_line = False
         # Reset quote state for new logical line
         _quote_open = False
         _quote_ch = None
@@ -578,6 +591,10 @@ def normalize_fixed_format(
             else:
                 chunk = text_slice.rstrip()
             parts.append(chunk)
+
+        # Either branch above always appends to `parts` (even an empty
+        # string), so this physical line has real content pending flush.
+        has_line = True
 
     # Save state before final flush
     final_pending_literal = pending_literal

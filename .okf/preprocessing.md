@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-08-03T00:00:00Z
+timestamp: 2026-08-10T00:00:00Z
 ---
 
 # Overview
@@ -420,6 +420,44 @@ every non-included physical line contributes an empty placeholder to
 
 Pinned by `tests/regression/test_normalize_line_number_preservation.py`,
 which also confirms the Cython/pure-Python paths agree.
+
+**`flush_parts()` still dropped one line shape (fixed 2026-08-10, issue
+#123):** the 2026-07-08 fix above covers "short/blank physical line" and
+"`*`/`/`/debug comment line" — both explicitly emit an empty placeholder.
+A third shape falls through neither special case: a full-width physical
+line with a blank (non-comment) indicator column whose extracted
+program-text (columns 8-72) is itself entirely blank. This starts a new
+logical line, buffers an empty string into `parts`, and used to only reach
+`result` via `flush_parts()`'s `if combined: result.append(combined)` —
+which is false for an empty string, so the line vanished with **no**
+placeholder at all (not even the correct empty one). This shape never
+arises in a plain fixed-format parse — a blank line is always short, and a
+comment line always has a non-blank indicator — so it went unnoticed until
+copybook expansion: `copy_statement_parser.remove_comment_lines` blanks a
+`*`-comment line to an all-spaces string of the *same length*, indicator
+column included, before `CobolParser._parse_core` re-runs
+`normalize_fixed_format` on the already-expanded source. On that second
+pass the former comment line has nothing left to recognize it as a
+comment, so it takes the buggy generic path instead. Symptom: `program-flow`
+`location.line` (and any other lexer/parser line number) drifted backward
+by exactly one per full-line comment anywhere earlier in the file, but
+only in source with at least one `COPY` statement. Fixed in both
+`normalize_fixed_format` and `_preprocess_fast.pyx` by tracking whether a
+logical line was actually *started* (`has_line`, reset on each flush, set
+whenever a physical line is consumed into `parts`) rather than inferring
+that from whether the merged text happens to be non-empty. Pinned by
+`tests/regression/test_normalize_line_number_preservation.py`
+(`TestNormalizeFixedFormatPreservesFullWidthBlankLines`,
+`TestCopybookCommentDriftIssue123`).
+
+**Known residual (not fixed by the above): +1 phantom line per `COPY`.**
+The per-comment *drift* is gone and the copybook-expansion offset is now
+constant per file, but that constant itself is one line larger than the
+copybooks' real combined content for every `COPY` statement in the file —
+`copybook_expander.py::_expand_source_recursive`'s splice re-inserts each
+copybook's own trailing `"\n"` into a span that already ends in one. See
+`reports/open-findings.md` (LOW) for the measured `+1`-per-`COPY` table and
+exact splice location.
 
 # Error Hierarchy
 
