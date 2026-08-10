@@ -95,13 +95,15 @@ undetectable by a caller that checks `warnings`, only by one that checks
 
 ## HIGH
 
-**H1-H10 are all fixed** (H1-H8 on 2026-07-09; H9, discovered during H7
+**H1-H11 are all fixed** (H1-H8 on 2026-07-09; H9, discovered during H7
 verification, in a 2026-07-09 follow-up pass; H10, reported directly by a
 user rather than found by this document's audit passes, in a further
-2026-07-09 follow-up) and are pinned by
-`tests/regression/test_open_findings_high_regressions.py` (H1-H9) and
+2026-07-09 follow-up; H11, likewise reported directly by a user, on
+2026-08-10) and are pinned by
+`tests/regression/test_open_findings_high_regressions.py` (H1-H9),
 `tests/regression/test_perform_backward_compat.py::TestPerformVaryingOutOfLine`
-(H10) — see `CHANGELOG.md` (Unreleased → Fixed) for the full per-finding
+(H10), and `tests/regression/test_procedure_recovery_boundary_misfire.py`
+(H11) — see `CHANGELOG.md` (Unreleased → Fixed) for the full per-finding
 writeup. Left in place (rather than deleted) for traceability, per this
 file's own convention for prior audits.
 
@@ -327,6 +329,70 @@ that could not previously occur, since the tag was only ever set alongside
 a populated clause): the sole other reader,
 `coverage_analyzer.py:631-632`, already guards with `if
 statement.varying_clause and ...` before subscripting it.
+
+### H11 — PROCEDURE DIVISION recovery's paragraph-boundary heuristic misreads an unsupported verb (or its bare operand) as a paragraph header — one shape hangs the parser — FIXED 2026-08-10
+
+Reported directly by a user (found incidentally while auditing an unrelated
+mocky-mock test fixture), with two distinct failure shapes sharing one root
+cause. H9 (above) taught individual statement parsers' own operand-collection
+loops (`looks_like_paragraph_boundary()` in
+`cobolparser/parsers/statements/_utils.py`) to tell a trailing operand from a
+following paragraph header, but the PROCEDURE DIVISION's own generic boundary
+check — `is_paragraph_or_section_start()`
+(`cobolparser/parsers/divisions/procedure_boundaries.py`), consulted by both
+`ProcedureDivisionParser._parse_paragraph_statements` and
+`StatementRecoveryHandler.skip_to_next_statement`
+(`cobolparser/parsers/divisions/procedure_recovery.py`) — was never updated to
+match, and had no notion of "this token is part of the unsupported statement
+currently being discarded, not a new paragraph header."
+
+* **Hang.** `PURGE`, `RAISE`, and `RESUME` have no dedicated lexer
+  `TokenType` (same set H9's own `looks_like_paragraph_boundary` docstring
+  and `tests/regression/test_tier7_unsupported_verb_boundary.py`'s
+  `IDENTIFIER_ONLY_VERBS` already name) — they lex as plain `IDENTIFIER`,
+  indistinguishable by shape from a paragraph name. A bare `RESUME.`
+  immediately following its own terminating period reads as a paragraph
+  header start; `_parse_paragraph_statements` breaks out having consumed
+  nothing, the outer loop re-dispatches the same unconsumed token to
+  `skip_to_next_statement`, which breaks on the identical check, also
+  consuming nothing. The cursor never advances: `parse_cobol()` hangs
+  forever (confirmed via a killed 8-second-timeout process, not just a slow
+  parse).
+* **Spurious paragraph.** An unsupported verb *with* a bare trailing
+  identifier operand (`PURGE WS-X.`) makes initial progress — the verb
+  itself is consumed as a recognized-but-unregistered statement keyword —
+  but `skip_to_next_statement` then re-evaluates the same boundary
+  heuristic on the operand token `WS-X`, which is followed by the
+  statement's own terminating period and so also looks exactly like a
+  paragraph header. Recovery stops there without consuming `WS-X` or the
+  period; the enclosing paragraph's own statement loop stops for the same
+  reason, and the outer loop reinterprets `WS-X` as a brand-new paragraph —
+  silently truncating the real paragraph's body (dropping its remaining
+  statements) and inventing a paragraph that was never in the source.
+  Reproduces with any `UNSUPPORTED_VERBS` entry (`PURGE`, `EXHIBIT`, `NOTE`,
+  ... — the operand's own token type is irrelevant, only its position
+  matters), not just the `IDENTIFIER`-lexed ones.
+
+Fixed by teaching the shared boundary logic two facts COBOL grammar already
+guarantees: (1) `_is_procedure_name_token()`
+(`procedure_boundaries.py`) now excludes any token whose value is in
+`STATEMENT_KEYWORDS` — a reserved verb can never legally be a paragraph
+name, mirroring the guard `looks_like_paragraph_boundary` (H9) already
+applies — which alone resolves the hang; (2)
+`skip_to_next_statement()` now only trusts the paragraph-boundary heuristic
+on the first token examined in a given call (covering the legitimate case
+of recovering right at an existing boundary, e.g. after
+`handle_statement_error` on a statement whose own period was already
+consumed) — once the call has started discarding a statement's tokens,
+everything up to that statement's own terminating period belongs to it, so
+the heuristic is never re-consulted mid-discard. Pinned by
+`tests/regression/test_procedure_recovery_boundary_misfire.py`: a direct,
+hang-proof unit test on `skip_to_next_statement` asserting forward progress
+for every `UNSUPPORTED_VERBS` entry that lexes as plain `IDENTIFIER`
+(computed from the live verb/keyword sets, not hand-picked), plus two
+end-to-end AST-shape tests (bare verb; verb with bare-identifier operand,
+parametrized over the full `UNSUPPORTED_VERBS` set) asserting no paragraph
+is invented and the real paragraph's body survives intact.
 
 ---
 

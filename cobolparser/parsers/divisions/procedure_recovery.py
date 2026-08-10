@@ -201,6 +201,7 @@ class StatementRecoveryHandler:
         Args:
             token_stream: Token stream to advance
         """
+        at_call_start = True
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if not token:
@@ -210,7 +211,21 @@ class StatementRecoveryHandler:
                 token_stream.consume()
                 break
 
-            if is_paragraph_or_section_start(token_stream):
+            # Only trust the paragraph/section-boundary heuristic on the
+            # very first token examined by this call. It exists to avoid
+            # overrunning into a real next paragraph when the cursor is
+            # already sitting at one (e.g. handle_statement_error recovering
+            # after a partially-parsed statement whose own terminating
+            # period was already consumed). Once this call has started
+            # discarding a statement's tokens, everything up to that
+            # statement's own terminating period belongs to it -- COBOL
+            # never nests a paragraph header inside an unterminated
+            # statement -- so re-checking the heuristic on a later token
+            # (e.g. an unsupported verb's own trailing bare-identifier
+            # operand, which is followed by that same period and so looks
+            # exactly like a paragraph header) misreads the operand as a
+            # new paragraph and truncates the statement being discarded.
+            if at_call_start and is_paragraph_or_section_start(token_stream):
                 break
 
             # Stop if we hit a statement keyword that has a registered parser.
@@ -223,3 +238,4 @@ class StatementRecoveryHandler:
                     break
 
             token_stream.consume()
+            at_call_start = False
