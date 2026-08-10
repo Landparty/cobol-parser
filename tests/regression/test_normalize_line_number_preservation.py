@@ -211,8 +211,9 @@ class TestCopybookCommentDriftIssue123:
     """End-to-end reproduction of GitHub issue #123: `program-flow`
     `location.line` drifted backward from a paragraph's real source line by
     one per full-line comment anywhere earlier in the file, but only when a
-    `COPY` statement preceded it (https://github.com/Landparty/cobol-parser
-    /issues/123).
+    `COPY` statement preceded it.
+
+    https://github.com/Landparty/cobol-parser/issues/123
     """
 
     COPYBOOK = (
