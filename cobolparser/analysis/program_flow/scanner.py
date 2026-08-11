@@ -7,9 +7,10 @@ also records exit points (STOP RUN / GOBACK / EXIT PROGRAM) and alternate
 ENTRY-statement entry points.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from ...models.program import CobolDivision, CobolParagraph, CobolProgram
+from ...models.statements.base import CobolExpression
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
     EvaluateStatement,
@@ -28,6 +29,7 @@ from ...models.statements.misc import (
     ReturnStatement,
     SortStatement,
 )
+from .condition_text import render_condition_text
 from .edges import EdgeCollector
 from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
 
@@ -213,15 +215,15 @@ class ProcedureScanner:
             elif isinstance(stmt, IfStatement):
                 node.if_count += 1
                 # Derive condition text
-                cond_text = "IF"
+                cond_text = (
+                    render_condition_text(stmt.condition) if stmt.condition else "IF"
+                )
                 decision: dict[str, Any] = {
                     "type": "IF",
                     "location": stmt.location.to_dict(),
                     "has_else": len(stmt.else_statements) > 0,
                 }
                 if stmt.condition:
-                    cond_dict = stmt.condition.to_dict()
-                    cond_text = cond_dict.get("expression_type", str(cond_dict))
                     decision["condition"] = cond_text
                 node.decisions.append(decision)
                 # Build BranchNode
@@ -294,11 +296,11 @@ class ProcedureScanner:
                 subj_text = (
                     ", ".join(
                         (
-                            s.get("expression_type", str(s))
-                            if isinstance(s, dict)
-                            else str(s)
+                            render_condition_text(cast(CobolExpression, subj))
+                            if hasattr(subj, "to_dict")
+                            else str(subj)
                         )
-                        for s in subjects
+                        for subj in stmt.subjects
                     )
                     or "EVALUATE"
                 )

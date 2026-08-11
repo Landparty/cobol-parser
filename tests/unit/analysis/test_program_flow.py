@@ -5411,3 +5411,68 @@ class TestCycleClassification:
         report = ProgramFlowAnalyzer().analyze(prog)
         assert report.cycle_details == []
         assert report.to_dict()["summary"]["recursion_cycle_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: Real condition text wiring (render_condition_text integration)
+# ---------------------------------------------------------------------------
+
+
+class TestRealConditionText:
+    """Condition text on real parsed COBOL, not synthetic AST doubles --
+    verifies the render_condition_text() wiring in edges.py/scanner.py."""
+
+    def test_perform_until_condition_is_real_text(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM READ-NEXT UNTIL WS-EOF-SW = 'Y'.
+           STOP RUN.
+       READ-NEXT.
+           CONTINUE.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        perform_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.PERFORM]
+        assert len(perform_edges) == 1
+        assert perform_edges[0].condition == "WS-EOF-SW = 'Y'"
+
+    def test_if_condition_text_is_real_text(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-QTY > 0
+               DISPLAY "POSITIVE"
+           END-IF.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert len(report.branch_nodes) == 1
+        assert report.branch_nodes[0].condition_text == "WS-QTY > 0"
+
+    def test_evaluate_subject_text_is_real_text(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-STATUS
+               WHEN 'A'
+                   DISPLAY "ACTIVE"
+               WHEN OTHER
+                   DISPLAY "OTHER"
+           END-EVALUATE.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert len(report.branch_nodes) == 1
+        assert report.branch_nodes[0].condition_text == "WS-STATUS"

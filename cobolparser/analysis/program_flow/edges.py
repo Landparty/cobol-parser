@@ -17,6 +17,7 @@ from ...models.statements.misc import (
     MergeStatement,
     SortStatement,
 )
+from .condition_text import render_condition_text
 from .models import FlowEdge, FlowEdgeType
 
 # Edge types that represent internal flow within the program (not external calls).
@@ -117,8 +118,7 @@ class EdgeCollector:
 
             condition = None
             if stmt.until_condition:
-                cond_dict = stmt.until_condition.to_dict()
-                condition = cond_dict.get("expression_type", str(cond_dict))
+                condition = render_condition_text(stmt.until_condition)
 
             thru_target = stmt.thru_paragraph.upper() if stmt.thru_paragraph else None
             members = self.range_members(target, thru_target) if thru_target else []
