@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **dead code / program flow:** `DeadCodeAnalyzer._collect_procedures`
+  (`cobolparser/analysis/dead_code.py`) and `ProcedureScanner.
+  collect_procedures` (`cobolparser/analysis/program_flow/scanner.py`)
+  appended all section-owned paragraphs to `_ordered_procedures` before
+  top-level paragraphs, even though COBOL legally allows paragraphs before
+  the first `SECTION` header. A program mixing the two ended up with an
+  `_ordered_procedures` list that no longer matched source order,
+  corrupting entry-point detection (a section became `entry_points[0]`
+  instead of the true first paragraph), falsely flagging the real first
+  paragraph as dead/unreachable, and fabricating a bogus fall-through edge
+  between physically non-adjacent paragraphs while dropping the real one.
+  Fixed both collectors by interleaving sections and top-level paragraphs
+  by `location.line` before walking them; the pre-existing name-collision
+  dedup guard (previously top-level-paragraph-branch-only, safe only when
+  sections were always walked first) was extended to the section-owned-
+  paragraph branch and the SECTION-registration branch in both files to
+  stay correct under the new interleaved order. Pinned by
+  `tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration` and
+  `tests/unit/analysis/test_program_flow.py::TestProgramFlowRealCobolIntegration`.
+
+* **analysis:** `DeadCodeAnalyzer._collect_goto_refs` and
+  `ProgramFlowAnalyzer.process_goto` reconstructed a computed
+  `GO TO ... DEPENDING ON` statement's targets by filtering `stmt.operands`
+  against `stmt.depending_on_variable`, instead of reading the AST's own
+  `GoStatement.target_paragraphs`. Operand dedup collapses a target
+  paragraph that happens to share its name with the DEPENDING ON variable
+  (`GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG.`) into one operand entry,
+  which the filter then drops entirely, so the shared-name target was
+  reported dead and missing a `GOTO_DEPENDING` edge despite being a live
+  target. Both sites now read `target_paragraphs` directly, which
+  `go_parser.py` already populates correctly. Pinned by
+  `test_goto_depending_target_sharing_name_with_variable` in
+  `tests/unit/analysis/test_dead_code.py` and
+  `tests/unit/analysis/test_program_flow.py`.
+
 * **preprocessing:** `normalize_fixed_format` silently dropped a physical
   line whose extracted program-text (columns 8-72) was entirely blank but
   which was neither a short/blank line nor a `*`/`/`/debug comment line

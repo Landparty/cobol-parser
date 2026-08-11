@@ -154,18 +154,19 @@ class EdgeCollector:
     def process_goto(self, stmt: GoStatement, source: str) -> None:
         """Create edges for a GO TO statement."""
         if stmt.depending_on_variable:
-            # Computed GO TO: multiple targets
-            for operand in stmt.operands:
-                if operand != stmt.depending_on_variable:
-                    self._edges.append(
-                        FlowEdge(
-                            source=source,
-                            target=operand.upper(),
-                            edge_type=FlowEdgeType.GOTO_DEPENDING,
-                            location=stmt.location,
-                            condition=f"DEPENDING ON {stmt.depending_on_variable}",
-                        )
+            # Computed GO TO: use the AST's own target list. Reconstructing
+            # targets by filtering operands would collapse a target that
+            # happens to share its name with the DEPENDING ON variable.
+            for target in stmt.target_paragraphs:
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=target.upper(),
+                        edge_type=FlowEdgeType.GOTO_DEPENDING,
+                        location=stmt.location,
+                        condition=f"DEPENDING ON {stmt.depending_on_variable}",
                     )
+                )
         elif stmt.target_paragraph:
             self._edges.append(
                 FlowEdge(

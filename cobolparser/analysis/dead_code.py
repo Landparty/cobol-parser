@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.ast_base import SourceLocation
-from ..models.program import CobolDivision, CobolProgram
+from ..models.program import CobolDivision, CobolProgram, CobolSection
+from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
     PerformStatement,
@@ -75,7 +76,10 @@ class DeadCodeAnalyzer:
     - ALTER ... TO PROCEED TO ...
 
     The first procedure in the PROCEDURE DIVISION is always considered
-    referenced as the program entry point.
+    referenced as the program entry point. A paragraph that contains an
+    ENTRY statement is also always considered referenced, since it is a
+    legitimate alternate external entry point (callable via CALL
+    'entry-name') even when nothing internally PERFORMs or GOes to it.
 
     Example:
         ```python
@@ -144,35 +148,60 @@ class DeadCodeAnalyzer:
         return report
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
-        """Collect all paragraph and section names from the PROCEDURE DIVISION."""
-        # Collect sections and their paragraphs
-        for section in proc_division._sections.values():
-            name = section.section_name
-            if name:
-                upper_name = name.upper()
-                self._procedure_names[upper_name] = ("SECTION", section.location)
-                self._ordered_procedures.append(upper_name)
-                self._section_paragraphs[upper_name] = []
-            # Collect paragraphs within sections
-            for para in section.paragraphs:
-                pname = para.paragraph_name
+        """Collect all paragraph and section names from the PROCEDURE DIVISION.
+
+        COBOL allows paragraphs before the first SECTION header, so sections
+        and top-level paragraphs are interleaved by source line to preserve
+        physical order (entry-point detection and fall-through edges both
+        depend on ``_ordered_procedures`` matching source order).
+        """
+        top_level_items: list[Any] = sorted(
+            [*proc_division._sections.values(), *proc_division.paragraphs],
+            key=lambda item: item.location.line,
+        )
+
+        for item in top_level_items:
+            if isinstance(item, CobolSection):
+                name = item.section_name
+                if name:
+                    upper_name = name.upper()
+                    if upper_name not in self._procedure_names:
+                        self._procedure_names[upper_name] = (
+                            "SECTION",
+                            item.location,
+                        )
+                        self._ordered_procedures.append(upper_name)
+                    # Always ensure a paragraph bucket exists for this section
+                    # name, even when the SECTION registration above was
+                    # skipped due to a name collision, so the paragraph loop
+                    # below can unconditionally .append() into it.
+                    self._section_paragraphs.setdefault(upper_name, [])
+                # Collect paragraphs within the section
+                for para in item.paragraphs:
+                    pname = para.paragraph_name
+                    if pname and self._is_valid_procedure_name(pname):
+                        upper_pname = pname.upper()
+                        if upper_pname not in self._procedure_names:
+                            self._procedure_names[upper_pname] = (
+                                "PARAGRAPH",
+                                para.location,
+                            )
+                            self._ordered_procedures.append(upper_pname)
+                        if name:
+                            sec_upper = name.upper()
+                            self._section_paragraphs[sec_upper].append(upper_pname)
+                            self._paragraph_section[upper_pname] = sec_upper
+            else:
+                # Top-level paragraph (not inside a section)
+                pname = item.paragraph_name
                 if pname and self._is_valid_procedure_name(pname):
                     upper_pname = pname.upper()
-                    self._procedure_names[upper_pname] = ("PARAGRAPH", para.location)
-                    self._ordered_procedures.append(upper_pname)
-                    if name:
-                        sec_upper = name.upper()
-                        self._section_paragraphs[sec_upper].append(upper_pname)
-                        self._paragraph_section[upper_pname] = sec_upper
-
-        # Collect top-level paragraphs (not inside sections)
-        for para in proc_division.paragraphs:
-            pname = para.paragraph_name
-            if pname and self._is_valid_procedure_name(pname):
-                upper_pname = pname.upper()
-                if upper_pname not in self._procedure_names:
-                    self._procedure_names[upper_pname] = ("PARAGRAPH", para.location)
-                    self._ordered_procedures.append(upper_pname)
+                    if upper_pname not in self._procedure_names:
+                        self._procedure_names[upper_pname] = (
+                            "PARAGRAPH",
+                            item.location,
+                        )
+                        self._ordered_procedures.append(upper_pname)
 
     def _propagate_section_references(self) -> None:
         """Propagate section references in both directions.
@@ -209,6 +238,8 @@ class DeadCodeAnalyzer:
                 self._collect_merge_refs(stmt)
             elif isinstance(stmt, AlterStatement):
                 self._collect_alter_refs(stmt)
+            elif isinstance(stmt, EntryStatement):
+                self._collect_entry_refs(stmt)
 
     def _collect_perform_refs(self, stmt: PerformStatement) -> None:
         """Collect references from a PERFORM statement."""
@@ -221,13 +252,12 @@ class DeadCodeAnalyzer:
 
     def _collect_goto_refs(self, stmt: GoStatement) -> None:
         """Collect references from a GO TO statement."""
-        if stmt.target_paragraph:
-            self._add_ref(stmt.target_paragraph)
-        # GO TO ... DEPENDING ON has multiple targets in operands
-        if stmt.depending_on_variable:
-            for operand in stmt.operands:
-                if operand != stmt.depending_on_variable:
-                    self._add_ref(operand)
+        # target_paragraphs already holds every target (including all
+        # computed GO TO ... DEPENDING ON targets); reconstructing them by
+        # filtering operands would collapse a target that happens to share
+        # its name with the DEPENDING ON variable.
+        for target in stmt.target_paragraphs:
+            self._add_ref(target)
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
@@ -255,6 +285,24 @@ class DeadCodeAnalyzer:
         for alteration in stmt.alterations:
             self._add_ref(alteration["from_paragraph"])
             self._add_ref(alteration["to_paragraph"])
+
+    def _collect_entry_refs(self, stmt: EntryStatement) -> None:
+        """Mark the paragraph containing an ENTRY statement as referenced.
+
+        The ENTRY statement's literal name is not a procedure name -- it is
+        the paragraph physically holding the ENTRY statement that is the
+        alternate entry point, so that paragraph (and, per
+        ``_propagate_section_references``, its enclosing section) must never
+        be reported as dead code. A blank/whitespace-only ENTRY literal isn't
+        a real alternate entry point (matches the same filter
+        ``program_flow/scanner.py``'s ``collect_entry_points`` applies), so
+        such a statement doesn't mask a truly-dead paragraph.
+        """
+        if not stmt.entry_name or not stmt.entry_name.strip("'\"").strip():
+            return
+        para_name = stmt.section_name
+        if para_name:
+            self._add_ref(para_name)
 
     @staticmethod
     def _is_valid_procedure_name(name: str) -> bool:

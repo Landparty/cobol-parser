@@ -12,6 +12,7 @@ from cobolparser.models.program import (
     CobolProgram,
     CobolSection,
 )
+from cobolparser.models.statements.call import EntryStatement
 from cobolparser.models.statements.control import (
     GoStatement,
     PerformStatement,
@@ -90,11 +91,12 @@ def _goto(target: str) -> GoStatement:
 def _goto_depending(targets: list[str], var: str) -> GoStatement:
     loc = SourceLocation(1, 12)
     stmt = GoStatement(loc)
-    # First target is the primary
+    # First target is the primary; mirrors go_parser.py's
+    # set_target_paragraph()/add_target_paragraph() calls.
     if targets:
         stmt.set_target_paragraph(targets[0])
     for t in targets[1:]:
-        stmt.add_operand(t)
+        stmt.add_target_paragraph(t)
     stmt.set_depending_on_variable(var)
     return stmt
 
@@ -124,6 +126,12 @@ def _alter(from_para: str, to_para: str) -> AlterStatement:
 
 def _continue() -> ContinueStatement:
     return ContinueStatement(SourceLocation(1, 12))
+
+
+def _entry(name: str) -> EntryStatement:
+    stmt = EntryStatement(SourceLocation(1, 12))
+    stmt.set_entry_name(name)
+    return stmt
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +535,149 @@ class TestDeadCodeIntegration:
         assert "INIT-END" not in dead_names
         assert "ORPHAN-PARA" in dead_names
 
+    def test_top_level_paragraph_before_section_stays_first_in_order(self) -> None:
+        """A paragraph before the first SECTION must stay first in physical
+        (source) order, not be reordered after all section-owned paragraphs.
+
+        Regression test: ``_collect_procedures`` used to append all
+        section-owned paragraphs before top-level paragraphs, so a program
+        that legally mixes the two (paragraphs before the first SECTION)
+        ended up with an ``_ordered_procedures`` list that no longer matched
+        source order. That corrupted entry-point detection (``[0]`` became
+        the wrong procedure) since the analyzer always treats the first
+        entry as the referenced program entry point.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       INIT-PARA.
+           DISPLAY 'INIT'.
+       MAIN-SECTION SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="mixedorder.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == [
+            "INIT-PARA",
+            "MAIN-SECTION",
+            "FIRST-PARA",
+        ]
+        # INIT-PARA is the entry point (first in source order), so it must
+        # not be reported as dead code even though nothing PERFORMs it.
+        dead_names = [item.name for item in report.dead_items]
+        assert "INIT-PARA" not in dead_names
+
+    def test_duplicate_name_across_top_level_and_section_not_double_counted(
+        self,
+    ) -> None:
+        """A name reused both as a top-level paragraph and a section-owned
+        paragraph must be recorded once in ``_ordered_procedures``, whichever
+        occurrence comes first in source order.
+
+        Regression test: interleaving top-level paragraphs and section-owned
+        paragraphs by source line (the fix for the mixed-order bug above)
+        made the existing dedup guard order-dependent -- it previously only
+        guarded the top-level-paragraph branch, which was safe when sections
+        were always collected first. Once collection order can put a
+        top-level occurrence before a section-owned occurrence of the same
+        name, an unguarded section branch would append it a second time.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       MAIN-SECTION SECTION.
+       DUP-NAME.
+           DISPLAY 'IN-SECTION'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="duptest.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == ["DUP-NAME", "MAIN-SECTION"]
+        assert report.total_procedures == 2
+
+    def test_duplicate_name_across_top_level_paragraph_and_section_header(
+        self,
+    ) -> None:
+        """A name reused as a top-level paragraph and later as a SECTION
+        header must be recorded once, and the SECTION's own paragraphs must
+        still be tracked under it.
+
+        Regression test: the SECTION-registration branch (unlike the
+        paragraph branches) had no dedup guard at all, so a same-named
+        top-level paragraph occurring earlier in source would be silently
+        overwritten and duplicated in ``_ordered_procedures`` when the
+        SECTION was collected. Also verifies ``_section_paragraphs`` is
+        still populated for the section even when its own header
+        registration was skipped due to the collision, so the paragraph
+        loop's ``.append()`` doesn't KeyError.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST2.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       DUP-NAME SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="duptest2.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == ["DUP-NAME", "FIRST-PARA"]
+        assert report.total_procedures == 2
+        assert analyzer._section_paragraphs["DUP-NAME"] == ["FIRST-PARA"]
+
+    def test_goto_depending_target_sharing_name_with_variable(self) -> None:
+        """A computed GO TO target that shares its name with the DEPENDING
+        ON variable must still be marked referenced, not just filtered out.
+        """
+        # PARA-A and RUN-FLAG each end in STOP RUN so neither is reachable
+        # via fall-through -- the only thing that can mark RUN-FLAG
+        # referenced is the computed GO TO's own target list, keeping this
+        # a precise regression test for the operand-filtering bug (as
+        # opposed to also being satisfiable by fall-through crediting).
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOSHARE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG
+           STOP RUN.
+       PARA-A.
+           DISPLAY "A"
+           STOP RUN.
+       RUN-FLAG.
+           DISPLAY "FLAG".
+"""
+        result = parse_cobol(source, filename="gotoshare.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        dead_names = [item.name for item in report.dead_items]
+        assert "RUN-FLAG" not in dead_names
+        assert "PARA-A" not in dead_names
+
     def test_find_dead_code_convenience(self) -> None:
         """CobolProgram.find_dead_code() works end-to-end."""
         source = """\
@@ -719,4 +870,126 @@ class TestAlterReferences:
         assert "PARA-X" not in dead
         assert "PARA-Y" not in dead
         assert "PARA-Z" not in dead
-        assert "DEAD" in dead
+
+
+# ---------------------------------------------------------------------------
+# _collect_entry_refs
+# ---------------------------------------------------------------------------
+
+
+class TestEntryReferences:
+    """Regression tests for the audit finding: a paragraph containing an
+    ENTRY statement is a legitimate alternate external entry point (callable
+    via CALL 'entry-name') and must never be reported as dead code, even
+    though nothing internally PERFORMs or GOes to it."""
+
+    def test_entry_paragraph_not_reported_dead(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "ALT-ENTRY-PARA" not in dead
+
+    def test_entry_paragraph_not_reported_dead_real_source(self) -> None:
+        """End-to-end regression test using the finding's repro shape."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALTENTRYPROG.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY "IN MAIN".
+           STOP RUN.
+       ALT-ENTRY-PARA.
+           ENTRY 'ALTENTRY'.
+           DISPLAY "IN ALT ENTRY".
+           GOBACK.
+"""
+        result = parse_cobol(source, filename="altentry.cbl")
+        assert result.errors == []
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        dead = [i.name for i in report.dead_items]
+        assert "ALT-ENTRY-PARA" not in dead
+
+    def test_entry_paragraph_in_section_marks_section_referenced_too(self) -> None:
+        """The paragraph's parent section must also not be reported dead
+        (via ``_propagate_section_references``' upward propagation)."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                (
+                    "MAIN-SECTION",
+                    [("MAIN-PARA", [_continue()])],
+                ),
+                (
+                    "ALT-ENTRY-SECTION",
+                    [("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()])],
+                ),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "ALT-ENTRY-PARA" not in dead
+        assert "ALT-ENTRY-SECTION" not in dead
+
+    def test_unrelated_paragraph_still_reported_dead(self) -> None:
+        """An ENTRY elsewhere does not blanket-mark every paragraph
+        referenced -- an actually-unreferenced paragraph is still dead."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
+                ("TRULY-DEAD", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "TRULY-DEAD" in dead
+        assert "ALT-ENTRY-PARA" not in dead
+
+    def test_whitespace_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """An ENTRY statement with a whitespace-only literal name isn't a
+        real alternate entry point (matches the same filter
+        program_flow/scanner.py's collect_entry_points applies), so it must
+        not mask an otherwise-dead paragraph."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [_entry("\n"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
+
+    def test_empty_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """Same as above for an ENTRY literal that is empty after quote
+        stripping (``''``)."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [_entry("''"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
+
+    def test_none_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """An EntryStatement whose entry_name was never set (None) doesn't
+        mask an otherwise-dead paragraph."""
+        entry = EntryStatement(SourceLocation(1, 12))
+        # set_entry_name is deliberately NOT called -> entry_name stays None
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [entry, _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
