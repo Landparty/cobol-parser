@@ -42,7 +42,47 @@ report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 ```
 
 Detects unreferenced paragraphs and sections (paragraphs/sections never the
-target of a PERFORM, GO TO, or fall-through control flow).
+target of a PERFORM, GO TO, or fall-through control flow). The first
+procedure is always referenced (program entry point), and so is any
+paragraph containing an `EntryStatement` (2026-08-11 fix, see below).
+
+**A paragraph holding an ENTRY statement is always referenced (2026-08-11
+fix, audit finding #5).** `EntryStatement` marks an alternate external entry
+point (`CALL 'entry-name'`), so `_collect_references` now dispatches it to
+`_collect_entry_refs`, which marks `stmt.section_name` (the *containing
+paragraph's* name -- `CobolParagraph` overrides `ASTNode.section_name` to
+return its own `paragraph_name`, so walking a statement's `.section_name` up
+the `.parent` chain lands on its paragraph regardless of nesting depth or
+whether a real SECTION also exists) as referenced. Before this, `dead_code.py`
+had no `EntryStatement` handling at all, so an ENTRY paragraph reachable only
+via its literal external name was falsely reported dead. `_collect_entry_refs`
+applies the same blank/whitespace-only-literal filter
+`program_flow/scanner.py`'s `collect_entry_points` does (a malformed ENTRY
+with no real name isn't a real alternate entry point) so it doesn't mask an
+otherwise-dead paragraph -- added after Copilot PR review caught the two
+analyzers diverging on this filter. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestEntryReferences`.
+
+**Computed GO TO targets read from `target_paragraphs`, not operand
+filtering (2026-08-11):** `_collect_goto_refs` used to reconstruct a
+computed `GO TO ... DEPENDING ON` statement's targets by filtering
+`stmt.operands` against `stmt.depending_on_variable` (`[op for op in
+stmt.operands if op != depending_on_variable]`). `GoStatement`'s setters
+(`set_target_paragraph`/`add_target_paragraph`/`set_depending_on_variable`)
+add operands via `_add_unique_operand`, which dedupes, so a target
+paragraph that happens to share its name with the DEPENDING ON variable
+(`GO TO PARA-A RUN-FLAG
+DEPENDING ON RUN-FLAG.`) collapses into one operand entry, which the filter
+then drops entirely — the shared-name target was reported dead despite
+being live. `GoStatement.target_paragraphs`
+(`cobolparser/models/statements/control.py`) already holds the exact,
+unfiltered target list — populated correctly by `go_parser.py`'s
+`set_target_paragraph`/`add_target_paragraph` calls — so `_collect_goto_refs`
+now just iterates it directly. Same root cause and same fix shape in
+`ProgramFlowAnalyzer.process_goto` below. Pinned by
+`test_goto_depending_target_sharing_name_with_variable` in both
+`tests/unit/analysis/test_dead_code.py` and
+`tests/unit/analysis/test_program_flow.py`.
 
 **Paragraphs before the first SECTION must stay first in source order
 (2026-08-11, dead-code-section-550f0e finding #1).** COBOL legally allows
@@ -90,13 +130,15 @@ it always appends into that bucket. Pinned by
 
 ```python
 report: ProgramFlowReport = ProgramFlowAnalyzer().analyze(ast)
-# report.edges: list[FlowEdge]  (typed: PERFORM / GO_TO / CALL / FALL_THROUGH)
+# report.edges: list[FlowEdge]  (typed: PERFORM / GOTO / GOTO_DEPENDING / CALL / FALL_THROUGH)
 # report.nodes: list[FlowNode]
 ```
 
 Produces a control-flow graph. Edge types:
 - `FlowEdgeType.PERFORM` — PERFORM target
-- `FlowEdgeType.GO_TO` — unconditional/conditional GO TO
+- `FlowEdgeType.GOTO` — unconditional GO TO
+- `FlowEdgeType.GOTO_DEPENDING` — one edge per target of a computed
+  `GO TO ... DEPENDING ON`, condition set to `"DEPENDING ON <variable>"`
 - `FlowEdgeType.CALL` — static CALL (target known at parse time)
 - `FlowEdgeType.FALL_THROUGH` — sequential paragraph fall-through
 
@@ -122,6 +164,20 @@ pinned by
 The SECTION-registration branch's missing guard (Copilot review catch) was
 also fixed identically here, pinned by
 `::test_duplicate_name_across_top_level_paragraph_and_section_header`.
+
+**ENTRY-statement paragraphs are alternate entry-point roots (2026-08-11
+fix, audit finding #5).** `scanner.py`'s `collect_entry_points` used to add
+the ENTRY statement's *literal* name (e.g. `'ALTENTRY'`) to `entry_points` --
+a value that never matches any key in the `nodes` dict, so it was a dead BFS
+seed and the paragraph physically holding the ENTRY statement was falsely
+reported in `unreachable_nodes`. It now resolves `stmt.section_name` (walks
+the statement's `.parent` chain up to its `CobolParagraph`, whose
+`section_name` override returns its own `paragraph_name` -- see
+`DeadCodeAnalyzer`'s matching fix above, same mechanism) and adds *that*
+paragraph name instead; the whitespace/empty-literal filter that previously
+guarded the literal is still applied first, so an ENTRY with a blank name
+still registers nothing. Pinned by
+`tests/unit/analysis/test_program_flow.py::TestProgramFlowEntryPoints`.
 
 **THRU range members count as reachable (2026-07-20):** `PERFORM A THRU C`
 (and SORT/MERGE procedure ranges) execute every paragraph the range

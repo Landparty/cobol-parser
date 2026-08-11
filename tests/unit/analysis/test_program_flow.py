@@ -110,10 +110,12 @@ def _goto(target: str) -> GoStatement:
 
 def _goto_depending(targets: list[str], var: str) -> GoStatement:
     stmt = GoStatement(LOC)
+    # First target is the primary; mirrors go_parser.py's
+    # set_target_paragraph()/add_target_paragraph() calls.
     if targets:
         stmt.set_target_paragraph(targets[0])
     for t in targets[1:]:
-        stmt.add_operand(t)
+        stmt.add_target_paragraph(t)
     stmt.set_depending_on_variable(var)
     return stmt
 
@@ -582,17 +584,47 @@ class TestProgramFlowEntryPoints:
         assert report.entry_points[0] == "MAIN-LOGIC"
 
     def test_entry_statement_adds_entry_point(self) -> None:
-        """ENTRY statements register additional entry points."""
+        """ENTRY statements register their *containing paragraph* -- not the
+        ENTRY literal name -- as an additional entry point, since the
+        literal is never a node key in the paragraph graph."""
         prog = _make_program(
             [
-                ("MAIN-LOGIC", [_entry("'ALTENTRY'")]),
+                ("MAIN-LOGIC", [_stop_run()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
             ]
         )
 
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
-        assert "ALTENTRY" in report.entry_points
+        assert "ALT-ENTRY-PARA" in report.entry_points
+        assert "ALTENTRY" not in report.entry_points
+        assert "ALT-ENTRY-PARA" not in report.unreachable_nodes
+
+    def test_entry_paragraph_not_reported_unreachable_real_source(self) -> None:
+        """Regression test for the audit finding: a paragraph holding an
+        ENTRY statement is a legitimate alternate external entry point
+        (callable via CALL 'ALTENTRY') and must not show up as unreachable,
+        even though nothing internally PERFORMs or GOes to it."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALTENTRYPROG.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY "IN MAIN".
+           STOP RUN.
+       ALT-ENTRY-PARA.
+           ENTRY 'ALTENTRY'.
+           DISPLAY "IN ALT ENTRY".
+           GOBACK.
+"""
+        result = parse_cobol(source, filename="altentry.cbl")
+        assert result.errors == []
+
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+
+        assert "ALT-ENTRY-PARA" in report.entry_points
+        assert "ALT-ENTRY-PARA" not in report.unreachable_nodes
 
 
 # ---------------------------------------------------------------------------
@@ -919,6 +951,38 @@ class TestProgramFlowIntegration:
 
         goto_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.GOTO]
         assert any(e.target == "ERROR-EXIT" for e in goto_edges)
+
+    def test_goto_depending_target_sharing_name_with_variable(self) -> None:
+        """A computed GO TO target that shares its name with the DEPENDING
+        ON variable must still get its own GOTO_DEPENDING edge.
+        """
+        # PARA-A ends in STOP RUN so RUN-FLAG is not also reachable via
+        # fall-through -- isolates this as a regression test for the
+        # operand-filtering bug specifically, independent of fall-through
+        # edge handling.
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOSHARE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG
+           STOP RUN.
+       PARA-A.
+           DISPLAY "A"
+           STOP RUN.
+       RUN-FLAG.
+           DISPLAY "FLAG".
+"""
+        result = parse_cobol(source, filename="gotoshare.cbl")
+        assert result.ast is not None
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        dep_targets = {
+            e.target for e in report.edges if e.edge_type == FlowEdgeType.GOTO_DEPENDING
+        }
+        assert dep_targets == {"PARA-A", "RUN-FLAG"}
 
     def test_call_flow(self) -> None:
         """CALL statements are tracked in parsed COBOL."""
@@ -1331,8 +1395,8 @@ class TestProgramFlowOutputDisplay:
         assert goto_edges[0]["target"] == "THE-END"
 
     def test_goto_depending_edges_in_output(self) -> None:
-        """GO TO DEPENDING produces GOTO_DEPENDING edges (unit-level with
-        manually constructed AST, since the parser simplifies this syntax)."""
+        """GO TO DEPENDING produces GOTO_DEPENDING edges (unit-level with a
+        manually constructed AST for isolation from the parser)."""
         prog = _make_program(
             [
                 (
@@ -4643,10 +4707,12 @@ class TestProgramFlowAuditEdgeCases:
     # ------------------------------------------------------------------
 
     def test_entry_point_not_in_nodes_skipped_gracefully(self) -> None:
-        """An ENTRY statement name that has no matching paragraph node is
-        skipped without error during reachability analysis."""
+        """collect_entry_points registers the paragraph *containing* the
+        ENTRY statement, not the ENTRY literal text -- the literal never
+        matches a node key, so it must never appear in entry_points, and
+        unrelated paragraphs are unaffected."""
         entry = EntryStatement(LOC)
-        entry.set_entry_name("'GHOST-ENTRY'")  # No matching paragraph
+        entry.set_entry_name("'GHOST-ENTRY'")  # Literal has no matching paragraph
 
         prog = _make_program(
             [
@@ -4657,8 +4723,10 @@ class TestProgramFlowAuditEdgeCases:
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
-        # GHOST-ENTRY was registered as an entry point but has no node
-        assert "GHOST-ENTRY" in report.entry_points
+        # The ENTRY literal itself is never a valid entry point
+        assert "GHOST-ENTRY" not in report.entry_points
+        # Its containing paragraph is (also already the first procedure here)
+        assert "MAIN-LOGIC" in report.entry_points
         # ISOLATED is unreachable from MAIN-LOGIC (no edge to it)
         assert "ISOLATED" in report.unreachable_nodes
 

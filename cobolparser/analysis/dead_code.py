@@ -12,6 +12,7 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolProgram, CobolSection
+from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
     PerformStatement,
@@ -75,7 +76,10 @@ class DeadCodeAnalyzer:
     - ALTER ... TO PROCEED TO ...
 
     The first procedure in the PROCEDURE DIVISION is always considered
-    referenced as the program entry point.
+    referenced as the program entry point. A paragraph that contains an
+    ENTRY statement is also always considered referenced, since it is a
+    legitimate alternate external entry point (callable via CALL
+    'entry-name') even when nothing internally PERFORMs or GOes to it.
 
     Example:
         ```python
@@ -234,6 +238,8 @@ class DeadCodeAnalyzer:
                 self._collect_merge_refs(stmt)
             elif isinstance(stmt, AlterStatement):
                 self._collect_alter_refs(stmt)
+            elif isinstance(stmt, EntryStatement):
+                self._collect_entry_refs(stmt)
 
     def _collect_perform_refs(self, stmt: PerformStatement) -> None:
         """Collect references from a PERFORM statement."""
@@ -246,13 +252,12 @@ class DeadCodeAnalyzer:
 
     def _collect_goto_refs(self, stmt: GoStatement) -> None:
         """Collect references from a GO TO statement."""
-        if stmt.target_paragraph:
-            self._add_ref(stmt.target_paragraph)
-        # GO TO ... DEPENDING ON has multiple targets in operands
-        if stmt.depending_on_variable:
-            for operand in stmt.operands:
-                if operand != stmt.depending_on_variable:
-                    self._add_ref(operand)
+        # target_paragraphs already holds every target (including all
+        # computed GO TO ... DEPENDING ON targets); reconstructing them by
+        # filtering operands would collapse a target that happens to share
+        # its name with the DEPENDING ON variable.
+        for target in stmt.target_paragraphs:
+            self._add_ref(target)
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
@@ -280,6 +285,24 @@ class DeadCodeAnalyzer:
         for alteration in stmt.alterations:
             self._add_ref(alteration["from_paragraph"])
             self._add_ref(alteration["to_paragraph"])
+
+    def _collect_entry_refs(self, stmt: EntryStatement) -> None:
+        """Mark the paragraph containing an ENTRY statement as referenced.
+
+        The ENTRY statement's literal name is not a procedure name -- it is
+        the paragraph physically holding the ENTRY statement that is the
+        alternate entry point, so that paragraph (and, per
+        ``_propagate_section_references``, its enclosing section) must never
+        be reported as dead code. A blank/whitespace-only ENTRY literal isn't
+        a real alternate entry point (matches the same filter
+        ``program_flow/scanner.py``'s ``collect_entry_points`` applies), so
+        such a statement doesn't mask a truly-dead paragraph.
+        """
+        if not stmt.entry_name or not stmt.entry_name.strip("'\"").strip():
+            return
+        para_name = stmt.section_name
+        if para_name:
+            self._add_ref(para_name)
 
     @staticmethod
     def _is_valid_procedure_name(name: str) -> bool:
