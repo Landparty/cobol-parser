@@ -269,8 +269,13 @@ class DeadCodeAnalyzer:
         the paragraph physically holding the ENTRY statement that is the
         alternate entry point, so that paragraph (and, per
         ``_propagate_section_references``, its enclosing section) must never
-        be reported as dead code.
+        be reported as dead code. A blank/whitespace-only ENTRY literal isn't
+        a real alternate entry point (matches the same filter
+        ``program_flow/scanner.py``'s ``collect_entry_points`` applies), so
+        such a statement doesn't mask a truly-dead paragraph.
         """
+        if not stmt.entry_name or not stmt.entry_name.strip("'\"").strip():
+            return
         para_name = stmt.section_name
         if para_name:
             self._add_ref(para_name)

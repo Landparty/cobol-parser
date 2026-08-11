@@ -806,3 +806,46 @@ class TestEntryReferences:
         dead = [i.name for i in report.dead_items]
         assert "TRULY-DEAD" in dead
         assert "ALT-ENTRY-PARA" not in dead
+
+    def test_whitespace_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """An ENTRY statement with a whitespace-only literal name isn't a
+        real alternate entry point (matches the same filter
+        program_flow/scanner.py's collect_entry_points applies), so it must
+        not mask an otherwise-dead paragraph."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [_entry("\n"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
+
+    def test_empty_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """Same as above for an ENTRY literal that is empty after quote
+        stripping (``''``)."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [_entry("''"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
+
+    def test_none_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """An EntryStatement whose entry_name was never set (None) doesn't
+        mask an otherwise-dead paragraph."""
+        entry = EntryStatement(SourceLocation(1, 12))
+        # set_entry_name is deliberately NOT called -> entry_name stays None
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [entry, _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead

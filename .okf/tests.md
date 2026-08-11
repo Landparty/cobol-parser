@@ -3,10 +3,19 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 # Overview
+
+2026-08-11: +3 in `tests/unit/analysis/test_dead_code.py`'s
+`TestEntryReferences` (whitespace-only, empty-after-quote-stripping, and
+`None` ENTRY literals) plus 2 more in `tests/unit/analysis/test_program_flow.py`.
+A Copilot review on the ENTRY-reachability fix (see [analysis.md](analysis.md)'s
+`DeadCodeAnalyzer`/`ProgramFlowAnalyzer` sections) caught that
+`dead_code.py`'s new `_collect_entry_refs` didn't apply the same
+blank/whitespace-literal filter `program_flow/scanner.py`'s
+`collect_entry_points` already did — fixed to match.
 
 2026-08-07: +7 — `tests/regression/test_inline_comment_stripping.py`, pinning
 the lexer's new `*>` free-form inline-comment stripping, including a

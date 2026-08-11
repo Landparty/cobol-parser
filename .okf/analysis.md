@@ -55,7 +55,12 @@ return its own `paragraph_name`, so walking a statement's `.section_name` up
 the `.parent` chain lands on its paragraph regardless of nesting depth or
 whether a real SECTION also exists) as referenced. Before this, `dead_code.py`
 had no `EntryStatement` handling at all, so an ENTRY paragraph reachable only
-via its literal external name was falsely reported dead. Pinned by
+via its literal external name was falsely reported dead. `_collect_entry_refs`
+applies the same blank/whitespace-only-literal filter
+`program_flow/scanner.py`'s `collect_entry_points` does (a malformed ENTRY
+with no real name isn't a real alternate entry point) so it doesn't mask an
+otherwise-dead paragraph -- added after Copilot PR review caught the two
+analyzers diverging on this filter. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestEntryReferences`.
 
 ## ProgramFlowAnalyzer
