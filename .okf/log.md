@@ -1,5 +1,48 @@
 # OKF Update Log
 
+## 2026-08-11 (Dead-code/program-flow: SECTION-registration dedup guard, Copilot follow-up)
+
+Copilot review on PR #130 (the paragraphs-before-first-SECTION fix below)
+caught that the SECTION-registration branch in both `DeadCodeAnalyzer.
+_collect_procedures` and `ProcedureScanner.collect_procedures` had no
+dedup guard at all, unlike both paragraph branches. Under the new
+interleaved-by-`location.line` order, a top-level paragraph followed later
+by a same-named `SECTION` header would silently overwrite the earlier
+`PARAGRAPH` entry with a `SECTION` one and duplicate the name in
+`_ordered_procedures` — confirmed with an empirical repro before fixing.
+Fixed by extending the same guard to the SECTION branch in both files;
+`dead_code.py`'s `_section_paragraphs[name]` bucket is now ensured via
+`.setdefault()` regardless of whether the guard skipped that SECTION's own
+registration, since the paragraph loop below it always appends into it
+unconditionally. Also fixed a Copilot-flagged path issue in `CHANGELOG.md`
+(missing the `cobolparser/` prefix used elsewhere in that file). Updated:
+[analysis.md](analysis.md), [tests.md](tests.md).
+
+## 2026-08-11 (Dead-code/program-flow: paragraphs before first SECTION reordered)
+
+`claude/dead-code-section-550f0e` finding #1: COBOL legally allows
+paragraphs before the first `SECTION` header, but `DeadCodeAnalyzer.
+_collect_procedures` (`analysis/dead_code.py`) and `ProcedureScanner.
+collect_procedures` (`analysis/program_flow/scanner.py`) both appended all
+section-owned paragraphs to `_ordered_procedures` before top-level
+paragraphs, corrupting physical source order whenever a program mixed the
+two. Since both analyzers treat `_ordered_procedures[0]` as the entry point
+(and `ProgramFlowAnalyzer`'s fall-through-edge pass walks the same list in
+order), this made a section the false entry point, reported the true first
+paragraph as dead/unreachable, and fabricated a bogus fall-through edge
+between physically non-adjacent paragraphs. Fixed both collectors by
+interleaving sections and top-level paragraphs by `location.line` before
+walking them. That interleave in turn made each collector's existing
+name-collision dedup guard order-dependent (it only lived on the
+top-level-paragraph branch, safe only when sections were always walked
+first) — caught by review before landing, not by the original finding; a
+name reused both top-level and inside a section could otherwise be
+double-appended to `_ordered_procedures` once a top-level occurrence sorted
+before its section-owned twin. Added the identical guard to the
+section-owned-paragraph branch in both files. Updated:
+[analysis.md](analysis.md) (`DeadCodeAnalyzer` and `ProgramFlowAnalyzer`
+sections).
+
 ## 2026-08-11 (Computed GO TO target dropped when it shares a name with the DEPENDING ON variable)
 
 Finding #4 from the "Dead Code & Program Flow" analyzer audit

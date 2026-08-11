@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.ast_base import SourceLocation
-from ..models.program import CobolDivision, CobolProgram
+from ..models.program import CobolDivision, CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
@@ -148,35 +148,60 @@ class DeadCodeAnalyzer:
         return report
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
-        """Collect all paragraph and section names from the PROCEDURE DIVISION."""
-        # Collect sections and their paragraphs
-        for section in proc_division._sections.values():
-            name = section.section_name
-            if name:
-                upper_name = name.upper()
-                self._procedure_names[upper_name] = ("SECTION", section.location)
-                self._ordered_procedures.append(upper_name)
-                self._section_paragraphs[upper_name] = []
-            # Collect paragraphs within sections
-            for para in section.paragraphs:
-                pname = para.paragraph_name
+        """Collect all paragraph and section names from the PROCEDURE DIVISION.
+
+        COBOL allows paragraphs before the first SECTION header, so sections
+        and top-level paragraphs are interleaved by source line to preserve
+        physical order (entry-point detection and fall-through edges both
+        depend on ``_ordered_procedures`` matching source order).
+        """
+        top_level_items: list[Any] = sorted(
+            [*proc_division._sections.values(), *proc_division.paragraphs],
+            key=lambda item: item.location.line,
+        )
+
+        for item in top_level_items:
+            if isinstance(item, CobolSection):
+                name = item.section_name
+                if name:
+                    upper_name = name.upper()
+                    if upper_name not in self._procedure_names:
+                        self._procedure_names[upper_name] = (
+                            "SECTION",
+                            item.location,
+                        )
+                        self._ordered_procedures.append(upper_name)
+                    # Always ensure a paragraph bucket exists for this section
+                    # name, even when the SECTION registration above was
+                    # skipped due to a name collision, so the paragraph loop
+                    # below can unconditionally .append() into it.
+                    self._section_paragraphs.setdefault(upper_name, [])
+                # Collect paragraphs within the section
+                for para in item.paragraphs:
+                    pname = para.paragraph_name
+                    if pname and self._is_valid_procedure_name(pname):
+                        upper_pname = pname.upper()
+                        if upper_pname not in self._procedure_names:
+                            self._procedure_names[upper_pname] = (
+                                "PARAGRAPH",
+                                para.location,
+                            )
+                            self._ordered_procedures.append(upper_pname)
+                        if name:
+                            sec_upper = name.upper()
+                            self._section_paragraphs[sec_upper].append(upper_pname)
+                            self._paragraph_section[upper_pname] = sec_upper
+            else:
+                # Top-level paragraph (not inside a section)
+                pname = item.paragraph_name
                 if pname and self._is_valid_procedure_name(pname):
                     upper_pname = pname.upper()
-                    self._procedure_names[upper_pname] = ("PARAGRAPH", para.location)
-                    self._ordered_procedures.append(upper_pname)
-                    if name:
-                        sec_upper = name.upper()
-                        self._section_paragraphs[sec_upper].append(upper_pname)
-                        self._paragraph_section[upper_pname] = sec_upper
-
-        # Collect top-level paragraphs (not inside sections)
-        for para in proc_division.paragraphs:
-            pname = para.paragraph_name
-            if pname and self._is_valid_procedure_name(pname):
-                upper_pname = pname.upper()
-                if upper_pname not in self._procedure_names:
-                    self._procedure_names[upper_pname] = ("PARAGRAPH", para.location)
-                    self._ordered_procedures.append(upper_pname)
+                    if upper_pname not in self._procedure_names:
+                        self._procedure_names[upper_pname] = (
+                            "PARAGRAPH",
+                            item.location,
+                        )
+                        self._ordered_procedures.append(upper_pname)
 
     def _propagate_section_references(self) -> None:
         """Propagate section references in both directions.

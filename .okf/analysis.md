@@ -84,6 +84,48 @@ now just iterates it directly. Same root cause and same fix shape in
 `tests/unit/analysis/test_dead_code.py` and
 `tests/unit/analysis/test_program_flow.py`.
 
+**Paragraphs before the first SECTION must stay first in source order
+(2026-08-11, dead-code-section-550f0e finding #1).** COBOL legally allows
+paragraphs before the first `SECTION` header. `_collect_procedures` used to
+append all section-owned paragraphs to `_ordered_procedures` before the
+top-level (pre-SECTION) paragraphs, so a program mixing the two produced an
+`_ordered_procedures` list that no longer matched physical source order.
+Since `analyze()` always treats `_ordered_procedures[0]` as the referenced
+program entry point, this fabricated a false-dead-code report for the real
+first paragraph (a section became entry point instead) whenever a program
+had any top-level paragraph before its first section — a legal, if
+uncommon, shape. Fixed by interleaving sections and top-level paragraphs by
+`location.line` before walking them, so `_ordered_procedures` always matches
+source order regardless of section/paragraph mix. `ProgramFlowAnalyzer`
+(below) had the identical bug in the same shape, from the same duplicated
+collection logic. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_top_level_paragraph_before_section_stays_first_in_order`.
+
+**The interleave fix made the pre-existing dedup guard order-dependent —
+caught by review before landing.** The dedup guard (`if upper_pname not in
+self._procedure_names`) previously lived only on the top-level-paragraph
+branch, which was safe *only* because sections were always walked first —
+by the time a top-level paragraph was considered, any same-named
+section-owned paragraph was already registered. Interleaving by
+`location.line` breaks that assumption: when a top-level occurrence of a
+duplicated name sorts before its section-owned twin, the (still-unguarded)
+section branch would append it to `_ordered_procedures` a second time. The
+section-owned-paragraph branch now carries the identical guard. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_and_section_not_double_counted`.
+
+**The SECTION-registration branch itself had no dedup guard at all —
+caught by Copilot review on the PR.** Unlike both paragraph branches, the
+code that records a `SECTION` header into `_procedure_names` never checked
+whether that name was already registered. A top-level paragraph followed
+later in source by a same-named `SECTION` (e.g. `DUP-NAME.` ... `DUP-NAME
+SECTION.`) would have its `PARAGRAPH` entry silently overwritten by a
+`SECTION` entry, and the name duplicated in `_ordered_procedures`. Fixed by
+adding the same guard to the SECTION branch; `_section_paragraphs[name]`
+is still unconditionally ensured via `.setdefault()` even when the guard
+skips the SECTION's own registration, since the paragraph loop right below
+it always appends into that bucket. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_paragraph_and_section_header`.
+
 ## ProgramFlowAnalyzer
 
 ```python
@@ -101,6 +143,27 @@ Produces a control-flow graph. Edge types:
 - `FlowEdgeType.FALL_THROUGH` — sequential paragraph fall-through
 
 THRU ranges expand to `range_members`; cycles are classified in `cycle_details`.
+
+**Paragraphs before the first SECTION must stay first in source order
+(2026-08-11, dead-code-section-550f0e finding #1).** `ProcedureScanner.
+collect_procedures` (`scanner.py`) had the same bug as `DeadCodeAnalyzer.
+_collect_procedures` above (they duplicate the same collection shape): all
+section-owned paragraphs were appended to `_ordered_procedures` before
+top-level (pre-SECTION) paragraphs, corrupting physical order whenever a
+program mixed the two. Since `entry_points[0]` and `build_fall_through_edges`
+(`graph.py`) both walk `_ordered_procedures` in order, this made the wrong
+procedure the entry point and fabricated a bogus fall-through edge between
+physically non-adjacent paragraphs while dropping the real one. Fixed the
+same way: sections and top-level paragraphs are interleaved by
+`location.line` before being walked. Pinned by
+`tests/unit/analysis/test_program_flow.py::TestProgramFlowRealCobolIntegration::test_top_level_paragraph_before_section_stays_first_entry_point`.
+Same order-dependent-dedup-guard trap as `DeadCodeAnalyzer` above applied
+here too (`self._nodes` guard was top-level-only); fixed identically,
+pinned by
+`::test_duplicate_name_across_top_level_and_section_not_double_counted`.
+The SECTION-registration branch's missing guard (Copilot review catch) was
+also fixed identically here, pinned by
+`::test_duplicate_name_across_top_level_paragraph_and_section_header`.
 
 **ENTRY-statement paragraphs are alternate entry-point roots (2026-08-11
 fix, audit finding #5).** `scanner.py`'s `collect_entry_points` used to add
