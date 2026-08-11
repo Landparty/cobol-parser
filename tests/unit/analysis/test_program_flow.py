@@ -5522,3 +5522,33 @@ class TestScannerDeepNestingRegression:
         outermost_bn = branch_nodes[0]
         outer_then_arm = next(a for a in outermost_bn.arms if a.arm_type == "THEN")
         assert outer_then_arm.nested_call_targets == []
+
+    def test_evaluate_when_edges_interleave_with_nested_subtree_edges(self) -> None:
+        """WHEN k+1's own EVALUATE_WHEN edge is appended only after WHEN k's
+        nested subtree is fully scanned — pins the exact interleaving the old
+        recursive version produced (arm/edge creation, then full recursion
+        into that arm, before moving to the next WHEN), which the rewrite
+        replicates by deferring each WHEN clause's own bookkeeping into a
+        thunk queued alongside its statements rather than eagerly building
+        all WHEN edges up front.
+        """
+        stmt = EvaluateStatement(LOC)
+        stmt.add_subject("WS-VAR")
+
+        wc1 = WhenClause([{"type": "Literal", "value": "1"}], LOC)
+        wc1.add_statement(_if_stmt([_continue()]))  # nested branch inside WHEN_1
+        stmt.add_when_clause(wc1)
+
+        wc2 = WhenClause([{"type": "Literal", "value": "2"}], LOC)
+        wc2.add_statement(_continue())
+        stmt.add_when_clause(wc2)
+
+        _branch_nodes, edges, _nodes = self._scan(stmt)
+
+        nested_if_branch_idx = next(
+            i for i, e in enumerate(edges) if e.edge_type == FlowEdgeType.IF_BRANCH
+        )
+        when_edges = [e for e in edges if e.edge_type == FlowEdgeType.EVALUATE_WHEN]
+        when_2_edge_idx = edges.index(when_edges[1])
+
+        assert when_2_edge_idx > nested_if_branch_idx

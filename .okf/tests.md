@@ -3,10 +3,21 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 # Overview
+
+2026-08-11: +4 in `tests/unit/analysis/test_program_flow.py` — new
+`TestScannerDeepNestingRegression` class, pinning the explicit-work-stack
+rewrite of `ProcedureScanner._scan_paragraph_statements`
+(`cobolparser/analysis/program_flow/scanner.py`): three tests drive
+`ProcedureScanner` directly (bypassing `ProgramFlowAnalyzer.analyze()`,
+which hits a separate, unrelated `RecursionError` in `CobolProgram.
+get_all_statements()` at these depths) at 2,000-5,000 levels of nested
+IF/PERFORM to confirm no `RecursionError`, plus one pinning the EVALUATE
+`WHEN`-clause thunk-deferral ordering invariant the rewrite depends on; see
+[analysis.md](analysis.md).
 
 2026-08-07: +7 — `tests/regression/test_inline_comment_stripping.py`, pinning
 the lexer's new `*>` free-form inline-comment stripping, including a
