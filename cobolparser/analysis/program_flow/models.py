@@ -56,6 +56,8 @@ class FlowNode:
     has_exit_section: bool = False
     has_exit_paragraph: bool = False
     has_exit_perform: bool = False
+    exit_statement_kind: str | None = None
+    exit_statement_location: SourceLocation | None = None
     if_count: int = 0
     evaluate_count: int = 0
     search_count: int = 0
@@ -90,6 +92,9 @@ class FlowNode:
             result["has_exit_paragraph"] = True
         if self.has_exit_perform:
             result["has_exit_perform"] = True
+        if self.exit_statement_kind and self.exit_statement_location:
+            result["exit_statement_kind"] = self.exit_statement_kind
+            result["exit_statement_location"] = self.exit_statement_location.to_dict()
         result["branching"] = {
             "if_count": self.if_count,
             "evaluate_count": self.evaluate_count,

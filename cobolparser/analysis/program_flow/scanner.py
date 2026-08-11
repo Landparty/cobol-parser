@@ -151,6 +151,19 @@ class ProcedureScanner:
                 if entry_name and entry_name not in self._entry_points:
                     self._entry_points.append(entry_name)
 
+    @staticmethod
+    def _record_exit_statement(node: FlowNode, kind: str, location: Any) -> None:
+        """Record the first exit statement seen in this paragraph.
+
+        First-write-wins: a paragraph with more than one exit statement
+        (e.g. one per IF branch) keeps whichever was scanned first: the
+        terminal-node rendering (flowchart.py, Task 5) draws one terminal
+        node per paragraph, not per statement.
+        """
+        if node.exit_statement_kind is None:
+            node.exit_statement_kind = kind
+            node.exit_statement_location = location
+
     def _scan_paragraph_statements(self, para: CobolParagraph) -> None:
         """Scan all statements within a paragraph, including nested ones."""
         proc_name = self._current_procedure
@@ -420,24 +433,20 @@ class ProcedureScanner:
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):
                 self._collector.process_cancel(stmt, proc_name)
-            elif isinstance(stmt, ReturnStatement):
-                node.has_return = True
-                # Scan AT END / NOT AT END branches for nested flow
-                for s in stmt.at_end_clause or []:
-                    scan(s)
-                for s in stmt.not_at_end_clause or []:
-                    scan(s)
             elif isinstance(stmt, StopStatement):
                 node.has_stop_run = True
                 self._exit_points.add(proc_name)
+                self._record_exit_statement(node, "STOP RUN", stmt.location)
             elif isinstance(stmt, GobackStatement):
                 node.has_goback = True
                 self._exit_points.add(proc_name)
+                self._record_exit_statement(node, "GOBACK", stmt.location)
             elif isinstance(stmt, ExitStatement):
                 exit_type = stmt.exit_type or ""
                 if exit_type == "PROGRAM":
                     node.has_exit_program = True
                     self._exit_points.add(proc_name)
+                    self._record_exit_statement(node, "EXIT PROGRAM", stmt.location)
                 elif exit_type == "SECTION":
                     node.has_exit_section = True
                 elif exit_type == "PARAGRAPH":
@@ -445,6 +454,14 @@ class ProcedureScanner:
                 elif exit_type.startswith("PERFORM"):
                     # Covers both "PERFORM" and "PERFORM CYCLE"
                     node.has_exit_perform = True
+            elif isinstance(stmt, ReturnStatement):
+                node.has_return = True
+                self._record_exit_statement(node, "RETURN", stmt.location)
+                # Scan AT END / NOT AT END branches for nested flow
+                for s in stmt.at_end_clause or []:
+                    scan(s)
+                for s in stmt.not_at_end_clause or []:
+                    scan(s)
             else:
                 # Any other statement may still host nested control flow in a
                 # conditional clause body: IO statements (READ AT END / WRITE

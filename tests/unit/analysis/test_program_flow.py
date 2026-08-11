@@ -5516,3 +5516,51 @@ class TestRealConditionText:
         report = ProgramFlowAnalyzer().analyze(result.ast)
         assert len(report.branch_nodes) == 1
         assert report.branch_nodes[0].condition_text == "X = Y"
+
+
+class TestExitStatementLocation:
+    def test_stop_run_records_kind_and_location(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "DONE".
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert node.exit_statement_kind == "STOP RUN"
+        assert node.exit_statement_location is not None
+        assert node.exit_statement_location.line == 6
+
+    def test_goback_records_kind(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           GOBACK.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert node.exit_statement_kind == "GOBACK"
+
+    def test_no_exit_statement_leaves_both_none(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "NO EXIT HERE".
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert node.exit_statement_kind is None
+        assert node.exit_statement_location is None
