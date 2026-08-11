@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 # Overview
@@ -48,6 +48,45 @@ what resolves on attribute access.
 string. `FlowchartOptions` controls statement counts, edge labels,
 fall-through edges, unreachable nodes, and synthetic external-CALL nodes.
 Driven by `cobol-parser program-flow --format mermaid|dot`.
+
+**Recursion/GO TO edge styling, terminal exit nodes, THRU badges
+(2026-08-11):** both generators now render three things identically in
+substance, differing only in each target format's own attribute syntax:
+
+- **Recursion / GO TO edge distinction.** Module-level
+  `_recursion_pairs(report)` returns every `(source, target)` pair that
+  closes a `PERFORM_RECURSION` cycle (from `report.cycle_details`);
+  `_PERFORM_EDGE_TYPE_VALUES` / `_GOTO_EDGE_TYPE_VALUES` (also
+  module-level, shared by both generator classes) classify an edge's
+  `.value` string. A PERFORM-family edge closing a recursion cycle gets
+  gold-dashed styling; any GO TO-family edge (`GOTO`, `GOTO_DEPENDING`,
+  `ALTER`) gets magenta-dashed styling — **Mermaid** via a `linkStyle N
+  <css>` line per styled edge (`_RECURSION_LINK_STYLE` /
+  `_GOTO_LINK_STYLE` constants; `N` is the edge's position among *emitted*
+  (non-skipped) edges only — a hidden fall-through edge does not consume an
+  index), **DOT** via `color="#e0a800"|"#d6336c"` + `style="dashed"`
+  attributes set directly on the `->` edge statement.
+- **Terminal exit nodes.** One extra node per `FlowNode` carrying
+  `exit_statement_kind`/`exit_statement_location` (see
+  [analysis.md](analysis.md)'s `ProgramFlowAnalyzer` section), labeled
+  `"{kind} · {line}"`, positioned right after the main node loop and
+  before external-call nodes in both generators — Mermaid emits `(((...)))`
+  triple-circle syntax plus a `terminal` classDef
+  (`fill:#1b1b1b,stroke:#c1121f`); DOT emits `shape=doublecircle` with
+  matching `fillcolor`/`fontcolor`. Both respect `show_unreachable`
+  identically to the main node loop.
+- **`[THRU n]` edge-label badges.** A `FlowEdge` carrying `thru_target` +
+  `range_members` (a `PERFORM ... THRU ...` / SORT|MERGE procedure range)
+  renders as a single arrow from the range's start to its *first* member,
+  badged `[THRU n]` (`n = len(range_members)`) — not as a second,
+  redundant arrow spanning the whole range. Both generators' edges loops
+  skip any edge whose `.value` ends in `"_THRU"` (the second, would-be
+  duplicate arrow) unconditionally, regardless of `show_fall_through`.
+
+Reference tests: `tests/unit/test_flowchart_generator.py` —
+`TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge
+sections), `TestDotFlowchartParity` (the DOT-side mirror of the same three
+features).
 
 # Copybook Test Data (`data/` package, shimmed via `copybook_data.py`)
 

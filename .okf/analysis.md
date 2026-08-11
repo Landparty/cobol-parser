@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 # Overview
@@ -87,6 +87,27 @@ construction, `INTERNAL_EDGE_TYPES`/`PERFORM_EDGE_TYPES`/`GOTO_EDGE_TYPES`),
 orchestrator). All public names still import from
 `cobolparser.analysis.program_flow`; behavior and `to_dict()` output are
 unchanged.
+
+**Real condition text + exit-statement tracking (2026-08-11):**
+`cobolparser/analysis/program_flow/condition_text.py` adds
+`render_condition_text(expr: CobolExpression | None) -> str`, walking a
+`ConditionalExpression`/`LogicalExpression` tree back into human-readable
+COBOL text (`"WS-EOF-SW = 'Y'"`, with nested `AND`/`OR`/`NOT` correctly
+parenthesized), falling back through the node's raw `operands[0]`,
+`metadata["raw_condition"]`, then its bare `expression_type` tag — so every
+caller gets *something* even for a partially-built or synthetic node.
+Before this, `BranchNode.condition_text` (and `PerformStatement`'s UNTIL
+guard) only ever carried the AST node's type TAG (e.g. `"COMPARISON"`),
+never the actual condition — both flowchart generators now render the real
+text on IF/EVALUATE diamonds and PERFORM UNTIL loop-test nodes.
+
+`FlowNode` gained `exit_statement_kind: str | None` /
+`exit_statement_location: SourceLocation | None` (`models.py`), set by
+`scanner.py` when a paragraph's terminal statement is `STOP RUN`, `GOBACK`,
+or an EXIT-family verb — both `to_dict()` and both flowchart generators
+render a distinct terminal node (`shape=doublecircle` in DOT, `(((...)))` +
+the `terminal` classDef in Mermaid) per exit statement, labeled `"{kind} ·
+{line}"`.
 
 Unlike most analyzers (which walk `get_all_statements()`), the flow graph is
 built by a hand-rolled `scan()` that recurses statement-by-statement. Audit

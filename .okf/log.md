@@ -1,5 +1,69 @@
 # OKF Update Log
 
+## 2026-08-11 (Mermaid/DOT flowchart fidelity: real condition text, exit nodes, recursion/GOTO styling, THRU badges)
+
+Seven-task plan (`docs/superpowers/plans/2026-08-11-mermaid-flow-fidelity.md`)
+closing four fidelity gaps between `cobolparser/generators/flowchart.py`'s
+diagrams and the actual control flow they're meant to represent, plus the
+analysis-layer data those diagrams needed and didn't have:
+
+* **Real condition text** (Tasks 1-3): `BranchNode.condition_text` and
+  PERFORM UNTIL's loop-test label previously showed only the AST node's
+  type TAG (`"COMPARISON"`), never the actual condition. New
+  `cobolparser/analysis/program_flow/condition_text.py` ->
+  `render_condition_text()` reconstructs real COBOL text from the
+  `ConditionalExpression`/`LogicalExpression` tree, correctly parenthesizing
+  nested AND/OR/NOT, with a graceful fallback chain (raw operand ->
+  `raw_condition` metadata -> type tag) so no caller ever gets nothing.
+  String-literal quotes are preserved through condition-token collection
+  rather than re-guessed at render time (a separate fix landed mid-plan,
+  caught before it could produce `WS-FLAG = Y` instead of `WS-FLAG = 'Y'`).
+* **Exit-statement terminal nodes** (Tasks 4-5 for Mermaid, Task 7 for DOT):
+  `FlowNode` gained `exit_statement_kind`/`exit_statement_location`
+  (`STOP RUN`/`GOBACK`/EXIT-family verbs), tracked by `scanner.py`. Both
+  generators now draw a distinct terminal node per exit statement
+  (Mermaid: `(((...)))` + `terminal` classDef; DOT: `shape=doublecircle`),
+  positioned after the main node loop and before external-call nodes,
+  respecting `show_unreachable` the same way the main node loop does.
+* **Recursion/GO TO edge color distinction** (Task 4 for Mermaid, Task 7
+  for DOT): new module-level `_recursion_pairs()` /
+  `_PERFORM_EDGE_TYPE_VALUES` / `_GOTO_EDGE_TYPE_VALUES` (shared by both
+  generator classes, not duplicated) classify each edge; a PERFORM edge
+  closing a `PERFORM_RECURSION` cycle gets gold-dashed styling, any GO
+  TO-family edge gets magenta-dashed styling. Mermaid via `linkStyle N
+  <css>` lines (index `N` counts only *emitted* edges — a hidden
+  fall-through edge must not consume an index, pinned by
+  `test_linkstyle_index_skips_hidden_edges_correctly`); DOT via
+  `color`/`style` attributes directly on the edge statement.
+* **`[THRU n]` edge-label badges instead of a duplicate arrow** (Task 6 for
+  Mermaid, Task 7 for DOT): a `PERFORM A THRU C`-style edge previously drew
+  *two* arrows (one to the range start, one spanning the whole range) — now
+  collapses to one arrow (to the range's first member) badged `[THRU n]`.
+  Both generators' edges loops skip any edge whose type ends in `"_THRU"`
+  unconditionally. **Task 7 finding:** DOT's edges loop was missing this
+  skip entirely before this task (Mermaid gained it in Task 6) — a real
+  parity bug, not just a missing style: without it, DOT rendered a
+  redundant full-span arrow alongside the badge on every THRU range.
+
+Updated: [analysis.md](analysis.md) (`ProgramFlowAnalyzer` section — new
+condition-text-rendering and exit-statement-tracking subsection),
+[generators.md](generators.md) (`Flowcharts` section — new subsection
+documenting all three edge/node styling features across both generators).
+New/extended tests: `tests/unit/test_flowchart_generator.py` gained
+`TestMermaidFlowchartGenerator`'s linkStyle/terminal-node/THRU-badge cases
+(Tasks 4-6) and a new `TestDotFlowchartParity` class (Task 7, 4 tests).
+Task 7 also corrected two pre-existing DOT tests
+(`test_fall_through_hidden_by_default`/`_shown_when_enabled`) whose
+`"dashed" not in out` assertion became a false proxy once GOTO edges
+legitimately gained `style="dashed"` — reworded to assert on the
+FALL_THROUGH edge's own text instead, preserving the tests' original
+intent (verify fall-through-specific visibility, not overload an
+increasingly-ambiguous substring). Full suite: 7944 passed / 13 skipped / 1
+xfailed (6 pre-existing, unrelated failures in
+`test_normalize_line_number_preservation.py`, confirmed present on the
+unmodified branch tip via `git stash`), 91.44% coverage. `ruff check .`,
+`black --check .`, `mypy cobolparser/` all clean. Task 7 commit `0db3a69`.
+
 ## 2026-08-10 (Copybook-triggered comment-line drift in normalize_fixed_format)
 
 GitHub issue #123: `program-flow`'s `location.line` drifted backward from a
