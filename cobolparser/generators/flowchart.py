@@ -67,6 +67,28 @@ _VERBOSE_EDGE_TYPES = {
     "EVALUATE_WHEN_OTHER",
 }
 
+# Edge types this generator treats as a "PERFORM-style call" versus a GO
+# TO-family unconditional branch -- string-value mirrors of the enum sets
+# already defined in analysis/program_flow/edges.py, kept local (rather
+# than imported) since this module works entirely in the `.value` string
+# space already (see etype handling throughout generate()).
+_PERFORM_EDGE_TYPE_VALUES = frozenset(
+    {
+        "PERFORM",
+        "PERFORM_THRU",
+        "SORT_INPUT_PROCEDURE",
+        "SORT_INPUT_PROCEDURE_THRU",
+        "SORT_OUTPUT_PROCEDURE",
+        "SORT_OUTPUT_PROCEDURE_THRU",
+        "MERGE_OUTPUT_PROCEDURE",
+        "MERGE_OUTPUT_PROCEDURE_THRU",
+    }
+)
+_GOTO_EDGE_TYPE_VALUES = frozenset({"GOTO", "GOTO_DEPENDING", "ALTER"})
+
+_RECURSION_LINK_STYLE = "stroke:#e0a800,stroke-width:2px,stroke-dasharray:5 5"
+_GOTO_LINK_STYLE = "stroke:#d6336c,stroke-width:2px,stroke-dasharray:3 3"
+
 
 def _sanitize_id(name: str) -> str:
     """Return a safe identifier derived from *name*.
@@ -78,6 +100,19 @@ def _sanitize_id(name: str) -> str:
     if safe and safe[0].isdigit():
         safe = "N_" + safe
     return safe or "N_UNKNOWN"
+
+
+def _recursion_pairs(report: ProgramFlowReport) -> set[tuple[str, str]]:
+    """(source, target) pairs that close a PERFORM_RECURSION cycle."""
+    pairs: set[tuple[str, str]] = set()
+    for cycle in report.cycle_details:
+        if cycle.get("kind") != "PERFORM_RECURSION":
+            continue
+        cycle_nodes = cycle.get("nodes", [])
+        n = len(cycle_nodes)
+        for i in range(n):
+            pairs.add((cycle_nodes[i], cycle_nodes[(i + 1) % n]))
+    return pairs
 
 
 def _short_edge_label(edge_type: str) -> str:
@@ -198,6 +233,9 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {arm_id} arm")
 
         # ---- edges ------------------------------------------------------------
+        recursion_pairs = _recursion_pairs(report)
+        link_styles: list[str] = []
+        link_index = 0
         for edge in report.edges:
             etype = (
                 edge.edge_type.value
@@ -206,6 +244,10 @@ class MermaidFlowchartGenerator:
             )
 
             if etype == "FALL_THROUGH" and not options.show_fall_through:
+                continue
+            if etype.endswith("_THRU"):
+                # THRU spans collapse into a badge on the base edge
+                # (Task 6) instead of a second, redundant arrow.
                 continue
 
             src_id = _sanitize_id(edge.source)
@@ -225,6 +267,23 @@ class MermaidFlowchartGenerator:
             else:
                 edge_str = f"    {src_id} {arrow} {tgt_id}"
             lines.append(edge_str)
+
+            if (
+                etype in _PERFORM_EDGE_TYPE_VALUES
+                and (
+                    edge.source,
+                    edge.target,
+                )
+                in recursion_pairs
+            ):
+                link_styles.append(
+                    f"    linkStyle {link_index} {_RECURSION_LINK_STYLE}"
+                )
+            elif etype in _GOTO_EDGE_TYPE_VALUES:
+                link_styles.append(f"    linkStyle {link_index} {_GOTO_LINK_STYLE}")
+            link_index += 1
+
+        lines.extend(link_styles)
 
         return "\n".join(lines)
 

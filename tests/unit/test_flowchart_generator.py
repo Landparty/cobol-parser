@@ -472,6 +472,48 @@ class TestMermaidFlowchartGenerator:
         out = MermaidFlowchartGenerator().generate(_simple_report())
         assert "flowchart TD" in out
 
+    # -- edge linkStyle (recursion / GO TO) -------------------------------
+
+    def test_perform_recursion_edge_gets_linkstyle(self) -> None:
+        nodes = [
+            _para("A", entry=True, stmt_count=1),
+            _para("B", stmt_count=1),
+        ]
+        edges = [
+            FlowEdge(
+                source="A", target="B", edge_type=FlowEdgeType.PERFORM, location=_loc()
+            ),
+            FlowEdge(
+                source="B", target="A", edge_type=FlowEdgeType.PERFORM, location=_loc()
+            ),
+        ]
+        report = ProgramFlowReport(
+            program_name="RECUR-PROG",
+            nodes=nodes,
+            edges=edges,
+            entry_points=["A"],
+            cycles=[["A", "B"]],
+            cycle_details=[
+                {
+                    "nodes": ["A", "B"],
+                    "kind": "PERFORM_RECURSION",
+                    "length": 2,
+                    "self_recursive": False,
+                    "edge_types": ["PERFORM"],
+                }
+            ],
+        )
+        out = self._gen(report)
+        assert "linkStyle" in out
+
+    def test_non_recursive_perform_edge_gets_no_linkstyle(self) -> None:
+        out = self._gen(_simple_report())
+        assert "linkStyle" not in out
+
+    def test_goto_edge_gets_linkstyle(self) -> None:
+        out = self._gen(_goto_report())
+        assert "linkStyle" in out
+
 
 # ---------------------------------------------------------------------------
 # DotFlowchartGenerator
