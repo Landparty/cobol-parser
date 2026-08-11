@@ -340,6 +340,8 @@ class MermaidFlowchartGenerator:
                 label_parts.append(_short_edge_label(etype))
         if edge.is_loop:
             label_parts.append("(loop)")
+        if edge.thru_target and edge.range_members:
+            label_parts.append(f"[THRU {len(edge.range_members)}]")
 
         return arrow, label_parts
 

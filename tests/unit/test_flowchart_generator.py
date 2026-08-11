@@ -585,6 +585,35 @@ class TestMermaidFlowchartGenerator:
         assert "linkStyle 0 " in out
         assert "linkStyle 1" not in out
 
+    def test_thru_range_renders_as_badge_not_second_arrow(self) -> None:
+        nodes = [
+            _para("A", entry=True, stmt_count=1),
+            _para("B", stmt_count=1),
+            _para("C", stmt_count=1),
+            _para("D", exit_=True, stmt_count=1),
+        ]
+        edges = [
+            FlowEdge(
+                source="A", target="B", edge_type=FlowEdgeType.PERFORM, location=_loc(),
+                thru_target="D", range_members=["B", "C", "D"],
+            ),
+            FlowEdge(
+                source="A", target="D", edge_type=FlowEdgeType.PERFORM_THRU, location=_loc(),
+                thru_target="D", range_members=["B", "C", "D"],
+            ),
+        ]
+        report = ProgramFlowReport(
+            program_name="THRU-PROG", nodes=nodes, edges=edges, entry_points=["A"],
+        )
+        out = self._gen(report)
+        assert "[THRU 3]" in out
+        # Exactly one arrow from A to D-range's entry (B), not a second
+        # A -> D arrow duplicating the same span.
+        # The PERFORM_THRU edge (A -> D) is skipped by the endswith("_THRU") filter.
+        assert "A --> D" not in out
+        # The badge should be on the A -> B edge
+        assert "A -->|[THRU 3]| B" in out
+
 
 # ---------------------------------------------------------------------------
 # DotFlowchartGenerator
