@@ -142,13 +142,29 @@ class ProcedureScanner:
                 self._scan_paragraph_statements(para)
 
     def collect_entry_points(self, ast: CobolProgram) -> None:
-        """Collect ENTRY statements as alternate entry points."""
+        """Collect the paragraphs containing ENTRY statements as alternate
+        entry points.
+
+        An ENTRY statement's literal name (e.g. ``'ALTENTRY'``) is not a node
+        key in the paragraph graph -- it is the *containing paragraph* that
+        must be treated as reachable, since that is what actually runs when
+        the alternate entry point is called.
+        """
         all_statements = ast.get_all_statements()
         for stmt in all_statements:
-            if isinstance(stmt, EntryStatement) and stmt.entry_name:
-                entry_name = stmt.entry_name.strip("'\"").strip().upper()
-                if entry_name and entry_name not in self._entry_points:
-                    self._entry_points.append(entry_name)
+            if not isinstance(stmt, EntryStatement) or not stmt.entry_name:
+                continue
+            # An ENTRY statement with a blank/whitespace-only literal name
+            # isn't a real alternate entry point; keep the existing filter
+            # so such statements don't register a spurious entry point.
+            if not stmt.entry_name.strip("'\"").strip():
+                continue
+            para_name = stmt.section_name
+            if not para_name:
+                continue
+            upper_para_name = para_name.strip().upper()
+            if upper_para_name and upper_para_name not in self._entry_points:
+                self._entry_points.append(upper_para_name)
 
     def _scan_paragraph_statements(self, para: CobolParagraph) -> None:
         """Scan all statements within a paragraph, including nested ones.

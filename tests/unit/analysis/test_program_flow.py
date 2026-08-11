@@ -587,17 +587,47 @@ class TestProgramFlowEntryPoints:
         assert report.entry_points[0] == "MAIN-LOGIC"
 
     def test_entry_statement_adds_entry_point(self) -> None:
-        """ENTRY statements register additional entry points."""
+        """ENTRY statements register their *containing paragraph* -- not the
+        ENTRY literal name -- as an additional entry point, since the
+        literal is never a node key in the paragraph graph."""
         prog = _make_program(
             [
-                ("MAIN-LOGIC", [_entry("'ALTENTRY'")]),
+                ("MAIN-LOGIC", [_stop_run()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
             ]
         )
 
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
-        assert "ALTENTRY" in report.entry_points
+        assert "ALT-ENTRY-PARA" in report.entry_points
+        assert "ALTENTRY" not in report.entry_points
+        assert "ALT-ENTRY-PARA" not in report.unreachable_nodes
+
+    def test_entry_paragraph_not_reported_unreachable_real_source(self) -> None:
+        """Regression test for the audit finding: a paragraph holding an
+        ENTRY statement is a legitimate alternate external entry point
+        (callable via CALL 'ALTENTRY') and must not show up as unreachable,
+        even though nothing internally PERFORMs or GOes to it."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALTENTRYPROG.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY "IN MAIN".
+           STOP RUN.
+       ALT-ENTRY-PARA.
+           ENTRY 'ALTENTRY'.
+           DISPLAY "IN ALT ENTRY".
+           GOBACK.
+"""
+        result = parse_cobol(source, filename="altentry.cbl")
+        assert result.errors == []
+
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+
+        assert "ALT-ENTRY-PARA" in report.entry_points
+        assert "ALT-ENTRY-PARA" not in report.unreachable_nodes
 
 
 # ---------------------------------------------------------------------------
@@ -4542,10 +4572,12 @@ class TestProgramFlowAuditEdgeCases:
     # ------------------------------------------------------------------
 
     def test_entry_point_not_in_nodes_skipped_gracefully(self) -> None:
-        """An ENTRY statement name that has no matching paragraph node is
-        skipped without error during reachability analysis."""
+        """collect_entry_points registers the paragraph *containing* the
+        ENTRY statement, not the ENTRY literal text -- the literal never
+        matches a node key, so it must never appear in entry_points, and
+        unrelated paragraphs are unaffected."""
         entry = EntryStatement(LOC)
-        entry.set_entry_name("'GHOST-ENTRY'")  # No matching paragraph
+        entry.set_entry_name("'GHOST-ENTRY'")  # Literal has no matching paragraph
 
         prog = _make_program(
             [
@@ -4556,8 +4588,10 @@ class TestProgramFlowAuditEdgeCases:
         analyzer = ProgramFlowAnalyzer()
         report = analyzer.analyze(prog)
 
-        # GHOST-ENTRY was registered as an entry point but has no node
-        assert "GHOST-ENTRY" in report.entry_points
+        # The ENTRY literal itself is never a valid entry point
+        assert "GHOST-ENTRY" not in report.entry_points
+        # Its containing paragraph is (also already the first procedure here)
+        assert "MAIN-LOGIC" in report.entry_points
         # ISOLATED is unreachable from MAIN-LOGIC (no edge to it)
         assert "ISOLATED" in report.unreachable_nodes
 
