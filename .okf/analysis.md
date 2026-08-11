@@ -63,17 +63,40 @@ otherwise-dead paragraph -- added after Copilot PR review caught the two
 analyzers diverging on this filter. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestEntryReferences`.
 
+**Computed GO TO targets read from `target_paragraphs`, not operand
+filtering (2026-08-11):** `_collect_goto_refs` used to reconstruct a
+computed `GO TO ... DEPENDING ON` statement's targets by filtering
+`stmt.operands` against `stmt.depending_on_variable` (`[op for op in
+stmt.operands if op != depending_on_variable]`). `GoStatement`'s setters
+(`set_target_paragraph`/`add_target_paragraph`/`set_depending_on_variable`)
+add operands via `_add_unique_operand`, which dedupes, so a target
+paragraph that happens to share its name with the DEPENDING ON variable
+(`GO TO PARA-A RUN-FLAG
+DEPENDING ON RUN-FLAG.`) collapses into one operand entry, which the filter
+then drops entirely — the shared-name target was reported dead despite
+being live. `GoStatement.target_paragraphs`
+(`cobolparser/models/statements/control.py`) already holds the exact,
+unfiltered target list — populated correctly by `go_parser.py`'s
+`set_target_paragraph`/`add_target_paragraph` calls — so `_collect_goto_refs`
+now just iterates it directly. Same root cause and same fix shape in
+`ProgramFlowAnalyzer.process_goto` below. Pinned by
+`test_goto_depending_target_sharing_name_with_variable` in both
+`tests/unit/analysis/test_dead_code.py` and
+`tests/unit/analysis/test_program_flow.py`.
+
 ## ProgramFlowAnalyzer
 
 ```python
 report: ProgramFlowReport = ProgramFlowAnalyzer().analyze(ast)
-# report.edges: list[FlowEdge]  (typed: PERFORM / GO_TO / CALL / FALL_THROUGH)
+# report.edges: list[FlowEdge]  (typed: PERFORM / GOTO / GOTO_DEPENDING / CALL / FALL_THROUGH)
 # report.nodes: list[FlowNode]
 ```
 
 Produces a control-flow graph. Edge types:
 - `FlowEdgeType.PERFORM` — PERFORM target
-- `FlowEdgeType.GO_TO` — unconditional/conditional GO TO
+- `FlowEdgeType.GOTO` — unconditional GO TO
+- `FlowEdgeType.GOTO_DEPENDING` — one edge per target of a computed
+  `GO TO ... DEPENDING ON`, condition set to `"DEPENDING ON <variable>"`
 - `FlowEdgeType.CALL` — static CALL (target known at parse time)
 - `FlowEdgeType.FALL_THROUGH` — sequential paragraph fall-through
 
