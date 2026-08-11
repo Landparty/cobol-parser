@@ -90,11 +90,12 @@ def _goto(target: str) -> GoStatement:
 def _goto_depending(targets: list[str], var: str) -> GoStatement:
     loc = SourceLocation(1, 12)
     stmt = GoStatement(loc)
-    # First target is the primary
+    # First target is the primary; mirrors go_parser.py's
+    # set_target_paragraph()/add_target_paragraph() calls.
     if targets:
         stmt.set_target_paragraph(targets[0])
     for t in targets[1:]:
-        stmt.add_operand(t)
+        stmt.add_target_paragraph(t)
     stmt.set_depending_on_variable(var)
     return stmt
 
@@ -526,6 +527,31 @@ class TestDeadCodeIntegration:
         assert "INIT-MIDDLE" not in dead_names
         assert "INIT-END" not in dead_names
         assert "ORPHAN-PARA" in dead_names
+
+    def test_goto_depending_target_sharing_name_with_variable(self) -> None:
+        """A computed GO TO target that shares its name with the DEPENDING
+        ON variable must still be marked referenced, not just filtered out.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOSHARE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG.
+       PARA-A.
+           DISPLAY "A".
+       RUN-FLAG.
+           DISPLAY "FLAG".
+"""
+        result = parse_cobol(source, filename="gotoshare.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        dead_names = [item.name for item in report.dead_items]
+        assert "RUN-FLAG" not in dead_names
+        assert "PARA-A" not in dead_names
 
     def test_find_dead_code_convenience(self) -> None:
         """CobolProgram.find_dead_code() works end-to-end."""

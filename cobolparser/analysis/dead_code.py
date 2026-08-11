@@ -221,13 +221,12 @@ class DeadCodeAnalyzer:
 
     def _collect_goto_refs(self, stmt: GoStatement) -> None:
         """Collect references from a GO TO statement."""
-        if stmt.target_paragraph:
-            self._add_ref(stmt.target_paragraph)
-        # GO TO ... DEPENDING ON has multiple targets in operands
-        if stmt.depending_on_variable:
-            for operand in stmt.operands:
-                if operand != stmt.depending_on_variable:
-                    self._add_ref(operand)
+        # target_paragraphs already holds every target (including all
+        # computed GO TO ... DEPENDING ON targets); reconstructing them by
+        # filtering operands would collapse a target that happens to share
+        # its name with the DEPENDING ON variable.
+        for target in stmt.target_paragraphs:
+            self._add_ref(target)
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
