@@ -5,6 +5,7 @@ from cobolparser.analysis.dead_code import (
     DeadCodeItem,
     DeadCodeReport,
 )
+from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.program import (
     CobolDivision,
@@ -275,7 +276,9 @@ class TestDeadCodeAnalyzer:
         assert "ORPHAN" in dead_names
 
     def test_alter_references(self) -> None:
-        """ALTER should mark both from and to paragraphs as referenced."""
+        """ALTER should mark only the new jump target (to_paragraph) as
+        referenced, not the paragraph whose GO TO is being modified
+        (from_paragraph)."""
         prog = _make_program(
             [
                 ("MAIN-LOGIC", [_alter("SWITCH-PARA", "NEW-TARGET")]),
@@ -288,7 +291,7 @@ class TestDeadCodeAnalyzer:
         report = analyzer.analyze(prog)
 
         dead_names = [item.name for item in report.dead_items]
-        assert "SWITCH-PARA" not in dead_names
+        assert "SWITCH-PARA" in dead_names
         assert "NEW-TARGET" not in dead_names
         assert "ORPHAN" in dead_names
 
@@ -851,7 +854,14 @@ class TestMarkThruRangeInverted:
 
 
 class TestAlterReferences:
-    def test_alter_marks_both_from_and_to(self) -> None:
+    def test_alter_marks_only_to_paragraph(self) -> None:
+        """Only the ALTER's new target (to_paragraph) counts as a reference.
+
+        The subject of the ALTER (from_paragraph) is the paragraph whose
+        internal GO TO is being modified -- naming it in the ALTER is not an
+        incoming jump, so it must not be protected from dead-code detection
+        just because it appears there.
+        """
         loc = SourceLocation(1, 12)
         alter = AlterStatement(loc)
         alter.add_alteration("PARA-X", "PARA-Y")
@@ -867,9 +877,44 @@ class TestAlterReferences:
         )
         report = DeadCodeAnalyzer().analyze(prog)
         dead = [i.name for i in report.dead_items]
-        assert "PARA-X" not in dead
+        # PARA-X is only ever named as an ALTER "from" subject -- never
+        # actually jumped to -- so it is genuinely dead.
+        assert "PARA-X" in dead
         assert "PARA-Y" not in dead
         assert "PARA-Z" not in dead
+        assert "DEAD" in dead
+
+    def test_alter_never_called_paragraph_is_dead(self) -> None:
+        """Regression test for the specific repro: a paragraph named only as
+        the ALTER subject (never PERFORMed/GONE TO) must be reported dead,
+        matching ProgramFlowAnalyzer's unreachable_nodes on the same input.
+
+        Each paragraph ends with GOBACK/STOP RUN so there is no implicit
+        fall-through between paragraphs muddying reachability -- the only
+        thing under test is the ALTER subject-vs-target handling.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALTERDEAD.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           ALTER NEVER-CALLED TO PROCEED TO SOME-TARGET
+           STOP RUN.
+       SOME-TARGET.
+           DISPLAY "TARGET"
+           GOBACK.
+       NEVER-CALLED.
+           DISPLAY "NEVER CALLED".
+"""
+        result = parse_cobol(source, filename="alterdead.cbl")
+        assert result.ast is not None
+
+        dead_code_report = DeadCodeAnalyzer().analyze(result.ast)
+        dead_names = {i.name for i in dead_code_report.dead_items}
+        assert "NEVER-CALLED" in dead_names
+
+        flow_report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert "NEVER-CALLED" in flow_report.unreachable_nodes
 
 
 # ---------------------------------------------------------------------------

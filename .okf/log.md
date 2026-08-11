@@ -1,5 +1,22 @@
 # OKF Update Log
 
+## 2026-08-11 (DeadCodeAnalyzer ALTER subject falsely marked referenced)
+
+Dead Code & Program Flow module audit finding #6: `DeadCodeAnalyzer.
+_collect_alter_refs` (`cobolparser/analysis/dead_code.py`) added *both*
+names from `ALTER paragraph-name TO PROCEED TO target-name` to the
+reference set, but `paragraph-name` (the ALTER's subject — the paragraph
+whose internal GO TO gets rewritten) is not an incoming jump; only
+`target-name` is. This hid genuinely dead paragraphs whenever a program
+named them only as an ALTER subject, and put `DeadCodeAnalyzer` out of
+step with `ProgramFlowAnalyzer`'s `unreachable_nodes`, whose ALTER edge
+(`program_flow/edges.py::process_alter`) already only flowed
+subject to target and never had this bug. Fixed by dropping the
+`from_paragraph` add; only `to_paragraph` counts as referenced now.
+Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer section). Pinned by
+`TestAlterReferences.test_alter_never_called_paragraph_is_dead`
+(`tests/unit/analysis/test_dead_code.py`).
+
 ## 2026-08-11 (Dead-code/program-flow: SECTION-registration dedup guard, Copilot follow-up)
 
 Copilot review on PR #130 (the paragraphs-before-first-SECTION fix below)
@@ -69,6 +86,7 @@ corrected source. Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer and
 ProgramFlowAnalyzer sections; also corrected a stale `GO_TO` edge-type name
 to `GOTO` and documented `GOTO_DEPENDING`, found while editing the adjacent
 text).
+
 ## 2026-08-11 (ENTRY-statement paragraphs falsely reported unreachable/dead)
 
 Dead Code & Program Flow module audit, finding #5: a paragraph containing an

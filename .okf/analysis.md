@@ -63,6 +63,20 @@ otherwise-dead paragraph -- added after Copilot PR review caught the two
 analyzers diverging on this filter. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestEntryReferences`.
 
+**ALTER only references its target, not its subject (2026-08-11):**
+`ALTER paragraph-name TO PROCEED TO target-name` modifies a GO TO living
+inside `paragraph-name`; only `target-name` is an incoming jump.
+`_collect_alter_refs` used to add both names to the reference set, so a
+paragraph named solely as an ALTER's subject was wrongly protected from
+dead-code detection even when nothing ever PERFORMed/GONE TO it. This put
+`DeadCodeAnalyzer` out of step with `ProgramFlowAnalyzer`'s
+`unreachable_nodes`, whose ALTER edge (`edges.py::process_alter`) already
+only flowed subject to target and never had this bug. Fixed by dropping the
+`from_paragraph` add in `_collect_alter_refs`; only `to_paragraph` counts as
+referenced now. Pinned by
+`TestAlterReferences.test_alter_never_called_paragraph_is_dead`
+(`tests/unit/analysis/test_dead_code.py`).
+
 **Computed GO TO targets read from `target_paragraphs`, not operand
 filtering (2026-08-11):** `_collect_goto_refs` used to reconstruct a
 computed `GO TO ... DEPENDING ON` statement's targets by filtering
