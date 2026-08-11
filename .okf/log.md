@@ -17,6 +17,26 @@ Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer section). Pinned by
 `TestAlterReferences.test_alter_never_called_paragraph_is_dead`
 (`tests/unit/analysis/test_dead_code.py`).
 
+## 2026-08-11 (ENTRY-statement paragraphs falsely reported unreachable/dead)
+
+Dead Code & Program Flow module audit, finding #5: a paragraph containing an
+`ENTRY` statement (a legitimate alternate external entry point, callable via
+`CALL 'entry-name'`) was never treated as a reachable root. Root cause:
+`program_flow/scanner.py`'s `collect_entry_points` added the ENTRY
+statement's *literal* name (e.g. `'ALTENTRY'`) to `entry_points`, which is
+never a key in the paragraph-node graph, so the BFS seed matched nothing and
+`ProgramFlowAnalyzer` reported the paragraph unreachable; `dead_code.py` had
+no `EntryStatement` handling at all, so `DeadCodeAnalyzer` reported it dead.
+Fixed by resolving the *containing paragraph's* name instead of the literal
+in both analyzers, via `stmt.section_name` -- `CobolParagraph` overrides
+`ASTNode.section_name` to return its own `paragraph_name`, so walking a
+statement's `.parent` chain up via `.section_name` already lands on its
+containing paragraph regardless of nesting depth, with no new AST walk-up
+helper needed. Updated: [analysis.md](analysis.md) (`DeadCodeAnalyzer` and
+`ProgramFlowAnalyzer` sections). Pinned by
+`tests/unit/analysis/test_dead_code.py::TestEntryReferences` and
+`tests/unit/analysis/test_program_flow.py::TestProgramFlowEntryPoints`.
+
 ## 2026-08-10 (reports/open-findings.md consolidated)
 
 At the user's request, cleaned up `reports/open-findings.md`: it had grown
