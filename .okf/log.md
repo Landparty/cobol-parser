@@ -1,5 +1,26 @@
 # OKF Update Log
 
+## 2026-08-10 (reports/open-findings.md consolidated)
+
+At the user's request, cleaned up `reports/open-findings.md`: it had grown
+into a 796-line journal of dated status updates and full per-finding
+writeups for every HIGH (H1-H11) and MEDIUM (M1-M16) finding, all of which
+are already fixed and pinned by regression tests, plus references to
+`reports/audit-2026-07-06/07/08/09.md` and
+`cobol-parser-example-parse-gaps.md`, which no longer exist in the repo
+(already superseded and deleted in an earlier pass). Rewrote it in place as
+a single ~130-line file listing only what's currently open: M17
+(branch-coverage debt), the LOW-severity list, and the test/tooling gaps
+list. Two items were dropped as stale during the cleanup rather than
+carried forward: the Tier-2 path-resolver containment gap (formerly "H6")
+now has dedicated regression coverage
+(`TestH6PathResolverContainment` in
+`tests/regression/test_open_findings_high_regressions.py`), and CI's
+Cython-extension build is no longer implicit — the `build` job added
+2026-08-06 (see below) runs `build_ext --inplace` explicitly. Fixed-finding
+history remains available in `CHANGELOG.md` ("Unreleased → Fixed") and this
+file's own git history; no code changed.
+
 ## 2026-08-10 (Copybook-triggered comment-line drift in normalize_fixed_format)
 
 GitHub issue #123: `program-flow`'s `location.line` drifted backward from a
