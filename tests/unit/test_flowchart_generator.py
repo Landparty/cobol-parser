@@ -22,6 +22,7 @@ from cobolparser.analysis.program_flow import (
     FlowEdge,
     FlowEdgeType,
     FlowNode,
+    ProgramFlowAnalyzer,
     ProgramFlowReport,
 )
 from cobolparser.generators.flowchart import (
@@ -31,7 +32,6 @@ from cobolparser.generators.flowchart import (
     _sanitize_id,
     _short_edge_label,
 )
-from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.parser import parse_cobol
 
