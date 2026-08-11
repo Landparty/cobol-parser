@@ -14,6 +14,7 @@ Tests cover:
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from cobolparser.analysis.program_flow import (
     BranchArm,
@@ -594,16 +595,27 @@ class TestMermaidFlowchartGenerator:
         ]
         edges = [
             FlowEdge(
-                source="A", target="B", edge_type=FlowEdgeType.PERFORM, location=_loc(),
-                thru_target="D", range_members=["B", "C", "D"],
+                source="A",
+                target="B",
+                edge_type=FlowEdgeType.PERFORM,
+                location=_loc(),
+                thru_target="D",
+                range_members=["B", "C", "D"],
             ),
             FlowEdge(
-                source="A", target="D", edge_type=FlowEdgeType.PERFORM_THRU, location=_loc(),
-                thru_target="D", range_members=["B", "C", "D"],
+                source="A",
+                target="D",
+                edge_type=FlowEdgeType.PERFORM_THRU,
+                location=_loc(),
+                thru_target="D",
+                range_members=["B", "C", "D"],
             ),
         ]
         report = ProgramFlowReport(
-            program_name="THRU-PROG", nodes=nodes, edges=edges, entry_points=["A"],
+            program_name="THRU-PROG",
+            nodes=nodes,
+            edges=edges,
+            entry_points=["A"],
         )
         out = self._gen(report)
         assert "[THRU 3]" in out
@@ -670,10 +682,15 @@ class TestDotFlowchartGenerator:
     def test_fall_through_hidden_by_default(self) -> None:
         out = self._gen(_goto_report())
         assert "fall-through" not in out
-        assert "dashed" not in out
+        # The FALL_THROUGH edge itself (SECTION_B -> END_PARA) must not be
+        # rendered when hidden. Note "dashed" alone is no longer a reliable
+        # signal here: the GOTO edge (SECTION_A -> SECTION_B) legitimately
+        # gets style="dashed" from the Task 7 GOTO color/style treatment.
+        assert "SECTION_B -> END_PARA" not in out
 
     def test_fall_through_shown_when_enabled(self) -> None:
         out = self._gen(_goto_report(), show_fall_through=True)
+        assert "SECTION_B -> END_PARA" in out
         assert "dashed" in out
 
     def test_loop_edge_color(self) -> None:
@@ -875,3 +892,93 @@ class TestDotBranchNodes:
         """Without branch nodes, no diamond shapes appear."""
         out = self._gen(_simple_report())
         assert "shape=diamond" not in out
+
+
+# ---------------------------------------------------------------------------
+# TestDotFlowchartParity
+# ---------------------------------------------------------------------------
+
+
+class TestDotFlowchartParity:
+    """DotFlowchartGenerator parity with the Mermaid recursion/GOTO/exit/THRU
+    styling added in Tasks 4-6."""
+
+    def _gen(self, report: ProgramFlowReport, **opts: Any) -> str:
+        return DotFlowchartGenerator().generate(report, FlowchartOptions(**opts))
+
+    def test_perform_recursion_edge_gets_orange_color(self) -> None:
+        nodes = [_para("A", entry=True, stmt_count=1), _para("B", stmt_count=1)]
+        edges = [
+            FlowEdge(
+                source="A", target="B", edge_type=FlowEdgeType.PERFORM, location=_loc()
+            ),
+            FlowEdge(
+                source="B", target="A", edge_type=FlowEdgeType.PERFORM, location=_loc()
+            ),
+        ]
+        report = ProgramFlowReport(
+            program_name="RECUR-PROG",
+            nodes=nodes,
+            edges=edges,
+            entry_points=["A"],
+            cycle_details=[
+                {
+                    "nodes": ["A", "B"],
+                    "kind": "PERFORM_RECURSION",
+                    "length": 2,
+                    "self_recursive": False,
+                    "edge_types": ["PERFORM"],
+                }
+            ],
+        )
+        out = self._gen(report)
+        assert "#e0a800" in out
+
+    def test_goto_edge_gets_magenta_color(self) -> None:
+        out = self._gen(_goto_report())
+        assert "#d6336c" in out
+
+    def test_stop_run_renders_doublecircle_terminal_node(self) -> None:
+        node = _para("MAIN-LOGIC", entry=True, exit_=True, stmt_count=2)
+        node.exit_statement_kind = "STOP RUN"
+        node.exit_statement_location = _loc(line=42)
+        report = ProgramFlowReport(
+            program_name="TERM-PROG",
+            nodes=[node],
+            entry_points=["MAIN-LOGIC"],
+        )
+        out = self._gen(report)
+        assert "shape=doublecircle" in out
+        assert "STOP RUN" in out and "42" in out
+
+    def test_thru_range_renders_as_dot_label_badge(self) -> None:
+        nodes = [
+            _para("A", entry=True, stmt_count=1),
+            _para("B", stmt_count=1),
+            _para("C", stmt_count=1),
+            _para("D", exit_=True, stmt_count=1),
+        ]
+        edges = [
+            FlowEdge(
+                source="A",
+                target="B",
+                edge_type=FlowEdgeType.PERFORM,
+                location=_loc(),
+                thru_target="D",
+                range_members=["B", "C", "D"],
+            ),
+            FlowEdge(
+                source="A",
+                target="D",
+                edge_type=FlowEdgeType.PERFORM_THRU,
+                location=_loc(),
+                thru_target="D",
+                range_members=["B", "C", "D"],
+            ),
+        ]
+        report = ProgramFlowReport(
+            program_name="THRU-PROG", nodes=nodes, edges=edges, entry_points=["A"]
+        )
+        out = self._gen(report)
+        assert "[THRU 3]" in out
+        assert "A -> D" not in out

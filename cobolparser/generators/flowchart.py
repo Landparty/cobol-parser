@@ -430,6 +430,23 @@ class DotFlowchartGenerator:
                 f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
             )
 
+        # ---- exit-statement terminal nodes -------------------------------------
+        for node in report.nodes:
+            if not node.exit_statement_kind or not node.exit_statement_location:
+                continue
+            if not options.show_unreachable and node.name in unreachable_set:
+                continue
+            nid = _sanitize_id(node.name)
+            exit_id = f"{nid}_EXIT"
+            label = self._dot_str(
+                f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
+            )
+            lines.append(
+                f"    {exit_id} [label={label}, shape=doublecircle,"
+                f' fillcolor="#1b1b1b", fontcolor="#c1121f"];'
+            )
+            lines.append(f"    {nid} -> {exit_id};")
+
         # ---- external call nodes ---------------------------------------------
         if options.show_external_calls:
             seen_ext: set[str] = set()
@@ -469,6 +486,7 @@ class DotFlowchartGenerator:
         lines.append("")
 
         # ---- edges -----------------------------------------------------------
+        recursion_pairs = _recursion_pairs(report)
         for edge in report.edges:
             etype = (
                 edge.edge_type.value
@@ -477,6 +495,8 @@ class DotFlowchartGenerator:
             )
 
             if etype == "FALL_THROUGH" and not options.show_fall_through:
+                continue
+            if etype.endswith("_THRU"):
                 continue
 
             src_id = _sanitize_id(edge.source)
@@ -490,6 +510,19 @@ class DotFlowchartGenerator:
                 tgt_id = _sanitize_id(edge.target)
 
             attrs = self._edge_attrs(etype, edge, options)
+            if (
+                etype in _PERFORM_EDGE_TYPE_VALUES
+                and (
+                    edge.source,
+                    edge.target,
+                )
+                in recursion_pairs
+            ):
+                attrs["color"] = "#e0a800"
+                attrs["style"] = "dashed"
+            elif etype in _GOTO_EDGE_TYPE_VALUES:
+                attrs["color"] = "#d6336c"
+                attrs["style"] = "dashed"
             if attrs:
                 attr_str = (
                     " [" + ", ".join(f'{k}="{v}"' for k, v in attrs.items()) + "]"
@@ -554,5 +587,9 @@ class DotFlowchartGenerator:
             attrs["label"] = lbl
         elif edge.is_loop:
             attrs["label"] = "(loop)"
+
+        if edge.thru_target and edge.range_members:
+            n = len(edge.range_members)
+            attrs["label"] = f"{attrs.get('label', '')} [THRU {n}]".strip()
 
         return attrs
