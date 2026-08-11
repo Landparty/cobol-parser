@@ -93,7 +93,27 @@ def test_logical_or_nested_under_and() -> None:
     and_expr = LogicalExpression("AND", LOC)
     and_expr.set_left_condition(or_expr)
     and_expr.set_right_condition(c)
-    assert render_condition_text(and_expr) == "A = 1 OR B = 2 AND C = 3"
+    assert render_condition_text(and_expr) == "(A = 1 OR B = 2) AND C = 3"
+
+
+def test_logical_and_nested_under_or() -> None:
+    # A OR (B AND C)
+    a = ConditionalExpression("EQUAL", LOC)
+    a.set_left_operand("A")
+    a.set_right_operand("1")
+    b = ConditionalExpression("EQUAL", LOC)
+    b.set_left_operand("B")
+    b.set_right_operand("2")
+    c = ConditionalExpression("EQUAL", LOC)
+    c.set_left_operand("C")
+    c.set_right_operand("3")
+    and_expr = LogicalExpression("AND", LOC)
+    and_expr.set_left_condition(b)
+    and_expr.set_right_condition(c)
+    or_expr = LogicalExpression("OR", LOC)
+    or_expr.set_left_condition(a)
+    or_expr.set_right_condition(and_expr)
+    assert render_condition_text(or_expr) == "A = 1 OR (B = 2 AND C = 3)"
 
 
 def test_function_call_operand() -> None:

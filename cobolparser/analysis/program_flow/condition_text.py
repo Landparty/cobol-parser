@@ -50,7 +50,11 @@ def render_condition_text(expr: CobolExpression | None) -> str:
 
     if isinstance(expr, LogicalExpression):
         left = render_condition_text(expr.left_condition)
+        if isinstance(expr.left_condition, LogicalExpression):
+            left = f"({left})"
         right = render_condition_text(expr.right_condition)
+        if isinstance(expr.right_condition, LogicalExpression):
+            right = f"({right})"
         return f"{left} {expr.operator} {right}".strip()
 
     if isinstance(expr, FunctionCall):
