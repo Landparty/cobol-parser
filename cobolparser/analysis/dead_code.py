@@ -12,6 +12,7 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolProgram
+from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
     PerformStatement,
@@ -75,7 +76,10 @@ class DeadCodeAnalyzer:
     - ALTER ... TO PROCEED TO ...
 
     The first procedure in the PROCEDURE DIVISION is always considered
-    referenced as the program entry point.
+    referenced as the program entry point. A paragraph that contains an
+    ENTRY statement is also always considered referenced, since it is a
+    legitimate alternate external entry point (callable via CALL
+    'entry-name') even when nothing internally PERFORMs or GOes to it.
 
     Example:
         ```python
@@ -209,6 +213,8 @@ class DeadCodeAnalyzer:
                 self._collect_merge_refs(stmt)
             elif isinstance(stmt, AlterStatement):
                 self._collect_alter_refs(stmt)
+            elif isinstance(stmt, EntryStatement):
+                self._collect_entry_refs(stmt)
 
     def _collect_perform_refs(self, stmt: PerformStatement) -> None:
         """Collect references from a PERFORM statement."""
@@ -255,6 +261,19 @@ class DeadCodeAnalyzer:
         for alteration in stmt.alterations:
             self._add_ref(alteration["from_paragraph"])
             self._add_ref(alteration["to_paragraph"])
+
+    def _collect_entry_refs(self, stmt: EntryStatement) -> None:
+        """Mark the paragraph containing an ENTRY statement as referenced.
+
+        The ENTRY statement's literal name is not a procedure name -- it is
+        the paragraph physically holding the ENTRY statement that is the
+        alternate entry point, so that paragraph (and, per
+        ``_propagate_section_references``, its enclosing section) must never
+        be reported as dead code.
+        """
+        para_name = stmt.section_name
+        if para_name:
+            self._add_ref(para_name)
 
     @staticmethod
     def _is_valid_procedure_name(name: str) -> bool:
