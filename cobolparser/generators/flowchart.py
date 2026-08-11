@@ -102,6 +102,31 @@ def _sanitize_id(name: str) -> str:
     return safe or "N_UNKNOWN"
 
 
+def _unique_exit_id(nid: str, paragraph_ids: set[str]) -> str:
+    """Return a terminal-node id derived from *nid* that cannot collide with
+    a real paragraph's sanitized id.
+
+    ``PERFORM X THRU X-EXIT`` is a common COBOL range idiom, so a program
+    can legitimately contain a paragraph literally named e.g. ``9000-TERM-
+    EXIT``. ``_sanitize_id`` turns both "9000-TERM" + our own "_EXIT" suffix
+    and the real paragraph "9000-TERM-EXIT" into the same id
+    (``N_9000_TERM_EXIT``), which would silently merge two distinct nodes.
+    Fall back to a suffix that's very unlikely to collide, then to an
+    incrementing numeric suffix in the pathological case that even that
+    collides too.
+    """
+    candidate = f"{nid}_EXIT"
+    if candidate not in paragraph_ids:
+        return candidate
+    candidate = f"{nid}_FLOWEXIT"
+    if candidate not in paragraph_ids:
+        return candidate
+    suffix = 2
+    while f"{nid}_FLOWEXIT_{suffix}" in paragraph_ids:
+        suffix += 1
+    return f"{nid}_FLOWEXIT_{suffix}"
+
+
 def _recursion_pairs(report: ProgramFlowReport) -> set[tuple[str, str]]:
     """(source, target) pairs that close a PERFORM_RECURSION cycle."""
     pairs: set[tuple[str, str]] = set()
@@ -210,17 +235,20 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {nid} unreachable")
 
         # ---- exit-statement terminal nodes -------------------------------------
+        paragraph_ids = {_sanitize_id(n.name) for n in report.nodes}
+        terminal_link_count = 0
         for node in report.nodes:
             if not node.exit_statement_kind or not node.exit_statement_location:
                 continue
             if not options.show_unreachable and node.name in unreachable_set:
                 continue
             nid = _sanitize_id(node.name)
-            exit_id = f"{nid}_EXIT"
+            exit_id = _unique_exit_id(nid, paragraph_ids)
             label = f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
             lines.append(f'    {exit_id}((("{label}")))')
             lines.append(f"    {nid} --> {exit_id}")
             lines.append(f"    class {exit_id} terminal")
+            terminal_link_count += 1
 
         # ---- external call nodes ----------------------------------------------
         if options.show_external_calls:
@@ -249,7 +277,13 @@ class MermaidFlowchartGenerator:
         # ---- edges ------------------------------------------------------------
         recursion_pairs = _recursion_pairs(report)
         link_styles: list[str] = []
-        link_index = 0
+        # Mermaid's `linkStyle N` addresses links by their order of
+        # *definition in the whole diagram*, not just within this loop.
+        # The terminal-node loop above already emitted `terminal_link_count`
+        # `-->` links, so this loop's own link indices must start after
+        # them -- otherwise every terminal-node link shifts all of these
+        # indices and recursion/GO TO colors land on the wrong arrows.
+        link_index = terminal_link_count
         for edge in report.edges:
             etype = (
                 edge.edge_type.value
@@ -431,13 +465,14 @@ class DotFlowchartGenerator:
             )
 
         # ---- exit-statement terminal nodes -------------------------------------
+        paragraph_ids = {_sanitize_id(n.name) for n in report.nodes}
         for node in report.nodes:
             if not node.exit_statement_kind or not node.exit_statement_location:
                 continue
             if not options.show_unreachable and node.name in unreachable_set:
                 continue
             nid = _sanitize_id(node.name)
-            exit_id = f"{nid}_EXIT"
+            exit_id = _unique_exit_id(nid, paragraph_ids)
             label = self._dot_str(
                 f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
             )
