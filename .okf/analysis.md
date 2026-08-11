@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-11T00:00:00Z
+timestamp: 2026-08-11T12:00:00Z
 ---
 
 # Overview
@@ -104,10 +104,25 @@ text on IF/EVALUATE diamonds and PERFORM UNTIL loop-test nodes.
 `FlowNode` gained `exit_statement_kind: str | None` /
 `exit_statement_location: SourceLocation | None` (`models.py`), set by
 `scanner.py` when a paragraph's terminal statement is `STOP RUN`, `GOBACK`,
-or an EXIT-family verb — both `to_dict()` and both flowchart generators
+or `EXIT PROGRAM` — both `to_dict()` (present only when both fields are
+set; absent from the dict entirely otherwise) and both flowchart generators
 render a distinct terminal node (`shape=doublecircle` in DOT, `(((...)))` +
 the `terminal` classDef in Mermaid) per exit statement, labeled `"{kind} ·
-{line}"`.
+{line}"`. First-write-wins: `_record_exit_statement` only sets the fields
+the first time a paragraph's `scan()` walk reaches an exit-eligible
+statement (e.g. `STOP RUN` in an `IF`'s THEN arm and `GOBACK` in its ELSE
+arm keeps whichever is scanned first).
+
+**RETURN is explicitly excluded (bug fixed 2026-08-11):** `RETURN` reads
+the next record from a SORT/MERGE file — it does not terminate the
+program, and `scanner.py` deliberately does not add RETURN's paragraph to
+`self._exit_points` either (`node.is_exit_point` stays `False`). An earlier
+task's `scan()` change called `_record_exit_statement(node, "RETURN",
+stmt.location)` anyway, so a paragraph's RETURN got rendered as a red
+terminal double-circle by both flowchart generators — directly
+contradicting the analyzer's own `is_exit_point` classification for the
+same node. Fixed by removing that call; `node.has_return` (unrelated,
+correct) is unaffected.
 
 Unlike most analyzers (which walk `get_all_statements()`), the flow graph is
 built by a hand-rolled `scan()` that recurses statement-by-statement. Audit

@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-11T00:00:00Z
+timestamp: 2026-08-11T12:00:00Z
 ---
 
 # Overview
@@ -62,10 +62,19 @@ substance, differing only in each target format's own attribute syntax:
   gold-dashed styling; any GO TO-family edge (`GOTO`, `GOTO_DEPENDING`,
   `ALTER`) gets magenta-dashed styling — **Mermaid** via a `linkStyle N
   <css>` line per styled edge (`_RECURSION_LINK_STYLE` /
-  `_GOTO_LINK_STYLE` constants; `N` is the edge's position among *emitted*
-  (non-skipped) edges only — a hidden fall-through edge does not consume an
-  index), **DOT** via `color="#e0a800"|"#d6336c"` + `style="dashed"`
-  attributes set directly on the `->` edge statement.
+  `_GOTO_LINK_STYLE` constants; `N` counts every `-->`/`==>`/`-.->` link
+  Mermaid will see, in the order `generate()` writes them to `lines` —
+  which includes the exit-statement terminal-node links emitted *before*
+  the edges loop, not just the edges loop's own emitted (non-skipped)
+  edges. `link_index` is seeded with `terminal_link_count` (the number of
+  `{nid} --> {exit_id}` lines the terminal-node loop actually wrote) before
+  the edges loop starts counting; a hidden fall-through edge still does not
+  consume an index of its own. **Bug fixed 2026-08-11:** `link_index` used
+  to start at 0 regardless of the terminal-node loop, so in any program with
+  both a terminal node and a styled edge, every `linkStyle N` line pointed
+  at the wrong arrow, off by the terminal-link count. DOT has no analogous
+  bug — its `color`/`style` are set as attributes directly on each `->`
+  edge statement, with no global, order-dependent index to get out of sync.
 - **Terminal exit nodes.** One extra node per `FlowNode` carrying
   `exit_statement_kind`/`exit_statement_location` (see
   [analysis.md](analysis.md)'s `ProgramFlowAnalyzer` section), labeled
@@ -74,19 +83,41 @@ substance, differing only in each target format's own attribute syntax:
   triple-circle syntax plus a `terminal` classDef
   (`fill:#1b1b1b,stroke:#c1121f`); DOT emits `shape=doublecircle` with
   matching `fillcolor`/`fontcolor`. Both respect `show_unreachable`
-  identically to the main node loop.
+  identically to the main node loop. The terminal id is normally
+  `f"{nid}_EXIT"` (`nid = _sanitize_id(node.name)`), but module-level
+  `_unique_exit_id(nid, paragraph_ids)` (shared by both generators) falls
+  back to `{nid}_FLOWEXIT`, then an incrementing numeric suffix, whenever
+  that id collides with a real paragraph's own sanitized id. **Bug fixed
+  2026-08-11:** `PERFORM X THRU X-EXIT` is a common COBOL range idiom, so a
+  program can legitimately contain a paragraph literally named e.g.
+  `9000-TERM-EXIT`; before the fix, that paragraph's own node id
+  (`N_9000_TERM_EXIT`) silently collided with paragraph `9000-TERM`'s
+  synthetic terminal-node id, merging two distinct nodes into one in both
+  renderers.
 - **`[THRU n]` edge-label badges.** A `FlowEdge` carrying `thru_target` +
   `range_members` (a `PERFORM ... THRU ...` / SORT|MERGE procedure range)
   renders as a single arrow from the range's start to its *first* member,
   badged `[THRU n]` (`n = len(range_members)`) — not as a second,
   redundant arrow spanning the whole range. Both generators' edges loops
   skip any edge whose `.value` ends in `"_THRU"` (the second, would-be
-  duplicate arrow) unconditionally, regardless of `show_fall_through`.
+  duplicate arrow) unconditionally, regardless of `show_fall_through`. This
+  requires the *base* (non-`_THRU`) edge to itself carry `thru_target`/
+  `range_members` — `EdgeCollector.process_perform` (`edges.py`) has always
+  done this; `process_sort`/`process_merge` did not (**bug fixed
+  2026-08-11**: the base `SORT_INPUT_PROCEDURE`/`SORT_OUTPUT_PROCEDURE`/
+  `MERGE_OUTPUT_PROCEDURE` edge had `thru_target=None, range_members=[]`,
+  so a SORT/MERGE THRU range rendered neither the second arrow (correctly
+  skipped) nor the badge (nothing to badge) — the range vanished from the
+  diagram entirely). All three `process_*` methods now compute the range
+  once and pass it to both the base edge and its `*_THRU` sibling.
 
 Reference tests: `tests/unit/test_flowchart_generator.py` —
 `TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge
-sections), `TestDotFlowchartParity` (the DOT-side mirror of the same three
-features).
+sections, plus `test_linkstyle_index_accounts_for_terminal_node_links` and
+`test_terminal_id_does_not_collide_with_real_exit_paragraph` pinning the
+two composition-bug fixes above), `TestDotFlowchartParity` (the DOT-side
+mirror), and `TestSortThruEndToEnd` (real-COBOL-through-the-analyzer proof
+that a SORT OUTPUT PROCEDURE THRU range now reaches both renderers).
 
 # Copybook Test Data (`data/` package, shimmed via `copybook_data.py`)
 

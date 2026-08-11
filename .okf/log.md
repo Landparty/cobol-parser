@@ -1,5 +1,108 @@
 # OKF Update Log
 
+## 2026-08-11 (Whole-branch final review: 4 composition bugs across the 7-task Mermaid/DOT flowchart-fidelity plan)
+
+A final review of the whole branch (the plan below, all 7 tasks individually
+reviewed clean) caught four composition bugs no single task's reviewer could
+see — each one only surfaces when two tasks' output combines in the same
+report. Fixed all four, plus two should-fix test-coverage gaps, in one pass
+per the review's own instruction (no second fix wave):
+
+* **Critical: Mermaid `linkStyle` indices off by the terminal-node link
+  count.** `flowchart.py`'s exit-statement terminal-node loop (Task 5) runs
+  *before* the edges loop (Tasks 4/6), emitting one `{nid} --> {exit_id}`
+  link per paragraph with a recorded exit statement — but the edges loop's
+  own `link_index` counter still started at 0, as if it were the only
+  link-emitting loop in the diagram. Since Mermaid's `linkStyle N`
+  addresses links by definition order across the *whole* diagram, every
+  terminal-node link shifted every subsequent `linkStyle` index, so
+  recursion/GO TO coloring landed on the wrong arrow in any program with
+  both a terminal node and a styled edge — i.e. almost every real program.
+  Fixed by seeding `link_index` with `terminal_link_count` (a new counter,
+  incremented only when the terminal-node loop actually appends a link)
+  before the edges loop starts. Verified empirically with a hand-built
+  report (paragraph `C` has `STOP RUN`; paragraphs `A`/`B` form a
+  `PERFORM_RECURSION` cycle): before the fix, the recursion edge `B --> A`
+  (arrow position 2 in definition order) got `linkStyle 1`, addressing
+  `A --> B` instead; after the fix it correctly gets `linkStyle 2`. New
+  regression test:
+  `test_linkstyle_index_accounts_for_terminal_node_links` in
+  `tests/unit/test_flowchart_generator.py`.
+* **Important: SORT/MERGE `... THRU ...` ranges vanished from both
+  diagrams.** Task 6 made both generators skip any edge whose type ends in
+  `_THRU`, relying on the *base* edge already carrying `thru_target`/
+  `range_members` for a `[THRU n]` badge — true for `process_perform`
+  (`edges.py`), which has always set those fields on both the base PERFORM
+  edge and its `PERFORM_THRU` sibling, but `process_sort`/`process_merge`
+  in the same file only ever set them on the `*_THRU` edge. Once the
+  generators started unconditionally skipping the `*_THRU` edge, the range
+  was lost entirely: no second arrow (correctly suppressed) *and* no badge
+  (nothing on the base edge to badge). This was a regression from
+  pre-Task-6 behavior (the second arrow used to at least show the range),
+  not just a missing feature. Fixed by restructuring `process_sort`'s
+  input/output-procedure handling and `process_merge`'s output-procedure
+  handling to compute the range once and pass `thru_target`/`range_members`
+  to *both* edges, mirroring `process_perform`. New tests:
+  `test_sort_input_procedure_base_edge_carries_thru_range`,
+  `test_sort_output_procedure_base_edge_carries_thru_range`,
+  `test_merge_output_procedure_base_edge_carries_thru_range` in
+  `tests/unit/analysis/test_program_flow.py` (unit-level, asserting the
+  edge fields directly); `TestSortThruEndToEnd` in
+  `tests/unit/test_flowchart_generator.py` (real COBOL through
+  `parse_cobol` → `ProgramFlowAnalyzer` → both generators — confirmed these
+  two tests fail against the pre-fix `edges.py` via `git stash` and pass
+  against the fix, so they pin the actual repair, not just the
+  already-correct badge-rendering consumer).
+* **Important: terminal node id collided with the `XXXX-EXIT` COBOL
+  idiom.** Both generators built a terminal node's id as `f"{nid}_EXIT"`.
+  `PERFORM X THRU X-EXIT` is common enough that a program can legitimately
+  contain a *real* paragraph literally named e.g. `9000-TERM-EXIT` — its
+  own sanitized id (`N_9000_TERM_EXIT`) collided with paragraph
+  `9000-TERM`'s synthetic terminal-node id, silently merging two distinct
+  nodes in both Mermaid and DOT output. Fixed with a new module-level
+  `_unique_exit_id(nid, paragraph_ids)` (shared by both generator classes):
+  builds the set of every real paragraph's sanitized id up front, falls
+  back from `_EXIT` to `_FLOWEXIT`, then to an incrementing numeric suffix,
+  on collision. New tests (one per generator, proving the two nodes now
+  get distinct ids): `test_terminal_id_does_not_collide_with_real_exit_paragraph`
+  in both `TestMermaidFlowchartGenerator` and `TestDotFlowchartParity`.
+* **Important: RETURN incorrectly rendered as a program-terminal node.**
+  `scanner.py`'s `ReturnStatement` handling called
+  `_record_exit_statement(node, "RETURN", stmt.location)`, so Task 5's
+  terminal-node rendering drew a red double-circle for RETURN — but RETURN
+  reads the next record from a sort/merge file, it does not terminate
+  anything, and `scanner.py` deliberately never adds RETURN's paragraph to
+  `self._exit_points` (`node.is_exit_point` stayed correctly `False` for
+  it) — the terminal-node rendering directly contradicted the analyzer's
+  own exit-point classification. Fixed by removing that one call;
+  `node.has_return` and the `AT END`/`NOT AT END` nested-statement scanning
+  are unaffected. New regression test:
+  `test_return_does_not_record_exit_statement_kind` in
+  `tests/unit/analysis/test_program_flow.py` (real COBOL, a RETURN inside a
+  SORT OUTPUT PROCEDURE — the common real-world shape).
+* **Should-fix: `FlowNode` exit-statement field test-coverage gaps.** Added
+  to `TestExitStatementLocation`
+  (`tests/unit/analysis/test_program_flow.py`):
+  `to_dict()` presence/absence of both `exit_statement_kind` and
+  `exit_statement_location` (as a dict, via `SourceLocation.to_dict()`);
+  `EXIT PROGRAM` sets `exit_statement_kind == "EXIT PROGRAM"`; the
+  first-write-wins rule (`STOP RUN` in an IF's THEN arm, `GOBACK` in its
+  ELSE arm — asserts `STOP RUN` wins, since it's scanned first).
+
+Updated: [analysis.md](analysis.md) (exit-statement subsection — explicit
+RETURN-exclusion note, first-write-wins note, `to_dict()` presence rule),
+[generators.md](generators.md) (all three styling bullets gained a
+"bug fixed 2026-08-11" note explaining what was wrong and why, plus the new
+reference tests). Full requested regression scope (`tests/unit/analysis/
+tests/unit/test_flowchart_generator.py tests/integration/`): 2530 passed, 4
+skipped, 0 failures. `tests/contracts/`/`tests/regression/` also run per
+review request: 1150 passed, 6 pre-existing failures in
+`test_normalize_line_number_preservation.py` (unrelated to this pass —
+confirmed present on the unmodified branch tip via `git stash`, same
+Cython-vs-pure-Python normalize_fixed_format issue noted in the 2026-08-10
+entry below). `ruff check .`, `black --check .` (2 files needed
+reformatting, applied), `mypy cobolparser/` all clean on touched files.
+
 ## 2026-08-11 (Mermaid/DOT flowchart fidelity: real condition text, exit nodes, recursion/GOTO styling, THRU badges)
 
 Seven-task plan (`docs/superpowers/plans/2026-08-11-mermaid-flow-fidelity.md`)
