@@ -456,7 +456,10 @@ class ProcedureScanner:
                     node.has_exit_perform = True
             elif isinstance(stmt, ReturnStatement):
                 node.has_return = True
-                self._record_exit_statement(node, "RETURN", stmt.location)
+                # RETURN reads the next record from a sort/merge file -- it
+                # does not terminate the program, so it must not be recorded
+                # as an exit statement (RETURN's paragraph is deliberately
+                # not added to self._exit_points either; see below).
                 # Scan AT END / NOT AT END branches for nested flow
                 for s in stmt.at_end_clause or []:
                     scan(s)
