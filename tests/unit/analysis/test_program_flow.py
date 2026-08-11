@@ -5743,6 +5743,27 @@ class TestRealConditionText:
         assert len(report.branch_nodes) == 1
         assert report.branch_nodes[0].condition_text == "WS-STATUS"
 
+    def test_evaluate_literal_subject_text_preserves_quotes(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE 'X'
+               WHEN 'A'
+                   DISPLAY "ACTIVE"
+           END-EVALUATE.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert len(report.branch_nodes) == 1
+        assert report.branch_nodes[0].condition_text == "'X'"
+        when_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.EVALUATE_WHEN]
+        assert len(when_edges) == 1
+        assert when_edges[0].condition == "WHEN 'A'"
+
     def test_if_condition_with_multi_char_literal_preserves_quotes(self) -> None:
         source = """\
        IDENTIFICATION DIVISION.
@@ -5815,6 +5836,30 @@ class TestExitStatementLocation:
         report = ProgramFlowAnalyzer().analyze(result.ast)
         node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
         assert node.exit_statement_kind == "GOBACK"
+
+    def test_stop_literal_is_not_recorded_as_stop_run_exit(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           STOP "HALT".
+       NEXT-PARA.
+           DISPLAY "AFTER STOP LITERAL".
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        main = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert main.has_stop_run is False
+        assert main.exit_statement_kind is None
+        assert "MAIN-LOGIC" not in report.exit_points
+        assert any(
+            e.source == "MAIN-LOGIC"
+            and e.target == "NEXT-PARA"
+            and e.edge_type == FlowEdgeType.FALL_THROUGH
+            for e in report.edges
+        )
 
     def test_no_exit_statement_leaves_both_none(self) -> None:
         source = """\

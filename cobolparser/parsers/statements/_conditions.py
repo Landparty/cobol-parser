@@ -81,7 +81,8 @@ def condition_token_text(token: Token) -> str:
     later.
     """
     if token.type == TokenType.STRING_LITERAL:
-        return f"'{token.value}'"
+        value = (token.value or "").replace("'", "''")
+        return f"'{value}'"
     return token.value or str(token.type)
 
 

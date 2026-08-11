@@ -372,6 +372,8 @@ class MermaidFlowchartGenerator:
                 label_parts.append(edge.condition or _short_edge_label(etype))
             else:
                 label_parts.append(_short_edge_label(etype))
+        elif options.show_edge_labels and etype == "PERFORM" and edge.condition:
+            label_parts.append(f"{_short_edge_label(etype)} UNTIL {edge.condition}")
         if edge.is_loop:
             label_parts.append("(loop)")
         if edge.thru_target and edge.range_members:
@@ -617,6 +619,11 @@ class DotFlowchartGenerator:
                 lbl = edge.condition or _short_edge_label(etype)
             else:
                 lbl = _short_edge_label(etype)
+            if edge.is_loop:
+                lbl += " (loop)"
+            attrs["label"] = lbl
+        elif options.show_edge_labels and etype == "PERFORM" and edge.condition:
+            lbl = f"{_short_edge_label(etype)} UNTIL {edge.condition}"
             if edge.is_loop:
                 lbl += " (loop)"
             attrs["label"] = lbl

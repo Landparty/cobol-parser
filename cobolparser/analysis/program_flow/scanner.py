@@ -520,9 +520,10 @@ class ProcedureScanner:
                     ]
                 )
             elif isinstance(stmt, StopStatement):
-                node.has_stop_run = True
-                self._exit_points.add(proc_name)
-                self._record_exit_statement(node, "STOP RUN", stmt.location)
+                if stmt.stop_type == "RUN":
+                    node.has_stop_run = True
+                    self._exit_points.add(proc_name)
+                    self._record_exit_statement(node, "STOP RUN", stmt.location)
             elif isinstance(stmt, GobackStatement):
                 node.has_goback = True
                 self._exit_points.add(proc_name)

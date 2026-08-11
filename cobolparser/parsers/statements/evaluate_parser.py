@@ -16,6 +16,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import EvaluateStatement, WhenClause
+from ._conditions import condition_token_text
 
 
 class EvaluateStatementParser(IStatementParser):
@@ -214,7 +215,7 @@ class EvaluateStatementParser(IStatementParser):
                 continue
 
             if token.type != TokenType.NEWLINE:
-                current_subject.append(token.value if token.value else "")
+                current_subject.append(condition_token_text(token))
             token_stream.consume()
 
         if current_subject:
@@ -264,15 +265,7 @@ class EvaluateStatementParser(IStatementParser):
                 continue
 
             if token.type != TokenType.NEWLINE:
-                value = token.value if token.value else ""
-                # The lexer strips quotes off string literals, so a blank
-                # literal (WHEN '  ' — the IMS DL/I "call succeeded" status
-                # idiom) arrives as whitespace-only text that _build_selector
-                # would filter out as an empty artifact, collapsing the WHEN
-                # to zero selectors. Re-quote it so the value survives.
-                if token.type == TokenType.STRING_LITERAL and not value.strip():
-                    value = f"'{value}'"
-                current_selector.append(value)
+                current_selector.append(condition_token_text(token))
                 expecting_selector = False
                 saw_separator = False
             token_stream.consume()

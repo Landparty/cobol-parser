@@ -150,6 +150,7 @@ def _loop_report() -> ProgramFlowReport:
             location=_loc(),
             is_loop=True,
             perform_type="UNTIL",
+            condition="WS-EOF-SW = 'Y'",
         )
     ]
     return ProgramFlowReport(
@@ -436,6 +437,10 @@ class TestMermaidFlowchartGenerator:
     def test_loop_annotation(self) -> None:
         out = self._gen(_loop_report())
         assert "loop" in out.lower()
+
+    def test_perform_until_condition_label(self) -> None:
+        out = self._gen(_loop_report())
+        assert "PERFORM UNTIL WS-EOF-SW = 'Y'" in out
 
     # -- external calls --------------------------------------------------
 
@@ -826,6 +831,10 @@ class TestDotFlowchartGenerator:
     def test_loop_edge_color(self) -> None:
         out = self._gen(_loop_report())
         assert "darkorange" in out
+
+    def test_perform_until_condition_label(self) -> None:
+        out = self._gen(_loop_report())
+        assert 'label="PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"' in out
 
     # -- external calls --------------------------------------------------
 
@@ -1238,3 +1247,28 @@ class TestSortThruEndToEnd:
         out = DotFlowchartGenerator().generate(self._report())
         assert "[THRU 3]" in out
         assert "MAIN_LOGIC -> OUT_START" in out
+
+
+class TestPerformUntilEndToEnd:
+    def _report(self) -> ProgramFlowReport:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LOOPPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM READ-NEXT UNTIL WS-EOF-SW = 'Y'.
+           STOP RUN.
+       READ-NEXT.
+           CONTINUE.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        return ProgramFlowAnalyzer().analyze(result.ast)
+
+    def test_mermaid_renders_perform_until_condition_label(self) -> None:
+        out = MermaidFlowchartGenerator().generate(self._report())
+        assert "PERFORM UNTIL WS-EOF-SW = 'Y'" in out
+
+    def test_dot_renders_perform_until_condition_label(self) -> None:
+        out = DotFlowchartGenerator().generate(self._report())
+        assert 'label="PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"' in out
