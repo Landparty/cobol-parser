@@ -1089,6 +1089,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.5.2](https://github.com/Landparty/cobol-parser/compare/v1.5.1...v1.5.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* paragraphs holding ENTRY statements never treated as reachable roots ([9267ce6](https://github.com/Landparty/cobol-parser/commit/9267ce640568de2021d23c52e7f9835c8f86a655))
+
 ## [1.5.1](https://github.com/Landparty/cobol-parser/compare/v1.5.0...v1.5.1) (2026-08-10)
 
 

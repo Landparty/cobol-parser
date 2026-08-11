@@ -193,7 +193,7 @@ from .profiling import (
 
 
 # Version info
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 __author__ = "Samuel Dion"
 __license__ = "Proprietary"
 
