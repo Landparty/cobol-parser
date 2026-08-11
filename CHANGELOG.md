@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `DeadCodeAnalyzer._collect_alter_refs` wrongly marked an
+  `ALTER paragraph-name TO PROCEED TO target-name` statement's *subject*
+  (`paragraph-name` -- the paragraph whose internal GO TO gets modified) as
+  referenced, alongside the real jump target (`target-name`). Being named
+  as the ALTER's subject is not an incoming jump, so this hid genuinely
+  dead paragraphs from `DeadCodeAnalyzer` that `ProgramFlowAnalyzer`'s
+  `unreachable_nodes` (whose ALTER edge already only flows target-ward)
+  correctly reported as unreachable. Fixed by only adding the ALTER's
+  `to_paragraph` to the reference set. Pinned by
+  `TestAlterReferences.test_alter_never_called_paragraph_is_dead` in
+  `tests/unit/analysis/test_dead_code.py`.
+
 * **preprocessing:** `normalize_fixed_format` silently dropped a physical
   line whose extracted program-text (columns 8-72) was entirely blank but
   which was neither a short/blank line nor a `*`/`/`/debug comment line

@@ -251,9 +251,14 @@ class DeadCodeAnalyzer:
             self._mark_thru_range(stmt.output_procedure, stmt.output_procedure_thru)
 
     def _collect_alter_refs(self, stmt: AlterStatement) -> None:
-        """Collect references from an ALTER statement."""
+        """Collect references from an ALTER statement.
+
+        Only the modified GO TO's new target (``to_paragraph``) is an
+        incoming jump. The ALTER's subject (``from_paragraph``) is the
+        paragraph whose internal GO TO gets rewritten -- being named there
+        is not itself a reference to that paragraph.
+        """
         for alteration in stmt.alterations:
-            self._add_ref(alteration["from_paragraph"])
             self._add_ref(alteration["to_paragraph"])
 
     @staticmethod

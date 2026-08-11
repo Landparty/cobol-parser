@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 # Overview
@@ -43,6 +43,20 @@ report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 
 Detects unreferenced paragraphs and sections (paragraphs/sections never the
 target of a PERFORM, GO TO, or fall-through control flow).
+
+**ALTER only references its target, not its subject (2026-08-11):**
+`ALTER paragraph-name TO PROCEED TO target-name` modifies a GO TO living
+inside `paragraph-name`; only `target-name` is an incoming jump.
+`_collect_alter_refs` used to add both names to the reference set, so a
+paragraph named solely as an ALTER's subject was wrongly protected from
+dead-code detection even when nothing ever PERFORMed/GONE TO it. This put
+`DeadCodeAnalyzer` out of step with `ProgramFlowAnalyzer`'s
+`unreachable_nodes`, whose ALTER edge (`edges.py::process_alter`) already
+only flowed subject to target and never had this bug. Fixed by dropping the
+`from_paragraph` add in `_collect_alter_refs`; only `to_paragraph` counts as
+referenced now. Pinned by
+`TestAlterReferences.test_alter_never_called_paragraph_is_dead`
+(`tests/unit/analysis/test_dead_code.py`).
 
 ## ProgramFlowAnalyzer
 
