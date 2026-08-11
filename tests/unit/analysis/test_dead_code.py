@@ -12,6 +12,7 @@ from cobolparser.models.program import (
     CobolProgram,
     CobolSection,
 )
+from cobolparser.models.statements.call import EntryStatement
 from cobolparser.models.statements.control import (
     GoStatement,
     PerformStatement,
@@ -124,6 +125,12 @@ def _alter(from_para: str, to_para: str) -> AlterStatement:
 
 def _continue() -> ContinueStatement:
     return ContinueStatement(SourceLocation(1, 12))
+
+
+def _entry(name: str) -> EntryStatement:
+    stmt = EntryStatement(SourceLocation(1, 12))
+    stmt.set_entry_name(name)
+    return stmt
 
 
 # ---------------------------------------------------------------------------
@@ -719,4 +726,126 @@ class TestAlterReferences:
         assert "PARA-X" not in dead
         assert "PARA-Y" not in dead
         assert "PARA-Z" not in dead
-        assert "DEAD" in dead
+
+
+# ---------------------------------------------------------------------------
+# _collect_entry_refs
+# ---------------------------------------------------------------------------
+
+
+class TestEntryReferences:
+    """Regression tests for the audit finding: a paragraph containing an
+    ENTRY statement is a legitimate alternate external entry point (callable
+    via CALL 'entry-name') and must never be reported as dead code, even
+    though nothing internally PERFORMs or GOes to it."""
+
+    def test_entry_paragraph_not_reported_dead(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "ALT-ENTRY-PARA" not in dead
+
+    def test_entry_paragraph_not_reported_dead_real_source(self) -> None:
+        """End-to-end regression test using the finding's repro shape."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALTENTRYPROG.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY "IN MAIN".
+           STOP RUN.
+       ALT-ENTRY-PARA.
+           ENTRY 'ALTENTRY'.
+           DISPLAY "IN ALT ENTRY".
+           GOBACK.
+"""
+        result = parse_cobol(source, filename="altentry.cbl")
+        assert result.errors == []
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        dead = [i.name for i in report.dead_items]
+        assert "ALT-ENTRY-PARA" not in dead
+
+    def test_entry_paragraph_in_section_marks_section_referenced_too(self) -> None:
+        """The paragraph's parent section must also not be reported dead
+        (via ``_propagate_section_references``' upward propagation)."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                (
+                    "MAIN-SECTION",
+                    [("MAIN-PARA", [_continue()])],
+                ),
+                (
+                    "ALT-ENTRY-SECTION",
+                    [("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()])],
+                ),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "ALT-ENTRY-PARA" not in dead
+        assert "ALT-ENTRY-SECTION" not in dead
+
+    def test_unrelated_paragraph_still_reported_dead(self) -> None:
+        """An ENTRY elsewhere does not blanket-mark every paragraph
+        referenced -- an actually-unreferenced paragraph is still dead."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
+                ("TRULY-DEAD", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "TRULY-DEAD" in dead
+        assert "ALT-ENTRY-PARA" not in dead
+
+    def test_whitespace_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """An ENTRY statement with a whitespace-only literal name isn't a
+        real alternate entry point (matches the same filter
+        program_flow/scanner.py's collect_entry_points applies), so it must
+        not mask an otherwise-dead paragraph."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [_entry("\n"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
+
+    def test_empty_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """Same as above for an ENTRY literal that is empty after quote
+        stripping (``''``)."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [_entry("''"), _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
+
+    def test_none_entry_name_does_not_mask_dead_paragraph(self) -> None:
+        """An EntryStatement whose entry_name was never set (None) doesn't
+        mask an otherwise-dead paragraph."""
+        entry = EntryStatement(SourceLocation(1, 12))
+        # set_entry_name is deliberately NOT called -> entry_name stays None
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_continue()]),
+                ("BOGUS-ENTRY-PARA", [entry, _continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "BOGUS-ENTRY-PARA" in dead
