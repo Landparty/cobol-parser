@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **dead code / program flow:** `DeadCodeAnalyzer._collect_procedures`
+  (`analysis/dead_code.py`) and `ProcedureScanner.collect_procedures`
+  (`analysis/program_flow/scanner.py`) appended all section-owned
+  paragraphs to `_ordered_procedures` before top-level paragraphs, even
+  though COBOL legally allows paragraphs before the first `SECTION`
+  header. A program mixing the two ended up with an `_ordered_procedures`
+  list that no longer matched source order, corrupting entry-point
+  detection (a section became `entry_points[0]` instead of the true first
+  paragraph), falsely flagging the real first paragraph as dead/
+  unreachable, and fabricating a bogus fall-through edge between
+  physically non-adjacent paragraphs while dropping the real one. Fixed
+  both collectors by interleaving sections and top-level paragraphs by
+  `location.line` before walking them; the pre-existing name-collision
+  dedup guard (previously top-level-branch-only, safe only when sections
+  were always walked first) was extended to the section-owned-paragraph
+  branch in both files to stay correct under the new interleaved order.
+  Pinned by
+  `tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration` and
+  `tests/unit/analysis/test_program_flow.py::TestProgramFlowRealCobolIntegration`.
+
 * **preprocessing:** `normalize_fixed_format` silently dropped a physical
   line whose extracted program-text (columns 8-72) was entirely blank but
   which was neither a short/blank line nor a `*`/`/`/debug comment line

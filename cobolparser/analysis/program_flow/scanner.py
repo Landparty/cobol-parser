@@ -9,7 +9,7 @@ ENTRY-statement entry points.
 
 from typing import Any
 
-from ...models.program import CobolDivision, CobolParagraph, CobolProgram
+from ...models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
     EvaluateStatement,
@@ -81,42 +81,53 @@ class ProcedureScanner:
         self._branch_seq: int = 0
 
     def collect_procedures(self, proc_division: CobolDivision) -> None:
-        """Collect all paragraphs and sections as flow nodes."""
-        # Collect sections and their paragraphs
-        for section in proc_division._sections.values():
-            name = section.section_name
-            if name:
-                upper_name = name.upper()
-                self._nodes[upper_name] = FlowNode(
-                    name=upper_name,
-                    procedure_type="SECTION",
-                    location=section.location,
-                )
-                self._ordered_procedures.append(upper_name)
+        """Collect all paragraphs and sections as flow nodes.
 
-            for para in section.paragraphs:
-                pname = para.paragraph_name
+        COBOL allows paragraphs before the first SECTION header, so sections
+        and top-level paragraphs are interleaved by source line to preserve
+        physical order (entry-point detection and fall-through edges both
+        depend on ``_ordered_procedures`` matching source order).
+        """
+        top_level_items: list[Any] = sorted(
+            [*proc_division._sections.values(), *proc_division.paragraphs],
+            key=lambda item: item.location.line,
+        )
+
+        for item in top_level_items:
+            if isinstance(item, CobolSection):
+                name = item.section_name
+                if name:
+                    upper_name = name.upper()
+                    self._nodes[upper_name] = FlowNode(
+                        name=upper_name,
+                        procedure_type="SECTION",
+                        location=item.location,
+                    )
+                    self._ordered_procedures.append(upper_name)
+
+                for para in item.paragraphs:
+                    pname = para.paragraph_name
+                    if pname and is_valid_procedure_name(pname):
+                        upper_pname = pname.upper()
+                        if upper_pname not in self._nodes:
+                            self._nodes[upper_pname] = FlowNode(
+                                name=upper_pname,
+                                procedure_type="PARAGRAPH",
+                                location=para.location,
+                            )
+                            self._ordered_procedures.append(upper_pname)
+            else:
+                # Top-level paragraph (not inside a section)
+                pname = item.paragraph_name
                 if pname and is_valid_procedure_name(pname):
                     upper_pname = pname.upper()
-                    self._nodes[upper_pname] = FlowNode(
-                        name=upper_pname,
-                        procedure_type="PARAGRAPH",
-                        location=para.location,
-                    )
-                    self._ordered_procedures.append(upper_pname)
-
-        # Collect top-level paragraphs
-        for para in proc_division.paragraphs:
-            pname = para.paragraph_name
-            if pname and is_valid_procedure_name(pname):
-                upper_pname = pname.upper()
-                if upper_pname not in self._nodes:
-                    self._nodes[upper_pname] = FlowNode(
-                        name=upper_pname,
-                        procedure_type="PARAGRAPH",
-                        location=para.location,
-                    )
-                    self._ordered_procedures.append(upper_pname)
+                    if upper_pname not in self._nodes:
+                        self._nodes[upper_pname] = FlowNode(
+                            name=upper_pname,
+                            procedure_type="PARAGRAPH",
+                            location=item.location,
+                        )
+                        self._ordered_procedures.append(upper_pname)
 
     def scan_statements(self, proc_division: CobolDivision) -> None:
         """Scan all statements to build edges and compute node metrics."""

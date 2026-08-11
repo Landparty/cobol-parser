@@ -1,5 +1,30 @@
 # OKF Update Log
 
+## 2026-08-11 (Dead-code/program-flow: paragraphs before first SECTION reordered)
+
+`claude/dead-code-section-550f0e` finding #1: COBOL legally allows
+paragraphs before the first `SECTION` header, but `DeadCodeAnalyzer.
+_collect_procedures` (`analysis/dead_code.py`) and `ProcedureScanner.
+collect_procedures` (`analysis/program_flow/scanner.py`) both appended all
+section-owned paragraphs to `_ordered_procedures` before top-level
+paragraphs, corrupting physical source order whenever a program mixed the
+two. Since both analyzers treat `_ordered_procedures[0]` as the entry point
+(and `ProgramFlowAnalyzer`'s fall-through-edge pass walks the same list in
+order), this made a section the false entry point, reported the true first
+paragraph as dead/unreachable, and fabricated a bogus fall-through edge
+between physically non-adjacent paragraphs. Fixed both collectors by
+interleaving sections and top-level paragraphs by `location.line` before
+walking them. That interleave in turn made each collector's existing
+name-collision dedup guard order-dependent (it only lived on the
+top-level-paragraph branch, safe only when sections were always walked
+first) — caught by review before landing, not by the original finding; a
+name reused both top-level and inside a section could otherwise be
+double-appended to `_ordered_procedures` once a top-level occurrence sorted
+before its section-owned twin. Added the identical guard to the
+section-owned-paragraph branch in both files. Updated:
+[analysis.md](analysis.md) (`DeadCodeAnalyzer` and `ProgramFlowAnalyzer`
+sections).
+
 ## 2026-08-10 (reports/open-findings.md consolidated)
 
 At the user's request, cleaned up `reports/open-findings.md`: it had grown

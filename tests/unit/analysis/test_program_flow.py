@@ -4237,6 +4237,83 @@ class TestProgramFlowRealCobolIntegration:
         assert d["summary"]["cancellation_count"] == 1
         assert d["summary"]["unreachable_node_count"] >= 1
 
+    # ------------------------------------------------------------------
+    # Paragraphs before the first SECTION (mixed top-level/sectioned order)
+    # ------------------------------------------------------------------
+
+    def test_top_level_paragraph_before_section_stays_first_entry_point(self) -> None:
+        """A paragraph before the first SECTION must remain the entry point
+        and must fall through to the section that follows it in source.
+
+        Regression test: ``ProcedureScanner.collect_procedures`` used to
+        collect all section-owned paragraphs before top-level paragraphs,
+        so a program that legally mixes the two (paragraphs before the
+        first SECTION) ended up with an ``_ordered_procedures`` list that
+        no longer matched source order. That corrupted entry-point
+        detection (the section became ``entry_points[0]`` instead of the
+        true first paragraph) and fabricated a bogus fall-through edge
+        between physically non-adjacent paragraphs while dropping the real
+        one.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       INIT-PARA.
+           DISPLAY 'INIT'.
+       MAIN-SECTION SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert [n.name for n in report.nodes] == [
+            "INIT-PARA",
+            "MAIN-SECTION",
+            "FIRST-PARA",
+        ]
+        assert report.entry_points[0] == "INIT-PARA"
+        assert report.unreachable_nodes == []
+
+        fall_through_pairs = {
+            (e.source, e.target)
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+        }
+        assert ("INIT-PARA", "MAIN-SECTION") in fall_through_pairs
+        assert ("MAIN-SECTION", "FIRST-PARA") in fall_through_pairs
+
+    def test_duplicate_name_across_top_level_and_section_not_double_counted(
+        self,
+    ) -> None:
+        """A name reused both as a top-level paragraph and a section-owned
+        paragraph must be recorded once in ``report.nodes``, whichever
+        occurrence comes first in source order.
+
+        Regression test: interleaving top-level paragraphs and section-owned
+        paragraphs by source line (the fix for the mixed-order bug above)
+        made the existing dedup guard order-dependent -- it previously only
+        guarded the top-level-paragraph branch, which was safe when sections
+        were always collected first. Once collection order can put a
+        top-level occurrence before a section-owned occurrence of the same
+        name, an unguarded section branch would append it a second time.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       MAIN-SECTION SECTION.
+       DUP-NAME.
+           DISPLAY 'IN-SECTION'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert [n.name for n in report.nodes] == ["DUP-NAME", "MAIN-SECTION"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: Edge-case coverage (audit gaps)
