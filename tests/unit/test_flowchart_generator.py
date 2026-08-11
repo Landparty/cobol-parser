@@ -514,6 +514,47 @@ class TestMermaidFlowchartGenerator:
         out = self._gen(_goto_report())
         assert "linkStyle" in out
 
+    def test_linkstyle_index_skips_hidden_edges_correctly(self) -> None:
+        """A skipped (hidden) edge before a styled edge must not consume a
+        linkStyle index -- the first EMITTED, styled edge must be linkStyle 0,
+        not linkStyle 1."""
+        nodes = [
+            _para("A", entry=True, stmt_count=1),
+            _para("B", stmt_count=1),
+        ]
+        edges = [
+            # Skipped since show_fall_through defaults to False; must NOT
+            # consume a linkStyle index.
+            FlowEdge(
+                source="A",
+                target="B",
+                edge_type=FlowEdgeType.FALL_THROUGH,
+                location=_loc(),
+            ),
+            # First (and only) EMITTED edge -- must get linkStyle 0.
+            FlowEdge(
+                source="A", target="B", edge_type=FlowEdgeType.PERFORM, location=_loc()
+            ),
+        ]
+        report = ProgramFlowReport(
+            program_name="SKIP-PROG",
+            nodes=nodes,
+            edges=edges,
+            entry_points=["A"],
+            cycle_details=[
+                {
+                    "nodes": ["A", "B"],
+                    "kind": "PERFORM_RECURSION",
+                    "length": 2,
+                    "self_recursive": False,
+                    "edge_types": ["PERFORM"],
+                }
+            ],
+        )
+        out = self._gen(report)
+        assert "linkStyle 0 " in out
+        assert "linkStyle 1" not in out
+
 
 # ---------------------------------------------------------------------------
 # DotFlowchartGenerator
