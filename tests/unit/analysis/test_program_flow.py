@@ -926,14 +926,20 @@ class TestProgramFlowIntegration:
         """A computed GO TO target that shares its name with the DEPENDING
         ON variable must still get its own GOTO_DEPENDING edge.
         """
+        # PARA-A ends in STOP RUN so RUN-FLAG is not also reachable via
+        # fall-through -- isolates this as a regression test for the
+        # operand-filtering bug specifically, independent of fall-through
+        # edge handling.
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. GOTOSHARE.
        PROCEDURE DIVISION.
        MAIN-LOGIC.
-           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG.
+           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG
+           STOP RUN.
        PARA-A.
-           DISPLAY "A".
+           DISPLAY "A"
+           STOP RUN.
        RUN-FLAG.
            DISPLAY "FLAG".
 """

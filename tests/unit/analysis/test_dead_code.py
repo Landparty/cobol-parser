@@ -532,14 +532,21 @@ class TestDeadCodeIntegration:
         """A computed GO TO target that shares its name with the DEPENDING
         ON variable must still be marked referenced, not just filtered out.
         """
+        # PARA-A and RUN-FLAG each end in STOP RUN so neither is reachable
+        # via fall-through -- the only thing that can mark RUN-FLAG
+        # referenced is the computed GO TO's own target list, keeping this
+        # a precise regression test for the operand-filtering bug (as
+        # opposed to also being satisfiable by fall-through crediting).
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. GOTOSHARE.
        PROCEDURE DIVISION.
        MAIN-LOGIC.
-           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG.
+           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG
+           STOP RUN.
        PARA-A.
-           DISPLAY "A".
+           DISPLAY "A"
+           STOP RUN.
        RUN-FLAG.
            DISPLAY "FLAG".
 """
