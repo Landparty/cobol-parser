@@ -2790,6 +2790,93 @@ class TestProgramFlowSortMergeThru:
             == "MERGE_OUTPUT_PROCEDURE_THRU"
         )
 
+    # ------------------------------------------------------------------
+    # Regression: the base (non-THRU) edge must also carry thru_target /
+    # range_members -- matching PERFORM's process_perform pattern -- so
+    # consumers that skip the *_THRU edge (flowchart generators badge the
+    # base edge instead of drawing a second arrow) don't lose the range.
+    # ------------------------------------------------------------------
+
+    def test_sort_input_procedure_base_edge_carries_thru_range(self) -> None:
+        """SORT ... INPUT PROCEDURE IS A THRU C: the base edge (A) must carry
+        thru_target/range_members, not just the *_THRU edge."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.set_input_procedure("IN-START", thru="IN-END")
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("IN-START", [_continue()]),
+                ("IN-MID", [_continue()]),
+                ("IN-END", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        base_edge = next(
+            e for e in report.edges if e.edge_type == FlowEdgeType.SORT_INPUT_PROCEDURE
+        )
+        thru_edge = next(
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.SORT_INPUT_PROCEDURE_THRU
+        )
+        assert base_edge.thru_target == "IN-END"
+        assert base_edge.range_members == ["IN-START", "IN-MID", "IN-END"]
+        assert thru_edge.thru_target == "IN-END"
+        assert thru_edge.range_members == ["IN-START", "IN-MID", "IN-END"]
+
+    def test_sort_output_procedure_base_edge_carries_thru_range(self) -> None:
+        """SORT ... OUTPUT PROCEDURE IS A THRU C: same base-edge coverage."""
+        stmt = SortStatement(LOC)
+        stmt.set_file_name("SORT-FILE")
+        stmt.set_output_procedure("OUT-START", thru="OUT-END")
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("OUT-START", [_continue()]),
+                ("OUT-END", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        base_edge = next(
+            e for e in report.edges if e.edge_type == FlowEdgeType.SORT_OUTPUT_PROCEDURE
+        )
+        assert base_edge.thru_target == "OUT-END"
+        assert base_edge.range_members == ["OUT-START", "OUT-END"]
+
+    def test_merge_output_procedure_base_edge_carries_thru_range(self) -> None:
+        """MERGE ... OUTPUT PROCEDURE IS A THRU C: same base-edge coverage."""
+        stmt = MergeStatement(LOC)
+        stmt.set_file_name("MERGE-FILE")
+        stmt.set_output_procedure("MERGE-START", thru="MERGE-END")
+
+        prog = _make_program(
+            [
+                ("MAIN-LOGIC", [stmt]),
+                ("MERGE-START", [_continue()]),
+                ("MERGE-END", [_continue()]),
+            ]
+        )
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        base_edge = next(
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.MERGE_OUTPUT_PROCEDURE
+        )
+        assert base_edge.thru_target == "MERGE-END"
+        assert base_edge.range_members == ["MERGE-START", "MERGE-END"]
+
 
 class TestProgramFlowCancel:
     """Tests for CANCEL statement tracking."""
@@ -5564,3 +5651,132 @@ class TestExitStatementLocation:
         node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
         assert node.exit_statement_kind is None
         assert node.exit_statement_location is None
+
+    # ------------------------------------------------------------------
+    # Fix 6: FlowNode exit-statement field coverage gaps
+    # ------------------------------------------------------------------
+
+    def test_to_dict_includes_exit_statement_fields_when_set(self) -> None:
+        """to_dict() includes exit_statement_kind and exit_statement_location
+        (as a dict, via SourceLocation.to_dict()) when both are set."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "DONE".
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        d = node.to_dict()
+        assert d["exit_statement_kind"] == "STOP RUN"
+        assert isinstance(d["exit_statement_location"], dict)
+        assert d["exit_statement_location"] == node.exit_statement_location.to_dict()
+        assert d["exit_statement_location"]["line"] == 6
+
+    def test_to_dict_omits_exit_statement_fields_when_absent(self) -> None:
+        """to_dict() omits both exit_statement_kind and exit_statement_location
+        entirely when no exit statement was recorded."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           DISPLAY "NO EXIT HERE".
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        d = node.to_dict()
+        assert "exit_statement_kind" not in d
+        assert "exit_statement_location" not in d
+
+    def test_exit_program_records_kind(self) -> None:
+        """EXIT PROGRAM sets exit_statement_kind == 'EXIT PROGRAM'."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EXIT PROGRAM.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        assert node.exit_statement_kind == "EXIT PROGRAM"
+
+    def test_return_does_not_record_exit_statement_kind(self) -> None:
+        """Regression guard for Fix 4: RETURN reads the next record from a
+        sort/merge file -- it does not terminate the program, so it must NOT
+        set exit_statement_kind, even though it is a common statement inside
+        a SORT OUTPUT PROCEDURE paragraph."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RETFLAG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SORT-WRK ASSIGN TO 'SORTWRK'.
+           SELECT IN-FILE  ASSIGN TO 'INPUT'.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SORT-WRK.
+       01 SORT-REC PIC X(80).
+       FD IN-FILE.
+       01 IN-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-EOF PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           SORT SORT-WRK ON ASCENDING KEY SORT-REC
+               USING IN-FILE
+               OUTPUT PROCEDURE OUTPUT-PROC.
+           STOP RUN.
+       OUTPUT-PROC.
+           RETURN SORT-WRK
+               AT END MOVE 'Y' TO WS-EOF
+               NOT AT END PERFORM WRITE-RECORD
+           END-RETURN.
+       WRITE-RECORD.
+           DISPLAY SORT-REC.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "OUTPUT-PROC")
+        assert node.has_return is True
+        assert node.exit_statement_kind is None
+        assert node.exit_statement_location is None
+        assert "exit_statement_kind" not in node.to_dict()
+
+    def test_first_exit_statement_wins_when_two_present(self) -> None:
+        """A paragraph with two exit-eligible statements (STOP RUN inside one
+        IF branch, GOBACK inside the ELSE branch of the same paragraph)
+        records only whichever is scanned first."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-FLAG PIC X VALUE 'Y'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-FLAG = 'Y'
+               STOP RUN
+           ELSE
+               GOBACK
+           END-IF.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        node = next(n for n in report.nodes if n.name == "MAIN-LOGIC")
+        # STOP RUN (THEN branch) is scanned before GOBACK (ELSE branch).
+        assert node.exit_statement_kind == "STOP RUN"
+        assert node.has_stop_run is True
+        assert node.has_goback is True
