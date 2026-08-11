@@ -514,6 +514,28 @@ class TestMermaidFlowchartGenerator:
         out = self._gen(_goto_report())
         assert "linkStyle" in out
 
+    # -- exit-statement terminal nodes ------------------------------------
+
+    def test_stop_run_renders_terminal_node(self) -> None:
+        node = _para("MAIN-LOGIC", entry=True, exit_=True, stmt_count=2)
+        node.exit_statement_kind = "STOP RUN"
+        node.exit_statement_location = _loc(line=42)
+        report = ProgramFlowReport(
+            program_name="TERM-PROG",
+            nodes=[node],
+            entry_points=["MAIN-LOGIC"],
+        )
+        out = self._gen(report)
+        assert "STOP RUN" in out
+        assert "42" in out
+        assert "MAIN_LOGIC_EXIT" in out
+        assert "MAIN_LOGIC --> MAIN_LOGIC_EXIT" in out
+        assert "classDef terminal" in out
+
+    def test_no_exit_statement_no_terminal_node(self) -> None:
+        out = self._gen(_simple_report())
+        assert "_EXIT" not in out
+
     def test_linkstyle_index_skips_hidden_edges_correctly(self) -> None:
         """A skipped (hidden) edge before a styled edge must not consume a
         linkStyle index -- the first EMITTED, styled edge must be linkStyle 0,

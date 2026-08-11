@@ -179,6 +179,7 @@ class MermaidFlowchartGenerator:
         lines.append("    classDef external fill:#6a0dad,stroke:#3d007a,color:#fff")
         lines.append("    classDef branch fill:#ffd60a,stroke:#e9c46a,color:#333")
         lines.append("    classDef arm fill:#caf0f8,stroke:#0096c7,color:#333")
+        lines.append("    classDef terminal fill:#1b1b1b,stroke:#c1121f,color:#fff")
 
         if not report.nodes and not report.external_calls:
             lines.append("    EMPTY[No procedures found]")
@@ -207,6 +208,19 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {nid} exit")
             elif node.name in unreachable_set:
                 lines.append(f"    class {nid} unreachable")
+
+        # ---- exit-statement terminal nodes -------------------------------------
+        for node in report.nodes:
+            if not node.exit_statement_kind or not node.exit_statement_location:
+                continue
+            if not options.show_unreachable and node.name in unreachable_set:
+                continue
+            nid = _sanitize_id(node.name)
+            exit_id = f"{nid}_EXIT"
+            label = f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
+            lines.append(f'    {exit_id}((("{label}")))')
+            lines.append(f"    {nid} --> {exit_id}")
+            lines.append(f"    class {exit_id} terminal")
 
         # ---- external call nodes ----------------------------------------------
         if options.show_external_calls:
