@@ -42,7 +42,103 @@ report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 ```
 
 Detects unreferenced paragraphs and sections (paragraphs/sections never the
-target of a PERFORM, GO TO, or fall-through control flow).
+target of a PERFORM, GO TO, or fall-through control flow). The first
+procedure is always referenced (program entry point), and so is any
+paragraph containing an `EntryStatement` (2026-08-11 fix, see below).
+
+**A paragraph holding an ENTRY statement is always referenced (2026-08-11
+fix, audit finding #5).** `EntryStatement` marks an alternate external entry
+point (`CALL 'entry-name'`), so `_collect_references` now dispatches it to
+`_collect_entry_refs`, which marks `stmt.section_name` (the *containing
+paragraph's* name -- `CobolParagraph` overrides `ASTNode.section_name` to
+return its own `paragraph_name`, so walking a statement's `.section_name` up
+the `.parent` chain lands on its paragraph regardless of nesting depth or
+whether a real SECTION also exists) as referenced. Before this, `dead_code.py`
+had no `EntryStatement` handling at all, so an ENTRY paragraph reachable only
+via its literal external name was falsely reported dead. `_collect_entry_refs`
+applies the same blank/whitespace-only-literal filter
+`program_flow/scanner.py`'s `collect_entry_points` does (a malformed ENTRY
+with no real name isn't a real alternate entry point) so it doesn't mask an
+otherwise-dead paragraph -- added after Copilot PR review caught the two
+analyzers diverging on this filter. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestEntryReferences`.
+
+**ALTER only references its target, not its subject (2026-08-11):**
+`ALTER paragraph-name TO PROCEED TO target-name` modifies a GO TO living
+inside `paragraph-name`; only `target-name` is an incoming jump.
+`_collect_alter_refs` used to add both names to the reference set, so a
+paragraph named solely as an ALTER's subject was wrongly protected from
+dead-code detection even when nothing ever PERFORMed/GONE TO it. This put
+`DeadCodeAnalyzer` out of step with `ProgramFlowAnalyzer`'s
+`unreachable_nodes`, whose ALTER edge (`edges.py::process_alter`) already
+only flowed subject to target and never had this bug. Fixed by dropping the
+`from_paragraph` add in `_collect_alter_refs`; only `to_paragraph` counts as
+referenced now. Pinned by
+`TestAlterReferences.test_alter_never_called_paragraph_is_dead`
+(`tests/unit/analysis/test_dead_code.py`).
+
+**Computed GO TO targets read from `target_paragraphs`, not operand
+filtering (2026-08-11):** `_collect_goto_refs` used to reconstruct a
+computed `GO TO ... DEPENDING ON` statement's targets by filtering
+`stmt.operands` against `stmt.depending_on_variable` (`[op for op in
+stmt.operands if op != depending_on_variable]`). `GoStatement`'s setters
+(`set_target_paragraph`/`add_target_paragraph`/`set_depending_on_variable`)
+add operands via `_add_unique_operand`, which dedupes, so a target
+paragraph that happens to share its name with the DEPENDING ON variable
+(`GO TO PARA-A RUN-FLAG
+DEPENDING ON RUN-FLAG.`) collapses into one operand entry, which the filter
+then drops entirely — the shared-name target was reported dead despite
+being live. `GoStatement.target_paragraphs`
+(`cobolparser/models/statements/control.py`) already holds the exact,
+unfiltered target list — populated correctly by `go_parser.py`'s
+`set_target_paragraph`/`add_target_paragraph` calls — so `_collect_goto_refs`
+now just iterates it directly. Same root cause and same fix shape in
+`ProgramFlowAnalyzer.process_goto` below. Pinned by
+`test_goto_depending_target_sharing_name_with_variable` in both
+`tests/unit/analysis/test_dead_code.py` and
+`tests/unit/analysis/test_program_flow.py`.
+
+**Paragraphs before the first SECTION must stay first in source order
+(2026-08-11, dead-code-section-550f0e finding #1).** COBOL legally allows
+paragraphs before the first `SECTION` header. `_collect_procedures` used to
+append all section-owned paragraphs to `_ordered_procedures` before the
+top-level (pre-SECTION) paragraphs, so a program mixing the two produced an
+`_ordered_procedures` list that no longer matched physical source order.
+Since `analyze()` always treats `_ordered_procedures[0]` as the referenced
+program entry point, this fabricated a false-dead-code report for the real
+first paragraph (a section became entry point instead) whenever a program
+had any top-level paragraph before its first section — a legal, if
+uncommon, shape. Fixed by interleaving sections and top-level paragraphs by
+`location.line` before walking them, so `_ordered_procedures` always matches
+source order regardless of section/paragraph mix. `ProgramFlowAnalyzer`
+(below) had the identical bug in the same shape, from the same duplicated
+collection logic. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_top_level_paragraph_before_section_stays_first_in_order`.
+
+**The interleave fix made the pre-existing dedup guard order-dependent —
+caught by review before landing.** The dedup guard (`if upper_pname not in
+self._procedure_names`) previously lived only on the top-level-paragraph
+branch, which was safe *only* because sections were always walked first —
+by the time a top-level paragraph was considered, any same-named
+section-owned paragraph was already registered. Interleaving by
+`location.line` breaks that assumption: when a top-level occurrence of a
+duplicated name sorts before its section-owned twin, the (still-unguarded)
+section branch would append it to `_ordered_procedures` a second time. The
+section-owned-paragraph branch now carries the identical guard. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_and_section_not_double_counted`.
+
+**The SECTION-registration branch itself had no dedup guard at all —
+caught by Copilot review on the PR.** Unlike both paragraph branches, the
+code that records a `SECTION` header into `_procedure_names` never checked
+whether that name was already registered. A top-level paragraph followed
+later in source by a same-named `SECTION` (e.g. `DUP-NAME.` ... `DUP-NAME
+SECTION.`) would have its `PARAGRAPH` entry silently overwritten by a
+`SECTION` entry, and the name duplicated in `_ordered_procedures`. Fixed by
+adding the same guard to the SECTION branch; `_section_paragraphs[name]`
+is still unconditionally ensured via `.setdefault()` even when the guard
+skips the SECTION's own registration, since the paragraph loop right below
+it always appends into that bucket. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_paragraph_and_section_header`.
 
 ## ProgramFlowAnalyzer
 
