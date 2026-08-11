@@ -7,9 +7,10 @@ also records exit points (STOP RUN / GOBACK / EXIT PROGRAM) and alternate
 ENTRY-statement entry points.
 """
 
+from collections.abc import Callable
 from typing import Any
 
-from ...models.program import CobolDivision, CobolParagraph, CobolProgram
+from ...models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
     EvaluateStatement,
@@ -81,42 +82,54 @@ class ProcedureScanner:
         self._branch_seq: int = 0
 
     def collect_procedures(self, proc_division: CobolDivision) -> None:
-        """Collect all paragraphs and sections as flow nodes."""
-        # Collect sections and their paragraphs
-        for section in proc_division._sections.values():
-            name = section.section_name
-            if name:
-                upper_name = name.upper()
-                self._nodes[upper_name] = FlowNode(
-                    name=upper_name,
-                    procedure_type="SECTION",
-                    location=section.location,
-                )
-                self._ordered_procedures.append(upper_name)
+        """Collect all paragraphs and sections as flow nodes.
 
-            for para in section.paragraphs:
-                pname = para.paragraph_name
+        COBOL allows paragraphs before the first SECTION header, so sections
+        and top-level paragraphs are interleaved by source line to preserve
+        physical order (entry-point detection and fall-through edges both
+        depend on ``_ordered_procedures`` matching source order).
+        """
+        top_level_items: list[Any] = sorted(
+            [*proc_division._sections.values(), *proc_division.paragraphs],
+            key=lambda item: item.location.line,
+        )
+
+        for item in top_level_items:
+            if isinstance(item, CobolSection):
+                name = item.section_name
+                if name:
+                    upper_name = name.upper()
+                    if upper_name not in self._nodes:
+                        self._nodes[upper_name] = FlowNode(
+                            name=upper_name,
+                            procedure_type="SECTION",
+                            location=item.location,
+                        )
+                        self._ordered_procedures.append(upper_name)
+
+                for para in item.paragraphs:
+                    pname = para.paragraph_name
+                    if pname and is_valid_procedure_name(pname):
+                        upper_pname = pname.upper()
+                        if upper_pname not in self._nodes:
+                            self._nodes[upper_pname] = FlowNode(
+                                name=upper_pname,
+                                procedure_type="PARAGRAPH",
+                                location=para.location,
+                            )
+                            self._ordered_procedures.append(upper_pname)
+            else:
+                # Top-level paragraph (not inside a section)
+                pname = item.paragraph_name
                 if pname and is_valid_procedure_name(pname):
                     upper_pname = pname.upper()
-                    self._nodes[upper_pname] = FlowNode(
-                        name=upper_pname,
-                        procedure_type="PARAGRAPH",
-                        location=para.location,
-                    )
-                    self._ordered_procedures.append(upper_pname)
-
-        # Collect top-level paragraphs
-        for para in proc_division.paragraphs:
-            pname = para.paragraph_name
-            if pname and is_valid_procedure_name(pname):
-                upper_pname = pname.upper()
-                if upper_pname not in self._nodes:
-                    self._nodes[upper_pname] = FlowNode(
-                        name=upper_pname,
-                        procedure_type="PARAGRAPH",
-                        location=para.location,
-                    )
-                    self._ordered_procedures.append(upper_pname)
+                    if upper_pname not in self._nodes:
+                        self._nodes[upper_pname] = FlowNode(
+                            name=upper_pname,
+                            procedure_type="PARAGRAPH",
+                            location=item.location,
+                        )
+                        self._ordered_procedures.append(upper_pname)
 
     def scan_statements(self, proc_division: CobolDivision) -> None:
         """Scan all statements to build edges and compute node metrics."""
@@ -166,25 +179,54 @@ class ProcedureScanner:
                 self._entry_points.append(upper_para_name)
 
     def _scan_paragraph_statements(self, para: CobolParagraph) -> None:
-        """Scan all statements within a paragraph, including nested ones."""
+        """Scan all statements within a paragraph, including nested ones.
+
+        Uses an explicit work stack of zero-argument thunks instead of
+        recursing through Python's call stack — mirrors
+        :func:`.cycles.detect_cycles`'s frame-stack fix — so IF/EVALUATE/
+        PERFORM trees of arbitrary nesting depth (e.g. machine-generated
+        COBOL with hundreds of nested inline blocks) cannot exceed
+        ``sys.getrecursionlimit()``. Each queued statement carries the
+        branch arm it is nested under explicitly (what the old mutable
+        ``arm_ctx`` slot held at that point in the recursive call chain)
+        rather than relying on a shared variable restored when a call
+        returns.
+        """
         proc_name = self._current_procedure
         if not proc_name or proc_name not in self._nodes:
             return
 
         node = self._nodes[proc_name]
         visited: set[int] = set()
-        # Mutable reference so nested scan() calls can read/write current arm context.
-        # Used only to populate nested_call_targets; does not affect edge routing.
-        arm_ctx: list[BranchArm | None] = [None]
+        work: list[Callable[[], None]] = []
 
         def _record_type(stmt: Any) -> None:
             stype = getattr(stmt, "statement_type", None)
             if stype:
                 node.statement_types[stype] = node.statement_types.get(stype, 0) + 1
 
-        def scan(stmt: Any, source_id: str | None = None) -> None:
-            if source_id is None:
-                source_id = proc_name
+        def push_one(stmt: Any, source_id: str, arm: BranchArm | None) -> None:
+            work.append(lambda: visit(stmt, source_id, arm))
+
+        def push_many(stmts: list[Any], source_id: str, arm: BranchArm | None) -> None:
+            # Push in reverse so the LIFO ``work`` stack pops them back out in
+            # original left-to-right order, with each item's full subtree
+            # processed before its next sibling — the same order the old
+            # recursive ``for s in stmts: scan(s, ...)`` loop produced.
+            for s in reversed(stmts):
+                push_one(s, source_id, arm)
+
+        def push_sequential(
+            groups: list[tuple[list[Any], str, BranchArm | None]],
+        ) -> None:
+            # ``groups`` lists statement lists in the order they must be
+            # fully drained — each list's own subtree processed before the
+            # next list's first item — replicating consecutive
+            # ``for``/``scan()`` loops from the pre-stack version.
+            for stmts, source_id, arm in reversed(groups):
+                push_many(stmts, source_id, arm)
+
+        def visit(stmt: Any, source_id: str, arm: BranchArm | None) -> None:
             if not hasattr(stmt, "node_type"):
                 return
             if id(stmt) in visited:
@@ -202,30 +244,30 @@ class ProcedureScanner:
                 # IF/EVALUATE arm the PERFORM lives in.
                 self._collector.process_perform(stmt, proc_name)
                 # Record perform target in current arm for swimlane data.
-                if arm_ctx[0] is not None and stmt.target_paragraph:
+                if arm is not None and stmt.target_paragraph:
                     target = stmt.target_paragraph.upper()
-                    if target not in arm_ctx[0].nested_call_targets:
-                        arm_ctx[0].nested_call_targets.append(target)
-                # Recurse into inline PERFORM blocks
-                for s in stmt.inline_statements:
-                    scan(s, source_id)
+                    if target not in arm.nested_call_targets:
+                        arm.nested_call_targets.append(target)
+                # Queue inline PERFORM blocks
+                push_many(stmt.inline_statements, source_id, arm)
             elif isinstance(stmt, GoStatement):
                 node.goto_count += 1
                 self._collector.process_goto(stmt, proc_name)
-                if arm_ctx[0] is not None and stmt.target_paragraph:
+                if arm is not None and stmt.target_paragraph:
                     target = stmt.target_paragraph.upper()
-                    if target not in arm_ctx[0].nested_call_targets:
-                        arm_ctx[0].nested_call_targets.append(target)
+                    if target not in arm.nested_call_targets:
+                        arm.nested_call_targets.append(target)
             elif isinstance(stmt, CallStatement):
                 node.call_count += 1
                 self._collector.process_call(stmt, proc_name)
-                # Scan exception handler branches for nested flow
-                for s in stmt.on_overflow or []:
-                    scan(s, source_id)
-                for s in stmt.on_exception or []:
-                    scan(s, source_id)
-                for s in stmt.not_on_exception or []:
-                    scan(s, source_id)
+                # Queue exception handler branches for nested flow
+                push_sequential(
+                    [
+                        (stmt.on_overflow or [], source_id, arm),
+                        (stmt.on_exception or [], source_id, arm),
+                        (stmt.not_on_exception or [], source_id, arm),
+                    ]
+                )
             elif isinstance(stmt, IfStatement):
                 node.if_count += 1
                 # Derive condition text
@@ -291,14 +333,12 @@ class ProcedureScanner:
                         location=stmt.location,
                     )
                 )
-                prev_arm = arm_ctx[0]
-                arm_ctx[0] = then_arm
-                for s in stmt.then_statements:
-                    scan(s, then_id)
-                arm_ctx[0] = else_arm
-                for s in stmt.else_statements:
-                    scan(s, else_id)
-                arm_ctx[0] = prev_arm
+                push_sequential(
+                    [
+                        (stmt.then_statements, then_id, then_arm),
+                        (stmt.else_statements, else_id, else_arm),
+                    ]
+                )
             elif isinstance(stmt, EvaluateStatement):
                 node.evaluate_count += 1
                 subjects: list[Any] = []
@@ -346,7 +386,12 @@ class ProcedureScanner:
                         location=stmt.location,
                     )
                 )
-                # WHEN arms
+                # WHEN arms. Each clause's own arm/edge bookkeeping is
+                # deferred into a thunk queued alongside its statements, so
+                # WHEN k+1's edge is only appended once WHEN k's subtree is
+                # fully drained from the work stack — matching the
+                # interleaving the old recursive version produced.
+                clause_thunks: list[Callable[[], None]] = []
                 for wc_idx, wc in enumerate(stmt.when_clauses):
                     sel = wc.selectors[0] if wc.selectors else {}
                     sel_type = sel.get("type", "") if isinstance(sel, dict) else ""
@@ -365,27 +410,32 @@ class ProcedureScanner:
                     else:
                         when_label = f"WHEN {wc_idx + 1}"
                     arm_id = f"{bn_id}__WHEN_{wc_idx + 1}"
-                    arm = BranchArm(
+                    when_arm = BranchArm(
                         arm_id=arm_id,
                         arm_type="WHEN",
                         label=when_label,
                         statement_count=len(wc.statements),
                     )
-                    bn.arms.append(arm)
-                    self._edges.append(
-                        FlowEdge(
-                            source=bn_id,
-                            target=arm_id,
-                            edge_type=FlowEdgeType.EVALUATE_WHEN,
-                            location=stmt.location,
-                            condition=when_label,
+
+                    def _when_thunk(
+                        wc: Any = wc,
+                        arm_id: str = arm_id,
+                        when_arm: BranchArm = when_arm,
+                        when_label: str = when_label,
+                    ) -> None:
+                        bn.arms.append(when_arm)
+                        self._edges.append(
+                            FlowEdge(
+                                source=bn_id,
+                                target=arm_id,
+                                edge_type=FlowEdgeType.EVALUATE_WHEN,
+                                location=stmt.location,
+                                condition=when_label,
+                            )
                         )
-                    )
-                    prev_arm = arm_ctx[0]
-                    arm_ctx[0] = arm
-                    for s in wc.statements:
-                        scan(s, arm_id)
-                    arm_ctx[0] = prev_arm
+                        push_many(wc.statements, arm_id, when_arm)
+
+                    clause_thunks.append(_when_thunk)
                 # WHEN OTHER arm
                 if stmt.default_when:
                     other_id = f"{bn_id}__WHEN_OTHER"
@@ -395,21 +445,28 @@ class ProcedureScanner:
                         label="WHEN OTHER",
                         statement_count=len(stmt.default_when.statements),
                     )
-                    bn.arms.append(other_arm)
-                    self._edges.append(
-                        FlowEdge(
-                            source=bn_id,
-                            target=other_id,
-                            edge_type=FlowEdgeType.EVALUATE_WHEN_OTHER,
-                            location=stmt.location,
-                            condition="WHEN OTHER",
+                    default_when = stmt.default_when
+
+                    def _other_thunk(
+                        other_id: str = other_id,
+                        other_arm: BranchArm = other_arm,
+                        default_when: Any = default_when,
+                    ) -> None:
+                        bn.arms.append(other_arm)
+                        self._edges.append(
+                            FlowEdge(
+                                source=bn_id,
+                                target=other_id,
+                                edge_type=FlowEdgeType.EVALUATE_WHEN_OTHER,
+                                location=stmt.location,
+                                condition="WHEN OTHER",
+                            )
                         )
-                    )
-                    prev_arm = arm_ctx[0]
-                    arm_ctx[0] = other_arm
-                    for s in stmt.default_when.statements:
-                        scan(s, other_id)
-                    arm_ctx[0] = prev_arm
+                        push_many(default_when.statements, other_id, other_arm)
+
+                    clause_thunks.append(_other_thunk)
+                for thunk in reversed(clause_thunks):
+                    work.append(thunk)
             elif isinstance(stmt, SearchStatement):
                 node.search_count += 1
                 decision = {
@@ -420,12 +477,13 @@ class ProcedureScanner:
                     "has_at_end": bool(stmt.at_end_clause),
                 }
                 node.decisions.append(decision)
-                for wc_dict in stmt.when_clauses:
-                    for s in wc_dict.get("statements", []):
-                        scan(s, source_id)
+                search_groups: list[tuple[list[Any], str, BranchArm | None]] = [
+                    (wc_dict.get("statements", []), source_id, arm)
+                    for wc_dict in stmt.when_clauses
+                ]
                 if stmt.at_end_clause:
-                    for s in stmt.at_end_clause:
-                        scan(s, source_id)
+                    search_groups.append((stmt.at_end_clause, source_id, arm))
+                push_sequential(search_groups)
             elif isinstance(stmt, SortStatement):
                 self._collector.process_sort(stmt, proc_name)
             elif isinstance(stmt, MergeStatement):
@@ -436,11 +494,16 @@ class ProcedureScanner:
                 self._collector.process_cancel(stmt, proc_name)
             elif isinstance(stmt, ReturnStatement):
                 node.has_return = True
-                # Scan AT END / NOT AT END branches for nested flow
-                for s in stmt.at_end_clause or []:
-                    scan(s)
-                for s in stmt.not_at_end_clause or []:
-                    scan(s)
+                # Queue AT END / NOT AT END branches for nested flow. The
+                # original recursive scan(s) call (no source_id argument)
+                # defaulted to proc_name rather than inheriting source_id —
+                # preserved here.
+                push_sequential(
+                    [
+                        (stmt.at_end_clause or [], proc_name, arm),
+                        (stmt.not_at_end_clause or [], proc_name, arm),
+                    ]
+                )
             elif isinstance(stmt, StopStatement):
                 node.has_stop_run = True
                 self._exit_points.add(proc_name)
@@ -467,11 +530,13 @@ class ProcedureScanner:
                 # PERFORM/GO TO/CALL living inside such a clause produced no
                 # edge, cascading into false "unreachable" reports and missing
                 # flowchart arrows.
+                clause_groups: list[tuple[list[Any], str, BranchArm | None]] = []
                 for attr in _CLAUSE_BODY_ATTRS:
                     clause = getattr(stmt, attr, None)
                     if isinstance(clause, list):
-                        for s in clause:
-                            scan(s, source_id)
+                        clause_groups.append((clause, source_id, arm))
+                push_sequential(clause_groups)
 
-        for stmt in para.statements:
-            scan(stmt)
+        push_many(para.statements, proc_name, None)
+        while work:
+            work.pop()()

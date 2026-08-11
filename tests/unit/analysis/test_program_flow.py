@@ -1,5 +1,8 @@
 """Tests for program flow analysis."""
 
+import sys
+from typing import Any
+
 import pytest
 
 from cobolparser.analysis.program_flow import (
@@ -9,6 +12,8 @@ from cobolparser.analysis.program_flow import (
     ProgramFlowAnalyzer,
     ProgramFlowReport,
 )
+from cobolparser.analysis.program_flow.edges import EdgeCollector
+from cobolparser.analysis.program_flow.scanner import ProcedureScanner
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.program import (
     CobolDivision,
@@ -4301,6 +4306,112 @@ class TestProgramFlowRealCobolIntegration:
         assert d["summary"]["cancellation_count"] == 1
         assert d["summary"]["unreachable_node_count"] >= 1
 
+    # ------------------------------------------------------------------
+    # Paragraphs before the first SECTION (mixed top-level/sectioned order)
+    # ------------------------------------------------------------------
+
+    def test_top_level_paragraph_before_section_stays_first_entry_point(self) -> None:
+        """A paragraph before the first SECTION must remain the entry point
+        and must fall through to the section that follows it in source.
+
+        Regression test: ``ProcedureScanner.collect_procedures`` used to
+        collect all section-owned paragraphs before top-level paragraphs,
+        so a program that legally mixes the two (paragraphs before the
+        first SECTION) ended up with an ``_ordered_procedures`` list that
+        no longer matched source order. That corrupted entry-point
+        detection (the section became ``entry_points[0]`` instead of the
+        true first paragraph) and fabricated a bogus fall-through edge
+        between physically non-adjacent paragraphs while dropping the real
+        one.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       INIT-PARA.
+           DISPLAY 'INIT'.
+       MAIN-SECTION SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert [n.name for n in report.nodes] == [
+            "INIT-PARA",
+            "MAIN-SECTION",
+            "FIRST-PARA",
+        ]
+        assert report.entry_points[0] == "INIT-PARA"
+        assert report.unreachable_nodes == []
+
+        fall_through_pairs = {
+            (e.source, e.target)
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+        }
+        assert ("INIT-PARA", "MAIN-SECTION") in fall_through_pairs
+        assert ("MAIN-SECTION", "FIRST-PARA") in fall_through_pairs
+
+    def test_duplicate_name_across_top_level_and_section_not_double_counted(
+        self,
+    ) -> None:
+        """A name reused both as a top-level paragraph and a section-owned
+        paragraph must be recorded once in ``report.nodes``, whichever
+        occurrence comes first in source order.
+
+        Regression test: interleaving top-level paragraphs and section-owned
+        paragraphs by source line (the fix for the mixed-order bug above)
+        made the existing dedup guard order-dependent -- it previously only
+        guarded the top-level-paragraph branch, which was safe when sections
+        were always collected first. Once collection order can put a
+        top-level occurrence before a section-owned occurrence of the same
+        name, an unguarded section branch would append it a second time.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       MAIN-SECTION SECTION.
+       DUP-NAME.
+           DISPLAY 'IN-SECTION'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert [n.name for n in report.nodes] == ["DUP-NAME", "MAIN-SECTION"]
+
+    def test_duplicate_name_across_top_level_paragraph_and_section_header(
+        self,
+    ) -> None:
+        """A name reused as a top-level paragraph and later as a SECTION
+        header must be recorded once, and the SECTION's own paragraphs must
+        still be scanned/collected under it.
+
+        Regression test: the SECTION-registration branch (unlike the
+        paragraph branches) had no dedup guard at all, so a same-named
+        top-level paragraph occurring earlier in source would be silently
+        overwritten (a PARAGRAPH ``FlowNode`` replaced by a SECTION one) and
+        duplicated in ``report.nodes``/``_ordered_procedures`` once the
+        SECTION was collected.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST2.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       DUP-NAME SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert [n.name for n in report.nodes] == ["DUP-NAME", "FIRST-PARA"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: Edge-case coverage (audit gaps)
@@ -5479,3 +5590,139 @@ class TestCycleClassification:
         report = ProgramFlowAnalyzer().analyze(prog)
         assert report.cycle_details == []
         assert report.to_dict()["summary"]["recursion_cycle_count"] == 0
+
+
+class TestScannerDeepNestingRegression:
+    """Regression coverage for the explicit work-stack rewrite of
+    ``ProcedureScanner._scan_paragraph_statements`` (see .okf/analysis.md,
+    ProgramFlowAnalyzer / scanner.py section).
+
+    Before the rewrite, the inner ``scan()`` closure recursed through the
+    Python call stack once per nested IF/EVALUATE/PERFORM level, so deeply
+    nested statement trees (e.g. machine-generated COBOL with long chains of
+    nested inline ``PERFORM ... END-PERFORM``) could raise ``RecursionError``
+    and abort ``analyze()`` outright. These tests nest well beyond Python's
+    default recursion limit (1000) to guard against a regression back to
+    recursion.
+
+    They drive :class:`ProcedureScanner` directly rather than going through
+    ``ProgramFlowAnalyzer.analyze()``: at these depths, ``analyze()`` also
+    calls ``CobolProgram.get_all_statements()`` (a separate, still-recursive
+    tree walker in ``cobolparser/models/program.py`` — a distinct, tracked
+    issue, not covered by this fix) which would hit its own
+    ``RecursionError`` first and mask whether *this* rewrite works.
+    """
+
+    @staticmethod
+    def _scan(stmt: Any) -> tuple[list[Any], list[Any], dict[str, Any]]:
+        """Run ``ProcedureScanner`` over a single MAIN-LOGIC paragraph
+        containing ``stmt``, returning (branch_nodes, edges, nodes)."""
+        para = CobolParagraph("MAIN-LOGIC", SourceLocation(10, 8))
+        para.add_statement(stmt)
+        proc_div = CobolDivision("PROCEDURE", SourceLocation(1, 1))
+        proc_div.add_paragraph(para)
+
+        nodes: dict[str, Any] = {}
+        ordered_procedures: list[Any] = []
+        edges: list[Any] = []
+        branch_nodes: list[Any] = []
+        collector = EdgeCollector(
+            edges=edges,
+            ordered_procedures=ordered_procedures,
+            external_calls=[],
+            program_cancellations=[],
+        )
+        scanner = ProcedureScanner(
+            nodes=nodes,
+            ordered_procedures=ordered_procedures,
+            edges=edges,
+            entry_points=[],
+            exit_points=set(),
+            branch_nodes=branch_nodes,
+            collector=collector,
+        )
+        scanner.collect_procedures(proc_div)
+        scanner.scan_statements(proc_div)
+        return branch_nodes, edges, nodes
+
+    def test_deeply_nested_if_chain_does_not_raise_recursion_error(self) -> None:
+        """A 5,000-deep nested IF/THEN chain scans without RecursionError."""
+        depth = 5000
+        assert depth > sys.getrecursionlimit()
+
+        stmt: Any = _continue()
+        for _ in range(depth):
+            stmt = _if_stmt([stmt])
+
+        branch_nodes, _edges, _nodes = self._scan(stmt)
+
+        assert len(branch_nodes) == depth
+        assert branch_nodes[0].node_id == "MAIN-LOGIC__IF_1"
+        assert branch_nodes[-1].node_id == f"MAIN-LOGIC__IF_{depth}"
+
+    def test_deeply_nested_inline_perform_does_not_raise_recursion_error(
+        self,
+    ) -> None:
+        """5,000 nested inline PERFORM ... END-PERFORM blocks scan without error."""
+        depth = 5000
+        assert depth > sys.getrecursionlimit()
+
+        stmt: Any = _continue()
+        for _ in range(depth):
+            outer = PerformStatement(LOC)
+            outer.inline_statements = [stmt]
+            stmt = outer
+
+        _branch_nodes, _edges, nodes = self._scan(stmt)
+
+        assert nodes["MAIN-LOGIC"].perform_count == depth
+
+    def test_deep_nesting_preserves_branch_arm_nested_call_targets(self) -> None:
+        """A PERFORM inside the innermost arm of a deep IF chain still
+        populates that arm's nested_call_targets — the explicit-stack walk
+        threads the correct arm through every nesting level, not just the
+        outermost one."""
+        depth = 2000
+        stmt: Any = _if_stmt([_perform("DEEPEST-TARGET")])
+        for _ in range(depth - 1):
+            stmt = _if_stmt([stmt])
+
+        branch_nodes, _edges, _nodes = self._scan(stmt)
+
+        innermost_bn = branch_nodes[-1]
+        then_arm = next(a for a in innermost_bn.arms if a.arm_type == "THEN")
+        assert then_arm.nested_call_targets == ["DEEPEST-TARGET"]
+        # No other arm in the chain accidentally picked up the target.
+        outermost_bn = branch_nodes[0]
+        outer_then_arm = next(a for a in outermost_bn.arms if a.arm_type == "THEN")
+        assert outer_then_arm.nested_call_targets == []
+
+    def test_evaluate_when_edges_interleave_with_nested_subtree_edges(self) -> None:
+        """WHEN k+1's own EVALUATE_WHEN edge is appended only after WHEN k's
+        nested subtree is fully scanned — pins the exact interleaving the old
+        recursive version produced (arm/edge creation, then full recursion
+        into that arm, before moving to the next WHEN), which the rewrite
+        replicates by deferring each WHEN clause's own bookkeeping into a
+        thunk queued alongside its statements rather than eagerly building
+        all WHEN edges up front.
+        """
+        stmt = EvaluateStatement(LOC)
+        stmt.add_subject("WS-VAR")
+
+        wc1 = WhenClause([{"type": "Literal", "value": "1"}], LOC)
+        wc1.add_statement(_if_stmt([_continue()]))  # nested branch inside WHEN_1
+        stmt.add_when_clause(wc1)
+
+        wc2 = WhenClause([{"type": "Literal", "value": "2"}], LOC)
+        wc2.add_statement(_continue())
+        stmt.add_when_clause(wc2)
+
+        _branch_nodes, edges, _nodes = self._scan(stmt)
+
+        nested_if_branch_idx = next(
+            i for i, e in enumerate(edges) if e.edge_type == FlowEdgeType.IF_BRANCH
+        )
+        when_edges = [e for e in edges if e.edge_type == FlowEdgeType.EVALUATE_WHEN]
+        when_2_edge_idx = edges.index(when_edges[1])
+
+        assert when_2_edge_idx > nested_if_branch_idx

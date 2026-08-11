@@ -17,6 +17,49 @@ Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer section). Pinned by
 `TestAlterReferences.test_alter_never_called_paragraph_is_dead`
 (`tests/unit/analysis/test_dead_code.py`).
 
+## 2026-08-11 (Dead-code/program-flow: SECTION-registration dedup guard, Copilot follow-up)
+
+Copilot review on PR #130 (the paragraphs-before-first-SECTION fix below)
+caught that the SECTION-registration branch in both `DeadCodeAnalyzer.
+_collect_procedures` and `ProcedureScanner.collect_procedures` had no
+dedup guard at all, unlike both paragraph branches. Under the new
+interleaved-by-`location.line` order, a top-level paragraph followed later
+by a same-named `SECTION` header would silently overwrite the earlier
+`PARAGRAPH` entry with a `SECTION` one and duplicate the name in
+`_ordered_procedures` — confirmed with an empirical repro before fixing.
+Fixed by extending the same guard to the SECTION branch in both files;
+`dead_code.py`'s `_section_paragraphs[name]` bucket is now ensured via
+`.setdefault()` regardless of whether the guard skipped that SECTION's own
+registration, since the paragraph loop below it always appends into it
+unconditionally. Also fixed a Copilot-flagged path issue in `CHANGELOG.md`
+(missing the `cobolparser/` prefix used elsewhere in that file). Updated:
+[analysis.md](analysis.md), [tests.md](tests.md).
+
+## 2026-08-11 (Dead-code/program-flow: paragraphs before first SECTION reordered)
+
+`claude/dead-code-section-550f0e` finding #1: COBOL legally allows
+paragraphs before the first `SECTION` header, but `DeadCodeAnalyzer.
+_collect_procedures` (`analysis/dead_code.py`) and `ProcedureScanner.
+collect_procedures` (`analysis/program_flow/scanner.py`) both appended all
+section-owned paragraphs to `_ordered_procedures` before top-level
+paragraphs, corrupting physical source order whenever a program mixed the
+two. Since both analyzers treat `_ordered_procedures[0]` as the entry point
+(and `ProgramFlowAnalyzer`'s fall-through-edge pass walks the same list in
+order), this made a section the false entry point, reported the true first
+paragraph as dead/unreachable, and fabricated a bogus fall-through edge
+between physically non-adjacent paragraphs. Fixed both collectors by
+interleaving sections and top-level paragraphs by `location.line` before
+walking them. That interleave in turn made each collector's existing
+name-collision dedup guard order-dependent (it only lived on the
+top-level-paragraph branch, safe only when sections were always walked
+first) — caught by review before landing, not by the original finding; a
+name reused both top-level and inside a section could otherwise be
+double-appended to `_ordered_procedures` once a top-level occurrence sorted
+before its section-owned twin. Added the identical guard to the
+section-owned-paragraph branch in both files. Updated:
+[analysis.md](analysis.md) (`DeadCodeAnalyzer` and `ProgramFlowAnalyzer`
+sections).
+
 ## 2026-08-11 (Computed GO TO target dropped when it shares a name with the DEPENDING ON variable)
 
 Finding #4 from the "Dead Code & Program Flow" analyzer audit
@@ -63,6 +106,50 @@ helper needed. Updated: [analysis.md](analysis.md) (`DeadCodeAnalyzer` and
 `ProgramFlowAnalyzer` sections). Pinned by
 `tests/unit/analysis/test_dead_code.py::TestEntryReferences` and
 `tests/unit/analysis/test_program_flow.py::TestProgramFlowEntryPoints`.
+
+## 2026-08-11 (scanner.py explicit-stack rewrite — dead-code/program-flow audit)
+
+Last of a 7-finding "Dead Code & Program Flow" module audit batch (branch
+`claude/dead-code-section-550f0e`). Finding: `ProcedureScanner.
+_scan_paragraph_statements`'s inner `scan()` closure
+(`cobolparser/analysis/program_flow/scanner.py`) recursed through Python's
+own call stack once per nested IF/EVALUATE arm, inline
+`PERFORM ... END-PERFORM` block, or clause body, with no depth guard — a
+risk (not empirically triggered in production) flagged as the same category
+as the already-fixed `analysis/const_fold.py` paragraph-chain recursion, but
+applied here to AST-nesting depth instead. Reproduced directly: a 3,000-deep
+nested-IF chain raised `RecursionError` against the pre-fix code (Python's
+default recursion limit is 1000); a 20,000-deep chain scans cleanly after
+the fix. Rewrote the walk to use an explicit `work` stack of zero-argument
+thunks — the same technique `program_flow/cycles.py`'s `detect_cycles`
+already uses for its paragraph-graph DFS — carrying each statement's branch
+`arm` explicitly instead of through a shared mutable slot, and deferring
+EVALUATE's per-`WHEN`-clause bookkeeping into thunks so branch-node/edge
+append order (and therefore `_branch_seq`-derived ID strings) exactly
+matches the old recursive interleaving. Added regression tests driving
+`ProcedureScanner` directly at 2,000-5,000 levels of nesting, plus one
+pinning the EVALUATE thunk-deferral invariant itself (a `WHEN` clause's own
+edge is appended only after its nested subtree's edges). Verified output
+equivalence empirically, not just via passing tests: dumped
+`ProgramFlowAnalyzer().analyze(ast).to_dict()` (unsorted) for all 483 files
+across the 24-file shamrice corpus and the 459-file NIST COBOL-85 corpus on
+both the pre-fix and post-fix `scanner.py` — byte-identical (same MD5)
+output on every file, confirming the rewrite preserves exact edge/branch-node
+ordering on real programs, not just the synthetic cases the unit tests
+construct. Found, but did not fix (flagged separately as a follow-up), a
+related unguarded recursive `traverse()` in `CobolProgram.
+get_all_statements()` (`cobolparser/models/program.py`) that hits the same
+class of error around ~500 levels of nesting. Updated:
+[analysis.md](analysis.md) (ProgramFlowAnalyzer section).
+
+Branch note: this landed on `claude/exciting-dhawan-a880d8`, not
+`claude/dead-code-section-550f0e` — that branch is checked out in a sibling
+worktree and, at the time of this fix, was still at `main`'s tip with none
+of the other 6 findings in this audit batch committed to it yet. The other 6
+findings (per the task brief, all touching `dead_code.py`,
+`program_flow/scanner.py`, `program_flow/graph.py`, and
+`program_flow/edges.py`) will need to merge against this rewritten
+`scan()`/`_scan_paragraph_statements`, not the other way around.
 
 ## 2026-08-10 (reports/open-findings.md consolidated)
 

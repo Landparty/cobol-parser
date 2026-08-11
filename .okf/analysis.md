@@ -98,6 +98,48 @@ now just iterates it directly. Same root cause and same fix shape in
 `tests/unit/analysis/test_dead_code.py` and
 `tests/unit/analysis/test_program_flow.py`.
 
+**Paragraphs before the first SECTION must stay first in source order
+(2026-08-11, dead-code-section-550f0e finding #1).** COBOL legally allows
+paragraphs before the first `SECTION` header. `_collect_procedures` used to
+append all section-owned paragraphs to `_ordered_procedures` before the
+top-level (pre-SECTION) paragraphs, so a program mixing the two produced an
+`_ordered_procedures` list that no longer matched physical source order.
+Since `analyze()` always treats `_ordered_procedures[0]` as the referenced
+program entry point, this fabricated a false-dead-code report for the real
+first paragraph (a section became entry point instead) whenever a program
+had any top-level paragraph before its first section — a legal, if
+uncommon, shape. Fixed by interleaving sections and top-level paragraphs by
+`location.line` before walking them, so `_ordered_procedures` always matches
+source order regardless of section/paragraph mix. `ProgramFlowAnalyzer`
+(below) had the identical bug in the same shape, from the same duplicated
+collection logic. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_top_level_paragraph_before_section_stays_first_in_order`.
+
+**The interleave fix made the pre-existing dedup guard order-dependent —
+caught by review before landing.** The dedup guard (`if upper_pname not in
+self._procedure_names`) previously lived only on the top-level-paragraph
+branch, which was safe *only* because sections were always walked first —
+by the time a top-level paragraph was considered, any same-named
+section-owned paragraph was already registered. Interleaving by
+`location.line` breaks that assumption: when a top-level occurrence of a
+duplicated name sorts before its section-owned twin, the (still-unguarded)
+section branch would append it to `_ordered_procedures` a second time. The
+section-owned-paragraph branch now carries the identical guard. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_and_section_not_double_counted`.
+
+**The SECTION-registration branch itself had no dedup guard at all —
+caught by Copilot review on the PR.** Unlike both paragraph branches, the
+code that records a `SECTION` header into `_procedure_names` never checked
+whether that name was already registered. A top-level paragraph followed
+later in source by a same-named `SECTION` (e.g. `DUP-NAME.` ... `DUP-NAME
+SECTION.`) would have its `PARAGRAPH` entry silently overwritten by a
+`SECTION` entry, and the name duplicated in `_ordered_procedures`. Fixed by
+adding the same guard to the SECTION branch; `_section_paragraphs[name]`
+is still unconditionally ensured via `.setdefault()` even when the guard
+skips the SECTION's own registration, since the paragraph loop right below
+it always appends into that bucket. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_paragraph_and_section_header`.
+
 ## ProgramFlowAnalyzer
 
 ```python
@@ -115,6 +157,27 @@ Produces a control-flow graph. Edge types:
 - `FlowEdgeType.FALL_THROUGH` — sequential paragraph fall-through
 
 THRU ranges expand to `range_members`; cycles are classified in `cycle_details`.
+
+**Paragraphs before the first SECTION must stay first in source order
+(2026-08-11, dead-code-section-550f0e finding #1).** `ProcedureScanner.
+collect_procedures` (`scanner.py`) had the same bug as `DeadCodeAnalyzer.
+_collect_procedures` above (they duplicate the same collection shape): all
+section-owned paragraphs were appended to `_ordered_procedures` before
+top-level (pre-SECTION) paragraphs, corrupting physical order whenever a
+program mixed the two. Since `entry_points[0]` and `build_fall_through_edges`
+(`graph.py`) both walk `_ordered_procedures` in order, this made the wrong
+procedure the entry point and fabricated a bogus fall-through edge between
+physically non-adjacent paragraphs while dropping the real one. Fixed the
+same way: sections and top-level paragraphs are interleaved by
+`location.line` before being walked. Pinned by
+`tests/unit/analysis/test_program_flow.py::TestProgramFlowRealCobolIntegration::test_top_level_paragraph_before_section_stays_first_entry_point`.
+Same order-dependent-dedup-guard trap as `DeadCodeAnalyzer` above applied
+here too (`self._nodes` guard was top-level-only); fixed identically,
+pinned by
+`::test_duplicate_name_across_top_level_and_section_not_double_counted`.
+The SECTION-registration branch's missing guard (Copilot review catch) was
+also fixed identically here, pinned by
+`::test_duplicate_name_across_top_level_paragraph_and_section_header`.
 
 **ENTRY-statement paragraphs are alternate entry-point roots (2026-08-11
 fix, audit finding #5).** `scanner.py`'s `collect_entry_points` used to add
@@ -148,7 +211,7 @@ adding them would misclassify cycles as `MIXED`. Pinned by
 `cobolparser/analysis/program_flow/` splits the former god class into
 collaborators — `models.py` (`FlowNode`/`FlowEdge`/`FlowEdgeType`/`BranchArm`/
 `BranchNode`/`ProgramFlowReport`), `scanner.py` (`ProcedureScanner`: procedure
-collection + the recursive `scan()` statement walk, `_CLAUSE_BODY_ATTRS`),
+collection + the explicit-work-stack statement walk, `_CLAUSE_BODY_ATTRS`),
 `edges.py` (`EdgeCollector`: PERFORM/GO TO/CALL/SORT/MERGE/CANCEL/ALTER edge
 construction, `INTERNAL_EDGE_TYPES`/`PERFORM_EDGE_TYPES`/`GOTO_EDGE_TYPES`),
 `cycles.py` (`detect_cycles`/`classify_cycles`), `graph.py`
@@ -159,9 +222,10 @@ orchestrator). All public names still import from
 unchanged.
 
 Unlike most analyzers (which walk `get_all_statements()`), the flow graph is
-built by a hand-rolled `scan()` that recurses statement-by-statement. Audit
-2026-07-09: `scan()` special-cased only PERFORM inline blocks, CALL handlers,
-and IF/EVALUATE/SEARCH/RETURN — it never descended into IO clause bodies
+built by a hand-rolled statement-tree walk in
+`ProcedureScanner._scan_paragraph_statements`. Audit 2026-07-09: `scan()`
+special-cased only PERFORM inline blocks, CALL handlers, and
+IF/EVALUATE/SEARCH/RETURN — it never descended into IO clause bodies
 (`AT END` / `INVALID KEY` / `AT EOP`), arithmetic `ON SIZE ERROR`, or
 STRING/UNSTRING `ON OVERFLOW`. A PERFORM/GO TO/CALL nested in one of those
 produced no edge, cascading into **false `unreachable_nodes`** and missing
@@ -169,6 +233,46 @@ flowchart arrows. Fixed with a final `else` branch iterating
 `_CLAUSE_BODY_ATTRS`; the `id`-based `visited` set keeps the
 generic pass from double-counting statements the specialized branches already
 handled. Pinned by `tests/regression/test_tier6_silent_drop_audit.py`.
+
+**Explicit work stack instead of call-stack recursion (2026-08-11, risk
+finding, not empirically triggered in production — same category as the
+already-fixed `const_fold.py` paragraph-chain recursion above, applied here
+to *AST-nesting depth* instead):** the inner `scan()` closure originally
+recursed through Python's own call stack once per nested IF/EVALUATE arm,
+inline `PERFORM ... END-PERFORM` block, or clause body — a few hundred to a
+thousand levels of nesting (plausible in machine-generated COBOL) could
+exceed `sys.getrecursionlimit()` (default 1000) and abort `analyze()`
+outright with an uncaught `RecursionError`. Reproduced directly: a
+3,000-deep nested-IF chain raised `RecursionError` against the old code
+before this fix; a 20,000-deep chain scans cleanly after it. Rewritten to an
+explicit `work` stack of zero-argument thunks — the same technique
+`program_flow/cycles.py`'s `detect_cycles` already uses for its
+paragraph-graph DFS — so nesting depth is bounded only by available memory,
+not the Python call stack. Two behavior-preservation details worth knowing
+if this function is touched again:
+- The old mutable `arm_ctx` single-slot variable (used only to populate
+  `BranchArm.nested_call_targets` for PERFORM/GO TO found inside an IF/
+  EVALUATE arm) is gone; each queued statement now carries its own `arm`
+  value explicitly, which is equivalent because it always held exactly what
+  the nearest enclosing arm on the current recursive path would have been.
+- EVALUATE's per-`WHEN`-clause arm/edge bookkeeping is deferred into a
+  thunk queued alongside that clause's statements, so `WHEN k+1`'s
+  `BranchNode`/`FlowEdge` entries are still appended only after `WHEN k`'s
+  entire subtree (including any nested branches inside it) has been
+  drained from the stack — preserving the exact `self._branch_seq` /
+  `self._edges` append order the old recursive interleaving produced, which
+  several tests pin via `bn.node_id` string suffixes
+  (`test_branch_seq_increments_across_if_and_evaluate`, etc.).
+
+A related, still-open issue found while testing this fix but out of scope
+for it: `CobolProgram.get_all_statements()` (`cobolparser/models/program.py`)
+has its own unguarded recursive `traverse()` closure over the full statement
+tree, reachable via `ProcedureScanner.collect_entry_points`, and hits the
+same class of `RecursionError` around ~500 levels of IF nesting. Not yet
+fixed. Pinned by
+`tests/unit/analysis/test_program_flow.py::TestScannerDeepNestingRegression`
+(drives `ProcedureScanner` directly, bypassing `get_all_statements()`, to
+isolate coverage of this fix from that separate issue).
 
 ## IOLogger
 

@@ -538,6 +538,117 @@ class TestDeadCodeIntegration:
         assert "INIT-END" not in dead_names
         assert "ORPHAN-PARA" in dead_names
 
+    def test_top_level_paragraph_before_section_stays_first_in_order(self) -> None:
+        """A paragraph before the first SECTION must stay first in physical
+        (source) order, not be reordered after all section-owned paragraphs.
+
+        Regression test: ``_collect_procedures`` used to append all
+        section-owned paragraphs before top-level paragraphs, so a program
+        that legally mixes the two (paragraphs before the first SECTION)
+        ended up with an ``_ordered_procedures`` list that no longer matched
+        source order. That corrupted entry-point detection (``[0]`` became
+        the wrong procedure) since the analyzer always treats the first
+        entry as the referenced program entry point.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       INIT-PARA.
+           DISPLAY 'INIT'.
+       MAIN-SECTION SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="mixedorder.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == [
+            "INIT-PARA",
+            "MAIN-SECTION",
+            "FIRST-PARA",
+        ]
+        # INIT-PARA is the entry point (first in source order), so it must
+        # not be reported as dead code even though nothing PERFORMs it.
+        dead_names = [item.name for item in report.dead_items]
+        assert "INIT-PARA" not in dead_names
+
+    def test_duplicate_name_across_top_level_and_section_not_double_counted(
+        self,
+    ) -> None:
+        """A name reused both as a top-level paragraph and a section-owned
+        paragraph must be recorded once in ``_ordered_procedures``, whichever
+        occurrence comes first in source order.
+
+        Regression test: interleaving top-level paragraphs and section-owned
+        paragraphs by source line (the fix for the mixed-order bug above)
+        made the existing dedup guard order-dependent -- it previously only
+        guarded the top-level-paragraph branch, which was safe when sections
+        were always collected first. Once collection order can put a
+        top-level occurrence before a section-owned occurrence of the same
+        name, an unguarded section branch would append it a second time.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       MAIN-SECTION SECTION.
+       DUP-NAME.
+           DISPLAY 'IN-SECTION'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="duptest.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == ["DUP-NAME", "MAIN-SECTION"]
+        assert report.total_procedures == 2
+
+    def test_duplicate_name_across_top_level_paragraph_and_section_header(
+        self,
+    ) -> None:
+        """A name reused as a top-level paragraph and later as a SECTION
+        header must be recorded once, and the SECTION's own paragraphs must
+        still be tracked under it.
+
+        Regression test: the SECTION-registration branch (unlike the
+        paragraph branches) had no dedup guard at all, so a same-named
+        top-level paragraph occurring earlier in source would be silently
+        overwritten and duplicated in ``_ordered_procedures`` when the
+        SECTION was collected. Also verifies ``_section_paragraphs`` is
+        still populated for the section even when its own header
+        registration was skipped due to the collision, so the paragraph
+        loop's ``.append()`` doesn't KeyError.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST2.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       DUP-NAME SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="duptest2.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == ["DUP-NAME", "FIRST-PARA"]
+        assert report.total_procedures == 2
+        assert analyzer._section_paragraphs["DUP-NAME"] == ["FIRST-PARA"]
+
     def test_goto_depending_target_sharing_name_with_variable(self) -> None:
         """A computed GO TO target that shares its name with the DEPENDING
         ON variable must still be marked referenced, not just filtered out.
