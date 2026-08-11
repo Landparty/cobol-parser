@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._conditions import (
     COMPARISON_OPS,
     build_condition_expression,
+    condition_token_text,
     find_top_level_operator,
     strip_enclosing_parens,
 )
@@ -94,7 +95,7 @@ class IfStatementParser(IStatementParser):
                 break
 
             # Add token to condition
-            condition_tokens.append(token.value)
+            condition_tokens.append(condition_token_text(token))
             token_stream.consume()
 
         # Create condition expression tree

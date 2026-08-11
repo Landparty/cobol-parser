@@ -3,7 +3,10 @@
 import logging
 from typing import Any, cast
 
-from cobolparser.parsers.statements._conditions import build_condition_expression
+from cobolparser.parsers.statements._conditions import (
+    build_condition_expression,
+    condition_token_text,
+)
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
@@ -683,7 +686,7 @@ class PerformStatementParser(IStatementParser):
                 and token.value.upper() in STATEMENT_KEYWORDS
             ):
                 break
-            tokens.append(token.value or str(token.type))
+            tokens.append(condition_token_text(token))
             stream.consume()
         return tokens
 
@@ -771,7 +774,7 @@ class PerformStatementParser(IStatementParser):
                 ):
                     break
 
-                condition_tokens.append(token.value or str(token.type))
+                condition_tokens.append(condition_token_text(token))
                 stream.consume()
 
             # Create CobolExpression for the condition and set it on statement

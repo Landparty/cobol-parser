@@ -5476,3 +5476,43 @@ class TestRealConditionText:
         report = ProgramFlowAnalyzer().analyze(result.ast)
         assert len(report.branch_nodes) == 1
         assert report.branch_nodes[0].condition_text == "WS-STATUS"
+
+    def test_if_condition_with_multi_char_literal_preserves_quotes(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF WS-STATUS = 'DONE'
+               DISPLAY "FINISHED"
+           END-IF.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert len(report.branch_nodes) == 1
+        assert report.branch_nodes[0].condition_text == "WS-STATUS = 'DONE'"
+
+    def test_two_single_letter_identifiers_not_quoted(self) -> None:
+        """Regression guard: two single-letter data names like IF X = Y
+        should render as X = Y, not 'X' = 'Y'."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 X PIC 9.
+       01 Y PIC 9.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           IF X = Y
+               DISPLAY "EQUAL"
+           END-IF.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert len(report.branch_nodes) == 1
+        assert report.branch_nodes[0].condition_text == "X = Y"
