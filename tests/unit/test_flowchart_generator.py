@@ -536,6 +536,14 @@ class TestMermaidFlowchartGenerator:
         out = self._gen(_simple_report())
         assert "_EXIT" not in out
 
+    def test_terminal_node_hidden_when_unreachable_and_disabled(self) -> None:
+        report = _unreachable_report()
+        dead = next(n for n in report.nodes if n.name == "DEAD-CODE")
+        dead.exit_statement_kind = "STOP RUN"
+        dead.exit_statement_location = _loc(line=99)
+        out = self._gen(report, show_unreachable=False)
+        assert "_EXIT" not in out
+
     def test_linkstyle_index_skips_hidden_edges_correctly(self) -> None:
         """A skipped (hidden) edge before a styled edge must not consume a
         linkStyle index -- the first EMITTED, styled edge must be linkStyle 0,
