@@ -1,5 +1,32 @@
 # OKF Update Log
 
+## 2026-08-11 (scanner.py explicit-stack rewrite — dead-code/program-flow audit)
+
+Last of a 7-finding "Dead Code & Program Flow" module audit batch (branch
+`claude/dead-code-section-550f0e`). Finding: `ProcedureScanner.
+_scan_paragraph_statements`'s inner `scan()` closure
+(`cobolparser/analysis/program_flow/scanner.py`) recursed through Python's
+own call stack once per nested IF/EVALUATE arm, inline
+`PERFORM ... END-PERFORM` block, or clause body, with no depth guard — a
+risk (not empirically triggered in production) flagged as the same category
+as the already-fixed `analysis/const_fold.py` paragraph-chain recursion, but
+applied here to AST-nesting depth instead. Reproduced directly: a 3,000-deep
+nested-IF chain raised `RecursionError` against the pre-fix code (Python's
+default recursion limit is 1000); a 20,000-deep chain scans cleanly after
+the fix. Rewrote the walk to use an explicit `work` stack of zero-argument
+thunks — the same technique `program_flow/cycles.py`'s `detect_cycles`
+already uses for its paragraph-graph DFS — carrying each statement's branch
+`arm` explicitly instead of through a shared mutable slot, and deferring
+EVALUATE's per-`WHEN`-clause bookkeeping into thunks so branch-node/edge
+append order (and therefore `_branch_seq`-derived ID strings) exactly
+matches the old recursive interleaving. Added regression tests driving
+`ProcedureScanner` directly at 2,000-5,000 levels of nesting. Found, but did
+not fix (flagged separately as a follow-up), a related unguarded recursive
+`traverse()` in `CobolProgram.get_all_statements()`
+(`cobolparser/models/program.py`) that hits the same class of error around
+~500 levels of nesting. Updated: [analysis.md](analysis.md) (ProgramFlow
+Analyzer section).
+
 ## 2026-08-10 (reports/open-findings.md consolidated)
 
 At the user's request, cleaned up `reports/open-findings.md`: it had grown
