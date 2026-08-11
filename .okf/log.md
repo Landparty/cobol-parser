@@ -89,6 +89,50 @@ helper needed. Updated: [analysis.md](analysis.md) (`DeadCodeAnalyzer` and
 `tests/unit/analysis/test_dead_code.py::TestEntryReferences` and
 `tests/unit/analysis/test_program_flow.py::TestProgramFlowEntryPoints`.
 
+## 2026-08-11 (scanner.py explicit-stack rewrite — dead-code/program-flow audit)
+
+Last of a 7-finding "Dead Code & Program Flow" module audit batch (branch
+`claude/dead-code-section-550f0e`). Finding: `ProcedureScanner.
+_scan_paragraph_statements`'s inner `scan()` closure
+(`cobolparser/analysis/program_flow/scanner.py`) recursed through Python's
+own call stack once per nested IF/EVALUATE arm, inline
+`PERFORM ... END-PERFORM` block, or clause body, with no depth guard — a
+risk (not empirically triggered in production) flagged as the same category
+as the already-fixed `analysis/const_fold.py` paragraph-chain recursion, but
+applied here to AST-nesting depth instead. Reproduced directly: a 3,000-deep
+nested-IF chain raised `RecursionError` against the pre-fix code (Python's
+default recursion limit is 1000); a 20,000-deep chain scans cleanly after
+the fix. Rewrote the walk to use an explicit `work` stack of zero-argument
+thunks — the same technique `program_flow/cycles.py`'s `detect_cycles`
+already uses for its paragraph-graph DFS — carrying each statement's branch
+`arm` explicitly instead of through a shared mutable slot, and deferring
+EVALUATE's per-`WHEN`-clause bookkeeping into thunks so branch-node/edge
+append order (and therefore `_branch_seq`-derived ID strings) exactly
+matches the old recursive interleaving. Added regression tests driving
+`ProcedureScanner` directly at 2,000-5,000 levels of nesting, plus one
+pinning the EVALUATE thunk-deferral invariant itself (a `WHEN` clause's own
+edge is appended only after its nested subtree's edges). Verified output
+equivalence empirically, not just via passing tests: dumped
+`ProgramFlowAnalyzer().analyze(ast).to_dict()` (unsorted) for all 483 files
+across the 24-file shamrice corpus and the 459-file NIST COBOL-85 corpus on
+both the pre-fix and post-fix `scanner.py` — byte-identical (same MD5)
+output on every file, confirming the rewrite preserves exact edge/branch-node
+ordering on real programs, not just the synthetic cases the unit tests
+construct. Found, but did not fix (flagged separately as a follow-up), a
+related unguarded recursive `traverse()` in `CobolProgram.
+get_all_statements()` (`cobolparser/models/program.py`) that hits the same
+class of error around ~500 levels of nesting. Updated:
+[analysis.md](analysis.md) (ProgramFlowAnalyzer section).
+
+Branch note: this landed on `claude/exciting-dhawan-a880d8`, not
+`claude/dead-code-section-550f0e` — that branch is checked out in a sibling
+worktree and, at the time of this fix, was still at `main`'s tip with none
+of the other 6 findings in this audit batch committed to it yet. The other 6
+findings (per the task brief, all touching `dead_code.py`,
+`program_flow/scanner.py`, `program_flow/graph.py`, and
+`program_flow/edges.py`) will need to merge against this rewritten
+`scan()`/`_scan_paragraph_statements`, not the other way around.
+
 ## 2026-08-10 (reports/open-findings.md consolidated)
 
 At the user's request, cleaned up `reports/open-findings.md`: it had grown
