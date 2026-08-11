@@ -17,6 +17,7 @@ from ...models.statements.misc import (
     MergeStatement,
     SortStatement,
 )
+from .condition_text import render_condition_text
 from .models import FlowEdge, FlowEdgeType
 
 # Edge types that represent internal flow within the program (not external calls).
@@ -117,8 +118,7 @@ class EdgeCollector:
 
             condition = None
             if stmt.until_condition:
-                cond_dict = stmt.until_condition.to_dict()
-                condition = cond_dict.get("expression_type", str(cond_dict))
+                condition = render_condition_text(stmt.until_condition)
 
             thru_target = stmt.thru_paragraph.upper() if stmt.thru_paragraph else None
             members = self.range_members(target, thru_target) if thru_target else []
@@ -206,18 +206,31 @@ class EdgeCollector:
             self._external_calls.append(call_info)
 
     def process_sort(self, stmt: SortStatement, source: str) -> None:
-        """Create edges for SORT INPUT/OUTPUT PROCEDURE references."""
+        """Create edges for SORT INPUT/OUTPUT PROCEDURE references.
+
+        Mirrors :meth:`process_perform`: when a THRU range is present, both
+        the base edge and the ``*_THRU`` edge carry ``thru_target`` /
+        ``range_members`` so consumers that skip the ``*_THRU`` edge (the
+        flowchart generators badge the base edge instead of drawing a
+        second, redundant arrow) don't lose the range information.
+        """
         if stmt.input_procedure:
+            target = stmt.input_procedure.upper()
+            thru = (
+                stmt.input_procedure_thru.upper() if stmt.input_procedure_thru else None
+            )
+            members = self.range_members(target, thru) if thru else []
             self._edges.append(
                 FlowEdge(
                     source=source,
-                    target=stmt.input_procedure.upper(),
+                    target=target,
                     edge_type=FlowEdgeType.SORT_INPUT_PROCEDURE,
                     location=stmt.location,
+                    thru_target=thru,
+                    range_members=list(members),
                 )
             )
-            if stmt.input_procedure_thru:
-                thru = stmt.input_procedure_thru.upper()
+            if thru:
                 self._edges.append(
                     FlowEdge(
                         source=source,
@@ -225,22 +238,28 @@ class EdgeCollector:
                         edge_type=FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
                         location=stmt.location,
                         thru_target=thru,
-                        range_members=self.range_members(
-                            stmt.input_procedure.upper(), thru
-                        ),
+                        range_members=list(members),
                     )
                 )
         if stmt.output_procedure:
+            target = stmt.output_procedure.upper()
+            thru = (
+                stmt.output_procedure_thru.upper()
+                if stmt.output_procedure_thru
+                else None
+            )
+            members = self.range_members(target, thru) if thru else []
             self._edges.append(
                 FlowEdge(
                     source=source,
-                    target=stmt.output_procedure.upper(),
+                    target=target,
                     edge_type=FlowEdgeType.SORT_OUTPUT_PROCEDURE,
                     location=stmt.location,
+                    thru_target=thru,
+                    range_members=list(members),
                 )
             )
-            if stmt.output_procedure_thru:
-                thru = stmt.output_procedure_thru.upper()
+            if thru:
                 self._edges.append(
                     FlowEdge(
                         source=source,
@@ -248,25 +267,35 @@ class EdgeCollector:
                         edge_type=FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
                         location=stmt.location,
                         thru_target=thru,
-                        range_members=self.range_members(
-                            stmt.output_procedure.upper(), thru
-                        ),
+                        range_members=list(members),
                     )
                 )
 
     def process_merge(self, stmt: MergeStatement, source: str) -> None:
-        """Create edges for MERGE OUTPUT PROCEDURE references."""
+        """Create edges for MERGE OUTPUT PROCEDURE references.
+
+        See :meth:`process_sort` -- the base edge carries ``thru_target`` /
+        ``range_members`` too, not just the ``*_THRU`` edge.
+        """
         if stmt.output_procedure:
+            target = stmt.output_procedure.upper()
+            thru = (
+                stmt.output_procedure_thru.upper()
+                if stmt.output_procedure_thru
+                else None
+            )
+            members = self.range_members(target, thru) if thru else []
             self._edges.append(
                 FlowEdge(
                     source=source,
-                    target=stmt.output_procedure.upper(),
+                    target=target,
                     edge_type=FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
                     location=stmt.location,
+                    thru_target=thru,
+                    range_members=list(members),
                 )
             )
-            if stmt.output_procedure_thru:
-                thru = stmt.output_procedure_thru.upper()
+            if thru:
                 self._edges.append(
                     FlowEdge(
                         source=source,
@@ -274,9 +303,7 @@ class EdgeCollector:
                         edge_type=FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
                         location=stmt.location,
                         thru_target=thru,
-                        range_members=self.range_members(
-                            stmt.output_procedure.upper(), thru
-                        ),
+                        range_members=list(members),
                     )
                 )
 

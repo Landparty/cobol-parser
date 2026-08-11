@@ -1,176 +1,171 @@
 # OKF Update Log
 
-## 2026-08-11 (DeadCodeAnalyzer ALTER subject falsely marked referenced)
+## 2026-08-11 (Whole-branch final review: 4 composition bugs across the 7-task Mermaid/DOT flowchart-fidelity plan)
 
-Dead Code & Program Flow module audit finding #6: `DeadCodeAnalyzer.
-_collect_alter_refs` (`cobolparser/analysis/dead_code.py`) added *both*
-names from `ALTER paragraph-name TO PROCEED TO target-name` to the
-reference set, but `paragraph-name` (the ALTER's subject — the paragraph
-whose internal GO TO gets rewritten) is not an incoming jump; only
-`target-name` is. This hid genuinely dead paragraphs whenever a program
-named them only as an ALTER subject, and put `DeadCodeAnalyzer` out of
-step with `ProgramFlowAnalyzer`'s `unreachable_nodes`, whose ALTER edge
-(`program_flow/edges.py::process_alter`) already only flowed
-subject to target and never had this bug. Fixed by dropping the
-`from_paragraph` add; only `to_paragraph` counts as referenced now.
-Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer section). Pinned by
-`TestAlterReferences.test_alter_never_called_paragraph_is_dead`
-(`tests/unit/analysis/test_dead_code.py`).
+A final review of the whole branch (the plan below, all 7 tasks individually
+reviewed clean) caught four composition bugs no single task's reviewer could
+see — each one only surfaces when two tasks' output combines in the same
+report. Fixed all four, plus two should-fix test-coverage gaps, in one pass
+per the review's own instruction (no second fix wave):
 
-## 2026-08-11 (Dead-code/program-flow: SECTION-registration dedup guard, Copilot follow-up)
+* **Critical: Mermaid `linkStyle` indices off by the terminal-node link
+  count.** `flowchart.py`'s exit-statement terminal-node loop (Task 5) runs
+  *before* the edges loop (Tasks 4/6), emitting one `{nid} --> {exit_id}`
+  link per paragraph with a recorded exit statement — but the edges loop's
+  own `link_index` counter still started at 0, as if it were the only
+  link-emitting loop in the diagram. Since Mermaid's `linkStyle N`
+  addresses links by definition order across the *whole* diagram, every
+  terminal-node link shifted every subsequent `linkStyle` index, so
+  recursion/GO TO coloring landed on the wrong arrow in any program with
+  both a terminal node and a styled edge — i.e. almost every real program.
+  Fixed by seeding `link_index` with `terminal_link_count` (a new counter,
+  incremented only when the terminal-node loop actually appends a link)
+  before the edges loop starts. Verified empirically with a hand-built
+  report (paragraph `C` has `STOP RUN`; paragraphs `A`/`B` form a
+  `PERFORM_RECURSION` cycle): before the fix, the recursion edge `B --> A`
+  (arrow position 2 in definition order) got `linkStyle 1`, addressing
+  `A --> B` instead; after the fix it correctly gets `linkStyle 2`. New
+  regression test:
+  `test_linkstyle_index_accounts_for_terminal_node_links` in
+  `tests/unit/test_flowchart_generator.py`.
+* **Important: SORT/MERGE `... THRU ...` ranges vanished from both
+  diagrams.** Task 6 made both generators skip any edge whose type ends in
+  `_THRU`, relying on the *base* edge already carrying `thru_target`/
+  `range_members` for a `[THRU n]` badge — true for `process_perform`
+  (`edges.py`), which has always set those fields on both the base PERFORM
+  edge and its `PERFORM_THRU` sibling, but `process_sort`/`process_merge`
+  in the same file only ever set them on the `*_THRU` edge. Once the
+  generators started unconditionally skipping the `*_THRU` edge, the range
+  was lost entirely: no second arrow (correctly suppressed) *and* no badge
+  (nothing on the base edge to badge). This was a regression from
+  pre-Task-6 behavior (the second arrow used to at least show the range),
+  not just a missing feature. Fixed by restructuring `process_sort`'s
+  input/output-procedure handling and `process_merge`'s output-procedure
+  handling to compute the range once and pass `thru_target`/`range_members`
+  to *both* edges, mirroring `process_perform`. New tests:
+  `test_sort_input_procedure_base_edge_carries_thru_range`,
+  `test_sort_output_procedure_base_edge_carries_thru_range`,
+  `test_merge_output_procedure_base_edge_carries_thru_range` in
+  `tests/unit/analysis/test_program_flow.py` (unit-level, asserting the
+  edge fields directly); `TestSortThruEndToEnd` in
+  `tests/unit/test_flowchart_generator.py` (real COBOL through
+  `parse_cobol` → `ProgramFlowAnalyzer` → both generators — confirmed these
+  two tests fail against the pre-fix `edges.py` via `git stash` and pass
+  against the fix, so they pin the actual repair, not just the
+  already-correct badge-rendering consumer).
+* **Important: terminal node id collided with the `XXXX-EXIT` COBOL
+  idiom.** Both generators built a terminal node's id as `f"{nid}_EXIT"`.
+  `PERFORM X THRU X-EXIT` is common enough that a program can legitimately
+  contain a *real* paragraph literally named e.g. `9000-TERM-EXIT` — its
+  own sanitized id (`N_9000_TERM_EXIT`) collided with paragraph
+  `9000-TERM`'s synthetic terminal-node id, silently merging two distinct
+  nodes in both Mermaid and DOT output. Fixed with a new module-level
+  `_unique_exit_id(nid, paragraph_ids)` (shared by both generator classes):
+  builds the set of every real paragraph's sanitized id up front, falls
+  back from `_EXIT` to `_FLOWEXIT`, then to an incrementing numeric suffix,
+  on collision. New tests (one per generator, proving the two nodes now
+  get distinct ids): `test_terminal_id_does_not_collide_with_real_exit_paragraph`
+  in both `TestMermaidFlowchartGenerator` and `TestDotFlowchartParity`.
+* **Important: RETURN incorrectly rendered as a program-terminal node.**
+  `scanner.py`'s `ReturnStatement` handling called
+  `_record_exit_statement(node, "RETURN", stmt.location)`, so Task 5's
+  terminal-node rendering drew a red double-circle for RETURN — but RETURN
+  reads the next record from a sort/merge file, it does not terminate
+  anything, and `scanner.py` deliberately never adds RETURN's paragraph to
+  `self._exit_points` (`node.is_exit_point` stayed correctly `False` for
+  it) — the terminal-node rendering directly contradicted the analyzer's
+  own exit-point classification. Fixed by removing that one call;
+  `node.has_return` and the `AT END`/`NOT AT END` nested-statement scanning
+  are unaffected. New regression test:
+  `test_return_does_not_record_exit_statement_kind` in
+  `tests/unit/analysis/test_program_flow.py` (real COBOL, a RETURN inside a
+  SORT OUTPUT PROCEDURE — the common real-world shape).
+* **Should-fix: `FlowNode` exit-statement field test-coverage gaps.** Added
+  to `TestExitStatementLocation`
+  (`tests/unit/analysis/test_program_flow.py`):
+  `to_dict()` presence/absence of both `exit_statement_kind` and
+  `exit_statement_location` (as a dict, via `SourceLocation.to_dict()`);
+  `EXIT PROGRAM` sets `exit_statement_kind == "EXIT PROGRAM"`; the
+  first-write-wins rule (`STOP RUN` in an IF's THEN arm, `GOBACK` in its
+  ELSE arm — asserts `STOP RUN` wins, since it's scanned first).
 
-Copilot review on PR #130 (the paragraphs-before-first-SECTION fix below)
-caught that the SECTION-registration branch in both `DeadCodeAnalyzer.
-_collect_procedures` and `ProcedureScanner.collect_procedures` had no
-dedup guard at all, unlike both paragraph branches. Under the new
-interleaved-by-`location.line` order, a top-level paragraph followed later
-by a same-named `SECTION` header would silently overwrite the earlier
-`PARAGRAPH` entry with a `SECTION` one and duplicate the name in
-`_ordered_procedures` — confirmed with an empirical repro before fixing.
-Fixed by extending the same guard to the SECTION branch in both files;
-`dead_code.py`'s `_section_paragraphs[name]` bucket is now ensured via
-`.setdefault()` regardless of whether the guard skipped that SECTION's own
-registration, since the paragraph loop below it always appends into it
-unconditionally. Also fixed a Copilot-flagged path issue in `CHANGELOG.md`
-(missing the `cobolparser/` prefix used elsewhere in that file). Updated:
-[analysis.md](analysis.md), [tests.md](tests.md).
+Updated: [analysis.md](analysis.md) (exit-statement subsection — explicit
+RETURN-exclusion note, first-write-wins note, `to_dict()` presence rule),
+[generators.md](generators.md) (all three styling bullets gained a
+"bug fixed 2026-08-11" note explaining what was wrong and why, plus the new
+reference tests). Full requested regression scope (`tests/unit/analysis/
+tests/unit/test_flowchart_generator.py tests/integration/`): 2530 passed, 4
+skipped, 0 failures. `tests/contracts/`/`tests/regression/` also run per
+review request: 1150 passed, 6 pre-existing failures in
+`test_normalize_line_number_preservation.py` (unrelated to this pass —
+confirmed present on the unmodified branch tip via `git stash`, same
+Cython-vs-pure-Python normalize_fixed_format issue noted in the 2026-08-10
+entry below). `ruff check .`, `black --check .` (2 files needed
+reformatting, applied), `mypy cobolparser/` all clean on touched files.
 
-## 2026-08-11 (Dead-code/program-flow: paragraphs before first SECTION reordered)
+## 2026-08-11 (Mermaid/DOT flowchart fidelity: real condition text, exit nodes, recursion/GOTO styling, THRU badges)
 
-`claude/dead-code-section-550f0e` finding #1: COBOL legally allows
-paragraphs before the first `SECTION` header, but `DeadCodeAnalyzer.
-_collect_procedures` (`analysis/dead_code.py`) and `ProcedureScanner.
-collect_procedures` (`analysis/program_flow/scanner.py`) both appended all
-section-owned paragraphs to `_ordered_procedures` before top-level
-paragraphs, corrupting physical source order whenever a program mixed the
-two. Since both analyzers treat `_ordered_procedures[0]` as the entry point
-(and `ProgramFlowAnalyzer`'s fall-through-edge pass walks the same list in
-order), this made a section the false entry point, reported the true first
-paragraph as dead/unreachable, and fabricated a bogus fall-through edge
-between physically non-adjacent paragraphs. Fixed both collectors by
-interleaving sections and top-level paragraphs by `location.line` before
-walking them. That interleave in turn made each collector's existing
-name-collision dedup guard order-dependent (it only lived on the
-top-level-paragraph branch, safe only when sections were always walked
-first) — caught by review before landing, not by the original finding; a
-name reused both top-level and inside a section could otherwise be
-double-appended to `_ordered_procedures` once a top-level occurrence sorted
-before its section-owned twin. Added the identical guard to the
-section-owned-paragraph branch in both files. Updated:
-[analysis.md](analysis.md) (`DeadCodeAnalyzer` and `ProgramFlowAnalyzer`
-sections).
+Seven-task plan (`docs/superpowers/plans/2026-08-11-mermaid-flow-fidelity.md`)
+closing four fidelity gaps between `cobolparser/generators/flowchart.py`'s
+diagrams and the actual control flow they're meant to represent, plus the
+analysis-layer data those diagrams needed and didn't have:
 
-## 2026-08-11 (Computed GO TO target dropped when it shares a name with the DEPENDING ON variable)
+* **Real condition text** (Tasks 1-3): `BranchNode.condition_text` and
+  PERFORM UNTIL's loop-test label previously showed only the AST node's
+  type TAG (`"COMPARISON"`), never the actual condition. New
+  `cobolparser/analysis/program_flow/condition_text.py` ->
+  `render_condition_text()` reconstructs real COBOL text from the
+  `ConditionalExpression`/`LogicalExpression` tree, correctly parenthesizing
+  nested AND/OR/NOT, with a graceful fallback chain (raw operand ->
+  `raw_condition` metadata -> type tag) so no caller ever gets nothing.
+  String-literal quotes are preserved through condition-token collection
+  rather than re-guessed at render time (a separate fix landed mid-plan,
+  caught before it could produce `WS-FLAG = Y` instead of `WS-FLAG = 'Y'`).
+* **Exit-statement terminal nodes** (Tasks 4-5 for Mermaid, Task 7 for DOT):
+  `FlowNode` gained `exit_statement_kind`/`exit_statement_location`
+  (`STOP RUN`/`GOBACK`/EXIT-family verbs), tracked by `scanner.py`. Both
+  generators now draw a distinct terminal node per exit statement
+  (Mermaid: `(((...)))` + `terminal` classDef; DOT: `shape=doublecircle`),
+  positioned after the main node loop and before external-call nodes,
+  respecting `show_unreachable` the same way the main node loop does.
+* **Recursion/GO TO edge color distinction** (Task 4 for Mermaid, Task 7
+  for DOT): new module-level `_recursion_pairs()` /
+  `_PERFORM_EDGE_TYPE_VALUES` / `_GOTO_EDGE_TYPE_VALUES` (shared by both
+  generator classes, not duplicated) classify each edge; a PERFORM edge
+  closing a `PERFORM_RECURSION` cycle gets gold-dashed styling, any GO
+  TO-family edge gets magenta-dashed styling. Mermaid via `linkStyle N
+  <css>` lines (index `N` counts only *emitted* edges — a hidden
+  fall-through edge must not consume an index, pinned by
+  `test_linkstyle_index_skips_hidden_edges_correctly`); DOT via
+  `color`/`style` attributes directly on the edge statement.
+* **`[THRU n]` edge-label badges instead of a duplicate arrow** (Task 6 for
+  Mermaid, Task 7 for DOT): a `PERFORM A THRU C`-style edge previously drew
+  *two* arrows (one to the range start, one spanning the whole range) — now
+  collapses to one arrow (to the range's first member) badged `[THRU n]`.
+  Both generators' edges loops skip any edge whose type ends in `"_THRU"`
+  unconditionally. **Task 7 finding:** DOT's edges loop was missing this
+  skip entirely before this task (Mermaid gained it in Task 6) — a real
+  parity bug, not just a missing style: without it, DOT rendered a
+  redundant full-span arrow alongside the badge on every THRU range.
 
-Finding #4 from the "Dead Code & Program Flow" analyzer audit
-(`claude/dead-code-section-550f0e`). Both `DeadCodeAnalyzer._collect_goto_refs`
-(`cobolparser/analysis/dead_code.py`) and `ProgramFlowAnalyzer.process_goto`
-(`cobolparser/analysis/program_flow/edges.py`) reconstructed a computed
-`GO TO ... DEPENDING ON` statement's targets by filtering `stmt.operands`
-against `stmt.depending_on_variable`, instead of reading the AST's own
-`GoStatement.target_paragraphs`. Operand dedup collapses a target paragraph
-that shares its name with the DEPENDING ON variable (`GO TO PARA-A RUN-FLAG
-DEPENDING ON RUN-FLAG.`) into the DEPENDING ON variable's operand entry,
-which the filter then removes — the shared-name target was silently dropped
-from both the dead-code reference set (reported dead) and the flow-graph
-edges (no `GOTO_DEPENDING` edge). Fixed both sites to iterate
-`stmt.target_paragraphs` directly; no parser change needed since
-`go_parser.py` already populates it correctly. Also updated the
-`_goto_depending` test helper in both `tests/unit/analysis/test_dead_code.py`
-and `tests/unit/analysis/test_program_flow.py`, which built its
-multi-target `GoStatement`s via `add_operand` (the same operand-based shape
-the buggy code read) instead of `add_target_paragraph` (what the real
-parser calls) — three existing tests were unknowingly exercising the old
-buggy reconstruction path and needed the helper fix to pass against the
-corrected source. Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer and
-ProgramFlowAnalyzer sections; also corrected a stale `GO_TO` edge-type name
-to `GOTO` and documented `GOTO_DEPENDING`, found while editing the adjacent
-text).
-
-## 2026-08-11 (ENTRY-statement paragraphs falsely reported unreachable/dead)
-
-Dead Code & Program Flow module audit, finding #5: a paragraph containing an
-`ENTRY` statement (a legitimate alternate external entry point, callable via
-`CALL 'entry-name'`) was never treated as a reachable root. Root cause:
-`program_flow/scanner.py`'s `collect_entry_points` added the ENTRY
-statement's *literal* name (e.g. `'ALTENTRY'`) to `entry_points`, which is
-never a key in the paragraph-node graph, so the BFS seed matched nothing and
-`ProgramFlowAnalyzer` reported the paragraph unreachable; `dead_code.py` had
-no `EntryStatement` handling at all, so `DeadCodeAnalyzer` reported it dead.
-Fixed by resolving the *containing paragraph's* name instead of the literal
-in both analyzers, via `stmt.section_name` -- `CobolParagraph` overrides
-`ASTNode.section_name` to return its own `paragraph_name`, so walking a
-statement's `.parent` chain up via `.section_name` already lands on its
-containing paragraph regardless of nesting depth, with no new AST walk-up
-helper needed. Updated: [analysis.md](analysis.md) (`DeadCodeAnalyzer` and
-`ProgramFlowAnalyzer` sections). Pinned by
-`tests/unit/analysis/test_dead_code.py::TestEntryReferences` and
-`tests/unit/analysis/test_program_flow.py::TestProgramFlowEntryPoints`.
-
-## 2026-08-11 (scanner.py explicit-stack rewrite — dead-code/program-flow audit)
-
-Last of a 7-finding "Dead Code & Program Flow" module audit batch (branch
-`claude/dead-code-section-550f0e`). Finding: `ProcedureScanner.
-_scan_paragraph_statements`'s inner `scan()` closure
-(`cobolparser/analysis/program_flow/scanner.py`) recursed through Python's
-own call stack once per nested IF/EVALUATE arm, inline
-`PERFORM ... END-PERFORM` block, or clause body, with no depth guard — a
-risk (not empirically triggered in production) flagged as the same category
-as the already-fixed `analysis/const_fold.py` paragraph-chain recursion, but
-applied here to AST-nesting depth instead. Reproduced directly: a 3,000-deep
-nested-IF chain raised `RecursionError` against the pre-fix code (Python's
-default recursion limit is 1000); a 20,000-deep chain scans cleanly after
-the fix. Rewrote the walk to use an explicit `work` stack of zero-argument
-thunks — the same technique `program_flow/cycles.py`'s `detect_cycles`
-already uses for its paragraph-graph DFS — carrying each statement's branch
-`arm` explicitly instead of through a shared mutable slot, and deferring
-EVALUATE's per-`WHEN`-clause bookkeeping into thunks so branch-node/edge
-append order (and therefore `_branch_seq`-derived ID strings) exactly
-matches the old recursive interleaving. Added regression tests driving
-`ProcedureScanner` directly at 2,000-5,000 levels of nesting, plus one
-pinning the EVALUATE thunk-deferral invariant itself (a `WHEN` clause's own
-edge is appended only after its nested subtree's edges). Verified output
-equivalence empirically, not just via passing tests: dumped
-`ProgramFlowAnalyzer().analyze(ast).to_dict()` (unsorted) for all 483 files
-across the 24-file shamrice corpus and the 459-file NIST COBOL-85 corpus on
-both the pre-fix and post-fix `scanner.py` — byte-identical (same MD5)
-output on every file, confirming the rewrite preserves exact edge/branch-node
-ordering on real programs, not just the synthetic cases the unit tests
-construct. Found, but did not fix (flagged separately as a follow-up), a
-related unguarded recursive `traverse()` in `CobolProgram.
-get_all_statements()` (`cobolparser/models/program.py`) that hits the same
-class of error around ~500 levels of nesting. Updated:
-[analysis.md](analysis.md) (ProgramFlowAnalyzer section).
-
-Branch note: this landed on `claude/exciting-dhawan-a880d8`, not
-`claude/dead-code-section-550f0e` — that branch is checked out in a sibling
-worktree and, at the time of this fix, was still at `main`'s tip with none
-of the other 6 findings in this audit batch committed to it yet. The other 6
-findings (per the task brief, all touching `dead_code.py`,
-`program_flow/scanner.py`, `program_flow/graph.py`, and
-`program_flow/edges.py`) will need to merge against this rewritten
-`scan()`/`_scan_paragraph_statements`, not the other way around.
-
-## 2026-08-10 (reports/open-findings.md consolidated)
-
-At the user's request, cleaned up `reports/open-findings.md`: it had grown
-into a 796-line journal of dated status updates and full per-finding
-writeups for every HIGH (H1-H11) and MEDIUM (M1-M16) finding, all of which
-are already fixed and pinned by regression tests, plus references to
-`reports/audit-2026-07-06/07/08/09.md` and
-`cobol-parser-example-parse-gaps.md`, which no longer exist in the repo
-(already superseded and deleted in an earlier pass). Rewrote it in place as
-a single ~130-line file listing only what's currently open: M17
-(branch-coverage debt), the LOW-severity list, and the test/tooling gaps
-list. Two items were dropped as stale during the cleanup rather than
-carried forward: the Tier-2 path-resolver containment gap (formerly "H6")
-now has dedicated regression coverage
-(`TestH6PathResolverContainment` in
-`tests/regression/test_open_findings_high_regressions.py`), and CI's
-Cython-extension build is no longer implicit — the `build` job added
-2026-08-06 (see below) runs `build_ext --inplace` explicitly. Fixed-finding
-history remains available in `CHANGELOG.md` ("Unreleased → Fixed") and this
-file's own git history; no code changed.
+Updated: [analysis.md](analysis.md) (`ProgramFlowAnalyzer` section — new
+condition-text-rendering and exit-statement-tracking subsection),
+[generators.md](generators.md) (`Flowcharts` section — new subsection
+documenting all three edge/node styling features across both generators).
+New/extended tests: `tests/unit/test_flowchart_generator.py` gained
+`TestMermaidFlowchartGenerator`'s linkStyle/terminal-node/THRU-badge cases
+(Tasks 4-6) and a new `TestDotFlowchartParity` class (Task 7, 4 tests).
+Task 7 also corrected two pre-existing DOT tests
+(`test_fall_through_hidden_by_default`/`_shown_when_enabled`) whose
+`"dashed" not in out` assertion became a false proxy once GOTO edges
+legitimately gained `style="dashed"` — reworded to assert on the
+FALL_THROUGH edge's own text instead, preserving the tests' original
+intent (verify fall-through-specific visibility, not overload an
+increasingly-ambiguous substring). Full suite: 7944 passed / 13 skipped / 1
+xfailed (6 pre-existing, unrelated failures in
+`test_normalize_line_number_preservation.py`, confirmed present on the
+unmodified branch tip via `git stash`), 91.44% coverage. `ruff check .`,
+`black --check .`, `mypy cobolparser/` all clean. Task 7 commit `0db3a69`.
 
 ## 2026-08-10 (Copybook-triggered comment-line drift in normalize_fixed_format)
 

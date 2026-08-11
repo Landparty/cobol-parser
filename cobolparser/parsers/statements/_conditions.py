@@ -12,6 +12,7 @@ M12). The IF parser's methods now delegate here.
 
 import re
 
+from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements.base import (
     CobolExpression,
@@ -67,6 +68,22 @@ _CLASS_SIGN_WORDS = {
 # digits, or hyphens. Used to tell a bare condition-name (level-88 style
 # ``IF END-OF-FILE``) apart from stray literals in the fallback path.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
+
+
+def condition_token_text(token: Token) -> str:
+    """Text for one condition token, re-quoting string literals.
+
+    The lexer's read_string_literal() strips quote characters when
+    building Token.value, so a STRING_LITERAL token's .value alone is
+    indistinguishable from an identifier once collected into a flat
+    condition-token list. Re-wrap it here, at the one point the token
+    type is still known, rather than guessing from the rendered text
+    later.
+    """
+    if token.type == TokenType.STRING_LITERAL:
+        value = (token.value or "").replace("'", "''")
+        return f"'{value}'"
+    return token.value or str(token.type)
 
 
 def build_condition_expression(

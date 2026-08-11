@@ -8,9 +8,10 @@ ENTRY-statement entry points.
 """
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from ...models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
+from ...models.statements.base import CobolExpression
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
     EvaluateStatement,
@@ -29,6 +30,7 @@ from ...models.statements.misc import (
     ReturnStatement,
     SortStatement,
 )
+from .condition_text import render_condition_text
 from .edges import EdgeCollector
 from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
 
@@ -178,6 +180,19 @@ class ProcedureScanner:
             if upper_para_name and upper_para_name not in self._entry_points:
                 self._entry_points.append(upper_para_name)
 
+    @staticmethod
+    def _record_exit_statement(node: FlowNode, kind: str, location: Any) -> None:
+        """Record the first exit statement seen in this paragraph.
+
+        First-write-wins: a paragraph with more than one exit statement
+        (e.g. one per IF branch) keeps whichever was scanned first: the
+        terminal-node rendering (flowchart.py, Task 5) draws one terminal
+        node per paragraph, not per statement.
+        """
+        if node.exit_statement_kind is None:
+            node.exit_statement_kind = kind
+            node.exit_statement_location = location
+
     def _scan_paragraph_statements(self, para: CobolParagraph) -> None:
         """Scan all statements within a paragraph, including nested ones.
 
@@ -271,15 +286,15 @@ class ProcedureScanner:
             elif isinstance(stmt, IfStatement):
                 node.if_count += 1
                 # Derive condition text
-                cond_text = "IF"
+                cond_text = (
+                    render_condition_text(stmt.condition) if stmt.condition else "IF"
+                )
                 decision: dict[str, Any] = {
                     "type": "IF",
                     "location": stmt.location.to_dict(),
                     "has_else": len(stmt.else_statements) > 0,
                 }
                 if stmt.condition:
-                    cond_dict = stmt.condition.to_dict()
-                    cond_text = cond_dict.get("expression_type", str(cond_dict))
                     decision["condition"] = cond_text
                 node.decisions.append(decision)
                 # Build BranchNode
@@ -350,11 +365,11 @@ class ProcedureScanner:
                 subj_text = (
                     ", ".join(
                         (
-                            s.get("expression_type", str(s))
-                            if isinstance(s, dict)
-                            else str(s)
+                            render_condition_text(cast(CobolExpression, subj))
+                            if hasattr(subj, "to_dict")
+                            else str(subj)
                         )
-                        for s in subjects
+                        for subj in stmt.subjects
                     )
                     or "EVALUATE"
                 )
@@ -505,16 +520,20 @@ class ProcedureScanner:
                     ]
                 )
             elif isinstance(stmt, StopStatement):
-                node.has_stop_run = True
-                self._exit_points.add(proc_name)
+                if stmt.stop_type == "RUN":
+                    node.has_stop_run = True
+                    self._exit_points.add(proc_name)
+                    self._record_exit_statement(node, "STOP RUN", stmt.location)
             elif isinstance(stmt, GobackStatement):
                 node.has_goback = True
                 self._exit_points.add(proc_name)
+                self._record_exit_statement(node, "GOBACK", stmt.location)
             elif isinstance(stmt, ExitStatement):
                 exit_type = stmt.exit_type or ""
                 if exit_type == "PROGRAM":
                     node.has_exit_program = True
                     self._exit_points.add(proc_name)
+                    self._record_exit_statement(node, "EXIT PROGRAM", stmt.location)
                 elif exit_type == "SECTION":
                     node.has_exit_section = True
                 elif exit_type == "PARAGRAPH":

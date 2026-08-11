@@ -67,6 +67,28 @@ _VERBOSE_EDGE_TYPES = {
     "EVALUATE_WHEN_OTHER",
 }
 
+# Edge types this generator treats as a "PERFORM-style call" versus a GO
+# TO-family unconditional branch -- string-value mirrors of the enum sets
+# already defined in analysis/program_flow/edges.py, kept local (rather
+# than imported) since this module works entirely in the `.value` string
+# space already (see etype handling throughout generate()).
+_PERFORM_EDGE_TYPE_VALUES = frozenset(
+    {
+        "PERFORM",
+        "PERFORM_THRU",
+        "SORT_INPUT_PROCEDURE",
+        "SORT_INPUT_PROCEDURE_THRU",
+        "SORT_OUTPUT_PROCEDURE",
+        "SORT_OUTPUT_PROCEDURE_THRU",
+        "MERGE_OUTPUT_PROCEDURE",
+        "MERGE_OUTPUT_PROCEDURE_THRU",
+    }
+)
+_GOTO_EDGE_TYPE_VALUES = frozenset({"GOTO", "GOTO_DEPENDING", "ALTER"})
+
+_RECURSION_LINK_STYLE = "stroke:#e0a800,stroke-width:2px,stroke-dasharray:5 5"
+_GOTO_LINK_STYLE = "stroke:#d6336c,stroke-width:2px,stroke-dasharray:3 3"
+
 
 def _sanitize_id(name: str) -> str:
     """Return a safe identifier derived from *name*.
@@ -78,6 +100,44 @@ def _sanitize_id(name: str) -> str:
     if safe and safe[0].isdigit():
         safe = "N_" + safe
     return safe or "N_UNKNOWN"
+
+
+def _unique_exit_id(nid: str, paragraph_ids: set[str]) -> str:
+    """Return a terminal-node id derived from *nid* that cannot collide with
+    a real paragraph's sanitized id.
+
+    ``PERFORM X THRU X-EXIT`` is a common COBOL range idiom, so a program
+    can legitimately contain a paragraph literally named e.g. ``9000-TERM-
+    EXIT``. ``_sanitize_id`` turns both "9000-TERM" + our own "_EXIT" suffix
+    and the real paragraph "9000-TERM-EXIT" into the same id
+    (``N_9000_TERM_EXIT``), which would silently merge two distinct nodes.
+    Fall back to a suffix that's very unlikely to collide, then to an
+    incrementing numeric suffix in the pathological case that even that
+    collides too.
+    """
+    candidate = f"{nid}_EXIT"
+    if candidate not in paragraph_ids:
+        return candidate
+    candidate = f"{nid}_FLOWEXIT"
+    if candidate not in paragraph_ids:
+        return candidate
+    suffix = 2
+    while f"{nid}_FLOWEXIT_{suffix}" in paragraph_ids:
+        suffix += 1
+    return f"{nid}_FLOWEXIT_{suffix}"
+
+
+def _recursion_pairs(report: ProgramFlowReport) -> set[tuple[str, str]]:
+    """(source, target) pairs that close a PERFORM_RECURSION cycle."""
+    pairs: set[tuple[str, str]] = set()
+    for cycle in report.cycle_details:
+        if cycle.get("kind") != "PERFORM_RECURSION":
+            continue
+        cycle_nodes = cycle.get("nodes", [])
+        n = len(cycle_nodes)
+        for i in range(n):
+            pairs.add((cycle_nodes[i], cycle_nodes[(i + 1) % n]))
+    return pairs
 
 
 def _short_edge_label(edge_type: str) -> str:
@@ -144,6 +204,7 @@ class MermaidFlowchartGenerator:
         lines.append("    classDef external fill:#6a0dad,stroke:#3d007a,color:#fff")
         lines.append("    classDef branch fill:#ffd60a,stroke:#e9c46a,color:#333")
         lines.append("    classDef arm fill:#caf0f8,stroke:#0096c7,color:#333")
+        lines.append("    classDef terminal fill:#1b1b1b,stroke:#c1121f,color:#fff")
 
         if not report.nodes and not report.external_calls:
             lines.append("    EMPTY[No procedures found]")
@@ -173,6 +234,22 @@ class MermaidFlowchartGenerator:
             elif node.name in unreachable_set:
                 lines.append(f"    class {nid} unreachable")
 
+        # ---- exit-statement terminal nodes -------------------------------------
+        paragraph_ids = {_sanitize_id(n.name) for n in report.nodes}
+        terminal_link_count = 0
+        for node in report.nodes:
+            if not node.exit_statement_kind or not node.exit_statement_location:
+                continue
+            if not options.show_unreachable and node.name in unreachable_set:
+                continue
+            nid = _sanitize_id(node.name)
+            exit_id = _unique_exit_id(nid, paragraph_ids)
+            label = f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
+            lines.append(f'    {exit_id}((("{label}")))')
+            lines.append(f"    {nid} --> {exit_id}")
+            lines.append(f"    class {exit_id} terminal")
+            terminal_link_count += 1
+
         # ---- external call nodes ----------------------------------------------
         if options.show_external_calls:
             seen_ext: set[str] = set()
@@ -198,6 +275,15 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {arm_id} arm")
 
         # ---- edges ------------------------------------------------------------
+        recursion_pairs = _recursion_pairs(report)
+        link_styles: list[str] = []
+        # Mermaid's `linkStyle N` addresses links by their order of
+        # *definition in the whole diagram*, not just within this loop.
+        # The terminal-node loop above already emitted `terminal_link_count`
+        # `-->` links, so this loop's own link indices must start after
+        # them -- otherwise every terminal-node link shifts all of these
+        # indices and recursion/GO TO colors land on the wrong arrows.
+        link_index = terminal_link_count
         for edge in report.edges:
             etype = (
                 edge.edge_type.value
@@ -206,6 +292,10 @@ class MermaidFlowchartGenerator:
             )
 
             if etype == "FALL_THROUGH" and not options.show_fall_through:
+                continue
+            if etype.endswith("_THRU"):
+                # THRU spans collapse into a badge on the base edge
+                # (Task 6) instead of a second, redundant arrow.
                 continue
 
             src_id = _sanitize_id(edge.source)
@@ -225,6 +315,23 @@ class MermaidFlowchartGenerator:
             else:
                 edge_str = f"    {src_id} {arrow} {tgt_id}"
             lines.append(edge_str)
+
+            if (
+                etype in _PERFORM_EDGE_TYPE_VALUES
+                and (
+                    edge.source,
+                    edge.target,
+                )
+                in recursion_pairs
+            ):
+                link_styles.append(
+                    f"    linkStyle {link_index} {_RECURSION_LINK_STYLE}"
+                )
+            elif etype in _GOTO_EDGE_TYPE_VALUES:
+                link_styles.append(f"    linkStyle {link_index} {_GOTO_LINK_STYLE}")
+            link_index += 1
+
+        lines.extend(link_styles)
 
         return "\n".join(lines)
 
@@ -265,8 +372,12 @@ class MermaidFlowchartGenerator:
                 label_parts.append(edge.condition or _short_edge_label(etype))
             else:
                 label_parts.append(_short_edge_label(etype))
+        elif options.show_edge_labels and etype == "PERFORM" and edge.condition:
+            label_parts.append(f"{_short_edge_label(etype)} UNTIL {edge.condition}")
         if edge.is_loop:
             label_parts.append("(loop)")
+        if edge.thru_target and edge.range_members:
+            label_parts.append(f"[THRU {len(edge.range_members)}]")
 
         return arrow, label_parts
 
@@ -355,6 +466,24 @@ class DotFlowchartGenerator:
                 f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
             )
 
+        # ---- exit-statement terminal nodes -------------------------------------
+        paragraph_ids = {_sanitize_id(n.name) for n in report.nodes}
+        for node in report.nodes:
+            if not node.exit_statement_kind or not node.exit_statement_location:
+                continue
+            if not options.show_unreachable and node.name in unreachable_set:
+                continue
+            nid = _sanitize_id(node.name)
+            exit_id = _unique_exit_id(nid, paragraph_ids)
+            label = self._dot_str(
+                f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
+            )
+            lines.append(
+                f"    {exit_id} [label={label}, shape=doublecircle,"
+                f' fillcolor="#1b1b1b", fontcolor="#c1121f"];'
+            )
+            lines.append(f"    {nid} -> {exit_id};")
+
         # ---- external call nodes ---------------------------------------------
         if options.show_external_calls:
             seen_ext: set[str] = set()
@@ -394,6 +523,7 @@ class DotFlowchartGenerator:
         lines.append("")
 
         # ---- edges -----------------------------------------------------------
+        recursion_pairs = _recursion_pairs(report)
         for edge in report.edges:
             etype = (
                 edge.edge_type.value
@@ -402,6 +532,8 @@ class DotFlowchartGenerator:
             )
 
             if etype == "FALL_THROUGH" and not options.show_fall_through:
+                continue
+            if etype.endswith("_THRU"):
                 continue
 
             src_id = _sanitize_id(edge.source)
@@ -415,6 +547,19 @@ class DotFlowchartGenerator:
                 tgt_id = _sanitize_id(edge.target)
 
             attrs = self._edge_attrs(etype, edge, options)
+            if (
+                etype in _PERFORM_EDGE_TYPE_VALUES
+                and (
+                    edge.source,
+                    edge.target,
+                )
+                in recursion_pairs
+            ):
+                attrs["color"] = "#e0a800"
+                attrs["style"] = "dashed"
+            elif etype in _GOTO_EDGE_TYPE_VALUES:
+                attrs["color"] = "#d6336c"
+                attrs["style"] = "dashed"
             if attrs:
                 attr_str = (
                     " [" + ", ".join(f'{k}="{v}"' for k, v in attrs.items()) + "]"
@@ -477,7 +622,16 @@ class DotFlowchartGenerator:
             if edge.is_loop:
                 lbl += " (loop)"
             attrs["label"] = lbl
+        elif options.show_edge_labels and etype == "PERFORM" and edge.condition:
+            lbl = f"{_short_edge_label(etype)} UNTIL {edge.condition}"
+            if edge.is_loop:
+                lbl += " (loop)"
+            attrs["label"] = lbl
         elif edge.is_loop:
             attrs["label"] = "(loop)"
+
+        if edge.thru_target and edge.range_members:
+            n = len(edge.range_members)
+            attrs["label"] = f"{attrs.get('label', '')} [THRU {n}]".strip()
 
         return attrs
