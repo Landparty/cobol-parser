@@ -601,6 +601,43 @@ class TestDeadCodeIntegration:
         assert analyzer._ordered_procedures == ["DUP-NAME", "MAIN-SECTION"]
         assert report.total_procedures == 2
 
+    def test_duplicate_name_across_top_level_paragraph_and_section_header(
+        self,
+    ) -> None:
+        """A name reused as a top-level paragraph and later as a SECTION
+        header must be recorded once, and the SECTION's own paragraphs must
+        still be tracked under it.
+
+        Regression test: the SECTION-registration branch (unlike the
+        paragraph branches) had no dedup guard at all, so a same-named
+        top-level paragraph occurring earlier in source would be silently
+        overwritten and duplicated in ``_ordered_procedures`` when the
+        SECTION was collected. Also verifies ``_section_paragraphs`` is
+        still populated for the section even when its own header
+        registration was skipped due to the collision, so the paragraph
+        loop's ``.append()`` doesn't KeyError.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST2.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       DUP-NAME SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="duptest2.cbl")
+        assert result.ast is not None
+
+        analyzer = DeadCodeAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        assert analyzer._ordered_procedures == ["DUP-NAME", "FIRST-PARA"]
+        assert report.total_procedures == 2
+        assert analyzer._section_paragraphs["DUP-NAME"] == ["FIRST-PARA"]
+
     def test_find_dead_code_convenience(self) -> None:
         """CobolProgram.find_dead_code() works end-to-end."""
         source = """\

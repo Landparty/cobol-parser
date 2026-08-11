@@ -1,5 +1,23 @@
 # OKF Update Log
 
+## 2026-08-11 (Dead-code/program-flow: SECTION-registration dedup guard, Copilot follow-up)
+
+Copilot review on PR #130 (the paragraphs-before-first-SECTION fix below)
+caught that the SECTION-registration branch in both `DeadCodeAnalyzer.
+_collect_procedures` and `ProcedureScanner.collect_procedures` had no
+dedup guard at all, unlike both paragraph branches. Under the new
+interleaved-by-`location.line` order, a top-level paragraph followed later
+by a same-named `SECTION` header would silently overwrite the earlier
+`PARAGRAPH` entry with a `SECTION` one and duplicate the name in
+`_ordered_procedures` — confirmed with an empirical repro before fixing.
+Fixed by extending the same guard to the SECTION branch in both files;
+`dead_code.py`'s `_section_paragraphs[name]` bucket is now ensured via
+`.setdefault()` regardless of whether the guard skipped that SECTION's own
+registration, since the paragraph loop below it always appends into it
+unconditionally. Also fixed a Copilot-flagged path issue in `CHANGELOG.md`
+(missing the `cobolparser/` prefix used elsewhere in that file). Updated:
+[analysis.md](analysis.md), [tests.md](tests.md).
+
 ## 2026-08-11 (Dead-code/program-flow: paragraphs before first SECTION reordered)
 
 `claude/dead-code-section-550f0e` finding #1: COBOL legally allows

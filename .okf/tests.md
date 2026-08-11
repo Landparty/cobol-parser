@@ -3,10 +3,18 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-06T00:00:00Z
+timestamp: 2026-08-11T00:00:00Z
 ---
 
 # Overview
+
+2026-08-11: +6 across `test_dead_code.py` and `test_program_flow.py` —
+three regression tests each pinning the `dead-code-section-550f0e`
+paragraphs-before-first-SECTION fix: the mixed-order reordering itself, a
+name reused top-level and inside a section (dedup guard on the paragraph
+branch), and a name reused as a top-level paragraph then later as a SECTION
+header (dedup guard on the SECTION-registration branch, added in a Copilot
+review follow-up on the same PR). See [analysis.md](analysis.md).
 
 2026-08-07: +7 — `tests/regression/test_inline_comment_stripping.py`, pinning
 the lexer's new `*>` free-form inline-comment stripping, including a

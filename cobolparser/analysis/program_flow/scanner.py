@@ -98,12 +98,13 @@ class ProcedureScanner:
                 name = item.section_name
                 if name:
                     upper_name = name.upper()
-                    self._nodes[upper_name] = FlowNode(
-                        name=upper_name,
-                        procedure_type="SECTION",
-                        location=item.location,
-                    )
-                    self._ordered_procedures.append(upper_name)
+                    if upper_name not in self._nodes:
+                        self._nodes[upper_name] = FlowNode(
+                            name=upper_name,
+                            procedure_type="SECTION",
+                            location=item.location,
+                        )
+                        self._ordered_procedures.append(upper_name)
 
                 for para in item.paragraphs:
                     pname = para.paragraph_name

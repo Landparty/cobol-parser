@@ -73,6 +73,19 @@ section branch would append it to `_ordered_procedures` a second time. The
 section-owned-paragraph branch now carries the identical guard. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_and_section_not_double_counted`.
 
+**The SECTION-registration branch itself had no dedup guard at all —
+caught by Copilot review on the PR.** Unlike both paragraph branches, the
+code that records a `SECTION` header into `_procedure_names` never checked
+whether that name was already registered. A top-level paragraph followed
+later in source by a same-named `SECTION` (e.g. `DUP-NAME.` ... `DUP-NAME
+SECTION.`) would have its `PARAGRAPH` entry silently overwritten by a
+`SECTION` entry, and the name duplicated in `_ordered_procedures`. Fixed by
+adding the same guard to the SECTION branch; `_section_paragraphs[name]`
+is still unconditionally ensured via `.setdefault()` even when the guard
+skips the SECTION's own registration, since the paragraph loop right below
+it always appends into that bucket. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_paragraph_and_section_header`.
+
 ## ProgramFlowAnalyzer
 
 ```python
@@ -106,6 +119,9 @@ Same order-dependent-dedup-guard trap as `DeadCodeAnalyzer` above applied
 here too (`self._nodes` guard was top-level-only); fixed identically,
 pinned by
 `::test_duplicate_name_across_top_level_and_section_not_double_counted`.
+The SECTION-registration branch's missing guard (Copilot review catch) was
+also fixed identically here, pinned by
+`::test_duplicate_name_across_top_level_paragraph_and_section_header`.
 
 **THRU range members count as reachable (2026-07-20):** `PERFORM A THRU C`
 (and SORT/MERGE procedure ranges) execute every paragraph the range

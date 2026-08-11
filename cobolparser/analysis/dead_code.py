@@ -161,9 +161,17 @@ class DeadCodeAnalyzer:
                 name = item.section_name
                 if name:
                     upper_name = name.upper()
-                    self._procedure_names[upper_name] = ("SECTION", item.location)
-                    self._ordered_procedures.append(upper_name)
-                    self._section_paragraphs[upper_name] = []
+                    if upper_name not in self._procedure_names:
+                        self._procedure_names[upper_name] = (
+                            "SECTION",
+                            item.location,
+                        )
+                        self._ordered_procedures.append(upper_name)
+                    # Always ensure a paragraph bucket exists for this section
+                    # name, even when the SECTION registration above was
+                    # skipped due to a name collision, so the paragraph loop
+                    # below can unconditionally .append() into it.
+                    self._section_paragraphs.setdefault(upper_name, [])
                 # Collect paragraphs within the section
                 for para in item.paragraphs:
                     pname = para.paragraph_name

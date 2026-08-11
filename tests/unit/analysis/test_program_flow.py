@@ -4314,6 +4314,35 @@ class TestProgramFlowRealCobolIntegration:
 
         assert [n.name for n in report.nodes] == ["DUP-NAME", "MAIN-SECTION"]
 
+    def test_duplicate_name_across_top_level_paragraph_and_section_header(
+        self,
+    ) -> None:
+        """A name reused as a top-level paragraph and later as a SECTION
+        header must be recorded once, and the SECTION's own paragraphs must
+        still be scanned/collected under it.
+
+        Regression test: the SECTION-registration branch (unlike the
+        paragraph branches) had no dedup guard at all, so a same-named
+        top-level paragraph occurring earlier in source would be silently
+        overwritten (a PARAGRAPH ``FlowNode`` replaced by a SECTION one) and
+        duplicated in ``report.nodes``/``_ordered_procedures`` once the
+        SECTION was collected.
+        """
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPTEST2.
+       PROCEDURE DIVISION.
+       DUP-NAME.
+           DISPLAY 'TOP-LEVEL'.
+       DUP-NAME SECTION.
+       FIRST-PARA.
+           DISPLAY 'FIRST'.
+           STOP RUN.
+"""
+        report = self._analyze(source)
+
+        assert [n.name for n in report.nodes] == ["DUP-NAME", "FIRST-PARA"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: Edge-case coverage (audit gaps)
