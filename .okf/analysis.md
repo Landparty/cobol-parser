@@ -48,9 +48,11 @@ target of a PERFORM, GO TO, or fall-through control flow).
 filtering (2026-08-11):** `_collect_goto_refs` used to reconstruct a
 computed `GO TO ... DEPENDING ON` statement's targets by filtering
 `stmt.operands` against `stmt.depending_on_variable` (`[op for op in
-stmt.operands if op != depending_on_variable]`). `add_operand`/
-`_add_unique_operand` dedupe operands, so a target paragraph that happens to
-share its name with the DEPENDING ON variable (`GO TO PARA-A RUN-FLAG
+stmt.operands if op != depending_on_variable]`). `GoStatement`'s setters
+(`set_target_paragraph`/`add_target_paragraph`/`set_depending_on_variable`)
+add operands via `_add_unique_operand`, which dedupes, so a target
+paragraph that happens to share its name with the DEPENDING ON variable
+(`GO TO PARA-A RUN-FLAG
 DEPENDING ON RUN-FLAG.`) collapses into one operand entry, which the filter
 then drops entirely — the shared-name target was reported dead despite
 being live. `GoStatement.target_paragraphs`
