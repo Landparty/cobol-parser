@@ -17,6 +17,33 @@ Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer section). Pinned by
 `TestAlterReferences.test_alter_never_called_paragraph_is_dead`
 (`tests/unit/analysis/test_dead_code.py`).
 
+## 2026-08-11 (Computed GO TO target dropped when it shares a name with the DEPENDING ON variable)
+
+Finding #4 from the "Dead Code & Program Flow" analyzer audit
+(`claude/dead-code-section-550f0e`). Both `DeadCodeAnalyzer._collect_goto_refs`
+(`cobolparser/analysis/dead_code.py`) and `ProgramFlowAnalyzer.process_goto`
+(`cobolparser/analysis/program_flow/edges.py`) reconstructed a computed
+`GO TO ... DEPENDING ON` statement's targets by filtering `stmt.operands`
+against `stmt.depending_on_variable`, instead of reading the AST's own
+`GoStatement.target_paragraphs`. Operand dedup collapses a target paragraph
+that shares its name with the DEPENDING ON variable (`GO TO PARA-A RUN-FLAG
+DEPENDING ON RUN-FLAG.`) into the DEPENDING ON variable's operand entry,
+which the filter then removes — the shared-name target was silently dropped
+from both the dead-code reference set (reported dead) and the flow-graph
+edges (no `GOTO_DEPENDING` edge). Fixed both sites to iterate
+`stmt.target_paragraphs` directly; no parser change needed since
+`go_parser.py` already populates it correctly. Also updated the
+`_goto_depending` test helper in both `tests/unit/analysis/test_dead_code.py`
+and `tests/unit/analysis/test_program_flow.py`, which built its
+multi-target `GoStatement`s via `add_operand` (the same operand-based shape
+the buggy code read) instead of `add_target_paragraph` (what the real
+parser calls) — three existing tests were unknowingly exercising the old
+buggy reconstruction path and needed the helper fix to pass against the
+corrected source. Updated: [analysis.md](analysis.md) (DeadCodeAnalyzer and
+ProgramFlowAnalyzer sections; also corrected a stale `GO_TO` edge-type name
+to `GOTO` and documented `GOTO_DEPENDING`, found while editing the adjacent
+text).
+
 ## 2026-08-11 (ENTRY-statement paragraphs falsely reported unreachable/dead)
 
 Dead Code & Program Flow module audit, finding #5: a paragraph containing an

@@ -110,10 +110,12 @@ def _goto(target: str) -> GoStatement:
 
 def _goto_depending(targets: list[str], var: str) -> GoStatement:
     stmt = GoStatement(LOC)
+    # First target is the primary; mirrors go_parser.py's
+    # set_target_paragraph()/add_target_paragraph() calls.
     if targets:
         stmt.set_target_paragraph(targets[0])
     for t in targets[1:]:
-        stmt.add_operand(t)
+        stmt.add_target_paragraph(t)
     stmt.set_depending_on_variable(var)
     return stmt
 
@@ -950,6 +952,38 @@ class TestProgramFlowIntegration:
         goto_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.GOTO]
         assert any(e.target == "ERROR-EXIT" for e in goto_edges)
 
+    def test_goto_depending_target_sharing_name_with_variable(self) -> None:
+        """A computed GO TO target that shares its name with the DEPENDING
+        ON variable must still get its own GOTO_DEPENDING edge.
+        """
+        # PARA-A ends in STOP RUN so RUN-FLAG is not also reachable via
+        # fall-through -- isolates this as a regression test for the
+        # operand-filtering bug specifically, independent of fall-through
+        # edge handling.
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOSHARE.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG
+           STOP RUN.
+       PARA-A.
+           DISPLAY "A"
+           STOP RUN.
+       RUN-FLAG.
+           DISPLAY "FLAG".
+"""
+        result = parse_cobol(source, filename="gotoshare.cbl")
+        assert result.ast is not None
+
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(result.ast)
+
+        dep_targets = {
+            e.target for e in report.edges if e.edge_type == FlowEdgeType.GOTO_DEPENDING
+        }
+        assert dep_targets == {"PARA-A", "RUN-FLAG"}
+
     def test_call_flow(self) -> None:
         """CALL statements are tracked in parsed COBOL."""
         source = """\
@@ -1361,8 +1395,8 @@ class TestProgramFlowOutputDisplay:
         assert goto_edges[0]["target"] == "THE-END"
 
     def test_goto_depending_edges_in_output(self) -> None:
-        """GO TO DEPENDING produces GOTO_DEPENDING edges (unit-level with
-        manually constructed AST, since the parser simplifies this syntax)."""
+        """GO TO DEPENDING produces GOTO_DEPENDING edges (unit-level with a
+        manually constructed AST for isolation from the parser)."""
         prog = _make_program(
             [
                 (

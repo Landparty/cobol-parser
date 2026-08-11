@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TestAlterReferences.test_alter_never_called_paragraph_is_dead` in
   `tests/unit/analysis/test_dead_code.py`.
 
+* **analysis:** `DeadCodeAnalyzer._collect_goto_refs` and
+  `ProgramFlowAnalyzer.process_goto` reconstructed a computed
+  `GO TO ... DEPENDING ON` statement's targets by filtering `stmt.operands`
+  against `stmt.depending_on_variable`, instead of reading the AST's own
+  `GoStatement.target_paragraphs`. Operand dedup collapses a target
+  paragraph that happens to share its name with the DEPENDING ON variable
+  (`GO TO PARA-A RUN-FLAG DEPENDING ON RUN-FLAG.`) into one operand entry,
+  which the filter then drops entirely, so the shared-name target was
+  reported dead and missing a `GOTO_DEPENDING` edge despite being a live
+  target. Both sites now read `target_paragraphs` directly, which
+  `go_parser.py` already populates correctly. Pinned by
+  `test_goto_depending_target_sharing_name_with_variable` in
+  `tests/unit/analysis/test_dead_code.py` and
+  `tests/unit/analysis/test_program_flow.py`.
+
 * **preprocessing:** `normalize_fixed_format` silently dropped a physical
   line whose extracted program-text (columns 8-72) was entirely blank but
   which was neither a short/blank line nor a `*`/`/`/debug comment line
