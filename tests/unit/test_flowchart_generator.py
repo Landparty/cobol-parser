@@ -982,3 +982,22 @@ class TestDotFlowchartParity:
         out = self._gen(report)
         assert "[THRU 3]" in out
         assert "A -> D" not in out
+
+    # -- negative cases (mirroring TestMermaidFlowchartGenerator) --------
+
+    def test_no_exit_statement_no_terminal_node(self) -> None:
+        out = self._gen(_simple_report())
+        assert "shape=doublecircle" not in out
+
+    def test_terminal_node_hidden_when_unreachable_and_disabled(self) -> None:
+        report = _unreachable_report()
+        dead = next(n for n in report.nodes if n.name == "DEAD-CODE")
+        dead.exit_statement_kind = "STOP RUN"
+        dead.exit_statement_location = _loc(line=99)
+        out = self._gen(report, show_unreachable=False)
+        assert "shape=doublecircle" not in out
+
+    def test_non_recursive_perform_edge_gets_no_color(self) -> None:
+        out = self._gen(_simple_report())
+        assert "#e0a800" not in out
+        assert "#d6336c" not in out
