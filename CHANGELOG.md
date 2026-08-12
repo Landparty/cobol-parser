@@ -1295,6 +1295,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.5.4](https://github.com/Landparty/cobol-parser/compare/v1.5.3...v1.5.4) (2026-08-12)
+
+
+### Bug Fixes
+
+* Decimal witness pipeline, DIVIDE mode, and statement-text fidelity ([42ad49e](https://github.com/Landparty/cobol-parser/commit/42ad49efbf75af4cb0e8c33377b23b26f756b1e6))
+* Decimal witness pipeline, DIVIDE mode, and statement-text fidelity ([daa16e6](https://github.com/Landparty/cobol-parser/commit/daa16e681c6624b4937560f6da7b4e06d1e6fcb8))
+* move CobolParseError alias below imports to satisfy ruff E402 ([4d71636](https://github.com/Landparty/cobol-parser/commit/4d71636c06664e4ae8b555cba512baad98123d5d))
+* quote Mermaid edge labels to survive parens/brackets ([05609ef](https://github.com/Landparty/cobol-parser/commit/05609ef870a505edb6eb14f41cbb7b58061a4761))
+* repair integration/tooling gaps from the 2026-08-12 audit ([2ad01e3](https://github.com/Landparty/cobol-parser/commit/2ad01e36f45fd385e12b0dae442b9d1c1adb5e6c))
+* resolve 12 analysis/generator audit findings ([2dc1e15](https://github.com/Landparty/cobol-parser/commit/2dc1e1590add395b199bf7210350ef8e9b57a46a))
+* resolve core parsing pipeline audit findings ([13087eb](https://github.com/Landparty/cobol-parser/commit/13087ebb9497914f9f362ec9a26082c9fd01f884))
+* resolve findings from the 2026-08-12 follow-up audit ([b495f26](https://github.com/Landparty/cobol-parser/commit/b495f26047554b57eea441363d156d5d64df07bb))
+
+
+### Performance Improvements
+
+* cache ASTNodeFactory's constructor-shape check per node class ([024214d](https://github.com/Landparty/cobol-parser/commit/024214d25bea86d37e39a7f1dddecb7637ea50c0))
+
+
+### Documentation
+
+* add 2026-08-12 full-repo audit report ([3044277](https://github.com/Landparty/cobol-parser/commit/304427786861ef357999437ebcbfe71bd33092ad))
+* add follow-up repo audit — new bugs and gaps post-PR[#137](https://github.com/Landparty/cobol-parser/issues/137) ([26a9f91](https://github.com/Landparty/cobol-parser/commit/26a9f91b92b2807ce41114b827f3724af279615f))
+* clarify Mermaid #quot wording comment ([4d76c6c](https://github.com/Landparty/cobol-parser/commit/4d76c6c11ab9abc910d24c9d0a37d4bff5afe183))
+* refresh counts/versions, changelog the audit fixes, track open items ([7433e1c](https://github.com/Landparty/cobol-parser/commit/7433e1cac7da18e4f5e48e4bab18d1b96db48dd5))
+
 ## [1.5.3](https://github.com/Landparty/cobol-parser/compare/v1.5.2...v1.5.3) (2026-08-11)
 
 
