@@ -155,10 +155,6 @@ from .plugins.core import (
     SerializationConfig,
 )
 
-# Backward-compatible alias: the backend integration contract historically
-# referred to the canonical parse exception as ``CobolParseError``.
-CobolParseError = ParseError
-
 # Import normalize_fixed_format from the preprocess package
 from .preprocess import (
     CircularReferenceError,
@@ -195,6 +191,10 @@ from .profiling import (
 #     MicroFocusCobol,
 # )
 
+
+# Backward-compatible alias: the backend integration contract historically
+# referred to the canonical parse exception as ``CobolParseError``.
+CobolParseError = ParseError
 
 # Version info
 __version__ = "1.5.3"
