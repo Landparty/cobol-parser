@@ -442,11 +442,43 @@ class TestMermaidFlowchartGenerator:
         out = self._gen(_loop_report())
         assert "PERFORM UNTIL WS-EOF-SW = 'Y'" in out
 
+    def test_loop_label_with_parens_is_quoted(self) -> None:
+        """Regression guard for a Mermaid parse error: an unquoted "(" inside
+        a `|label|` is read by Mermaid's flowchart lexer as the start of a
+        round-node shape, not literal text. The "(loop)" suffix must be
+        wrapped in quotes so it survives as plain label text."""
+        out = self._gen(_loop_report())
+        assert '-->|"PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"|' in out
+
     # -- external calls --------------------------------------------------
 
     def test_external_call_node_created(self) -> None:
         out = self._gen(_call_report())
         assert "EXT_EXTPGM" in out
+
+    def test_call_dynamic_edge_label_with_parens_is_quoted(self) -> None:
+        """Same class of bug as test_loop_label_with_parens_is_quoted, but
+        via CALL_DYNAMIC's static "CALL (dynamic)" label instead of the
+        loop-derived one -- covers the case with edge.is_loop=False."""
+        nodes = [_para("CALL-PARA", entry=True, exit_=True, stmt_count=1)]
+        edges = [
+            FlowEdge(
+                source="CALL-PARA",
+                target="EXTPGM",
+                edge_type=FlowEdgeType.CALL_DYNAMIC,
+                location=_loc(),
+            )
+        ]
+        report = ProgramFlowReport(
+            program_name="CALL-DYNAMIC-PROG",
+            nodes=nodes,
+            edges=edges,
+            entry_points=["CALL-PARA"],
+            exit_points=["CALL-PARA"],
+            external_calls=[{"target": "EXTPGM", "location": _loc().to_dict()}],
+        )
+        out = MermaidFlowchartGenerator().generate(report)
+        assert '-->|"CALL (dynamic)"|' in out
 
     def test_external_call_class_annotated(self) -> None:
         out = self._gen(_call_report())
@@ -720,7 +752,7 @@ class TestMermaidFlowchartGenerator:
         # The PERFORM_THRU edge (A -> D) is skipped by the endswith("_THRU") filter.
         assert "A --> D" not in out
         # The badge should be on the A -> B edge
-        assert "A -->|[THRU 3]| B" in out
+        assert 'A -->|"[THRU 3]"| B' in out
 
     def test_sort_input_procedure_thru_range_renders_as_badge(self) -> None:
         """Regression guard: SORT/MERGE THRU ranges must not vanish -- the
@@ -759,7 +791,7 @@ class TestMermaidFlowchartGenerator:
         out = self._gen(report)
         assert "[THRU 3]" in out
         assert "A --> D" not in out
-        assert "A -->|SORT INPUT [THRU 3]| B" in out
+        assert 'A -->|"SORT INPUT [THRU 3]"| B' in out
 
 
 # ---------------------------------------------------------------------------
@@ -927,11 +959,11 @@ class TestMermaidBranchNodes:
 
     def test_if_then_edge_label(self) -> None:
         out = self._gen(_if_branch_report())
-        assert "-->|THEN|" in out
+        assert '-->|"THEN"|' in out
 
     def test_if_else_edge_label(self) -> None:
         out = self._gen(_if_branch_report())
-        assert "-->|ELSE|" in out
+        assert '-->|"ELSE"|' in out
 
     # -- EVALUATE branch -------------------------------------------------
 
@@ -942,12 +974,12 @@ class TestMermaidBranchNodes:
     def test_evaluate_when_edge_label_from_condition(self) -> None:
         """EVALUATE_WHEN edge uses edge.condition when set."""
         out = self._gen(_eval_branch_report())
-        assert "-->|WHEN 1|" in out
+        assert '-->|"WHEN 1"|' in out
 
     def test_evaluate_when_other_edge_label_fallback(self) -> None:
         """EVALUATE_WHEN_OTHER falls back to _short_edge_label when condition is None."""
         out = self._gen(_eval_branch_report())
-        assert "-->|WHEN OTHER|" in out
+        assert '-->|"WHEN OTHER"|' in out
 
     # -- absence guard ----------------------------------------------------
 
@@ -1241,7 +1273,7 @@ class TestSortThruEndToEnd:
     def test_mermaid_renders_sort_output_thru_badge(self) -> None:
         out = MermaidFlowchartGenerator().generate(self._report())
         assert "[THRU 3]" in out
-        assert "MAIN_LOGIC -->|SORT OUTPUT [THRU 3]| OUT_START" in out
+        assert 'MAIN_LOGIC -->|"SORT OUTPUT [THRU 3]"| OUT_START' in out
 
     def test_dot_renders_sort_output_thru_badge(self) -> None:
         out = DotFlowchartGenerator().generate(self._report())

@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-11T12:00:00Z
+timestamp: 2026-08-11T13:00:00Z
 ---
 
 # Overview
@@ -110,6 +110,17 @@ substance, differing only in each target format's own attribute syntax:
   skipped) nor the badge (nothing to badge) — the range vanished from the
   diagram entirely). All three `process_*` methods now compute the range
   once and pass it to both the base edge and its `*_THRU` sibling.
+
+- **Quoted edge labels.** `MermaidFlowchartGenerator` wraps every non-empty
+  edge label in double quotes (`-->|"label text"|`), reusing the `#quot;`
+  entity escape already used for branch/arm condition text. **Bug fixed
+  2026-08-11:** labels were previously written unquoted between the `|...|`
+  pipes; Mermaid's flowchart lexer reads an unquoted `(` or `[` there as the
+  start of a node shape (`PS`/`SQS` tokens), not literal text, so a loop
+  annotation (`... (loop)`), `CALL_DYNAMIC`'s `"CALL (dynamic)"` label, or a
+  `[THRU n]` badge broke parsing entirely — e.g. a `PERFORM UNTIL` loop edge
+  in `legacy-application/cobol/DEPTBMP.cbl`. DOT is unaffected — `_dot_str`
+  already quotes every DOT label.
 
 Reference tests: `tests/unit/test_flowchart_generator.py` —
 `TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge

@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-11T00:00:00Z
+timestamp: 2026-08-11T13:00:00Z
 ---
 
 # Overview
@@ -101,6 +101,14 @@ in `tests/regression/test_open_findings_high_regressions.py` for HIGH
 findings H1-H8). Coverage floor: **81% line coverage** enforced by
 `--cov-fail-under=81` in `pyproject.toml`; full-suite run measured
 91.43%. Branch coverage is enabled.
+
+2026-08-11: +2 in `test_flowchart_generator.py`
+(`test_loop_label_with_parens_is_quoted`, `test_call_dynamic_edge_label_with_parens_is_quoted`)
+plus 6 existing `-->|label|` assertions updated to the now-quoted form —
+`MermaidFlowchartGenerator` started wrapping edge labels in quotes so an
+unquoted `(`/`[` inside one (a loop annotation, `CALL (dynamic)`, a
+`[THRU n]` badge) can't be misread by Mermaid's flowchart lexer as a node
+shape token. See [generators.md](generators.md)'s "Flowcharts" section.
 
 Running only a subset of tests will trigger a coverage failure — that is expected.
 
