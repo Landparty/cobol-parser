@@ -834,7 +834,7 @@ class TestDotFlowchartGenerator:
 
     def test_perform_until_condition_label(self) -> None:
         out = self._gen(_loop_report())
-        assert 'label="PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"' in out
+        assert "label=\"PERFORM UNTIL WS-EOF-SW = 'Y' (loop)\"" in out
 
     # -- external calls --------------------------------------------------
 
@@ -1271,4 +1271,4 @@ class TestPerformUntilEndToEnd:
 
     def test_dot_renders_perform_until_condition_label(self) -> None:
         out = DotFlowchartGenerator().generate(self._report())
-        assert 'label="PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"' in out
+        assert "label=\"PERFORM UNTIL WS-EOF-SW = 'Y' (loop)\"" in out
