@@ -77,6 +77,7 @@ class ProgramFlowAnalyzer:
         self._cycle_details: list[dict[str, Any]] = []
         self._unreachable_nodes: list[str] = []
         self._branch_nodes: list[BranchNode] = []
+        self._terminating_paragraphs: set[str] = set()
 
     def analyze(self, ast: CobolProgram) -> ProgramFlowReport:
         """Analyze a COBOL program and build its control flow graph.
@@ -98,6 +99,7 @@ class ProgramFlowAnalyzer:
         self._cycle_details = []
         self._unreachable_nodes = []
         self._branch_nodes = []
+        self._terminating_paragraphs = set()
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -117,6 +119,7 @@ class ProgramFlowAnalyzer:
             exit_points=self._exit_points,
             branch_nodes=self._branch_nodes,
             collector=collector,
+            terminating_paragraphs=self._terminating_paragraphs,
         )
 
         # Pass 1: Collect all procedures as nodes
@@ -129,7 +132,12 @@ class ProgramFlowAnalyzer:
         scanner.collect_entry_points(ast)
 
         # Pass 4: Determine fall-through edges
-        build_fall_through_edges(self._nodes, self._edges, self._ordered_procedures)
+        build_fall_through_edges(
+            self._nodes,
+            self._edges,
+            self._ordered_procedures,
+            self._terminating_paragraphs,
+        )
 
         # Mark the first procedure as entry point before cycle/reachability analysis
         # so that the entry point set is complete when those passes run.

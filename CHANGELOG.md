@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `DeadCodeAnalyzer` had no concept of fall-through at all --
+  unlike `ProgramFlowAnalyzer` (which has `graph.build_fall_through_edges`),
+  `_collect_references` only looked at PERFORM/GO TO/SORT/MERGE/ALTER/ENTRY
+  references, so any paragraph reached purely by falling off the end of the
+  previous one (the default shape of a straight-line COBOL program with no
+  explicit control transfer between paragraphs) was reported dead. Fixed by
+  adding `_collect_fallthrough_refs`, which marks a procedure referenced
+  when the one immediately before it in source order is itself already
+  reachable and does not terminate (any of its own top-level statements --
+  not just the last one -- is a hard terminator -- `STOP RUN`, `GOBACK`,
+  `EXIT PROGRAM` -- or an unconditional, non-`DEPENDING` `GO TO`). Pinned by
+  `tests/unit/analysis/test_dead_code.py::TestFallThroughReferences`.
+
+* **analysis:** `ProgramFlowAnalyzer.build_fall_through_edges` suppressed a
+  paragraph's fall-through edge whenever *any* `GOTO`-type edge originated
+  from it, or whenever `node.has_stop_run`/`has_goback`/`has_exit_program`
+  was set for a STOP RUN/GOBACK/EXIT PROGRAM *anywhere* in the paragraph --
+  neither check required the statement to be the paragraph's own
+  unconditional top-level statement, so one nested inside an `IF` (no
+  `ELSE`) or other conditional arm incorrectly suppressed fall-through even
+  though the paragraph still falls through whenever that branch isn't
+  taken. Fixed by having `ProcedureScanner` check every one of a
+  paragraph's own top-level statements (not just the last, and never
+  nested ones) for an unconditional terminator (`STOP RUN`/`GOBACK`/
+  `EXIT PROGRAM`/bare non-`DEPENDING` `GO TO`) via a single
+  `_is_terminator` predicate, replacing both prior checks; also dropped a
+  stale `node.perform_count == 0` conjunct (a PERFORM before the
+  paragraph's own terminator cannot create a path back to a fall-through).
+  Pinned by `TestProgramFlowFallThrough::
+  test_conditional_goto_inside_if_does_not_suppress_fall_through`,
+  `::test_unconditional_trailing_goto_still_suppresses_fall_through`,
+  `::test_terminator_earlier_in_paragraph_still_suppresses_fall_through`,
+  and `::test_conditional_stop_run_inside_if_does_not_suppress_fall_through`
+  in `tests/unit/analysis/test_program_flow.py`.
+
 * **analysis:** `DeadCodeAnalyzer._collect_alter_refs` wrongly marked an
   `ALTER paragraph-name TO PROCEED TO target-name` statement's *subject*
   (`paragraph-name` -- the paragraph whose internal GO TO gets modified) as

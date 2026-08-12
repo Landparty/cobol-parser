@@ -3,21 +3,30 @@ Dead code detection for COBOL programs.
 
 Analyzes the PROCEDURE DIVISION to find paragraphs and sections that are
 never referenced by any control flow statement (PERFORM, GO TO, ALTER,
-SORT/MERGE procedures). The first procedure in the PROCEDURE DIVISION is
-always considered referenced as the program entry point.
+SORT/MERGE procedures) and never implicitly reached by falling through from
+the paragraph immediately preceding them in source order. The first
+procedure in the PROCEDURE DIVISION is always considered referenced as the
+program entry point.
 """
 
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.ast_base import SourceLocation
-from ..models.program import CobolDivision, CobolProgram, CobolSection
+from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
     PerformStatement,
+    StopStatement,
 )
-from ..models.statements.misc import AlterStatement, MergeStatement, SortStatement
+from ..models.statements.misc import (
+    AlterStatement,
+    ExitStatement,
+    GobackStatement,
+    MergeStatement,
+    SortStatement,
+)
 
 
 @dataclass
@@ -74,6 +83,11 @@ class DeadCodeAnalyzer:
     - GO TO target / GO TO targets DEPENDING ON
     - SORT/MERGE INPUT/OUTPUT PROCEDURE
     - ALTER ... TO PROCEED TO ...
+    - Implicit fall-through: the paragraph immediately preceding it in
+      source order does not end in a hard terminator (STOP RUN, GOBACK,
+      EXIT PROGRAM) or an unconditional (non-DEPENDING) GO TO as its own
+      last top-level statement -- the default shape of a straight-line
+      COBOL program with no explicit control transfer between paragraphs.
 
     The first procedure in the PROCEDURE DIVISION is always considered
     referenced as the program entry point. A paragraph that contains an
@@ -103,6 +117,10 @@ class DeadCodeAnalyzer:
         self._section_paragraphs: dict[str, list[str]] = {}
         # Maps paragraph name -> parent section name (if any)
         self._paragraph_section: dict[str, str] = {}
+        # Maps paragraph name -> its CobolParagraph node, for fall-through
+        # termination checks. Sections have no entry here -- a bare SECTION
+        # header has no statements of its own and never blocks fall-through.
+        self._paragraph_nodes: dict[str, CobolParagraph] = {}
 
     def analyze(self, ast: CobolProgram) -> DeadCodeReport:
         """Analyze a COBOL program for dead code.
@@ -118,6 +136,7 @@ class DeadCodeAnalyzer:
         self._ordered_procedures = []
         self._section_paragraphs = {}
         self._paragraph_section = {}
+        self._paragraph_nodes = {}
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -126,9 +145,13 @@ class DeadCodeAnalyzer:
         self._collect_procedures(proc_division)
         self._collect_references(ast)
 
-        # Entry point is always referenced
+        # Entry point is always referenced. Marked before the fall-through
+        # pass (which propagates left-to-right and needs to know the first
+        # procedure is reachable) rather than after.
         if self._ordered_procedures:
             self._referenced_names.add(self._ordered_procedures[0])
+
+        self._collect_fallthrough_refs()
 
         # When a section is referenced, all its paragraphs are too
         self._propagate_section_references()
@@ -187,6 +210,7 @@ class DeadCodeAnalyzer:
                                 para.location,
                             )
                             self._ordered_procedures.append(upper_pname)
+                            self._paragraph_nodes[upper_pname] = para
                         if name:
                             sec_upper = name.upper()
                             self._section_paragraphs[sec_upper].append(upper_pname)
@@ -202,6 +226,7 @@ class DeadCodeAnalyzer:
                             item.location,
                         )
                         self._ordered_procedures.append(upper_pname)
+                        self._paragraph_nodes[upper_pname] = item
 
     def _propagate_section_references(self) -> None:
         """Propagate section references in both directions.
@@ -308,6 +333,71 @@ class DeadCodeAnalyzer:
         para_name = stmt.section_name
         if para_name:
             self._add_ref(para_name)
+
+    def _collect_fallthrough_refs(self) -> None:
+        """Mark a procedure as referenced when the one immediately before it
+        in physical source order is itself reachable and does not terminate.
+
+        In COBOL, when a paragraph finishes without a hard terminator or an
+        unconditional GO TO, execution falls through to the next procedure
+        in source order -- the default shape of a straight-line program with
+        no explicit control transfer. A SECTION header has no statements of
+        its own and never blocks fall-through into its (or the next
+        procedure's) content.
+
+        Gated on ``current`` already being in ``_referenced_names`` (which
+        this same left-to-right pass keeps extending) rather than crediting
+        every non-terminating procedure unconditionally: otherwise a chain
+        of procedures that are all themselves unreached would still credit
+        each other purely for standing next to one another, masking real
+        dead code. Must run after the entry point is marked referenced, and
+        a single forward pass suffices since fall-through only ever
+        propagates in source order.
+        """
+        for i in range(len(self._ordered_procedures) - 1):
+            current = self._ordered_procedures[i]
+            next_proc = self._ordered_procedures[i + 1]
+            if current in self._referenced_names and not self._terminates(current):
+                self._add_ref(next_proc)
+
+    def _terminates(self, name: str) -> bool:
+        """Check whether procedure *name* unconditionally transfers control
+        away, so that execution never falls through to the next procedure.
+
+        Any top-level statement counts, not just the last: once an
+        unconditional terminator is reached, it always fires, so whatever is
+        physically written after it in the same paragraph is itself
+        unreachable and irrelevant to whether the paragraph falls through --
+        checking only ``para.statements[-1]`` would miss a mid-paragraph
+        terminator followed by dead trailing statements. Nested statements
+        (inside an IF/EVALUATE arm) are deliberately excluded: a terminator
+        there only fires conditionally, so it must not suppress
+        fall-through whenever that branch isn't the one actually taken.
+        """
+        para = self._paragraph_nodes.get(name)
+        if para is None:
+            # Sections (and paragraphs with no statements) have no control
+            # flow of their own -- execution always falls into whatever
+            # comes next.
+            return False
+        return any(self._is_terminator(stmt) for stmt in para.statements)
+
+    @staticmethod
+    def _is_terminator(stmt: Any) -> bool:
+        """Check whether *stmt* unconditionally transfers control away when
+        reached: STOP RUN (not STOP 'literal', which merely halts pending
+        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
+        GO TO.
+        """
+        if isinstance(stmt, GobackStatement):
+            return True
+        if isinstance(stmt, StopStatement):
+            return stmt.stop_type == "RUN"
+        if isinstance(stmt, ExitStatement):
+            return stmt.exit_type == "PROGRAM"
+        if isinstance(stmt, GoStatement):
+            return bool(stmt.target_paragraph) and not stmt.depending_on_variable
+        return False
 
     @staticmethod
     def _is_valid_procedure_name(name: str) -> bool:
