@@ -1,4 +1,15 @@
-# cobolparser — Open Findings (as of 2026-08-10)
+# cobolparser — Open Findings (as of 2026-08-12)
+
+> **New since 2026-08-10:** `reports/audit-2026-08-12-followup.md` is a
+> second audit pass, run after the 2026-08-12 audit's own findings were
+> fixed and merged (PR #137). It found new bugs and gaps in areas that
+> earlier pass didn't cover deeply — see that file for full detail. Not yet
+> fixed as of this writing; headline items: a missing terminating period
+> before CLOSE/SET/CANCEL/OPEN/SORT/MERGE operand lists can silently
+> delete the next paragraph from the AST, `ENTRY ... USING` silently drops
+> its parameters when `USING` is on a continuation line, and
+> `gen-fixtures`' `ScenarioPlanner` can report a `WHEN OTHER` arm as
+> "covered" by a fixture that never actually reaches it.
 
 This file tracks only what is currently open. It replaces this file's own
 prior form — a running journal of a months-long audit that accumulated

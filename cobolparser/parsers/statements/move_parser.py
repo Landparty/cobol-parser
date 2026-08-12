@@ -236,18 +236,27 @@ def _join_source_parts(parts: list[str]) -> str:
     returned unchanged.
     """
     out = ""
+    prev_part: str | None = None
+    # Tracks whether `prev_part` was itself a leading unary sign (one that
+    # starts a fresh operand: at the very start of the source, right after
+    # an opening paren, or right after a comma between subscripts) so the
+    # digit that follows it glues on with no space even when the sign
+    # itself got a space (e.g. after a comma: "WS-TAB(WS-I, -1)").
+    prev_was_leading_sign = False
     for part in parts:
         if not part:
             continue
+        is_sign = part in ("-", "+")
+        is_leading_sign = is_sign and prev_part in (None, "(", ",")
         if (
             not out
             or part in ("(", ")", ",")
-            or out.endswith("(")
-            # Leading unary sign of a signed literal (MOVE -5 TO ...): the
-            # lexer emits the sign and the digits as two tokens.
-            or out in ("-", "+")
+            or prev_part == "("
+            or prev_was_leading_sign
         ):
             out += part
         else:
             out += " " + part
+        prev_was_leading_sign = is_leading_sign
+        prev_part = part
     return out

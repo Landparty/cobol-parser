@@ -6,45 +6,35 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import StringStatement, UnstringStatement
 from ._utils import (
-    STATEMENT_KEYWORDS,
+    collect_clause_stmts,
     consume_period,
     is_statement_boundary,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
-    try_parse_nested_statement,
     warn_paragraph_boundary_swallowed,
 )
 from ._utils import (
     token_value_upper as _val,
 )
 
+#: Values that end an ON OVERFLOW / NOT ON OVERFLOW clause body, on top of
+#: `collect_clause_stmts`'s own period/NOT/INVALID/scope-terminator stops.
+_OVERFLOW_CLAUSE_STOP = {"END-STRING", "END-UNSTRING"}
+
 
 def _parse_overflow_stmts(token_stream: ITokenStream) -> list:
-    """Parse imperative statements in an ON OVERFLOW / NOT ON OVERFLOW clause."""
-    stmts: list = []
-    while not token_stream.is_empty():
-        skip_whitespace(token_stream)
-        token = token_stream.peek()
-        if not token:
-            break
-        val = _val(token)
-        if token.type == TokenType.PERIOD or val in (
-            "END-STRING",
-            "END-UNSTRING",
-            "NOT",
-        ):
-            break
-        if val in STATEMENT_KEYWORDS:
-            nested = try_parse_nested_statement(token_stream)
-            if nested:
-                stmts.append(nested)
-            else:
-                break
-        else:
-            break
-    return stmts
+    """Parse imperative statements in an ON OVERFLOW / NOT ON OVERFLOW clause.
+
+    Delegates to the shared `collect_clause_stmts` helper (also used for
+    READ/WRITE/DELETE/REWRITE's INVALID KEY / ON SIZE ERROR bodies) instead
+    of a bespoke loop that gave up on the *entire* clause body at the first
+    token no registered parser accepted -- `collect_clause_stmts` skips one
+    token and retries, matching how every other conditional-clause body in
+    this codebase recovers from an unrecognized token.
+    """
+    return collect_clause_stmts(token_stream, _OVERFLOW_CLAUSE_STOP)
 
 
 class StringStatementParser(IStatementParser):

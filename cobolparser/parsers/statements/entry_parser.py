@@ -6,7 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import EntryStatement
-from ._utils import is_statement_boundary, matches_keyword
+from ._utils import is_statement_boundary, matches_keyword, skip_whitespace
 
 
 class EntryStatementParser(IStatementParser):
@@ -95,12 +95,21 @@ class EntryStatementParser(IStatementParser):
             token_stream: Token stream positioned after entry name
             stmt: EntryStatement to populate with parameters
         """
-        # Check for USING keyword
+        # Check for USING keyword. USING commonly appears on a continuation
+        # line after the entry-name literal (see class docstring example),
+        # so whitespace/newline/comment tokens must be skipped before
+        # peeking -- otherwise the lookahead sees WHITESPACE/NEWLINE instead
+        # of USING and the entire parameter list is silently dropped.
+        skip_whitespace(token_stream)
         if token_stream.is_empty():
             return
 
         next_token = token_stream.peek()
-        if not next_token or next_token.value.upper() != "USING":
+        if (
+            not next_token
+            or not next_token.value
+            or next_token.value.upper() != "USING"
+        ):
             return
 
         # Consume USING keyword

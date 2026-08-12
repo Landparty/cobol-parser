@@ -268,7 +268,17 @@ class IOCoverageReporter:
         for variation in self.variations:
             tests = self.test_results.get(variation.variation_id, [])
 
-            if tests:
+            if (
+                variation.status or ""
+            ).strip().lower() == CoverageStatus.UNSUPPORTED.value:
+                # The catalog itself marks this variation as a deliberately
+                # unimplemented IBM extension. Deriving status purely from
+                # whether a matching test id exists would collapse that into
+                # a plain GAP (or a false COVERED, if an unrelated test id
+                # happens to match) -- keep the catalog's own call final.
+                status = CoverageStatus.UNSUPPORTED.value
+                last_tested = None
+            elif tests:
                 status = (
                     CoverageStatus.COVERED.value
                     if all(t.get("status") == "passed" for t in tests)

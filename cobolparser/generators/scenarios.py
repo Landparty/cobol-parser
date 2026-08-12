@@ -348,6 +348,16 @@ def _merge_candidates(
     Deterministic: candidates arrive pre-sorted by (line, column, arm_id); a
     candidate merges into the first open scenario it is compatible with,
     else starts a new one.
+
+    A zero-constraint arm (``WHEN OTHER``, an EVALUATE ``Any`` selector, or
+    any arm the constraint extractor couldn't derive conjuncts for) is
+    never a merge candidate in either direction. Its *real* precondition is
+    "none of this branch's other arms matched" -- but with no conjuncts of
+    its own, `_compatible` sees an empty touched-field set, which is
+    trivially "disjoint" from everything, including a sibling arm's
+    scenario that pins the very field this arm's condition depends on.
+    Merging either way would silently claim a branch is exercised by a
+    fixture that provably can never reach it.
     """
     open_scenarios: list[PlannedScenario] = []
     outcomes: list[ArmOutcome] = []
@@ -358,7 +368,18 @@ def _merge_candidates(
         # in constraints.py) -- recovering parent_proc here avoids losing it
         # off ArmOutcome just because PlannedScenario itself doesn't carry it.
         parent_proc = arm_key.split("@", 1)[0] or None
-        target = next((s for s in open_scenarios if _compatible(s, candidate)), None)
+        target = (
+            next(
+                (
+                    s
+                    for s in open_scenarios
+                    if s.field_constraints and _compatible(s, candidate)
+                ),
+                None,
+            )
+            if candidate.field_constraints
+            else None
+        )
         if target is None:
             open_scenarios.append(candidate)
             outcomes.append(ArmOutcome(arm_key, parent_proc, "targeted"))

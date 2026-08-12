@@ -5,9 +5,11 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     create_statement,
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     try_consume_keyword,
+    warn_paragraph_boundary_swallowed,
 )
 
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -86,6 +88,12 @@ class OpenStatementParser(IStatementParser):
                 # TokenType) must not be folded into the file-name list when
                 # OPEN has no trailing period.
                 if is_statement_boundary(token):
+                    break
+                # A missing period on this OPEN followed by what looks like
+                # the next paragraph/section header (H9): stop instead of
+                # folding it into the file-name list.
+                if looks_like_paragraph_boundary(token_stream):
+                    warn_paragraph_boundary_swallowed(token_stream)
                     break
                 # Otherwise it's a file name
                 stmt.add_file(token.value, current_mode)

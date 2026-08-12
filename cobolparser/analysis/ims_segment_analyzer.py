@@ -337,11 +337,21 @@ class IMSSegmentAnalyzer:
                 raw = str(item.value_clause).strip("\"'")
                 return raw[:_SSA_SEGMENT_NAME_LEN].rstrip() or None
 
-        # Fall back to MOVE-tracked values (dynamic assignment)
+        # Fall back to MOVE-tracked values (dynamic assignment). Mirrors
+        # `_resolve_func_code`'s handling of a multi-valued variable: report
+        # every candidate rather than silently picking one, so a variable
+        # set to different segment names on different branches doesn't read
+        # as a single certain answer.
         if var in self._variable_values:
-            candidates = sorted(self._variable_values[var])
+            candidates = sorted(
+                {
+                    v[:_SSA_SEGMENT_NAME_LEN].rstrip()
+                    for v in self._variable_values[var]
+                    if v[:_SSA_SEGMENT_NAME_LEN].rstrip()
+                }
+            )
             if candidates:
-                return candidates[0][:_SSA_SEGMENT_NAME_LEN].rstrip() or None
+                return "/".join(candidates) if len(candidates) > 1 else candidates[0]
 
         return None
 

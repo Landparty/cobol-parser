@@ -208,11 +208,20 @@ class BaseDivisionParser(IDivisionParser, ABC):
                     line_number=line,
                 )
             token_stream.consume()
+            using_parameters: list[str] = []
         else:
 
-            # Skip optional header clauses before the period
-            # e.g. PROCEDURE DIVISION USING data-name GIVING result-name.
-            # All remaining tokens up to (and including) the period terminate the header.
+            # Parse (rather than blindly discard) optional header clauses
+            # before the period, e.g. PROCEDURE DIVISION USING data-name-1
+            # data-name-2 GIVING result-name. -- data-name-1/2 are the
+            # implicit entry interface `LinkageChecker._collect_procedure_using`
+            # relies on; without capturing them here that check was silently
+            # inert for every program, not just nested ones. GIVING's own
+            # target is a return value, not an incoming parameter, so it is
+            # deliberately excluded. All remaining tokens up to (and
+            # including) the period terminate the header either way.
+            using_parameters = []
+            skip_next_identifier = False  # set right after consuming GIVING
             while not token_stream.is_empty():
                 tok = token_stream.peek(0)
                 if not tok:
@@ -220,6 +229,21 @@ class BaseDivisionParser(IDivisionParser, ABC):
                 if tok.value == ".":
                     token_stream.consume()  # consume the period
                     break
+                val_upper = (tok.value or "").upper()
+                if val_upper == "GIVING":
+                    skip_next_identifier = True
+                elif (
+                    tok.type == TokenType.IDENTIFIER
+                    and tok.value
+                    # REFERENCE/CONTENT/CHAINING have no dedicated TokenType
+                    # (unlike BY/VALUE/OPTIONAL, which do and so never reach
+                    # this branch) and would otherwise be misread as
+                    # data-names.
+                    and val_upper not in ("USING", "REFERENCE", "CONTENT", "CHAINING")
+                ):
+                    if not skip_next_identifier:
+                        using_parameters.append(tok.value)
+                    skip_next_identifier = False
                 token_stream.consume()
 
         # Parse division-specific content
@@ -229,6 +253,8 @@ class BaseDivisionParser(IDivisionParser, ABC):
         ast_node = self._create_ast_node(
             division_token, division_content, start_location
         )
+        if self.division_name == "PROCEDURE" and using_parameters:
+            ast_node.set_metadata("using_parameters", using_parameters)
 
         return ast_node
 

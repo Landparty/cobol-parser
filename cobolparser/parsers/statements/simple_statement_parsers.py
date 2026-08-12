@@ -27,10 +27,12 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     consume_period,
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
     try_parse_nested_statement,
+    warn_paragraph_boundary_swallowed,
 )
 from ._utils import (
     token_value_upper as _token_value_upper,
@@ -170,6 +172,14 @@ class CancelStatementParser(IStatementParser):
             # be folded into the program-name list when CANCEL has no
             # trailing period.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
+                break
+            # A missing period on this CANCEL followed by what looks like
+            # the next paragraph/section header (H9): stop instead of
+            # folding it into the program-name list.
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                warn_paragraph_boundary_swallowed(token_stream)
                 break
             if token.type == TokenType.COMMA:
                 # A comma between program names (`CANCEL WS-A, WS-B.`) is a
