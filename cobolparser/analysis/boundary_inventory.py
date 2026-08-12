@@ -65,9 +65,13 @@ _NESTED_STATEMENT_ATTRS = (
     "invalid_key_clause",
     "not_invalid_key_clause",
     "at_eop_clause",
+    "not_at_eop_clause",
     "on_exception",
     "not_on_exception",
     "on_overflow",
+    "not_on_overflow",
+    "on_size_error",
+    "not_on_size_error",
 )
 
 # Which of the generic clause attributes above signal a *declared error
@@ -243,6 +247,16 @@ class BoundaryInventoryAnalyzer:
     argument-direction ladder's "callee source available" rung.
     """
 
+    def __init__(self) -> None:
+        # Full normalized command texts of every SQL/CICS/DLI site in the
+        # program under analysis, collected up-front by analyze() so
+        # `_unique_prefix` keys are computed against every OTHER same-category
+        # site's FULL text -- order-independent and prefix-unique -- rather
+        # than against previously *assigned* (already-shortened) keys, which
+        # made keys depend on walk order and let an early site keep a key
+        # that was a prefix of a later sibling's text.
+        self._exec_texts: dict[str, list[str]] = {}
+
     def analyze(
         self,
         ast: CobolProgram,
@@ -263,6 +277,8 @@ class BoundaryInventoryAnalyzer:
             return report
 
         DynamicCallAnalyzer().analyze(ast)
+
+        self._exec_texts = self._collect_exec_texts(procedure)
 
         for paragraph in self._all_paragraphs(procedure):
             statements = paragraph.statements
@@ -289,6 +305,44 @@ class BoundaryInventoryAnalyzer:
                 continue
             paragraphs.extend(section.paragraphs)
         return paragraphs
+
+    def _collect_exec_texts(
+        self, procedure_division: CobolDivision
+    ) -> dict[str, list[str]]:
+        """Pre-pass: the full normalized command text of every SQL/CICS/DLI
+        site in the program, per category, so key assignment can compare each
+        site against all OTHER sites' full texts (see ``__init__``)."""
+        texts: dict[str, list[str]] = {"SQL": [], "CICS": [], "DLI": []}
+
+        def visit(statement: Any) -> None:
+            # Same dispatch precedence as _classify (SQL before CICS/DLI).
+            if isinstance(statement, ExecSQLStatement):
+                sql_type = (statement.sql_type or "").upper()
+                texts["SQL"].append(statement.sql_text or sql_type)
+            elif isinstance(statement, ExecCicsStatement):
+                texts["CICS"].append(
+                    f"{statement.cics_command} {statement.cics_text}".strip()
+                )
+            elif isinstance(statement, ExecImsStatement):
+                texts["DLI"].append(
+                    f"{statement.ims_command} {statement.ims_text}".strip()
+                )
+            for nested_list in self._nested_statement_lists(statement):
+                for nested in nested_list:
+                    visit(nested)
+
+        for paragraph in self._all_paragraphs(procedure_division):
+            for statement in paragraph.statements:
+                visit(statement)
+        return texts
+
+    def _other_texts(self, category: str, text: str) -> list[str]:
+        """All same-category sites' full texts, minus one occurrence of this
+        site's own -- what its key's uniqueness must be judged against."""
+        others = list(self._exec_texts.get(category, []))
+        if text in others:
+            others.remove(text)
+        return others
 
     @staticmethod
     def _nested_statement_lists(statement: Any) -> list[list]:
@@ -424,10 +478,19 @@ class BoundaryInventoryAnalyzer:
             for file_name in getattr(statement, "file_names", []) or []:
                 if not file_name:
                     continue
+                # OPEN/CLOSE carry no data payload but do set the file's
+                # declared FILE STATUS field -- resolved the same way the
+                # READ/DELETE/START/UNLOCK branch below does, so a later
+                # phase (ScenarioPlanner's "OPEN -> FILE STATUS 35" error
+                # family) can actually target it.
+                facts = index.file_facts(file_name)
                 report.boundaries.append(
                     Boundary(
                         ref=ref(category, file_name.upper()),
                         direction="STATUS_ONLY",
+                        status_field=(
+                            facts.file_status_field if facts is not None else None
+                        ),
                         handlers=handlers,
                     )
                 )
@@ -785,9 +848,11 @@ class BoundaryInventoryAnalyzer:
         else:
             direction = "STATUS_ONLY"
 
-        others = [b.ref.key for b in report.boundaries if b.ref.category == "SQL"]
         text = statement.sql_text or sql_type
-        key = self._unique_prefix(text, others) if text else sql_type
+        if text:
+            key = self._unique_prefix(text, self._other_texts("SQL", text))
+        else:
+            key = sql_type
 
         report.boundaries.append(
             Boundary(
@@ -821,8 +886,10 @@ class BoundaryInventoryAnalyzer:
                 record_names.append(display_name)
 
         text = f"{statement.cics_command} {statement.cics_text}".strip()
-        others = [b.ref.key for b in report.boundaries if b.ref.category == "CICS"]
-        key = self._unique_prefix(text, others) if text else statement.cics_command
+        if text:
+            key = self._unique_prefix(text, self._other_texts("CICS", text))
+        else:
+            key = statement.cics_command
 
         unresolved: list[str] = []
         if not record_names:
@@ -856,8 +923,10 @@ class BoundaryInventoryAnalyzer:
                 record_names.append(display_name)
 
         text = f"{statement.ims_command} {statement.ims_text}".strip()
-        others = [b.ref.key for b in report.boundaries if b.ref.category == "DLI"]
-        key = self._unique_prefix(text, others) if text else statement.ims_command
+        if text:
+            key = self._unique_prefix(text, self._other_texts("DLI", text))
+        else:
+            key = statement.ims_command
 
         unresolved: list[str] = []
         if not record_names:

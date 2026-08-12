@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-11T12:00:00Z
+timestamp: 2026-08-12T12:00:00Z
 ---
 
 # Overview
@@ -48,6 +48,22 @@ what resolves on attribute access.
 string. `FlowchartOptions` controls statement counts, edge labels,
 fall-through edges, unreachable nodes, and synthetic external-CALL nodes.
 Driven by `cobol-parser program-flow --format mermaid|dot`.
+
+**External-call nodes read the analyzer's real shape (2026-08-12 fix, audit
+A-A2).** Both generators used to read `ext.get("target", "")` off
+`report.external_calls`, but `EdgeCollector.process_call`
+(`analysis/program_flow/edges.py`) emits the called program under the
+`"program"` key -- so `EXT_*` nodes NEVER rendered from a real
+`ProgramFlowAnalyzer` report, only from hand-built dicts. There was also a
+case mismatch: `FlowEdge.target` is uppercased by the collector while
+`call_info["program"]` keeps the source's original case, so a lowercase
+`CALL 'subpgm'` literal produced a CALL edge pointing at an `EXT_` id no
+node declared. Module-level `_external_call_target()` now reads
+`"program"` (keeping `"target"` as a fallback for hand-built legacy dicts)
+and uppercases the name so node ids agree with edge endpoints. Pinned by
+`tests/unit/test_flowchart_generator.py::TestExternalCallEndToEnd` (real
+COBOL through the analyzer into both renderers, plus the legacy-dict
+fallback).
 
 **Recursion/GO TO edge styling, terminal exit nodes, THRU badges
 (2026-08-11):** both generators now render three things identically in
@@ -404,7 +420,14 @@ segment orders for the same concept:
 A level-88 condition name resolves to its *parent* field's `ResolvedField`
 (a separate recursive walk over each record's raw `CobolDataItem` tree, keyed
 by qualified path, since `flatten_record` does not emit a `FieldSpec` for
-level-88/66 items).
+level-88/66 items). **Duplicate 88 names refuse to guess (2026-08-12 fix,
+audit A-B4):** the same condition name declared under parent fields in more
+than one record used to overwrite last-one-wins with no `ambiguities` entry;
+`_condition_index` now keeps every parent, and a lookup mapping to more than
+one distinct parent field returns `None` and records the parents in
+`ambiguities` -- the same policy `resolve()`/`record_named()` already apply
+to bare names. Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestB4DuplicateConditionNamesAreAmbiguous`.
 
 **`record_named(name)` — whole records, not fields.** `resolve()` only ever
 finds *elementary* fields, because `flatten_record` never emits a `FieldSpec`
@@ -712,9 +735,9 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
   every numeric field any constraint touches pinned to its picture's true
   extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`).
   Pinned via an `eq` constraint, not `ge`/`le` -- found writing this
-  family's own test: `domains.solve()`'s witness is always the *midpoint*
-  of the resulting interval, so a `ge("0")` constraint alone produced a
-  mid-range witness, not `0`.
+  family's own test: `domains.solve()`'s witness is always the interval's
+  (grid) *midpoint*, so a `ge("0")` constraint alone produced a mid-range
+  witness, not `0`.
 
 **Wired into `gen-fixtures` as of Phase 6.** The CLI's `--scenarios
 branches|all` now drive real scenario selection via
