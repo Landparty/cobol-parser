@@ -155,6 +155,10 @@ from .plugins.core import (
     SerializationConfig,
 )
 
+# Backward-compatible alias: the backend integration contract historically
+# referred to the canonical parse exception as ``CobolParseError``.
+CobolParseError = ParseError
+
 # Import normalize_fixed_format from the preprocess package
 from .preprocess import (
     CircularReferenceError,
@@ -201,6 +205,7 @@ __license__ = "Proprietary"
 __all__ = [
     # Core parsing errors and configuration
     "ParseError",
+    "CobolParseError",
     "ParseStatistics",
     # AST model classes
     "CobolProgram",
