@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `DeadCodeAnalyzer` had no concept of fall-through at all --
+  unlike `ProgramFlowAnalyzer` (which has `graph.build_fall_through_edges`),
+  `_collect_references` only looked at PERFORM/GO TO/SORT/MERGE/ALTER/ENTRY
+  references, so any paragraph reached purely by falling off the end of the
+  previous one (the default shape of a straight-line COBOL program with no
+  explicit control transfer between paragraphs) was reported dead. Fixed by
+  adding `_collect_fallthrough_refs`, which marks a procedure referenced
+  when the one immediately before it in source order is itself already
+  reachable and does not terminate (own last top-level statement is a hard
+  terminator -- `STOP RUN`, `GOBACK`, `EXIT PROGRAM` -- or an unconditional,
+  non-`DEPENDING` `GO TO`). Pinned by
+  `tests/unit/analysis/test_dead_code.py::TestFallThroughReferences`.
+
+* **analysis:** `ProgramFlowAnalyzer.build_fall_through_edges` suppressed a
+  paragraph's fall-through edge whenever *any* `GOTO`-type edge originated
+  from it, with no check that the GO TO was the paragraph's own
+  unconditional last statement -- a GO TO nested inside an `IF` (no `ELSE`)
+  only fires when the condition is true, so the paragraph still falls
+  through whenever it isn't. Fixed by having `ProcedureScanner` record, per
+  paragraph, whether its own last top-level statement is a bare
+  (non-`DEPENDING`) `GO TO`, and gating suppression on that instead of "any
+  GOTO edge exists"; also dropped a stale `node.perform_count == 0`
+  conjunct in the same fix (a PERFORM before the paragraph's own trailing
+  GO TO cannot create a path back to a fall-through). Pinned by
+  `TestProgramFlowFallThrough::
+  test_conditional_goto_inside_if_does_not_suppress_fall_through` and
+  `::test_unconditional_trailing_goto_still_suppresses_fall_through` in
+  `tests/unit/analysis/test_program_flow.py`.
+
 * **analysis:** `DeadCodeAnalyzer._collect_alter_refs` wrongly marked an
   `ALTER paragraph-name TO PROCEED TO target-name` statement's *subject*
   (`paragraph-name` -- the paragraph whose internal GO TO gets modified) as

@@ -46,6 +46,34 @@ target of a PERFORM, GO TO, or fall-through control flow). The first
 procedure is always referenced (program entry point), and so is any
 paragraph containing an `EntryStatement` (2026-08-11 fix, see below).
 
+**DeadCodeAnalyzer had no fall-through concept at all (2026-08-11 fix,
+audit finding #1 of 7).** Unlike `ProgramFlowAnalyzer` (which has
+`graph.build_fall_through_edges`), `_collect_references` only looked at
+PERFORM/GO TO/SORT/MERGE/ALTER/ENTRY references — any paragraph reached
+purely by falling off the end of the previous one (the default shape of a
+straight-line COBOL program with no explicit control transfer) was
+reported dead. Fixed by adding `_collect_fallthrough_refs`, which walks
+`_ordered_procedures` left to right and marks a procedure referenced when
+the one immediately before it is itself already known to be reachable
+(gated on membership in `_referenced_names`, which this same pass keeps
+extending) and does not terminate per `_terminates`: its own last
+top-level statement is a hard terminator (`STOP RUN` — not `STOP
+'literal'`, which merely halts pending operator action; `GOBACK`; `EXIT
+PROGRAM`) or an unconditional (non-`DEPENDING`) `GO TO`. The reachability
+gate matters: without it, a chain of paragraphs that are *all* themselves
+unreached would still credit each other purely for standing next to one
+another in source, masking real dead code (`DEAD-1`/`DEAD-2`/`DEAD-3`
+stubs after an unrelated `STOP RUN` would otherwise cascade-reference each
+other). Runs after entry-point marking (moved earlier in `analyze()` for
+this reason) so the first procedure seeds the pass. A bare `SECTION`
+header has no statements of its own (`_paragraph_nodes` only holds
+paragraphs) so `_terminates` always returns `False` for one — falling into
+a section always reaches its content. Same termination semantics as
+`ProgramFlowAnalyzer.build_fall_through_edges` (below), but implemented
+independently per this module's existing flat reference-marking
+architecture rather than sharing code with `program_flow`. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestFallThroughReferences`.
+
 **A paragraph holding an ENTRY statement is always referenced (2026-08-11
 fix, audit finding #5).** `EntryStatement` marks an alternate external entry
 point (`CALL 'entry-name'`), so `_collect_references` now dispatches it to
@@ -169,6 +197,36 @@ executes it. Cycle detection (`cycles.py`) intentionally still uses only
 explicit edges — member-hops have no `(source, target)` edge record, so
 adding them would misclassify cycles as `MIXED`. Pinned by
 `tests/unit/analysis/test_program_flow_thru_reachability.py`.
+
+**A conditional GO TO was treated the same as an unconditional
+fall-through terminator (2026-08-11 fix, audit finding #5 of 7).**
+`build_fall_through_edges` (`graph.py`) used to suppress a paragraph's
+fall-through edge whenever *any* `GOTO`-type edge originated from it, with
+no check that the GO TO was the paragraph's own unconditional last
+statement — a GO TO nested inside an `IF` (no `ELSE`) only fires when the
+condition is true, so the paragraph still falls through whenever it isn't.
+Fixed by having `ProcedureScanner._scan_paragraph_statements` record, per
+paragraph, whether its own last top-level statement (`para.statements[-1]`,
+checked directly — not via the statement-tree walk, so it's unaffected by
+nesting/arm context) is a bare, non-`DEPENDING`, targeted `GO TO`
+(`ProgramFlowAnalyzer._unconditional_gotos`, threaded through
+`ProcedureScanner`'s constructor and `build_fall_through_edges`'s new
+`unconditional_gotos` parameter); suppression now gates on membership in
+that set instead of "any GOTO edge exists". Dropped the pre-existing
+`node.perform_count == 0` conjunct in the same change (folded in rather
+than landing separately): it had no remaining justification once
+`unconditional_gotos` membership already guarantees the GO TO is the
+paragraph's own last statement — PERFORM always returns control to the
+statement after it (the GO TO), so an earlier PERFORM in the same
+paragraph cannot create a path back to a fall-through (repro: `MAIN.
+PERFORM HELPER. GO TO MAIN.`, a self-looping main-loop paragraph, used to
+produce a spurious `MAIN -> HELPER` edge). `DeadCodeAnalyzer._terminates`
+(above) uses the identical "own last top-level statement" rule
+independently. Pinned by `TestProgramFlowFallThrough::
+test_conditional_goto_inside_if_does_not_suppress_fall_through`,
+`::test_unconditional_trailing_goto_still_suppresses_fall_through`, and
+`::test_fall_through_when_goto_and_perform_both_present` (rewritten in
+place to assert the corrected, suppressed behavior).
 
 **Structure (2026-07-14):** `program_flow` is a package, not a single module.
 `cobolparser/analysis/program_flow/` splits the former god class into

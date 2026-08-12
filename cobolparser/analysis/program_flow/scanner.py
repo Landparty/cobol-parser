@@ -71,6 +71,7 @@ class ProcedureScanner:
         exit_points: set[str],
         branch_nodes: list[BranchNode],
         collector: EdgeCollector,
+        unconditional_gotos: set[str],
     ) -> None:
         self._nodes = nodes
         self._ordered_procedures = ordered_procedures
@@ -79,6 +80,12 @@ class ProcedureScanner:
         self._exit_points = exit_points
         self._branch_nodes = branch_nodes
         self._collector = collector
+        # Paragraphs whose own last top-level statement is a bare
+        # (non-DEPENDING) GO TO -- i.e. one that always transfers control,
+        # as opposed to a GO TO nested inside an IF/EVALUATE arm that only
+        # fires conditionally. Populated below; consumed by
+        # build_fall_through_edges() to decide fall-through suppression.
+        self._unconditional_gotos = unconditional_gotos
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
         self._branch_seq: int = 0
@@ -559,3 +566,17 @@ class ProcedureScanner:
         push_many(para.statements, proc_name, None)
         while work:
             work.pop()()
+
+        # A paragraph only unconditionally transfers control away (and thus
+        # never falls through to the next paragraph) when its OWN last
+        # top-level statement is a bare GO TO. A GO TO nested inside an
+        # IF/EVALUATE arm fires only when that branch is taken -- the
+        # paragraph still falls through whenever the condition doesn't hold.
+        if para.statements:
+            last_stmt = para.statements[-1]
+            if (
+                isinstance(last_stmt, GoStatement)
+                and last_stmt.target_paragraph
+                and not last_stmt.depending_on_variable
+            ):
+                self._unconditional_gotos.add(proc_name)

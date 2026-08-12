@@ -8,6 +8,19 @@ timestamp: 2026-08-11T00:00:00Z
 
 # Overview
 
+2026-08-11: +11 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestFallThroughReferences` class (the fall-through concept added to
+`DeadCodeAnalyzer`, audit finding #1) and +3 in
+`tests/unit/analysis/test_program_flow.py`'s `TestProgramFlowFallThrough`
+(the conditional-GO TO fall-through-suppression fix, audit finding #5,
+including a rewrite of `test_fall_through_when_goto_and_perform_both_present`
+to assert the corrected behavior). 21 pre-existing tests in
+`test_dead_code.py` also needed their fixtures updated: they used
+`CONTINUE`/bare `DISPLAY` as filler paragraph bodies with no terminator,
+which the new fall-through pass now (correctly) credits as reaching the
+next paragraph — added `STOP RUN` where a fixture's paragraph needed to
+stay an isolated dead-code island. See [analysis.md](analysis.md).
+
 2026-08-11: +6 across `test_dead_code.py` and `test_program_flow.py` —
 three regression tests each pinning the `dead-code-section-550f0e`
 paragraphs-before-first-SECTION fix: the mixed-order reordering itself, a

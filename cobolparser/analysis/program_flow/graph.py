@@ -15,6 +15,7 @@ def build_fall_through_edges(
     nodes: dict[str, FlowNode],
     edges: list[FlowEdge],
     ordered_procedures: list[str],
+    unconditional_gotos: set[str],
 ) -> None:
     """Build fall-through edges between sequential paragraphs.
 
@@ -34,15 +35,15 @@ def build_fall_through_edges(
         if node.has_stop_run or node.has_goback or node.has_exit_program:
             continue
 
-        # Skip if procedure has an unconditional GO TO as the last
-        # flow-altering statement (heuristic: has GO TO and no PERFORM)
-        has_unconditional_goto = False
-        for edge in edges:
-            if edge.source == current and edge.edge_type == FlowEdgeType.GOTO:
-                has_unconditional_goto = True
-                break
-
-        if has_unconditional_goto and node.perform_count == 0:
+        # Skip if the paragraph's own last top-level statement is an
+        # unconditional (non-DEPENDING) GO TO -- see
+        # ProcedureScanner._scan_paragraph_statements, which populates
+        # unconditional_gotos. A GO TO nested inside an IF/EVALUATE arm does
+        # not qualify: the paragraph still falls through whenever that
+        # branch isn't taken, so membership requires the GO TO to be the
+        # paragraph's literal last statement, not merely present somewhere
+        # in it.
+        if current in unconditional_gotos:
             continue
 
         edges.append(

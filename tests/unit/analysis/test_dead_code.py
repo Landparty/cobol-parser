@@ -17,10 +17,13 @@ from cobolparser.models.statements.call import EntryStatement
 from cobolparser.models.statements.control import (
     GoStatement,
     PerformStatement,
+    StopStatement,
 )
 from cobolparser.models.statements.misc import (
     AlterStatement,
     ContinueStatement,
+    ExitStatement,
+    GobackStatement,
     MergeStatement,
     SortStatement,
 )
@@ -129,6 +132,12 @@ def _continue() -> ContinueStatement:
     return ContinueStatement(SourceLocation(1, 12))
 
 
+def _stop_run() -> StopStatement:
+    stmt = StopStatement(SourceLocation(1, 12))
+    stmt.stop_type = "RUN"
+    return stmt
+
+
 def _entry(name: str) -> EntryStatement:
     stmt = EntryStatement(SourceLocation(1, 12))
     stmt.set_entry_name(name)
@@ -161,11 +170,16 @@ class TestDeadCodeAnalyzer:
         assert report.referenced_procedures == 3
 
     def test_detect_unreferenced_paragraph(self) -> None:
-        """A paragraph never referenced should be detected as dead."""
+        """A paragraph never referenced should be detected as dead.
+
+        PROCESS-DATA ends with STOP RUN so it doesn't fall through into
+        UNUSED-PARA -- the only thing under test is direct PERFORM
+        reference tracking, not fall-through.
+        """
         prog = _make_program(
             [
                 ("MAIN-LOGIC", [_perform("PROCESS-DATA")]),
-                ("PROCESS-DATA", [_continue()]),
+                ("PROCESS-DATA", [_stop_run()]),
                 ("UNUSED-PARA", [_continue()]),
             ]
         )
@@ -178,10 +192,14 @@ class TestDeadCodeAnalyzer:
         assert report.dead_items[0].procedure_type == "PARAGRAPH"
 
     def test_entry_point_always_referenced(self) -> None:
-        """The first paragraph is always referenced (entry point)."""
+        """The first paragraph is always referenced (entry point).
+
+        ENTRY-POINT ends with STOP RUN so it doesn't fall through into
+        UNREFERENCED -- the only thing under test is entry-point marking.
+        """
         prog = _make_program(
             [
-                ("ENTRY-POINT", [_continue()]),
+                ("ENTRY-POINT", [_stop_run()]),
                 ("UNREFERENCED", [_continue()]),
             ]
         )
@@ -195,13 +213,17 @@ class TestDeadCodeAnalyzer:
         assert "ENTRY-POINT" not in dead_names
 
     def test_perform_thru_marks_range(self) -> None:
-        """PERFORM A THRU C should mark A, B, and C as referenced."""
+        """PERFORM A THRU C should mark A, B, and C as referenced.
+
+        STEP-C ends with STOP RUN so it doesn't fall through into ORPHAN --
+        the only thing under test is THRU-range reference tracking.
+        """
         prog = _make_program(
             [
                 ("MAIN-LOGIC", [_perform("STEP-A", thru="STEP-C")]),
                 ("STEP-A", [_continue()]),
                 ("STEP-B", [_continue()]),
-                ("STEP-C", [_continue()]),
+                ("STEP-C", [_stop_run()]),
                 ("ORPHAN", [_continue()]),
             ]
         )
@@ -228,7 +250,11 @@ class TestDeadCodeAnalyzer:
         assert not report.has_dead_code
 
     def test_goto_depending_marks_all_targets(self) -> None:
-        """GO TO ... DEPENDING ON should mark all target paragraphs."""
+        """GO TO ... DEPENDING ON should mark all target paragraphs.
+
+        STEP-3 ends with STOP RUN so it doesn't fall through into ORPHAN --
+        the only thing under test is computed GO TO reference tracking.
+        """
         prog = _make_program(
             [
                 (
@@ -237,7 +263,7 @@ class TestDeadCodeAnalyzer:
                 ),
                 ("STEP-1", [_continue()]),
                 ("STEP-2", [_continue()]),
-                ("STEP-3", [_continue()]),
+                ("STEP-3", [_stop_run()]),
                 ("ORPHAN", [_continue()]),
             ]
         )
@@ -251,7 +277,11 @@ class TestDeadCodeAnalyzer:
         assert "ORPHAN" in dead_names
 
     def test_sort_procedures_referenced(self) -> None:
-        """SORT INPUT/OUTPUT PROCEDURE should mark targets as referenced."""
+        """SORT INPUT/OUTPUT PROCEDURE should mark targets as referenced.
+
+        OUTPUT-PROC ends with STOP RUN so it doesn't fall through into
+        ORPHAN -- the only thing under test is SORT reference tracking.
+        """
         prog = _make_program(
             [
                 (
@@ -263,7 +293,7 @@ class TestDeadCodeAnalyzer:
                     ],
                 ),
                 ("INPUT-PROC", [_continue()]),
-                ("OUTPUT-PROC", [_continue()]),
+                ("OUTPUT-PROC", [_stop_run()]),
                 ("ORPHAN", [_continue()]),
             ]
         )
@@ -278,12 +308,17 @@ class TestDeadCodeAnalyzer:
     def test_alter_references(self) -> None:
         """ALTER should mark only the new jump target (to_paragraph) as
         referenced, not the paragraph whose GO TO is being modified
-        (from_paragraph)."""
+        (from_paragraph).
+
+        MAIN-LOGIC and NEW-TARGET both end with STOP RUN so neither falls
+        through (into SWITCH-PARA and ORPHAN respectively) -- the only thing
+        under test is ALTER subject-vs-target reference tracking.
+        """
         prog = _make_program(
             [
-                ("MAIN-LOGIC", [_alter("SWITCH-PARA", "NEW-TARGET")]),
+                ("MAIN-LOGIC", [_alter("SWITCH-PARA", "NEW-TARGET"), _stop_run()]),
                 ("SWITCH-PARA", [_continue()]),
-                ("NEW-TARGET", [_continue()]),
+                ("NEW-TARGET", [_stop_run()]),
                 ("ORPHAN", [_continue()]),
             ]
         )
@@ -296,7 +331,12 @@ class TestDeadCodeAnalyzer:
         assert "ORPHAN" in dead_names
 
     def test_sections_and_nested_paragraphs(self) -> None:
-        """Sections and paragraphs within sections should be detected."""
+        """Sections and paragraphs within sections should be detected.
+
+        HELPER-PARA ends with STOP RUN so it doesn't fall through into
+        UNUSED-SECTION -- the only thing under test is section/paragraph
+        reference tracking, not fall-through.
+        """
         prog = _make_program(
             paragraphs=[],
             sections=[
@@ -309,7 +349,7 @@ class TestDeadCodeAnalyzer:
                 (
                     "USED-SECTION",
                     [
-                        ("HELPER-PARA", [_continue()]),
+                        ("HELPER-PARA", [_stop_run()]),
                     ],
                 ),
                 (
@@ -375,10 +415,19 @@ class TestDeadCodeAnalyzer:
         assert not report.has_dead_code
 
     def test_multiple_dead_paragraphs(self) -> None:
-        """Multiple dead paragraphs should all be reported."""
+        """Multiple dead paragraphs should all be reported.
+
+        MAIN-LOGIC ends with STOP RUN, so DEAD-1 is never fallen into --
+        which in turn means the fall-through pass never treats DEAD-1 as
+        reachable, so it can't credit DEAD-2 either, and so on down the
+        chain. Without the STOP RUN, MAIN-LOGIC falling into DEAD-1 falling
+        into DEAD-2 falling into DEAD-3 would make this the exact
+        straight-line-program shape that's supposed to be *reachable*, not
+        dead code.
+        """
         prog = _make_program(
             [
-                ("MAIN-LOGIC", [_continue()]),
+                ("MAIN-LOGIC", [_stop_run()]),
                 ("DEAD-1", [_continue()]),
                 ("DEAD-2", [_continue()]),
                 ("DEAD-3", [_continue()]),
@@ -438,10 +487,14 @@ class TestCobolProgramFindDeadCode:
     """Tests for the find_dead_code() convenience method on CobolProgram."""
 
     def test_find_dead_code_returns_report(self) -> None:
-        """find_dead_code() returns a DeadCodeReport."""
+        """find_dead_code() returns a DeadCodeReport.
+
+        MAIN-LOGIC ends with STOP RUN so it doesn't fall through into
+        UNREACHABLE.
+        """
         prog = _make_program(
             [
-                ("MAIN-LOGIC", [_continue()]),
+                ("MAIN-LOGIC", [_stop_run()]),
                 ("UNREACHABLE", [_continue()]),
             ]
         )
@@ -461,7 +514,11 @@ class TestDeadCodeIntegration:
     """Integration tests using parse_cobol to build the AST."""
 
     def test_parsed_program_with_dead_code(self) -> None:
-        """Parse a real COBOL program and detect dead paragraphs."""
+        """Parse a real COBOL program and detect dead paragraphs.
+
+        PROCESS-DATA ends with STOP RUN so it doesn't fall through into
+        UNUSED-PARA.
+        """
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. DEADTEST.
@@ -470,7 +527,8 @@ class TestDeadCodeIntegration:
            PERFORM PROCESS-DATA
            STOP RUN.
        PROCESS-DATA.
-           DISPLAY "PROCESSING".
+           DISPLAY "PROCESSING"
+           STOP RUN.
        UNUSED-PARA.
            DISPLAY "NEVER CALLED".
 """
@@ -509,7 +567,11 @@ class TestDeadCodeIntegration:
         assert not report.has_dead_code
 
     def test_parsed_program_perform_thru(self) -> None:
-        """PERFORM THRU should mark all paragraphs in range as referenced."""
+        """PERFORM THRU should mark all paragraphs in range as referenced.
+
+        INIT-END ends with STOP RUN so it doesn't fall through into
+        ORPHAN-PARA.
+        """
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. THRUTEST.
@@ -522,7 +584,8 @@ class TestDeadCodeIntegration:
        INIT-MIDDLE.
            DISPLAY "MIDDLE".
        INIT-END.
-           DISPLAY "END".
+           DISPLAY "END"
+           STOP RUN.
        ORPHAN-PARA.
            DISPLAY "ORPHAN".
 """
@@ -682,7 +745,11 @@ class TestDeadCodeIntegration:
         assert "PARA-A" not in dead_names
 
     def test_find_dead_code_convenience(self) -> None:
-        """CobolProgram.find_dead_code() works end-to-end."""
+        """CobolProgram.find_dead_code() works end-to-end.
+
+        USED-PARA ends with STOP RUN so it doesn't fall through into
+        DEAD-PARA.
+        """
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. CONVTEST.
@@ -691,7 +758,8 @@ class TestDeadCodeIntegration:
            PERFORM USED-PARA
            STOP RUN.
        USED-PARA.
-           DISPLAY "USED".
+           DISPLAY "USED"
+           STOP RUN.
        DEAD-PARA.
            DISPLAY "DEAD".
 """
@@ -739,12 +807,14 @@ def _merge_stmt(
 
 class TestSortMergeThruReferences:
     def test_sort_input_procedure_thru_marks_range(self) -> None:
+        """IN-END ends with STOP RUN so it doesn't fall through into
+        DEAD-PARA."""
         prog = _make_program(
             paragraphs=[
                 ("MAIN", [_sort_stmt(input_proc="IN-START", input_thru="IN-END")]),
                 ("IN-START", [ContinueStatement(SourceLocation(1, 12))]),
                 ("IN-MIDDLE", [ContinueStatement(SourceLocation(1, 12))]),
-                ("IN-END", [ContinueStatement(SourceLocation(1, 12))]),
+                ("IN-END", [_stop_run()]),
                 ("DEAD-PARA", [ContinueStatement(SourceLocation(1, 12))]),
             ]
         )
@@ -756,11 +826,13 @@ class TestSortMergeThruReferences:
         assert "DEAD-PARA" in dead
 
     def test_sort_output_procedure_thru_marks_range(self) -> None:
+        """OUT-B ends with STOP RUN so it doesn't fall through into
+        ORPHAN."""
         prog = _make_program(
             paragraphs=[
                 ("MAIN", [_sort_stmt(output_proc="OUT-A", output_thru="OUT-B")]),
                 ("OUT-A", [ContinueStatement(SourceLocation(1, 12))]),
-                ("OUT-B", [ContinueStatement(SourceLocation(1, 12))]),
+                ("OUT-B", [_stop_run()]),
                 ("ORPHAN", [ContinueStatement(SourceLocation(1, 12))]),
             ]
         )
@@ -795,12 +867,14 @@ class TestSortMergeThruReferences:
         assert not dead  # all procedures are referenced
 
     def test_merge_output_procedure_thru_marks_range(self) -> None:
+        """MRG-END ends with STOP RUN so it doesn't fall through into
+        DEAD."""
         prog = _make_program(
             paragraphs=[
                 ("MAIN", [_merge_stmt(output_proc="MRG-START", output_thru="MRG-END")]),
                 ("MRG-START", [ContinueStatement(SourceLocation(1, 12))]),
                 ("MRG-MID", [ContinueStatement(SourceLocation(1, 12))]),
-                ("MRG-END", [ContinueStatement(SourceLocation(1, 12))]),
+                ("MRG-END", [_stop_run()]),
                 ("DEAD", [ContinueStatement(SourceLocation(1, 12))]),
             ]
         )
@@ -837,9 +911,11 @@ class TestMarkThruRangeInverted:
         assert "PARA-B" not in dead
 
     def test_thru_range_with_unknown_names_is_noop(self) -> None:
+        """MAIN ends with STOP RUN so it doesn't fall through into
+        REAL-PARA."""
         prog = _make_program(
             paragraphs=[
-                ("MAIN", [_perform("UNKNOWN-START", thru="UNKNOWN-END")]),
+                ("MAIN", [_perform("UNKNOWN-START", thru="UNKNOWN-END"), _stop_run()]),
                 ("REAL-PARA", [ContinueStatement(SourceLocation(1, 12))]),
             ]
         )
@@ -861,6 +937,10 @@ class TestAlterReferences:
         internal GO TO is being modified -- naming it in the ALTER is not an
         incoming jump, so it must not be protected from dead-code detection
         just because it appears there.
+
+        MAIN and PARA-Z both end with STOP RUN so neither falls through
+        (into PARA-X and DEAD respectively) -- the only thing under test is
+        ALTER subject-vs-target reference tracking.
         """
         loc = SourceLocation(1, 12)
         alter = AlterStatement(loc)
@@ -868,10 +948,10 @@ class TestAlterReferences:
         alter.add_alteration("PARA-Y", "PARA-Z")
         prog = _make_program(
             paragraphs=[
-                ("MAIN", [alter]),
+                ("MAIN", [alter, _stop_run()]),
                 ("PARA-X", [ContinueStatement(loc)]),
                 ("PARA-Y", [ContinueStatement(loc)]),
-                ("PARA-Z", [ContinueStatement(loc)]),
+                ("PARA-Z", [_stop_run()]),
                 ("DEAD", [ContinueStatement(loc)]),
             ]
         )
@@ -983,11 +1063,15 @@ class TestEntryReferences:
 
     def test_unrelated_paragraph_still_reported_dead(self) -> None:
         """An ENTRY elsewhere does not blanket-mark every paragraph
-        referenced -- an actually-unreferenced paragraph is still dead."""
+        referenced -- an actually-unreferenced paragraph is still dead.
+
+        ALT-ENTRY-PARA ends with STOP RUN so it doesn't fall through into
+        TRULY-DEAD.
+        """
         prog = _make_program(
             paragraphs=[
                 ("MAIN-PARA", [_continue()]),
-                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _continue()]),
+                ("ALT-ENTRY-PARA", [_entry("'ALTENTRY'"), _stop_run()]),
                 ("TRULY-DEAD", [_continue()]),
             ]
         )
@@ -1000,10 +1084,14 @@ class TestEntryReferences:
         """An ENTRY statement with a whitespace-only literal name isn't a
         real alternate entry point (matches the same filter
         program_flow/scanner.py's collect_entry_points applies), so it must
-        not mask an otherwise-dead paragraph."""
+        not mask an otherwise-dead paragraph.
+
+        MAIN-PARA ends with STOP RUN so it doesn't fall through into
+        BOGUS-ENTRY-PARA.
+        """
         prog = _make_program(
             paragraphs=[
-                ("MAIN-PARA", [_continue()]),
+                ("MAIN-PARA", [_stop_run()]),
                 ("BOGUS-ENTRY-PARA", [_entry("\n"), _continue()]),
             ]
         )
@@ -1013,10 +1101,14 @@ class TestEntryReferences:
 
     def test_empty_entry_name_does_not_mask_dead_paragraph(self) -> None:
         """Same as above for an ENTRY literal that is empty after quote
-        stripping (``''``)."""
+        stripping (``''``).
+
+        MAIN-PARA ends with STOP RUN so it doesn't fall through into
+        BOGUS-ENTRY-PARA.
+        """
         prog = _make_program(
             paragraphs=[
-                ("MAIN-PARA", [_continue()]),
+                ("MAIN-PARA", [_stop_run()]),
                 ("BOGUS-ENTRY-PARA", [_entry("''"), _continue()]),
             ]
         )
@@ -1026,15 +1118,227 @@ class TestEntryReferences:
 
     def test_none_entry_name_does_not_mask_dead_paragraph(self) -> None:
         """An EntryStatement whose entry_name was never set (None) doesn't
-        mask an otherwise-dead paragraph."""
+        mask an otherwise-dead paragraph.
+
+        MAIN-PARA ends with STOP RUN so it doesn't fall through into
+        BOGUS-ENTRY-PARA.
+        """
         entry = EntryStatement(SourceLocation(1, 12))
         # set_entry_name is deliberately NOT called -> entry_name stays None
         prog = _make_program(
             paragraphs=[
-                ("MAIN-PARA", [_continue()]),
+                ("MAIN-PARA", [_stop_run()]),
                 ("BOGUS-ENTRY-PARA", [entry, _continue()]),
             ]
         )
         report = DeadCodeAnalyzer().analyze(prog)
         dead = [i.name for i in report.dead_items]
         assert "BOGUS-ENTRY-PARA" in dead
+
+
+# ---------------------------------------------------------------------------
+# _collect_fallthrough_refs
+# ---------------------------------------------------------------------------
+
+
+class TestFallThroughReferences:
+    """Regression tests for the audit finding: DeadCodeAnalyzer had no
+    concept of fall-through at all, so any paragraph reached purely by
+    falling off the end of the previous one -- the default shape of a
+    straight-line COBOL program -- was reported dead."""
+
+    def test_straight_line_program_has_no_dead_code(self) -> None:
+        """The audit's exact repro: three paragraphs with no PERFORM/GO TO
+        between them at all, the last ending in STOP RUN. All three run on
+        every execution via fall-through alone."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STRAIGHTLINE.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY 'IN MAIN'.
+       PARA-TWO.
+           DISPLAY 'IN TWO'.
+       PARA-THREE.
+           DISPLAY 'IN THREE'
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="straightline.cbl")
+        assert result.ast is not None
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        assert not report.has_dead_code
+
+    def test_stop_run_cuts_off_fall_through(self) -> None:
+        """A paragraph ending in STOP RUN does not fall through -- the next
+        paragraph is dead unless something else references it."""
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [_stop_run()]),
+                ("NEVER-REACHED", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "NEVER-REACHED" in dead
+
+    def test_goback_cuts_off_fall_through(self) -> None:
+        """A paragraph ending in GOBACK does not fall through."""
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [GobackStatement(SourceLocation(1, 12))]),
+                ("NEVER-REACHED", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "NEVER-REACHED" in dead
+
+    def test_exit_program_cuts_off_fall_through(self) -> None:
+        """A paragraph ending in EXIT PROGRAM does not fall through."""
+        exit_stmt = ExitStatement(SourceLocation(1, 12))
+        exit_stmt.set_exit_type("PROGRAM")
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [exit_stmt]),
+                ("NEVER-REACHED", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "NEVER-REACHED" in dead
+
+    def test_unconditional_goto_cuts_off_fall_through(self) -> None:
+        """A bare GO TO as a paragraph's own last statement does not fall
+        through -- it always jumps away."""
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [_goto("PARA-C")]),
+                ("NEVER-REACHED", [_continue()]),
+                ("PARA-C", [_stop_run()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "NEVER-REACHED" in dead
+
+    def test_stop_literal_does_not_cut_off_fall_through(self) -> None:
+        """STOP 'literal' (as opposed to STOP RUN) merely halts pending
+        operator action -- execution continues at the next statement, so it
+        must not be treated as a hard terminator."""
+        stop_literal = StopStatement(SourceLocation(1, 12))
+        stop_literal.stop_type = "literal"
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [stop_literal]),
+                ("STILL-REACHED", [_stop_run()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "STILL-REACHED" not in dead
+
+    def test_computed_goto_does_not_cut_off_fall_through(self) -> None:
+        """GO TO ... DEPENDING ON is conditional -- if the subscript matches
+        none of the targets, execution falls through -- so it must not
+        suppress fall-through crediting even as a paragraph's last
+        statement."""
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [_goto_depending(["BRANCH-A", "BRANCH-B"], "WS-IDX")]),
+                ("STILL-REACHED", [_stop_run()]),
+                ("BRANCH-A", [_stop_run()]),
+                ("BRANCH-B", [_stop_run()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "STILL-REACHED" not in dead
+
+    def test_conditional_goto_inside_if_does_not_cut_off_fall_through(self) -> None:
+        """A GO TO nested inside an IF only fires when the condition is
+        true -- the paragraph still falls through whenever it isn't, so it
+        must not be treated the same as an unconditional last-statement
+        GO TO."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CONDGOTO.
+       PROCEDURE DIVISION.
+       PARA-A.
+           IF WS-FLAG = 'Y'
+               GO TO PARA-C
+           END-IF.
+       PARA-B.
+           DISPLAY 'B'
+           STOP RUN.
+       PARA-C.
+           DISPLAY 'C'
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="condgoto.cbl")
+        assert result.ast is not None
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        dead = [i.name for i in report.dead_items]
+        assert "PARA-B" not in dead
+
+    def test_fall_through_does_not_cascade_from_an_unreached_paragraph(self) -> None:
+        """A chain of non-terminating paragraphs that are themselves never
+        reached must not credit each other purely for standing next to one
+        another -- fall-through only propagates from a paragraph that is
+        itself already known to be reachable."""
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [_stop_run()]),
+                ("DEAD-1", [_continue()]),
+                ("DEAD-2", [_continue()]),
+                ("DEAD-3", [_stop_run()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "DEAD-1" in dead
+        assert "DEAD-2" in dead
+        assert "DEAD-3" in dead
+
+    def test_fall_through_into_section_header_reaches_its_first_paragraph(
+        self,
+    ) -> None:
+        """A SECTION header has no statements of its own -- falling into one
+        from a non-terminating predecessor must reach its first paragraph
+        too."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                ("FIRST-SECTION", [("FIRST-PARA", [_continue()])]),
+                ("SECOND-SECTION", [("SECOND-PARA", [_stop_run()])]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert not dead
+
+    def test_fall_through_agrees_with_program_flow_analyzer(self) -> None:
+        """DeadCodeAnalyzer and ProgramFlowAnalyzer must agree on the
+        straight-line case -- prior to this fix they disagreed (dead_code.py
+        had no fall-through concept at all)."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AGREETEST.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY 'IN MAIN'.
+       PARA-TWO.
+           DISPLAY 'IN TWO'.
+       PARA-THREE.
+           DISPLAY 'IN THREE'
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="agreetest.cbl")
+        assert result.ast is not None
+
+        dead_report = DeadCodeAnalyzer().analyze(result.ast)
+        flow_report = ProgramFlowAnalyzer().analyze(result.ast)
+
+        assert not dead_report.has_dead_code
+        assert flow_report.unreachable_nodes == []

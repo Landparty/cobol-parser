@@ -816,6 +816,55 @@ class TestProgramFlowFallThrough:
         ft_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.FALL_THROUGH]
         assert len(ft_edges) == 0
 
+    def test_conditional_goto_inside_if_does_not_suppress_fall_through(self) -> None:
+        """A GO TO nested inside an IF (with no ELSE) only fires when the
+        condition is true -- the paragraph still falls through to the next
+        one whenever it isn't, so it must not be treated the same as an
+        unconditional trailing GO TO.
+        """
+        prog = _make_program(
+            [
+                ("PARA-A", [_if_stmt([_goto("PARA-C")])]),
+                ("PARA-B", [_continue()]),
+                ("PARA-C", [_stop_run()]),
+            ]
+        )
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 1
+        assert "PARA-B" not in report.unreachable_nodes
+
+    def test_unconditional_trailing_goto_still_suppresses_fall_through(self) -> None:
+        """A bare GO TO as a paragraph's own last top-level statement is a
+        true unconditional terminator and must still suppress fall-through.
+        """
+        prog = _make_program(
+            [
+                ("PARA-A", [_goto("PARA-C")]),
+                ("PARA-B", [_continue()]),
+                ("PARA-C", [_stop_run()]),
+            ]
+        )
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 0
+
 
 # ---------------------------------------------------------------------------
 # Tests: Report serialization
@@ -5076,8 +5125,12 @@ class TestProgramFlowAuditEdgeCases:
     # ------------------------------------------------------------------
 
     def test_fall_through_when_goto_and_perform_both_present(self) -> None:
-        """When a paragraph has both a GO TO and a PERFORM, the heuristic
-        does NOT suppress fall-through (perform_count > 0 overrides GOTO)."""
+        """A paragraph whose own last top-level statement is an unconditional
+        GO TO still suppresses fall-through even when it also contains a
+        PERFORM earlier on -- the PERFORM returns control to the statement
+        after it (the GO TO), which then unconditionally transfers control
+        away, so there is no path back to a fall-through.
+        """
         prog = _make_program(
             [
                 ("MAIN", [_perform("HELPER"), _goto("MAIN")]),
@@ -5095,7 +5148,7 @@ class TestProgramFlowAuditEdgeCases:
             and e.source == "MAIN"
             and e.target == "HELPER"
         ]
-        assert len(ft_edges) == 1
+        assert len(ft_edges) == 0
 
     # ------------------------------------------------------------------
     # AlterStatement with multiple alterations (line 683-690)
@@ -5760,7 +5813,9 @@ class TestRealConditionText:
         report = ProgramFlowAnalyzer().analyze(result.ast)
         assert len(report.branch_nodes) == 1
         assert report.branch_nodes[0].condition_text == "'X'"
-        when_edges = [e for e in report.edges if e.edge_type == FlowEdgeType.EVALUATE_WHEN]
+        when_edges = [
+            e for e in report.edges if e.edge_type == FlowEdgeType.EVALUATE_WHEN
+        ]
         assert len(when_edges) == 1
         assert when_edges[0].condition == "WHEN 'A'"
 
@@ -6054,6 +6109,7 @@ class TestScannerDeepNestingRegression:
             exit_points=set(),
             branch_nodes=branch_nodes,
             collector=collector,
+            unconditional_gotos=set(),
         )
         scanner.collect_procedures(proc_div)
         scanner.scan_statements(proc_div)
