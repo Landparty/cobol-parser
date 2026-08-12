@@ -20,6 +20,102 @@ VS Code extension): the pre-fix `DEPTBMP.cbl` output fails to parse, the
 post-fix output parses cleanly. Full writeup in
 [generators.md](generators.md)'s "Flowcharts" section; new/updated tests
 noted in [tests.md](tests.md).
+## 2026-08-11 (PR #135 Copilot review: fall-through termination checks were last-statement-only / has_stop_run-etc. were nesting-blind)
+
+Copilot's automated review on PR #135 (the fall-through fix below) caught
+two related precision bugs in the same area, both fixed in the same pass:
+
+1. Both `DeadCodeAnalyzer._terminates` and `ProcedureScanner`'s new GO TO
+   tracking checked only `para.statements[-1]` -- a hard terminator or
+   unconditional GO TO earlier in a paragraph (not its last statement)
+   still unconditionally fires when reached, so trailing statements after
+   it are themselves unreachable and don't change whether the paragraph
+   falls through. Fixed by extracting a static `_is_terminator(stmt)`
+   helper in each module and checking `any(...)` over every top-level
+   statement instead of indexing `[-1]`.
+
+2. `ProgramFlowAnalyzer.build_fall_through_edges` suppressed fall-through
+   via `node.has_stop_run`/`has_goback`/`has_exit_program`, but those flags
+   are set by the recursive statement walk whenever it encounters the
+   statement *anywhere*, including nested inside an IF/EVALUATE arm --
+   exactly the same "conditional treated as unconditional" bug the GO TO
+   half of this PR fixes, just for the other three terminator kinds.
+   Replaced with the same unified `_is_terminator`-over-top-level-
+   statements check (renamed the threaded set from
+   `_unconditional_gotos`/`unconditional_gotos` to
+   `_terminating_paragraphs`/`terminating_paragraphs` throughout
+   `scanner.py`/`graph.py`/`analyzer.py` since it now covers all four
+   terminator kinds, not just GO TO). The `has_stop_run`/`has_goback`/
+   `has_exit_program` fields themselves are untouched -- other consumers
+   (flowchart-generator terminal nodes, `is_exit_point`) intentionally
+   want the broader "anywhere in the paragraph" semantics.
+
+Full writeups (including the one known, deliberately-unaddressed boundary
+case -- a terminator inside an unconditional bare `PERFORM ... END-PERFORM`
+block) in [analysis.md](analysis.md)'s `DeadCodeAnalyzer` and
+`ProgramFlowAnalyzer` sections. New tests:
+`test_terminator_earlier_in_paragraph_still_cuts_off_fall_through`
+(`test_dead_code.py`), and
+`test_terminator_earlier_in_paragraph_still_suppresses_fall_through` +
+`test_conditional_stop_run_inside_if_does_not_suppress_fall_through`
+(`test_program_flow.py`). Full suite green (5211 unit tests; `ruff`,
+`black --check`, `mypy` clean on touched files).
+
+## 2026-08-11 (Dead Code & Program Flow audit: remaining 2 of 7 findings -- fall-through concept and conditional GO TO)
+
+Closes out the "Dead Code & Program Flow" analyzer audit (the artifact this
+session reviewed found 5 of its 7 findings already fixed and merged to
+main under various branches/commits from earlier sessions, and 2 genuinely
+unaddressed -- confirmed by reading the current code, not by trusting
+commit messages). Two unrelated local branches
+(`claude/dead-code-section-550f0e`, `claude/optimistic-lumiere-bb902f`)
+already contained a correct, well-tested fix for the conditional-GO-TO
+finding, but both branched off a point *before* the paragraph-ordering fix
+landed on main via a different implementation (`b0b204d`), so neither
+could be cleanly merged or cherry-picked -- the underlying logic was
+ported by hand onto current main's `scanner.py` (which also already has
+the unrelated explicit-work-stack rewrite, `4e53724`, that those stale
+branches never saw).
+
+**Finding #1 -- DeadCodeAnalyzer had no fall-through concept at all.**
+Fixed in `cobolparser/analysis/dead_code.py`: new `_collect_fallthrough_refs`
++ `_terminates`, gated on the predecessor already being reachable (not just
+non-terminating) to avoid falsely un-deadening a chain of paragraphs that
+are themselves never reached. See [analysis.md](analysis.md)
+(`DeadCodeAnalyzer` section) for the full writeup.
+
+Fixing this correctly required updating 21 pre-existing tests in
+`tests/unit/analysis/test_dead_code.py`: they used `CONTINUE` (or a bare
+`DISPLAY`) as a paragraph-body placeholder with no terminator, relying on
+the analyzer's total blindness to fall-through to keep an intentionally
+"dead" paragraph dead. Under the fix, several of those paragraphs are
+*genuinely* reachable per real COBOL semantics (the fixture author's intent
+was "isolated dead stub", but the actual shape was "straight-line code"),
+so this wasn't test-breakage to route around -- it was the fixtures being
+wrong about what they were testing. Added `STOP RUN` to the paragraph
+immediately before each fixture's intentionally-dead island. See
+[tests.md](tests.md).
+
+**Finding #5 -- conditional GO TO treated as unconditional fall-through
+terminator.** Fixed in `cobolparser/analysis/program_flow/graph.py` +
+`scanner.py` + `analyzer.py`: `build_fall_through_edges` now suppresses
+only when a paragraph's own last top-level statement is a bare
+(non-`DEPENDING`) `GO TO` (`ProcedureScanner`-populated
+`unconditional_gotos` set), not merely "any GOTO edge exists" refined by a
+now-redundant `perform_count == 0` guard (dropped in the same change --
+see [analysis.md](analysis.md)'s `ProgramFlowAnalyzer` section for why it
+had no remaining justification once last-statement tracking exists).
+`DeadCodeAnalyzer._terminates` (above) applies the identical rule
+independently, by design -- the two analyzers deliberately don't share
+code, per this module's existing architecture.
+
+Verification: full `tests/unit` (5206 passed), `tests/integration` +
+`tests/regression` (2411 passed; the only 7 failures --
+`test_evaluate_space_literal_when.py` and
+`test_normalize_line_number_preservation.py` -- were confirmed pre-existing
+on a clean `main` checkout via `git stash`, unrelated to this change, a
+stale Cython-extension issue). `ruff check`, `black --check`, and `mypy`
+clean on all touched files.
 
 ## 2026-08-11 (Whole-branch final review: 4 composition bugs across the 7-task Mermaid/DOT flowchart-fidelity plan)
 
