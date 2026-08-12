@@ -316,9 +316,9 @@ class MermaidFlowchartGenerator:
                 # lexer as the start of a node shape (PS / SQS tokens),
                 # not literal text -- e.g. a PERFORM UNTIL edge's "(loop)"
                 # suffix or a THRU edge's "[THRU n]" badge breaks parsing
-                # without the quotes. Reuse the same "#quot;" entity
-                # escape branch/arm labels already use above for any
-                # double quote that survives into COBOL condition text.
+                # without the quotes. Reuse the same literal "#quot;"
+                # escape token branch/arm labels already use above for
+                # any double quote that survives into COBOL condition text.
                 label_text = " ".join(label_parts).replace('"', "#quot;")
                 edge_str = f'    {src_id} {arrow}|"{label_text}"| {tgt_id}'
             else:
