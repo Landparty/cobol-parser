@@ -72,6 +72,14 @@ class ASTNodeFactory:
     # Registry of known node types and their validation rules
     _node_validators: dict[str, dict[str, Any]] = {}
 
+    # node_class -> name of its __init__'s first argument after `self`,
+    # memoized so the constructor-shape check in create() (guarding against
+    # the location-mis-binding landmine) only introspects each class once
+    # via `inspect.signature` instead of on every node creation -- create()
+    # sits on the parsing hot path (every statement parser routes through
+    # it via create_statement()).
+    _first_init_param_cache: dict[type, str | None] = {}
+
     def __init__(self) -> None:
         """Initialize the AST node factory."""
         self._creation_count = 0
@@ -207,8 +215,14 @@ class ASTNodeFactory:
         # of raising for one of those, since Python doesn't type-check
         # positional arguments. Catch that here with a clear error rather
         # than letting it corrupt the created node.
-        init_params = list(inspect.signature(node_class.__init__).parameters.values())
-        first_arg = init_params[1].name if len(init_params) > 1 else None
+        if node_class not in self._first_init_param_cache:
+            init_params = list(
+                inspect.signature(node_class.__init__).parameters.values()
+            )
+            self._first_init_param_cache[node_class] = (
+                init_params[1].name if len(init_params) > 1 else None
+            )
+        first_arg = self._first_init_param_cache[node_class]
         if first_arg != "location":
             raise TypeError(
                 f"{node_class.__name__}.__init__ does not take `location` as "
