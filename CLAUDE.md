@@ -34,7 +34,7 @@ The OKF is more specific and more current than this file for the above topics. W
 
 ## Project Overview
 
-**cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. Version 1.0.0, authored by Samuel Dion.
+**cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. Version 1.5.3 (see `pyproject.toml` — release-please keeps it current), authored by Samuel Dion.
 
 ## Backend Integration
 
@@ -60,7 +60,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (81% minimum enforced; ~5,969 tests across 226 files)
+# Run all tests with coverage (81% minimum enforced; ~8,075 tests across 303 files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -109,14 +109,14 @@ The parser is a multi-stage pipeline: **preprocessing -> lexing -> parsing -> AS
 ```
 COBOL source (.cbl/.cob)
   -> preprocess/          (normalize_fixed_format, copybook expansion, conditional compilation)
-  -> lexer.py             (CobolLexer -> List[Token], 236 TokenType values)
+  -> lexer.py             (CobolLexer -> List[Token], 237 TokenType values)
   -> parser.py            (CobolParser -> ParseResult)
   -> models/              (AST node classes with to_dict()/to_json())
 ```
 
 ### Key Packages
 
-**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (236 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. When `cobolparser._lexer_fast` is compiled (see Cython acceleration below), the lexer transparently uses the Cython-accelerated subclass for hot-path methods; otherwise it falls back to pure Python.
+**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (237 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. When `cobolparser._lexer_fast` is compiled (see Cython acceleration below), the lexer transparently uses the Cython-accelerated subclass for hot-path methods; otherwise it falls back to pure Python.
 
 **`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** / **`cobolparser/_data_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor (and accelerate the DATA DIVISION `PICTURE` / data-item clause loops) by overriding the inner hot-path methods with C-typed implementations. Built via `setup.py build_ext --inplace`; the corresponding `.c` files are checked in so the extension builds without re-running Cython. Setting `COBOLPARSER_SKIP_EXT=1` at install time skips the C build and falls back to the pure-Python paths.
 
@@ -145,7 +145,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 26 statement parser files (see "Statement Parsers" section below)
+- `statements/` -- 29 statement parser files (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -282,7 +282,7 @@ profile = prof.result   # ProfilingResult with FunctionProfile entries
 # Copybook expansion
 from cobolparser import expand_copybooks, parse_cobol_with_expansion
 result = expand_copybooks(source, copybook_paths=["/path/to/copybooks"])
-parse_result = parse_cobol_with_expansion(source, copybook_paths=["/path"])
+parse_result = parse_cobol_with_expansion(source, "prog.cbl", copybook_paths=["/path"])
 
 # Dynamic call analysis
 from cobolparser.analysis import DynamicCallAnalyzer
@@ -290,7 +290,7 @@ DynamicCallAnalyzer().analyze(parse_result.ast)
 
 # Analyzers exported from the top-level package — all follow the same
 # `<Analyzer>().analyze(ast) -> <Report>` shape (HostVariableResolver
-# uses `.resolve(ast)` instead):
+# uses `.resolve(ast)`; LinkageChecker and MoveTypeChecker use `.check(ast)`):
 from cobolparser import (
     DeadCodeAnalyzer,           # report.dead_items
     ProgramFlowAnalyzer,        # report.edges (typed PERFORM/GO TO/CALL/fall-through; THRU range_members; classified cycle_details)
@@ -412,7 +412,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~5,969 tests across 226 files in 5 directories:
+~8,075 tests across 303 files in 5 directories:
 
 ```
 tests/
@@ -463,7 +463,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13)
 3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (verifies install and Cython extension build; no tests)
 
-The full pytest suite (`pytest tests/ -v`, ~5,969 tests) no longer runs automatically -- it's wired as a `test` job gated to `workflow_dispatch` only, since it's too slow to run on every push/PR. Run it locally during development, or trigger the workflow manually from the Actions tab when CI needs to confirm.
+The full pytest suite (`pytest tests/ -v`, ~8,075 tests) no longer runs automatically -- it's wired as a `test` job gated to `workflow_dispatch` only, since it's too slow to run on every push/PR. Run it locally during development, or trigger the workflow manually from the Actions tab when CI needs to confirm.
 
 ## Code Style and Conventions
 
@@ -497,7 +497,6 @@ The full pytest suite (`pytest tests/ -v`, ~5,969 tests) no longer runs automati
   - `metrics/io_ticket_tracker.py` -- Tracks IO-related work items
   - `perf/io_threshold_guard.py` -- Guards IO performance against thresholds
 - `scripts/validate_io_coverage.py` -- Standalone IO coverage validator
-- `baselines/` -- Stored coverage baselines (`current-coverage.json`, `final.json`) for regression comparison
 - `benchmarks/` -- Performance benchmark programs
 - `reports/` -- Audit reports
 - `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely.

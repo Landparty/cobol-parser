@@ -121,3 +121,55 @@ this was measured (2026-07-09) and have not been re-measured since.
   (4, lines 180/184/650/654) — all `pytest.skip("Implementation pending -
   Phase 6/7")`. Count confirmed current as of 2026-08-10.
 - Branch-coverage holes are tracked under M17 above.
+
+
+---
+
+## Carried forward from the 2026-08-12 audit (`audit-2026-08-12.md`)
+
+All High/Medium bugs from that audit were fixed in the same PR. Still open,
+in rough priority order (identifiers reference the audit report's sections):
+
+- **P-D2** — the three checked-in Cython `.c` files are not generated from
+  one canonical environment: `_lexer_fast.c` was regenerated 2026-08-12 in
+  a zstd-less Linux env, while `_preprocess_fast.c`/`_data_fast.c` still
+  carry the earlier Windows/zstd-variant output. Regenerate all three from
+  one canonical environment (ideally in CI) to stop spurious diffs.
+- **P-D3** — `setup.py` sets Cython `wraparound=False` while the `.pyx`
+  files use negative slice indices (`line[:-1]`, `token_value[:-1]`) —
+  formally undefined behavior; currently correct but fragile across Cython
+  upgrades. Replace with explicit-length slices.
+- **P-C1** — `parse_picture_clause_fast` in `_data_fast.pyx` is dead and
+  lacks the 2026-07-21 missing-terminator LEVEL_NUMBER lookahead fix;
+  wiring it up later would re-introduce a silent data-item drop. Delete or
+  fix-and-wire.
+- **P-D4** — statement `column` numbers are normalized-text coordinates
+  (columns 1–7 stripped), systematically -7 from fixed-format source
+  columns; undocumented. Document or translate.
+- **P-D5** — `ASTNodeFactory._node_validators` is class-level shared state
+  and is never consulted by `create()`; the advertised field validation is
+  unreachable. Wire it up or remove the registry.
+- **P-D6** — `ASTNode.find_all_by_type` returns the internal cache list;
+  callers mutating it corrupt later lookups. Return a copy.
+- **P-C3/P-C4/P-C6** — test-only legacy char-cursor lexer API
+  (`read_string_literal` et al.), uncalled `TokenStream.transaction()`,
+  and dead newline-strip branches in both lexer variants.
+- **A-design** — `MoveTypeChecker`'s flat name→category catalog collapses
+  duplicate data names (no ambiguity accounting); `DeadCodeAnalyzer`
+  explicit references are not reachability-gated (dead subgraphs shield
+  each other); `domains._apply_enum` ignores relational ops on
+  88-enumerated domains and can leak raw `THROUGH:n` markers as witnesses;
+  `detect_cycles` dedups by node *set*, merging genuinely distinct cycles.
+- **A-B2 residual** — `_unique_prefix` uses `startswith` without a word
+  boundary ("SELECT A" also prefixes "SELECT AB ..."); and
+  `value_tracker._extract_literal_value`'s permissive identifier fallback
+  is now gated at its caller but still pinned by direct-call tests
+  (`tests/unit/test_value_tracker_coverage.py:106-118`) — delete both
+  together in a follow-up.
+- **S-2 (info)** — batch workers have no per-file memory/time cap;
+  document that batch input should be size-bounded.
+- **S-3 (info)** — CLI `-o` overwrites without confirmation (standard, but
+  keep it a conscious choice).
+- **T-misc** — dead `[[tool.mypy.overrides]]` for `tests.*` in
+  pyproject.toml (mypy only ever runs on `cobolparser/`); pre-commit runs
+  both `ruff-format` and black (latent formatter fight; they agree today).

@@ -5,7 +5,7 @@ okf_version: "0.1"
 # cobol-parser OKF Bundle
 
 Knowledge bundle for the **cobolparser** Python library — COBOL → AST for IBM Enterprise COBOL.
-Version 1.1.0. Author: Samuel Dion.
+Version 1.5.3. Author: Samuel Dion.
 
 ## Core Pipeline
 
@@ -16,7 +16,7 @@ Version 1.1.0. Author: Samuel Dion.
 
 ## Analysis & Generation
 
-* [Analysis](analysis.md) — 13 static-analysis modules (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.)
+* [Analysis](analysis.md) — 16 static-analysis modules plus the `program_flow/` package (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.)
 * [Generators](generators.md) — flowcharts (Mermaid/DOT) and copybook → CSV synthetic test data
 * [Batch Parsing](batch.md) — `parse_files()` / `parse_files_with_copybooks()`, per-file fault isolation
 * [CLI](cli.md) — `cobol-parser` subcommands and flags
