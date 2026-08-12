@@ -586,8 +586,10 @@ def expand_copybooks(
         encoding_errors=encoding_errors,
     )
 
-    # Create path resolver
-    path_resolver = PathResolver(search_config)
+    # Create path resolver -- but honor a caller-supplied one (its warm
+    # resolution/directory-index caches are the whole point of passing it).
+    if path_resolver is None:
+        path_resolver = PathResolver(search_config)
 
     # Create expansion context
     context = ExpansionContext(
@@ -756,9 +758,6 @@ def _expand_source_recursive(
     # We use the NORMALIZED source as the base for expansion because we need valid indices
     expanded_source = normalized_source
     for statement in reversed(copy_statements):
-        # Check cache first (for diamond dependency optimization)
-        context.get_cache_key(statement.member_name, statement.replacing_clauses)
-
         # Find copybook file
         copybook_path = path_resolver.resolve(
             statement.member_name, statement.library_qualifier

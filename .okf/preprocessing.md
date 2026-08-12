@@ -260,6 +260,25 @@ which passes raw `*`-comment lines straight in without going through
 and `tests/unit/test_copybook_expander_coverage.py::TestExpandCopybooks::
 test_content_validation`.
 
+**Caller-supplied `path_resolver` honored (audit 2026-08-12, P-D1):**
+`expand_copybooks(..., path_resolver=...)` used to overwrite the parameter
+unconditionally with a fresh `PathResolver`; a caller-supplied resolver
+(whose warm resolution/directory-index caches are the whole point of
+passing one — `batch.parse_files_with_copybooks` does) is now used as-is,
+and a new one is constructed only when the argument is `None`. Note the
+supplied resolver's own `search_config` governs nesting/size/encoding
+limits during expansion. Pinned by
+`tests/regression/test_audit_2026_08_12_core.py::TestPD1CallerSuppliedPathResolver`.
+
+**`COPY_PATTERN` removed (audit 2026-08-12, S-1):**
+`copy_statement_parser.py` exported a monolithic `COPY_PATTERN` regex that
+was unused by the live expansion path (the real scanner is
+`CopyStatementLexer.tokenize_copy_statements`, a linear hand-written lexer)
+and whose ambiguous REPLACING sub-pattern backtracked exponentially on
+unterminated input (`COPY X REPLACING BY BY ... BY %`). Deleted (and
+removed from `__all__`) rather than de-ambiguated. Guarded by
+`tests/regression/test_audit_2026_08_12_core.py::TestS1CopyPatternRemoved`.
+
 `parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
 encoding decodes, content-validation and level-number warnings) onto the
 returned `ParseResult.warnings` (2026-07-07). Previously they lived only on
@@ -365,10 +384,20 @@ These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
 1. **Tier 1** — a resolution cache keyed by `member_name` (exact repeat
    lookups are O(1) with no filesystem access).
 2. **Tier 2** — a per-directory index (`_dir_index`, built once via
-   `os.scandir()`) keyed by uppercased basename-without-extension, for
-   O(1) lookup against every directory without re-scanning.
+   `os.scandir()`) keyed by uppercased basename-without-extension AND full
+   filename, for O(1) lookup against every directory without re-scanning.
 3. **Tier 3** — a full filesystem search (`find_copybook_file`) as the
    fallback when the index misses.
+
+**Tier precedence is first-configured-directory-wins everywhere (audit
+2026-08-12, P-B6):** when the same copybook name exists in two search
+directories, the first configured directory wins for the Tier-2 stem key,
+the Tier-2 full-filename key, and Tier 3 alike. Previously the Tier-2
+full-filename key alone was *last*-directory-wins (built with an
+unconditional `index[name_upper] = abs_path` instead of `setdefault`), so
+`resolve("SHARED.cpy")` and `resolve("SHARED")` could return files from
+different directories. Pinned by
+`tests/regression/test_audit_2026_08_12_core.py::TestPB6FirstDirectoryWins`.
 
 All three tiers funnel through `validate_path_within_directory(path,
 search_dir)`, which resolves symlinks (`Path.resolve()`) and confirms the

@@ -37,11 +37,8 @@ class TestRealWorldCobolPatterns:
             cobol_source = self.create_cobol_program(data_section=f"       {data_def}")
             result = parse_cobol(cobol_source)
 
-            print(f"{description}: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
-
-            assert isinstance(result.success, bool)
+            assert result.success, f"{description} failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_complex_picture_patterns_from_examples(self):
         """Test complex PICTURE patterns found in NIST examples."""
@@ -68,9 +65,8 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"{description}: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert result.success, f"{description} failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_usage_clauses_from_examples(self):
         """Test USAGE clauses found in examples."""
@@ -89,9 +85,8 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"{description}: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert result.success, f"{description} failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_level_number_variations(self):
         """Test level number patterns from examples."""
@@ -109,9 +104,8 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"{description}: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert result.success, f"{description} failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_value_clauses_from_examples(self):
         """Test VALUE clause patterns from examples."""
@@ -129,9 +123,8 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"{description}: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert result.success, f"{description} failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_redefines_patterns_from_examples(self):
         """Test REDEFINES patterns found in examples."""
@@ -148,9 +141,10 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"REDEFINES pattern: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert (
+                result.success
+            ), f"REDEFINES pattern failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_occurs_patterns_from_examples(self):
         """Test OCCURS patterns found in examples."""
@@ -169,9 +163,10 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"OCCURS pattern: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert (
+                result.success
+            ), f"OCCURS pattern failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_procedure_statements_from_examples(self):
         """Test PROCEDURE DIVISION statements from examples."""
@@ -200,9 +195,8 @@ class TestRealWorldCobolPatterns:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"{description}: {'SUCCESS' if result.success else 'FAILED'}")
-            if not result.success:
-                print(f"  Errors: {result.errors[:3]}")
+            assert result.success, f"{description} failed to parse: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_environment_division_patterns(self):
         """Test ENVIRONMENT DIVISION patterns from examples."""
@@ -226,9 +220,11 @@ class TestRealWorldCobolPatterns:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"ENVIRONMENT DIVISION: {'SUCCESS' if result.success else 'FAILED'}")
-        if not result.success:
-            print(f"  Errors: {result.errors[:5]}")
+        assert (
+            result.success
+        ), f"ENVIRONMENT DIVISION failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert result.ast.has_division("ENVIRONMENT")
 
     def test_file_section_patterns(self):
         """Test FILE SECTION patterns from examples."""
@@ -254,9 +250,15 @@ class TestRealWorldCobolPatterns:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"FILE SECTION: {'SUCCESS' if result.success else 'FAILED'}")
-        if not result.success:
-            print(f"  Errors: {result.errors[:5]}")
+        assert result.success, f"FILE SECTION failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        # The FD's records must be present in the AST.
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert "PRINT-REC" in item_names
+        assert "DUMMY-RECORD" in item_names
 
     def test_actual_nist_program_structure(self):
         """Test parsing actual NIST program structure (simplified)."""
@@ -296,60 +298,65 @@ class TestRealWorldCobolPatterns:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"NIST program structure: {'SUCCESS' if result.success else 'FAILED'}")
-        if not result.success:
-            print(f"  Errors: {result.errors[:5]}")
-
-        # This is the goal - to parse actual NIST programs successfully
-        if result.success:
-            print("🎉 Successfully parsed NIST-style program!")
-        else:
-            print("❌ NIST-style program parsing needs work")
-
-        return result.success
+        # The goal: actual NIST-style programs must parse successfully.
+        assert (
+            result.success
+        ), f"NIST program structure failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert result.ast.program_name == "IC101A"
+        # The CALL from the procedure division must survive into the AST.
+        calls = result.ast.find_all_by_type("CallStatement")
+        assert len(calls) >= 1, "Expected the CALL 'IC102A' statement in the AST"
 
 
 class TestCurrentParserStatus:
-    """Summarize current parser status and identify next steps."""
+    """Verify the parser handles every pattern category exercised above."""
 
-    def test_parser_summary_report(self):
-        """Generate a summary of what works and what needs implementation."""
+    def test_parser_capability_sweep(self):
+        """One representative source per capability category must parse."""
+        capability_sources = {
+            "Basic program structure": """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CAP-BASIC.
+       PROCEDURE DIVISION.
+           STOP RUN.""",
+            "REDEFINES clause": """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CAP-REDEF.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-A     PIC X(10).
+       01  WS-B REDEFINES WS-A PIC 9(10).
+       PROCEDURE DIVISION.
+           STOP RUN.""",
+            "OCCURS clause": """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CAP-OCCURS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-TBL.
+           05  WS-ITEM OCCURS 10 TIMES PIC 9(5).
+       PROCEDURE DIVISION.
+           STOP RUN.""",
+            "USAGE clauses (COMP, COMP-3)": """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CAP-USAGE.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-C     PIC 9(5) COMP.
+       01  WS-C3    PIC 9(7)V99 COMP-3.
+       PROCEDURE DIVISION.
+           STOP RUN.""",
+            "ENVIRONMENT DIVISION": """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CAP-ENV.
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       SOURCE-COMPUTER. IBM-3090.
+       OBJECT-COMPUTER. IBM-3090.
+       PROCEDURE DIVISION.
+           STOP RUN.""",
+        }
 
-        # Test basic functionality that should work
-        basic_patterns = [
-            "Basic program structure",
-            "Simple PICTURE clauses",
-            "VALUE clauses with literals",
-            "Basic PROCEDURE DIVISION statements",
-        ]
+        failures = {}
+        for capability, source in capability_sources.items():
+            result = parse_cobol(source)
+            if not (result.success and result.ast is not None):
+                failures[capability] = result.errors[:3]
 
-        advanced_patterns = [
-            "ENVIRONMENT DIVISION",
-            "FILE SECTION with FD",
-            "REDEFINES clauses",
-            "OCCURS clauses",
-            "Complex PICTURE patterns",
-            "USAGE clauses (COMP, COMP-3)",
-            "NIST program format",
-        ]
-
-        print("\\n=== COBOL Parser Status Report ===")
-        print("\\nBasic patterns (should work):")
-        for pattern in basic_patterns:
-            print(f"  📋 {pattern}")
-
-        print("\\nAdvanced patterns (may need work):")
-        for pattern in advanced_patterns:
-            print(f"  🔧 {pattern}")
-
-        print("\\n=== Next Implementation Steps ===")
-        print("1. Fix ENVIRONMENT DIVISION parsing")
-        print("2. Implement REDEFINES clause parsing")
-        print("3. Implement OCCURS clause parsing")
-        print("4. Add support for complex PICTURE patterns")
-        print("5. Implement FILE SECTION and FD parsing")
-        print("6. Add USAGE clause parsing (COMP, COMP-3)")
-        print("7. Handle NIST program header format")
-
-        # Always pass - this is just a report
-        assert True
+        assert not failures, f"Capability regressions: {failures}"

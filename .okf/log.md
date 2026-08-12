@@ -1,5 +1,184 @@
 # OKF Update Log
 
+## 2026-08-12 (Core audit fixes: EVALUATE selector contract restored, MOVE source join, expect()-at-EOF, statistics snapshot, sequence-numbered ID division, path-resolver precedence + honored parameter, ReDoS regex removed, compiled-lexer warnings reset, dead code)
+
+All pinned by `tests/regression/test_audit_2026_08_12_core.py` (plus the
+pre-existing `test_evaluate_space_literal_when.py` for T-H1).
+
+1. **T-H1 — EVALUATE WHEN selector contract restored** (`evaluate_parser.py`):
+   commit `17fa400` routed every selector token through
+   `condition_token_text()`, quoting *all* string literals and breaking the
+   pinned contract (non-blank literals unquoted, blank/whitespace-only
+   literals quoted). Reverted the selector path to blank-only re-quoting;
+   subjects keep `condition_token_text()`. See [parser.md](parser.md).
+2. **P-B1 — MOVE multi-word source corruption** (`move_parser.py`):
+   `"".join` → subscript/sign-aware `_join_source_parts`. See parser.md's
+   new "Core audit fixes (2026-08-12)" section.
+3. **P-B2 — `TokenStream.expect()` matched anything at EOF**
+   (`core/token_stream.py`): empty-valued tokens now mismatch. See parser.md.
+4. **P-B3 — `ParseResult.statistics` clobbered on parser reuse**
+   (`parser.py`, `plugins/core.py`): results now get
+   `ParseStatistics.copy()` snapshots. See parser.md.
+5. **P-B4 — `_ID_DIV_RE` vs sequence-numbered fixed format** (`parser.py`):
+   optional exactly-6-char `[0-9 ]{6}` prefix allowed. See parser.md.
+6. **P-B6 — Tier-2 full-filename index key was last-directory-wins**
+   (`preprocess/path_resolver.py`): now first-configured-directory-wins in
+   every tier. See [preprocessing.md](preprocessing.md).
+7. **S-1 — exported-but-unused `COPY_PATTERN` regex with exponential
+   backtracking removed** (`preprocess/copy_statement_parser.py`). See
+   preprocessing.md.
+8. **P-B5 — compiled lexer duplicated warnings across `tokenize()` calls**
+   (`_lexer_fast.pyx`, checked-in `_lexer_fast.c` regenerated with Cython
+   3.2.9 — note: this environment's Cython lacks the zstd string-compression
+   branch the previous `.c` carried). See [lexer.md](lexer.md).
+9. **P-D1 — `expand_copybooks()` ignored a caller-supplied `path_resolver`**
+   (`preprocess/copybook_expander.py`): honored now; this also makes
+   `parse_files_with_copybooks`' shared-resolver reuse real. See
+   preprocessing.md.
+10. **Dead code removed:** four space-containing (unreachable)
+    `CobolLexer.KEYWORDS` entries (`"KEY IS"`, `"WITH LOCK"`, `"NO REWIND"`,
+    `"NO ADVANCING"` — see lexer.md); a discarded
+    `context.get_cache_key(...)` call in
+    `copybook_expander._expand_source_recursive`; the never-used
+    `_file_content_cache` dict in `batch.parse_files_with_copybooks`
+    (docstring corrected — the real sharing is the reused `PathResolver`
+    plus the module-level LRU file cache).
+
+## 2026-08-12 (Test-infrastructure audit fixes: structural marker enforcement, placeholder skips implemented, assert-free tests strengthened)
+
+Three test-suite audit findings fixed; no `cobolparser/` source changes.
+
+1. **Markers enforced per directory (T-M1).** `-m contract` selected only
+   66 of the 386 tests in `tests/contracts/` (2 of 21 files carried the
+   marker), `-m io` only 69 of the 183 in the four io/io_statements
+   directories, and 3 of 29 `tests/integration/` files lacked
+   `integration`. Added six per-directory `conftest.py` files
+   (`tests/contracts/`, `tests/integration/`, `tests/unit/io_statements/`,
+   `tests/integration/io_statements/`, `tests/integration/io/`,
+   `tests/contracts/io_statements/`) whose
+   `pytest_collection_modifyitems` hook adds the directory's marker to
+   every collected item under it, so new files cannot drift out of `-m`
+   selection. After: `-m contract` 386 (== directory total), `-m io` 183
+   (== the four directories' total), `-m integration` 1686 (all 1647
+   in-directory + 39 explicitly-marked tests elsewhere). Existing in-file
+   `pytestmark` lines were kept as harmless duplicates. See
+   [tests.md](tests.md)'s new "Per-directory marker enforcement" section.
+
+2. **12 "Implementation pending - Phase 6/7" skips implemented (T-M2).**
+   The phases shipped long ago. All 12 permanently-skipped placeholders in
+   `tests/unit/test_copybook_expansion.py`,
+   `tests/integration/test_copybook_expansion_integration.py`, and
+   `tests/contracts/test_copybook_expansion_contracts.py` now carry real
+   assertions against what the expander exposes today: COPY REPLACING
+   (parse + whole-text-word substitution), `parse_cobol_with_expansion`
+   signature/ParseResult/end-to-end AST content, error tracing
+   (`CopybookNotFoundError` names the member and search paths), nested
+   attribution via `included_copybooks` real paths in inclusion order,
+   line-number placement of expanded content, `CopyStatement.
+   source_location` accuracy, and the `source_location_map` contract
+   (dict when `preserve_source_locations=True`, None otherwise, key
+   omitted from `to_dict()` when disabled). Note: the expander's
+   line-by-line `source_location_map` is exposed but never *populated*
+   (the tracking branch in `copybook_expander.py` is a documented no-op
+   `pass`), so the tests pin the exposed contract, not per-line accuracy.
+
+3. **Assert-free/tautological tests strengthened (T-M3).** All print-only
+   test bodies and all 16 tautological `assert isinstance(result.success,
+   bool)` checks across `tests/unit/test_comprehensive_real_world.py`,
+   `tests/unit/test_parser_capabilities.py`, and
+   `tests/unit/test_basic_real_world_parsing.py` replaced with real
+   assertions -- every sampled pattern parses cleanly today, so each test
+   now asserts `result.success` (with errors in the failure message) plus
+   `result.ast is not None`, and where cheap, AST content (program name,
+   division presence, data-item names, CALL statement count). The pure
+   print "status report" test became a real capability sweep asserting
+   the five historically-doubtful categories all parse.
+
+## 2026-08-12 (Analysis/generators audit: 12 verified findings across const_fold, boundary_inventory, domains, flowchart, crud_matrix, io_sequence, value_tracker, program_layout, scanner)
+
+Twelve audit findings fixed in `cobolparser/analysis/` and
+`cobolparser/generators/`; regression tests in
+`tests/regression/test_audit_2026_08_12_analysis.py` (one class per finding)
+plus `tests/unit/test_flowchart_generator.py::TestExternalCallEndToEnd`.
+
+1. **A-A1 `const_fold.py`:** the fold walk never poisoned statements nested
+   in conditional handler bodies (`AT END`/`INVALID KEY`/`ON SIZE ERROR`/
+   `ON OVERFLOW`/`ON EXCEPTION`/`AT EOP` and NOT variants) -- `MOVE 'N' TO
+   WS-EOF. READ F AT END MOVE 'Y' TO WS-EOF. DISPLAY WS-EOF.` emitted
+   `field_equals WS-EOF="N"` even when AT END fires. `_walk_one` now poisons
+   every field any handler body could write, AFTER the statement's own fold
+   (so a handler writing the statement's own target wins), via the new
+   `_HANDLER_BODY_ATTRS` tuple.
+2. **A-A2 `generators/flowchart.py`:** external-call nodes read
+   `ext.get("target")` but `EdgeCollector.process_call` emits `"program"`,
+   so EXT_ nodes never rendered from real analyzer reports; also
+   `edge.target` is uppercased while `call_info["program"]` keeps original
+   case, so ids disagreed for lowercase CALL literals. New module-level
+   `_external_call_target()` reads `"program"` (with `"target"` kept as a
+   hand-built-dict fallback) and uppercases, used by both generators.
+3. **A-A3 `crud_matrix.py`:** `_collect_open_modes` used `stmt.open_mode`
+   (first mode group) for every file; now reads
+   `IOOpenStatement.file_modes` per file, falling back to `open_mode`.
+   `OPEN INPUT IN-FILE OUTPUT OUT-FILE` records INPUT/OUTPUT respectively.
+4. **A-A4 `const_fold.py`:** `_ordered_paragraphs` appended section-owned
+   paragraphs before top-level ones, inverting source order for mixed
+   programs and emptying PERFORM THRU ranges spanning both. Now interleaves
+   by `location.line`, mirroring `program_flow/scanner.py` /
+   `dead_code.py`'s already-fixed collection. (The analysis.md claim that
+   it "mirrors scanner.py (sections before top-level paragraphs)" was
+   wrong on both counts and is corrected.)
+5. **A-A5 `boundary_inventory.py` / `constraints.py`:** both
+   `_NESTED_STATEMENT_ATTRS` tuples omitted `on_size_error`,
+   `not_on_size_error`, `not_on_overflow`, `not_at_eop_clause` -- a
+   `CALL 'ERRLOG'` inside `ON SIZE ERROR` produced no boundary. All four
+   added to both.
+6. **A-A6 `domains.py`:** `NumericDomain.pick()` used a raw float midpoint
+   with float-equality exclusion checks; `PIC 9` with `ne "4"` picked 4.5,
+   which RENDERED (rounded) back to the excluded "4". Candidates are now
+   enumerated on the field's decimal grid (integer units of `10**-d`),
+   exclusions quantized before comparison, and `solve()` re-verifies the
+   RENDERED witness against the domain as a defensive backstop.
+7. **A-A7 `boundary_inventory.py`:** `_classify_file_op` never set
+   `status_field` for OPEN/CLOSE, so `scenarios.py`'s "OPEN -> FILE STATUS
+   35" error family could never fire. Both now resolve it via
+   `index.file_facts(...)`, same as READ/DELETE/START/UNLOCK.
+8. **A-B1 `io_sequence.py`:** ANY `StopStatement` was treated as program
+   termination (clearing open-file state); only `STOP RUN` is
+   (`stop_type == "RUN"`), matching `dead_code.py`/`scanner.py`'s
+   `_is_terminator`. `OPEN, STOP 'literal', READ, CLOSE` is now clean.
+9. **A-B2 `boundary_inventory.py`:** SQL/CICS/DLI keys were computed
+   against previously *assigned* (already-shortened) same-category keys --
+   order-dependent, and the first site could keep a key that is a prefix
+   of a sibling's text (`SELECT A FROM T` / `SELECT B FROM T` yielded
+   `SELECT` + `SELECT B`). Now two-pass: `analyze()` pre-collects every
+   site's FULL normalized text per category (`_collect_exec_texts`), and
+   each site's `_unique_prefix` compares against all OTHER sites' full
+   texts (`_other_texts`) -- order-independent, prefix-unique keys
+   (`SELECT A` / `SELECT B`). Serialized bundle keys can change for
+   affected programs; the per-(program, seed) byte-identity contract holds.
+10. **A-B3 `value_tracker.py`:** `_extract_literal_value` echoed any
+    identifier-shaped string, so `MOVE WS-INPUT-PROG TO WS-TARGET`
+    (untracked source) recorded the NAME "WS-INPUT-PROG" as a possible
+    CALL value. `_track_move_statements` now gates recording on the new
+    `_is_definite_literal` (quoted / numeric / figurative only); an
+    untracked identifier source instead marks the target's value set
+    incomplete (`_incomplete_variables`, propagated through var-to-var
+    MOVEs) and `_populate_dynamic_calls` stamps
+    `possible_values_incomplete=True` metadata on the CALL node.
+11. **A-B4 `generators/data/program_layout.py`:** duplicate level-88
+    condition names overwrote last-one-wins with no `ambiguities` entry.
+    `_condition_index` now keeps every parent; a lookup that maps to more
+    than one distinct parent field returns `None` and records the
+    ambiguity, matching `resolve()`/`record_named()` semantics.
+12. **A-C1 `program_flow/scanner.py`:** `scan_statements`' empty-section
+    branch set `self._current_procedure` and did nothing else --
+    `CobolSection` cannot carry statements of its own, so the branch was
+    an unreachable-effect no-op; deleted.
+
+Also fixed two pre-existing analysis.md errors while updating it:
+`LinkageChecker` uses `.check(ast)` (not `.analyze`), and `IOViolationKind`'s
+real names are `READ_BEFORE_OPEN`/`WRITE_BEFORE_OPEN`/`CLOSE_NOT_OPEN`.
+
 ## 2026-08-11 (PR #135 Copilot review: fall-through termination checks were last-statement-only / has_stop_run-etc. were nesting-blind)
 
 Copilot's automated review on PR #135 (the fall-through fix below) caught

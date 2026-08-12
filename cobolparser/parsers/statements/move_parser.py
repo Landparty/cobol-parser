@@ -220,4 +220,34 @@ class MoveStatementParser(IStatementParser):
 
             token_stream.consume()
 
-        return "".join(source_parts) if source_parts else ""
+        return _join_source_parts(source_parts)
+
+
+def _join_source_parts(parts: list[str]) -> str:
+    """Join collected source tokens back into readable COBOL text.
+
+    A bare ``"".join`` corrupted every multi-word source (``MOVE WS-A OF
+    WS-GRP`` became ``WS-AOFWS-GRP``; ``FUNCTION UPPER-CASE(WS-X)`` became
+    ``FUNCTIONUPPER-CASE(WS-X)``), while a bare ``" ".join`` would space out
+    subscripts. Words are space-separated; parens/commas follow the
+    subscript-aware convention ``_consume_arithmetic_target`` established:
+    no space before ``(``, none after ``(`` or before ``)``/``,``, so
+    ``TABLE (1, 2)`` renders as ``TABLE(1, 2)``. Single-token sources are
+    returned unchanged.
+    """
+    out = ""
+    for part in parts:
+        if not part:
+            continue
+        if (
+            not out
+            or part in ("(", ")", ",")
+            or out.endswith("(")
+            # Leading unary sign of a signed literal (MOVE -5 TO ...): the
+            # lexer emits the sign and the digits as two tokens.
+            or out in ("-", "+")
+        ):
+            out += part
+        else:
+            out += " " + part
+    return out

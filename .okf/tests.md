@@ -8,6 +8,16 @@ timestamp: 2026-08-11T00:00:00Z
 
 # Overview
 
+2026-08-12: Test-infrastructure audit — `contract`/`integration`/`io`
+markers are now applied structurally by per-directory `conftest.py`
+collection hooks (see "Per-directory marker enforcement" below); the 12
+"Implementation pending - Phase 6/7" placeholder skips in the copybook
+expansion unit/integration/contract files were replaced with real tests
+(the phases shipped long ago); and the assert-free/tautological tests in
+`test_comprehensive_real_world.py`, `test_parser_capabilities.py`, and
+`test_basic_real_world_parsing.py` now assert `result.success` and AST
+content. See [log.md](log.md).
+
 2026-08-11: +1 in `test_dead_code.py`
 (`test_terminator_earlier_in_paragraph_still_cuts_off_fall_through`) and +2
 in `test_program_flow.py`
@@ -217,6 +227,27 @@ python -m pytest -m "contract"       # API contract tests only
 python -m pytest -m "io"             # IO statement tests only
 ```
 
+## Per-directory marker enforcement (2026-08-12)
+
+The `contract`, `integration`, and `io` markers are applied **structurally**
+by per-directory `conftest.py` files (a `pytest_collection_modifyitems` hook
+that adds the marker to every item collected under that directory), so new
+test files can never drift out of `-m` selection:
+
+| conftest.py location | Marker applied |
+|----------------------|----------------|
+| `tests/contracts/` | `contract` |
+| `tests/integration/` | `integration` |
+| `tests/unit/io_statements/` | `io` |
+| `tests/integration/io_statements/` | `io` (plus `integration` from parent) |
+| `tests/integration/io/` | `io` (plus `integration` from parent) |
+| `tests/contracts/io_statements/` | `io` (plus `contract` from parent) |
+
+In-file `pytestmark = pytest.mark.<x>` lines still exist in many files;
+they are harmless duplicates and are no longer required. A file *outside*
+these directories can still opt in with an explicit `pytestmark` (e.g. the
+`integration` marker is carried by a few files elsewhere).
+
 # Shared Fixtures (`tests/conftest.py`)
 
 | Fixture | Returns |
@@ -275,7 +306,7 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
 2. **typecheck** — `mypy cobolparser/` (Python 3.13)
 3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (install + Cython extension build only, no tests)
 
-The full `pytest tests/ -v` suite (~5,969 tests) is **not** run automatically —
+The full `pytest tests/ -v` suite (~8,075 tests) is **not** run automatically —
 too slow for every push/PR. It's wired as a `test` job gated to
 `if: github.event_name == 'workflow_dispatch'`, so it only runs when manually
 triggered from the Actions tab. Run the full suite locally during development

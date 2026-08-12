@@ -3,7 +3,7 @@
 Python library for parsing IBM Enterprise COBOL source into an AST. Supports dependency extraction, dead code detection, program flow analysis, and CRUD matrices. 99.1% parse success on the NIST COBOL-85 corpus.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-5800%2B%20passing-green.svg)](#commands)
+[![Tests](https://img.shields.io/badge/tests-8000%2B%20passing-green.svg)](#commands)
 [![Coverage](https://img.shields.io/badge/coverage-81%25%2B%20enforced-green.svg)](#commands)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 

@@ -187,10 +187,16 @@ class IOSequenceAnalyzer:
             self._check_open(node.file_name or "", "DELETE", loc)
         elif isinstance(node, IOStartStatement):
             self._check_open(node.file_name or "", "START", loc)
-        elif isinstance(node, (StopStatement, GobackStatement)):
+        elif isinstance(node, GobackStatement) or (
+            isinstance(node, StopStatement) and node.stop_type == "RUN"
+        ):
             # Treat as end-of-program for leak detection (violations added later
             # by analyze() for remaining open files, but we clear here so
-            # subsequent statements don't also trigger them)
+            # subsequent statements don't also trigger them). Only STOP RUN
+            # terminates the program -- STOP 'literal' merely pauses pending
+            # operator action and execution then continues, so it must not
+            # reset the open-file state (same distinction dead_code.py's and
+            # program_flow/scanner.py's _is_terminator draw).
             for file_name in sorted(self._open_files):
                 self._violations.append(
                     IOSequenceViolation(

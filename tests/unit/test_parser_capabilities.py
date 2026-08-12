@@ -70,13 +70,10 @@ STOP RUN."""
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            if not result.success:
-                print(f"Failed to parse {description} ({pic_clause}): {result.errors}")
-            else:
-                print(f"Successfully parsed {description} ({pic_clause})")
-
-            # For now, just verify it doesn't crash
-            assert isinstance(result.success, bool)
+            assert (
+                result.success
+            ), f"Failed to parse {description} ({pic_clause}): {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_level_number_variations(self):
         """Test different level number patterns."""
@@ -101,10 +98,10 @@ STOP RUN."""
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            if not result.success:
-                print(f"Failed to parse {description} (level {level}): {result.errors}")
-            else:
-                print(f"Successfully parsed {description} (level {level})")
+            assert (
+                result.success
+            ), f"Failed to parse {description} (level {level}): {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_data_division_sections(self):
         """Test parsing different DATA DIVISION sections."""
@@ -129,10 +126,8 @@ STOP RUN."""
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            if not result.success:
-                print(f"Failed to parse {description}: {result.errors}")
-            else:
-                print(f"Successfully parsed {description}")
+            assert result.success, f"Failed to parse {description}: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_usage_clauses(self):
         """Test parsing USAGE clauses."""
@@ -158,10 +153,10 @@ STOP RUN."""
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            if not result.success:
-                print(f"Failed to parse {description} usage: {result.errors}")
-            else:
-                print(f"Successfully parsed {description} usage")
+            assert (
+                result.success
+            ), f"Failed to parse {description} usage: {result.errors[:3]}"
+            assert result.ast is not None
 
     def test_value_clauses(self):
         """Test parsing VALUE clauses with different literal types."""
@@ -188,17 +183,17 @@ STOP RUN."""
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            if not result.success:
-                print(f"Failed to parse {description} value: {result.errors}")
-            else:
-                print(f"Successfully parsed {description} value")
+            assert (
+                result.success
+            ), f"Failed to parse {description} value: {result.errors[:3]}"
+            assert result.ast is not None
 
 
 class TestProblematicPatterns:
-    """Test patterns that are failing and need implementation."""
+    """Test patterns that were historically problematic; all now parse."""
 
     def test_environment_division_parsing(self):
-        """Test ENVIRONMENT DIVISION parsing issues."""
+        """Test ENVIRONMENT DIVISION parsing."""
         cobol_source = """IDENTIFICATION DIVISION.
 PROGRAM-ID. ENV-TEST.
 
@@ -219,11 +214,11 @@ STOP RUN."""
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        if not result.success:
-            print(f"ENVIRONMENT DIVISION parsing issues: {result.errors}")
-            # This might be expected - document what needs to be implemented
-
-        assert isinstance(result.success, bool)
+        assert (
+            result.success
+        ), f"ENVIRONMENT DIVISION failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert result.ast.has_division("ENVIRONMENT")
 
     def test_redefines_clause_parsing(self):
         """Test REDEFINES clause parsing."""
@@ -240,10 +235,13 @@ STOP RUN."""
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        if not result.success:
-            print(f"REDEFINES parsing issues: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"REDEFINES failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert "WS-NUM" in item_names, "REDEFINES data item missing from AST"
 
     def test_occurs_clause_parsing(self):
         """Test OCCURS clause parsing."""
@@ -260,10 +258,13 @@ STOP RUN."""
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        if not result.success:
-            print(f"OCCURS parsing issues: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"OCCURS failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert "WS-ITEM" in item_names, "OCCURS data item missing from AST"
 
     def test_procedure_division_statements(self):
         """Test PROCEDURE DIVISION statement parsing."""
@@ -293,10 +294,8 @@ STOP RUN."""
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            if not result.success:
-                print(f"Failed to parse {description}: {result.errors}")
-            else:
-                print(f"Successfully parsed {description}")
+            assert result.success, f"Failed to parse {description}: {result.errors[:3]}"
+            assert result.ast is not None
 
 
 class TestNistProgramPatterns:
@@ -324,15 +323,9 @@ class TestNistProgramPatterns:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        if not result.success:
-            print(
-                f"NIST format parsing issues: {result.errors[:10]}"
-            )  # Show first 10 errors
-
-        # Document what's causing issues
-        print(f"NIST program parsing success: {result.success}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"NIST format failed to parse: {result.errors[:10]}"
+        assert result.ast is not None
+        assert result.ast.program_name == "IC101A"
 
     def test_simplified_nist_structure(self):
         """Test a simplified version of NIST program structure."""
@@ -354,9 +347,8 @@ STOP RUN."""
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        if not result.success:
-            print(f"Simplified NIST parsing issues: {result.errors}")
-        else:
-            print("Simplified NIST structure parsed successfully!")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"Simplified NIST failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert result.ast.program_name == "IC101A"
+        # The CALL statement must survive into the AST.
+        assert len(result.ast.find_all_by_type("CallStatement")) == 1

@@ -32,7 +32,10 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
-.claude/
+# Local Claude Code state stays ignored, but the shared project
+# settings (hooks) are checked in.
+.claude/*
+!.claude/settings.json
 
 # Installer logs
 pip-log.txt
@@ -158,7 +161,6 @@ baselines
 
 *.zip
 .serena/project.yml
-.claude/settings.local.json
 .claude/settings.local.json
 
 # Runtime-generated log files

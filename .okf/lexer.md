@@ -126,6 +126,14 @@ unrecognised characters or malformed string literals.
 Cython subclass) also collects a `self.warnings: list[str]`, reset at the
 top of each `tokenize()` call, exposed via:
 
+> Until 2026-08-12 (audit finding P-B5) the reset was pure-Python-only:
+> `_lexer_fast.pyx`'s `tokenize()` reset only `self.tokens`/`self.errors`,
+> so repeated `tokenize()` calls on one compiled lexer *duplicated* every
+> warning. Fixed by adding `self.warnings = []` to the `.pyx` (checked-in
+> `_lexer_fast.c` regenerated). Pinned by
+> `tests/regression/test_audit_2026_08_12_core.py::TestPB5LexerWarningsReset`,
+> which exercises both paths.
+
 ```python
 lexer = CobolLexer(text, free_form=True)
 tokens = lexer.tokenize()
@@ -232,6 +240,15 @@ two-word SELECT clauses these words are named after (`FILE STATUS IS`,
 `RECORD DELIMITER IS`, `SHARING WITH READ ONLY`) are unaffected -- verified
 by an end-to-end SELECT-clause test. Pinned by
 `tests/regression/test_dead_keyword_removal.py`.
+
+**Addendum (2026-08-12):** four more unreachable entries removed — the
+space-containing keys `"KEY IS"`, `"WITH LOCK"`, `"NO REWIND"`, and
+`"NO ADVANCING"`. `KEYWORDS` is only ever consulted with a *single* word
+(`read_word_from_text`/`read_identifier` build one word at a time), so a key
+containing a space could never match anything. The single-word aliases
+(`"REWIND"`, `"ADVANCING"`, ...) remain; the parsers recognize the two-word
+phrases word by word. A comment at the removal site explains why, so the
+entries don't get re-added for "completeness".
 
 # Free-form `*>` inline comments now stripped (2026-08-07)
 

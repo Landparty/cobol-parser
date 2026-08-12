@@ -76,8 +76,12 @@ class TokenStream(ITokenStream):
         if token is None:
             raise UnexpectedEndOfInput(f"Expected '{value}'")
 
-        if token.value and token.value.upper() != value.upper():
-            raise TokenMismatch(value, token.value)
+        # An empty-valued token (e.g. EOF, whose value is "") must mismatch
+        # any non-empty expected value -- the old `token.value and ...` guard
+        # made expect(".") at EOF silently consume the EOF token instead of
+        # raising TokenMismatch.
+        if (token.value or "").upper() != value.upper():
+            raise TokenMismatch(value, token.value or "")
 
         return self.consume()
 

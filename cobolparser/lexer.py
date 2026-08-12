@@ -576,16 +576,18 @@ class _CobolLexerPure:
         "ACCEPT": TokenType.ACCEPT,
         # IO Clause Keywords (additional for IBM Enterprise COBOL)
         "INVALID": TokenType.INVALID,
-        "KEY IS": TokenType.KEY_IS,
+        # NOTE: multi-word entries ("KEY IS", "WITH LOCK", "NO REWIND",
+        # "NO ADVANCING") are deliberately NOT mapped. KEYWORDS is only ever
+        # consulted with a single word (read_word_from_text/read_identifier
+        # build one word at a time), so a key containing a space can never
+        # match -- such entries are unreachable dead weight; the parsers
+        # recognize these phrases word by word.
         "END-OF-PAGE": TokenType.END_OF_PAGE,
         "EOP": TokenType.END_OF_PAGE,
-        "WITH LOCK": TokenType.WITH_LOCK,
-        "NO REWIND": TokenType.NO_REWIND,
         "REWIND": TokenType.NO_REWIND,
         "REEL": TokenType.REEL,
         "UNIT": TokenType.UNIT,
         "ADVANCING": TokenType.ADVANCING,
-        "NO ADVANCING": TokenType.NO_ADVANCING,
         # NOTE: "END-OF-FILE" and "EOF" are deliberately NOT mapped. Neither
         # is a COBOL reserved word -- end-of-file testing is done via a
         # READ statement's AT END clause plus a programmer-defined

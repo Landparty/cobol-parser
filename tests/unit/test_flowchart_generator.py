@@ -132,7 +132,16 @@ def _call_report() -> ProgramFlowReport:
         edges=edges,
         entry_points=["CALL-PARA"],
         exit_points=["CALL-PARA"],
-        external_calls=[{"target": "EXTPGM", "location": _loc().to_dict()}],
+        # Real EdgeCollector.process_call shape: the called program is under
+        # "program" (original case), not "target".
+        external_calls=[
+            {
+                "program": "EXTPGM",
+                "is_dynamic": False,
+                "called_from": "CALL-PARA",
+                "location": _loc().to_dict(),
+            }
+        ],
     )
 
 
@@ -834,7 +843,7 @@ class TestDotFlowchartGenerator:
 
     def test_perform_until_condition_label(self) -> None:
         out = self._gen(_loop_report())
-        assert 'label="PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"' in out
+        assert "label=\"PERFORM UNTIL WS-EOF-SW = 'Y' (loop)\"" in out
 
     # -- external calls --------------------------------------------------
 
@@ -1271,4 +1280,72 @@ class TestPerformUntilEndToEnd:
 
     def test_dot_renders_perform_until_condition_label(self) -> None:
         out = DotFlowchartGenerator().generate(self._report())
-        assert 'label="PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"' in out
+        assert "label=\"PERFORM UNTIL WS-EOF-SW = 'Y' (loop)\"" in out
+
+
+class TestExternalCallEndToEnd:
+    """Audit 2026-08-12 A-A2: external-call nodes must render from a REAL
+    ProgramFlowAnalyzer report (whose external_calls entries use the
+    "program" key, per EdgeCollector.process_call), not just from hand-built
+    dicts using the legacy "target" key -- and the EXT_ node id must agree
+    with the uppercased FlowEdge.target even when the CALL literal is
+    lowercase in the source."""
+
+    def _report(self) -> ProgramFlowReport:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'subpgm1'.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        return ProgramFlowAnalyzer().analyze(result.ast)
+
+    def test_analyzer_report_uses_program_key(self) -> None:
+        report = self._report()
+        assert report.external_calls
+        assert report.external_calls[0]["program"] == "subpgm1"
+        assert "target" not in report.external_calls[0]
+
+    def test_mermaid_renders_styled_ext_node_from_real_report(self) -> None:
+        out = MermaidFlowchartGenerator().generate(
+            self._report(), FlowchartOptions(show_external_calls=True)
+        )
+        assert '    EXT_SUBPGM1(["SUBPGM1"])' in out
+        assert "    class EXT_SUBPGM1 external" in out
+        # The CALL edge points at the same node id the declaration used.
+        assert "EXT_SUBPGM1" in [
+            line.split()[-1] for line in out.splitlines() if "-->" in line
+        ]
+
+    def test_dot_renders_styled_ext_node_from_real_report(self) -> None:
+        out = DotFlowchartGenerator().generate(
+            self._report(), FlowchartOptions(show_external_calls=True)
+        )
+        assert 'EXT_SUBPGM1 [label="SUBPGM1", shape=ellipse' in out
+        assert "MAIN_LOGIC -> EXT_SUBPGM1" in out
+
+    def test_legacy_hand_built_target_key_still_renders(self) -> None:
+        report = ProgramFlowReport(
+            program_name="LEGACY",
+            nodes=[_para("MAIN", entry=True, stmt_count=1)],
+            edges=[
+                FlowEdge(
+                    source="MAIN",
+                    target="OLDPGM",
+                    edge_type=FlowEdgeType.CALL,
+                    location=_loc(),
+                )
+            ],
+            entry_points=["MAIN"],
+            exit_points=["MAIN"],
+            external_calls=[{"target": "OLDPGM", "location": _loc().to_dict()}],
+        )
+        mermaid = MermaidFlowchartGenerator().generate(report)
+        dot = DotFlowchartGenerator().generate(report)
+        assert 'EXT_OLDPGM(["OLDPGM"])' in mermaid
+        assert "class EXT_OLDPGM external" in mermaid
+        assert 'EXT_OLDPGM [label="OLDPGM"' in dot

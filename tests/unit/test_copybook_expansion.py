@@ -293,11 +293,57 @@ class TestSourceLocationTracking:
 
     def test_source_location_tracking(self):
         """Test line numbers incremented correctly (T077)."""
-        pytest.skip("Implementation pending - Phase 6")
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+
+        # COPY EMPLOYEE sits on (1-based) line 5; EMPLOYEE.cpy contributes
+        # five data-item lines in its place.
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LINE-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY EMPLOYEE.
+       PROCEDURE DIVISION.
+           STOP RUN."""
+
+        result = expand_copybooks(source, [str(samples_dir)])
+        lines = result.expanded_source.splitlines()
+
+        # Lines before the COPY keep their original line numbers.
+        assert "IDENTIFICATION DIVISION" in lines[0]
+        assert "WORKING-STORAGE SECTION" in lines[3]
+        # The copybook's first line lands exactly where the COPY was.
+        assert "01 EMPLOYEE-RECORD" in lines[4]
+        # Lines after the COPY are shifted down by the inserted content:
+        # the expansion grew the source, and PROCEDURE DIVISION now sits
+        # below the last copybook line instead of at its original line 6.
+        proc_idx = next(i for i, ln in enumerate(lines) if "PROCEDURE DIVISION" in ln)
+        last_copy_idx = next(
+            i for i, ln in enumerate(lines) if "EMPLOYEE-DEPARTMENT" in ln
+        )
+        assert last_copy_idx == 8  # 5 copybook lines starting at index 4
+        assert proc_idx > last_copy_idx
+        assert len(lines) > len(source.splitlines())
+        # Reported statistics agree with the expanded line count.
+        assert result.statistics.total_lines == len(lines)
 
     def test_nested_file_references(self):
         """Test nested content attributes to deepest source file (T078)."""
-        pytest.skip("Implementation pending - Phase 6")
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+
+        # LEVEL1 -> LEVEL2 -> LEVEL3: content from the deepest file must be
+        # present, and every contributing file must be attributed by its
+        # real on-disk path in inclusion order.
+        source = "       COPY LEVEL1."
+        result = expand_copybooks(source, [str(samples_dir)])
+
+        assert "LEVEL3-FIELD" in result.expanded_source
+        assert result.max_depth_reached == 3
+
+        included = [Path(p) for p in result.included_copybooks]
+        assert [p.name for p in included] == ["LEVEL1.cpy", "LEVEL2.cpy", "LEVEL3.cpy"]
+        for path in included:
+            assert path.is_absolute()
+            assert path.is_file()
 
 
 class TestCopyReplacing:
@@ -305,4 +351,20 @@ class TestCopyReplacing:
 
     def test_replacing_parsing(self):
         """Test parsing of COPY REPLACING clause (T087)."""
-        pytest.skip("Implementation pending - Phase 7")
+        from cobolparser.preprocess.copy_statement_parser import CopyStatementLexer
+
+        lexer = CopyStatementLexer(
+            "       COPY EMPLOYEE REPLACING ==OLD-NAME== BY ==NEW-NAME==.",
+            source_file="repl.cbl",
+        )
+        statements = lexer.tokenize_copy_statements()
+
+        assert len(statements) == 1
+        stmt = statements[0]
+        assert stmt.member_name == "EMPLOYEE"
+        assert len(stmt.replacing_clauses) == 1
+        clause = stmt.replacing_clauses[0]
+        assert clause.find_text == "OLD-NAME"
+        assert clause.replace_text == "NEW-NAME"
+        # The statement records where in the source the COPY was found.
+        assert stmt.source_location == ("repl.cbl", 1, 8)

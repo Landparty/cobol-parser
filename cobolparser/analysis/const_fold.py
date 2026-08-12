@@ -24,6 +24,10 @@ than guessing:
   every field either arm could write is poisoned the same way -- this is a
   conjunctive walk, not per-scenario branch evaluation (Phase 5's
   `ScenarioPlanner` already owns targeting a specific arm).
+* A conditional handler body (``AT END``/``INVALID KEY``/``ON SIZE ERROR``/
+  ``ON OVERFLOW``/``ON EXCEPTION``/``AT EOP`` and their ``NOT`` variants) may
+  or may not fire, so every field it could write is poisoned the same way an
+  ``IF`` arm is.
 * ``DIVIDE`` is poisoned unconditionally: the AST does not record whether
   ``BY`` or ``INTO`` was used, and the two invert dividend/divisor order, so
   there is no way to compute the correct value from the node alone. A ``/``
@@ -101,6 +105,29 @@ _NESTED_STATEMENT_ATTRS = (
     "then_statements",
     "else_statements",
     "inline_statements",
+    "at_end_clause",
+    "not_at_end_clause",
+    "invalid_key_clause",
+    "not_invalid_key_clause",
+    "at_eop_clause",
+    "not_at_eop_clause",
+    "on_size_error",
+    "not_on_size_error",
+    "on_overflow",
+    "not_on_overflow",
+    "on_exception",
+    "not_on_exception",
+)
+
+#: The conditional-handler subset of the above: statement-level clause bodies
+#: that may or may not fire at runtime (AT END, INVALID KEY, ON SIZE ERROR,
+#: ON OVERFLOW, ON EXCEPTION, AT EOP -- and their NOT variants). The main
+#: fold walk cannot evaluate whether such a handler fires, so every field a
+#: handler body could write must be poisoned, exactly like an IF arm --
+#: "exact by construction, or absent". Excludes the structural attributes
+#: (`then_statements`/`else_statements`/`inline_statements`), which the walk
+#: already dispatches on per statement type.
+_HANDLER_BODY_ATTRS = (
     "at_end_clause",
     "not_at_end_clause",
     "invalid_key_clause",
@@ -228,25 +255,35 @@ def _ordered_paragraphs(
 ) -> tuple[list[str], dict[str, CobolParagraph]]:
     """Flat, source-ordered paragraph name list + name -> node map, for
     resolving `PERFORM ... THRU ...` ranges. Mirrors
-    `program_flow/scanner.py`'s own traversal (sections before top-level
-    paragraphs) for consistency with the rest of the codebase."""
+    `program_flow/scanner.py`'s / `dead_code.py`'s traversal: sections and
+    top-level paragraphs are interleaved by source line, because COBOL allows
+    paragraphs before the first SECTION header -- appending all section-owned
+    paragraphs first would invert source order for such mixed programs,
+    making every `PERFORM ... THRU ...` range resolve against a scrambled
+    list (empty bodies, stale folded values)."""
     procedure = ast.get_division("PROCEDURE")
     if procedure is None:
         return [], {}
     ordered: list[str] = []
     by_name: dict[str, CobolParagraph] = {}
-    for section in procedure._sections.values():
-        for para in section.paragraphs:
-            if para.paragraph_name:
-                name = para.paragraph_name.upper()
-                ordered.append(name)
-                by_name[name] = para
-    for para in procedure.paragraphs:
+
+    def register(para: CobolParagraph) -> None:
         if para.paragraph_name:
             name = para.paragraph_name.upper()
             if name not in by_name:
                 ordered.append(name)
                 by_name[name] = para
+
+    top_level_items: list[Any] = sorted(
+        [*procedure._sections.values(), *procedure.paragraphs],
+        key=lambda item: item.location.line,
+    )
+    for item in top_level_items:
+        if isinstance(item, CobolParagraph):
+            register(item)
+        else:
+            for para in item.paragraphs:
+                register(para)
     return ordered, by_name
 
 
@@ -306,6 +343,29 @@ def _walk_one(
     """Fold one statement in place; return a (paragraph-name-or-None, body)
     pair when `_walk_statements` must push a new frame to keep walking (a
     SIMPLE PERFORM, inline or to another paragraph), else None."""
+    result = _dispatch_one(stmt, index, by_name, ordered_names, state)
+    # Conditional handler bodies (AT END / INVALID KEY / ON SIZE ERROR /
+    # ON OVERFLOW / ON EXCEPTION / AT EOP, and their NOT variants) may or may
+    # not fire -- this walk cannot tell -- so every field they could write is
+    # poisoned, the same treatment an IF arm gets. Runs *after* the dispatch
+    # above so a handler write always trumps the statement's own folded
+    # result (`ADD 1 TO X ON SIZE ERROR MOVE 0 TO X` must leave X unknown).
+    for attr in _HANDLER_BODY_ATTRS:
+        body = getattr(stmt, attr, None)
+        if isinstance(body, list) and body:
+            _poison_written_names(body, index, state.env, by_name, ordered_names)
+    return result
+
+
+def _dispatch_one(
+    stmt: Any,
+    index: ProgramLayoutIndex,
+    by_name: dict[str, CobolParagraph],
+    ordered_names: list[str],
+    state: _WalkState,
+) -> tuple[str | None, list[Any]] | None:
+    """Per-statement-type fold dispatch for `_walk_one` (which additionally
+    poisons conditional handler bodies around whatever happens here)."""
     if isinstance(stmt, MoveStatement):
         _fold_move(stmt, index, state.env)
     elif isinstance(stmt, AddStatement):

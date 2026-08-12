@@ -62,9 +62,9 @@ flow_dict = flow_report.to_dict()    # must return dict
 
 ### 5. Exception type
 ```python
-from cobolparser import CobolParseError
+from cobolparser import ParseError
 ```
-Adapter catches `CobolParseError` specifically and maps it to a structured error result.
+Adapter catches `ParseError` (the canonical base exception, defined in `cobolparser/_errors.py`) and maps it to a structured error result. `CobolParseError` is exported as a backward-compatible alias of `ParseError` for adapters written against the older name — both resolve to the same class.
 
 ---
 

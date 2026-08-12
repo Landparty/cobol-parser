@@ -51,6 +51,12 @@ class ParseResult:
     def has_warnings(self) -> bool:
 ```
 
+`statistics` is an independent **snapshot** (2026-08-12, audit P-B3):
+`_create_result` hands each `ParseResult` `self.statistics.copy()`
+(`ParseStatistics.copy()`, `plugins/core.py`) rather than the parser's live
+object, which the next `parse()` call `reset()`s in place — previously
+reusing one `CobolParser` clobbered earlier results' statistics.
+
 `warnings` is the "recognized but degraded" channel (2026-07-07): the parser
 populates it when it skips an unsupported verb (no registered statement
 parser — e.g. `INVOKE`, `EXHIBIT`; see
@@ -405,7 +411,13 @@ selectors and reporting "WHEN clause must have at least one selector" on
 valid programs. `_parse_selectors` re-quotes whitespace-only
 `STRING_LITERAL` tokens (selector value `"'  '"`); non-blank literals keep
 their unquoted representation. Pinned by
-`tests/regression/test_evaluate_space_literal_when.py`.
+`tests/regression/test_evaluate_space_literal_when.py`. Commit `17fa400`
+(2026-08-11) briefly regressed this by routing every selector token through
+`condition_token_text()` (which quotes *all* string literals); restored
+2026-08-12 (audit T-H1). EVALUATE *subjects* (`_parse_subjects`) do keep the
+`condition_token_text()` quoting — `EVALUATE 'X'` renders its subject as
+`'X'` — since no contract pins the unquoted form there; the flow scanner's
+`WHEN <value>` edge labels follow the selector (unquoted) shape.
 
 **EVALUATE WHEN-clause child registration (`evaluate_parser.py`):** the
 `WhenClause` nodes (both regular `WHEN` branches and the `WHEN OTHER`
@@ -1862,6 +1874,35 @@ branches, mirroring the existing `SIGN` clause's `[IS]` handling. Pinned by
 `TestExternalGlobalClauses.test_leading_is_does_not_warn` and
 `TestSynchronizedJustifiedIsClause` in
 `tests/regression/test_parser_completeness.py`.
+
+# Core audit fixes (2026-08-12)
+
+All pinned by `tests/regression/test_audit_2026_08_12_core.py`.
+
+* **MOVE source join (P-B1, `move_parser.py`):** `_parse_source` collected
+  its tokens correctly but rendered them with `"".join`, corrupting every
+  multi-token source: `MOVE WS-A OF WS-GRP ...` produced
+  `source == "WS-AOFWS-GRP"`, `MOVE FUNCTION UPPER-CASE(WS-X) ...` produced
+  `"FUNCTIONUPPER-CASE(WS-X)"`. Now rendered via `_join_source_parts`:
+  words space-separated, no space around parens/before commas
+  (`TBL(1, 2)` — the same convention `_consume_arithmetic_target`'s
+  callers rely on), and a leading unary `-`/`+` stays attached to its
+  digits (`MOVE -5` → `"-5"`, relied on by `analysis/const_fold.py`).
+  Single-token sources are byte-identical to before.
+* **`TokenStream.expect()` matched anything at EOF (P-B2,
+  `core/token_stream.py`):** the guard was `if token.value and
+  token.value.upper() != value.upper()`, so an empty-valued token (EOF's
+  value is `""`) short-circuited the comparison and *matched any expected
+  value* — `expect(".")` at end of stream silently consumed the EOF token
+  instead of raising `TokenMismatch`. An empty-valued token now mismatches
+  every non-empty expected value.
+* **`_ID_DIV_RE` vs sequence numbers (P-B4, `parser.py`):**
+  `_skip_to_identification_division`'s regex (`^\s*(IDENTIFICATION|ID)\s+
+  (DIVISION|DIV)`) never matched a sequence-numbered fixed-format header
+  (`000100 IDENTIFICATION DIVISION.`), so junk lines before such a program
+  were never skipped. The regex now allows an optional exactly-6-character
+  digits/spaces prefix (`^(?:[0-9 ]{6})?\s*...`) — exactly-6 (not "up to 6")
+  so arbitrary text that merely starts with digits still doesn't match.
 
 # See Also
 

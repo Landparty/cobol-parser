@@ -61,9 +61,10 @@ class ASTNodeFactory:
 
     Example:
         factory = ASTNodeFactory()
-        node = factory.create_display_statement(
-            location=SourceLocation(10, 1),
-            items=["greeting", "name"]
+        node = factory.create(
+            DisplayStatement,
+            SourceLocation(10, 1),
+            items=["greeting", "name"],
         )
     """
 

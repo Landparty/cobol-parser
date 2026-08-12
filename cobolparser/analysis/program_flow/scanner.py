@@ -144,18 +144,15 @@ class ProcedureScanner:
 
     def scan_statements(self, proc_division: CobolDivision) -> None:
         """Scan all statements to build edges and compute node metrics."""
-        # Scan sections
+        # Scan sections. A bare SECTION header owns no statements of its own
+        # (CobolSection carries only paragraphs/data_items), so an empty
+        # section has nothing to scan.
         for section in proc_division._sections.values():
-            sec_name = section.section_name
             for para in section.paragraphs:
                 pname = para.paragraph_name
                 if pname and is_valid_procedure_name(pname):
                     self._current_procedure = pname.upper()
                     self._scan_paragraph_statements(para)
-
-            # If section has no paragraphs, scan section-level
-            if not section.paragraphs and sec_name:
-                self._current_procedure = sec_name.upper()
 
         # Scan top-level paragraphs
         for para in proc_division.paragraphs:

@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-11T12:00:00Z
+timestamp: 2026-08-12T12:00:00Z
 ---
 
 # Overview
@@ -347,11 +347,22 @@ ACCEPT, DISPLAY, UNLOCK) in execution order with file name and paragraph context
 ```python
 report: IOSequenceReport = IOSequenceAnalyzer().analyze(ast)
 # report.violations: list[IOSequenceViolation]
-# IOViolationKind: READ_WITHOUT_OPEN, WRITE_WITHOUT_OPEN, CLOSE_WITHOUT_OPEN, …
+# IOViolationKind: READ_BEFORE_OPEN, WRITE_BEFORE_OPEN, REWRITE_BEFORE_OPEN,
+#                  DELETE_BEFORE_OPEN, START_BEFORE_OPEN, DOUBLE_OPEN,
+#                  CLOSE_NOT_OPEN, DOUBLE_CLOSE, FILE_LEFT_OPEN
 ```
 
 Validates that IO operations follow legal COBOL sequencing rules (file must be
 opened before read/write, etc.).
+
+**Only `STOP RUN` is program termination (2026-08-12 fix, audit A-B1):**
+the end-of-program handling (flag still-open files, clear open-file state)
+used to fire for ANY `StopStatement`, but `STOP 'literal'` merely pauses for
+operator action and execution continues -- so `OPEN, STOP 'literal', READ,
+CLOSE` produced spurious FILE_LEFT_OPEN + READ_BEFORE_OPEN violations. Now
+gated on `stop_type == "RUN"`, the same distinction `dead_code.py`'s and
+`program_flow/scanner.py`'s `_is_terminator` already draw. Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestB1StopLiteralIsNotTermination`.
 
 ## MoveTypeChecker
 
@@ -385,7 +396,7 @@ wants a real all-clear must now check `not violations and unresolved_count
 ## LinkageChecker
 
 ```python
-report: LinkageReport = LinkageChecker().analyze(ast)
+report: LinkageReport = LinkageChecker().check(ast)   # note: .check(), not .analyze()
 # report.violations: list[LinkageViolation]
 # LinkageViolationKind: MISSING_USING_CLAUSE, UNDEFINED_LINKAGE_ITEM, …
 ```
@@ -415,6 +426,14 @@ matrix.to_json()
 Generates a CRUD matrix of file operations (Create/Read/Update/Delete) per
 paragraph.
 
+**Open modes are per-file (2026-08-12 fix, audit A-A3):** `OPEN INPUT
+IN-FILE OUTPUT OUT-FILE` used to record INPUT (the statement's *first* mode
+group, `stmt.open_mode`) for every file in the statement. `_collect_open_modes`
+now reads `IOOpenStatement.file_modes` (the authoritative per-file dict the
+parser populates per mode group), falling back to `open_mode` only for a
+file with no per-file entry. Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestA3OpenModesPerFile`.
+
 ## DynamicCallAnalyzer
 
 ```python
@@ -424,6 +443,20 @@ DynamicCallAnalyzer().analyze(ast)   # mutates ast, annotating dynamic CALL targ
 
 Tracks possible values for variables used in dynamic CALL statements via MOVE
 and VALUE clause analysis.
+
+**An untracked identifier-shaped MOVE source is not a value (2026-08-12 fix,
+audit A-B3).** `MOVE WS-INPUT-PROG TO WS-TARGET` (where `WS-INPUT-PROG` has
+no VALUE clause and no tracked MOVE) used to record the literal string
+`"WS-INPUT-PROG"` -- a data-name, not a value -- into `WS-TARGET`'s possible
+values (the parser keeps quotes on `MoveStatement.source`, so an unquoted
+hyphenated token is always a reference). Value recording is now gated on
+`_is_definite_literal` (quoted string / numeric literal / figurative
+constant only); an untracked identifier source instead marks the target's
+value set INCOMPLETE, propagated through variable-to-variable MOVEs, and any
+dynamic CALL on such a variable gets
+`get_metadata("possible_values_incomplete") == True` so a consumer knows
+`possible_values` (even when non-empty) is not exhaustive. Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestB3UntrackedIdentifierSourceIsNotAValue`.
 
 ## IMSSegmentAnalyzer
 
@@ -486,8 +519,12 @@ target is a group item, which `flatten_record` never emits a `FieldSpec`
 for -- this gap is exactly why `record_named()` exists; found via direct
 reproduction against `tests/samples/file_operations.cbl`, not theorized).
 OPEN/CLOSE emit one `Boundary` per file named (COBOL allows `OPEN INPUT A
-OUTPUT B` in one statement). DELETE/START/UNLOCK are `STATUS_ONLY` (no data
-payload); READ is `IN`; WRITE/REWRITE are `OUT`.
+OUTPUT B` in one statement) and -- since 2026-08-12 (audit A-A7) -- carry
+`status_field` resolved via `index.file_facts(...)` the same way
+READ/DELETE/START/UNLOCK always did; before that, `ScenarioPlanner`'s
+"OPEN -> FILE STATUS 35" error family could never fire because the OPEN
+boundary it gates on never had a `status_field`. DELETE/START/UNLOCK are
+`STATUS_ONLY` (no data payload); READ is `IN`; WRITE/REWRITE are `OUT`.
 
 **CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
 `CallArg.provenance` records which:
@@ -556,6 +593,16 @@ keys are uppercased/normalized. SQL/CICS/DLI keys are the shortest
 word-prefix of the normalized command text no other same-category site in
 the program shares (`_unique_prefix`, re-derived from mockymock's
 `generator._unique_prefix`), falling back to the full text on a genuine tie.
+**Two-pass since 2026-08-12 (audit A-B2):** `analyze()` first collects every
+SQL/CICS/DLI site's FULL normalized text per category
+(`_collect_exec_texts`), and each site's prefix is checked against all
+OTHER same-category sites' full texts (`_other_texts`). The old single-pass
+compared against previously *assigned* (already-shortened) keys, which made
+keys walk-order-dependent and let the first site keep a key that was a
+prefix of a later sibling's text (`SELECT A FROM T` / `SELECT B FROM T`
+yielded `SELECT` + `SELECT B`; now `SELECT A` / `SELECT B`, in either
+source order). Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestB2ExecKeysAreOrderIndependentPrefixes`.
 
 **Nested-body walk**: the same discipline `IOLogger` and mockymock's
 `mock_surface` both converged on independently -- a fixed set of
@@ -565,7 +612,14 @@ the program shares (`_unique_prefix`, re-derived from mockymock's
 with a `.statements` attribute, while `SearchStatement.when_clauses` is a
 **list of dicts** with a `"statements"` key -- a different shape, and a
 documented trap (mixing the two loop variables up trips mypy immediately,
-which is how this was caught).
+which is how this was caught). **2026-08-12 (audit A-A5):** both this
+module's and `constraints.py`'s `_NESTED_STATEMENT_ATTRS` were missing
+`on_size_error`, `not_on_size_error`, `not_on_overflow`, and
+`not_at_eop_clause` (all real model attributes `program_flow/scanner.py`
+and `const_fold.py` already walked) -- a `CALL 'ERRLOG'` nested in an
+arithmetic `ON SIZE ERROR` produced no boundary at all. All four added to
+both tuples; pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestA5SizeErrorBodiesAreWalked`.
 
 ## ConstraintExtractor
 
@@ -698,6 +752,18 @@ compound SEARCH WHEN.
 **Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
 stated as a parent-plan limitation, not attempted.
 
+**Numeric witnesses are picked on the field's decimal grid (2026-08-12 fix,
+audit A-A6).** `domains.NumericDomain.pick()` used to take the raw float
+midpoint of the interval and check exclusions by float equality -- `PIC 9`
+with `ne "4"` picked 4.5 (not excluded as a float), which
+`ValueFactory.render()` then ROUNDED back to the excluded "4". Candidates
+are now enumerated in integer units of `10**-decimals` (starting from the
+grid midpoint, scanning up, wrapping to the low bound), exclusions are
+quantized to the same grid before comparison, and `solve()` re-verifies the
+RENDERED witness against the numeric domain as a defensive backstop
+(`_rendered_numeric_ok`). Still fully deterministic. Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestA6WitnessOnTheDecimalGrid`.
+
 **Bug found writing this module's tests, fixed at the root (not worked
 around): `>=`/`<=`/`<>` were silently mis-parsed everywhere**, not just
 here. The lexer emits these as two separate single-character tokens (`>`
@@ -752,6 +818,16 @@ internal env) rather than approximating:
   `ScenarioPlanner` already owns targeting one specific arm elsewhere), so
   every field either arm could write is poisoned the same way as a loop
   body -- this is a conjunctive walk, not per-scenario branch evaluation.
+* A conditional handler body (`AT END`/`NOT AT END`/`INVALID KEY`/`ON SIZE
+  ERROR`/`ON OVERFLOW`/`ON EXCEPTION`/`AT EOP` and their `NOT` variants,
+  the `_HANDLER_BODY_ATTRS` tuple) may or may not fire, so every field it
+  could write is poisoned exactly like an `IF` arm -- and the poison runs
+  AFTER the statement's own fold, so a handler writing the statement's own
+  target (`ADD 1 TO X ON SIZE ERROR MOVE 0 TO X`) still leaves X unknown
+  (2026-08-12 fix, audit A-A1: before this, `MOVE 'N' TO WS-EOF. READ F AT
+  END MOVE 'Y' TO WS-EOF. DISPLAY WS-EOF.` emitted `field_equals
+  WS-EOF="N"` even in a scenario where AT END fires). Pinned by
+  `tests/regression/test_audit_2026_08_12_analysis.py::TestA1HandlerBodiesPoisonTheFold`.
 * `DIVIDE` is poisoned unconditionally: `DivideStatement` does not record
   whether `BY` or `INTO` was used (`_parse_binary_arithmetic` shares one
   code path for both, see [parser.md](parser.md)), and the two invert
@@ -852,6 +928,20 @@ speculatively. Pinned by
 `tests/unit/analysis/test_const_fold.py::TestPerformChaining::test_long_straight_line_perform_chain_does_not_blow_the_stack`
 and `::test_long_perform_chain_inside_a_loop_body_does_not_blow_the_stack`
 (2000-paragraph chains, both directions).
+
+**`_ordered_paragraphs` interleaves sections and top-level paragraphs by
+source line (2026-08-12 fix, audit A-A4).** It used to append all
+section-owned paragraphs first, then top-level ones -- inverting source
+order for a program mixing the two, so a `PERFORM ... THRU ...` range
+spanning a top-level paragraph and a section-owned one resolved to
+`end_idx < start_idx` and came back as an EMPTY body (nothing inside the
+range folded or poisoned; stale values survived). Now interleaved by
+`location.line`, the same fix `program_flow/scanner.py` and `dead_code.py`
+already carry for their own procedure collection (the old docstring claimed
+it "mirrored scanner.py's sections-before-top-level traversal" -- wrong on
+both counts, scanner.py had already been fixed to interleave). Behavior for
+programs without sections is unchanged. Pinned by
+`tests/regression/test_audit_2026_08_12_analysis.py::TestA4OrderedParagraphsInterleaveSections`.
 
 ## Module File Map
 
