@@ -865,6 +865,60 @@ class TestProgramFlowFallThrough:
         ]
         assert len(ft_edges) == 0
 
+    def test_terminator_earlier_in_paragraph_still_suppresses_fall_through(
+        self,
+    ) -> None:
+        """A hard terminator that isn't the paragraph's LAST top-level
+        statement still suppresses fall-through -- once reached it always
+        fires, so anything physically written after it in the same
+        paragraph is itself unreachable and doesn't change whether the
+        paragraph as a whole falls through."""
+        prog = _make_program(
+            [
+                ("PARA-A", [_stop_run(), _continue()]),
+                ("PARA-B", [_continue()]),
+            ]
+        )
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 0
+
+    def test_conditional_stop_run_inside_if_does_not_suppress_fall_through(
+        self,
+    ) -> None:
+        """A STOP RUN nested inside an IF (with no ELSE) only fires when the
+        condition is true -- the paragraph still falls through to the next
+        one whenever it isn't. Unlike node.has_stop_run (set whenever the
+        recursive statement walk encounters STOP RUN anywhere, including
+        nested), fall-through suppression must only consider the
+        paragraph's own top-level statements.
+        """
+        prog = _make_program(
+            [
+                ("PARA-A", [_if_stmt([_stop_run()])]),
+                ("PARA-B", [_continue()]),
+            ]
+        )
+        analyzer = ProgramFlowAnalyzer()
+        report = analyzer.analyze(prog)
+
+        ft_edges = [
+            e
+            for e in report.edges
+            if e.edge_type == FlowEdgeType.FALL_THROUGH
+            and e.source == "PARA-A"
+            and e.target == "PARA-B"
+        ]
+        assert len(ft_edges) == 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: Report serialization
@@ -6109,7 +6163,7 @@ class TestScannerDeepNestingRegression:
             exit_points=set(),
             branch_nodes=branch_nodes,
             collector=collector,
-            unconditional_gotos=set(),
+            terminating_paragraphs=set(),
         )
         scanner.collect_procedures(proc_div)
         scanner.scan_statements(proc_div)

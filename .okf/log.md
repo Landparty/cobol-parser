@@ -1,5 +1,46 @@
 # OKF Update Log
 
+## 2026-08-11 (PR #135 Copilot review: fall-through termination checks were last-statement-only / has_stop_run-etc. were nesting-blind)
+
+Copilot's automated review on PR #135 (the fall-through fix below) caught
+two related precision bugs in the same area, both fixed in the same pass:
+
+1. Both `DeadCodeAnalyzer._terminates` and `ProcedureScanner`'s new GO TO
+   tracking checked only `para.statements[-1]` -- a hard terminator or
+   unconditional GO TO earlier in a paragraph (not its last statement)
+   still unconditionally fires when reached, so trailing statements after
+   it are themselves unreachable and don't change whether the paragraph
+   falls through. Fixed by extracting a static `_is_terminator(stmt)`
+   helper in each module and checking `any(...)` over every top-level
+   statement instead of indexing `[-1]`.
+
+2. `ProgramFlowAnalyzer.build_fall_through_edges` suppressed fall-through
+   via `node.has_stop_run`/`has_goback`/`has_exit_program`, but those flags
+   are set by the recursive statement walk whenever it encounters the
+   statement *anywhere*, including nested inside an IF/EVALUATE arm --
+   exactly the same "conditional treated as unconditional" bug the GO TO
+   half of this PR fixes, just for the other three terminator kinds.
+   Replaced with the same unified `_is_terminator`-over-top-level-
+   statements check (renamed the threaded set from
+   `_unconditional_gotos`/`unconditional_gotos` to
+   `_terminating_paragraphs`/`terminating_paragraphs` throughout
+   `scanner.py`/`graph.py`/`analyzer.py` since it now covers all four
+   terminator kinds, not just GO TO). The `has_stop_run`/`has_goback`/
+   `has_exit_program` fields themselves are untouched -- other consumers
+   (flowchart-generator terminal nodes, `is_exit_point`) intentionally
+   want the broader "anywhere in the paragraph" semantics.
+
+Full writeups (including the one known, deliberately-unaddressed boundary
+case -- a terminator inside an unconditional bare `PERFORM ... END-PERFORM`
+block) in [analysis.md](analysis.md)'s `DeadCodeAnalyzer` and
+`ProgramFlowAnalyzer` sections. New tests:
+`test_terminator_earlier_in_paragraph_still_cuts_off_fall_through`
+(`test_dead_code.py`), and
+`test_terminator_earlier_in_paragraph_still_suppresses_fall_through` +
+`test_conditional_stop_run_inside_if_does_not_suppress_fall_through`
+(`test_program_flow.py`). Full suite green (5211 unit tests; `ruff`,
+`black --check`, `mypy` clean on touched files).
+
 ## 2026-08-11 (Dead Code & Program Flow audit: remaining 2 of 7 findings -- fall-through concept and conditional GO TO)
 
 Closes out the "Dead Code & Program Flow" analyzer audit (the artifact this

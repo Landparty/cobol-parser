@@ -364,24 +364,39 @@ class DeadCodeAnalyzer:
         """Check whether procedure *name* unconditionally transfers control
         away, so that execution never falls through to the next procedure.
 
-        Only the procedure's own last top-level statement counts -- a hard
-        terminator or unconditional GO TO earlier in the paragraph (or
-        nested inside an IF/EVALUATE arm) does not prevent fall-through
-        whenever that branch isn't the one actually taken.
+        Any top-level statement counts, not just the last: once an
+        unconditional terminator is reached, it always fires, so whatever is
+        physically written after it in the same paragraph is itself
+        unreachable and irrelevant to whether the paragraph falls through --
+        checking only ``para.statements[-1]`` would miss a mid-paragraph
+        terminator followed by dead trailing statements. Nested statements
+        (inside an IF/EVALUATE arm) are deliberately excluded: a terminator
+        there only fires conditionally, so it must not suppress
+        fall-through whenever that branch isn't the one actually taken.
         """
         para = self._paragraph_nodes.get(name)
-        if para is None or not para.statements:
+        if para is None:
             # Sections (and paragraphs with no statements) have no control
             # flow of their own -- execution always falls into whatever
             # comes next.
             return False
-        last = para.statements[-1]
-        if isinstance(last, (StopStatement, GobackStatement)):
-            return isinstance(last, GobackStatement) or last.stop_type == "RUN"
-        if isinstance(last, ExitStatement):
-            return last.exit_type == "PROGRAM"
-        if isinstance(last, GoStatement):
-            return bool(last.target_paragraph) and not last.depending_on_variable
+        return any(self._is_terminator(stmt) for stmt in para.statements)
+
+    @staticmethod
+    def _is_terminator(stmt: Any) -> bool:
+        """Check whether *stmt* unconditionally transfers control away when
+        reached: STOP RUN (not STOP 'literal', which merely halts pending
+        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
+        GO TO.
+        """
+        if isinstance(stmt, GobackStatement):
+            return True
+        if isinstance(stmt, StopStatement):
+            return stmt.stop_type == "RUN"
+        if isinstance(stmt, ExitStatement):
+            return stmt.exit_type == "PROGRAM"
+        if isinstance(stmt, GoStatement):
+            return bool(stmt.target_paragraph) and not stmt.depending_on_variable
         return False
 
     @staticmethod

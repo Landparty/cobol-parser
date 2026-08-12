@@ -1222,6 +1222,24 @@ class TestFallThroughReferences:
         dead = [i.name for i in report.dead_items]
         assert "NEVER-REACHED" in dead
 
+    def test_terminator_earlier_in_paragraph_still_cuts_off_fall_through(
+        self,
+    ) -> None:
+        """A hard terminator that isn't the paragraph's LAST top-level
+        statement still cuts off fall-through -- once reached it always
+        fires, so anything physically written after it in the same
+        paragraph is itself unreachable and doesn't change whether the
+        paragraph as a whole falls through."""
+        prog = _make_program(
+            [
+                ("MAIN-PARA", [_stop_run(), _continue()]),
+                ("NEVER-REACHED", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "NEVER-REACHED" in dead
+
     def test_stop_literal_does_not_cut_off_fall_through(self) -> None:
         """STOP 'literal' (as opposed to STOP RUN) merely halts pending
         operator action -- execution continues at the next statement, so it

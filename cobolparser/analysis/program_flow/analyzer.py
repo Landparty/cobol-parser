@@ -77,7 +77,7 @@ class ProgramFlowAnalyzer:
         self._cycle_details: list[dict[str, Any]] = []
         self._unreachable_nodes: list[str] = []
         self._branch_nodes: list[BranchNode] = []
-        self._unconditional_gotos: set[str] = set()
+        self._terminating_paragraphs: set[str] = set()
 
     def analyze(self, ast: CobolProgram) -> ProgramFlowReport:
         """Analyze a COBOL program and build its control flow graph.
@@ -99,7 +99,7 @@ class ProgramFlowAnalyzer:
         self._cycle_details = []
         self._unreachable_nodes = []
         self._branch_nodes = []
-        self._unconditional_gotos = set()
+        self._terminating_paragraphs = set()
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -119,7 +119,7 @@ class ProgramFlowAnalyzer:
             exit_points=self._exit_points,
             branch_nodes=self._branch_nodes,
             collector=collector,
-            unconditional_gotos=self._unconditional_gotos,
+            terminating_paragraphs=self._terminating_paragraphs,
         )
 
         # Pass 1: Collect all procedures as nodes
@@ -136,7 +136,7 @@ class ProgramFlowAnalyzer:
             self._nodes,
             self._edges,
             self._ordered_procedures,
-            self._unconditional_gotos,
+            self._terminating_paragraphs,
         )
 
         # Mark the first procedure as entry point before cycle/reachability analysis

@@ -71,7 +71,7 @@ class ProcedureScanner:
         exit_points: set[str],
         branch_nodes: list[BranchNode],
         collector: EdgeCollector,
-        unconditional_gotos: set[str],
+        terminating_paragraphs: set[str],
     ) -> None:
         self._nodes = nodes
         self._ordered_procedures = ordered_procedures
@@ -80,12 +80,14 @@ class ProcedureScanner:
         self._exit_points = exit_points
         self._branch_nodes = branch_nodes
         self._collector = collector
-        # Paragraphs whose own last top-level statement is a bare
-        # (non-DEPENDING) GO TO -- i.e. one that always transfers control,
-        # as opposed to a GO TO nested inside an IF/EVALUATE arm that only
-        # fires conditionally. Populated below; consumed by
+        # Paragraphs where at least one of the paragraph's own TOP-LEVEL
+        # statements unconditionally transfers control away (STOP RUN,
+        # GOBACK, EXIT PROGRAM, or a bare non-DEPENDING GO TO) -- i.e. one
+        # that always fires when reached, as opposed to the same kind of
+        # statement nested inside an IF/EVALUATE arm, which only fires
+        # conditionally. Populated below; consumed by
         # build_fall_through_edges() to decide fall-through suppression.
-        self._unconditional_gotos = unconditional_gotos
+        self._terminating_paragraphs = terminating_paragraphs
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
         self._branch_seq: int = 0
@@ -567,16 +569,37 @@ class ProcedureScanner:
         while work:
             work.pop()()
 
-        # A paragraph only unconditionally transfers control away (and thus
-        # never falls through to the next paragraph) when its OWN last
-        # top-level statement is a bare GO TO. A GO TO nested inside an
-        # IF/EVALUATE arm fires only when that branch is taken -- the
-        # paragraph still falls through whenever the condition doesn't hold.
-        if para.statements:
-            last_stmt = para.statements[-1]
-            if (
-                isinstance(last_stmt, GoStatement)
-                and last_stmt.target_paragraph
-                and not last_stmt.depending_on_variable
-            ):
-                self._unconditional_gotos.add(proc_name)
+        # A paragraph never falls through to the next one when any of its
+        # own TOP-LEVEL statements unconditionally transfers control away.
+        # Any position counts, not just the last: once such a statement is
+        # reached it always fires, so whatever is physically written after
+        # it in the same paragraph is itself unreachable and irrelevant to
+        # whether the paragraph as a whole falls through -- checking only
+        # para.statements[-1] would miss a mid-paragraph terminator followed
+        # by dead trailing statements. Only statements directly in
+        # para.statements qualify: one nested inside an IF/EVALUATE arm only
+        # fires conditionally and must not suppress fall-through whenever
+        # that branch isn't taken. (A terminator inside an unconditional
+        # bare PERFORM ... END-PERFORM block -- no UNTIL/TIMES -- is a rare
+        # construct not covered here, since inline PERFORM bodies are not
+        # top-level statements either.)
+        if any(self._is_terminator(stmt) for stmt in para.statements):
+            self._terminating_paragraphs.add(proc_name)
+
+    @staticmethod
+    def _is_terminator(stmt: Any) -> bool:
+        """Check whether *stmt* unconditionally transfers control away when
+        reached: STOP RUN (not STOP 'literal', which merely halts pending
+        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
+        GO TO. Mirrors DeadCodeAnalyzer._is_terminator, kept independent per
+        this package's existing collaborator architecture.
+        """
+        if isinstance(stmt, GobackStatement):
+            return True
+        if isinstance(stmt, StopStatement):
+            return stmt.stop_type == "RUN"
+        if isinstance(stmt, ExitStatement):
+            return stmt.exit_type == "PROGRAM"
+        if isinstance(stmt, GoStatement):
+            return bool(stmt.target_paragraph) and not stmt.depending_on_variable
+        return False

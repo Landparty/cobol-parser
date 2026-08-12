@@ -15,7 +15,7 @@ def build_fall_through_edges(
     nodes: dict[str, FlowNode],
     edges: list[FlowEdge],
     ordered_procedures: list[str],
-    unconditional_gotos: set[str],
+    terminating_paragraphs: set[str],
 ) -> None:
     """Build fall-through edges between sequential paragraphs.
 
@@ -31,19 +31,20 @@ def build_fall_through_edges(
         if not node:
             continue
 
-        # Skip if procedure ends with a hard terminator
-        if node.has_stop_run or node.has_goback or node.has_exit_program:
-            continue
-
-        # Skip if the paragraph's own last top-level statement is an
-        # unconditional (non-DEPENDING) GO TO -- see
-        # ProcedureScanner._scan_paragraph_statements, which populates
-        # unconditional_gotos. A GO TO nested inside an IF/EVALUATE arm does
-        # not qualify: the paragraph still falls through whenever that
-        # branch isn't taken, so membership requires the GO TO to be the
-        # paragraph's literal last statement, not merely present somewhere
-        # in it.
-        if current in unconditional_gotos:
+        # Skip if any of the paragraph's own TOP-LEVEL statements is an
+        # unconditional terminator (STOP RUN, GOBACK, EXIT PROGRAM, or a
+        # bare non-DEPENDING GO TO) -- see ProcedureScanner's
+        # _is_terminator, which populates terminating_paragraphs. Once such
+        # a statement is reached it always fires, so anything physically
+        # written after it in the same paragraph is itself unreachable and
+        # doesn't change whether the paragraph falls through -- checking
+        # only the last statement would miss a mid-paragraph terminator.
+        # Deliberately does NOT use node.has_stop_run/has_goback/
+        # has_exit_program: those are set whenever the recursive statement
+        # walk encounters one ANYWHERE, including nested inside an
+        # IF/EVALUATE arm where it only fires conditionally -- the same
+        # class of bug this function's GO TO handling fixes.
+        if current in terminating_paragraphs:
             continue
 
         edges.append(
