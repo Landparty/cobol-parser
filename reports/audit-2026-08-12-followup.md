@@ -1,5 +1,12 @@
 # cobolparser — Repository Audit, Follow-Up Pass (2026-08-12)
 
+> **Post-hoc status note (2026-08-12, later the same day):** every
+> High/Medium bug below is fixed at HEAD — commit `b495f26` ("fix: resolve
+> findings from the 2026-08-12 follow-up audit", merged via PR #139).
+> Re-verified by direct reproduction during the cross-repo bug review.
+> This report is preserved as written; read `reports/open-findings.md`
+> for what is actually still open.
+
 This is a second audit pass performed after `reports/audit-2026-08-12.md`'s
 findings were fixed and merged (PR #137, `047ab64..3809ac6`). That report is
 no longer current — every High/Medium bug it listed is fixed at HEAD

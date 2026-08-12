@@ -457,7 +457,7 @@ class TestMermaidFlowchartGenerator:
         round-node shape, not literal text. The "(loop)" suffix must be
         wrapped in quotes so it survives as plain label text."""
         out = self._gen(_loop_report())
-        assert '-->|"PERFORM UNTIL WS-EOF-SW = \'Y\' (loop)"|' in out
+        assert "-->|\"PERFORM UNTIL WS-EOF-SW = 'Y' (loop)\"|" in out
 
     # -- external calls --------------------------------------------------
 

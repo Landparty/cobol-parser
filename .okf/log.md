@@ -1,5 +1,38 @@
 # OKF Update Log
 
+## 2026-08-12 (Bug review: Decimal witness pipeline, DIVIDE mode + folding, `**` text, typed-literal/ref-mod fidelity)
+
+Cross-repo bug review (cobol-parser + mocky-mock, same session). Five
+fixes, all pinned by `tests/regression/test_bug_review_2026_08_12.py`:
+
+1. **Decimal end-to-end in the gen-fixtures numeric pipeline** (HIGH).
+   `domains.NumericDomain`'s bounds/exclusions, `_apply_numeric`'s literal
+   parsing, `_rendered_numeric_ok`, `scenarios._picture_ceiling`, and
+   `ValueFactory._format_number`/`_fit_domain_value` all used float64, so
+   a literal past ~16 significant digits was silently rounded:
+   `IF ACCT-ID = 123456789012345678` (PIC 9(18)) produced fixture rows of
+   `...680` while `ScenarioCoverage` reported the arm as targeted -- and
+   `_rendered_numeric_ok` re-checked in float, so the corruption passed
+   its own backstop. All Decimal now, `localcontext(prec=80)` where the
+   widest PICTUREs could outgrow the default 28-digit context.
+   [analysis.md](analysis.md), [generators.md](generators.md).
+2. **`DivideStatement.division_mode`** records BY vs INTO;
+   `const_fold._fold_divide` folds the unambiguous DIVIDE forms (exactness
+   verified by multiply-back at prec 80); REMAINDER targets now poisoned
+   by the arm/handler write scan too. [ast-models.md](ast-models.md),
+   [analysis.md](analysis.md).
+3. **COMPUTE `**` text**: the serialized `expression` string re-merges the
+   two lexed `*` tokens (the tree already did) -- was `2 * * 3`.
+4. **Typed-literal prefixes survive** in MOVE source / DISPLAY item text
+   via `Token.raw_value` (`X"41"` no longer collapses to `"41"`).
+5. **Ref-mod joins tight**: `_join_source_parts` renders `WS-X(2:3)`, not
+   `WS-X(2 : 3)`. [parser.md](parser.md).
+
+Also refreshed `reports/open-findings.md` / the follow-up audit header:
+every headline item of the 2026-08-12 follow-up audit was already fixed
+at HEAD (`b495f26`, PR #139) but both files still claimed "not yet
+fixed"; re-verified each by direct reproduction before rewording.
+
 ## 2026-08-11 (Mermaid flowchart edge labels broke on unquoted parens/brackets)
 
 A user's Program Flow webview (mocky-mock-vscode-extension) hit a Mermaid

@@ -212,9 +212,15 @@ class MoveStatementParser(IStatementParser):
             if paren_depth == 0 and token.type == TokenType.PERIOD:
                 break
 
-            # Get token value
+            # Get token value. A typed literal (X"41", Z"...", N"...")
+            # keeps its original prefixed text in raw_value -- re-quoting
+            # only the content would silently turn the one-byte hex literal
+            # X"41" into the two-character text literal "41".
             if token.type == TokenType.STRING_LITERAL:
-                source_parts.append(f'"{token.value}"')
+                if token.raw_value:
+                    source_parts.append(token.raw_value)
+                else:
+                    source_parts.append(f'"{token.value}"')
             elif token.value:
                 source_parts.append(token.value)
 
@@ -232,26 +238,29 @@ def _join_source_parts(parts: list[str]) -> str:
     subscripts. Words are space-separated; parens/commas follow the
     subscript-aware convention ``_consume_arithmetic_target`` established:
     no space before ``(``, none after ``(`` or before ``)``/``,``, so
-    ``TABLE (1, 2)`` renders as ``TABLE(1, 2)``. Single-token sources are
-    returned unchanged.
+    ``TABLE (1, 2)`` renders as ``TABLE(1, 2)``. A reference-modification
+    colon joins tight on both sides (``WS-X(2:3)``, never ``WS-X(2 : 3)``
+    -- the spaced form is not what the source said and breaks any consumer
+    that re-parses the text). Single-token sources are returned unchanged.
     """
     out = ""
     prev_part: str | None = None
     # Tracks whether `prev_part` was itself a leading unary sign (one that
     # starts a fresh operand: at the very start of the source, right after
-    # an opening paren, or right after a comma between subscripts) so the
-    # digit that follows it glues on with no space even when the sign
-    # itself got a space (e.g. after a comma: "WS-TAB(WS-I, -1)").
+    # an opening paren, right after a ref-mod colon, or right after a comma
+    # between subscripts) so the digit that follows it glues on with no
+    # space even when the sign itself got a space (e.g. after a comma:
+    # "WS-TAB(WS-I, -1)").
     prev_was_leading_sign = False
     for part in parts:
         if not part:
             continue
         is_sign = part in ("-", "+")
-        is_leading_sign = is_sign and prev_part in (None, "(", ",")
+        is_leading_sign = is_sign and prev_part in (None, "(", ",", ":")
         if (
             not out
-            or part in ("(", ")", ",")
-            or prev_part == "("
+            or part in ("(", ")", ",", ":")
+            or prev_part in ("(", ":")
             or prev_was_leading_sign
         ):
             out += part

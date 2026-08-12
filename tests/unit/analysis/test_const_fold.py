@@ -201,9 +201,11 @@ class TestArithmeticFolding:
         )
         assert fold.known == {"WS-B": "3", "WS-TOTAL": "15"}
 
-    def test_divide_is_always_poisoned(self):
-        # BY vs INTO is not recorded on the AST, and the two invert
-        # dividend/divisor order -- see the module docstring.
+    def test_divide_into_folds_exact_quotient(self):
+        # DivideStatement.division_mode now records BY vs INTO, so the
+        # unambiguous forms fold -- see _fold_divide and
+        # tests/regression/test_bug_review_2026_08_12.py for the poisoned
+        # cases (inexact quotient, ROUNDED, REMAINDER, divide-by-zero).
         fold = _fold(
             "       MAIN-PARA.\n"
             "           MOVE 10 TO WS-A.\n"
@@ -211,7 +213,7 @@ class TestArithmeticFolding:
             "           DIVIDE WS-B INTO WS-A.\n"
             "           DISPLAY WS-A.\n"
         )
-        assert fold.known == {}
+        assert fold.known == {"WS-A": "5"}
 
     def test_compute_arithmetic_expression(self):
         fold = _fold(

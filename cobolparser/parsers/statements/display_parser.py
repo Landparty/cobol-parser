@@ -169,10 +169,17 @@ class DisplayStatementParser(IStatementParser):
             ):
                 item_token = token_stream.consume()
 
-                # Format string literals
+                # Format string literals. A typed literal (X"41", Z"...")
+                # keeps its original prefixed text in raw_value -- re-quoting
+                # only the content would turn the one-byte hex literal X"41"
+                # into the two-character text literal "41".
                 item_value = item_token.value or ""
                 if token.type == TokenType.STRING_LITERAL:
-                    item_value = f'"{item_value}"'
+                    item_value = (
+                        item_token.raw_value
+                        if item_token.raw_value
+                        else f'"{item_value}"'
+                    )
 
                 # Subscripted operand, e.g. `SQLERRD(3)`: fold the
                 # parenthesized subscript into this item instead of

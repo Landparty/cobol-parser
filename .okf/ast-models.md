@@ -104,6 +104,11 @@ Serialization fidelity notes (2026-07-07):
   operands. `DivideStatement.remainder: str | None` — the `REMAINDER r`
   target (was entirely unimplemented). See [parser.md](parser.md)
   "Statement-Support Verification Sweep (2026-07-22/23)".
+  `DivideStatement.division_mode: str | None` (2026-08-12 bug review) —
+  `"BY"` or `"INTO"` as the source wrote it, emitted by `to_dict()`; the
+  two forms invert dividend/divisor order, so without this no consumer
+  could evaluate a DIVIDE from the AST (const_fold poisoned all of them —
+  it now folds the unambiguous forms, see [analysis.md](analysis.md)).
 * `UnstringStatement.tallying_variable: str | None` (2026-07-22) —
   `TALLYING IN counter`, documented but never implemented; `.delimiters`
   now collects every `OR`-joined delimiter (`DELIMITED BY d1 OR d2`),

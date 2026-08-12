@@ -1886,9 +1886,22 @@ All pinned by `tests/regression/test_audit_2026_08_12_core.py`.
   `"FUNCTIONUPPER-CASE(WS-X)"`. Now rendered via `_join_source_parts`:
   words space-separated, no space around parens/before commas
   (`TBL(1, 2)` — the same convention `_consume_arithmetic_target`'s
-  callers rely on), and a leading unary `-`/`+` stays attached to its
-  digits (`MOVE -5` → `"-5"`, relied on by `analysis/const_fold.py`).
-  Single-token sources are byte-identical to before.
+  callers rely on), a leading unary `-`/`+` stays attached to its
+  digits (`MOVE -5` → `"-5"`, relied on by `analysis/const_fold.py`),
+  and a reference-modification colon joins tight on both sides
+  (`WS-X(2:3)`, never `WS-X(2 : 3)` — 2026-08-12 bug review).
+  Single-token sources are byte-identical to before. Same review, two
+  more text-fidelity fixes: MOVE source and DISPLAY item collection
+  prefer `Token.raw_value` for STRING_LITERALs, so a typed literal keeps
+  its prefix (`X"41"` stays the one byte `X"41"`, no longer collapsed to
+  the two-character `"41"`); and COMPUTE's serialized `expression` string
+  re-merges `**`'s two lexed `*` tokens (the `expression_tree` already
+  did), so `2 ** 3` no longer reads `2 * * 3`. `DivideStatement` also
+  gained `division_mode` (`"BY"`/`"INTO"`), set where
+  `_parse_binary_arithmetic` consumes the separator and emitted by
+  `to_dict()` — see [ast-models.md](ast-models.md) and
+  [analysis.md](analysis.md)'s const-fold notes. All pinned by
+  `tests/regression/test_bug_review_2026_08_12.py`.
 * **`TokenStream.expect()` matched anything at EOF (P-B2,
   `core/token_stream.py`):** the guard was `if token.value and
   token.value.upper() != value.upper()`, so an empty-valued token (EOF's
