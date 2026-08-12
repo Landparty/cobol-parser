@@ -177,11 +177,63 @@ class TestSourceLocationIntegration:
 
     def test_error_tracing_with_source_locations(self):
         """Test error message references original copybook (T079)."""
-        pytest.skip("Implementation pending - Phase 6")
+        from cobolparser.preprocess import CopybookNotFoundError
+
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TRACE-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY EMPLOYEE.
+       COPY NO-SUCH-BOOK.
+       PROCEDURE DIVISION.
+           STOP RUN."""
+
+        with pytest.raises(CopybookNotFoundError) as exc_info:
+            expand_copybooks(source, [str(samples_dir)])
+
+        # The error must trace back to the offending copybook by name and
+        # tell the user where it looked.
+        error_msg = str(exc_info.value)
+        assert "NO-SUCH-BOOK" in error_msg
+        assert str(samples_dir) in error_msg
+        # The copybook that *does* resolve must not be blamed.
+        assert "EMPLOYEE" not in error_msg
 
     def test_source_location_map_serialization(self):
         """Test JSON export includes source location information (T080)."""
-        pytest.skip("Implementation pending - Phase 6")
+        import json
+
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SERIAL-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY EMPLOYEE.
+       PROCEDURE DIVISION.
+           STOP RUN."""
+
+        # With preservation enabled, to_dict() must carry the map (JSON keys
+        # are strings, values are {"file": ..., "line": ...} dicts).
+        enabled = expand_copybooks(
+            source, [str(samples_dir)], preserve_source_locations=True
+        )
+        assert enabled.source_location_map is not None
+        enabled_dict = enabled.to_dict()
+        assert "source_location_map" in enabled_dict
+        serialized = json.dumps(enabled_dict)  # must be JSON-serializable
+        round_tripped = json.loads(serialized)
+        for key, value in round_tripped["source_location_map"].items():
+            assert isinstance(key, str)
+            assert set(value.keys()) == {"file", "line"}
+
+        # With preservation disabled (the default), the map is None and the
+        # key is omitted from the serialized form entirely.
+        disabled = expand_copybooks(source, [str(samples_dir)])
+        assert disabled.source_location_map is None
+        assert "source_location_map" not in disabled.to_dict()
 
 
 class TestProcedureDivisionCopybooks:
@@ -647,8 +699,55 @@ class TestCopyReplacingIntegration:
 
     def test_replacing_text_substitution(self):
         """Test text replacement occurs after copybook insertion (T088)."""
-        pytest.skip("Implementation pending - Phase 7")
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REPL-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY EMPLOYEE REPLACING ==EMPLOYEE-RECORD== BY ==WORKER-RECORD==.
+       PROCEDURE DIVISION.
+           STOP RUN."""
+
+        result = expand_copybooks(source, [str(samples_dir)])
+
+        # The replacement applies to the inserted copybook text...
+        assert "WORKER-RECORD" in result.expanded_source
+        assert "EMPLOYEE-RECORD" not in result.expanded_source
+        # ...while non-matching text words in the copybook survive untouched
+        # (COBOL REPLACING matches whole text words, not substrings).
+        assert "EMPLOYEE-ID" in result.expanded_source
+        assert "EMPLOYEE-NAME" in result.expanded_source
+        # And the COPY statement itself is gone.
+        assert "COPY EMPLOYEE" not in result.expanded_source
+        assert "REPLACING" not in result.expanded_source
 
     def test_parse_cobol_with_expansion_end_to_end(self):
         """Test real COBOL with copybooks expands and parses (T093)."""
-        pytest.skip("Implementation pending - Phase 7")
+        samples_dir = Path(__file__).parent.parent / "samples" / "copybooks"
+
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. E2E-TEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY EMPLOYEE.
+       COPY CUSTOMER.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE ZEROS TO EMPLOYEE-ID.
+           DISPLAY EMPLOYEE-NAME.
+           STOP RUN."""
+
+        result = parse_cobol_with_expansion(source, "e2e_test.cbl", [str(samples_dir)])
+
+        assert result is not None
+        assert result.success, f"Parsing failed: {result.errors}"
+        assert result.ast is not None
+
+        # Data items from *both* expanded copybooks must be in the AST.
+        data_items = result.ast.find_all_by_type("CobolDataItem")
+        item_names = {getattr(item, "name", None) for item in data_items}
+        assert "EMPLOYEE-RECORD" in item_names
+        assert "EMPLOYEE-ID" in item_names
+        assert "CUSTOMER-RECORD" in item_names
+        assert "CUSTOMER-ID" in item_names
