@@ -316,6 +316,15 @@ filler is additionally capped at `_MAX_RANDOM_TEXT = 32` characters — a
 200 characters of noise, and a short value is still valid for the field.
 Semantic and declared values are not capped (they are already short).
 
+`_format_number` (and `_fit_domain_value`/`render()`'s parse) is Decimal
+throughout (2026-08-12 bug review): the old float64 internals silently
+rounded any exact value past ~16 significant digits, so a solver-picked
+`PIC 9(18)` witness rendered one-off (`...678` → `...680`) and the fixture
+could never take the branch it targeted. Randomly generated floats are
+unaffected (`Decimal(str(float))` round-trips); declared VALUEs, level-88
+literals, and solved witnesses now render digit-for-digit. Pinned by
+`tests/regression/test_bug_review_2026_08_12.py::TestWideNumericPrecision`.
+
 `_format_number`'s `allow_random_sign` guards a subtle trap: a signed field
 negates a freshly generated magnitude ~25 % of the time so negatives get
 exercised, but values the copybook *declared* (levels 1-2 above) must be

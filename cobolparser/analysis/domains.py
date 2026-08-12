@@ -13,10 +13,9 @@ generator's own value providers already guarantee.
 from __future__ import annotations
 
 import itertools
-import math
 import random
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 
 from ..generators.data.layout import FieldCategory, FieldSpec
 from ..generators.data.options import DataGeneratorOptions
@@ -60,38 +59,47 @@ class Witness:
 
 @dataclass
 class NumericDomain:
-    lo: float
-    hi: float
+    """Bounds/exclusions are ``Decimal`` throughout: a ``PIC 9(17)``/``9(18)``
+    literal exceeds float64's 53-bit mantissa, and a bound silently rounded
+    on the way in produced a witness that could never satisfy the original
+    constraint (``eq 123456789012345678`` used to render
+    ``123456789012345680``)."""
+
+    lo: Decimal
+    hi: Decimal
     decimals: int
-    excluded: set[float] = field(default_factory=set)
+    excluded: set[Decimal] = field(default_factory=set)
 
     def pick(self) -> str | None:
         """Deterministic witness on the field's own decimal grid.
 
         Every representable value of a ``PIC [S]9(m)[V9(d)]`` field is an
         integer multiple of ``10**-d``, so candidates are enumerated in
-        integer grid units (never a raw float midpoint, which for e.g.
-        ``PIC 9`` with ``ne 4`` used to pick 4.5, dodge the float-equality
+        integer grid units (never a raw midpoint, which for e.g.
+        ``PIC 9`` with ``ne 4`` used to pick 4.5, dodge the equality
         exclusion check, and then RENDER back to the excluded "4").
         Exclusions are compared after quantizing to the same grid; an
         exclusion not on the grid can never equal a grid candidate and is
-        ignored. The returned string is exact (rendered via Decimal), so the
-        PICTURE-rendering step downstream never rounds it.
+        ignored. All arithmetic is exact Decimal, so the returned string is
+        exact and the PICTURE-rendering step downstream never rounds it.
         """
         if self.lo > self.hi:
             return None
         scale = 10**self.decimals
-        # A tiny tolerance so float noise (0.1 + 0.01 = 0.11000000000000001)
-        # does not shift a bound off its intended grid cell.
-        lo_units = math.ceil(self.lo * scale - 1e-9)
-        hi_units = math.floor(self.hi * scale + 1e-9)
-        if lo_units > hi_units:
-            return None
-        excluded_units = set()
-        for value in self.excluded:
-            units = round(value * scale)
-            if abs(value * scale - units) < 1e-6:
-                excluded_units.add(units)
+        # Wide precision so bound*scale stays exact even for the largest
+        # PICTUREs (up to 31 integer + 31 decimal digits); the default
+        # 28-digit context would silently round the product.
+        with localcontext() as ctx:
+            ctx.prec = 80
+            lo_units = int((self.lo * scale).to_integral_value(rounding=ROUND_CEILING))
+            hi_units = int((self.hi * scale).to_integral_value(rounding=ROUND_FLOOR))
+            if lo_units > hi_units:
+                return None
+            excluded_units = set()
+            for value in self.excluded:
+                units = value * scale
+                if units == units.to_integral_value():
+                    excluded_units.add(int(units))
         mid_units = (lo_units + hi_units) // 2
         for units in itertools.chain(
             range(mid_units, hi_units + 1), range(lo_units, mid_units)
@@ -178,26 +186,28 @@ def solve(
 def _rendered_numeric_ok(rendered: str, domain: NumericDomain) -> bool:
     """True when the PICTURE-rendered witness still satisfies the domain."""
     try:
-        value = float(rendered)
-    except ValueError:
+        value = Decimal(rendered)
+    except InvalidOperation:
         return True  # non-numeric rendering: nothing checkable here
-    if any(abs(value - excluded) < 1e-9 for excluded in domain.excluded):
+    if value in domain.excluded:
         return False
-    return domain.lo - 1e-9 <= value <= domain.hi + 1e-9
+    return domain.lo <= value <= domain.hi
 
 
 def _initial_numeric_domain(spec: FieldSpec) -> NumericDomain:
     digits = spec.integer_digits
     decimals = spec.decimal_digits
     ceiling = (
-        float(10**digits - 1) if decimals == 0 else float(10**digits) - 10.0**-decimals
+        Decimal(10**digits - 1)
+        if decimals == 0
+        else Decimal(10**digits) - Decimal(1).scaleb(-decimals)
     )
-    lo = -ceiling if spec.is_signed else 0.0
+    lo = -ceiling if spec.is_signed else Decimal(0)
     return NumericDomain(lo=lo, hi=ceiling, decimals=decimals)
 
 
-def _epsilon(decimals: int) -> float:
-    return 10.0**-decimals if decimals > 0 else 1.0
+def _epsilon(decimals: int) -> Decimal:
+    return Decimal(1).scaleb(-decimals) if decimals > 0 else Decimal(1)
 
 
 def _apply(domain: Domain, c: FieldConstraint) -> bool:
@@ -234,10 +244,10 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
         return True  # class_numeric/class_alphabetic: no-op on a numeric domain in v1
 
     try:
-        value = float(c.values[0]) if c.values else None
-    except ValueError:
+        value = Decimal(c.values[0]) if c.values else None
+    except InvalidOperation:
         return True  # a non-numeric literal against a numeric field: ignore, don't fail solve()
-    if value is None:
+    if value is None or not value.is_finite():
         return True
 
     if c.op == "eq":
@@ -249,14 +259,20 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
     if c.op == "ne":
         domain.excluded.add(value)
         return domain.lo < domain.hi or domain.lo not in domain.excluded
+    # Same wide-precision reasoning as NumericDomain.pick(): a strict bound
+    # nudged by one grid epsilon must stay exact for the widest PICTUREs.
     if c.op == "gt":
-        domain.lo = max(domain.lo, value + _epsilon(domain.decimals))
+        with localcontext() as ctx:
+            ctx.prec = 80
+            domain.lo = max(domain.lo, value + _epsilon(domain.decimals))
         return domain.lo <= domain.hi
     if c.op == "ge":
         domain.lo = max(domain.lo, value)
         return domain.lo <= domain.hi
     if c.op == "lt":
-        domain.hi = min(domain.hi, value - _epsilon(domain.decimals))
+        with localcontext() as ctx:
+            ctx.prec = 80
+            domain.hi = min(domain.hi, value - _epsilon(domain.decimals))
         return domain.lo <= domain.hi
     if c.op == "le":
         domain.hi = min(domain.hi, value)

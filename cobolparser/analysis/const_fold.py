@@ -28,11 +28,12 @@ than guessing:
   ``ON OVERFLOW``/``ON EXCEPTION``/``AT EOP`` and their ``NOT`` variants) may
   or may not fire, so every field it could write is poisoned the same way an
   ``IF`` arm is.
-* ``DIVIDE`` is poisoned unconditionally: the AST does not record whether
-  ``BY`` or ``INTO`` was used, and the two invert dividend/divisor order, so
-  there is no way to compute the correct value from the node alone. A ``/``
-  inside a COMPUTE expression tree has no such ambiguity (both operands are
-  explicit) and folds normally.
+* ``DIVIDE`` folds only the forms whose semantics are unambiguous now that
+  ``DivideStatement.division_mode`` records BY vs INTO (the two invert
+  dividend/divisor order): mode-less nodes, ROUNDED, the nonstandard
+  ``DIVIDE a BY b`` without GIVING, non-exact quotients, and every
+  REMAINDER target are all still poisoned -- see ``_fold_divide``. A ``/``
+  inside a COMPUTE expression tree folds as before.
 * ROUNDED, CORRESPONDING, and any target this module cannot resolve to an
   elementary numeric/text field are all poisoned rather than approximated.
 * A numeric MOVE/arithmetic result is only ever recorded when it fits its
@@ -52,7 +53,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolParagraph, CobolProgram
@@ -375,8 +376,7 @@ def _dispatch_one(
     elif isinstance(stmt, MultiplyStatement):
         _fold_multiply(stmt, index, state.env)
     elif isinstance(stmt, DivideStatement):
-        # See module docstring: BY vs INTO is not recoverable from the AST.
-        _poison_names([*stmt.targets, *stmt.givings], index, state.env)
+        _fold_divide(stmt, index, state.env)
     elif isinstance(stmt, ComputeStatement):
         _fold_compute(stmt, index, state.env)
     elif isinstance(stmt, DisplayStatement):
@@ -503,9 +503,12 @@ def _perform_body_statements(
 def _write_targets(stmt: Any) -> list[str]:
     if isinstance(stmt, MoveStatement):
         return list(stmt.targets)
-    if isinstance(
-        stmt, (AddStatement, SubtractStatement, MultiplyStatement, DivideStatement)
-    ):
+    if isinstance(stmt, DivideStatement):
+        # REMAINDER is a written target too -- leaving it out would let a
+        # stale env entry survive a DIVIDE inside an IF arm / handler body.
+        remainder = [stmt.remainder] if stmt.remainder else []
+        return [*stmt.targets, *stmt.givings, *remainder]
+    if isinstance(stmt, (AddStatement, SubtractStatement, MultiplyStatement)):
         return [*stmt.targets, *stmt.givings]
     if isinstance(stmt, ComputeStatement):
         return list(stmt.targets)
@@ -822,6 +825,99 @@ def _fold_multiply(
     product = operand_values[0] * operand_values[1]  # type: ignore[operator]
     for target in stmt.givings or stmt.targets:
         _write_numeric(target, product, index, env)
+
+
+def _exact_divide(dividend: Decimal, divisor: Decimal) -> Decimal | None:
+    """``dividend / divisor`` only when the quotient is exactly
+    representable -- verified by multiplying back at wide precision, so a
+    quotient the context silently rounded (e.g. a 30-digit repeating
+    fraction that happens to round to an integral-looking value) can never
+    masquerade as exact. None means "poison", same contract as every other
+    helper here."""
+    if divisor == 0:
+        return None
+    with localcontext() as ctx:
+        ctx.prec = 80
+        quotient = dividend / divisor
+        if quotient * divisor != dividend:
+            return None
+    return quotient
+
+
+def _fold_divide(
+    stmt: DivideStatement, index: ProgramLayoutIndex, env: dict[str, Decimal | str]
+) -> None:
+    """Fold the DIVIDE forms whose semantics are now recoverable from the
+    AST via ``division_mode`` (BY vs INTO invert dividend/divisor order).
+
+    Kept "exact by construction, or absent" like everything else:
+
+    * ``division_mode is None`` (older AST, unparsable separator) poisons --
+      the pre-``division_mode`` behavior for every DIVIDE.
+    * ROUNDED poisons (same gate as ADD/SUBTRACT/MULTIPLY).
+    * A REMAINDER target is always poisoned: the remainder is defined via
+      the quotient *as truncated to the GIVING target's PICTURE*, which
+      this module deliberately does not model. The GIVING value itself is
+      still safe to fold -- it is only recorded when the true quotient fits
+      the target exactly, in which case truncation was a no-op.
+    * ``DIVIDE a BY b`` without GIVING is a nonstandard shape the parser
+      tolerates; its semantics are not defined by the standard, so it
+      poisons rather than guesses.
+    * `.operands` deduplication makes ``DIVIDE X INTO X`` indistinguishable
+      from a missing operand -- poison when filtering leaves the wrong
+      count, the same documented caveat as ADD/MULTIPLY.
+    """
+    if stmt.remainder:
+        _poison_names([stmt.remainder], index, env)
+    if stmt.rounded or stmt.division_mode not in ("BY", "INTO"):
+        _poison_names([*stmt.targets, *stmt.givings], index, env)
+        return
+
+    if stmt.givings:
+        reserved = set(stmt.givings)
+        if stmt.remainder:
+            reserved.add(stmt.remainder)
+        true_operands = [op for op in stmt.operands if op not in reserved]
+        if len(true_operands) != 2:
+            _poison_names(stmt.givings, index, env)
+            return
+        values = [_resolve_operand(op, index, env) for op in true_operands]
+        first, second = values[0], values[1]
+        if first is None or second is None:
+            _poison_names(stmt.givings, index, env)
+            return
+        # DIVIDE a BY b GIVING c -> c = a/b; DIVIDE a INTO b GIVING c -> c = b/a.
+        quotient = (
+            _exact_divide(first, second)
+            if stmt.division_mode == "BY"
+            else _exact_divide(second, first)
+        )
+        if quotient is None:
+            _poison_names(stmt.givings, index, env)
+            return
+        for giving in stmt.givings:
+            _write_numeric(giving, quotient, index, env)
+        return
+
+    # Format 1: DIVIDE a INTO b [c ...] -- each target := target / a.
+    if stmt.division_mode != "INTO":
+        _poison_names(stmt.targets, index, env)
+        return
+    divisor_tokens = [op for op in stmt.operands if op not in stmt.targets]
+    if len(divisor_tokens) != 1:
+        _poison_names(stmt.targets, index, env)
+        return
+    divisor = _resolve_operand(divisor_tokens[0], index, env)
+    if divisor is None:
+        _poison_names(stmt.targets, index, env)
+        return
+    for target in stmt.targets:
+        current = _resolve_operand(target, index, env)
+        quotient = _exact_divide(current, divisor) if current is not None else None
+        if quotient is None:
+            _poison_names([target], index, env)
+            continue
+        _write_numeric(target, quotient, index, env)
 
 
 def _fold_compute(

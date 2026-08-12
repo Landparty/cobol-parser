@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 import re
 import string
+from decimal import Decimal, InvalidOperation
 
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
 from .options import DataGeneratorOptions
@@ -275,9 +276,14 @@ class ValueFactory:
             FieldCategory.NUMERIC_EDITED,
             FieldCategory.FLOAT,
         ):
+            # Decimal, not float: a PIC 9(17)/9(18) literal exceeds float64's
+            # mantissa, and a solver-picked witness rounded here could no
+            # longer satisfy the constraint it was picked for.
             try:
-                number = float(value)
-            except ValueError:
+                number = Decimal(value)
+            except InvalidOperation:
+                return self._fit_text(value, spec)
+            if not number.is_finite():
                 return self._fit_text(value, spec)
             return self._format_number(number, spec, allow_random_sign=False)
         return self._fit_text(value, spec)
@@ -388,7 +394,7 @@ class ValueFactory:
 
     def _format_number(
         self,
-        value: float | int,
+        value: float | int | Decimal,
         spec: FieldSpec,
         *,
         allow_random_sign: bool = True,
@@ -399,29 +405,49 @@ class ValueFactory:
         freshly generated magnitude, so negative values are exercised. Callers
         formatting a value the copybook *declared* pass ``False`` -- see
         :meth:`_fit_domain_value`.
+
+        Arithmetic is Decimal throughout: a value already exact (a declared
+        VALUE literal, a solved witness) must render digit-for-digit even
+        past float64's ~16 significant digits (``PIC 9(18)`` keys). Randomly
+        generated floats pass through unchanged in practice -- ``str(float)``
+        round-trips exactly.
         """
         decimals = spec.decimal_digits
         digits = spec.integer_digits
-        magnitude = abs(float(value))
+        exact = value if isinstance(value, Decimal) else Decimal(str(value))
+        if not exact.is_finite():
+            exact = Decimal(0)
+        magnitude = abs(exact)
         if digits > 0:
-            ceiling = 10**digits - 10**-decimals if decimals else 10**digits - 1
-            magnitude = min(magnitude, float(ceiling))
+            ceiling = (
+                Decimal(10**digits) - Decimal(1).scaleb(-decimals)
+                if decimals
+                else Decimal(10**digits - 1)
+            )
+            magnitude = min(magnitude, ceiling)
         elif decimals:
-            magnitude = min(magnitude, 1 - 10.0**-decimals)
+            magnitude = min(magnitude, Decimal(1) - Decimal(1).scaleb(-decimals))
         else:
-            magnitude = 0.0
+            magnitude = Decimal(0)
 
         negative = spec.is_signed and (
-            float(value) < 0
+            exact < 0
             or (allow_random_sign and magnitude > 0 and self._rng.random() < 0.25)
         )
-        text = f"{magnitude:.{decimals}f}" if decimals else str(int(round(magnitude)))
+        # to_integral_value, not quantize: quantize raises InvalidOperation
+        # once the integer part outgrows the context precision; rounding mode
+        # (half-even) matches the round() the float version used.
+        text = (
+            f"{magnitude:.{decimals}f}"
+            if decimals
+            else str(int(magnitude.to_integral_value()))
+        )
         # Rounding at the boundary can push the value one digit over.
         if digits > 0:
             integer_part = text.split(".")[0]
             if len(integer_part) > digits:
                 text = ("9" * digits) + (text[len(integer_part) :] if decimals else "")
-        return f"-{text}" if negative and float(text) != 0 else text
+        return f"-{text}" if negative and Decimal(text) != 0 else text
 
     # -- text ---------------------------------------------------------------
 

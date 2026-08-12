@@ -19,6 +19,7 @@ here is arm coverage, not full path coverage.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from ..analysis.boundary_inventory import BoundaryReport
@@ -528,12 +529,14 @@ def _bound_constraint(sample: FieldConstraint, op: str, value: str) -> FieldCons
 
 
 def _picture_ceiling(spec: FieldSpec) -> str:
+    """Exact decimal text, never float: ``str(float(10**18 - 1))`` is
+    ``'1e+18'`` -- scientific notation the solver would then mis-handle,
+    and one past the field's actual ceiling."""
     digits = spec.integer_digits
     decimals = spec.decimal_digits
-    ceiling = (
-        float(10**digits - 1) if decimals == 0 else float(10**digits) - 10.0**-decimals
-    )
-    return str(ceiling)
+    if decimals == 0:
+        return str(10**digits - 1)
+    return str(Decimal(10**digits) - Decimal(1).scaleb(-decimals))
 
 
 __all__ = [

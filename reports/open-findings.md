@@ -1,15 +1,23 @@
-# cobolparser — Open Findings (as of 2026-08-12)
+# cobolparser — Open Findings (as of 2026-08-12, post-bug-review)
 
-> **New since 2026-08-10:** `reports/audit-2026-08-12-followup.md` is a
-> second audit pass, run after the 2026-08-12 audit's own findings were
-> fixed and merged (PR #137). It found new bugs and gaps in areas that
-> earlier pass didn't cover deeply — see that file for full detail. Not yet
-> fixed as of this writing; headline items: a missing terminating period
-> before CLOSE/SET/CANCEL/OPEN/SORT/MERGE operand lists can silently
-> delete the next paragraph from the AST, `ENTRY ... USING` silently drops
-> its parameters when `USING` is on a continuation line, and
-> `gen-fixtures`' `ScenarioPlanner` can report a `WHEN OTHER` arm as
-> "covered" by a fixture that never actually reaches it.
+> **Status of `reports/audit-2026-08-12-followup.md`:** all of that pass's
+> headline items are **fixed at HEAD** (commit `b495f26`, merged via
+> PR #139) — the CLOSE/SET/CANCEL/OPEN/SORT/MERGE paragraph-swallow, the
+> `ENTRY ... USING` continuation-line drop, the MOVE signed-subscript
+> reintroduction, the `WHEN OTHER` false-merge in `ScenarioPlanner`, and
+> the `io-coverage render` path bug. Re-verified by direct reproduction
+> during the 2026-08-12 cross-repo bug review.
+>
+> **That same bug review found and fixed five further defects** (see
+> `CHANGELOG.md` Unreleased → Fixed and
+> `tests/regression/test_bug_review_2026_08_12.py`): float64 precision
+> loss through the `gen-fixtures` witness pipeline (a `PIC 9(18)` witness
+> rendered one-off while `ScenarioCoverage` still reported the arm
+> targeted), `COMPUTE`'s `**` serializing as `* *`, `DivideStatement`
+> dropping the BY/INTO distinction (now recorded as `division_mode`, and
+> const_fold folds the unambiguous forms), typed literals losing their
+> prefix in MOVE/DISPLAY text (`X"41"` → `"41"`), and reference
+> modification gaining spaces (`WS-X(2 : 3)`).
 
 This file tracks only what is currently open. It replaces this file's own
 prior form — a running journal of a months-long audit that accumulated

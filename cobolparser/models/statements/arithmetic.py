@@ -111,6 +111,16 @@ class DivideStatement(ArithmeticStatement):
     def __init__(self, location: SourceLocation):
         super().__init__("DIVIDE", location)
         self.remainder: str | None = None  # For REMAINDER clause
+        #: ``"BY"`` or ``"INTO"`` -- the two forms invert dividend/divisor
+        #: order (``DIVIDE a BY b`` computes a/b; ``DIVIDE a INTO b``
+        #: computes b/a), so without this no consumer could evaluate a
+        #: DIVIDE from the AST at all. ``None`` only when the separator was
+        #: missing/unparsable.
+        self.division_mode: str | None = None
+
+    def set_division_mode(self, mode: str) -> None:
+        """Record which separator keyword (BY or INTO) the source used."""
+        self.division_mode = mode
 
     def set_remainder(self, remainder: str) -> None:
         """Set the REMAINDER clause's target identifier."""
@@ -121,6 +131,8 @@ class DivideStatement(ArithmeticStatement):
         result = super().to_dict()
         if self.remainder:
             result["remainder"] = self.remainder
+        if self.division_mode:
+            result["division_mode"] = self.division_mode
         return result
 
 

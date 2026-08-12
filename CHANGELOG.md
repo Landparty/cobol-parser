@@ -23,6 +23,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **generators/analysis:** the `gen-fixtures` witness pipeline no longer
+  loses precision on wide numeric literals. `domains.py`'s solver and
+  `ValueFactory.render()`/`_format_number` carried values through float64,
+  so any literal past ~16 significant digits (PIC 9(17)/9(18) account
+  keys) was silently rounded — `IF ACCT-ID = 123456789012345678` produced
+  a fixture row of `123456789012345680` while `ScenarioCoverage` still
+  reported the arm as targeted, violating the "no silent gaps" guarantee.
+  Bounds, exclusions, and exact-value rendering are now `Decimal`
+  end-to-end (wide-precision contexts guard the largest PICTUREs), and
+  `scenarios._picture_ceiling` no longer emits scientific notation
+  (`1e+18`) for 18-digit fields.
+* **analysis:** `ConstantFolder` now folds unambiguous DIVIDE forms
+  (`BY`/`INTO` with GIVING, `INTO` in place) instead of poisoning every
+  DIVIDE, using the new `DivideStatement.division_mode`; ROUNDED,
+  REMAINDER targets, non-exact quotients, divide-by-zero, and the
+  nonstandard `DIVIDE a BY b` without GIVING still poison. A DIVIDE's
+  REMAINDER target is now also poisoned by the IF-arm/handler-body write
+  scan (it was previously missed).
+* **parser:** `COMPUTE` expression text re-merges the two lexed `*` tokens
+  of `**` — `COMPUTE X = 2 ** 3` serializes as `2 ** 3`, not the invalid
+  `2 * * 3` (the structural `expression_tree` was already correct).
+* **parser:** MOVE/DISPLAY statement text preserves typed-literal
+  prefixes: `MOVE X"41" TO WS-X` keeps `X"41"` (one byte) instead of
+  collapsing to the two-character text literal `"41"`; same for
+  `Z"…"`/`N"…"`/`G"…"`.
+* **parser:** reference modification joins tight in MOVE source text —
+  `WS-X(2:3)`, not `WS-X(2 : 3)` (same fidelity class as the earlier
+  negative-subscript fix).
+
+### Added
+
+* **models:** `DivideStatement.division_mode` (`"BY"` | `"INTO"`, emitted
+  by `to_dict()`) records which separator the source used — the two forms
+  invert dividend/divisor order, so without it no consumer could evaluate
+  a DIVIDE from the AST.
+
+### Fixed (previous audit round)
+
 * **parser:** restored the EVALUATE WHEN selector contract regressed by
   commit `17fa400`: non-blank string-literal selectors keep their
   unquoted representation; only blank/whitespace-only literals are

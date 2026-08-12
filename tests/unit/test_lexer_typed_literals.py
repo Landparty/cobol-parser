@@ -126,7 +126,10 @@ class TestTypedLiteralsParseEndToEnd:
         moves = [s for s in statements if s.to_dict()["statement_type"] == "MOVE"]
         assert len(moves) == 1
         move = moves[0].to_dict()
-        assert move["operands"] == ['"1F"', "WS-FLAG"]
+        # The prefix stays attached to the (single) literal operand: X"1F"
+        # is the one byte 0x1F, not the two-character text literal "1F" --
+        # see tests/regression/test_bug_review_2026_08_12.py.
+        assert move["operands"] == ['X"1F"', "WS-FLAG"]
         assert move["targets"] == ["WS-FLAG"]
 
 

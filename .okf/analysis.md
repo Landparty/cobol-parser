@@ -764,6 +764,23 @@ RENDERED witness against the numeric domain as a defensive backstop
 (`_rendered_numeric_ok`). Still fully deterministic. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA6WitnessOnTheDecimalGrid`.
 
+**The whole numeric pipeline is Decimal, never float (2026-08-12 bug
+review).** `NumericDomain`'s bounds/exclusions, `_apply_numeric`'s literal
+parsing, `_rendered_numeric_ok`, `scenarios._picture_ceiling`, and
+`ValueFactory._format_number`/`_fit_domain_value`'s exact-value path all
+used float64 internally, so any literal past ~16 significant digits (a
+`PIC 9(17)`/`9(18)` account key) was silently rounded in transit:
+`eq 123456789012345678` rendered the witness `123456789012345680`, the
+fixture row could never take the branch, and `ScenarioCoverage` still
+reported the arm as targeted — a silent violation of the "targeted +
+merged + missed == total" guarantee (`_rendered_numeric_ok` re-checked in
+float too, so the corruption passed its own backstop).
+`_picture_ceiling` additionally emitted `'1e+18'` for `PIC 9(18)`.
+Everything is `Decimal` end-to-end now, with `localcontext(prec=80)`
+around the few multiplications/epsilon-nudges that could outgrow the
+default 28-digit context on the widest PICTUREs. Pinned by
+`tests/regression/test_bug_review_2026_08_12.py`.
+
 **Bug found writing this module's tests, fixed at the root (not worked
 around): `>=`/`<=`/`<>` were silently mis-parsed everywhere**, not just
 here. The lexer emits these as two separate single-character tokens (`>`
@@ -828,14 +845,25 @@ internal env) rather than approximating:
   END MOVE 'Y' TO WS-EOF. DISPLAY WS-EOF.` emitted `field_equals
   WS-EOF="N"` even in a scenario where AT END fires). Pinned by
   `tests/regression/test_audit_2026_08_12_analysis.py::TestA1HandlerBodiesPoisonTheFold`.
-* `DIVIDE` is poisoned unconditionally: `DivideStatement` does not record
-  whether `BY` or `INTO` was used (`_parse_binary_arithmetic` shares one
-  code path for both, see [parser.md](parser.md)), and the two invert
-  dividend/divisor order -- there is no way to compute the correct value
-  from the node alone. A `/` inside a `COMPUTE` expression tree has no such
-  ambiguity (both operands are structurally explicit, M12's
-  `expression_tree`) and folds normally, including a divide-by-zero or
-  non-terminating-decimal guard (both poison, not truncate).
+* `DIVIDE` folds the unambiguous forms (2026-08-12 bug review):
+  `DivideStatement.division_mode` now records `BY` vs `INTO` (the two
+  invert dividend/divisor order), so `_fold_divide` computes
+  `DIVIDE a BY b GIVING c` (c = a/b), `DIVIDE a INTO b GIVING c`
+  (c = b/a), and the in-place `DIVIDE a INTO b [c ...]` (each target /= a).
+  Still "exact by construction, or absent": a mode-less node (older AST),
+  `ROUNDED`, the nonstandard `DIVIDE a BY b` without GIVING,
+  divide-by-zero, and any non-exact quotient all poison — exactness is
+  verified by multiplying the quotient back at `prec=80`
+  (`_exact_divide`), so a context-rounded repeating fraction can never
+  masquerade as exact. A `REMAINDER` target is always poisoned (it is
+  defined via the quotient as truncated to the GIVING target's PICTURE,
+  which this module does not model), and `_write_targets` now includes it
+  in the IF-arm/handler-body write scan (previously missed). The GIVING
+  value stays safe to fold alongside a poisoned REMAINDER: it is only
+  recorded when the true quotient fits exactly, i.e. truncation was a
+  no-op. A `/` inside a `COMPUTE` expression tree folds as before
+  (divide-by-zero and non-terminating decimals poison, not truncate).
+  Pinned by `tests/regression/test_bug_review_2026_08_12.py::TestDivideMode`.
 * `ROUNDED`, `CORRESPONDING`, and any target that does not resolve to an
   elementary field are poisoned rather than approximated. A numeric
   MOVE/arithmetic result is only ever recorded when it fits its target

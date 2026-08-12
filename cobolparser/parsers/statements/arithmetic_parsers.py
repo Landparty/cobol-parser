@@ -322,6 +322,11 @@ def _parse_binary_arithmetic(
     upper = peek_value_upper(token_stream)
     if upper in separators:
         token_stream.consume()
+        if verb == "DIVIDE" and upper is not None:
+            # BY vs INTO inverts dividend/divisor order; record it so
+            # consumers (const_fold, to_dict/to_json readers) can evaluate
+            # the statement instead of treating every DIVIDE as opaque.
+            cast(DivideStatement, stmt).set_division_mode(upper)
         second_operand = _consume_arithmetic_operand(token_stream)
         if second_operand is not None:
             stmt.add_operand(second_operand)
@@ -950,6 +955,17 @@ class ComputeStatementParser(IStatementParser):
             token_stream.consume()
 
         if expr_tokens:
+            # ``**`` lexes as two adjacent MULTIPLY_OP tokens; re-merge them
+            # so the serialized text reads ``2 ** 3``, not ``2 * * 3`` (which
+            # is not valid COBOL and misreads as a double multiply) -- the
+            # same merge build_compute_expression_tree already applies.
+            merged_tokens: list[str] = []
+            for tok in expr_tokens:
+                if tok == "*" and merged_tokens and merged_tokens[-1] == "*":
+                    merged_tokens[-1] = "**"
+                    continue
+                merged_tokens.append(tok)
+            expr_tokens = merged_tokens
             expr_str = " ".join(expr_tokens).strip()
             stmt.set_expression(expr_str)
             # M12: additionally attach a structural tree parsed from the
