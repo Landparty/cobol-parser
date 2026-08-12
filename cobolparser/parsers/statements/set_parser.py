@@ -7,9 +7,11 @@ from ...lexer import TokenType
 from ...models.statements import SetStatement
 from ._utils import (
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
+    warn_paragraph_boundary_swallowed,
 )
 from ._utils import token_value_upper as _val
 
@@ -56,6 +58,14 @@ class SetStatementParser(IStatementParser):
             # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
             # be folded into the target list when SET has no trailing period.
             if token.type == TokenType.IDENTIFIER and is_statement_boundary(token):
+                break
+            # A missing period on this SET followed by what looks like the
+            # next paragraph/section header (H9): stop instead of folding it
+            # into the target list.
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                warn_paragraph_boundary_swallowed(token_stream)
                 break
             if token.type == TokenType.COMMA:
                 # A comma between targets (e.g. `SET IX1, IX2 UP BY 1.`) is a

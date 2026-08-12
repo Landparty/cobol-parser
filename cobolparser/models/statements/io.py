@@ -284,6 +284,7 @@ class IOWriteStatement(RetryClauseMixin, InvalidKeyClauseMixin, CobolStatement):
                 "record_name": self.record_name,
                 "from_clause": self.from_clause,
                 "advancing_clause": self.advancing_clause,
+                "advancing_mode": self.advancing_mode,
                 "lock_scope": self.lock_scope,
                 # Status flags
                 "delete_record": self.delete_record,

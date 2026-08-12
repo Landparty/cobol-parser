@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.program import CobolProgram
-from ..models.sql_statements import ExecSQLStatement
+from ..models.sql_statements import ExecSQLStatement, _strip_sql_literals_and_comments
 from ..models.statements import (
     CallStatement,
     DisplayStatement,
@@ -343,7 +343,14 @@ class IOLogger:
             # into_variables (can happen when SQL text has no space before colon)
             into_vars = list(stmt.into_variables)
             if not into_vars and stmt.sql_text:
-                into_match = _SQL_INTO_HOST_VARS_RE.search(stmt.sql_text)
+                # Scrub string literals/comments first, matching the real
+                # parser's own `_extract_into_variables` -- otherwise an
+                # "INTO :x"-shaped substring sitting inside a quoted string
+                # literal (which the parser correctly ignores) still matches
+                # here, fabricating a host-variable operation that was never
+                # actually present.
+                scrubbed_sql = _strip_sql_literals_and_comments(stmt.sql_text)
+                into_match = _SQL_INTO_HOST_VARS_RE.search(scrubbed_sql)
                 if into_match:
                     into_vars = _SQL_HOST_VAR_RE.findall(into_match.group(1))
 

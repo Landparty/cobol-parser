@@ -11,6 +11,7 @@ The factory enables refactoring of all parsers to use centralized node creation,
 improving maintainability and reducing coupled dependencies.
 """
 
+import inspect
 from typing import Any
 
 from ..core.exceptions import ValidationError
@@ -198,6 +199,24 @@ class ASTNodeFactory:
         # Validate that it's actually an ASTNode
         if not issubclass(node_class, ASTNode):
             raise TypeError(f"{node_class.__name__} is not an ASTNode subclass")
+
+        # Not every ASTNode subclass's __init__ takes `location` as its first
+        # argument -- e.g. CobolDataItem(name, level, location) or
+        # CobolSection(section_name, location). node_class(location, **kwargs)
+        # below would silently bind `location` to the wrong parameter instead
+        # of raising for one of those, since Python doesn't type-check
+        # positional arguments. Catch that here with a clear error rather
+        # than letting it corrupt the created node.
+        init_params = list(inspect.signature(node_class.__init__).parameters.values())
+        first_arg = init_params[1].name if len(init_params) > 1 else None
+        if first_arg != "location":
+            raise TypeError(
+                f"{node_class.__name__}.__init__ does not take `location` as "
+                "its first argument (got "
+                f"{first_arg!r}); ASTNodeFactory.create() cannot be used for "
+                "this class without mis-binding location -- construct it "
+                "directly instead"
+            )
 
         try:
             # Create the node

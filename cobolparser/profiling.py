@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import cProfile
 import json
+import os
 import pstats
 import time
 import tracemalloc
@@ -111,8 +112,13 @@ class ProfilerContext:
             cpu_user_s = max(0.0, cpu_after.user - self._cpu_before.user)
             cpu_system_s = max(0.0, cpu_after.system - self._cpu_before.system)
 
-        # Write .prof binary if requested
+        # Write .prof binary if requested. dump_stats() raises FileNotFoundError
+        # uncaught if its parent directory doesn't exist yet -- create it first,
+        # matching the batch-parsing path's os.makedirs(..., exist_ok=True).
         if self._prof_output:
+            parent = os.path.dirname(self._prof_output)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             self._profiler.dump_stats(self._prof_output)
 
         # Extract top-N functions by cumulative time from cProfile stats

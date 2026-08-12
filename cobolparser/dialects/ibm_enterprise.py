@@ -128,8 +128,12 @@ class ExecIMSStatement(CobolStatement):
     def set_command(self, command: str) -> None:
         """Set the IMS command."""
         self._ims_command = command.upper()
-        # Determine IMS call type
-        if self._ims_command in ["GU", "GN", "GNP", "ISRT", "REPL", "DLET"]:
+        # Determine IMS call type. Recognizes every DL/I call type
+        # IBMEnterpriseCobol.IMS_COMMANDS does (GU/GN/GNP/ISRT/REPL/DLET plus
+        # CHKP/ROLLB/TERM/ENQUEUE/DEQUEUE/PURG/XRST/XDLT/XRPL) -- restricting
+        # this to the first six left `ims_call_type` at "UNKNOWN" for a
+        # recognized command.
+        if self._ims_command in IBMEnterpriseCobol.IMS_COMMANDS:
             self.ims_call_type = self._ims_command
 
     def add_option(self, option: str, value: str = "") -> None:

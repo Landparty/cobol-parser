@@ -152,42 +152,56 @@ class LinkageChecker:
     # ------------------------------------------------------------------
 
     def _collect_linkage_items(self, ast: CobolProgram) -> None:
-        """Find all 01-level items in the LINKAGE SECTION."""
-        data_div = ast.data_division
-        if not data_div:
-            return
+        """Find all 01-level items in the LINKAGE SECTION.
 
-        # Look for a section named LINKAGE (use public .sections property)
-        for section in data_div.sections:
-            if not isinstance(section, CobolSection):
-                continue
-            section_name = section.section_name or ""
-            if "LINKAGE" in section_name.upper():
-                for item in section.data_items:
-                    if isinstance(item, CobolDataItem) and item.level == 1:
-                        name = (item.name or "").upper().strip()
-                        if name:
-                            self._linkage_items[name] = False  # not yet referenced
+        Recurses into ``ast.contained_programs`` -- a nested/contained
+        program has its own DATA DIVISION and its own LINKAGE SECTION, and
+        without this recursion its linkage items never register, so
+        `UNREFERENCED_LINKAGE` silently never fires for a nested program's
+        parameters.
+        """
+        data_div = ast.data_division
+        if data_div:
+            # Look for a section named LINKAGE (use public .sections property)
+            for section in data_div.sections:
+                if not isinstance(section, CobolSection):
+                    continue
+                section_name = section.section_name or ""
+                if "LINKAGE" in section_name.upper():
+                    for item in section.data_items:
+                        if isinstance(item, CobolDataItem) and item.level == 1:
+                            name = (item.name or "").upper().strip()
+                            if name:
+                                self._linkage_items[name] = False  # not yet referenced
+
+        for contained in ast.contained_programs:
+            self._collect_linkage_items(contained)
 
     def _collect_procedure_using(self, ast: CobolProgram) -> None:
-        """Collect parameters from PROCEDURE DIVISION USING clause."""
-        proc_div = ast.procedure_division
-        if not proc_div:
-            return
+        """Collect parameters from PROCEDURE DIVISION USING clause.
 
-        # The parser stores PROCEDURE DIVISION USING params in metadata
-        using_params = proc_div.get_metadata("using_parameters") or []
-        if using_params:
-            # Use the program name as key for the implicit entry interface
-            prog_name = (ast.program_name or "PROGRAM").upper()
-            self._entry_interfaces[prog_name] = [
-                p if isinstance(p, str) else str(p) for p in using_params
-            ]
-            # Mark them as referenced
-            for p in using_params:
-                pname = (p if isinstance(p, str) else str(p)).upper()
-                if pname in self._linkage_items:
-                    self._linkage_items[pname] = True
+        Recurses into ``ast.contained_programs`` so a nested program's own
+        implicit entry interface (its ``PROCEDURE DIVISION USING``) is
+        registered too, matching `_collect_linkage_items`.
+        """
+        proc_div = ast.procedure_division
+        if proc_div:
+            # The parser stores PROCEDURE DIVISION USING params in metadata
+            using_params = proc_div.get_metadata("using_parameters") or []
+            if using_params:
+                # Use the program name as key for the implicit entry interface
+                prog_name = (ast.program_name or "PROGRAM").upper()
+                self._entry_interfaces[prog_name] = [
+                    p if isinstance(p, str) else str(p) for p in using_params
+                ]
+                # Mark them as referenced
+                for p in using_params:
+                    pname = (p if isinstance(p, str) else str(p)).upper()
+                    if pname in self._linkage_items:
+                        self._linkage_items[pname] = True
+
+        for contained in ast.contained_programs:
+            self._collect_procedure_using(contained)
 
     def _collect_entry_statements(self, ast: ASTNode) -> None:
         """Recursively collect ENTRY statements and their USING clauses."""

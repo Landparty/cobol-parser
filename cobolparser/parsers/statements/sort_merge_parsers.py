@@ -7,9 +7,11 @@ from ...lexer import TokenType
 from ...models.statements import MergeStatement, SortStatement
 from ._utils import (
     is_statement_boundary,
+    looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
     token_location,
+    warn_paragraph_boundary_swallowed,
 )
 from ._utils import token_value_upper as _val
 
@@ -76,6 +78,12 @@ def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:
                     # TokenType) must not be folded into the KEY field list.
                     if is_statement_boundary(f):
                         break
+                    # A missing period followed by what looks like the next
+                    # paragraph/section header (H9): stop instead of folding
+                    # it into the KEY field list.
+                    if looks_like_paragraph_boundary(ts):
+                        warn_paragraph_boundary_swallowed(ts)
+                        break
                     ts.consume()
                     keys.append({"field": f.value or "", "order": order})
                 else:
@@ -113,6 +121,12 @@ def _parse_file_list(ts: ITokenStream) -> list[str]:
             # A following statement's verb that lexes as a plain IDENTIFIER
             # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
             # be folded into the file-name list.
+            break
+        # A missing period followed by what looks like the next
+        # paragraph/section header (H9): stop instead of folding it into
+        # the file-name list.
+        if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(ts):
+            warn_paragraph_boundary_swallowed(ts)
             break
         if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
             ts.consume()
@@ -170,6 +184,14 @@ class SortStatementParser(IStatementParser):
             if is_statement_boundary(token):
                 # No period before the next statement: stop rather than
                 # swallow it as a bogus SORT clause token.
+                break
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                # A missing period on this SORT followed by what looks like
+                # the next paragraph/section header (H9): stop instead of
+                # falling through to the generic-clause-token consume below.
+                warn_paragraph_boundary_swallowed(token_stream)
                 break
             elif val == "WITH":
                 token_stream.consume()
@@ -317,6 +339,14 @@ class MergeStatementParser(IStatementParser):
             if is_statement_boundary(token):
                 # No period before the next statement: stop rather than
                 # swallow it as a bogus MERGE clause token.
+                break
+            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
+                token_stream
+            ):
+                # A missing period on this MERGE followed by what looks like
+                # the next paragraph/section header (H9): stop instead of
+                # falling through to the generic-clause-token consume below.
+                warn_paragraph_boundary_swallowed(token_stream)
                 break
             elif val == "COLLATING":
                 token_stream.consume()

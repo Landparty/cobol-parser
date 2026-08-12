@@ -25,12 +25,19 @@ from cobolparser.analysis.io_coverage_reporter import IOCoverageReporter
 def cmd_status(args: argparse.Namespace) -> int:
     """Show IO coverage status."""
     # Find artifact
-    artifact_path = Path(args.artifact)
+    requested_path = Path(args.artifact)
+    artifact_path = requested_path
     if not artifact_path.exists():
-        # Try to find in current directory
-        artifact_path = Path("io-coverage.json")
-        if not artifact_path.exists():
-            print("Error: io-coverage.json not found. Run 'generate' first.")
+        # Fall back to the default artifact name in the current directory,
+        # but only when the caller didn't already ask for that exact path --
+        # otherwise this silently serves a stale io-coverage.json instead of
+        # reporting that the path the user actually asked for is missing.
+        fallback_path = Path("io-coverage.json")
+        if requested_path != fallback_path and fallback_path.exists():
+            print(f"Note: {requested_path} not found; falling back to {fallback_path}")
+            artifact_path = fallback_path
+        else:
+            print(f"Error: {requested_path} not found. Run 'generate' first.")
             return 1
 
     try:
@@ -135,6 +142,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate coverage artifact against schema."""
+    # `scripts/` isn't a package on sys.path unless invoked from the repo
+    # root (where `-m` puts the CWD on sys.path) -- add the repo root
+    # explicitly so this resolves from any working directory.
+    repo_root = str(Path(__file__).resolve().parent.parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     from scripts.validate_io_coverage import CoverageSchemaValidator
 
     validator = CoverageSchemaValidator(args.artifact)
@@ -152,7 +165,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_render(args: argparse.Namespace) -> int:
     """Render coverage artifact as Markdown/CSV."""
-    sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "io_coverage"))
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    sys.path.insert(0, str(repo_root / "tools" / "io_coverage"))
     from render_markdown import CoverageRenderer  # type: ignore[import-not-found]
 
     try:
