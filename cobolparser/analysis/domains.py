@@ -12,8 +12,11 @@ generator's own value providers already guarantee.
 
 from __future__ import annotations
 
+import itertools
+import math
 import random
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from ..generators.data.layout import FieldCategory, FieldSpec
 from ..generators.data.options import DataGeneratorOptions
@@ -62,18 +65,40 @@ class NumericDomain:
     decimals: int
     excluded: set[float] = field(default_factory=set)
 
-    def pick(self) -> float | None:
+    def pick(self) -> str | None:
+        """Deterministic witness on the field's own decimal grid.
+
+        Every representable value of a ``PIC [S]9(m)[V9(d)]`` field is an
+        integer multiple of ``10**-d``, so candidates are enumerated in
+        integer grid units (never a raw float midpoint, which for e.g.
+        ``PIC 9`` with ``ne 4`` used to pick 4.5, dodge the float-equality
+        exclusion check, and then RENDER back to the excluded "4").
+        Exclusions are compared after quantizing to the same grid; an
+        exclusion not on the grid can never equal a grid candidate and is
+        ignored. The returned string is exact (rendered via Decimal), so the
+        PICTURE-rendering step downstream never rounds it.
+        """
         if self.lo > self.hi:
             return None
-        step = _epsilon(self.decimals)
-        candidate = (self.lo + self.hi) / 2
-        tries = 0
-        while candidate in self.excluded and tries < 1000:
-            candidate += step
-            if candidate > self.hi:
-                candidate = self.lo
-            tries += 1
-        return None if candidate in self.excluded else candidate
+        scale = 10**self.decimals
+        # A tiny tolerance so float noise (0.1 + 0.01 = 0.11000000000000001)
+        # does not shift a bound off its intended grid cell.
+        lo_units = math.ceil(self.lo * scale - 1e-9)
+        hi_units = math.floor(self.hi * scale + 1e-9)
+        if lo_units > hi_units:
+            return None
+        excluded_units = set()
+        for value in self.excluded:
+            units = round(value * scale)
+            if abs(value * scale - units) < 1e-6:
+                excluded_units.add(units)
+        mid_units = (lo_units + hi_units) // 2
+        for units in itertools.chain(
+            range(mid_units, hi_units + 1), range(lo_units, mid_units)
+        ):
+            if units not in excluded_units:
+                return str(Decimal(units).scaleb(-self.decimals))
+        return None
 
 
 @dataclass
@@ -110,9 +135,10 @@ def solve(
 ) -> Witness | Unsatisfiable:
     """Solve *constraints* against *spec*'s domain and pick a witness.
 
-    Witness picking is deterministic: midpoint for a numeric interval, the
-    first allowed literal in sorted order for text, the first remaining
-    enumerated value for a level-88 domain.
+    Witness picking is deterministic: the grid value at the midpoint of a
+    numeric interval (scanning forward past exclusions, wrapping to the low
+    bound), the first allowed literal in sorted order for text, the first
+    remaining enumerated value for a level-88 domain.
     """
     domain: Domain
     if any(c.op in ("in_set", "not_in_set") for c in constraints):
@@ -137,7 +163,27 @@ def solve(
         return Unsatisfiable("no witness available in domain")
 
     factory = ValueFactory(random.Random(0), DataGeneratorOptions())
-    return Witness(factory.render(spec, str(witness)))
+    rendered = factory.render(spec, str(witness))
+    if isinstance(domain, NumericDomain) and not _rendered_numeric_ok(rendered, domain):
+        # Defensive: grid-based picking should make this unreachable, but a
+        # witness whose RENDERED form violates the constraint set must never
+        # escape (rendering used to round a fractional midpoint onto an
+        # excluded value).
+        return Unsatisfiable(
+            f"rendered witness {rendered!r} violates the constraint set"
+        )
+    return Witness(rendered)
+
+
+def _rendered_numeric_ok(rendered: str, domain: NumericDomain) -> bool:
+    """True when the PICTURE-rendered witness still satisfies the domain."""
+    try:
+        value = float(rendered)
+    except ValueError:
+        return True  # non-numeric rendering: nothing checkable here
+    if any(abs(value - excluded) < 1e-9 for excluded in domain.excluded):
+        return False
+    return domain.lo - 1e-9 <= value <= domain.hi + 1e-9
 
 
 def _initial_numeric_domain(spec: FieldSpec) -> NumericDomain:

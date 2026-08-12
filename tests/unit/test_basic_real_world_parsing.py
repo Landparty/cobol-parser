@@ -31,13 +31,9 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source)
 
-        # Basic success check
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        # For now, just verify it doesn't crash - we'll add AST checks later
-        assert isinstance(result.success, bool)
+        assert result.success, f"Simple program failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert result.ast.program_name == "TEST-SIMPLE"
 
     def test_picture_clause_variations(self):
         """Test various PICTURE clause patterns found in examples."""
@@ -58,12 +54,15 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        # For now, just check it doesn't crash completely
-        assert isinstance(result.success, bool)
+        assert (
+            result.success
+        ), f"PICTURE variations failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert {"WRK-DS-18V00", "A06THREES-DS-03V03", "SIMPLE-FIELD"} <= item_names
 
     def test_redefines_pattern(self):
         """Test REDEFINES clause parsing."""
@@ -82,11 +81,13 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"REDEFINES failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert "WRK-NUMERIC" in item_names, "REDEFINES data item missing from AST"
 
     def test_occurs_pattern(self):
         """Test OCCURS clause parsing."""
@@ -105,11 +106,13 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"OCCURS failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert "ARR-ITEM" in item_names, "OCCURS data item missing from AST"
 
     def test_call_statement(self):
         """Test CALL statement parsing."""
@@ -128,11 +131,11 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"CALL failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert (
+            len(result.ast.find_all_by_type("CallStatement")) == 1
+        ), "CALL statement missing from AST"
 
     def test_computational_fields(self):
         """Test COMPUTATIONAL field parsing."""
@@ -151,11 +154,13 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"COMP fields failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert {"WS-COMP-FIELD", "WS-COMP3-FIELD"} <= item_names
 
     def test_file_control_structure(self):
         """Test file control and FD parsing."""
@@ -179,11 +184,14 @@ class TestBasicParsing:
 
         result = parse_cobol(cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
 
-        print(f"Parse success: {result.success}")
-        if not result.success:
-            print(f"Errors: {result.errors}")
-
-        assert isinstance(result.success, bool)
+        assert result.success, f"FILE-CONTROL failed to parse: {result.errors[:5]}"
+        assert result.ast is not None
+        assert result.ast.has_division("ENVIRONMENT")
+        item_names = {
+            getattr(item, "name", None)
+            for item in result.ast.find_all_by_type("CobolDataItem")
+        }
+        assert "PRINT-REC" in item_names, "FD record missing from AST"
 
 
 class TestRealWorldPrograms:
@@ -199,12 +207,10 @@ class TestRealWorldPrograms:
                 cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
             )
 
-            print(f"Parse success: {result.success}")
-            if not result.success:
-                print(f"Errors: {result.errors}")
-
-            # Should at least attempt to parse without crashing
-            assert isinstance(result.success, bool)
+            assert (
+                result.success
+            ), f"test_program.cob failed to parse: {result.errors[:5]}"
+            assert result.ast is not None
 
         except FileNotFoundError:
             pytest.skip("test_program.cob not found")
@@ -223,23 +229,17 @@ class TestRealWorldPrograms:
         for filename in sample_files:
             sample_file = examples_dir / filename
             if sample_file.exists():
-                try:
-                    with open(sample_file) as f:
-                        cobol_source = f.read()
+                with open(sample_file) as f:
+                    cobol_source = f.read()
 
-                    result = parse_cobol(
-                        cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
-                    )
+                result = parse_cobol(
+                    cobol_source, error_recovery=ErrorRecoveryMode.COLLECT_ALL
+                )
 
-                    print(f"Parsing {filename}: success={result.success}")
-                    if not result.success:
-                        print(f"Errors: {result.errors[:5]}")  # Show first 5 errors
+                assert (
+                    result.success
+                ), f"{filename} failed to parse: {result.errors[:5]}"
+                assert result.ast is not None
+                return  # Successfully tested one file
 
-                    # Should at least attempt to parse without crashing
-                    assert isinstance(result.success, bool)
-                    return  # Successfully tested one file
-
-                except Exception as e:
-                    print(f"Exception parsing {filename}: {e}")
-
-        pytest.skip("No sample COBOL files could be found or parsed")
+        pytest.skip("No sample COBOL files found in examples/cobol")

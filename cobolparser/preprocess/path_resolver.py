@@ -321,19 +321,20 @@ class PathResolver:
                     continue
                 abs_path = os.path.abspath(entry.path)
                 name = entry.name
-                # Index by exact filename
+                # First-configured-directory wins for BOTH the full-filename
+                # key and the stem key, matching Tier-3's
+                # ``find_copybook_file`` directory-order semantics. The
+                # full-filename key used to be last-wins (unconditional
+                # assignment) while the stem key was first-wins, so the two
+                # lookup shapes could resolve the same member to files in
+                # different directories.
                 if self.search_config.case_sensitive:
-                    index[name] = abs_path
+                    index.setdefault(name, abs_path)
                     # Also index by stem (without extension)
-                    stem = Path(name).stem
-                    if stem not in index:
-                        index[stem] = abs_path
+                    index.setdefault(Path(name).stem, abs_path)
                 else:
-                    name_upper = name.upper()
-                    index[name_upper] = abs_path
-                    stem_upper = Path(name).stem.upper()
-                    if stem_upper not in index:
-                        index[stem_upper] = abs_path
+                    index.setdefault(name.upper(), abs_path)
+                    index.setdefault(Path(name).stem.upper(), abs_path)
         return index
 
     def _validate_indexed_result(self, result: str) -> None:

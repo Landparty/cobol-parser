@@ -133,6 +133,9 @@ class CobolLexer(_CobolLexerBase):
 
         self.tokens = out_tokens
         self.errors = []
+        # Mirror the pure-Python lexer: warnings must also reset per
+        # tokenize() call, or repeated calls on one lexer duplicate them.
+        self.warnings = []
 
         n_lines = len(lines)
         for line_num in range(n_lines):

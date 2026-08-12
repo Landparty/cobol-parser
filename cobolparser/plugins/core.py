@@ -154,6 +154,25 @@ class ParseStatistics:
             self.parse_time_seconds = end_time - self._start_time
             self.total_time_ms = self.parse_time_seconds * 1000.0
 
+    def copy(self) -> "ParseStatistics":
+        """Return an independent snapshot of these statistics.
+
+        ``CobolParser`` hands each ``ParseResult`` a snapshot rather than
+        its own live (and later ``reset()``) statistics object, so reusing
+        one parser instance cannot clobber earlier results' statistics.
+        """
+        snapshot = ParseStatistics()
+        snapshot.lines_processed = self.lines_processed
+        snapshot.lines_parsed = self.lines_parsed
+        snapshot.tokens_processed = self.tokens_processed
+        snapshot.memory_peak_mb = self.memory_peak_mb
+        snapshot.parse_time_seconds = self.parse_time_seconds
+        snapshot.total_time_ms = self.total_time_ms
+        snapshot.error_count = self.error_count
+        snapshot.warning_count = self.warning_count
+        snapshot._start_time = self._start_time
+        return snapshot
+
     def to_dict(self) -> dict[str, int | float]:
         """Convert statistics to dictionary format."""
         return {

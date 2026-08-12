@@ -327,11 +327,22 @@ class CRUDMatrixGenerator:
     # ------------------------------------------------------------------
 
     def _collect_open_modes(self, statements: list) -> None:
-        """Record OPEN modes for each file referenced in OPEN statements."""
+        """Record OPEN modes for each file referenced in OPEN statements.
+
+        ``IOOpenStatement.file_modes`` is the authoritative per-file source:
+        ``OPEN INPUT IN-FILE OUTPUT OUT-FILE`` opens each file under its own
+        mode group, while ``open_mode`` only ever reflects the statement's
+        *first* mode group. Fall back to ``open_mode`` for any file the
+        parser recorded no per-file mode for.
+        """
         for stmt in statements:
-            if isinstance(stmt, IOOpenStatement) and stmt.open_mode:
-                mode = stmt.open_mode.upper()
+            if isinstance(stmt, IOOpenStatement):
+                file_modes = getattr(stmt, "file_modes", None) or {}
                 for file_name in stmt.file_names:
+                    mode = file_modes.get(file_name) or stmt.open_mode
+                    if not mode:
+                        continue
+                    mode = mode.upper()
                     entry = self._get_or_create_file_entry(file_name.upper())
                     if mode not in entry.open_modes:
                         entry.open_modes.append(mode)

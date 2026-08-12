@@ -5871,7 +5871,11 @@ class TestRealConditionText:
             e for e in report.edges if e.edge_type == FlowEdgeType.EVALUATE_WHEN
         ]
         assert len(when_edges) == 1
-        assert when_edges[0].condition == "WHEN 'A'"
+        # Non-blank literal WHEN selectors keep their unquoted parser
+        # representation (pinned by
+        # tests/regression/test_evaluate_space_literal_when.py), so the
+        # flow edge label reflects that same shape.
+        assert when_edges[0].condition == "WHEN A"
 
     def test_if_condition_with_multi_char_literal_preserves_quotes(self) -> None:
         source = """\

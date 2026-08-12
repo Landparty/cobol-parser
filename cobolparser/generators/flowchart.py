@@ -90,6 +90,21 @@ _RECURSION_LINK_STYLE = "stroke:#e0a800,stroke-width:2px,stroke-dasharray:5 5"
 _GOTO_LINK_STYLE = "stroke:#d6336c,stroke-width:2px,stroke-dasharray:3 3"
 
 
+def _external_call_target(ext: dict) -> str:
+    """The called-program name from an external-call record.
+
+    ``EdgeCollector.process_call`` (analysis/program_flow/edges.py) emits the
+    name under the ``"program"`` key; ``"target"`` is kept as a fallback for
+    hand-built report dicts that predate this fix. Returned UPPERCASED so the
+    synthetic ``EXT_*`` node id agrees with ``FlowEdge.target``, which the
+    edge collector uppercases (``call_info["program"]`` keeps the source's
+    original case) -- otherwise a lowercase CALL literal produced an edge
+    pointing at an ``EXT_`` id no node declared.
+    """
+    target = ext.get("program") or ext.get("target") or ""
+    return target.upper()
+
+
 def _sanitize_id(name: str) -> str:
     """Return a safe identifier derived from *name*.
 
@@ -254,7 +269,7 @@ class MermaidFlowchartGenerator:
         if options.show_external_calls:
             seen_ext: set[str] = set()
             for ext in report.external_calls:
-                target = ext.get("target", "")
+                target = _external_call_target(ext)
                 if not target or target in seen_ext:
                     continue
                 seen_ext.add(target)
@@ -497,7 +512,7 @@ class DotFlowchartGenerator:
         if options.show_external_calls:
             seen_ext: set[str] = set()
             for ext in report.external_calls:
-                target = ext.get("target", "")
+                target = _external_call_target(ext)
                 if not target or target in seen_ext:
                     continue
                 seen_ext.add(target)

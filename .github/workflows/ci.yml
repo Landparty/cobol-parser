@@ -17,7 +17,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install ruff black
+      # Pinned to match .pre-commit-config.yaml so local hooks and CI agree.
+      - run: pip install "ruff==0.15.0" "black==26.3.0"
       - run: ruff check .
       - run: black --check .
 
@@ -28,7 +29,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install mypy
+      # Pinned to match .pre-commit-config.yaml so local hooks and CI agree.
+      - run: pip install "mypy==1.20.0"
       - run: mypy cobolparser/
 
   build:
@@ -45,7 +47,7 @@ jobs:
       - run: pip install -e ".[dev,fast]"
       - run: python setup.py build_ext --inplace
 
-  # Full pytest suite (~5,969 tests). Manual-only — run locally during
+  # Full pytest suite (~8,000 tests). Manual-only — run locally during
   # development; trigger via workflow_dispatch when CI needs to confirm.
   test:
     if: github.event_name == 'workflow_dispatch'

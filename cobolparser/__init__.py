@@ -192,6 +192,10 @@ from .profiling import (
 # )
 
 
+# Backward-compatible alias: the backend integration contract historically
+# referred to the canonical parse exception as ``CobolParseError``.
+CobolParseError = ParseError
+
 # Version info
 __version__ = "1.5.3"
 __author__ = "Samuel Dion"
@@ -201,6 +205,7 @@ __license__ = "Proprietary"
 __all__ = [
     # Core parsing errors and configuration
     "ParseError",
+    "CobolParseError",
     "ParseStatistics",
     # AST model classes
     "CobolProgram",

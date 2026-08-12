@@ -41,6 +41,13 @@ class DynamicCallAnalyzer:
     def __init__(self) -> None:
         """Initialize the value tracker."""
         self._variable_values: dict[str, set[str]] = {}
+        # Variables whose tracked value set is known to be INCOMPLETE: they
+        # received a MOVE from an identifier-shaped source this analyzer does
+        # not track (e.g. `MOVE WS-INPUT-PROG TO WS-TARGET` where
+        # WS-INPUT-PROG has no VALUE clause and no tracked MOVE). Recording
+        # the source's own *name* as a possible value -- the old behavior --
+        # polluted the value set with a data-name that is not a value at all.
+        self._incomplete_variables: set[str] = set()
         self._dynamic_calls: list[CallStatement] = []
 
     def analyze(self, ast: CobolProgram) -> None:
@@ -51,6 +58,7 @@ class DynamicCallAnalyzer:
         """
         # Reset state
         self._variable_values = {}
+        self._incomplete_variables = set()
         self._dynamic_calls = []
 
         # First pass: collect initial values from data definitions
@@ -93,15 +101,17 @@ class DynamicCallAnalyzer:
                 # Check if source is a known variable (propagate its values)
                 if source_upper in self._variable_values:
                     source_values = self._variable_values[source_upper]
+                    source_incomplete = source_upper in self._incomplete_variables
                     for target in targets:
                         target_name = target.upper()
                         if target_name not in self._variable_values:
                             self._variable_values[target_name] = set()
                         self._variable_values[target_name].update(source_values)
-                else:
-                    # Source is not a known variable, treat as a literal value
-                    # The parser strips quotes from STRING_LITERAL tokens, so
-                    # "PROGRAM-A" becomes PROGRAM-A
+                        if source_incomplete:
+                            self._incomplete_variables.add(target_name)
+                elif self._is_definite_literal(source):
+                    # A quoted string, numeric literal, or figurative
+                    # constant: an actual value, safe to record.
                     source_value = self._extract_literal_value(source)
 
                     if source_value:
@@ -110,6 +120,17 @@ class DynamicCallAnalyzer:
                             if target_name not in self._variable_values:
                                 self._variable_values[target_name] = set()
                             self._variable_values[target_name].add(source_value)
+                else:
+                    # Identifier-shaped source with no tracked values: the
+                    # target now holds a value this analyzer cannot know.
+                    # Recording the source's NAME as a value would pollute
+                    # the set (`MOVE WS-INPUT-PROG TO WS-TARGET` is not a
+                    # MOVE of the literal "WS-INPUT-PROG") -- instead the
+                    # target's value set is marked incomplete, surfaced on
+                    # dynamic CALL nodes via the
+                    # "possible_values_incomplete" metadata flag.
+                    for target in targets:
+                        self._incomplete_variables.add(target.upper())
 
         # Recursively process children
         if hasattr(node, "children"):
@@ -126,14 +147,54 @@ class DynamicCallAnalyzer:
                     # Populate the possible values
                     values = sorted(self._variable_values[var_name])
                     node.set_possible_values(values)
+                if var_name in self._incomplete_variables:
+                    # The variable also received at least one value this
+                    # analyzer could not resolve, so possible_values (even
+                    # when populated) is not exhaustive.
+                    node.set_metadata("possible_values_incomplete", True)
 
         # Recursively process children
         if hasattr(node, "children"):
             for child in node.children:
                 self._populate_dynamic_calls(child)
 
+    @staticmethod
+    def _is_definite_literal(source: str) -> bool:
+        """True only for a source that is certainly a VALUE, never a name:
+        a quoted string literal, a numeric literal, or a figurative constant.
+
+        An identifier-shaped source (``PROGRAM-A``, ``WS-INPUT-PROG``) is NOT
+        definite -- the parser keeps quotes on ``MoveStatement.source``, so an
+        unquoted hyphenated token is a data-name reference, not a literal.
+        ``_track_move_statements`` uses this gate before recording a value;
+        sources failing it mark the target's value set incomplete instead.
+        """
+        if not source:
+            return False
+        s = source.strip()
+        if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+            return True
+        if s and s.replace("-", "").replace("+", "").replace(".", "").isdigit():
+            return True
+        return s.upper() in (
+            "ZERO",
+            "ZEROS",
+            "ZEROES",
+            "SPACE",
+            "SPACES",
+            "LOW-VALUE",
+            "LOW-VALUES",
+            "HIGH-VALUE",
+            "HIGH-VALUES",
+        )
+
     def _extract_literal_value(self, source: str) -> str | None:
         """Extract literal value from source string.
+
+        Note: the trailing identifier-shaped fallback below is deliberately
+        permissive (it echoes back any name-shaped token); callers recording
+        values must first gate on :meth:`_is_definite_literal` so a bare
+        data-name is never recorded as if it were a value.
 
         Args:
             source: Source string that might be a literal

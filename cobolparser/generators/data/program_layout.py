@@ -98,7 +98,11 @@ class ProgramLayoutIndex:
         self._records_by_file: dict[str, list[CobolDataItem]] = {}
         self._file_facts: dict[str, FileFacts] = {}
         self._name_index: dict[str, list[ResolvedField]] = {}
-        self._condition_index: dict[str, ResolvedField] = {}
+        # Level-88 condition name -> every parent field it resolves to. More
+        # than one distinct parent (the same 88 name declared under fields in
+        # different records) is an ambiguity: lookups refuse to guess, same
+        # policy as resolve()/record_named().
+        self._condition_index: dict[str, list[ResolvedField]] = {}
         self._records_by_name: dict[str, list[tuple[str, CobolDataItem]]] = {}
         self._section_records: dict[str, list[CobolDataItem]] = {
             attr: [] for attr in _SECTION_NAMES.values()
@@ -232,9 +236,16 @@ class ProgramLayoutIndex:
 
         candidates = self._name_index.get(base)
         if not candidates:
-            condition = self._condition_index.get(base)
-            if condition is not None:
-                return condition
+            conditions = self._condition_index.get(base)
+            if conditions:
+                parents = sorted({c.spec.qualified_name for c in conditions})
+                if len(parents) == 1:
+                    return conditions[0]
+                # The same 88 name is declared under more than one distinct
+                # parent field (e.g. in two different records): refuse to
+                # guess, record the ambiguity -- same policy as bare-name
+                # and record_named() lookups.
+                self.ambiguities[base] = parents
             return None
 
         if qualifiers:
@@ -358,7 +369,9 @@ class ProgramLayoutIndex:
             if isinstance(child, ConditionNameItem):
                 owners = qualified_index.get(qualified)
                 if owners:
-                    self._condition_index[child.name.upper()] = owners[0]
+                    self._condition_index.setdefault(child.name.upper(), []).append(
+                        owners[0]
+                    )
             elif isinstance(child, CobolDataItem):
                 self._index_condition_names(child, item_path, qualified_index)
 

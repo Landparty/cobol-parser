@@ -7,7 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+* **api:** `CobolParseError` is exported as a backward-compatible alias of
+  `ParseError` — the backend integration contract historically referred to
+  the canonical parse exception by that name, which never resolved.
+* **tooling:** the `.claude/settings.json` `PostToolUse` OKF-reminder hook
+  documented in CLAUDE.md is now actually checked in (`.gitignore` gained a
+  scoped exception), and `.githooks/pre-commit` is committed with its
+  executable bit so git runs the OKF staleness check instead of silently
+  skipping a non-executable hook.
+* **ci:** ruff/black/mypy versions in the lint and typecheck jobs are
+  pinned to match `.pre-commit-config.yaml`, so a new formatter release
+  can no longer break CI without a deliberate version bump.
+
 ### Fixed
+
+* **parser:** restored the EVALUATE WHEN selector contract regressed by
+  commit `17fa400`: non-blank string-literal selectors keep their
+  unquoted representation; only blank/whitespace-only literals are
+  re-quoted. (This had turned the full test suite red at HEAD.)
+* **parser:** MOVE statements no longer corrupt multi-word sources —
+  qualified names (`WS-A OF WS-GRP`), `FUNCTION` calls, and subscripted
+  references are joined with correct spacing instead of concatenated.
+* **parser:** `TokenStream.expect()` raises `TokenMismatch` instead of
+  silently matching any expected value against an empty-valued (EOF)
+  token, so a missing terminating period at end-of-file is diagnosed.
+* **parser:** `ParseResult.statistics` is an independent snapshot;
+  reusing one `CobolParser` no longer clobbers earlier results.
+* **parser:** IDENTIFICATION DIVISION detection recognizes
+  sequence-numbered fixed-format headers (`000100 IDENTIFICATION
+  DIVISION.`) when skipping leading non-COBOL text.
+* **lexer:** the compiled `_lexer_fast` lexer resets its warnings on each
+  `tokenize()` call, matching the pure-Python lexer instead of
+  duplicating warnings across calls (checked-in `.c` regenerated).
+* **preprocess:** copybook resolution is consistently
+  first-configured-directory-wins across the resolver's indexed (Tier-2)
+  and filesystem-search (Tier-3) paths.
+* **preprocess:** `expand_copybooks()` honors a caller-supplied
+  `path_resolver` instead of unconditionally replacing it.
+* **preprocess:** removed the unused exported `COPY_PATTERN` regex, which
+  exhibited exponential backtracking (ReDoS) on unterminated
+  `COPY ... REPLACING` input.
+* **analysis:** `ConstantFolder` poisons fields written in AT END /
+  INVALID KEY / ON SIZE ERROR / ON OVERFLOW / ON EXCEPTION / AT EOP
+  handler bodies instead of emitting stale `field_equals` expectations,
+  and orders paragraphs by source line so PERFORM THRU ranges spanning
+  top-level paragraphs and sections fold correctly.
+* **analysis:** boundary inventory and constraint extraction descend into
+  ON SIZE ERROR / NOT ON OVERFLOW / NOT AT EOP clause bodies (a CALL
+  inside ON SIZE ERROR is now inventoried).
+* **analysis:** OPEN/CLOSE boundaries carry the declared FILE STATUS
+  field, enabling the gen-fixtures "OPEN → FILE STATUS 35" error-status
+  scenario family that previously could never fire.
+* **analysis:** SQL/CICS/DLI boundary keys are order-independent unique
+  prefixes computed against every other same-category site's full text.
+* **analysis:** `domains.solve()` picks numeric witnesses on the field's
+  decimal grid and re-verifies the rendered form, so a witness can no
+  longer round onto an excluded value (e.g. PIC 9 with `ne 4` yielding
+  `"4"`).
+* **analysis:** `IOSequenceAnalyzer` treats only STOP RUN (not
+  `STOP 'literal'`) as program termination.
+* **analysis:** `CRUDMatrixGenerator` records each file's own mode for
+  multi-mode `OPEN INPUT A OUTPUT B` statements via
+  `IOOpenStatement.file_modes`.
+* **analysis:** `DynamicCallAnalyzer` no longer records an untracked
+  identifier-shaped MOVE source as a possible CALL value; such CALLs are
+  flagged `possible_values_incomplete` instead.
+* **generators:** flowchart generators render external-CALL nodes from
+  real `ProgramFlowAnalyzer` reports (the analyzer emits `"program"`,
+  not `"target"`; `EXT_*` ids are uppercase-normalized).
+* **generators:** `ProgramLayoutIndex` records an ambiguity for duplicate
+  level-88 condition names instead of silently keeping the last one.
+* **tests:** `contract`/`integration`/`io` pytest markers are applied
+  structurally by per-directory conftest hooks — `-m contract` selects
+  386 tests (was 66), `-m io` 183 (was 69), and 36 previously-missed
+  integration tests are covered.
+* **tests:** the 12 permanently-skipped "Implementation pending -
+  Phase 6/7" copybook-expansion placeholders are real tests now, and
+  ~30 assert-free or tautological real-world parsing tests assert parse
+  success and AST content.
+
+### Removed
+
+* Dead code identified by the 2026-08-12 audit: unreachable multi-word
+  lexer `KEYWORDS` entries, a discarded expansion cache-key call, the
+  unused batch file-content cache, and a no-op empty-SECTION branch in
+  the program-flow scanner.
 
 * **analysis:** `DeadCodeAnalyzer` had no concept of fall-through at all --
   unlike `ProgramFlowAnalyzer` (which has `graph.build_fall_through_edges`),

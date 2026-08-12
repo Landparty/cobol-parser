@@ -19,7 +19,7 @@ from `ast_base.py` and must implement `to_dict()`. Instantiate nodes via
 class SourceLocation:
     line: int
     column: int
-    filename: str
+    length: int | None = None   # no filename field — file identity travels on ParseResult
 
 class ASTNode:
     location: SourceLocation | None
@@ -255,7 +255,9 @@ Notes (2026-07-07 audit remediation):
 from cobolparser.core.ast_factory import get_factory, create_node
 
 factory = get_factory()
-node = create_node("MoveStatement", location=loc, sending=..., receiving=...)
+# create_node takes the node CLASS (not a string) and the node's own
+# constructor kwargs; location is passed positionally to the node.
+node = create_node(MoveStatement, loc, source="WS-A", targets=["WS-B"])
 ```
 
 Raises `NodeTypeError` for unknown node types, `FieldValidationError` for bad fields.
