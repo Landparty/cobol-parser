@@ -281,11 +281,14 @@ def parse_files_with_copybooks(
     top_n: int = 50,
     prof_output: str | None = None,
 ) -> list[BatchResult]:
-    """Parse multiple COBOL files with shared copybook expansion cache.
+    """Parse multiple COBOL files with shared copybook path resolution.
 
     Optimized for large batch scenarios (3000+ programs, 50+ copybooks each)
-    where many programs reference the same copybooks. The shared file content
-    cache avoids redundant I/O and re-expansion of the same copybook content.
+    where many programs reference the same copybooks. A single ``PathResolver``
+    (with its resolution and directory-index caches) is reused across every
+    file, and copybook file reads go through the module-level LRU file cache
+    in ``cobolparser.preprocess.copybook_expander``, so repeated lookups of
+    the same copybooks avoid redundant filesystem work.
 
     This function runs sequentially in the main process to maximize cache hits.
     For CPU-bound scenarios where copybook expansion is minimal, use parse_files()
@@ -330,9 +333,6 @@ def parse_files_with_copybooks(
         max_nesting_depth=max_nesting_depth,
         max_cache_entries=copybook_cache_size,
     )
-
-    # Pre-build the file content cache (read each copybook file once)
-    _file_content_cache: dict[str, str] = {}
 
     # Reusable path resolver to avoid recreating per file
     path_resolver = PathResolver(search_config)

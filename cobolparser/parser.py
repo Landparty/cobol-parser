@@ -40,8 +40,15 @@ from .profiling import ProfilerContext, ProfilingResult
 
 logger = logging.getLogger(__name__)
 
-# Pre-compiled regex for ID division detection (avoids re-compilation per parse call)
-_ID_DIV_RE = re.compile(r"^\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE)
+# Pre-compiled regex for ID division detection (avoids re-compilation per parse call).
+# Fixed-format source may carry a sequence area in columns 1-6, so an optional
+# exactly-6-character digits/spaces prefix is allowed before the usual leading
+# whitespace ("000100 IDENTIFICATION DIVISION."). Requiring exactly 6 such
+# characters (not "up to 6 of anything digit-shaped") keeps random text that
+# merely starts with digits from matching.
+_ID_DIV_RE = re.compile(
+    r"^(?:[0-9 ]{6})?\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE
+)
 
 
 @dataclass
@@ -617,7 +624,9 @@ class CobolParser:
             ast=ast,
             errors=self.errors.copy(),
             warnings=self.warnings.copy(),
-            statistics=self.statistics,
+            # Snapshot: self.statistics is reset in place on the next
+            # parse() call, which would clobber this result's statistics.
+            statistics=self.statistics.copy(),
         )
 
 

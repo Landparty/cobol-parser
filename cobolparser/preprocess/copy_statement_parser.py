@@ -33,67 +33,13 @@ COMMENT_LINE_PATTERN = re.compile(r"^.{6}[*\/]", re.MULTILINE)
 # last char of the EOL so col_num arithmetic stays correct across conventions.
 _EOL_RE = re.compile(r"\r\n|\r|\n")
 
-# COPY statement regex patterns supporting IBM Enterprise COBOL syntax
-# Matches: COPY member, COPY "member", COPY member IN/OF library, COPY member SUPPRESS, COPY member REPLACING
-#
-# The REPLACING clause pattern handles:
-# - Pseudo-text blocks (==...==) which may contain periods
-# - Plain identifiers and literals after BY
-# A period inside ==...== should NOT terminate the COPY statement.
-# The statement ends with a period that follows the complete REPLACING clause.
-#
-# Pattern structure:
-#   COPY <member> [IN/OF <library>] [SUPPRESS [PRINTING]] [REPLACING <clauses>] .
-#
-# REPLACING operands can be:
-# - Pseudo-text: ==...== or :...:
-# - Identifiers: WORD-NAME, FIELD-01, etc.
-# - Literals: "string" or 'string'
-# - Numeric literals with optional sign: +2, -3, 00001
-# - Figurative constants: SPACE, ZERO, etc.
-
-# Helper pattern for REPLACING operands (pseudo-text, identifier, literal, or numeric)
-_REPLACING_OPERAND = (
-    r"(?:"
-    r"==(?:[^=]|=[^=])*=="  # Pseudo-text ==...==
-    r"|"
-    r":(?:[^:])*:"  # Alternate pseudo-text :...:
-    r"|"
-    r'"[^"]*"'  # Double-quoted literal
-    r"|"
-    r"'[^']*'"  # Single-quoted literal
-    r"|"
-    r"[+-]?[0-9]+(?:\.[0-9]+)?"  # Numeric literal with optional sign and decimal
-    r"|"
-    r"[A-Za-z0-9][-A-Za-z0-9]*(?:\s+(?:IN|OF)\s+[A-Za-z0-9][-A-Za-z0-9]*)*(?:\s*\([^)]+\))?"  # Qualified identifier with optional subscript
-    r")"
-)
-
-COPY_PATTERN = re.compile(
-    r"\bCOPY\s+"  # COPY keyword
-    r"(?:"  # Member name (quoted or unquoted)
-    r'"([^"]+)"'  # Quoted member name (group 1)
-    r"|"
-    r"'([^']+)'"  # Single-quoted member name (group 2)
-    r"|"
-    r"([A-Za-z0-9_.-]+)"  # Unquoted member name (group 3) - allow dots for extensions like .CPY
-    r")"
-    r"(?:\s+(?:IN|OF)\s+([A-Za-z0-9_-]+))?"  # Optional library qualifier (group 4)
-    r"(?:\s+(SUPPRESS)(?:\s+(PRINTING))?)?"  # Optional SUPPRESS [PRINTING] clause (groups 5, 6)
-    r"(?:\s+REPLACING\s+"  # Optional REPLACING clause start
-    r"("  # Capture the entire REPLACING content (group 7)
-    r"(?:"
-    r"(?:LEADING\s+|TRAILING\s+)?"  # Optional LEADING/TRAILING modifier
-    + _REPLACING_OPERAND  # Find operand
-    + r"\s+BY\s+"
-    + _REPLACING_OPERAND  # Replace operand
-    + r"\s*"
-    r")+"
-    r")"
-    r")?"
-    r"\s*\.",  # Terminating period (NOT inside pseudo-text)
-    re.IGNORECASE | re.DOTALL,
-)
+# NOTE (audit 2026-08-12, S-1): the module previously exported a monolithic
+# COPY_PATTERN regex here. It was unused by the live expansion path (the real
+# scanner is CopyStatementLexer.tokenize_copy_statements, a linear
+# hand-written lexer) and its ambiguous REPLACING sub-pattern exhibited
+# exponential backtracking on unterminated input such as
+# "COPY X REPLACING BY BY BY ... BY %". It has been removed rather than
+# de-ambiguated; use CopyStatementLexer instead.
 
 
 def normalize_continuation_lines(source: str, indicator_position: int = 6) -> str:
@@ -969,6 +915,5 @@ __all__ = [
     "is_comment_line",
     "is_within_string_literal",
     "remove_comment_lines",
-    "COPY_PATTERN",
     "FIXED_FORMAT_CODE_END_COLUMN",
 ]
