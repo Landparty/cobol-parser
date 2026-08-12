@@ -127,6 +127,17 @@ substance, differing only in each target format's own attribute syntax:
   diagram entirely). All three `process_*` methods now compute the range
   once and pass it to both the base edge and its `*_THRU` sibling.
 
+- **Quoted edge labels.** `MermaidFlowchartGenerator` wraps every non-empty
+  edge label in double quotes (`-->|"label text"|`), reusing the `#quot;`
+  entity escape already used for branch/arm condition text. **Bug fixed
+  2026-08-11:** labels were previously written unquoted between the `|...|`
+  pipes; Mermaid's flowchart lexer reads an unquoted `(` or `[` there as the
+  start of a node shape (`PS`/`SQS` tokens), not literal text, so a loop
+  annotation (`... (loop)`), `CALL_DYNAMIC`'s `"CALL (dynamic)"` label, or a
+  `[THRU n]` badge broke parsing entirely — e.g. a `PERFORM UNTIL` loop edge
+  in `legacy-application/cobol/DEPTBMP.cbl`. DOT is unaffected — `_dot_str`
+  already quotes every DOT label.
+
 Reference tests: `tests/unit/test_flowchart_generator.py` —
 `TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge
 sections, plus `test_linkstyle_index_accounts_for_terminal_node_links` and

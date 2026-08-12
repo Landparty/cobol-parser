@@ -1,5 +1,26 @@
 # OKF Update Log
 
+## 2026-08-11 (Mermaid flowchart edge labels broke on unquoted parens/brackets)
+
+A user's Program Flow webview (mocky-mock-vscode-extension) hit a Mermaid
+parse error rendering `legacy-application/cobol/DEPTBMP.cbl`:
+`Parse error ... UNTIL NO-MORE-MSGS (loop)| N_2000_PROCE ... got 'PS'`.
+Root cause: `MermaidFlowchartGenerator._edge_style`/`generate` in
+`cobolparser/generators/flowchart.py` wrote edge labels unquoted inside
+Mermaid's `-->|label|` syntax. Mermaid's flowchart lexer reads an unquoted
+`(` or `[` inside such a label as the start of a node shape (`PS`/`SQS`
+tokens), not literal text -- so any `PERFORM UNTIL ... (loop)` annotation,
+`CALL_DYNAMIC`'s `"CALL (dynamic)"` label, or `[THRU n]` badge broke
+parsing. Fixed by wrapping the joined label text in quotes, reusing the
+`#quot;` entity escape branch/arm labels already used for embedded double
+quotes. DOT output is unaffected (`_dot_str` already quotes every label).
+
+Verified against a real Mermaid 11.16.1 parse (the version pinned in the
+VS Code extension): the pre-fix `DEPTBMP.cbl` output fails to parse, the
+post-fix output parses cleanly. Full writeup in
+[generators.md](generators.md)'s "Flowcharts" section; new/updated tests
+noted in [tests.md](tests.md).
+
 ## 2026-08-12 (Core audit fixes: EVALUATE selector contract restored, MOVE source join, expect()-at-EOF, statistics snapshot, sequence-numbered ID division, path-resolver precedence + honored parameter, ReDoS regex removed, compiled-lexer warnings reset, dead code)
 
 All pinned by `tests/regression/test_audit_2026_08_12_core.py` (plus the
