@@ -1,5 +1,40 @@
 # OKF Update Log
 
+## 2026-08-13 (New analyzer: `UnusedVariableAnalyzer` + `unused-variables` CLI)
+
+New `cobolparser/analysis/unused_variables.py` (`UnusedVariableAnalyzer`),
+following the existing `<Analyzer>().analyze(ast) -> <Report>` shape.
+Detects DATA DIVISION items never referenced in the PROCEDURE DIVISION —
+FILLER and synthetic `ANONYMOUS-<level>-<line>` names always excluded,
+group items used-if-any-descendant-used, level-88 usage marks its parent
+used, REDEFINES/OCCURS DEPENDING ON/RENAMES treated as real structural
+dependencies. Backed by the new `unused-variables` CLI subcommand.
+
+Two findings worth flagging for future sessions, both documented in the
+new module's docstring rather than fixed here (out of scope for adding an
+analyzer):
+
+1. `expand_copybooks`'s `preserve_source_locations` parameter is threaded
+   all the way to `_expand_source_recursive` but never actually populates
+   `context.source_maps` — a no-op feature, not a working one. The new
+   analyzer's `--exclude-copybook-variables` flag instead determines
+   copybook provenance by diffing `collect_declared_items()` on an
+   unexpanded parse against the expanded one (see
+   `_parse_without_copybook_expansion` in `cli/parse.py`).
+2. SCREEN SECTION / REPORT SECTION / COMMUNICATION SECTION are not
+   modeled by the DATA DIVISION parser (only FILE/WORKING-STORAGE/
+   LOCAL-STORAGE/LINKAGE are recognized section names) — their clauses
+   get mis-parsed as nested WORKING-STORAGE data items (e.g. a SCREEN
+   SECTION `COLUMN 5` clause becomes an item literally named `COLUMN`).
+   Confirmed empirically against `tests/samples/screen_section_io.cbl`
+   and `report_writer.cbl` while validating the new analyzer against the
+   full sample corpus. Spawned as a separate follow-up task, not fixed
+   here.
+
+Updated [analysis.md](analysis.md) (new `UnusedVariableAnalyzer` section +
+module map row), [cli.md](cli.md) (new `unused-variables` subcommand
+section). Timestamps bumped to 2026-08-13T00:00Z.
+
 ## 2026-08-12 (Program-flow label fidelity: ASCII, `<`/`>` escaping, arm summaries)
 
 Driven by VS Code Program Flow webview feedback (mocky-mock-vscode-extension,

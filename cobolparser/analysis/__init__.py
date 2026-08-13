@@ -192,6 +192,23 @@ def __getattr__(name: str) -> object:
             "TableEntry": TableEntry,
         }
         return _map[name]
+    if name in (
+        "UnusedVariableAnalyzer",
+        "UnusedVariableReport",
+        "UnusedVariableItem",
+    ):
+        from .unused_variables import (
+            UnusedVariableAnalyzer,
+            UnusedVariableItem,
+            UnusedVariableReport,
+        )
+
+        _map = {
+            "UnusedVariableAnalyzer": UnusedVariableAnalyzer,
+            "UnusedVariableReport": UnusedVariableReport,
+            "UnusedVariableItem": UnusedVariableItem,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -236,4 +253,7 @@ __all__ = [
     "FlowNode",
     "FlowEdge",
     "FlowEdgeType",
+    "UnusedVariableAnalyzer",
+    "UnusedVariableReport",
+    "UnusedVariableItem",
 ]

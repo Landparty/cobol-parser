@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-04T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -208,6 +208,23 @@ cobol-parser dead-code <file.cbl>
 ```
 
 Runs `DeadCodeAnalyzer` and lists unreferenced paragraphs/sections.
+
+## Unused-Variables
+
+```bash
+cobol-parser unused-variables <file.cbl> [--copybook-path DIR ...] \
+    [--exclude-copybook-variables] [--profile ...]
+```
+
+Runs `UnusedVariableAnalyzer` (see `.okf/analysis.md`) and lists DATA
+DIVISION items never referenced in the PROCEDURE DIVISION.
+`--exclude-copybook-variables` filters out unused items that came from an
+expanded COPY; it only has an effect together with `--copybook-path`
+(otherwise a stderr warning notes the no-op) since copybook provenance is
+determined by parsing the source a second time *without* expansion
+(`_parse_without_copybook_expansion`) and diffing declared item names
+against the expanded AST — `expand_copybooks`'s own line-tracking
+(`preserve_source_locations`) doesn't work (see `.okf/analysis.md`).
 
 ## Program-Flow
 

@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
-tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-12T18:00:00Z
+description: 16 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
+tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 15 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 16 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -28,6 +28,7 @@ from cobolparser import (
     LanguageEnvironmentAnalyzer,
     CRUDMatrixGenerator,
     DynamicCallAnalyzer,
+    UnusedVariableAnalyzer,
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 ```
@@ -182,6 +183,111 @@ is still unconditionally ensured via `.setdefault()` even when the guard
 skips the SECTION's own registration, since the paragraph loop right below
 it always appends into that bucket. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestDeadCodeIntegration::test_duplicate_name_across_top_level_paragraph_and_section_header`.
+
+## UnusedVariableAnalyzer (`unused_variables.py`, 2026-08-13)
+
+```python
+report: UnusedVariableReport = UnusedVariableAnalyzer().analyze(ast)
+# report.unused_items: list[UnusedVariableItem]  (name/level/section/location/from_copybook)
+```
+
+Detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE,
+any level, FILLER and synthetic `ANONYMOUS-<level>-<line>` names always
+excluded) never referenced anywhere in the PROCEDURE DIVISION. Single-program
+scope, same as `DeadCodeAnalyzer`/`ProgramFlowAnalyzer` — does not recurse
+into `ast.contained_programs`.
+
+**Reference collection is `.operands`-first, with per-statement-type
+extras.** Every `CobolStatement` already accumulates most of its own
+identifier/literal tokens into `.operands` via `_add_unique_operand`/
+`add_operand`, but an empirical audit (grepping every statement model's
+setters) found real gaps where a setter never reaches `.operands` at all:
+`ExecSqlStatement.host_variables`/`.null_indicators` (SQL statements don't
+touch `.operands` at all), `UnstringStatement.source_operand`/
+`.into_targets`/`.pointer_variable`/`.tallying_variable`,
+`StringStatement.into_target`/`.pointer_variable`,
+`InspectStatement.tallying_clauses`/`.replacing_clauses`/
+`.converting_from`/`.converting_to`, `SearchStatement.table_name`/
+`.varying_variable`, `SortStatement.keys`/`MergeStatement.keys` (the
+`"field"` key), and `PerformStatement.varying_clause`/`.after_clauses`
+(`"variable"`/`"from_value"`/`"by_value"`). All handled via the module-level
+`_STR_ATTR_EXTRAS`/`_DICT_LIST_EXTRAS` lookup tables plus explicit
+per-type branches in `_collect_referenced_names`, rather than trusting
+`.operands` alone. The tables are looked up by walking `type(stmt).__mro__`,
+not exact type — an exact-type lookup would silently lose a keyed
+statement class's extras the moment any real subclass of it existed (none
+do today, but the failure mode is exactly the "used field reported
+unused" bug this module exists to avoid), pinned by
+`TestExtrasLookupIsMroAware` in `tests/unit/analysis/test_unused_variables.py`.
+
+**Condition/expression trees are walked separately from `.operands`.**
+`IfStatement.condition`, `PerformStatement.until_condition`/
+`after_clauses[].until_condition`, and `ComputeStatement.expression_tree`
+never reach `.operands` (confirmed: `IfStatement.set_condition` only calls
+`add_child`, matching `program_flow/condition_text.py`'s note that the raw
+condition text/tree lives entirely off the statement). `_walk_expression_operands`
+mirrors `render_condition_text`'s dispatch (`LogicalExpression` ->
+recurse both sides; `ConditionalExpression`/`ArithmeticExpression` ->
+`left_operand`/`right_operand`; `FunctionCall` -> `arguments`) but collects
+leaf identifiers instead of rendering text, falling back to a best-effort
+regex over `operands[0]`/`raw_condition` for a node shape it can't
+decompose structurally (SEARCH WHEN and `EVALUATE TRUE` Condition-type
+selectors, per `constraints.py`'s same documented gap — see
+`ConstraintExtractor`'s section above). The fallback is deliberately
+over-inclusive: a false positive there only makes the analyzer *miss* an
+unused variable, never wrongly flag a used one.
+
+**Group items, level-88s, REDEFINES, and OCCURS DEPENDING ON are
+structural, not textual, dependencies.** A group item counts as used if
+any descendant field is used (post-order `is_used()` over `item.children`);
+a level-88 `ConditionNameItem` child being referenced (`IF ORDER-VALID`)
+marks its parent elementary item used too. `X REDEFINES Y` marks `Y` used
+whenever `X` is used (propagated to a fixpoint for REDEFINES chains,
+resolved by uppercased name via a `by_name` index — not structural item
+identity, a documented limitation for the rare case of duplicate
+same-named items at different qualification scopes). An `OCCURS ...
+DEPENDING ON` variable is unconditionally marked used via
+`_collect_data_division_references`, since it's a real runtime dependency
+even when never touched procedurally. Level-66 RENAMES targets
+(`renames_from`/`renames_through`) are marked used the same
+unconditional way.
+
+**Copybook provenance is set-difference, not line-tracking — because the
+line-tracking feature doesn't work.** `expand_copybooks`'s own
+`preserve_source_locations` parameter threads all the way down to
+`_expand_source_recursive` but never actually populates
+`context.source_maps` (a literal `pass` at the write site, with a comment
+admitting it's "disabled by default in the expander" — see
+[preprocessing.md](preprocessing.md) if that file gains its own note, or
+`copybook_expander.py` around the `preserve_locations and
+statement.source_location` check). Discovered empirically while designing
+this analyzer's copybook flag; not fixed here (a different, cached,
+perf-sensitive subsystem). Instead, `analyze()` takes an optional
+`copybook_item_names: set[str]` the caller computes by diffing
+`collect_declared_items()` on an *unexpanded* parse against the expanded
+one — see the `unused-variables` CLI subcommand
+(`_parse_without_copybook_expansion` in `cli/parse.py`) for the reference
+implementation. `include_copybook_variables=False` then excludes any
+unused item in that set from `report.unused_items` (tallied instead in
+`report.skipped_copybook_count`); the flag is a documented no-op when
+`copybook_item_names` is None.
+
+**SCREEN/REPORT/COMMUNICATION SECTION are not modeled by the DATA
+DIVISION parser** (only FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE are
+recognized section names — `parsers/divisions/data.py`), so their clauses
+get mis-parsed as nested WORKING-STORAGE data items (a SCREEN SECTION
+`COLUMN 5` clause becomes an item literally named `COLUMN`). Confirmed
+empirically against `tests/samples/screen_section_io.cbl` and
+`report_writer.cbl` while validating this analyzer against the sample
+corpus (`tests/samples/*.cbl` + `examples/cobol/shamrice/*.cbl`) — a
+parser-level fix is out of scope for this analyzer; tracked separately.
+Unnamed level-number entries (`ANONYMOUS-<level>-<line>`) are filtered by
+`collect_declared_items`, which catches some but not all of the noise
+(a mis-parsed clause keyword that happens to lex as an IDENTIFIER, like
+`COLUMN` or `TYPE`, is not distinguishable from a real data item at this
+layer).
+
+CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 
 ## ProgramFlowAnalyzer
 
@@ -1010,6 +1116,7 @@ programs without sections is unchanged. Pinned by
 | `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
 | `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
 | `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
+| `unused_variables.py` | `UnusedVariableAnalyzer` |
 
 # Silent-Failure Audit (2026-07-08)
 

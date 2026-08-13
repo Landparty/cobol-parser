@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis/cli:** `UnusedVariableAnalyzer` (`cobolparser.analysis.unused_variables`)
+  detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE)
+  never referenced anywhere in the PROCEDURE DIVISION, including group
+  items (used-if-any-descendant-used), level-88 condition names, REDEFINES
+  propagation, and OCCURS ... DEPENDING ON. Backed by the `unused-variables`
+  CLI subcommand, whose `--exclude-copybook-variables` flag filters out
+  items that came from an expanded COPY (`--copybook-path`) — determined
+  by diffing declared items against an unexpanded parse of the same
+  source, since `expand_copybooks`'s own `preserve_source_locations`
+  line-tracking is not implemented upstream.
 * **api:** `CobolParseError` is exported as a backward-compatible alias of
   `ParseError` — the backend integration contract historically referred to
   the canonical parse exception by that name, which never resolved.

@@ -93,6 +93,7 @@ cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--descri
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
+cobol-parser unused-variables <file.cbl> [--copybook-path DIR] [--exclude-copybook-variables]
 cobol-parser program-flow <file.cbl>
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
 cobol-parser io-sequence <file.cbl>
@@ -293,6 +294,7 @@ DynamicCallAnalyzer().analyze(parse_result.ast)
 # uses `.resolve(ast)`; LinkageChecker and MoveTypeChecker use `.check(ast)`):
 from cobolparser import (
     DeadCodeAnalyzer,           # report.dead_items
+    UnusedVariableAnalyzer,     # report.unused_items (DATA DIVISION items never referenced)
     ProgramFlowAnalyzer,        # report.edges (typed PERFORM/GO TO/CALL/fall-through; THRU range_members; classified cycle_details)
     IOLogger,                   # report.operations
     IOSequenceAnalyzer,         # report.violations

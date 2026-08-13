@@ -3,10 +3,22 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-12T18:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
+
+2026-08-13: New `tests/unit/analysis/test_unused_variables.py` (25 tests) for
+the new `UnusedVariableAnalyzer` (see [analysis.md](analysis.md)) — basic
+used/unused detection, FILLER/`ANONYMOUS-*` exclusion, group-item
+used-if-any-descendant-used, level-88 usage marking its parent used,
+IF/PERFORM UNTIL condition operands (exercising the expression-tree walk,
+not `.operands`), REDEFINES propagation, OCCURS DEPENDING ON, LINKAGE/FILE
+SECTION coverage, `copybook_item_names`/`include_copybook_variables`
+filtering, `TestExtrasLookupIsMroAware` (pins that the
+`_STR_ATTR_EXTRAS`/`_DICT_LIST_EXTRAS` lookup walks `type(stmt).__mro__`,
+not exact type), `to_dict()` serialization, top-level package export, and a
+`collect_declared_items()` unit test.
 
 2026-08-12: Test-infrastructure audit — `contract`/`integration`/`io`
 markers are now applied structurally by per-directory `conftest.py`
