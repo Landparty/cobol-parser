@@ -79,8 +79,15 @@ class DynamicCallAnalyzer:
                 if var_name:
                     if var_name not in self._variable_values:
                         self._variable_values[var_name] = set()
-                    # Store the value (remove quotes if present)
-                    value = str(node.value_clause).strip("\"'")
+                    # Route through the same literal-resolution path as MOVE
+                    # sources so a figurative constant (VALUE SPACES, VALUE
+                    # ZERO, ...) collapses to one canonical value instead of
+                    # surviving as its own raw keyword text alongside the
+                    # resolved value a MOVE of the same constant would add
+                    # (e.g. both "SPACES" and " " for the same variable).
+                    value = self._extract_literal_value(str(node.value_clause))
+                    if value is None:
+                        value = str(node.value_clause).strip("\"'")
                     self._variable_values[var_name].add(value)
 
         # Recursively process children
