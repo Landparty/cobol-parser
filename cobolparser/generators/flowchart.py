@@ -109,16 +109,22 @@ def _external_call_target(ext: dict) -> str:
 def _escape_mermaid_label(text: str) -> str:
     """Escape characters Mermaid mangles inside quoted label text.
 
-    ``"`` breaks the quoted-string lexing outright, and a bare ``>`` is
-    silently swallowed by Mermaid's (v11, htmlLabels:false) label
-    sanitization -- ``WS-PURGE-ERRORS > ZERO`` renders as
+    A bare ``>`` is silently swallowed by Mermaid's (v11, htmlLabels:false)
+    label sanitization -- ``WS-PURGE-ERRORS > ZERO`` renders as
     ``WS-PURGE-ERRORS ZERO`` and ``>=`` as ``=``. Mermaid's ``#name;``
-    entity syntax survives both the lexer and the sanitizer, so map all
-    three to entities (``<`` included: ``<`` followed by a letter reads
-    as an HTML tag opener and would be stripped the same way).
+    entity syntax survives both the lexer and the sanitizer for ``<``/``>``
+    (``<`` included: followed by a letter it reads as an HTML tag opener and
+    would be stripped the same way).
+
+    ``"`` breaks the quoted-string lexing outright, and its ``#quot;``
+    entity is NOT decoded on the SVG-text label path -- it renders as
+    literal ``&quot;`` (verified against Mermaid 11.12). These are
+    display-only labels, so a double quote becomes a plain apostrophe
+    instead: the parser normalizes COBOL literals to double quotes, and
+    ``MOVE 'ACTIVE' TO WS-STATE`` is how the source read anyway.
     """
     return (
-        text.replace('"', "#quot;").replace("<", "#lt;").replace(">", "#gt;")
+        text.replace('"', "'").replace("<", "#lt;").replace(">", "#gt;")
     )
 
 
@@ -392,7 +398,7 @@ class MermaidFlowchartGenerator:
                 # not literal text -- e.g. a PERFORM UNTIL edge's "(loop)"
                 # suffix or a THRU edge's "[THRU n]" badge breaks parsing
                 # without the quotes. _escape_mermaid_label additionally
-                # entity-escapes the "/</> that COBOL condition text can
+                # neutralizes the "/</> that COBOL condition text can
                 # carry into the label.
                 label_text = _escape_mermaid_label(" ".join(label_parts))
                 edge_str = f'    {src_id} {arrow}|"{label_text}"| {tgt_id}'

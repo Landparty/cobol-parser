@@ -9,8 +9,9 @@ same session). Three fixes in `generators/flowchart.py` +
 1. **ASCII-only emitted labels** — exit terminals now `"{kind} @ {line}"`
    (was `·`), `GOTO_DEPENDING` now `GO TO ... DEPENDING` (was `…`); cp1252
    CLI stdout vs UTF-8 consumers rendered them as `�`.
-2. **`_escape_mermaid_label()`** — `"`/`<`/`>` → `#quot;`/`#lt;`/`#gt;` in
-   every Mermaid label; Mermaid v11 (htmlLabels:false) swallows a bare `>`.
+2. **`_escape_mermaid_label()`** — `<`/`>` → `#lt;`/`#gt;` and `"` → `'` in
+   every Mermaid label; Mermaid v11 (htmlLabels:false) swallows a bare `>`,
+   and `#quot;` (unlike `#lt;`/`#gt;`) renders as literal `&quot;`.
 3. **`BranchArm.summary`** (new additive field) via new
    `analysis/program_flow/statement_text.py`
    (`summarize_statement`/`summarize_arm`); both generators render it in arm

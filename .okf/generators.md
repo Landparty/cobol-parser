@@ -150,16 +150,20 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   (cp1252) while consumers decode UTF-8, so any non-ASCII label character
   rendered as U+FFFD (`GOBACK � 118` in the webview). Pinned by the
   `test_output_is_ascii_only` tests (`out.encode("ascii")`).
-- **`"`/`<`/`>` entity-escaped in every Mermaid label.** Module-level
-  `_escape_mermaid_label()` maps them to `#quot;`/`#lt;`/`#gt;` in branch
-  conditions, arm labels, and edge labels. Mermaid v11 with
-  `htmlLabels:false` silently swallows a bare `>` from label text
-  (`WS-PURGE-ERRORS > ZERO` rendered as `WS-PURGE-ERRORS ZERO`, `>=` as
-  `=`) while `<`/`<>` happen to survive; the `#name;` entity form renders
-  correctly through both the lexer and the sanitizer (`#62;`-style
-  *numeric* entities do NOT — they come out as literal `&#62;` text in
-  SVG-text label mode; verified empirically against Mermaid 11.12).
-  DOT labels are not entity-escaped — Graphviz has no such mangling.
+- **`"`/`<`/`>` escaped in every Mermaid label.** Module-level
+  `_escape_mermaid_label()` maps `<`/`>` to `#lt;`/`#gt;` and `"` to a
+  plain apostrophe in branch conditions, arm labels, and edge labels.
+  Mermaid v11 with `htmlLabels:false` silently swallows a bare `>` from
+  label text (`WS-PURGE-ERRORS > ZERO` rendered as `WS-PURGE-ERRORS
+  ZERO`, `>=` as `=`) while `<`/`<>` happen to survive; the `#name;`
+  entity form renders correctly through both the lexer and the sanitizer
+  for `<`/`>` only — `#62;`-style *numeric* entities and `#quot;` both
+  come out as literal `&#62;`/`&quot;` text in SVG-text label mode
+  (verified empirically against Mermaid 11.12), which is why `"` is
+  substituted rather than entity-escaped: display-only text, and `'Y'`
+  is how the COBOL literal read anyway. This supersedes the earlier
+  bare `.replace('"', "#quot;")` used since the 2026-08-11 quoted-edge-
+  label fix. DOT labels are not escaped — Graphviz has no such mangling.
 - **Arm boxes show statement summaries.** `BranchArm.summary` (see
   [analysis.md](analysis.md)'s statement_text section) renders instead of
   the bare `THEN`/`ELSE`/`WHEN x` keyword, which duplicated the edge label

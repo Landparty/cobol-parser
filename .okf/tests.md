@@ -141,8 +141,9 @@ findings H1-H8). Coverage floor: **81% line coverage** enforced by
 type, truncation, never-raises guard) and +20 in
 `test_flowchart_generator.py` (`TestMermaidLabelFidelity`/
 `TestDotLabelFidelity`/`TestLabelFidelityEndToEnd`: ASCII-only output,
-`#lt;`/`#gt;` label escaping, arm statement summaries with `+N more`
-markers, empty-IF-arm dropping), plus `test_program_flow.py`'s
+`#lt;`/`#gt;` label escaping, `"`→`'` substitution — `#quot;` renders as
+literal `&quot;` on the SVG-text path — arm statement summaries with
+`+N more` markers, empty-IF-arm dropping), plus `test_program_flow.py`'s
 `test_branch_arm_to_dict_fields` extended for the optional
 `BranchArm.summary` key. See [generators.md](generators.md)'s "Label
 fidelity" section.

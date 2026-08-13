@@ -1491,6 +1491,18 @@ class TestMermaidLabelFidelity:
         out = self._gen(report)
         assert "#lt;#gt; WS-TARGET" in out
 
+    def test_double_quotes_become_apostrophes(self) -> None:
+        """Not #quot;: that entity is NOT decoded on Mermaid's SVG-text label
+        path and renders as literal &quot; (unlike #lt;/#gt;, which are).
+        These are display-only labels, and 'Y' is how the COBOL read anyway."""
+        report = _gt_condition_report()
+        report.branch_nodes[0].condition_text = 'WS-EOF-SW = "Y"'
+        report.branch_nodes[0].arms[0].summary = 'MOVE "ACTIVE" TO WS-STATE'
+        out = self._gen(report)
+        assert "[IF] WS-EOF-SW = 'Y'" in out
+        assert "MOVE 'ACTIVE' TO WS-STATE" in out
+        assert "#quot;" not in out
+
     def test_edge_label_condition_escaped(self) -> None:
         report = _gt_condition_report()
         report.edges.append(
