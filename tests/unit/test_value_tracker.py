@@ -266,3 +266,39 @@ class TestExtractLiteralValue:
         analyzer.analyze(ast)
         values = analyzer.get_variable_values("PROG-NAME")
         assert " " in values
+
+    def test_value_clause_figurative_constant_matches_move_of_same_constant(self):
+        """Regression: a variable initialized ``VALUE SPACES`` and later also
+        ``MOVE``d SPACES must collapse to one canonical value (" "), not
+        survive as both the raw VALUE-clause keyword text ("SPACES") and the
+        MOVE-resolved value (" "). Mirrors the real-world pattern in
+        examples/cobol/legacy-application/cobol/JOBDISP.cbl, where
+        WS-CALL-PROGRAM is declared ``VALUE SPACES`` and a later
+        ``WHEN OTHER MOVE SPACES TO WS-CALL-PROGRAM`` branch feeds a dynamic
+        CALL -- both routes into possible_values must agree.
+        """
+        source = (
+            BOILERPLATE_HEADER
+            + "       01 WS-CALL-PROGRAM PIC X(8) VALUE SPACES.\n"
+            + BOILERPLATE_PROC
+            + "           IF 1 = 2\n"
+            + "               MOVE 'PROGA' TO WS-CALL-PROGRAM\n"
+            + "           ELSE\n"
+            + "               MOVE SPACES TO WS-CALL-PROGRAM\n"
+            + "           END-IF\n"
+            + "           CALL WS-CALL-PROGRAM.\n"
+            + "           STOP RUN.\n"
+        )
+        analyzer = DynamicCallAnalyzer()
+        ast = _parse(source)
+        analyzer.analyze(ast)
+        values = analyzer.get_variable_values("WS-CALL-PROGRAM")
+        assert " " in values
+        assert "SPACES" not in values
+
+        calls = [
+            stmt for stmt in ast.find_all_by_type("CallStatement") if stmt.is_dynamic
+        ]
+        assert len(calls) == 1
+        assert " " in calls[0].possible_values
+        assert "SPACES" not in calls[0].possible_values
