@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `DeadCodeAnalyzer` no longer resurrects genuinely dead
+  paragraphs that share a section with a PERFORMed/GONE-TO sibling.
+  `_propagate_section_references` used to mark a paragraph's parent
+  section "referenced" and then broadcast that to every paragraph in the
+  section, even when the section itself was never PERFORMed/GONE TO — only
+  one of its paragraphs was. Downward propagation now runs before upward
+  propagation, so it only cascades from sections that are themselves
+  directly referenced (matching real COBOL semantics: `PERFORM
+  section-name` runs every paragraph in it, but `PERFORM
+  child-paragraph` does not).
 * **generators/analysis:** the `gen-fixtures` witness pipeline no longer
   loses precision on wide numeric literals. `domains.py`'s solver and
   `ValueFactory.render()`/`_format_number` carried values through float64,

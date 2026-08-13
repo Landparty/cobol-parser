@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-12T18:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -48,6 +48,11 @@ what resolves on attribute access.
 string. `FlowchartOptions` controls statement counts, edge labels,
 fall-through edges, unreachable nodes, and synthetic external-CALL nodes.
 Driven by `cobol-parser program-flow --format mermaid|dot`.
+
+**Black reformat (2026-08-13, no behavior change):** `_escape_mermaid_label`
+and `_is_empty_if_arm` were reformatted to match the CI-pinned
+`black==26.3.0` (a local newer black had already reformatted them
+differently) — whitespace-only, no logic change.
 
 **External-call nodes read the analyzer's real shape (2026-08-12 fix, audit
 A-A2).** Both generators used to read `ext.get("target", "")` off
