@@ -8,6 +8,10 @@ timestamp: 2026-08-13T00:00:00Z
 
 # Overview
 
+2026-08-13: `test_statement_text.py` reformatted to match the CI-pinned
+`black==26.3.0` (whitespace-only, no test logic change) — pre-existing
+drift from a newer local black, discovered while unblocking this PR's CI.
+
 2026-08-13: +13 in `tests/unit/analysis/test_dead_code.py` — 3 in new
 `TestSectionPropagationDoesNotResurrectSiblings` pinning the
 `_propagate_section_references` sibling-resurrection fix, plus 10 in new

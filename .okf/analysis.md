@@ -347,6 +347,15 @@ key only when non-None, the report's usual optional-field convention. The
 flowchart generators render it instead of the bare THEN/ELSE keyword —
 see [generators.md](generators.md).
 
+**Mypy narrowing fix (2026-08-13, no behavior change):** the EVALUATE
+subject-summary line used `hasattr(s, "to_dict")` to distinguish a
+`CobolExpression` subject from a bare `str` one
+(`EvaluateStatement.subjects: list[str | CobolExpression]`) — mypy can't
+narrow a union on `hasattr`, so it still saw the full union at the
+`render_condition_text(s)` call, which only accepts `CobolExpression |
+None`. Swapped for `isinstance(s, CobolExpression)`, which mypy narrows
+correctly; runtime behavior is identical.
+
 **RETURN is explicitly excluded (bug fixed 2026-08-11):** `RETURN` reads
 the next record from a SORT/MERGE file — it does not terminate the
 program, and `scanner.py` deliberately does not add RETURN's paragraph to
