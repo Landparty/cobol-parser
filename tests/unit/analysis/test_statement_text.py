@@ -58,9 +58,7 @@ class TestSummarizeStatement:
         assert _first_summary("           GO TO 9000-DONE.") == "GO TO 9000-DONE"
 
     def test_call(self) -> None:
-        assert (
-            _first_summary("           CALL 'CBLTDLI' USING WS-A.") == "CALL CBLTDLI"
-        )
+        assert _first_summary("           CALL 'CBLTDLI' USING WS-A.") == "CALL CBLTDLI"
 
     def test_set_to_true(self) -> None:
         assert _first_summary("           SET WS-EOF TO TRUE.") == "SET WS-EOF TO TRUE"

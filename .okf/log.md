@@ -1,5 +1,53 @@
 # OKF Update Log
 
+## 2026-08-13 (Unblock CI: mypy union-narrowing fix + black==26.3.0 drift on two unrelated files)
+
+`main`'s CI (`typecheck` and `lint` jobs) had been red since 2026-08-12
+(commits 94490a2a, 5600be5) — unrelated to this branch's dead-code fix, but
+blocking its own PR checks regardless, so fixed here:
+
+- **`statement_text.py`:** `hasattr(s, "to_dict")` doesn't narrow a
+  `str | CobolExpression` union for mypy, so `render_condition_text(s)`
+  (which only accepts `CobolExpression | None`) still saw the full union.
+  Swapped for `isinstance(s, CobolExpression)` — mypy narrows that
+  correctly, runtime behavior is identical. See [analysis.md](analysis.md).
+- **`flowchart.py` / `test_statement_text.py`:** reformatted with the
+  CI-pinned `black==26.3.0` (a newer local black had already reformatted
+  them differently) — whitespace-only. See [generators.md](generators.md),
+  [tests.md](tests.md).
+
+Local `ruff`/`black`/`mypy` must be run at the exact `ruff==0.15.0
+black==26.3.0 mypy==1.20.0` pinned in `.github/workflows/ci.yml` to match
+CI — a newer local toolchain can pass locally and still fail CI.
+
+## 2026-08-13 (DeadCodeAnalyzer: section-propagation sibling bug + 100% coverage)
+
+Correctness review of `cobolparser/analysis/dead_code.py` requested by Sam.
+One real logic bug found and fixed:
+
+**`_propagate_section_references` resurrected unrelated dead siblings.**
+Chaining upward (paragraph referenced -> section referenced) before downward
+(section referenced -> all its paragraphs referenced) meant a paragraph
+referenced only via a plain `PERFORM child-paragraph` bootstrapped its whole
+section into "referenced," and the downward pass then broadcast that to
+every sibling paragraph -- even ones nothing PERFORMs/GOes TO and that
+fall-through never reaches. Fixed by reordering so downward only ever sees
+sections that were *directly* referenced before the function ran. Pinned by
+`TestSectionPropagationDoesNotResurrectSiblings`
+(`tests/unit/analysis/test_dead_code.py`).
+
+Also closed every remaining coverage gap in the module (was 95.77%, now
+100% line + 100% branch): inline PERFORM with no target, MERGE without an
+output procedure / without THRU, a THRU range with a falsy start, a blank
+SECTION name, invalid (`"."`) paragraph names inside a section, a duplicate
+top-level paragraph name, an ENTRY statement with no parent paragraph, and
+an ALTER alteration with a blank target -- 12 new tests, all defensive
+branches exercised directly rather than via `parse_cobol()` since the
+parser itself never emits these malformed shapes.
+
+Updated [analysis.md](analysis.md) (`## DeadCodeAnalyzer`). Timestamp
+bumped to 2026-08-13T00:00Z.
+
 ## 2026-08-12 (Program-flow label fidelity: ASCII, `<`/`>` escaping, arm summaries)
 
 Driven by VS Code Program Flow webview feedback (mocky-mock-vscode-extension,
