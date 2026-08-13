@@ -240,6 +240,32 @@ do today, but the failure mode is exactly the "used field reported
 unused" bug this module exists to avoid), pinned by
 `TestExtrasLookupIsMroAware` in `tests/unit/analysis/test_unused_variables.py`.
 
+**An operand string is tokenized, not treated as one opaque name (Copilot
+PR-review fix, 2026-08-13).** Statement parsers routinely join a whole
+qualified reference, subscript, special register, or intrinsic function
+call into a *single* operand string rather than splitting out the
+underlying data-name(s) — confirmed empirically: `MoveStatement.source`
+for `MOVE WS-A OF WS-GRP TO ...` is the literal string `"WS-A OF WS-GRP"`;
+`"FUNCTION UPPER-CASE(WS-X)"` and `"LENGTH OF WS-X"` are the same shape.
+The first version of this module added such an operand verbatim as one
+name, so `WS-A`/`WS-GRP`/`WS-X` never matched a declared item's bare name
+and were falsely reported unused. `_extract_identifiers` (renamed from
+the narrower `_extract_identifier_tokens`, which now also replaces the
+old boolean `_is_identifier_operand` gate everywhere) is the single
+extraction path for every operand/extra-field/condition-fallback value:
+it strips quoted substrings, regex-extracts every letter-led token, and
+filters `_NON_IDENTIFIER_WORDS` (figurative constants merged with
+qualification/special-register/intrinsic-function keywords `OF`/`IN`/
+`FUNCTION`/`LENGTH`/`ADDRESS` and the raw-condition-text stopwords). A
+bare numeric literal never matches at all since a token must start with
+a letter, so the old explicit numeric/quoted-literal pre-checks were
+subsumed rather than kept as a separate fast path. Deliberately
+over-inclusive in the same direction as the condition-text fallback
+below: a stray token (an intrinsic function name, say) only risks
+coincidentally matching an unrelated declared item, never causes a used
+item to be reported unused. Pinned by `TestQualifiedAndFunctionOperands`
+in `tests/unit/analysis/test_unused_variables.py`.
+
 **Condition/expression trees are walked separately from `.operands`.**
 `IfStatement.condition`, `PerformStatement.until_condition`/
 `after_clauses[].until_condition`, and `ComputeStatement.expression_tree`

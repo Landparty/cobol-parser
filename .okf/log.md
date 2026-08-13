@@ -1,5 +1,28 @@
 # OKF Update Log
 
+## 2026-08-13 (`UnusedVariableAnalyzer`: Copilot PR-review fix — qualified names/FUNCTION calls falsely reported unused)
+
+Copilot review on PR #148 (the `UnusedVariableAnalyzer` PR) caught a real
+bug: statement parsers routinely join a whole qualified reference,
+subscript, special register, or intrinsic function call into a *single*
+operand string (`MoveStatement.source` for `MOVE WS-A OF WS-GRP TO ...`
+is literally `"WS-A OF WS-GRP"`) — the analyzer's first version added
+such an operand verbatim as one name, so `WS-A`/`WS-GRP` never matched a
+declared item's bare name and were falsely reported unused. Reproduced
+empirically before fixing, and confirmed against the sample corpus sweep
+(534 → 485 flagged unused across `tests/samples/*.cbl` +
+`examples/cobol/shamrice/*.cbl`, same corpus as the analyzer's original
+validation pass).
+
+Fixed by replacing the old boolean `_is_identifier_operand` gate (add the
+whole operand as one name) with `_extract_identifiers` (tokenize the
+operand, strip quoted substrings, filter a merged
+figurative-constant/qualification-keyword/condition-stopword list) at
+every call site, not just MOVE. See [analysis.md](analysis.md)'s
+`UnusedVariableAnalyzer` section for the full writeup, and
+`TestQualifiedAndFunctionOperands` in
+`tests/unit/analysis/test_unused_variables.py` (+5 tests).
+
 ## 2026-08-13 (New analyzer: `UnusedVariableAnalyzer` + `unused-variables` CLI)
 
 New `cobolparser/analysis/unused_variables.py` (`UnusedVariableAnalyzer`),

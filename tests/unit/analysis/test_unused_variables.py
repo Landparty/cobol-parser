@@ -110,6 +110,101 @@ class TestBasicUsage:
         assert not report.has_unused_variables
 
 
+class TestQualifiedAndFunctionOperands:
+    """Statement parsers frequently join a whole qualified reference or
+    intrinsic function call into a single operand string instead of
+    splitting out the underlying data-name(s) -- e.g. MoveStatement.source
+    for `MOVE WS-A OF WS-GRP TO ...` is the literal string
+    "WS-A OF WS-GRP". Treating an operand as one opaque token meant none
+    of the underlying names ever matched a declared item's bare name and
+    were falsely reported unused. See _extract_identifiers.
+    """
+
+    def test_qualified_name_with_of_marks_both_items_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GRP.
+           05 WS-A PIC X(5).
+       01 WS-TARGET PIC X(5).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE WS-A OF WS-GRP TO WS-TARGET
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert not _names(report)
+
+    def test_qualified_name_with_in_marks_both_items_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GRP.
+           05 WS-A PIC X(5).
+       01 WS-TARGET PIC X(5).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE WS-A IN WS-GRP TO WS-TARGET
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert not _names(report)
+
+    def test_function_call_argument_marks_field_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC X(10) VALUE 'hello'.
+       01 WS-UPPER PIC X(10).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE FUNCTION UPPER-CASE(WS-X) TO WS-UPPER
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert not _names(report)
+
+    def test_length_of_special_register_marks_field_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC X(10).
+       01 WS-LEN PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE LENGTH OF WS-X TO WS-LEN
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert not _names(report)
+
+    def test_subscripted_reference_marks_both_items_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-IDX PIC 9(2) VALUE 1.
+       01 WS-TABLE.
+           05 WS-ENTRY PIC X(5) OCCURS 5 TIMES.
+       01 WS-TARGET PIC X(5).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE WS-ENTRY(WS-IDX) TO WS-TARGET
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert not _names(report)
+
+
 class TestAnonymousItems:
     def test_anonymous_level_number_entry_never_reported(self):
         """A level-number entry with no IDENTIFIER token gets a synthetic

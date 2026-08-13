@@ -8,6 +8,16 @@ timestamp: 2026-08-13T00:00:00Z
 
 # Overview
 
+2026-08-13: +5 in `tests/unit/analysis/test_unused_variables.py`'s new
+`TestQualifiedAndFunctionOperands` — Copilot PR review on the
+`UnusedVariableAnalyzer` PR caught that a qualified name (`WS-A OF
+WS-GRP`), an intrinsic function call (`FUNCTION UPPER-CASE(WS-X)`), a
+special register (`LENGTH OF WS-X`), and a subscripted reference
+(`WS-ENTRY(WS-IDX)`) were each added to the referenced-names set as one
+opaque joined string instead of split into their underlying data-names,
+so none of the real names ever matched and were falsely reported unused.
+See [analysis.md](analysis.md)'s `_extract_identifiers` note.
+
 2026-08-13: New `tests/unit/analysis/test_unused_variables.py` (25 tests) for
 the new `UnusedVariableAnalyzer` (see [analysis.md](analysis.md)) — basic
 used/unused detection, FILLER/`ANONYMOUS-*` exclusion, group-item

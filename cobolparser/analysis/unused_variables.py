@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, TypeGuard
+from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
@@ -48,12 +48,17 @@ from ..models.statements.misc import MergeStatement, SortStatement
 # CRUDMatrixGenerator rely on.
 _DATA_SECTION_NAMES = frozenset({"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"})
 
-_QUOTE_CHARS = ("'", '"')
-
-# Figurative constants and reserved literals that can appear as a bare
-# operand string but are never a data-name reference.
-_FIGURATIVE_CONSTANTS = frozenset(
+# Words that can appear as, or inside, an operand's text but are never
+# themselves a data-name reference: figurative constants, connective/
+# qualification keywords the parser leaves joined into an operand string
+# instead of splitting out (``WS-A OF WS-GRP``, ``FUNCTION UPPER-CASE(X)``,
+# ``LENGTH OF X`` -- confirmed empirically, none of these reach
+# ``.operands`` pre-split), and common raw condition-text keywords (SEARCH
+# WHEN / EVALUATE TRUE Condition selectors, which carry only joined text --
+# see ``_extract_identifiers``).
+_NON_IDENTIFIER_WORDS = frozenset(
     {
+        # Figurative constants / reserved literals
         "SPACE",
         "SPACES",
         "ZERO",
@@ -68,15 +73,14 @@ _FIGURATIVE_CONSTANTS = frozenset(
         "NULL",
         "NULLS",
         "ALL",
-    }
-)
-
-# Reserved words that commonly appear in raw, un-decomposed condition text
-# (SEARCH WHEN, EVALUATE TRUE Condition selectors) -- filtered out of the
-# best-effort identifier extraction so they're never mistaken for a
-# data-name reference.
-_CONDITION_TEXT_STOPWORDS = frozenset(
-    {
+        # Qualification / special-register / intrinsic-function keywords
+        # that stay joined into an operand's raw text
+        "OF",
+        "IN",
+        "FUNCTION",
+        "LENGTH",
+        "ADDRESS",
+        # Condition-text keywords (raw, un-decomposed SEARCH/EVALUATE text)
         "AND",
         "OR",
         "NOT",
@@ -88,15 +92,6 @@ _CONDITION_TEXT_STOPWORDS = frozenset(
         "ALPHABETIC-UPPER",
         "POSITIVE",
         "NEGATIVE",
-        "ZERO",
-        "ZEROS",
-        "ZEROES",
-        "SPACE",
-        "SPACES",
-        "HIGH-VALUE",
-        "HIGH-VALUES",
-        "LOW-VALUE",
-        "LOW-VALUES",
         "THRU",
         "THROUGH",
         "TRUE",
@@ -223,43 +218,44 @@ def collect_declared_items(ast: CobolProgram) -> list[CobolDataItem]:
     ]
 
 
-def _is_identifier_operand(operand: Any) -> TypeGuard[str]:
-    """Filter an operand string down to "looks like a data-name reference".
+def _extract_identifiers(operand: Any) -> set[str]:
+    """Extract every candidate data-name reference out of an operand's raw
+    text.
 
-    Excludes quoted string literals (quotes are preserved verbatim by the
-    parser -- see ``MoveStatement.source``'s docstring elsewhere), numeric
-    literals, and figurative constants.
+    Statement parsers frequently join a whole qualified reference,
+    subscript, reference-modification, special register, or intrinsic
+    function call into a *single* operand string instead of splitting out
+    the underlying data-name(s) -- confirmed empirically:
+    ``MoveStatement.source`` for ``MOVE WS-A OF WS-GRP TO ...`` is the
+    literal string ``"WS-A OF WS-GRP"``; ``"FUNCTION UPPER-CASE(WS-X)"``
+    and ``"LENGTH OF WS-X"`` shapes are the same. Treating an operand as
+    one opaque token (the previous approach) meant ``WS-A``/``WS-GRP``/
+    ``WS-X`` never matched a declared item's bare name and were falsely
+    reported unused -- caught by Copilot review on the PR that introduced
+    this analyzer.
+
+    Quoted substrings are stripped first so literal text is never mistaken
+    for an identifier (also handles the plain-literal-operand case, e.g.
+    ``"'HELLO'"`` reduces to nothing); every remaining letter-led token is
+    a candidate, filtered against ``_NON_IDENTIFIER_WORDS`` (figurative
+    constants, qualification/special-register/intrinsic-function keywords,
+    raw condition-text keywords). A bare numeric literal (``"12345"``)
+    never matches at all, since a token must start with a letter.
+
+    Deliberately over-inclusive: a token that isn't really a data-name
+    (e.g. an intrinsic function name like ``UPPER-CASE``) only risks
+    coincidentally matching an unrelated declared item and marking it
+    used -- the analyzer's stated bias throughout is that a missed
+    truly-unused variable is safe, a falsely-flagged used one is not.
     """
     if not isinstance(operand, str) or not operand:
-        return False
-    if operand[0] in _QUOTE_CHARS:
-        return False
-    upper = operand.upper()
-    if upper in _FIGURATIVE_CONSTANTS:
-        return False
-    stripped = upper.lstrip("+-")
-    if not stripped:
-        return False
-    numeric_body = stripped.replace(".", "", 1)
-    if numeric_body.isdigit():
-        return False
-    return True
+        return set()
 
-
-def _extract_identifier_tokens(text: str) -> set[str]:
-    """Best-effort identifier extraction from raw, un-decomposed condition
-    text (SEARCH WHEN, EVALUATE TRUE Condition selectors). Quoted
-    substrings are stripped first so literal text is never mistaken for an
-    identifier; a small stopword list filters common condition keywords.
-
-    Deliberately over-inclusive: false positives here only make the
-    analyzer *miss* a truly-unused variable, never wrongly flag a used one.
-    """
-    stripped = _QUOTED_TEXT_RE.sub(" ", text)
+    stripped = _QUOTED_TEXT_RE.sub(" ", operand)
     tokens: set[str] = set()
     for match in _IDENTIFIER_TOKEN_RE.findall(stripped):
         upper = match.upper()
-        if upper in _CONDITION_TEXT_STOPWORDS:
+        if upper in _NON_IDENTIFIER_WORDS:
             continue
         tokens.add(upper)
     return tokens
@@ -286,26 +282,26 @@ def _walk_expression_operands(expr: CobolExpression | None) -> set[str]:
         for arg in expr.arguments:
             if isinstance(arg, CobolExpression):
                 names |= _walk_expression_operands(arg)
-            elif _is_identifier_operand(arg):
-                names.add(arg.upper())
+            else:
+                names |= _extract_identifiers(arg)
         return names
 
     if isinstance(expr, (ConditionalExpression, ArithmeticExpression)):
         for operand in (expr.left_operand, expr.right_operand):
             if isinstance(operand, CobolExpression):
                 names |= _walk_expression_operands(operand)
-            elif _is_identifier_operand(operand):
-                names.add(operand.upper())
+            else:
+                names |= _extract_identifiers(operand)
         return names
 
     # Unrecognized/opaque expression shape: fall back to the raw text this
     # codebase always keeps around for exactly this situation.
     if expr.operands:
-        names |= _extract_identifier_tokens(str(expr.operands[0]))
+        names |= _extract_identifiers(str(expr.operands[0]))
         return names
     raw = expr.get_metadata("raw_condition")
     if raw:
-        names |= _extract_identifier_tokens(str(raw))
+        names |= _extract_identifiers(str(raw))
     return names
 
 
@@ -496,24 +492,19 @@ class UnusedVariableAnalyzer:
 
         for stmt in ast.get_all_statements():
             for operand in stmt.operands:
-                if _is_identifier_operand(operand):
-                    names.add(operand.upper())
+                names |= _extract_identifiers(operand)
 
             # Walked by MRO, not exact type, so a (currently hypothetical)
             # subclass of a keyed statement type still gets its extras
             # collected instead of silently losing coverage.
             for klass in type(stmt).__mro__:
                 for attr in _STR_ATTR_EXTRAS.get(klass, ()):
-                    value = getattr(stmt, attr, None)
-                    if _is_identifier_operand(value):
-                        names.add(value.upper())
+                    names |= _extract_identifiers(getattr(stmt, attr, None))
 
                 for attr, keys in _DICT_LIST_EXTRAS.get(klass, ()):
                     for entry in getattr(stmt, attr, None) or []:
                         for key in keys:
-                            value = entry.get(key)
-                            if _is_identifier_operand(value):
-                                names.add(value.upper())
+                            names |= _extract_identifiers(entry.get(key))
 
             if isinstance(stmt, IfStatement):
                 names |= _walk_expression_operands(stmt.condition)
@@ -521,15 +512,11 @@ class UnusedVariableAnalyzer:
                 names |= _walk_expression_operands(stmt.until_condition)
                 if stmt.varying_clause:
                     for key in ("variable", "from_value", "by_value"):
-                        value = stmt.varying_clause.get(key)
-                        if _is_identifier_operand(value):
-                            names.add(value.upper())
+                        names |= _extract_identifiers(stmt.varying_clause.get(key))
                 for after in stmt.after_clauses:
                     names |= _walk_expression_operands(after.get("until_condition"))
                     for key in ("variable", "from_value", "by_value"):
-                        value = after.get(key)
-                        if _is_identifier_operand(value):
-                            names.add(value.upper())
+                        names |= _extract_identifiers(after.get(key))
             elif isinstance(stmt, EvaluateStatement):
                 clauses = list(stmt.when_clauses)
                 if stmt.default_when is not None:
@@ -541,7 +528,7 @@ class UnusedVariableAnalyzer:
                 for search_clause in stmt.when_clauses:
                     condition_text = search_clause.get("condition")
                     if condition_text:
-                        names |= _extract_identifier_tokens(str(condition_text))
+                        names |= _extract_identifiers(str(condition_text))
 
             expression_tree = getattr(stmt, "expression_tree", None)
             if expression_tree is not None:
@@ -549,14 +536,12 @@ class UnusedVariableAnalyzer:
 
             host_variables = getattr(stmt, "host_variables", None)
             if host_variables:
-                names.update(
-                    v.upper() for v in host_variables if _is_identifier_operand(v)
-                )
+                for v in host_variables:
+                    names |= _extract_identifiers(v)
             null_indicators = getattr(stmt, "null_indicators", None)
             if null_indicators:
-                names.update(
-                    v.upper() for v in null_indicators if _is_identifier_operand(v)
-                )
+                for v in null_indicators:
+                    names |= _extract_identifiers(v)
 
         return names
 
@@ -568,18 +553,14 @@ class UnusedVariableAnalyzer:
         names: set[str] = set()
         selector_type = selector.get("type")
         if selector_type == "Identifier":
-            value = selector.get("value")
-            if _is_identifier_operand(value):
-                names.add(value.upper())
+            names |= _extract_identifiers(selector.get("value"))
         elif selector_type == "Range":
             for key in ("start", "end"):
-                value = selector.get(key)
-                if _is_identifier_operand(value):
-                    names.add(value.upper())
+                names |= _extract_identifiers(selector.get(key))
         elif selector_type == "Condition":
             text = selector.get("text")
             if text:
-                names |= _extract_identifier_tokens(str(text))
+                names |= _extract_identifiers(str(text))
         return names
 
     # ------------------------------------------------------------------
@@ -607,16 +588,14 @@ class UnusedVariableAnalyzer:
                 for descendant in [item, *item.get_all_children()]:
                     occurs = descendant.occurs_clause
                     if occurs and occurs.depending_on:
-                        names.add(occurs.depending_on.upper())
+                        names |= _extract_identifiers(occurs.depending_on)
 
             for child in section.children:
                 if getattr(child, "node_type", None) == "RenamesItem":
-                    renames_from = getattr(child, "renames_from", None)
-                    renames_through = getattr(child, "renames_through", None)
-                    if _is_identifier_operand(renames_from):
-                        names.add(renames_from.upper())
-                    if _is_identifier_operand(renames_through):
-                        names.add(renames_through.upper())
+                    names |= _extract_identifiers(getattr(child, "renames_from", None))
+                    names |= _extract_identifiers(
+                        getattr(child, "renames_through", None)
+                    )
 
         return names
 
