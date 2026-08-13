@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-08-04T00:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -134,6 +134,51 @@ CobolParser.parse(source)
 signatures — the compiled `_data_fast` extension receives the division parser
 as `parser_self` and calls those three back by name. New clause logic goes in
 `DataItemClauseParser`; the wrappers must stay.
+
+**SCREEN/REPORT/COMMUNICATION SECTION recognition (`data.py`, 2026-08-13):**
+`DataDivisionParser` only recognizes FILE, WORKING-STORAGE, LOCAL-STORAGE,
+and LINKAGE as real sections; SCREEN SECTION, REPORT SECTION, and
+COMMUNICATION SECTION have their own grammars (screen-field clauses,
+RD/report-group entries, CD entries) that are not modeled. Their headers are
+still recognized as section *boundaries* (`_SECTION_BREAK_HEADERS` in
+`parse_division`'s dispatch and `_parse_section`'s break check) so an
+in-progress section scan — almost always WORKING-STORAGE — stops there
+instead of silently absorbing the header token-by-token and then
+misparsing the following section's own level-numbered content as bogus
+nested data items (a SCREEN SECTION `COLUMN 5` clause previously produced a
+spurious `CobolDataItem` literally named `COLUMN`). `DataDivisionParser._skip_section()`
+consumes the header (`NAME [SECTION] [.]`) and discards the body up to the
+next section/division boundary — the same boundary logic `_parse_section`
+uses — then registers an empty, distinctly-named `CobolSection`
+(`SCREEN`/`REPORT`/`COMMUNICATION`) plus a
+`has_screen`/`has_report`/`has_communication` division-metadata flag, so
+downstream consumers can tell the section was present without seeing
+corrupted WORKING-STORAGE data. Known tradeoff: a data item declared inside
+or directly after one of these sections with no section header of its own
+(e.g. a COMMUNICATION SECTION CD's record, or a bare `01` placed right after
+it) is discarded along with the rest of the unmodeled body — it does not
+survive into WORKING-STORAGE (the old, corrupting behavior) or anywhere
+else. Because that loss would otherwise be silent (`errors=0`),
+`_skip_section` records a `ParseResult.warnings` entry naming the section —
+this repo's established "recognized but degraded" convention (see the
+Silent-Drop Audit entries below) — rather than letting `errors=0,
+warnings=0` imply a complete AST.
+
+`REPORT` (and, less commonly, `COMMUNICATION`/`SCREEN`) doubles as an
+ordinary clause word outside a section header — an FD's `REPORT IS
+report-name.` clause is exactly this
+(`examples/cobol/shamrice/report_test.cbl` line 32). `parse_division`'s
+dispatch only routes to `_skip_section` when the *next* token is literally
+`SECTION` (`DataDivisionParser._next_is_section_keyword`, the same
+lookahead `_parse_section`'s own break check already used for these three
+headers) — otherwise the bare word falls through to the existing
+unknown-token skip, so it can't wrongly discard whatever source follows it
+(the same "swallow" bug class this parser has been repeatedly audited for
+elsewhere — see the Silent-Drop Audit sections below). Pinned by
+`tests/regression/test_screen_report_communication_sections.py` (23 cases),
+including end-to-end assertions against `tests/samples/screen_section_io.cbl`,
+`report_writer.cbl`, and `communication_module.cbl` (the fixtures that
+originally exposed the bug) and the `report_test.cbl` FD-clause collision.
 
 **FD/SD metadata tags on FILE SECTION 01-items (`data.py`, `_parse_section`):**
 while scanning under an `FD`/`SD` header, every level-01 item is tagged with

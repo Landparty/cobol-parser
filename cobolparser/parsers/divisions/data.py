@@ -55,6 +55,15 @@ _SECTION_KEYWORDS: frozenset[str] = frozenset(
 _SECTION_BREAK_HEADERS: frozenset[str] = frozenset(
     {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"}
 )
+# SCREEN SECTION, REPORT SECTION, and COMMUNICATION SECTION have their own
+# grammars (screen-field clauses, RD/report-group entries, CD entries) that
+# this parser does not model. They must still break any section scan that's
+# currently in progress -- otherwise their content (which also starts with
+# level numbers) is silently absorbed as bogus nested items of whatever
+# section preceded them (usually WORKING-STORAGE). See _skip_section.
+_UNSUPPORTED_SECTION_HEADERS: frozenset[str] = frozenset(
+    {"SCREEN", "REPORT", "COMMUNICATION"}
+)
 
 
 class DataDivisionParser(BaseDivisionParser):
@@ -120,6 +129,12 @@ class DataDivisionParser(BaseDivisionParser):
                 )
             elif token_value == "LINKAGE":
                 sections["linkage"] = self._parse_section(token_stream, "LINKAGE")
+            elif token_value in _UNSUPPORTED_SECTION_HEADERS and (
+                self._next_is_section_keyword(token_stream)
+            ):
+                sections[token_value.lower()] = self._skip_section(
+                    token_stream, token_value
+                )
             else:
                 # Unknown section - skip it for error recovery
                 token_stream.consume()
@@ -201,7 +216,9 @@ class DataDivisionParser(BaseDivisionParser):
             value_upper = tok_value.upper() if tok_value else ""
 
             # Stop when we encounter the next section header or division header.
-            if value_upper in _SECTION_BREAK_HEADERS:
+            if value_upper in _SECTION_BREAK_HEADERS or value_upper in (
+                _UNSUPPORTED_SECTION_HEADERS
+            ):
                 next_token = token_stream.peek(1)
                 if (
                     next_token
@@ -310,6 +327,109 @@ class DataDivisionParser(BaseDivisionParser):
             "type": section_name.lower().replace("-", "_"),
             "data_items": hierarchical_items,
             "exec_sql_items": exec_sql_items,
+        }
+        if section_location is not None:
+            result["location"] = section_location
+        return result
+
+    @staticmethod
+    def _next_is_section_keyword(token_stream: ITokenStream) -> bool:
+        """True if the token after the current one is the SECTION keyword.
+
+        Guards SCREEN/REPORT/COMMUNICATION dispatch against a same-spelled
+        non-header use reaching this top-level scan (e.g. an FD's
+        ``REPORT IS name`` clause) -- mirrors the lookahead
+        ``_parse_section``'s own break check already uses for these headers.
+        """
+        next_token = token_stream.peek(1)
+        return bool(
+            next_token and next_token.value and next_token.value.upper() == "SECTION"
+        )
+
+    def _skip_section(
+        self, token_stream: ITokenStream, section_name: str
+    ) -> dict[str, Any]:
+        """Consume a SCREEN/REPORT/COMMUNICATION SECTION header and its body.
+
+        These sections have their own grammars (screen-field clauses,
+        RD/report-group entries, CD entries) that this parser does not
+        model. Rather than let their level-numbered content fall through to
+        the generic data-item scanner -- which would misparse screen/report
+        clause keywords (COLUMN, TYPE, LINE, ...) as bogus nested data items
+        -- the header is consumed and the body is discarded token-by-token up
+        to the next section or division boundary, so downstream consumers
+        see an (empty) section keyed by its real name instead of corrupted
+        WORKING-STORAGE data.
+
+        Args:
+            token_stream: Token stream positioned at the section keyword
+            section_name: Name of the section (SCREEN, REPORT, COMMUNICATION)
+
+        Returns:
+            Dictionary containing an empty section body (no data items)
+        """
+        section_token = token_stream.peek(0)
+        section_location = section_token.location if section_token else None
+
+        # errors=0/warnings=0 must not imply a complete AST (repo convention
+        # -- see parser.md's silent-drop audits): flag the discard so
+        # consumers relying on the warnings channel see it, even though the
+        # section is intentionally unparsed rather than a parse failure.
+        add_warning = getattr(self.host, "add_warning", None)
+        if callable(add_warning):
+            line = getattr(section_location, "line", None)
+            where = f" at line {line}" if line else ""
+            add_warning(
+                f"{section_name} SECTION{where} is not supported; its "
+                "content (including any data item declared under it) is "
+                "skipped and not represented in the AST"
+            )
+
+        # Consume section keyword, optional 'SECTION' keyword, and period --
+        # same header shape as _parse_section.
+        token_stream.consume()
+        _dt = token_stream.peek()
+        if _dt and _dt.value and _dt.value.upper() == "SECTION":
+            token_stream.consume()
+        _dp = token_stream.peek()
+        if _dp and _dp.type == TokenType.PERIOD:
+            token_stream.consume()
+
+        # Discard the body until the next section/division header.
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if not token:
+                break
+
+            tok_type = token.type
+            tok_value = token.value
+
+            if tok_type in _DIVISION_TOKEN_TYPES:
+                break
+
+            value_upper = tok_value.upper() if tok_value else ""
+
+            if value_upper in _SECTION_BREAK_HEADERS or value_upper in (
+                _UNSUPPORTED_SECTION_HEADERS
+            ):
+                next_token = token_stream.peek(1)
+                if (
+                    next_token
+                    and next_token.value
+                    and next_token.value.upper() == "SECTION"
+                ):
+                    break
+
+            if value_upper in ("IDENTIFICATION", "ENVIRONMENT", "PROCEDURE"):
+                if at_division_boundary(token_stream):
+                    break
+
+            token_stream.consume()
+
+        result: dict[str, Any] = {
+            "type": section_name.lower(),
+            "data_items": [],
+            "exec_sql_items": [],
         }
         if section_location is not None:
             result["location"] = section_location
@@ -442,6 +562,9 @@ class DataDivisionParser(BaseDivisionParser):
             "working_storage": "WORKING-STORAGE",
             "local_storage": "LOCAL-STORAGE",
             "linkage": "LINKAGE",
+            "screen": "SCREEN",
+            "report": "REPORT",
+            "communication": "COMMUNICATION",
         }
 
         for key, section_name in section_map.items():
@@ -478,6 +601,9 @@ class DataDivisionParser(BaseDivisionParser):
                 "has_working_storage": "working_storage" in division_content,
                 "has_local_storage": "local_storage" in division_content,
                 "has_linkage": "linkage" in division_content,
+                "has_screen": "screen" in division_content,
+                "has_report": "report" in division_content,
+                "has_communication": "communication" in division_content,
             }
         )
 

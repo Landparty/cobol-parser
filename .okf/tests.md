@@ -3,10 +3,20 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-12T18:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
+
+2026-08-13: +23 in new `tests/regression/test_screen_report_communication_sections.py`
+— pins the DATA DIVISION parser's new SCREEN/REPORT/COMMUNICATION SECTION
+header recognition (previously unrecognized headers let their content
+corrupt WORKING-STORAGE), including end-to-end assertions against
+`tests/samples/screen_section_io.cbl`, `report_writer.cbl`, and
+`communication_module.cbl`, plus a dedicated collision check against
+`examples/cobol/shamrice/report_test.cbl`'s `REPORT IS report-name.` FD
+clause (`REPORT` as an ordinary clause word, not a section header). See
+[parser.md](parser.md).
 
 2026-08-12: Test-infrastructure audit — `contract`/`integration`/`io`
 markers are now applied structurally by per-directory `conftest.py`
@@ -209,6 +219,9 @@ tests/
                                #   EVALUATE WHEN branches must be AST children
                                #   (find_all_by_type reaches nested statements;
                                #   duplicate WHEN OTHER reuses one default clause)
+                               #   test_screen_report_communication_sections.py:
+                               #   SCREEN/REPORT/COMMUNICATION SECTION header
+                               #   recognition (2026-08-13) -- see parser.md
                                #   test_tier5_silent_drip_audit.py: SORT/MERGE/
                                #   ENTRY/CALL-handler silent-drop fixes (2026-07-08)
                                #   test_normalize_line_number_preservation.py:
