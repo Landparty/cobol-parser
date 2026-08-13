@@ -123,9 +123,7 @@ def _escape_mermaid_label(text: str) -> str:
     instead: the parser normalizes COBOL literals to double quotes, and
     ``MOVE 'ACTIVE' TO WS-STATE`` is how the source read anyway.
     """
-    return (
-        text.replace('"', "'").replace("<", "#lt;").replace(">", "#gt;")
-    )
+    return text.replace('"', "'").replace("<", "#lt;").replace(">", "#gt;")
 
 
 def _arm_summary_label(arm: BranchArm) -> str:
@@ -149,9 +147,7 @@ def _is_empty_if_arm(branch_type: str, arm: BranchArm) -> bool:
     value is deliberately handled.
     """
     return (
-        branch_type == "IF"
-        and arm.statement_count == 0
-        and not arm.nested_call_targets
+        branch_type == "IF" and arm.statement_count == 0 and not arm.nested_call_targets
     )
 
 

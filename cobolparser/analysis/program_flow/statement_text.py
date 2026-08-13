@@ -20,6 +20,7 @@ from ...models.statements.arithmetic import (
     MultiplyStatement,
     SubtractStatement,
 )
+from ...models.statements.base import CobolExpression
 from ...models.statements.call import CallStatement
 from ...models.statements.control import (
     EvaluateStatement,
@@ -92,7 +93,9 @@ def summarize_statement(stmt: Any) -> str:
         sources = [o for o in stmt.operands if o not in stmt.targets]
         if sources:
             verb, prep = (
-                ("ADD", "TO") if isinstance(stmt, AddStatement) else ("SUBTRACT", "FROM")
+                ("ADD", "TO")
+                if isinstance(stmt, AddStatement)
+                else ("SUBTRACT", "FROM")
             )
             return _truncate(f"{verb} {_join(sources)} {prep} {_join(stmt.targets)}")
     if isinstance(stmt, MultiplyStatement) and stmt.operands and stmt.target:
@@ -108,7 +111,7 @@ def summarize_statement(stmt: Any) -> str:
         return "IF"
     if isinstance(stmt, EvaluateStatement):
         subj = ", ".join(
-            render_condition_text(s) if hasattr(s, "to_dict") else str(s)
+            render_condition_text(s) if isinstance(s, CobolExpression) else str(s)
             for s in stmt.subjects
         )
         return _truncate(f"EVALUATE {subj}") if subj else "EVALUATE"

@@ -236,17 +236,34 @@ class DeadCodeAnalyzer:
         - Paragraph → section: when any paragraph inside a section is referenced,
           the section itself is also considered referenced so it is not falsely
           reported as dead code.
-        """
-        # Upward: paragraph referenced -> parent section is referenced
-        for para_name, sec_name in self._paragraph_section.items():
-            if para_name in self._referenced_names:
-                self._referenced_names.add(sec_name)
 
-        # Downward: section referenced -> all child paragraphs are referenced
+        Order matters here and is not interchangeable. Downward propagation
+        must run first, using only the references already collected by
+        ``_collect_references``/entry-point-marking/``_collect_fallthrough_refs``
+        -- i.e. sections that are *directly* referenced (PERFORM/GO TO the
+        section name itself, or falling into it). If upward ran first, a
+        section would gain "referenced" status merely because one of its own
+        paragraphs happens to be a PERFORM target, and the downward pass would
+        then broadcast that to every *sibling* paragraph too -- reviving
+        genuinely dead paragraphs that are neither PERFORMed/GONE TO nor
+        reachable by fall-through (a plain ``PERFORM child-para`` does not
+        execute the rest of its section, unlike ``PERFORM section-name``).
+        Running downward first means it only ever sees pre-existing direct
+        section references, so a paragraph-only reference can still protect
+        its *own* section from being reported dead (via the upward pass
+        below) without resurrecting unrelated siblings.
+        """
+        # Downward: a *directly* referenced section makes all its paragraphs
+        # referenced too (must run before the upward pass -- see docstring).
         for sec_name, para_names in self._section_paragraphs.items():
             if sec_name in self._referenced_names:
                 for pname in para_names:
                     self._referenced_names.add(pname)
+
+        # Upward: paragraph referenced -> parent section is referenced
+        for para_name, sec_name in self._paragraph_section.items():
+            if para_name in self._referenced_names:
+                self._referenced_names.add(sec_name)
 
     def _collect_references(self, ast: CobolProgram) -> None:
         """Collect all procedure name references from control flow statements."""

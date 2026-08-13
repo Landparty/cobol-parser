@@ -1360,3 +1360,246 @@ class TestFallThroughReferences:
 
         assert not dead_report.has_dead_code
         assert flow_report.unreachable_nodes == []
+
+
+# ---------------------------------------------------------------------------
+# _propagate_section_references: downward broadcast must not resurrect
+# siblings referenced only indirectly via another paragraph's own direct
+# reference (2026-08-13 audit finding).
+# ---------------------------------------------------------------------------
+
+
+class TestSectionPropagationDoesNotResurrectSiblings:
+    """Regression tests for the bug fixed by reordering
+    `_propagate_section_references` to run its downward pass (section ->
+    all paragraphs) before its upward pass (paragraph -> parent section),
+    using only references that already existed beforehand.
+
+    Before the fix, the upward pass ran first: any paragraph directly
+    PERFORMed/GONE TO bootstrapped its *entire* parent section into
+    "referenced," and the subsequent downward pass then broadcast that to
+    every sibling paragraph -- including ones nothing actually calls and
+    that fall-through never reaches. A plain `PERFORM child-paragraph`
+    does not execute the rest of its section, unlike `PERFORM
+    section-name`, which does.
+    """
+
+    def test_perform_of_one_paragraph_does_not_revive_dead_sibling(self) -> None:
+        """PERFORM PARA-B (not PERFORM SEC-A) reaches only PARA-B -- it must
+        not resurrect PARA-A, an unrelated sibling in the same section that
+        nothing PERFORMs/GOes TO and that fall-through never reaches.
+
+        MAIN-PARA ends with STOP RUN so it doesn't fall through into SEC-A.
+        `_make_program` builds either sections or top-level paragraphs, not
+        both, so MAIN-PARA lives in its own leading section here (same
+        pattern as `test_sections_and_nested_paragraphs`).
+        """
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                ("MAIN-SECTION", [("MAIN-PARA", [_perform("PARA-B"), _stop_run()])]),
+                (
+                    "SEC-A",
+                    [
+                        ("PARA-A", [_continue()]),
+                        ("PARA-B", [_continue()]),
+                    ],
+                ),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "PARA-A" in dead
+        assert "PARA-B" not in dead
+        # SEC-A itself is still not dead -- one of its paragraphs is used.
+        assert "SEC-A" not in dead
+
+    def test_perform_section_name_still_marks_all_its_paragraphs(self) -> None:
+        """A genuine PERFORM of the section name itself is unaffected by the
+        fix -- real COBOL semantics say PERFORMing a section runs every
+        paragraph in it from first to last, so all of them must stay
+        referenced."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                ("MAIN-SECTION", [("MAIN-PARA", [_perform("SEC-A"), _stop_run()])]),
+                (
+                    "SEC-A",
+                    [
+                        ("PARA-A", [_continue()]),
+                        ("PARA-B", [_continue()]),
+                    ],
+                ),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert not report.dead_items
+
+    def test_goto_section_name_still_marks_all_its_paragraphs(self) -> None:
+        """GO TO the section name itself is a direct reference too -- it
+        must still cascade to every paragraph in the section via
+        fall-through."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                ("MAIN-SECTION", [("MAIN-PARA", [_goto("SEC-A")])]),
+                (
+                    "SEC-A",
+                    [
+                        ("PARA-A", [_continue()]),
+                        ("PARA-B", [_stop_run()]),
+                    ],
+                ),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert not report.dead_items
+
+
+# ---------------------------------------------------------------------------
+# Defensive/edge-case branches: malformed AST shapes and inline statements
+# with no procedure-name operand, exercised directly to reach 100% branch
+# coverage on this module.
+# ---------------------------------------------------------------------------
+
+
+class TestDefensiveEdgeCases:
+    def test_section_with_blank_name_still_collects_its_paragraphs(self) -> None:
+        """A CobolSection with no name (a malformed/synthetic node) still has
+        its paragraphs collected as procedures -- they just aren't tied to
+        any section for propagation purposes, since there is no section name
+        to key `_section_paragraphs`/`_paragraph_section` on."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[("", [("ORPHAN-PARA", [_continue()])])],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert report.total_procedures == 1
+        dead = [i.name for i in report.dead_items]
+        # The first (and only) procedure is the entry point.
+        assert "ORPHAN-PARA" not in dead
+
+    def test_invalid_paragraph_name_inside_a_named_section_is_skipped(self) -> None:
+        """A synthetic paragraph named '.' inside a real section is excluded
+        from the analysis, same as at the top level."""
+        prog = _make_program(
+            paragraphs=[],
+            sections=[
+                (
+                    "REAL-SECTION",
+                    [(".", [_continue()]), ("REAL-PARA", [_continue()])],
+                )
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert report.total_procedures == 2  # REAL-SECTION + REAL-PARA only
+
+    def test_invalid_top_level_paragraph_name_is_skipped(self) -> None:
+        """A synthetic top-level paragraph named '.' is excluded from the
+        analysis entirely -- it's neither counted nor reported dead."""
+        prog = _make_program(
+            paragraphs=[("MAIN-PARA", [_stop_run()]), (".", [_continue()])],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert report.total_procedures == 1
+
+    def test_duplicate_top_level_paragraph_name_counted_once(self) -> None:
+        """Two top-level paragraphs sharing a name (malformed source) are
+        only registered once -- the second occurrence hits the dedup guard
+        rather than becoming a duplicate report entry."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_perform("DUP-PARA"), _stop_run()]),
+                ("DUP-PARA", [_continue()]),
+                ("DUP-PARA", [_continue()]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert report.total_procedures == 2
+        dead = [i.name for i in report.dead_items]
+        assert "DUP-PARA" not in dead
+
+    def test_inline_perform_with_no_target_paragraph_adds_no_reference(self) -> None:
+        """An inline PERFORM (e.g. PERFORM UNTIL ... END-PERFORM) has no
+        `target_paragraph` -- it must not be treated as a reference to
+        anything."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [PerformStatement(SourceLocation(1, 12)), _stop_run()]),
+                ("UNREACHED", [_continue()]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "UNREACHED" in dead
+
+    def test_merge_without_output_procedure_thru_adds_no_range(self) -> None:
+        """MERGE with an output procedure but no THRU clause must not touch
+        `_mark_thru_range` at all.
+
+        MRG-PROC ends with STOP RUN so it doesn't fall through into
+        UNREACHED -- the only thing under test is that the missing THRU
+        clause doesn't trigger range-marking.
+        """
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_merge_stmt(output_proc="MRG-PROC"), _stop_run()]),
+                ("MRG-PROC", [_stop_run()]),
+                ("UNREACHED", [_continue()]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "MRG-PROC" not in dead
+        assert "UNREACHED" in dead
+
+    def test_merge_thru_with_no_output_procedure_is_a_noop_range(self) -> None:
+        """A MERGE statement whose `output_procedure_thru` is set without a
+        corresponding `output_procedure` (malformed/partial construction)
+        must not crash `_mark_thru_range` -- the falsy `start` guard returns
+        immediately instead of indexing `_ordered_procedures`."""
+        stmt = MergeStatement(SourceLocation(1, 12))
+        stmt.set_file_name("FILE-MERGE")
+        stmt.set_output_procedure("", "MRG-END")
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [stmt, _stop_run()]),
+                ("MRG-END", [_continue()]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        # MRG-END is still referenced directly (output_procedure_thru is
+        # always added as its own reference), just not via range-marking.
+        assert "MRG-END" not in dead
+
+    def test_alter_with_blank_target_adds_no_reference(self) -> None:
+        """A malformed ALTER alteration with a blank `to_paragraph` (parser
+        error-recovery shape) must not add a bogus empty-string reference."""
+        prog = _make_program(
+            paragraphs=[
+                ("MAIN-PARA", [_alter("SWITCH-PARA", ""), _stop_run()]),
+                ("SWITCH-PARA", [_continue()]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        dead = [i.name for i in report.dead_items]
+        assert "SWITCH-PARA" in dead
+
+    def test_entry_statement_with_no_parent_paragraph_adds_no_reference(self) -> None:
+        """An ENTRY statement not attached to any paragraph resolves
+        `section_name` to None (nothing to walk up the parent chain to) --
+        it must not raise or add a bogus reference."""
+        stmt = EntryStatement(SourceLocation(1, 12))
+        stmt.set_entry_name("'ORPHAN-ENTRY'")
+        prog = _make_program(
+            paragraphs=[("MAIN-PARA", [_stop_run()])],
+        )
+        # Append directly to the paragraph's statement list without going
+        # through add_statement()/add_child(), so the statement has no
+        # parent and `section_name` falls through to None -- mirrors the
+        # defensive path in `_collect_entry_refs`. get_all_statements()
+        # still finds it via its dedicated "Paragraph.statements" traversal.
+        prog.procedure_division.paragraphs[0].statements.append(stmt)
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert not report.has_dead_code

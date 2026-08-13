@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-12T18:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
@@ -119,6 +119,26 @@ only flowed subject to target and never had this bug. Fixed by dropping the
 referenced now. Pinned by
 `TestAlterReferences.test_alter_never_called_paragraph_is_dead`
 (`tests/unit/analysis/test_dead_code.py`).
+
+**`_propagate_section_references` resurrected unrelated dead siblings
+(2026-08-13 audit finding).** The function chained an upward pass (any
+referenced paragraph marks its parent section referenced) followed by a
+downward pass (a referenced section marks *all* its paragraphs referenced)
+in that order. Since the two passes share the same mutable
+`_referenced_names` set, a paragraph referenced only by a plain `PERFORM
+child-paragraph` (not `PERFORM section-name`) bootstrapped its parent
+section into "referenced" via the upward pass, and the downward pass then
+broadcast that to every *sibling* paragraph in the section too --
+resurrecting paragraphs nothing PERFORMs/GOes TO and that fall-through
+never reaches. Real COBOL semantics only cascade to every paragraph in a
+section when the *section itself* is PERFORMed/GONE TO (or fallen into);
+PERFORMing one paragraph inside it returns to the caller afterward and does
+not run the rest of the section. Fixed by reordering: downward now runs
+*first*, so it only ever sees sections that were already directly
+referenced by `_collect_references`/entry-point-marking/
+`_collect_fallthrough_refs` before this function ran, never sections that
+became "referenced" purely via a child's own reference. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestSectionPropagationDoesNotResurrectSiblings`.
 
 **Computed GO TO targets read from `target_paragraphs`, not operand
 filtering (2026-08-11):** `_collect_goto_refs` used to reconstruct a
@@ -326,6 +346,15 @@ all four arm kinds (THEN/ELSE/WHEN/WHEN OTHER); `to_dict()` includes the
 key only when non-None, the report's usual optional-field convention. The
 flowchart generators render it instead of the bare THEN/ELSE keyword —
 see [generators.md](generators.md).
+
+**Mypy narrowing fix (2026-08-13, no behavior change):** the EVALUATE
+subject-summary line used `hasattr(s, "to_dict")` to distinguish a
+`CobolExpression` subject from a bare `str` one
+(`EvaluateStatement.subjects: list[str | CobolExpression]`) — mypy can't
+narrow a union on `hasattr`, so it still saw the full union at the
+`render_condition_text(s)` call, which only accepts `CobolExpression |
+None`. Swapped for `isinstance(s, CobolExpression)`, which mypy narrows
+correctly; runtime behavior is identical.
 
 **RETURN is explicitly excluded (bug fixed 2026-08-11):** `RETURN` reads
 the next record from a SORT/MERGE file — it does not terminate the

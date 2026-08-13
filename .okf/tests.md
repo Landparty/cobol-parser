@@ -18,6 +18,20 @@ corrupt WORKING-STORAGE), including end-to-end assertions against
 clause (`REPORT` as an ordinary clause word, not a section header). See
 [parser.md](parser.md).
 
+2026-08-13: `test_statement_text.py` reformatted to match the CI-pinned
+`black==26.3.0` (whitespace-only, no test logic change) — pre-existing
+drift from a newer local black, discovered while unblocking this PR's CI.
+
+2026-08-13: +13 in `tests/unit/analysis/test_dead_code.py` — 3 in new
+`TestSectionPropagationDoesNotResurrectSiblings` pinning the
+`_propagate_section_references` sibling-resurrection fix, plus 10 in new
+`TestDefensiveEdgeCases` closing every remaining coverage gap in
+`dead_code.py` (95.77% → 100% line + 100% branch): inline PERFORM with no
+target, MERGE without an output procedure / without THRU, a THRU range
+with a falsy start, a blank SECTION name, invalid `"."` paragraph names
+inside a section, a duplicate top-level paragraph name, an orphan ENTRY
+statement, and a malformed ALTER target. See [analysis.md](analysis.md).
+
 2026-08-12: Test-infrastructure audit — `contract`/`integration`/`io`
 markers are now applied structurally by per-directory `conftest.py`
 collection hooks (see "Per-directory marker enforcement" below); the 12
