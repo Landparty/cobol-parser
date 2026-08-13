@@ -99,6 +99,9 @@ from .analysis import (
     ProgramFlowAnalyzer,
     ProgramFlowReport,
     TableEntry,
+    UnusedVariableAnalyzer,
+    UnusedVariableItem,
+    UnusedVariableReport,
 )
 from .batch import (
     BatchResult,
@@ -292,6 +295,9 @@ __all__ = [
     "IOLogger",
     "IOLogReport",
     "IOOperation",
+    "UnusedVariableAnalyzer",
+    "UnusedVariableReport",
+    "UnusedVariableItem",
     # Will be added when implemented:
     # "ANSICobol",
     # "MicroFocusCobol",

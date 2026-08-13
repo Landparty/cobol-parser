@@ -8,6 +8,28 @@ timestamp: 2026-08-13T00:00:00Z
 
 # Overview
 
+2026-08-13: +5 in `tests/unit/analysis/test_unused_variables.py`'s new
+`TestQualifiedAndFunctionOperands` — Copilot PR review on the
+`UnusedVariableAnalyzer` PR caught that a qualified name (`WS-A OF
+WS-GRP`), an intrinsic function call (`FUNCTION UPPER-CASE(WS-X)`), a
+special register (`LENGTH OF WS-X`), and a subscripted reference
+(`WS-ENTRY(WS-IDX)`) were each added to the referenced-names set as one
+opaque joined string instead of split into their underlying data-names,
+so none of the real names ever matched and were falsely reported unused.
+See [analysis.md](analysis.md)'s `_extract_identifiers` note.
+
+2026-08-13: New `tests/unit/analysis/test_unused_variables.py` (25 tests) for
+the new `UnusedVariableAnalyzer` (see [analysis.md](analysis.md)) — basic
+used/unused detection, FILLER/`ANONYMOUS-*` exclusion, group-item
+used-if-any-descendant-used, level-88 usage marking its parent used,
+IF/PERFORM UNTIL condition operands (exercising the expression-tree walk,
+not `.operands`), REDEFINES propagation, OCCURS DEPENDING ON, LINKAGE/FILE
+SECTION coverage, `copybook_item_names`/`include_copybook_variables`
+filtering, `TestExtrasLookupIsMroAware` (pins that the
+`_STR_ATTR_EXTRAS`/`_DICT_LIST_EXTRAS` lookup walks `type(stmt).__mro__`,
+not exact type), `to_dict()` serialization, top-level package export, and a
+`collect_declared_items()` unit test.
+
 2026-08-13: +23 in new `tests/regression/test_screen_report_communication_sections.py`
 — pins the DATA DIVISION parser's new SCREEN/REPORT/COMMUNICATION SECTION
 header recognition (previously unrecognized headers let their content

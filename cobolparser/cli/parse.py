@@ -22,6 +22,7 @@ _SUBCOMMANDS = frozenset(
         "gen-fixtures",
         "analyze",
         "dead-code",
+        "unused-variables",
         "program-flow",
         "io-sequence",
         "move-type-check",
@@ -1076,6 +1077,112 @@ def _cmd_dead_code(args: argparse.Namespace) -> None:
     _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: unused-variables ---------------------------------------------
+
+
+def _build_unused_variables_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "unused-variables",
+        help="Detect DATA DIVISION items never referenced in PROCEDURE DIVISION",
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_free_form_arg(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    _add_profiling_args(p)
+    p.add_argument(
+        "--exclude-copybook-variables",
+        action="store_true",
+        help=(
+            "Exclude unused items that originated from an expanded COPY "
+            "statement. Only takes effect together with --copybook-path "
+            "(copybook origin is determined by diffing declared items "
+            "against an unexpanded parse of the same source); a no-op "
+            "otherwise, with a warning on stderr."
+        ),
+    )
+    p.set_defaults(func=_cmd_unused_variables)
+
+
+def _parse_without_copybook_expansion(args: argparse.Namespace) -> Any:
+    """Parse *args.file* the same way ``_do_parse`` does, but never
+    expanding COPY statements.
+
+    Used by ``_cmd_unused_variables`` to determine which declared data
+    items came from a copybook: ``expand_copybooks``'s own
+    ``preserve_source_locations`` line-tracking is not implemented (see
+    ``UnusedVariableAnalyzer``'s docstring), so provenance is instead
+    determined by set-difference -- names declared in the expanded AST but
+    not in this unexpanded one must have come from an expanded COPY.
+    """
+    source = _read_source(args.file)
+    dialect = _DIALECT_MAP[args.dialect]
+    error_recovery = _get_error_recovery(args)
+    defines = _parse_defines(getattr(args, "define", []))
+
+    if defines:
+        from ..preprocess import preprocess_conditional_compilation
+
+        source = preprocess_conditional_compilation(source, defines, warnings=[])
+
+    parse_kwargs: dict[str, Any] = {
+        "dialect": dialect,
+        "error_recovery": error_recovery,
+        "free_form": getattr(args, "free_form", False),
+    }
+    return parse_cobol(source, filename=args.file, **parse_kwargs)
+
+
+def _cmd_unused_variables(args: argparse.Namespace) -> None:
+    from ..analysis.unused_variables import (
+        UnusedVariableAnalyzer,
+        collect_declared_items,
+    )
+
+    ast, prof = _parse_or_fail(args)
+
+    copybook_paths = getattr(args, "copybook_path", [])
+    exclude_copybook = getattr(args, "exclude_copybook_variables", False)
+    copybook_item_names: set[str] | None = None
+
+    if copybook_paths:
+        unexpanded_result = _parse_without_copybook_expansion(args)
+        if unexpanded_result.ast is None:
+            print(
+                f"warning: {args.file} could not be parsed without copybook "
+                "expansion; copybook-origin detection disabled",
+                file=sys.stderr,
+            )
+        else:
+            local_names = {
+                item.name.upper()
+                for item in collect_declared_items(unexpanded_result.ast)
+            }
+            expanded_names = {item.name.upper() for item in collect_declared_items(ast)}
+            copybook_item_names = expanded_names - local_names
+    elif exclude_copybook:
+        print(
+            "warning: --exclude-copybook-variables has no effect without "
+            "--copybook-path",
+            file=sys.stderr,
+        )
+
+    analyzer = UnusedVariableAnalyzer()
+    report = analyzer.analyze(
+        ast,
+        include_copybook_variables=not exclude_copybook,
+        copybook_item_names=copybook_item_names,
+    )
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
 # -- Subcommand: program-flow -------------------------------------------------
 
 
@@ -1375,6 +1482,7 @@ def _build_parser() -> argparse.ArgumentParser:
         _cmd_dead_code,
         profiling=True,
     )
+    _build_unused_variables_parser(subparsers)
     _build_program_flow_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
