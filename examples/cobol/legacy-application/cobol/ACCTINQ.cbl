@@ -6,9 +6,9 @@
       *            COMMAREA-DRIVEN SERVICE CALLED BY TELLER/API       *
       *            FRONT ENDS TO RETURN CURRENT BALANCE, AVAILABLE    *
       *            BALANCE, HOLD AMOUNT, AND ACCOUNT STATUS.          *
-      * INPUT:     DFHCOMMAREA - TLR-COMM-AREA REQUEST HALF           *
-      *            (ACCOUNT NUMBER, TELLER ID, BRANCH CODE)           *
-      * OUTPUT:    DFHCOMMAREA - TLR-COMM-AREA RESPONSE HALF          *
+      * INPUT:     DFHCOMMAREA TLR-REQUEST HALF (ACCOUNT NUMBER,      *
+      *            TELLER ID, BRANCH CODE)                            *
+      * OUTPUT:    DFHCOMMAREA TLR-RESPONSE HALF                      *
       * FILES:     ACCTMST (CICS FCT-DEFINED VSAM KSDS ON ACCT-NUMBER)*
       * TRANSID:   ACIQ                                                *
       * PCT:       ACIQ -> ACCTINQ (CICS-DEFINED, NO BATCH JCL)       *
@@ -27,8 +27,14 @@
        01  WS-ACCT-KEY               PIC X(12).
 
        LINKAGE SECTION.
-       01  DFHCOMMAREA.
-           COPY TLRCOMM.
+      *    Equal-level COPY nests as a SIBLING, not a child -- an 01
+      *    DFHCOMMAREA wrapper around "COPY TLRCOMM." would leave
+      *    DFHCOMMAREA empty and TLR-COMM-AREA floating beside it,
+      *    detached from the commarea CICS actually populates on
+      *    entry. REPLACING renames the copybook's own 01 so
+      *    DFHCOMMAREA itself is the populated record.
+           COPY TLRCOMM
+               REPLACING ==TLR-COMM-AREA== BY ==DFHCOMMAREA==.
 
        PROCEDURE DIVISION.
        0000-MAIN-PROCESS.
@@ -38,7 +44,7 @@
            END-EXEC
 
            IF EIBCALEN = ZERO
-               MOVE SPACES TO TLR-COMM-AREA
+               MOVE SPACES TO DFHCOMMAREA
                MOVE ERR-PROGRAM-ERROR TO TLR-RESP-STATUS-CODE
                MOVE 'NO COMMAREA RECEIVED ON ACIQ TRANSACTION'
                    TO TLR-RESP-MESSAGE
@@ -49,8 +55,8 @@
            END-IF
 
            EXEC CICS RETURN
-               COMMAREA(TLR-COMM-AREA)
-               LENGTH(LENGTH OF TLR-COMM-AREA)
+               COMMAREA(DFHCOMMAREA)
+               LENGTH(LENGTH OF DFHCOMMAREA)
            END-EXEC.
 
        1000-READ-ACCOUNT-MASTER.
@@ -86,12 +92,12 @@
            END-IF.
 
        2000-NOTFND-HANDLER.
-           MOVE SPACES TO TLR-COMM-AREA
+           MOVE SPACES TO DFHCOMMAREA
            MOVE ERR-ACCT-NOT-FOUND TO TLR-RESP-STATUS-CODE
            MOVE 'ACCOUNT NOT FOUND' TO TLR-RESP-MESSAGE
            EXEC CICS RETURN
-               COMMAREA(TLR-COMM-AREA)
-               LENGTH(LENGTH OF TLR-COMM-AREA)
+               COMMAREA(DFHCOMMAREA)
+               LENGTH(LENGTH OF DFHCOMMAREA)
            END-EXEC.
 
        9999-ABEND-HANDLER.

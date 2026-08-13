@@ -31,22 +31,27 @@
 
        DATA DIVISION.
        FILE SECTION.
+      *    Equal-level COPY nests as a SIBLING, not a child -- an 01
+      *    wrapper around "COPY TRANREC." would leave the wrapper
+      *    empty and TRANSACTION-RECORD floating beside it. REPLACING
+      *    renames the copybook's own 01 so each FD gets one genuinely
+      *    populated top-level record, still OF-qualifiable below.
        FD  TRANS-IN
            RECORDING MODE IS F
            BLOCK CONTAINS 0 RECORDS.
-       01  TRANS-IN-REC.
-           COPY TRANREC.
+           COPY TRANREC
+               REPLACING ==TRANSACTION-RECORD== BY ==TRANS-IN-REC==.
 
        FD  TRANS-SORTED
            RECORDING MODE IS F
            BLOCK CONTAINS 0 RECORDS.
-       01  TRANS-SORTED-REC.
-           COPY TRANREC.
+           COPY TRANREC
+               REPLACING ==TRANSACTION-RECORD== BY ==TRANS-SORTED-REC==.
 
        SD  SORT-WORK
            RECORDING MODE IS F.
-       01  SORT-WORK-REC.
-           COPY TRANREC.
+           COPY TRANREC
+               REPLACING ==TRANSACTION-RECORD== BY ==SORT-WORK-REC==.
 
        FD  FEERPT
            RECORDING MODE IS F
