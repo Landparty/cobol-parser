@@ -1295,6 +1295,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.5.5](https://github.com/Landparty/cobol-parser/compare/v1.5.4...v1.5.5) (2026-08-13)
+
+
+### Bug Fixes
+
+* program-flow label fidelity (ASCII, &lt;/&gt; escaping, arm statement summaries) ([c086c20](https://github.com/Landparty/cobol-parser/commit/c086c205cab9a7ba532339409bdbb3ff8640ef55))
+* program-flow label fidelity (ASCII, &lt;/&gt; escaping, arm summaries) ([94490a2](https://github.com/Landparty/cobol-parser/commit/94490a2a2996168c6e64cab910f8361ac4e9ef50))
+* render double quotes in mermaid labels as apostrophes, not #quot; ([5600be5](https://github.com/Landparty/cobol-parser/commit/5600be5bb774c5643eef6b8742ff916aacbbb1fe))
+
 ## [1.5.4](https://github.com/Landparty/cobol-parser/compare/v1.5.3...v1.5.4) (2026-08-12)
 
 
