@@ -33,6 +33,7 @@ from ...models.statements.misc import (
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
 from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
+from .statement_text import summarize_arm
 
 # Conditional clause-body attributes that may hold nested statements on IO /
 # arithmetic / STRING statements the ``scan()`` dispatch does not special-case.
@@ -313,12 +314,14 @@ class ProcedureScanner:
                     arm_type="THEN",
                     label="THEN",
                     statement_count=len(stmt.then_statements),
+                    summary=summarize_arm(stmt.then_statements),
                 )
                 else_arm = BranchArm(
                     arm_id=else_id,
                     arm_type="ELSE",
                     label="ELSE",
                     statement_count=len(stmt.else_statements),
+                    summary=summarize_arm(stmt.else_statements),
                 )
                 bn = BranchNode(
                     node_id=bn_id,
@@ -436,6 +439,7 @@ class ProcedureScanner:
                         arm_type="WHEN",
                         label=when_label,
                         statement_count=len(wc.statements),
+                        summary=summarize_arm(wc.statements),
                     )
 
                     def _when_thunk(
@@ -465,6 +469,7 @@ class ProcedureScanner:
                         arm_type="WHEN_OTHER",
                         label="WHEN OTHER",
                         statement_count=len(stmt.default_when.statements),
+                        summary=summarize_arm(stmt.default_when.statements),
                     )
                     default_when = stmt.default_when
 

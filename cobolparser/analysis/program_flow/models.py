@@ -158,15 +158,21 @@ class BranchArm:
     label: str
     statement_count: int
     nested_call_targets: list[str] = field(default_factory=list)
+    # Compact one-line summary of the arm's first statement (see
+    # analysis/program_flow/statement_text.py); None when the arm is empty.
+    summary: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "arm_id": self.arm_id,
             "arm_type": self.arm_type,
             "label": self.label,
             "statement_count": self.statement_count,
             "nested_call_targets": self.nested_call_targets,
         }
+        if self.summary is not None:
+            result["summary"] = self.summary
+        return result
 
 
 @dataclass

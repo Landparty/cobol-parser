@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-11T13:00:00Z
+timestamp: 2026-08-12T18:00:00Z
 ---
 
 # Overview
@@ -135,6 +135,17 @@ in `tests/regression/test_open_findings_high_regressions.py` for HIGH
 findings H1-H8). Coverage floor: **81% line coverage** enforced by
 `--cov-fail-under=81` in `pyproject.toml`; full-suite run measured
 91.43%. Branch coverage is enabled.
+
+2026-08-12: +17 in `tests/unit/analysis/test_statement_text.py` (new —
+`summarize_statement`/`summarize_arm`, real-parse fixtures per statement
+type, truncation, never-raises guard) and +20 in
+`test_flowchart_generator.py` (`TestMermaidLabelFidelity`/
+`TestDotLabelFidelity`/`TestLabelFidelityEndToEnd`: ASCII-only output,
+`#lt;`/`#gt;` label escaping, arm statement summaries with `+N more`
+markers, empty-IF-arm dropping), plus `test_program_flow.py`'s
+`test_branch_arm_to_dict_fields` extended for the optional
+`BranchArm.summary` key. See [generators.md](generators.md)'s "Label
+fidelity" section.
 
 2026-08-11: +2 in `test_flowchart_generator.py`
 (`test_loop_label_with_parens_is_quoted`, `test_call_dynamic_edge_label_with_parens_is_quoted`)

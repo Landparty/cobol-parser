@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-12T12:00:00Z
+timestamp: 2026-08-12T18:00:00Z
 ---
 
 # Overview
@@ -94,7 +94,8 @@ substance, differing only in each target format's own attribute syntax:
 - **Terminal exit nodes.** One extra node per `FlowNode` carrying
   `exit_statement_kind`/`exit_statement_location` (see
   [analysis.md](analysis.md)'s `ProgramFlowAnalyzer` section), labeled
-  `"{kind} · {line}"`, positioned right after the main node loop and
+  `"{kind} @ {line}"` (ASCII `@` since 2026-08-12 — see "Label fidelity"
+  below), positioned right after the main node loop and
   before external-call nodes in both generators — Mermaid emits `(((...)))`
   triple-circle syntax plus a `terminal` classDef
   (`fill:#1b1b1b,stroke:#c1121f`); DOT emits `shape=doublecircle` with
@@ -138,13 +139,51 @@ substance, differing only in each target format's own attribute syntax:
   in `legacy-application/cobol/DEPTBMP.cbl`. DOT is unaffected — `_dot_str`
   already quotes every DOT label.
 
+**Label fidelity (2026-08-12):** three fixes driven by how the VS Code
+Program Flow webview (Mermaid v11, `htmlLabels:false`,
+`securityLevel:'strict'`) actually renders the emitted text:
+
+- **ASCII-only output.** Both generators' emitted labels are pure ASCII:
+  the exit-terminal separator is `@` (was U+00B7 `·`) and
+  `GOTO_DEPENDING`'s short label is `GO TO ... DEPENDING` (was U+2026
+  `…`). On Windows the CLI writes stdout in the console's locale encoding
+  (cp1252) while consumers decode UTF-8, so any non-ASCII label character
+  rendered as U+FFFD (`GOBACK � 118` in the webview). Pinned by the
+  `test_output_is_ascii_only` tests (`out.encode("ascii")`).
+- **`"`/`<`/`>` entity-escaped in every Mermaid label.** Module-level
+  `_escape_mermaid_label()` maps them to `#quot;`/`#lt;`/`#gt;` in branch
+  conditions, arm labels, and edge labels. Mermaid v11 with
+  `htmlLabels:false` silently swallows a bare `>` from label text
+  (`WS-PURGE-ERRORS > ZERO` rendered as `WS-PURGE-ERRORS ZERO`, `>=` as
+  `=`) while `<`/`<>` happen to survive; the `#name;` entity form renders
+  correctly through both the lexer and the sanitizer (`#62;`-style
+  *numeric* entities do NOT — they come out as literal `&#62;` text in
+  SVG-text label mode; verified empirically against Mermaid 11.12).
+  DOT labels are not entity-escaped — Graphviz has no such mangling.
+- **Arm boxes show statement summaries.** `BranchArm.summary` (see
+  [analysis.md](analysis.md)'s statement_text section) renders instead of
+  the bare `THEN`/`ELSE`/`WHEN x` keyword, which duplicated the edge label
+  and said nothing about the arm's behavior: Mermaid emits
+  `["MOVE 8 TO RETURN-CODE\n+2 more"]` (in-label `\n` line break, count
+  from `statement_count`), DOT emits `label="MOVE 8 TO RETURN-CODE (+2
+  more)"` (single-line — a `\n` would collide with `_dot_str`'s backslash
+  escaping). Arms without a summary (hand-built reports) keep the keyword
+  label. Additionally, module-level `_is_empty_if_arm()` drops the empty
+  ELSE arm the scanner synthesizes for every IF with no ELSE clause (and
+  its `IF_ELSE` edge — otherwise Mermaid/DOT would auto-recreate the node
+  from the dangling edge). EVALUATE arms are never dropped: an empty WHEN
+  still documents that its selector value is deliberately handled.
+
 Reference tests: `tests/unit/test_flowchart_generator.py` —
 `TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge
 sections, plus `test_linkstyle_index_accounts_for_terminal_node_links` and
 `test_terminal_id_does_not_collide_with_real_exit_paragraph` pinning the
 two composition-bug fixes above), `TestDotFlowchartParity` (the DOT-side
-mirror), and `TestSortThruEndToEnd` (real-COBOL-through-the-analyzer proof
-that a SORT OUTPUT PROCEDURE THRU range now reaches both renderers).
+mirror), `TestSortThruEndToEnd` (real-COBOL-through-the-analyzer proof
+that a SORT OUTPUT PROCEDURE THRU range now reaches both renderers), and
+`TestMermaidLabelFidelity`/`TestDotLabelFidelity`/`TestLabelFidelityEndToEnd`
+(ASCII-only output, `#lt;`/`#gt;` escaping, arm summaries, empty-IF-arm
+dropping).
 
 # Copybook Test Data (`data/` package, shimmed via `copybook_data.py`)
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..analysis.program_flow import (
+        BranchArm,
         FlowEdge,
         FlowNode,
         ProgramFlowReport,
@@ -105,6 +106,49 @@ def _external_call_target(ext: dict) -> str:
     return target.upper()
 
 
+def _escape_mermaid_label(text: str) -> str:
+    """Escape characters Mermaid mangles inside quoted label text.
+
+    ``"`` breaks the quoted-string lexing outright, and a bare ``>`` is
+    silently swallowed by Mermaid's (v11, htmlLabels:false) label
+    sanitization -- ``WS-PURGE-ERRORS > ZERO`` renders as
+    ``WS-PURGE-ERRORS ZERO`` and ``>=`` as ``=``. Mermaid's ``#name;``
+    entity syntax survives both the lexer and the sanitizer, so map all
+    three to entities (``<`` included: ``<`` followed by a letter reads
+    as an HTML tag opener and would be stripped the same way).
+    """
+    return (
+        text.replace('"', "#quot;").replace("<", "#lt;").replace(">", "#gt;")
+    )
+
+
+def _arm_summary_label(arm: BranchArm) -> str:
+    """Display label for a branch arm box.
+
+    Prefers the arm's statement summary ("MOVE 8 TO RETURN-CODE") over the
+    bare arm keyword ("THEN"/"ELSE"/"WHEN x"), which duplicates the edge
+    label and says nothing about what the arm does.
+    """
+    if arm.summary:
+        return arm.summary
+    return arm.label
+
+
+def _is_empty_if_arm(branch_type: str, arm: BranchArm) -> bool:
+    """True for an IF arm with no statements and no nested transfers.
+
+    Every IF gets an ELSE arm from the scanner even when the source has no
+    ELSE clause; drawing an empty "ELSE" box is pure noise. EVALUATE arms
+    are never dropped -- an empty WHEN still documents that its selector
+    value is deliberately handled.
+    """
+    return (
+        branch_type == "IF"
+        and arm.statement_count == 0
+        and not arm.nested_call_targets
+    )
+
+
 def _sanitize_id(name: str) -> str:
     """Return a safe identifier derived from *name*.
 
@@ -161,7 +205,11 @@ def _short_edge_label(edge_type: str) -> str:
         "PERFORM": "PERFORM",
         "PERFORM_THRU": "PERFORM THRU",
         "GOTO": "GO TO",
-        "GOTO_DEPENDING": "GO TO … DEPENDING",
+        # ASCII only (here and in every emitted label): the CLI writes
+        # stdout in the console's locale encoding on Windows (cp1252), while
+        # consumers (the VS Code extension among them) decode UTF-8 -- any
+        # non-ASCII character renders as U+FFFD "?" in the diagram.
+        "GOTO_DEPENDING": "GO TO ... DEPENDING",
         "CALL": "CALL",
         "CALL_DYNAMIC": "CALL (dynamic)",
         "SORT_INPUT_PROCEDURE": "SORT INPUT",
@@ -259,7 +307,9 @@ class MermaidFlowchartGenerator:
                 continue
             nid = _sanitize_id(node.name)
             exit_id = _unique_exit_id(nid, paragraph_ids)
-            label = f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
+            # "@" (not a middle dot) -- emitted labels must stay ASCII, see
+            # the encoding note on _short_edge_label's map.
+            label = f"{node.exit_statement_kind} @ {node.exit_statement_location.line}"
             lines.append(f'    {exit_id}((("{label}")))')
             lines.append(f"    {nid} --> {exit_id}")
             lines.append(f"    class {exit_id} terminal")
@@ -278,14 +328,20 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {eid} external")
 
         # ---- branch / arm nodes -----------------------------------------------
+        skipped_arm_ids: set[str] = set()
         for bn in report.branch_nodes:
             bn_id = _sanitize_id(bn.node_id)
-            cond = bn.condition_text.replace('"', "#quot;")
+            cond = _escape_mermaid_label(bn.condition_text)
             lines.append(f'    {bn_id}{{"[{bn.branch_type}] {cond}"}}')
             lines.append(f"    class {bn_id} branch")
             for arm in bn.arms:
                 arm_id = _sanitize_id(arm.arm_id)
-                arm_label = arm.label.replace('"', "#quot;")
+                if _is_empty_if_arm(bn.branch_type, arm):
+                    skipped_arm_ids.add(arm_id)
+                    continue
+                arm_label = _escape_mermaid_label(_arm_summary_label(arm))
+                if arm.summary and arm.statement_count > 1:
+                    arm_label += f"\\n+{arm.statement_count - 1} more"
                 lines.append(f'    {arm_id}["{arm_label}"]')
                 lines.append(f"    class {arm_id} arm")
 
@@ -323,6 +379,10 @@ class MermaidFlowchartGenerator:
                 if not options.show_unreachable and edge.target in unreachable_set:
                     continue
                 tgt_id = _sanitize_id(edge.target)
+                # An edge into an arm box that was dropped as empty would
+                # make Mermaid re-create the node with its bare id as label.
+                if tgt_id in skipped_arm_ids:
+                    continue
 
             arrow, label_parts = self._edge_style(etype, edge, options)
             if label_parts:
@@ -331,10 +391,10 @@ class MermaidFlowchartGenerator:
                 # lexer as the start of a node shape (PS / SQS tokens),
                 # not literal text -- e.g. a PERFORM UNTIL edge's "(loop)"
                 # suffix or a THRU edge's "[THRU n]" badge breaks parsing
-                # without the quotes. Reuse the same literal "#quot;"
-                # escape token branch/arm labels already use above for
-                # any double quote that survives into COBOL condition text.
-                label_text = " ".join(label_parts).replace('"', "#quot;")
+                # without the quotes. _escape_mermaid_label additionally
+                # entity-escapes the "/</> that COBOL condition text can
+                # carry into the label.
+                label_text = _escape_mermaid_label(" ".join(label_parts))
                 edge_str = f'    {src_id} {arrow}|"{label_text}"| {tgt_id}'
             else:
                 edge_str = f"    {src_id} {arrow} {tgt_id}"
@@ -499,8 +559,10 @@ class DotFlowchartGenerator:
                 continue
             nid = _sanitize_id(node.name)
             exit_id = _unique_exit_id(nid, paragraph_ids)
+            # "@" (not a middle dot): keep emitted labels ASCII, matching the
+            # Mermaid generator (see the encoding note on _short_edge_label).
             label = self._dot_str(
-                f"{node.exit_statement_kind} · {node.exit_statement_location.line}"
+                f"{node.exit_statement_kind} @ {node.exit_statement_location.line}"
             )
             lines.append(
                 f"    {exit_id} [label={label}, shape=doublecircle,"
@@ -525,6 +587,7 @@ class DotFlowchartGenerator:
                 )
 
         # ---- branch / arm nodes ----------------------------------------------
+        skipped_arm_ids: set[str] = set()
         for bn in report.branch_nodes:
             bn_id = _sanitize_id(bn.node_id)
             cond_label = self._dot_str(f"[{bn.branch_type}] {bn.condition_text}")
@@ -536,7 +599,15 @@ class DotFlowchartGenerator:
             )
             for arm in bn.arms:
                 arm_id = _sanitize_id(arm.arm_id)
-                arm_label = self._dot_str(arm.label)
+                if _is_empty_if_arm(bn.branch_type, arm):
+                    skipped_arm_ids.add(arm_id)
+                    continue
+                arm_text = _arm_summary_label(arm)
+                if arm.summary and arm.statement_count > 1:
+                    # Single-line "(+N more)" -- a "\n" here would collide
+                    # with _dot_str's backslash escaping.
+                    arm_text += f" (+{arm.statement_count - 1} more)"
+                arm_label = self._dot_str(arm_text)
                 afill = _DOT_COLORS["arm"]
                 afontcolor = _DOT_FONT_COLOR["arm"]
                 lines.append(
@@ -569,6 +640,10 @@ class DotFlowchartGenerator:
                 if not options.show_unreachable and edge.target in unreachable_set:
                     continue
                 tgt_id = _sanitize_id(edge.target)
+                # Parity with the Mermaid generator: no edges into arm
+                # boxes dropped as empty (DOT would auto-create the node).
+                if tgt_id in skipped_arm_ids:
+                    continue
 
             attrs = self._edge_attrs(etype, edge, options)
             if (
