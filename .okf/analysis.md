@@ -318,20 +318,22 @@ unused item in that set from `report.unused_items` (tallied instead in
 `report.skipped_copybook_count`); the flag is a documented no-op when
 `copybook_item_names` is None.
 
-**SCREEN/REPORT/COMMUNICATION SECTION are not modeled by the DATA
-DIVISION parser** (only FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE are
-recognized section names — `parsers/divisions/data.py`), so their clauses
-get mis-parsed as nested WORKING-STORAGE data items (a SCREEN SECTION
-`COLUMN 5` clause becomes an item literally named `COLUMN`). Confirmed
-empirically against `tests/samples/screen_section_io.cbl` and
-`report_writer.cbl` while validating this analyzer against the sample
-corpus (`tests/samples/*.cbl` + `examples/cobol/shamrice/*.cbl`) — a
-parser-level fix is out of scope for this analyzer; tracked separately.
-Unnamed level-number entries (`ANONYMOUS-<level>-<line>`) are filtered by
-`collect_declared_items`, which catches some but not all of the noise
-(a mis-parsed clause keyword that happens to lex as an IDENTIFIER, like
-`COLUMN` or `TYPE`, is not distinguishable from a real data item at this
-layer).
+**SCREEN/REPORT/COMMUNICATION SECTION false-positive noise was fixed
+upstream, not in this module.** This analyzer originally found (empirically,
+against `tests/samples/screen_section_io.cbl` and `report_writer.cbl`
+while validating against the sample corpus) that the DATA DIVISION parser
+mis-parsed SCREEN/REPORT/COMMUNICATION SECTION clauses as nested
+WORKING-STORAGE data items (a SCREEN SECTION `COLUMN 5` clause became an
+item literally named `COLUMN`), spawned as a separate follow-up task
+rather than fixed here. That parser fix has since landed (same day —
+`parsers/divisions/data.py`'s `_skip_section`; see [log.md](log.md)): the
+three section headers are now recognized and their
+content discarded into distinctly-named, always-empty `SCREEN`/`REPORT`/
+`COMMUNICATION` sections. `collect_declared_items` only ever recognized
+FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE, so no analyzer-side change
+was needed — the noise disappeared once the parser stopped corrupting
+WORKING-STORAGE. Confirmed empirically post-fix: `screen_section_io.cbl`'s
+WORKING-STORAGE dropped from 33 spurious items back to its real 5.
 
 CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 

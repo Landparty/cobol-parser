@@ -58,6 +58,53 @@ Updated [analysis.md](analysis.md) (new `UnusedVariableAnalyzer` section +
 module map row), [cli.md](cli.md) (new `unused-variables` subcommand
 section). Timestamps bumped to 2026-08-13T00:00Z.
 
+## 2026-08-13 (SCREEN/REPORT/COMMUNICATION SECTION headers no longer corrupt WORKING-STORAGE)
+
+`DataDivisionParser` (`data.py`) only recognized FILE, WORKING-STORAGE,
+LOCAL-STORAGE, and LINKAGE as DATA DIVISION section headers. A SCREEN
+SECTION, REPORT SECTION, or COMMUNICATION SECTION header was not a
+recognized section boundary in either `parse_division`'s dispatch loop or
+`_parse_section`'s break conditions, so whichever section scan was in
+progress (almost always WORKING-STORAGE) silently absorbed the unrecognized
+header token-by-token and kept going into the following section's own
+level-numbered content. Two distinct corruption shapes resulted, both
+confirmed empirically:
+- SCREEN SECTION's clause keywords (`COLUMN`, `LINE`, `BLANK`, ...), which
+  the data-item clause loop doesn't recognize either, produced spurious
+  top-level `CobolDataItem`s literally named `COLUMN` etc. (real file:
+  `screen_section_io.cbl` ballooned WORKING-STORAGE from 5 to 33 items).
+- COMMUNICATION SECTION's own CD/record content was silently eaten with no
+  trace, but any data item declared *after* it with no section header of
+  its own (a loose but common real-world pattern) was wrongly merged back
+  into WORKING-STORAGE (real file: `communication_module.cbl`, 5 → 12).
+
+Fixed by adding `SCREEN`/`REPORT`/`COMMUNICATION` to the section-break-header
+set (so any in-progress section scan stops there) and a new
+`DataDivisionParser._skip_section()` that consumes the header and discards
+the body up to the next section/division boundary, then registers an empty,
+distinctly-named `CobolSection` (`SCREEN`/`REPORT`/`COMMUNICATION`) plus a
+`has_screen`/`has_report`/`has_communication` division-metadata flag. These
+three sections' own grammars (screen-field clauses, RD/report-group entries,
+CD entries) are still not modeled -- their content, and any item declared
+under them, is discarded rather than corrupting WORKING-STORAGE or another
+section. Two refinements added on review:
+1. The discard is no longer silent -- `_skip_section` records a
+   `ParseResult.warnings` entry naming the section, matching this repo's
+   established "recognized but degraded" convention (`errors=0, warnings=0`
+   must not imply a complete AST).
+2. `REPORT` (and, less commonly, `COMMUNICATION`/`SCREEN`) also appears as
+   an ordinary clause word outside a section header -- an FD's `REPORT IS
+   report-name.` clause (`examples/cobol/shamrice/report_test.cbl:32`) is
+   exactly this. `parse_division`'s dispatch now only routes to
+   `_skip_section` when the next token is literally `SECTION`
+   (`_next_is_section_keyword`, mirroring `_parse_section`'s own lookahead
+   for these headers), so a bare clause-word use falls through to the
+   existing unknown-token skip instead of wrongly discarding whatever
+   source follows it.
+Pinned by `tests/regression/test_screen_report_communication_sections.py`
+(23 cases), including end-to-end pins against the three real sample
+fixtures above and the `report_test.cbl` FD-clause collision.
+
 ## 2026-08-13 (Unblock CI: mypy union-narrowing fix + black==26.3.0 drift on two unrelated files)
 
 `main`'s CI (`typecheck` and `lint` jobs) had been red since 2026-08-12

@@ -342,20 +342,18 @@ class UnusedVariableAnalyzer:
       by name, not by structural item identity -- two same-named items at
       different qualification scopes (legal but rare in COBOL) are not
       distinguished.
-    - SCREEN SECTION, REPORT SECTION, and COMMUNICATION SECTION are not
-      modeled as distinct constructs by the DATA DIVISION parser (only
-      FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE are recognized section
-      names -- see ``parsers/divisions/data.py``); their clauses can be
-      mis-parsed as nested WORKING-STORAGE data items (e.g. a SCREEN
-      SECTION's ``COLUMN 5`` clause showing up as an item literally named
-      ``COLUMN``), which then reports as a spurious unused variable.
-      Confirmed empirically against ``tests/samples/screen_section_io.cbl``
-      and ``report_writer.cbl``. Real unnamed level-number entries
-      (``ANONYMOUS-<level>-<line>``) are filtered by
-      ``collect_declared_items``, but a mis-parsed *named* clause keyword
-      is not distinguishable from a real data item at this layer -- a
-      parser-level fix (recognizing and skipping SCREEN/REPORT/
-      COMMUNICATION SECTION content) is out of scope here.
+    - SCREEN SECTION, REPORT SECTION, and COMMUNICATION SECTION headers
+      are now recognized by the DATA DIVISION parser and their content
+      discarded into distinctly-named, always-empty ``SCREEN``/``REPORT``/
+      ``COMMUNICATION`` sections (a separate parser fix, landed after this
+      analyzer was first written -- see ``parsers/divisions/data.py``'s
+      ``_skip_section``). ``collect_declared_items`` only recognizes
+      FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE, so these three sections
+      contribute nothing to the declared-item set either way -- no
+      analyzer-side change was needed once the parser stopped corrupting
+      WORKING-STORAGE with their clause keywords. Their content (screen
+      fields, report groups, CD entries) is simply invisible to this
+      analyzer, same as any other construct outside its documented scope.
 
     Example:
         ```python
