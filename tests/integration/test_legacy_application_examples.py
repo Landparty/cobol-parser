@@ -17,7 +17,9 @@ from cobolparser import CobolParser, ErrorRecoveryMode, parse_cobol_with_expansi
 
 pytestmark = pytest.mark.integration
 
-LEGACY_APP_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol" / "legacy-application"
+LEGACY_APP_DIR = (
+    Path(__file__).parent.parent.parent / "examples" / "cobol" / "legacy-application"
+)
 COBOL_DIR = LEGACY_APP_DIR / "cobol"
 COPYBOOK_DIR = LEGACY_APP_DIR / "copybook"
 
@@ -50,6 +52,8 @@ class TestLegacyApplicationExamples:
             source, str(cbl_path), copybook_paths=[str(COPYBOOK_DIR)]
         )
         assert result.ast is not None, f"{cbl_path.name}: AST is None (expanded)"
-        assert result.errors == [], f"{cbl_path.name}: parse errors (expanded):\n" + "\n".join(
+        assert (
+            result.errors == []
+        ), f"{cbl_path.name}: parse errors (expanded):\n" + "\n".join(
             str(e) for e in result.errors
         )
