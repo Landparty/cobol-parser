@@ -5455,18 +5455,26 @@ class TestBranchNodes:
         }
 
     def test_branch_arm_to_dict_fields(self) -> None:
-        """BranchArm.to_dict() exposes all expected keys."""
+        """BranchArm.to_dict() exposes all expected keys.
+
+        "summary" follows the report-wide optional-field convention: present
+        only when the arm has statements (the THEN arm here holds a
+        CONTINUE), absent for an empty arm (the ELSE arm here).
+        """
         prog = _make_program([("MAIN-LOGIC", [_if_stmt([_continue()])])])
         report = ProgramFlowAnalyzer().analyze(prog)
-        arm_d = report.branch_nodes[0].arms[0].to_dict()
+        then_d = report.branch_nodes[0].arms[0].to_dict()
+        else_d = report.branch_nodes[0].arms[1].to_dict()
 
-        assert set(arm_d.keys()) == {
+        assert set(then_d.keys()) == {
             "arm_id",
             "arm_type",
             "label",
             "statement_count",
             "nested_call_targets",
+            "summary",
         }
+        assert "summary" not in else_d
 
     def test_branch_arm_nested_call_targets_empty_when_no_perform(self) -> None:
         """nested_call_targets is empty when the arm contains no PERFORM or GO TO."""

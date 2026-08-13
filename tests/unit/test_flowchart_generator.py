@@ -1381,3 +1381,221 @@ class TestExternalCallEndToEnd:
         assert 'EXT_OLDPGM(["OLDPGM"])' in mermaid
         assert "class EXT_OLDPGM external" in mermaid
         assert 'EXT_OLDPGM [label="OLDPGM"' in dot
+
+
+# ---------------------------------------------------------------------------
+# TestLabelFidelity -- ASCII-only output, </> escaping, arm summaries
+# ---------------------------------------------------------------------------
+
+
+def _exit_terminal_report() -> ProgramFlowReport:
+    node = _para("MAIN-LOGIC", entry=True, exit_=True, stmt_count=2)
+    node.exit_statement_kind = "GOBACK"
+    node.exit_statement_location = _loc(line=118)
+    return ProgramFlowReport(
+        program_name="TERM-PROG",
+        nodes=[node],
+        entry_points=["MAIN-LOGIC"],
+        edges=[
+            FlowEdge(
+                source="MAIN-LOGIC",
+                target="MAIN-LOGIC",
+                edge_type=FlowEdgeType.GOTO_DEPENDING,
+                location=_loc(),
+            )
+        ],
+    )
+
+
+def _gt_condition_report(*, else_count: int = 1) -> ProgramFlowReport:
+    """IF branch whose condition text carries comparison operators."""
+    then_arm = BranchArm(
+        arm_id="MAIN-LOGIC__IF_1__THEN",
+        arm_type="THEN",
+        label="THEN",
+        statement_count=3,
+        summary="MOVE 8 TO RETURN-CODE",
+    )
+    else_arm = BranchArm(
+        arm_id="MAIN-LOGIC__IF_1__ELSE",
+        arm_type="ELSE",
+        label="ELSE",
+        statement_count=else_count,
+        summary="MOVE ZERO TO RETURN-CODE" if else_count else None,
+    )
+    bn = BranchNode(
+        node_id="MAIN-LOGIC__IF_1",
+        branch_type="IF",
+        parent_proc="MAIN-LOGIC",
+        location=_loc(),
+        condition_text="WS-PURGE-ERRORS > ZERO",
+        arms=[then_arm, else_arm],
+    )
+    edges = [
+        FlowEdge(
+            source="MAIN-LOGIC",
+            target="MAIN-LOGIC__IF_1",
+            edge_type=FlowEdgeType.IF_BRANCH,
+            location=_loc(),
+        ),
+        FlowEdge(
+            source="MAIN-LOGIC__IF_1",
+            target="MAIN-LOGIC__IF_1__THEN",
+            edge_type=FlowEdgeType.IF_THEN,
+            location=_loc(),
+        ),
+        FlowEdge(
+            source="MAIN-LOGIC__IF_1",
+            target="MAIN-LOGIC__IF_1__ELSE",
+            edge_type=FlowEdgeType.IF_ELSE,
+            location=_loc(),
+        ),
+    ]
+    return ProgramFlowReport(
+        program_name="GT-PROG",
+        nodes=[_para("MAIN-LOGIC", entry=True, exit_=True, stmt_count=5)],
+        edges=edges,
+        entry_points=["MAIN-LOGIC"],
+        exit_points=["MAIN-LOGIC"],
+        branch_nodes=[bn],
+    )
+
+
+class TestMermaidLabelFidelity:
+    def _gen(self, report: ProgramFlowReport) -> str:
+        return MermaidFlowchartGenerator().generate(report)
+
+    # -- ASCII-only output (Windows cp1252 stdout vs UTF-8 consumers) -----
+
+    def test_output_is_ascii_only(self) -> None:
+        out = self._gen(_exit_terminal_report())
+        out.encode("ascii")  # raises UnicodeEncodeError on any stray char
+
+    def test_exit_terminal_label_uses_ascii_separator(self) -> None:
+        out = self._gen(_exit_terminal_report())
+        assert '((("GOBACK @ 118")))' in out
+
+    def test_goto_depending_label_uses_ascii_ellipsis(self) -> None:
+        assert _short_edge_label("GOTO_DEPENDING") == "GO TO ... DEPENDING"
+
+    # -- </> escaping (Mermaid v11 swallows bare ">" in labels) -----------
+
+    def test_condition_gt_escaped_as_entity(self) -> None:
+        out = self._gen(_gt_condition_report())
+        assert '{"[IF] WS-PURGE-ERRORS #gt; ZERO"}' in out
+        assert "> ZERO" not in out
+
+    def test_condition_lt_and_not_equal_escaped(self) -> None:
+        report = _gt_condition_report()
+        report.branch_nodes[0].condition_text = "CUST-IO-STATUS <> WS-TARGET"
+        out = self._gen(report)
+        assert "#lt;#gt; WS-TARGET" in out
+
+    def test_double_quotes_become_apostrophes(self) -> None:
+        """Not #quot;: that entity is NOT decoded on Mermaid's SVG-text label
+        path and renders as literal &quot; (unlike #lt;/#gt;, which are).
+        These are display-only labels, and 'Y' is how the COBOL read anyway."""
+        report = _gt_condition_report()
+        report.branch_nodes[0].condition_text = 'WS-EOF-SW = "Y"'
+        report.branch_nodes[0].arms[0].summary = 'MOVE "ACTIVE" TO WS-STATE'
+        out = self._gen(report)
+        assert "[IF] WS-EOF-SW = 'Y'" in out
+        assert "MOVE 'ACTIVE' TO WS-STATE" in out
+        assert "#quot;" not in out
+
+    def test_edge_label_condition_escaped(self) -> None:
+        report = _gt_condition_report()
+        report.edges.append(
+            FlowEdge(
+                source="MAIN-LOGIC",
+                target="MAIN-LOGIC",
+                edge_type=FlowEdgeType.PERFORM,
+                location=_loc(),
+                condition="WS-COUNT > 10",
+            )
+        )
+        out = self._gen(report)
+        assert '|"PERFORM UNTIL WS-COUNT #gt; 10"|' in out
+
+    # -- arm summaries ------------------------------------------------------
+
+    def test_arm_box_shows_statement_summary(self) -> None:
+        out = self._gen(_gt_condition_report())
+        assert 'MAIN_LOGIC__IF_1__ELSE["MOVE ZERO TO RETURN-CODE"]' in out
+
+    def test_arm_box_appends_more_marker(self) -> None:
+        out = self._gen(_gt_condition_report())
+        # "\\n" (a literal backslash-n in the emitted text) is Mermaid's
+        # in-label line break, same convention _node_label already uses.
+        assert 'MAIN_LOGIC__IF_1__THEN["MOVE 8 TO RETURN-CODE\\n+2 more"]' in out
+
+    def test_arm_without_summary_keeps_keyword_label(self) -> None:
+        out = self._gen(_if_branch_report())
+        assert 'MAIN_LOGIC__IF_1__THEN["THEN"]' in out
+
+    # -- empty IF arms dropped -------------------------------------------
+
+    def test_empty_else_arm_and_edge_dropped(self) -> None:
+        out = self._gen(_gt_condition_report(else_count=0))
+        assert "MAIN_LOGIC__IF_1__ELSE" not in out
+        assert '|"ELSE"|' not in out
+
+    def test_empty_evaluate_when_arm_kept(self) -> None:
+        report = _eval_branch_report()
+        report.branch_nodes[0].arms[0].statement_count = 0
+        out = self._gen(report)
+        assert 'MAIN_LOGIC__EVAL_1__WHEN_1["WHEN 1"]' in out
+
+
+class TestDotLabelFidelity:
+    def _gen(self, report: ProgramFlowReport) -> str:
+        return DotFlowchartGenerator().generate(report)
+
+    def test_output_is_ascii_only(self) -> None:
+        self._gen(_exit_terminal_report()).encode("ascii")
+
+    def test_exit_terminal_label_uses_ascii_separator(self) -> None:
+        assert "GOBACK @ 118" in self._gen(_exit_terminal_report())
+
+    def test_arm_box_shows_summary_with_more_marker(self) -> None:
+        out = self._gen(_gt_condition_report())
+        assert 'label="MOVE 8 TO RETURN-CODE (+2 more)"' in out
+        assert 'label="MOVE ZERO TO RETURN-CODE"' in out
+
+    def test_empty_else_arm_and_edge_dropped(self) -> None:
+        out = self._gen(_gt_condition_report(else_count=0))
+        assert "MAIN_LOGIC__IF_1__ELSE" not in out
+
+
+class TestLabelFidelityEndToEnd:
+    """Real parse -> analyze -> mermaid, pinning the ACCTPRG-style output the
+    Program Flow webview renders."""
+
+    _SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ACCTPRG.
+       PROCEDURE DIVISION.
+       3000-FINALIZE.
+           IF WS-PURGE-ERRORS > ZERO
+               MOVE 8 TO RETURN-CODE-X
+           ELSE
+               MOVE ZERO TO RETURN-CODE-X
+           END-IF.
+           GOBACK.
+"""
+
+    def _mermaid(self) -> str:
+        result = parse_cobol(self._SOURCE)
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        return MermaidFlowchartGenerator().generate(report)
+
+    def test_condition_operator_survives_as_entity(self) -> None:
+        assert "[IF] WS-PURGE-ERRORS #gt; ZERO" in self._mermaid()
+
+    def test_arms_carry_statement_text(self) -> None:
+        out = self._mermaid()
+        assert '["MOVE 8 TO RETURN-CODE-X"]' in out
+        assert '["MOVE ZERO TO RETURN-CODE-X"]' in out
+
+    def test_output_ascii_only(self) -> None:
+        self._mermaid().encode("ascii")

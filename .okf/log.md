@@ -1,5 +1,26 @@
 # OKF Update Log
 
+## 2026-08-12 (Program-flow label fidelity: ASCII, `<`/`>` escaping, arm summaries)
+
+Driven by VS Code Program Flow webview feedback (mocky-mock-vscode-extension,
+same session). Three fixes in `generators/flowchart.py` +
+`analysis/program_flow/`:
+
+1. **ASCII-only emitted labels** — exit terminals now `"{kind} @ {line}"`
+   (was `·`), `GOTO_DEPENDING` now `GO TO ... DEPENDING` (was `…`); cp1252
+   CLI stdout vs UTF-8 consumers rendered them as `�`.
+2. **`_escape_mermaid_label()`** — `<`/`>` → `#lt;`/`#gt;` and `"` → `'` in
+   every Mermaid label; Mermaid v11 (htmlLabels:false) swallows a bare `>`,
+   and `#quot;` (unlike `#lt;`/`#gt;`) renders as literal `&quot;`.
+3. **`BranchArm.summary`** (new additive field) via new
+   `analysis/program_flow/statement_text.py`
+   (`summarize_statement`/`summarize_arm`); both generators render it in arm
+   boxes with a `+N more` marker and drop empty IF arms.
+
+Updated [generators.md](generators.md) ("Label fidelity" section),
+[analysis.md](analysis.md) (statement_text + `@` separator),
+[tests.md](tests.md) (+37 tests). Timestamps bumped to 2026-08-12T18:00Z.
+
 ## 2026-08-12 (Bug review: Decimal witness pipeline, DIVIDE mode + folding, `**` text, typed-literal/ref-mod fidelity)
 
 Cross-repo bug review (cobol-parser + mocky-mock, same session). Five

@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-12T12:00:00Z
+timestamp: 2026-08-12T18:00:00Z
 ---
 
 # Overview
@@ -303,11 +303,29 @@ text on IF/EVALUATE diamonds and PERFORM UNTIL loop-test nodes.
 or `EXIT PROGRAM` — both `to_dict()` (present only when both fields are
 set; absent from the dict entirely otherwise) and both flowchart generators
 render a distinct terminal node (`shape=doublecircle` in DOT, `(((...)))` +
-the `terminal` classDef in Mermaid) per exit statement, labeled `"{kind} ·
-{line}"`. First-write-wins: `_record_exit_statement` only sets the fields
+the `terminal` classDef in Mermaid) per exit statement, labeled `"{kind} @
+{line}"` (ASCII `@` since 2026-08-12; see generators.md's "Label
+fidelity"). First-write-wins: `_record_exit_statement` only sets the fields
 the first time a paragraph's `scan()` walk reaches an exit-eligible
 statement (e.g. `STOP RUN` in an `IF`'s THEN arm and `GOBACK` in its ELSE
 arm keeps whichever is scanned first).
+
+**Branch-arm statement summaries (2026-08-12):**
+`cobolparser/analysis/program_flow/statement_text.py` adds
+`summarize_statement(stmt) -> str` — a compact, COBOL-like one-liner
+(`"MOVE 8 TO RETURN-CODE"`, `"PERFORM 4000-CLEANUP"`, `"IF <rendered
+condition>"` via `render_condition_text`) with type-specific branches for
+the common arm-opening statements (MOVE/PERFORM/GO TO/CALL/SET/COMPUTE/
+ADD/SUBTRACT/MULTIPLY/DIVIDE/DISPLAY/IF/EVALUATE/STOP/GOBACK/EXIT) and a
+`statement_type + operands` generic fallback that never raises, truncated
+to 48 chars — and `summarize_arm(statements) -> str | None` (first
+statement's summary, `None` for an empty arm; the "+N more" marker is the
+generators' presentation concern, from `statement_count`). `BranchArm`
+gained `summary: str | None` (`models.py`), populated by `scanner.py` for
+all four arm kinds (THEN/ELSE/WHEN/WHEN OTHER); `to_dict()` includes the
+key only when non-None, the report's usual optional-field convention. The
+flowchart generators render it instead of the bare THEN/ELSE keyword —
+see [generators.md](generators.md).
 
 **RETURN is explicitly excluded (bug fixed 2026-08-11):** `RETURN` reads
 the next record from a SORT/MERGE file — it does not terminate the
