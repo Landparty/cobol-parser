@@ -3,10 +3,20 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-12T18:00:00Z
+timestamp: 2026-08-13T00:00:00Z
 ---
 
 # Overview
+
+2026-08-13: +13 in `tests/unit/analysis/test_dead_code.py` — 3 in new
+`TestSectionPropagationDoesNotResurrectSiblings` pinning the
+`_propagate_section_references` sibling-resurrection fix, plus 10 in new
+`TestDefensiveEdgeCases` closing every remaining coverage gap in
+`dead_code.py` (95.77% → 100% line + 100% branch): inline PERFORM with no
+target, MERGE without an output procedure / without THRU, a THRU range
+with a falsy start, a blank SECTION name, invalid `"."` paragraph names
+inside a section, a duplicate top-level paragraph name, an orphan ENTRY
+statement, and a malformed ALTER target. See [analysis.md](analysis.md).
 
 2026-08-12: Test-infrastructure audit — `contract`/`integration`/`io`
 markers are now applied structurally by per-directory `conftest.py`
