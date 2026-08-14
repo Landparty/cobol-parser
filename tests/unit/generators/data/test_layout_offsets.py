@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from cobolparser import ErrorRecoveryMode, parse_cobol
-from cobolparser.generators.data.layout_offsets import compute_record_layout
+from cobolparser.generators.data.layout_offsets import compute_program_data_items, compute_record_layout
 from cobolparser.models.data_items import CobolDataItem
 
 
@@ -294,3 +294,30 @@ class TestLevel88:
         layout = compute_record_layout(record)
         entry = next(item for item in layout if item.name == "CODE-LOW-RANGE")
         assert entry.condition_values == ["2", "3", "4"]
+
+
+class TestComputeProgramDataItems:
+    def test_walks_working_storage_and_returns_items_plus_unresolved_keys(self):
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROGTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-REC-A.
+           05  WS-FIELD-A       PIC X(3).
+       01  WS-REC-B.
+           05  WS-FIELD-B       PIC 9(2).
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="progtest.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        assert result.ast is not None, result.errors
+        output = compute_program_data_items(result.ast)
+
+        assert "items" in output
+        assert "unresolved" in output
+        names = {item["name"] for item in output["items"]}
+        assert {"WS-REC-A", "WS-FIELD-A", "WS-REC-B", "WS-FIELD-B"} <= names
+        # each record's offsets are independently 0-based
+        by_name = {item["name"]: item for item in output["items"]}
+        assert by_name["WS-FIELD-A"]["byte_offset"] == 0
+        assert by_name["WS-FIELD-B"]["byte_offset"] == 0

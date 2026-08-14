@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-08-15T01:00:00Z
+timestamp: 2026-08-14T22:30:00Z
 ---
 
 # Overview
@@ -221,6 +221,31 @@ into focused, reusable modules:
 - **`errors.py`** — `CopybookLayoutError` exception for layout validation failures.
 - **`layout.py`** — `FieldCategory` enum, `FieldSpec` dataclass, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns. Also exports `expand_condition_values()` for condition-name value expansion.
 - **`layout_offsets.py`** — `LayoutItem` dataclass, `compute_record_layout()` function; byte-offset and byte-length computation for individual records, used by data-item hover details and offset-based lookups (Task 2-6: initial implementation + nested group recursion + REDEFINES-chain slot sharing + OCCURS footprint multiplication + cross-level OCCURS DEPENDING ON ambiguity propagation). Sibling layout (record root and every group) runs through a shared `_layout_siblings()` helper: a "slot" is a contiguous run of `[base item, redefine 1, redefine 2, ...]` — COBOL requires a REDEFINES entry to immediately follow what it redefines — every slot member starts at the same offset, the slot's footprint (`slot_footprint`) is the max footprint across its members, and the running offset advances past the slot once. `_walk_redefines_chain()` resolves a possibly multi-hop REDEFINES chain (A redefines B redefines C) within one sibling list, cycle-guarded. A childless record root (bare 77-level or elementary 01-level) is still special-cased to report its own elementary byte length rather than 0. **Task 5: OCCURS multiplies footprint, never `byte_length`.** `_layout_item()`'s return value (`one_occurrence_length`) is always exactly one occurrence's size and is what gets stored as the emitted `LayoutItem.byte_length` — this fixes a real gap in `CobolDataItem.calculate_size()`, which never applies a *group* item's own OCCURS multiplier. `_layout_siblings()` separately computes each member's `member_footprint` (`one_occurrence_length * (occurs.max_times or occurs.min_times or 1)` for a fixed OCCURS; just `one_occurrence_length` — one occurrence only, multiplier unknown at compile time — when `occurs.depending_on` is set, which is also what flips `is_ambiguous = True` for every sibling laid out after it) and folds *that* into `slot_footprint`/`total`/`offset`, so a later sibling's offset correctly advances past every occurrence. `_occurs_dict()` populates the `occurs` field (`{"min": ..., "max": ...}` or `None`) on every non-level-88 `LayoutItem`, elementary or group.
+
+  **Task 8: `compute_program_data_items(ast: CobolProgram) -> dict[str, Any]`** —
+  the program-wide entry point, returning `{"items": [...], "unresolved":
+  [...]}` (JSON-ready; `unresolved` always present for forward
+  compatibility, though nothing populates it yet). Walks every DATA
+  DIVISION section (FILE, WORKING-STORAGE, LOCAL-STORAGE, LINKAGE) and
+  calls `compute_record_layout()` on each section's top-level (01/77)
+  records. Also closes a gap `compute_record_layout()` leaves by design:
+  that function lays out one record in total isolation (no knowledge of
+  its section siblings), so its record-root `LayoutItem` always hardcodes
+  `redefines_chain=[]` — correct for a record with no REDEFINES, wrong for
+  a top-level 01 that redefines a *different* top-level 01 in the same
+  section (nested REDEFINES, inside a group, was already handled — see
+  Task 4 above — via that group's own `_layout_siblings()` sibling list).
+  `compute_program_data_items` builds a `siblings_by_name` dict from each
+  section's top-level records and, for any record with `.redefines` set,
+  reuses `_walk_redefines_chain()` (same helper `_layout_siblings()`
+  already uses, generic over whatever sibling dict it's given) to
+  overwrite that record's root `redefines_chain` in place before
+  appending its flattened layout to the output. `compute_record_layout()`
+  itself is untouched — same signature, same behavior, still used
+  directly by Tasks 2-7's unit tests with no siblings context. Byte
+  offsets are unaffected either way: each top-level record is
+  independently record-relative and correctly starts at byte 0 whether or
+  not it redefines a section sibling.
 
   **Task 6: ambiguity propagates across nesting levels, not just within one sibling list.** Task 5's `is_ambiguous` flag was local to each `_layout_siblings()` call — an OCCURS ... DEPENDING ON table nested *inside* a group only made that group's own children ambiguous; the group's own sibling in the *parent* list still got a concrete, wrong offset. `_layout_siblings()`/`_layout_item()` now both return `tuple[int, bool]` (`footprint, trailing_ambiguous`) instead of a bare `int`: a group's nested `_layout_siblings()` call reports whether *it* ended ambiguous, `_layout_item()` passes that straight through for group items (elementary items always report `False` here — their own direct `occurs.depending_on` is already handled by the caller's existing check), and the calling `_layout_siblings()` folds a `True` nested signal into its own `is_ambiguous`, exactly like a direct ODO child would. Propagates through arbitrarily many nesting levels for free (each level only needs its own direct child's signal) — confirmed with a two-level nesting test, not just by inspection. `compute_record_layout()`'s public contract (the `LayoutItem` list and every field on it) is unchanged; only the two private helpers' internal return shape changed. Root cause of the two brief-derived tests initially failing during development: unrelated to this propagation gap — fixed-format COBOL only recognizes columns 8-72 as the code area, and the brief's literal one-line `OCCURS 1 TO 10 TIMES DEPENDING ON WS-COUNT.` fixture at that indentation pushed `ON WS-COUNT.` past column 72, where the lexer silently drops it with no error, so the ODO parsed as a fixed `OCCURS 10` with `depending_on = None`. Test fixtures now wrap `DEPENDING ON <var>` onto a continuation line to stay inside the code area.
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints.
@@ -828,6 +853,20 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
   generator and that generated cells are assignable to their fields
 * `tests/contracts/test_copybook_data_generator_contract.py` — exported names,
   signatures, `to_dict()` key sets, reproducibility guarantee
+* `tests/unit/generators/data/test_layout_offsets.py::TestComputeProgramDataItems`
+  — `compute_program_data_items()` over a two-record WORKING-STORAGE
+  section: both records' items appear in `output["items"]`, `unresolved`
+  key present, each record's fields are independently 0-based
+* `tests/integration/test_data_item_layout_corpus.py` — `TestRedefinesFixture`
+  pins the Task 8 top-level-REDEFINES fix against
+  `tests/samples/redefines_test.cbl`'s real fan-out shape (`WS-REDEF-1`
+  and `WS-REDEF-2` both redefine `WS-BASE-AREA` directly, not a 3-way
+  chain — each resolves to `redefines_chain == ["WS-BASE-AREA"]`, all
+  three at `byte_offset == 0`); `TestShamriceCorpusDoesNotRaise` sweeps
+  the same `examples/cobol/shamrice/*.cbl` corpus
+  `test_program_layout_corpus.py` uses, purely for "doesn't crash"
+  coverage — that corpus was not authored with REDEFINES-chain
+  assertions in mind
 * `tests/unit/test_flowchart_generator.py` — flowchart generators
 * `tests/unit/test_program_layout_index.py` — FD/record resolution, FD-vs-SD
   tagging, `FileFacts` merging, bare/qualified/level-88 name resolution,

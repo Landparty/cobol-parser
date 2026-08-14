@@ -18,7 +18,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...models.data_items import CobolDataItem, ConditionNameItem
+from ...models.program import CobolProgram, CobolSection
 from .layout import expand_condition_values
+
+_SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
 
 
 @dataclass
@@ -298,3 +301,41 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
         ),
     )
     return out
+
+
+def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
+    """Compute layout facts for every top-level (01/77) record in every
+    DATA DIVISION section of *ast*. Record-relative offsets -- see the
+    module docstring.
+
+    Unlike ``compute_record_layout`` (which lays out one record in
+    isolation, with no knowledge of its section siblings), this function
+    also resolves top-level REDEFINES chains: a 01-item that redefines
+    another 01-item in the same section has its own record root's
+    ``redefines_chain`` corrected here after the fact, since
+    ``compute_record_layout`` always hardcodes an empty chain for the
+    record root (top-level REDEFINES was out of scope for that function --
+    it only walks REDEFINES among the record's own nested children, via
+    ``_layout_siblings``'s own ``siblings_by_name``, built from *that
+    group's* children, not the section's top-level records).
+    """
+    items: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    data_div = ast.get_division("DATA")
+    if data_div is None:
+        return {"items": items, "unresolved": unresolved}
+
+    for canonical in _SECTION_NAMES:
+        section = data_div.get_section_by_name(canonical)
+        if not isinstance(section, CobolSection):
+            continue
+        records = [r for r in section.data_items if isinstance(r, CobolDataItem)]
+        siblings_by_name = {r.name.upper(): r for r in records}
+        for record in records:
+            record_layout = compute_record_layout(record)
+            if record.redefines:
+                record_layout[0].redefines_chain = _walk_redefines_chain(record, siblings_by_name)
+            for layout_item in record_layout:
+                items.append(layout_item.to_dict())
+
+    return {"items": items, "unresolved": unresolved}
