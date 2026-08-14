@@ -129,10 +129,15 @@ def _occurs_dict(item: CobolDataItem) -> dict[str, int] | None:
     occurs = item.occurs_clause
     if occurs is None:
         return None
-    return {"min": occurs.min_times or 0, "max": occurs.max_times or occurs.min_times or 0}
+    return {
+        "min": occurs.min_times or 0,
+        "max": occurs.max_times or occurs.min_times or 0,
+    }
 
 
-def _walk_redefines_chain(item: CobolDataItem, siblings_by_name: dict[str, CobolDataItem]) -> list[str]:
+def _walk_redefines_chain(
+    item: CobolDataItem, siblings_by_name: dict[str, CobolDataItem]
+) -> list[str]:
     chain: list[str] = []
     seen: set[str] = set()
     target = item.redefines
@@ -188,7 +193,9 @@ def _layout_siblings(
             slot_start = offset
 
         child_ambiguous = is_ambiguous or slot_start is None
-        redefines_chain = _walk_redefines_chain(child, siblings_by_name) if child.redefines else []
+        redefines_chain = (
+            _walk_redefines_chain(child, siblings_by_name) if child.redefines else []
+        )
         one_occurrence_length, child_trailing_ambiguous = _layout_item(
             child,
             path,
@@ -203,7 +210,9 @@ def _layout_siblings(
             is_ambiguous = True
             member_footprint = one_occurrence_length  # unknown multiplier -- reserve one occurrence only
         elif occurs is not None:
-            member_footprint = one_occurrence_length * (occurs.max_times or occurs.min_times or 1)
+            member_footprint = one_occurrence_length * (
+                occurs.max_times or occurs.min_times or 1
+            )
         else:
             member_footprint = one_occurrence_length
 
@@ -310,7 +319,9 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
         # its own elementary byte length rather than defaulting to 0.
         record_length = _elementary_byte_length(record)
     else:
-        record_length, _ = _layout_siblings(data_children, (record.name,), 0, False, out)
+        record_length, _ = _layout_siblings(
+            data_children, (record.name,), 0, False, out
+        )
 
     out.insert(
         0,
@@ -320,7 +331,9 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
             level=record.level,
             is_group=bool(data_children),
             picture=record.picture_clause.pattern if record.picture_clause else None,
-            usage=(record.usage or "DISPLAY").upper() if record.picture_clause else None,
+            usage=(
+                (record.usage or "DISPLAY").upper() if record.picture_clause else None
+            ),
             byte_offset=0,
             byte_length=record_length,
             offset_ambiguous=False,
@@ -390,14 +403,18 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
         for record in records:
             record_layout = compute_record_layout(record)
             if record.redefines:
-                record_layout[0].redefines_chain = _walk_redefines_chain(record, siblings_by_name)
+                record_layout[0].redefines_chain = _walk_redefines_chain(
+                    record, siblings_by_name
+                )
             for layout_item in record_layout:
                 items.append(layout_item.to_dict())
 
             for misnested in _find_misnested_level_77_items(record):
                 misnested_layout = compute_record_layout(misnested)
                 if misnested.redefines:
-                    misnested_layout[0].redefines_chain = _walk_redefines_chain(misnested, siblings_by_name)
+                    misnested_layout[0].redefines_chain = _walk_redefines_chain(
+                        misnested, siblings_by_name
+                    )
                 for layout_item in misnested_layout:
                     items.append(layout_item.to_dict())
 

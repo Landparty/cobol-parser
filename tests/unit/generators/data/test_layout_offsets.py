@@ -17,7 +17,9 @@ def _parse_record(data_division_body: str) -> CobolDataItem:
        PROCEDURE DIVISION.
            STOP RUN.
 """
-    result = parse_cobol(source, filename="layouttest.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+    result = parse_cobol(
+        source, filename="layouttest.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST
+    )
     assert result.ast is not None, result.errors
     assert result.errors == []
     section = result.ast.get_division("DATA").get_section_by_name("WORKING-STORAGE")
@@ -129,11 +131,18 @@ class TestRedefines:
 
         assert by_name["WS-REDEF-1"].redefines_chain == ["WS-BASE"]
         assert by_name["WS-REDEF-2"].redefines_chain == ["WS-REDEF-1", "WS-BASE"]
-        assert by_name["WS-BASE"].byte_offset == by_name["WS-REDEF-1"].byte_offset == by_name["WS-REDEF-2"].byte_offset == 0
+        assert (
+            by_name["WS-BASE"].byte_offset
+            == by_name["WS-REDEF-1"].byte_offset
+            == by_name["WS-REDEF-2"].byte_offset
+            == 0
+        )
 
 
 class TestOccurs:
-    def test_elementary_occurs_reports_one_occurrence_length_but_advances_past_all(self):
+    def test_elementary_occurs_reports_one_occurrence_length_but_advances_past_all(
+        self,
+    ):
         record = _parse_record(
             "       01  WS-REC.\n"
             "           05  WS-TABLE         PIC X(2) OCCURS 5 TIMES.\n"
@@ -204,7 +213,9 @@ class TestOccursDependingOn:
         assert by_name["WS-AFTER"].offset_ambiguous is True
         assert by_name["WS-AFTER"].byte_offset is None
         # the record's own overall byte_length is likewise unknowable
-        assert by_name["WS-REC"].offset_ambiguous is False  # the record root itself always starts at 0
+        assert (
+            by_name["WS-REC"].offset_ambiguous is False
+        )  # the record root itself always starts at 0
 
     def test_odo_nested_inside_a_group_makes_the_groups_own_siblings_ambiguous(self):
         record = _parse_record(
@@ -271,8 +282,8 @@ class TestLevel88:
         record = _parse_record(
             "       01  WS-REC.\n"
             "           05  WS-STATUS        PIC X.\n"
-            "               88  STATUS-ACTIVE     VALUE \"A\".\n"
-            "               88  STATUS-INACTIVE   VALUE \"I\", \"D\".\n"
+            '               88  STATUS-ACTIVE     VALUE "A".\n'
+            '               88  STATUS-INACTIVE   VALUE "I", "D".\n'
         )
         layout = compute_record_layout(record)
         by_name = {item.name: item for item in layout}
@@ -359,7 +370,9 @@ class TestComputeProgramDataItems:
        PROCEDURE DIVISION.
            STOP RUN.
 """
-        result = parse_cobol(source, filename="progtest.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        result = parse_cobol(
+            source, filename="progtest.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST
+        )
         assert result.ast is not None, result.errors
         output = compute_program_data_items(result.ast)
 
@@ -372,7 +385,9 @@ class TestComputeProgramDataItems:
         assert by_name["WS-FIELD-A"]["byte_offset"] == 0
         assert by_name["WS-FIELD-B"]["byte_offset"] == 0
 
-    def test_a_77_level_item_after_a_record_does_not_corrupt_the_preceding_records_length(self):
+    def test_a_77_level_item_after_a_record_does_not_corrupt_the_preceding_records_length(
+        self,
+    ):
         # The parser's hierarchy builder nests purely by level-number
         # comparison: since 77 > 05, a 77-level item declared right after
         # an 01 record (with a 05 as its deepest preceding item) becomes
@@ -390,7 +405,9 @@ class TestComputeProgramDataItems:
        PROCEDURE DIVISION.
            STOP RUN.
 """
-        result = parse_cobol(source, filename="progtest2.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        result = parse_cobol(
+            source, filename="progtest2.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST
+        )
         assert result.ast is not None, result.errors
         output = compute_program_data_items(result.ast)
         by_name = {item["name"]: item for item in output["items"]}
@@ -399,7 +416,9 @@ class TestComputeProgramDataItems:
         assert by_name["WS-A"]["is_group"] is False
         assert by_name["WS-REC"]["byte_length"] == 3
 
-    def test_a_77_level_item_that_is_a_records_only_child_is_recovered_as_its_own_record(self):
+    def test_a_77_level_item_that_is_a_records_only_child_is_recovered_as_its_own_record(
+        self,
+    ):
         # Narrower variant of the case above: no intervening 05 field, so
         # the misnested 77 is WS-REC's *only* AST child. _direct_data_children
         # excludes it there too, which makes WS-REC look childless -- it
@@ -414,7 +433,9 @@ class TestComputeProgramDataItems:
        PROCEDURE DIVISION.
            STOP RUN.
 """
-        result = parse_cobol(source, filename="progtest3.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        result = parse_cobol(
+            source, filename="progtest3.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST
+        )
         assert result.ast is not None, result.errors
         output = compute_program_data_items(result.ast)
         by_name = {item["name"]: item for item in output["items"]}
