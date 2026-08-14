@@ -395,3 +395,31 @@ class TestComputeProgramDataItems:
         assert by_name["WS-A"]["byte_length"] == 3
         assert by_name["WS-A"]["is_group"] is False
         assert by_name["WS-REC"]["byte_length"] == 3
+
+    def test_a_77_level_item_that_is_a_records_only_child_is_recovered_as_its_own_record(self):
+        # Narrower variant of the case above: no intervening 05 field, so
+        # the misnested 77 is WS-REC's *only* AST child. _direct_data_children
+        # excludes it there too, which makes WS-REC look childless -- it
+        # must not be treated as an elementary item with WS-CTR silently
+        # dropped; WS-CTR must be recovered as its own top-level record.
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROGTEST3.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-REC.
+       77  WS-CTR       PIC 9(4) COMP.
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="progtest3.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        assert result.ast is not None, result.errors
+        output = compute_program_data_items(result.ast)
+        by_name = {item["name"]: item for item in output["items"]}
+
+        assert by_name["WS-REC"]["is_group"] is False
+        assert by_name["WS-REC"]["byte_length"] == 0
+
+        assert "WS-CTR" in by_name
+        assert by_name["WS-CTR"]["is_group"] is False
+        assert by_name["WS-CTR"]["byte_length"] == 2  # COMP, <=4 digits -> 2 bytes
+        assert by_name["WS-CTR"]["byte_offset"] == 0

@@ -74,6 +74,28 @@ def _direct_condition_children(item: CobolDataItem) -> list[ConditionNameItem]:
     return [c for c in item.children if isinstance(c, ConditionNameItem)]
 
 
+def _find_misnested_level_77_items(item: CobolDataItem) -> list[CobolDataItem]:
+    """Recover level-77 items buried anywhere in *item*'s AST subtree.
+
+    ``_direct_data_children`` excludes level-77 children at every nesting
+    level so a misnested 77 can't corrupt its AST parent's own PIC/length
+    (see that function's docstring). That guard alone makes the 77 vanish
+    from the layout entirely whenever it was its parent's *only* child --
+    the parent looks childless and the 77 is never visited by anything
+    else. Walk the raw (unfiltered) child tree to find every such 77 so
+    the caller can re-root each one as its own independent top-level
+    record instead of silently dropping it.
+    """
+    found: list[CobolDataItem] = []
+    for child in item.children:
+        if isinstance(child, CobolDataItem):
+            if child.level == 77:
+                found.append(child)
+            else:
+                found.extend(_find_misnested_level_77_items(child))
+    return found
+
+
 def _elementary_byte_length(item: CobolDataItem) -> int:
     """One occurrence's real storage byte length.
 
@@ -371,5 +393,12 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                 record_layout[0].redefines_chain = _walk_redefines_chain(record, siblings_by_name)
             for layout_item in record_layout:
                 items.append(layout_item.to_dict())
+
+            for misnested in _find_misnested_level_77_items(record):
+                misnested_layout = compute_record_layout(misnested)
+                if misnested.redefines:
+                    misnested_layout[0].redefines_chain = _walk_redefines_chain(misnested, siblings_by_name)
+                for layout_item in misnested_layout:
+                    items.append(layout_item.to_dict())
 
     return {"items": items, "unresolved": unresolved}
