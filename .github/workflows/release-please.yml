@@ -4,6 +4,25 @@ on:
   push:
     branches:
       - main
+  # Manual dry run of the wheel-build + publish path. PyPI filenames are
+  # burned permanently on first upload, so `target: testpypi` exists to
+  # rehearse the whole pipeline against test.pypi.org before the first real
+  # publish. Two caveats, both deliberately out of scope here:
+  #   * Using it requires a SEPARATE one-time manual step -- registering a
+  #     Trusted Publisher for this repo/workflow on test.pypi.org, exactly
+  #     like the pypi.org registration noted on publish-pypi below.
+  #   * The `release-please` job still runs on a manual dispatch, so a
+  #     pending "chore: release X" PR can be created/updated by it. Dispatch
+  #     from a state where that is acceptable.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Package index the publish-pypi job uploads to"
+        type: choice
+        options:
+          - pypi
+          - testpypi
+        default: pypi
 
 permissions:
   contents: write
@@ -33,31 +52,62 @@ jobs:
   # EVERY cobolparser module (COBOLPARSER_CLOSED_SOURCE=1, set in
   # pyproject.toml's [tool.cibuildwheel.environment]) into .so/.pyd files, so
   # the resulting wheels never contain readable .py source (only thin
-  # __init__.py re-export stubs). No sdist and no pure-Python fallback wheel
-  # are built anywhere -- both would ship full source.
+  # __init__.py re-export stubs and the __main__.py runpy shim). No sdist and
+  # no pure-Python fallback wheel are built anywhere -- both would ship full
+  # source.
   build-binary-wheels:
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    # Only reads the repo to build wheels; it needs none of the workflow-level
+    # write scopes that the release-please job requires.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # One job PER ARCHITECTURE on Linux, not one job for both. Closed-source
+        # mode compiles ~113 modules instead of 3, and the aarch64 half runs
+        # under QEMU emulation -- doing both in a single ubuntu-latest job
+        # risks blowing GitHub Actions' 6-hour per-job limit. Split, each arch
+        # gets its own budget and fails independently.
+        #
+        # CIBW_ARCHS overrides the per-platform `archs` in pyproject.toml's
+        # [tool.cibuildwheel.*] sections (which still govern local
+        # `cibuildwheel` runs).
+        include:
+          - os: ubuntu-latest
+            archs: x86_64
+            artifact: linux-x86_64
+          - os: ubuntu-latest
+            archs: aarch64
+            artifact: linux-aarch64
+          - os: macos-latest
+            archs: x86_64 arm64
+            artifact: macos
+          - os: windows-latest
+            archs: AMD64
+            artifact: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       # QEMU lets the Linux runner cross-compile aarch64 wheels without a real ARM machine.
       - uses: docker/setup-qemu-action@v3
-        if: runner.os == 'Linux'
+        if: matrix.archs == 'aarch64'
         with:
           platforms: aarch64
       - uses: pypa/cibuildwheel@v2.21.3
+        env:
+          CIBW_ARCHS: ${{ matrix.archs }}
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-wheels-${{ matrix.os }}
+          # Must be unique per matrix entry -- upload-artifact@v4 rejects
+          # duplicate names, and two entries now share ubuntu-latest.
+          name: dist-wheels-${{ matrix.artifact }}
           path: wheelhouse/
 
   # Attach the closed-source wheels to the GitHub Release for traceability /
-  # manual download.
+  # manual download. Deliberately NOT run on workflow_dispatch: a manual
+  # dispatch cuts no release, so there is no tag to upload to.
   publish:
     needs: [release-please, build-binary-wheels]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
@@ -87,8 +137,12 @@ jobs:
   # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
   publish-pypi:
     needs: [release-please, build-binary-wheels]
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    # NOTE: the environment stays "pypi" even for a testpypi dry run -- the
+    # deployment gate/reviewers are the same either way, and splitting it
+    # would need a second environment configured by hand. Only the upload URL
+    # below changes.
     environment:
       name: pypi
       url: https://pypi.org/project/cobolparser/
@@ -103,3 +157,8 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          # Re-running this job after a partial upload would otherwise fail on
+          # the files that already landed. PyPI filenames are immutable, so
+          # skipping them is the only recoverable behavior.
+          skip-existing: true
+          repository-url: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi') && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
