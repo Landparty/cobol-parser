@@ -51,6 +51,10 @@ Usage Example:
 # readable .py source in the published wheel. Implementation belongs in
 # _normalize.py (or another private sibling), not here.
 from ._normalize import (
+    DEFAULT_SEQ_COL_END,
+    INDICATOR_COL,
+    TEXT_END_COL,
+    TEXT_START_COL,
     CircularReferenceError,
     CopybookNotFoundError,
     CopybookSizeExceededError,
