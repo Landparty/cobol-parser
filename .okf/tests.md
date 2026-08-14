@@ -3,10 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-15T01:00:00Z
+timestamp: 2026-08-14T21:30:00Z
 ---
 
 # Overview
+
+2026-08-14 (Task 7): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestLevel88` class pinning per-condition-name level-88 value expansion: `test_each_condition_name_gets_its_own_entry_with_its_own_values` verifies that each level-88 condition name gets its own `LayoutItem` entry with its own `condition_values` list (no merging/leaking across conditions), and `test_thru_range_expands_on_a_level_88_entry` verifies THRU ranges expand (VALUE 2 THRU 4 → ["2", "3", "4"]) on level-88 entries. Both tests pass against existing behavior: Task 2's `_layout_item()` already emits a `LayoutItem` per `ConditionNameItem` child using `expand_condition_values(cond.values)`, so no production changes needed. Confirms the per-condition-name value semantics are distinct from `layout.py`'s merged `_condition_values` approach.
 
 2026-08-14 (Task 6): +4 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestOccursDependingOn` class: the brief's `test_odo_table_itself_has_a_known_offset` and `test_everything_after_an_odo_table_is_flagged_ambiguous` pin single-level OCCURS DEPENDING ON behavior (the ODO table itself keeps a concrete offset; a direct sibling after it is `offset_ambiguous=True`/`byte_offset=None`; the record root stays `offset_ambiguous=False`). Two new tests cover the cross-level propagation gap Task 5's reviewer found: `test_odo_nested_inside_a_group_makes_the_groups_own_siblings_ambiguous` (ODO nested one level inside a group — the group's own *sibling*, not just the ODO's own siblings, must go ambiguous) and `test_odo_two_levels_deep_propagates_through_both_nesting_hops` (ODO nested two levels deep — both the one-hop and two-hop siblings must go ambiguous, proving propagation isn't limited to a single level). Verified via a stash-based revert of the `layout_offsets.py` fix that the nested-group test genuinely fails without it (`AFTER-GROUP` wrongly reported a concrete offset). Pins Task 6's `(footprint, trailing_ambiguous)` tuple threading through `_layout_siblings()`/`_layout_item()` — see [generators.md](generators.md)'s `layout_offsets.py` entry. Note: fixed-format COBOL's column-72 code-area limit means `OCCURS ... DEPENDING ON <var>` fixtures at deep indentation must wrap the `DEPENDING ON` clause onto a continuation line, or the lexer silently drops it past column 72 with no error.
 

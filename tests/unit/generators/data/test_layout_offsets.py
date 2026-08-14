@@ -261,3 +261,36 @@ class TestOccursDependingOn:
         # Two hops out: AFTER-OUTER, a sibling of OUTER within REC.
         assert by_name["AFTER-OUTER"].offset_ambiguous is True
         assert by_name["AFTER-OUTER"].byte_offset is None
+
+
+class TestLevel88:
+    def test_each_condition_name_gets_its_own_entry_with_its_own_values(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-STATUS        PIC X.\n"
+            "               88  STATUS-ACTIVE     VALUE \"A\".\n"
+            "               88  STATUS-INACTIVE   VALUE \"I\", \"D\".\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["STATUS-ACTIVE"].level == 88
+        assert by_name["STATUS-ACTIVE"].condition_values == ["A"]
+        assert by_name["STATUS-ACTIVE"].parent_qualified_name == "WS-REC.WS-STATUS"
+        assert by_name["STATUS-ACTIVE"].byte_offset == 0
+        assert by_name["STATUS-ACTIVE"].byte_length == 1
+
+        assert by_name["STATUS-INACTIVE"].condition_values == ["I", "D"]
+        # STATUS-ACTIVE's values must NOT leak into STATUS-INACTIVE's list
+        # (that's the whole point of expand_condition_values being
+        # per-condition-name, unlike layout.py's merged _condition_values).
+
+    def test_thru_range_expands_on_a_level_88_entry(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-CODE          PIC 9.\n"
+            "               88  CODE-LOW-RANGE    VALUE 2 THRU 4.\n"
+        )
+        layout = compute_record_layout(record)
+        entry = next(item for item in layout if item.name == "CODE-LOW-RANGE")
+        assert entry.condition_values == ["2", "3", "4"]
