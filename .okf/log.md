@@ -1,5 +1,26 @@
 # OKF Update Log
 
+## 2026-08-14 (New `data-items` CLI subcommand — final task of the data-item-layout plan)
+
+Task 9 (last of 9) of the data-item-layout plan wires Task 8's
+`compute_program_data_items()` (`cobolparser/generators/data/layout_offsets.py`)
+into cobol-parser's own CLI, following the exact `dead-code`/`io-sequence`
+registration pattern (`_build_analyzer_parser(subparsers, "data-items", ...,
+_cmd_data_items, profiling=True)`). `_cmd_data_items` is a three-liner —
+`_parse_or_fail(args)` then `compute_program_data_items(ast)` then
+`_emit_report(output, args, prof, ast)` — identical in shape to
+`_cmd_dead_code`. `"data-items"` was also added to `_SUBCOMMANDS` so the
+legacy no-subcommand-given syntax (`cobol-parser data-items file.cbl`
+without an explicit `parse` prefix) doesn't get misrouted to `parse`.
+
+Tests landed in the existing `tests/unit/cli/test_new_subcommands.py`
+(new `TestCmdDataItems` class, plus `"data-items"` added to the two
+existing parametrized registration/output-silent test classes) rather
+than a new file — that file's own docstring already scoped it to "new
+CLI subcommands added to cobolparser.cli.parse", and `data-items` is
+exactly that. See [cli.md](cli.md)'s "Data-Items" entry and
+[tests.md](tests.md) for details.
+
 ## 2026-08-13 (`UnusedVariableAnalyzer`: Copilot PR-review fix — qualified names/FUNCTION calls falsely reported unused)
 
 Copilot review on PR #148 (the `UnusedVariableAnalyzer` PR) caught a real

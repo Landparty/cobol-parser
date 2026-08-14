@@ -3,10 +3,24 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T22:30:00Z
+timestamp: 2026-08-14T23:30:00Z
 ---
 
 # Overview
+
+2026-08-14 (Task 9): +6 in `tests/unit/cli/test_new_subcommands.py`'s new
+`TestCmdDataItems` class (following `TestCmdIoSequence`'s shape:
+report-dict shape, compact output, `--output` file redirection, a
+parse-failure exit, plus a dedicated `test_outputs_items_and_unresolved_keys`
+pinning `_emit_report`'s `source_file`/`program_id` splice against a
+two-item WORKING-STORAGE fixture), wiring the new `data-items` CLI
+subcommand (`_cmd_data_items`, added to `_SUBCOMMANDS`) that exposes
+Task 8's `compute_program_data_items()` (see [generators.md](generators.md)
+and [cli.md](cli.md)'s "Data-Items" entry). Also added `"data-items"` to
+the existing `TestNewSubcommandsRegistered` and
+`TestNewSubcommandsOutputSilent` parametrized subcommand lists for the
+same registration/`-o`-silences-stdout coverage the other five analyzer
+subcommands already get.
 
 2026-08-14 (Task 8): +1 in `tests/unit/generators/data/test_layout_offsets.py` (new `TestComputeProgramDataItems` class) and +2 new test classes in new `tests/integration/test_data_item_layout_corpus.py`, for the new `compute_program_data_items()` program-wide entry point (see [generators.md](generators.md)'s `layout_offsets.py` entry). The unit test walks a two-record WORKING-STORAGE section and confirms both records' items land in `output["items"]` with independently 0-based offsets, plus the always-present `unresolved` key. The integration test's `TestRedefinesFixture` corrects a wrong assumption in this task's own brief: the brief guessed `tests/samples/redefines_test.cbl` contained a 3-way REDEFINES chain (`WS-REDEF-2 REDEFINES WS-REDEF-1 REDEFINES WS-BASE-AREA`); the real fixture (lines 16-21) is a fan-out — `WS-REDEF-1` and `WS-REDEF-2` both redefine `WS-BASE-AREA` directly — so the test asserts `redefines_chain == ["WS-BASE-AREA"]` for both, all three at `byte_offset == 0`. This also exercises the Task 8 top-level-REDEFINES fix: without it, `WS-REDEF-1`/`WS-REDEF-2` would report an empty `redefines_chain` despite genuinely redefining a section sibling (`compute_record_layout()`'s record-root `LayoutItem` hardcodes `redefines_chain=[]` since it has no visibility into section-level siblings). `TestShamriceCorpusDoesNotRaise` sweeps `examples/cobol/shamrice/*.cbl` for crash-free coverage only. The brief's Step 5 code sample also had a bare `ErrorRecoveryMode.RECOVER`, which does not exist on the enum (`FAIL_FAST`/`COLLECT_ALL` are the only members) — corrected to `COLLECT_ALL` to match every other corpus-sweep test in this suite.
 
