@@ -3,10 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
+
+2026-08-14: +3 in new `tests/unit/generators/data/test_layout_offsets.py` for the new `compute_record_layout()` function and `LayoutItem` dataclass (see [generators.md](generators.md)'s new `layout_offsets.py` entry) — flat records with sequential elementary items, COMP-3 packed-decimal byte-length calculation, and 77-level elementary-item handling. Pins the Task 2 deliverable: byte-offset and byte-length computation, with stub group-item recursion (Task 3 replaces).
 
 2026-08-13: +5 in `tests/unit/analysis/test_unused_variables.py`'s new
 `TestQualifiedAndFunctionOperands` — Copilot PR review on the
