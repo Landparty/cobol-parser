@@ -1315,6 +1315,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.7.0](https://github.com/Landparty/cobol-parser/compare/v1.6.0...v1.7.0) (2026-08-14)
+
+
+### Features
+
+* add closed-source Cythonized build mode ([851b0ed](https://github.com/Landparty/cobol-parser/commit/851b0ed77070e7c310bd3c681c3cedfa2ddc7817))
+* add data-items CLI subcommand ([f539e7b](https://github.com/Landparty/cobol-parser/commit/f539e7b7273a7753f1e1fc07bc46e6c331b5df6e))
+* compute per-record byte offsets for flat data items ([bae53f4](https://github.com/Landparty/cobol-parser/commit/bae53f4fbed2a7b8ad189bf2521535e88adf741e))
+* compute_program_data_items walks all DATA DIVISION sections ([41a2fda](https://github.com/Landparty/cobol-parser/commit/41a2fda296d275b66109f0b20702f9eae17ebcbc))
+* data-items analyzer — byte offset, REDEFINES chains, level-88 values ([ab04245](https://github.com/Landparty/cobol-parser/commit/ab0424533f2c58747f257d471b2f564a5dbbaa67))
+* multiply OCCURS footprint for offset advancement ([acff4c9](https://github.com/Landparty/cobol-parser/commit/acff4c9de49af6d9ef1a3a543b3d90eea02c40f0))
+* recurse into nested group items for offset computation ([eb382ba](https://github.com/Landparty/cobol-parser/commit/eb382ba35c0bc684e00e4775e43ef12fe8314921))
+* resolve REDEFINES chains as contiguous offset-sharing slots ([72efcd1](https://github.com/Landparty/cobol-parser/commit/72efcd1b24ffbe6a2f66dee6ec269d29c144132e))
+
+
+### Bug Fixes
+
+* add pytest-cov to cibuildwheel test-requires for --no-cov flag ([b563f0e](https://github.com/Landparty/cobol-parser/commit/b563f0e0a2715bc7f5176791769e052441484ad3))
+* address Copilot PR review findings ([c1181e6](https://github.com/Landparty/cobol-parser/commit/c1181e64afee15600fb0f58745c4449ee1397d5d))
+* consume CobolParser initial_warnings after the first parse() call ([c75e9fe](https://github.com/Landparty/cobol-parser/commit/c75e9fe825b71bc400d67e29b6a8b5da802368ac))
+* final-review fixes for data-item layout (root-level 88s, misnested 77) ([83b3745](https://github.com/Landparty/cobol-parser/commit/83b37455debeb8aa77ed6ad26875d07ac85c9dd6))
+* keep fixed-format column constants on cobolparser.preprocess ([e0d3f1a](https://github.com/Landparty/cobol-parser/commit/e0d3f1a092a1cdb7e01cb15ddb973b1a542de569))
+* propagate OCCURS DEPENDING ON ambiguity across nested groups ([6ebc28d](https://github.com/Landparty/cobol-parser/commit/6ebc28d317d9c5de95c1b20fa52cfd012cdc67ee))
+* recover misnested level-77 items dropped as a group's only child ([1500925](https://github.com/Landparty/cobol-parser/commit/1500925fa38c1f7a0fd74a96222807e7dd899c30))
+* recover misnested level-77 items dropped as a group's only child ([0ae4e67](https://github.com/Landparty/cobol-parser/commit/0ae4e67a79aca055dd3e112b50fccbfdefa8e2dc))
+* satisfy lint gates on closed-source build mode ([9a70e07](https://github.com/Landparty/cobol-parser/commit/9a70e07bd37b24beb82cb85fd0a9d790149cccc2))
+* satisfy ruff import-sort line-length on test_layout_offsets.py ([555248d](https://github.com/Landparty/cobol-parser/commit/555248dd5fb910cd5704fb976da6f3638dab87f6))
+* stop closed-source wheels from leaking readable source ([b5f2dee](https://github.com/Landparty/cobol-parser/commit/b5f2deeadcc8d92e064934abf26278b0f5e82ad5))
+* surface fixed-format column-72 overflow warnings, close word-boundary gap ([d59e635](https://github.com/Landparty/cobol-parser/commit/d59e635b2a4da78b5288401f5b9be93920a61aaf))
+* surface fixed-format column-72 overflow warnings, close word-boundary gap ([affeb7a](https://github.com/Landparty/cobol-parser/commit/affeb7afcebbb596f7b514cc80fb8e88c23df9ae))
+
+
+### Documentation
+
+* add design spec for closed-source PyPI release ([5529a30](https://github.com/Landparty/cobol-parser/commit/5529a3000ff3fc96291c86e184b5adc6a957d4eb))
+* add implementation plan for closed-source PyPI release ([0739d80](https://github.com/Landparty/cobol-parser/commit/0739d80ba09fb6db9881a066b2dbf2c4deff8b6a))
+* restore explanatory comments in expand_condition_values ([ac82cd7](https://github.com/Landparty/cobol-parser/commit/ac82cd764b87c4a9613427631c4a0b43d8ad722a))
+
 ## [1.6.0](https://github.com/Landparty/cobol-parser/compare/v1.5.6...v1.6.0) (2026-08-14)
 
 
