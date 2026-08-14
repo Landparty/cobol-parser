@@ -91,3 +91,39 @@ class TestNestedGroups:
 
         assert by_name["WS-TRAILER"].byte_offset == 14
         assert by_name["WS-REC"].byte_length == 16
+
+
+class TestRedefines:
+    def test_redefines_shares_offset_and_advances_past_the_larger_alternative(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-ORIGINAL      PIC X(4).\n"
+            "           05  WS-REDEF REDEFINES WS-ORIGINAL PIC 9(6).\n"
+            "           05  WS-AFTER         PIC X(2).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-ORIGINAL"].byte_offset == 0
+        assert by_name["WS-ORIGINAL"].byte_length == 4
+        assert by_name["WS-REDEF"].byte_offset == 0
+        assert by_name["WS-REDEF"].byte_length == 6
+        assert by_name["WS-REDEF"].redefines_chain == ["WS-ORIGINAL"]
+        # the slot's footprint is max(4, 6) = 6, not 4 -- WS-AFTER must
+        # start after the *larger* alternative.
+        assert by_name["WS-AFTER"].byte_offset == 6
+        assert by_name["WS-REC"].byte_length == 8
+
+    def test_three_way_redefines_chain_is_reported_in_order(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-BASE          PIC X(4).\n"
+            "           05  WS-REDEF-1 REDEFINES WS-BASE PIC 9(4).\n"
+            "           05  WS-REDEF-2 REDEFINES WS-REDEF-1 PIC X(4).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-REDEF-1"].redefines_chain == ["WS-BASE"]
+        assert by_name["WS-REDEF-2"].redefines_chain == ["WS-REDEF-1", "WS-BASE"]
+        assert by_name["WS-BASE"].byte_offset == by_name["WS-REDEF-1"].byte_offset == by_name["WS-REDEF-2"].byte_offset == 0

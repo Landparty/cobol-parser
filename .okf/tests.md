@@ -3,10 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-08-14T23:55:00Z
 ---
 
 # Overview
+
+2026-08-14 (Task 4): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestRedefines` class: `test_redefines_shares_offset_and_advances_past_the_larger_alternative` verifies a REDEFINES slot shares its base offset and the running offset advances past the *larger* alternative, not the base item; `test_three_way_redefines_chain_is_reported_in_order` verifies a multi-hop REDEFINES chain (A redefines B redefines C) is reported oldest-target-last (`["WS-REDEF-1", "WS-BASE"]`) and every chain member shares offset 0. Pins Task 4's slot-based `_layout_siblings()` rewrite in `layout_offsets.py`.
 
 2026-08-14 (Task 3): +1 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestNestedGroups` class with `test_group_length_is_sum_of_children_and_children_offsets_are_correct` verifying that group items recurse properly: group's byte_length becomes sum of children's footprints, and children's offsets are relative to group's start. Pins Task 3 implementation of nested group recursion in `_layout_item()`.
 

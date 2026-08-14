@@ -92,6 +92,72 @@ def _elementary_byte_length(item: CobolDataItem) -> int:
     return base_size
 
 
+def _walk_redefines_chain(item: CobolDataItem, siblings_by_name: dict[str, CobolDataItem]) -> list[str]:
+    chain: list[str] = []
+    seen: set[str] = set()
+    target = item.redefines
+    while target:
+        upper = target.upper()
+        if upper in seen:
+            break  # malformed source with a cycle -- don't hang
+        seen.add(upper)
+        chain.append(target)
+        sibling = siblings_by_name.get(upper)
+        target = sibling.redefines if sibling else None
+    return chain
+
+
+def _layout_siblings(
+    children: list[CobolDataItem],
+    path: tuple[str, ...],
+    start_offset: int | None,
+    ambiguous: bool,
+    out: list[LayoutItem],
+) -> int:
+    """Lay out one sibling list (a record's direct children, or one
+    group's direct children) starting at *start_offset*. Returns the
+    total footprint consumed (for the caller -- a group item, or the
+    synthetic record root -- to report as its own byte_length).
+    """
+    siblings_by_name = {c.name.upper(): c for c in children}
+    offset = start_offset
+    total = 0
+    slot_start = offset
+    slot_max_length = 0
+    is_ambiguous = ambiguous
+
+    def close_slot() -> None:
+        nonlocal offset, total, slot_max_length
+        total += slot_max_length
+        if offset is not None:
+            offset += slot_max_length
+        slot_max_length = 0
+
+    for child in children:
+        if not child.redefines:
+            close_slot()
+            slot_start = offset
+
+        child_ambiguous = is_ambiguous or slot_start is None
+        redefines_chain = _walk_redefines_chain(child, siblings_by_name) if child.redefines else []
+        length = _layout_item(
+            child,
+            path,
+            None if child_ambiguous else slot_start,
+            child_ambiguous,
+            redefines_chain,
+            out,
+        )
+        slot_max_length = max(slot_max_length, length)
+
+        occurs = child.occurs_clause
+        if occurs is not None and occurs.depending_on:
+            is_ambiguous = True
+
+    close_slot()
+    return total
+
+
 def _layout_item(
     item: CobolDataItem,
     path: tuple[str, ...],
@@ -112,13 +178,7 @@ def _layout_item(
     item_ambiguous = ambiguous or start_offset is None
 
     if data_children:
-        group_offset = start_offset
-        child_offset = 0 if start_offset is None else start_offset
-        for child in data_children:
-            child_ambiguous = ambiguous or start_offset is None
-            length = _layout_item(child, item_path, child_offset if not child_ambiguous else None, child_ambiguous, [], out)
-            child_offset += length
-        one_occurrence_length = 0 if start_offset is None else child_offset - group_offset
+        one_occurrence_length = _layout_siblings(data_children, item_path, start_offset, item_ambiguous, out)
         picture = None
         usage = None
     else:
@@ -173,14 +233,12 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
     data_children = _direct_data_children(record)
 
     if not data_children:
-        # 77-level elementary item or 01-level elementary item
+        # 77-level elementary item or 01-level elementary item -- the
+        # record root represents itself, not an empty group, so it needs
+        # its own elementary byte length rather than defaulting to 0.
         record_length = _elementary_byte_length(record)
     else:
-        offset = 0
-        for child in data_children:
-            length = _layout_item(child, (record.name,), offset, False, [], out)
-            offset += length
-        record_length = offset
+        record_length = _layout_siblings(data_children, (record.name,), 0, False, out)
 
     out.insert(
         0,
