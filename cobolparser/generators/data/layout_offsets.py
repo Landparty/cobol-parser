@@ -92,6 +92,13 @@ def _elementary_byte_length(item: CobolDataItem) -> int:
     return base_size
 
 
+def _occurs_dict(item: CobolDataItem) -> dict[str, int] | None:
+    occurs = item.occurs_clause
+    if occurs is None:
+        return None
+    return {"min": occurs.min_times or 0, "max": occurs.max_times or occurs.min_times or 0}
+
+
 def _walk_redefines_chain(item: CobolDataItem, siblings_by_name: dict[str, CobolDataItem]) -> list[str]:
     chain: list[str] = []
     seen: set[str] = set()
@@ -123,15 +130,15 @@ def _layout_siblings(
     offset = start_offset
     total = 0
     slot_start = offset
-    slot_max_length = 0
+    slot_footprint = 0  # replaces slot_max_length -- now OCCURS-aware per member
     is_ambiguous = ambiguous
 
     def close_slot() -> None:
-        nonlocal offset, total, slot_max_length
-        total += slot_max_length
+        nonlocal offset, total, slot_footprint
+        total += slot_footprint
         if offset is not None:
-            offset += slot_max_length
-        slot_max_length = 0
+            offset += slot_footprint
+        slot_footprint = 0
 
     for child in children:
         if not child.redefines:
@@ -140,7 +147,7 @@ def _layout_siblings(
 
         child_ambiguous = is_ambiguous or slot_start is None
         redefines_chain = _walk_redefines_chain(child, siblings_by_name) if child.redefines else []
-        length = _layout_item(
+        one_occurrence_length = _layout_item(
             child,
             path,
             None if child_ambiguous else slot_start,
@@ -148,11 +155,17 @@ def _layout_siblings(
             redefines_chain,
             out,
         )
-        slot_max_length = max(slot_max_length, length)
 
         occurs = child.occurs_clause
         if occurs is not None and occurs.depending_on:
             is_ambiguous = True
+            member_footprint = one_occurrence_length  # unknown multiplier -- reserve one occurrence only
+        elif occurs is not None:
+            member_footprint = one_occurrence_length * (occurs.max_times or occurs.min_times or 1)
+        else:
+            member_footprint = one_occurrence_length
+
+        slot_footprint = max(slot_footprint, member_footprint)
 
     close_slot()
     return total
@@ -198,7 +211,7 @@ def _layout_item(
             byte_length=one_occurrence_length,
             offset_ambiguous=item_ambiguous,
             redefines_chain=redefines_chain,
-            occurs=None,
+            occurs=_occurs_dict(item),
             condition_values=[],
             parent_qualified_name=parent_qualified_name,
         )

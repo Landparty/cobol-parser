@@ -3,10 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T23:55:00Z
+timestamp: 2026-08-15T00:15:00Z
 ---
 
 # Overview
+
+2026-08-14 (Task 5): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestOccurs` class: `test_elementary_occurs_reports_one_occurrence_length_but_advances_past_all` verifies an elementary OCCURS item's `byte_length` stays one occurrence's size while a later sibling's offset advances past all occurrences, and `occurs` reports `{"min": N, "max": N}`; `test_group_occurs_multiplies_the_whole_group_footprint` verifies the same for a *group* item's own OCCURS (its `byte_length` is one occurrence's footprint, but a later sibling's offset advances past every occurrence of the whole group). Pins Task 5's OCCURS-aware `slot_footprint` computation in `_layout_siblings()` and the `occurs` field wiring in `_layout_item()`.
 
 2026-08-14 (Task 4): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestRedefines` class: `test_redefines_shares_offset_and_advances_past_the_larger_alternative` verifies a REDEFINES slot shares its base offset and the running offset advances past the *larger* alternative, not the base item; `test_three_way_redefines_chain_is_reported_in_order` verifies a multi-hop REDEFINES chain (A redefines B redefines C) is reported oldest-target-last (`["WS-REDEF-1", "WS-BASE"]`) and every chain member shares offset 0. Pins Task 4's slot-based `_layout_siblings()` rewrite in `layout_offsets.py`.
 

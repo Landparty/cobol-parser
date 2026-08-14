@@ -127,3 +127,37 @@ class TestRedefines:
         assert by_name["WS-REDEF-1"].redefines_chain == ["WS-BASE"]
         assert by_name["WS-REDEF-2"].redefines_chain == ["WS-REDEF-1", "WS-BASE"]
         assert by_name["WS-BASE"].byte_offset == by_name["WS-REDEF-1"].byte_offset == by_name["WS-REDEF-2"].byte_offset == 0
+
+
+class TestOccurs:
+    def test_elementary_occurs_reports_one_occurrence_length_but_advances_past_all(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-TABLE         PIC X(2) OCCURS 5 TIMES.\n"
+            "           05  WS-AFTER         PIC X(3).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-TABLE"].byte_length == 2
+        assert by_name["WS-TABLE"].occurs == {"min": 5, "max": 5}
+        assert by_name["WS-AFTER"].byte_offset == 10  # 2 * 5
+
+    def test_group_occurs_multiplies_the_whole_group_footprint(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-LINE-ITEM OCCURS 3 TIMES.\n"
+            "               10  WS-CODE      PIC X(2).\n"
+            "               10  WS-QTY       PIC 9(3).\n"
+            "           05  WS-TOTAL         PIC 9(5).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-LINE-ITEM"].byte_length == 5  # 2 + 3, one occurrence
+        assert by_name["WS-LINE-ITEM"].occurs == {"min": 3, "max": 3}
+        assert by_name["WS-CODE"].byte_offset == 0
+        assert by_name["WS-QTY"].byte_offset == 2
+        # After 3 occurrences of the 5-byte group: 15 bytes.
+        assert by_name["WS-TOTAL"].byte_offset == 15
+        assert by_name["WS-REC"].byte_length == 20
