@@ -185,7 +185,9 @@ class TestNonMidTokenOverflowDoesNotWarn:
         # per-line test-case id "IX2094.2" in the identification area.
         # Before this gate, this shape alone accounted for 4434 of 4438
         # "mid-token" false positives across the vendored example corpus.
-        code = '029100          "BBBBBBBBBC002EEEEEEEEEF002ALTKEY1WWWWWWWWWV398ALTKEY2".'
+        code = (
+            '029100          "BBBBBBBBBC002EEEEEEEEEF002ALTKEY1WWWWWWWWWV398ALTKEY2".'
+        )
         line = code + "IX2094.2"
         assert len(code) == 72
         assert line[71] == "."  # column 72: the statement's own period

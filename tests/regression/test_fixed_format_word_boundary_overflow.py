@@ -61,9 +61,7 @@ class TestParseCobolSurfacesOverflowWarning:
         result = parse_cobol(_PROGRAM, error_recovery=ErrorRecoveryMode.FAIL_FAST)
         assert result.ast is not None
         assert result.errors == []
-        assert any(
-            "content beyond column 72 was dropped" in w for w in result.warnings
-        )
+        assert any("content beyond column 72 was dropped" in w for w in result.warnings)
 
     def test_ast_still_reflects_the_silently_truncated_source(self):
         # The fix surfaces a diagnostic; it does not change what the
@@ -121,9 +119,7 @@ class TestInitialWarningsConsumedOnce:
         )
 
         first = parser.parse(self._CLEAN)
-        assert first.warnings == [
-            "Line 1: content beyond column 72 was dropped: 'X'"
-        ]
+        assert first.warnings == ["Line 1: content beyond column 72 was dropped: 'X'"]
 
         second = parser.parse(self._CLEAN)
         assert second.warnings == []

@@ -573,7 +573,7 @@ def normalize_fixed_format(
             continue
 
         if warnings is not None and len(line) > TEXT_END_COL:
-            seq_area = line[: DEFAULT_SEQ_COL_END]
+            seq_area = line[:DEFAULT_SEQ_COL_END]
             # A real per-line sequence number in columns 1-6 is strong,
             # independent evidence that this file deliberately uses the
             # full traditional 80-column punch-card convention -- which
@@ -592,9 +592,7 @@ def normalize_fixed_format(
             # OCCURS/DEPENDING ON word-boundary case) unaffected while
             # eliminating the false-positive flood on sequence-numbered
             # decks.
-            has_sequence_number = (
-                seq_area.strip() != "" and seq_area.strip().isdigit()
-            )
+            has_sequence_number = seq_area.strip() != "" and seq_area.strip().isdigit()
             if not has_sequence_number:
                 before, after = line[TEXT_END_COL - 1], line[TEXT_END_COL]
                 mid_token = not before.isspace() and not after.isspace()

@@ -3,10 +3,16 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-15T00:10:00Z
+timestamp: 2026-08-15T00:20:00Z
 ---
 
 # Overview
+
+2026-08-15 (lint fix, PR #153): `black==26.3.0` reformatted
+`cobolparser/preprocess/__init__.py`,
+`tests/regression/test_fixed_format_word_boundary_overflow.py`, and
+`tests/regression/test_normalize_column_overflow_warning.py`
+(whitespace-only, CI's `lint` job caught it — no behavior change).
 
 2026-08-15 (Copilot review fix, PR #153): +1 in
 `tests/regression/test_fixed_format_word_boundary_overflow.py`'s new
