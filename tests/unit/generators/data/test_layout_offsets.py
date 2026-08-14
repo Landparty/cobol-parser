@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from cobolparser import ErrorRecoveryMode, parse_cobol
-from cobolparser.generators.data.layout_offsets import compute_program_data_items, compute_record_layout
+from cobolparser.generators.data.layout_offsets import (
+    compute_program_data_items,
+    compute_record_layout,
+)
 from cobolparser.models.data_items import CobolDataItem
 
 
