@@ -120,11 +120,20 @@ def _layout_siblings(
     start_offset: int | None,
     ambiguous: bool,
     out: list[LayoutItem],
-) -> int:
+) -> tuple[int, bool]:
     """Lay out one sibling list (a record's direct children, or one
-    group's direct children) starting at *start_offset*. Returns the
-    total footprint consumed (for the caller -- a group item, or the
-    synthetic record root -- to report as its own byte_length).
+    group's direct children) starting at *start_offset*. Returns a
+    ``(footprint, trailing_ambiguous)`` pair: *footprint* is the total
+    footprint consumed (for the caller -- a group item, or the synthetic
+    record root -- to report as its own byte_length); *trailing_ambiguous*
+    reports whether this sibling list ended in an ambiguous state (either
+    because it started ambiguous, one of its own direct children carries
+    OCCURS ... DEPENDING ON, or a nested group child's own children went
+    ambiguous). The caller (one level up, itself a ``_layout_siblings``
+    loop) uses that to flag everything *after* the offending group child
+    as offset_ambiguous too -- ambiguity inside a nested group must
+    propagate to the group's own siblings, not stay trapped at that
+    nesting level.
     """
     siblings_by_name = {c.name.upper(): c for c in children}
     offset = start_offset
@@ -147,7 +156,7 @@ def _layout_siblings(
 
         child_ambiguous = is_ambiguous or slot_start is None
         redefines_chain = _walk_redefines_chain(child, siblings_by_name) if child.redefines else []
-        one_occurrence_length = _layout_item(
+        one_occurrence_length, child_trailing_ambiguous = _layout_item(
             child,
             path,
             None if child_ambiguous else slot_start,
@@ -165,10 +174,17 @@ def _layout_siblings(
         else:
             member_footprint = one_occurrence_length
 
+        if child_trailing_ambiguous:
+            # A nested group child's own children carried an ODO table
+            # somewhere inside -- everything after this child in THIS
+            # sibling list is now offset-ambiguous too, even though the
+            # group child itself still had a known starting offset.
+            is_ambiguous = True
+
         slot_footprint = max(slot_footprint, member_footprint)
 
     close_slot()
-    return total
+    return total, is_ambiguous
 
 
 def _layout_item(
@@ -178,20 +194,30 @@ def _layout_item(
     ambiguous: bool,
     redefines_chain: list[str],
     out: list[LayoutItem],
-) -> int:
+) -> tuple[int, bool]:
     """Emit LayoutItems for *item* (and, recursively, its children) starting
-    at *start_offset*. Returns this item's one-occurrence footprint in
-    bytes, for the caller to compare against REDEFINES siblings / multiply
-    by OCCURS.
+    at *start_offset*. Returns a ``(footprint, trailing_ambiguous)`` pair:
+    *footprint* is this item's one-occurrence footprint in bytes, for the
+    caller to compare against REDEFINES siblings / multiply by OCCURS.
+    *trailing_ambiguous* is only ever True for a group item whose own
+    nested ``_layout_siblings`` call ended ambiguous (e.g. an OCCURS ...
+    DEPENDING ON table among its own children) -- it lets the CALLING
+    sibling list know that this child, despite starting at a known
+    offset itself, leaves everything after it ambiguous. Elementary
+    items always report False here: a directly-attached DEPENDING ON is
+    already handled by the caller's own check on ``occurs_clause``.
     """
     item_path = (*path, item.name)
     qualified_name = ".".join(item_path)
     parent_qualified_name = ".".join(path) if path else None
     data_children = _direct_data_children(item)
     item_ambiguous = ambiguous or start_offset is None
+    trailing_ambiguous = False
 
     if data_children:
-        one_occurrence_length = _layout_siblings(data_children, item_path, start_offset, item_ambiguous, out)
+        one_occurrence_length, trailing_ambiguous = _layout_siblings(
+            data_children, item_path, start_offset, item_ambiguous, out
+        )
         picture = None
         usage = None
     else:
@@ -236,7 +262,7 @@ def _layout_item(
             )
         )
 
-    return one_occurrence_length
+    return one_occurrence_length, trailing_ambiguous
 
 
 def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
@@ -251,7 +277,7 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
         # its own elementary byte length rather than defaulting to 0.
         record_length = _elementary_byte_length(record)
     else:
-        record_length = _layout_siblings(data_children, (record.name,), 0, False, out)
+        record_length, _ = _layout_siblings(data_children, (record.name,), 0, False, out)
 
     out.insert(
         0,

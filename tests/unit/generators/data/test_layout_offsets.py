@@ -161,3 +161,103 @@ class TestOccurs:
         # After 3 occurrences of the 5-byte group: 15 bytes.
         assert by_name["WS-TOTAL"].byte_offset == 15
         assert by_name["WS-REC"].byte_length == 20
+
+
+class TestOccursDependingOn:
+    # NOTE: fixed-format COBOL only recognizes columns 8-72 as the code
+    # area -- columns 73-80 are the identification area and get silently
+    # truncated by the lexer. "OCCURS 1 TO 10 TIMES DEPENDING ON
+    # WS-COUNT." does not fit on one line at this indentation, so the
+    # DEPENDING ON clause is wrapped onto a continuation line to stay
+    # inside the code area (verified empirically: writing it on one
+    # line silently drops "ON WS-COUNT.", parses as a fixed OCCURS 10,
+    # and was the actual root cause of this test class's first failures).
+    def test_odo_table_itself_has_a_known_offset(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-COUNT         PIC 9(3).\n"
+            "           05  WS-TABLE         PIC X(2) OCCURS 1 TO 10 TIMES\n"
+            "               DEPENDING ON WS-COUNT.\n"
+            "           05  WS-AFTER         PIC X(4).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-TABLE"].byte_offset == 3
+        assert by_name["WS-TABLE"].offset_ambiguous is False
+        assert by_name["WS-TABLE"].occurs == {"min": 1, "max": 10}
+
+    def test_everything_after_an_odo_table_is_flagged_ambiguous(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-COUNT         PIC 9(3).\n"
+            "           05  WS-TABLE         PIC X(2) OCCURS 1 TO 10 TIMES\n"
+            "               DEPENDING ON WS-COUNT.\n"
+            "           05  WS-AFTER         PIC X(4).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-AFTER"].offset_ambiguous is True
+        assert by_name["WS-AFTER"].byte_offset is None
+        # the record's own overall byte_length is likewise unknowable
+        assert by_name["WS-REC"].offset_ambiguous is False  # the record root itself always starts at 0
+
+    def test_odo_nested_inside_a_group_makes_the_groups_own_siblings_ambiguous(self):
+        record = _parse_record(
+            "       01  REC.\n"
+            "           05  GROUP-WITH-ODO.\n"
+            "               10  WS-COUNT     PIC 9(3).\n"
+            "               10  WS-ITEMS     PIC X(2) OCCURS 1 TO 10 TIMES\n"
+            "                   DEPENDING ON WS-COUNT.\n"
+            "           05  AFTER-GROUP      PIC X(4).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        # The group itself, and its own direct children, still have
+        # known offsets -- the ambiguity starts only once WS-ITEMS is
+        # reached inside the group.
+        assert by_name["GROUP-WITH-ODO"].byte_offset == 0
+        assert by_name["GROUP-WITH-ODO"].offset_ambiguous is False
+        assert by_name["WS-COUNT"].byte_offset == 0
+        assert by_name["WS-COUNT"].offset_ambiguous is False
+        assert by_name["WS-ITEMS"].byte_offset == 3
+        assert by_name["WS-ITEMS"].offset_ambiguous is False
+
+        # But AFTER-GROUP -- a sibling of the *group*, not of WS-ITEMS --
+        # is data-dependent too, since it comes after a group whose size
+        # is only known at runtime.
+        assert by_name["AFTER-GROUP"].offset_ambiguous is True
+        assert by_name["AFTER-GROUP"].byte_offset is None
+
+    def test_odo_two_levels_deep_propagates_through_both_nesting_hops(self):
+        # OUTER -> INNER -> WS-ITEMS (the ODO table). AFTER-INNER is one
+        # hop from the ODO (a sibling of INNER, inside OUTER's own
+        # sibling list); AFTER-OUTER is two hops out (a sibling of OUTER,
+        # inside REC's own sibling list). Both must end up ambiguous --
+        # propagation must not stop after a single level of nesting.
+        record = _parse_record(
+            "       01  REC.\n"
+            "           05  OUTER.\n"
+            "               10  INNER.\n"
+            "                   15  WS-COUNT  PIC 9(3).\n"
+            "                   15  WS-ITEMS  PIC X(2) OCCURS 1 TO 10\n"
+            "                       TIMES DEPENDING ON WS-COUNT.\n"
+            "               10  AFTER-INNER   PIC X(4).\n"
+            "           05  AFTER-OUTER       PIC X(4).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        # Known offsets right up to (and including) the ODO table itself.
+        assert by_name["INNER"].offset_ambiguous is False
+        assert by_name["WS-ITEMS"].offset_ambiguous is False
+
+        # One hop out: AFTER-INNER, a sibling of INNER within OUTER.
+        assert by_name["AFTER-INNER"].offset_ambiguous is True
+        assert by_name["AFTER-INNER"].byte_offset is None
+
+        # Two hops out: AFTER-OUTER, a sibling of OUTER within REC.
+        assert by_name["AFTER-OUTER"].offset_ambiguous is True
+        assert by_name["AFTER-OUTER"].byte_offset is None

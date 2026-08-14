@@ -3,10 +3,12 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-15T00:15:00Z
+timestamp: 2026-08-15T01:00:00Z
 ---
 
 # Overview
+
+2026-08-14 (Task 6): +4 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestOccursDependingOn` class: the brief's `test_odo_table_itself_has_a_known_offset` and `test_everything_after_an_odo_table_is_flagged_ambiguous` pin single-level OCCURS DEPENDING ON behavior (the ODO table itself keeps a concrete offset; a direct sibling after it is `offset_ambiguous=True`/`byte_offset=None`; the record root stays `offset_ambiguous=False`). Two new tests cover the cross-level propagation gap Task 5's reviewer found: `test_odo_nested_inside_a_group_makes_the_groups_own_siblings_ambiguous` (ODO nested one level inside a group — the group's own *sibling*, not just the ODO's own siblings, must go ambiguous) and `test_odo_two_levels_deep_propagates_through_both_nesting_hops` (ODO nested two levels deep — both the one-hop and two-hop siblings must go ambiguous, proving propagation isn't limited to a single level). Verified via a stash-based revert of the `layout_offsets.py` fix that the nested-group test genuinely fails without it (`AFTER-GROUP` wrongly reported a concrete offset). Pins Task 6's `(footprint, trailing_ambiguous)` tuple threading through `_layout_siblings()`/`_layout_item()` — see [generators.md](generators.md)'s `layout_offsets.py` entry. Note: fixed-format COBOL's column-72 code-area limit means `OCCURS ... DEPENDING ON <var>` fixtures at deep indentation must wrap the `DEPENDING ON` clause onto a continuation line, or the lexer silently drops it past column 72 with no error.
 
 2026-08-14 (Task 5): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestOccurs` class: `test_elementary_occurs_reports_one_occurrence_length_but_advances_past_all` verifies an elementary OCCURS item's `byte_length` stays one occurrence's size while a later sibling's offset advances past all occurrences, and `occurs` reports `{"min": N, "max": N}`; `test_group_occurs_multiplies_the_whole_group_footprint` verifies the same for a *group* item's own OCCURS (its `byte_length` is one occurrence's footprint, but a later sibling's offset advances past every occurrence of the whole group). Pins Task 5's OCCURS-aware `slot_footprint` computation in `_layout_siblings()` and the `occurs` field wiring in `_layout_item()`.
 
