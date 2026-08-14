@@ -146,11 +146,19 @@ def expand_condition_values(raw_values: list[str]) -> list[str]:
             low, high = int(start), int(end)
             if low > high:
                 low, high = high, low
+            # Cap the expansion: the point is a representative domain,
+            # not an exhaustive enumeration of a six-digit range.
             high = min(high, low + _MAX_RANGE_EXPANSION)
+            # Emit the closed interval, both endpoints included. Iterating
+            # from ``low`` rather than from ``start`` is what makes a
+            # descending ``VALUE 4 THRU 2`` yield 2 as well as 3 and 4;
+            # the ``dict.fromkeys`` dedup below drops the repeated
+            # endpoint that ``start`` already contributed.
             values.extend(str(value) for value in range(low, high + 1))
         elif end:
             values.append(end)
         previous = end
+    # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
 
 
@@ -166,6 +174,7 @@ def _condition_values(item: CobolDataItem) -> list[str]:
         if not isinstance(child, ConditionNameItem):
             continue
         values.extend(expand_condition_values(child.values))
+    # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
 
 
