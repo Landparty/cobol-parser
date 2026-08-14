@@ -34,6 +34,19 @@ _MODULES = ("_lexer_fast", "_preprocess_fast", "_data_fast")
 _CLOSED_SOURCE_ENV = "COBOLPARSER_CLOSED_SOURCE"
 _REPO_ROOT = Path(__file__).resolve().parent
 
+# File names that must stay plain .py source even in a closed-source build.
+#
+# __init__.py: the whole strategy assumes package __init__ files are thin
+#   re-export stubs with no business logic of their own. Keep them that way --
+#   anything substantial belongs in a private sibling module that *does* get
+#   compiled (see cobolparser/preprocess/_normalize.py, which was split out of
+#   preprocess/__init__.py for exactly this reason).
+# __main__.py: runpy needs a code object to execute `python -m cobolparser`,
+#   and extension-module loaders return None from get_code(), which fails with
+#   an opaque "No code object available". It is a 3-line shim over
+#   cobolparser.cli:main, so shipping it as source discloses nothing.
+_UNCOMPILED_FILENAMES = frozenset({"__init__.py", "__main__.py"})
+
 
 def _closed_source_enabled() -> bool:
     return os.environ.get(_CLOSED_SOURCE_ENV) == "1"
@@ -42,10 +55,10 @@ def _closed_source_enabled() -> bool:
 def _iter_closed_source_py_files():
     """Yield (dotted.module.name, relative/path.py) for every cobolparser
     module that should be compiled and stripped of its .py source, i.e.
-    everything except __init__.py files."""
+    everything except the _UNCOMPILED_FILENAMES shims."""
     pkg_dir = _REPO_ROOT / _PKG
     for path in sorted(pkg_dir.rglob("*.py")):
-        if path.name == "__init__.py":
+        if path.name in _UNCOMPILED_FILENAMES:
             continue
         rel = path.relative_to(_REPO_ROOT)
         dotted = ".".join(rel.with_suffix("").parts)
@@ -53,16 +66,16 @@ def _iter_closed_source_py_files():
 
 
 class _ClosedSourceBuildPy(_build_py):
-    """Only copy __init__.py files -- every other .py module has a compiled
-    extension twin (see _iter_closed_source_py_files) and must not ship as
-    readable source in the built distribution."""
+    """Only copy the _UNCOMPILED_FILENAMES shims -- every other .py module has
+    a compiled extension twin (see _iter_closed_source_py_files) and must not
+    ship as readable source in the built distribution."""
 
     def find_package_modules(self, package, package_dir):
         modules = super().find_package_modules(package, package_dir)
         return [
             (pkg, mod, file)
             for (pkg, mod, file) in modules
-            if os.path.basename(file) == "__init__.py"
+            if os.path.basename(file) in _UNCOMPILED_FILENAMES
         ]
 
 
@@ -95,6 +108,11 @@ def _build_ext_modules() -> list:
 
     return cythonize(
         extensions,
+        # Closed-source mode cythonizes ~113 modules; translating them one at
+        # a time dominates the build (and, on the emulated aarch64 CI runner,
+        # risks the 6-hour job limit). 0 means "serial" to Cython, so clamp to
+        # at least 1 when os.cpu_count() returns None.
+        nthreads=os.cpu_count() or 1,
         compiler_directives={
             "language_level": "3",
             "boundscheck": False,

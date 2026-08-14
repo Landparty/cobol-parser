@@ -32,19 +32,47 @@ def build_wheel(dist_dir: Path) -> Path:
     return wheels[0]
 
 
+# Kept in sync with setup.py's _UNCOMPILED_FILENAMES: the only .py files a
+# closed-source wheel may legitimately contain.
+ALLOWED_PY_NAMES = ("__init__.py", "__main__.py")
+
+# Cython embeds the original source verbatim, line by line, in C comments, so
+# a shipped .c file is a fully readable copy of the module it came from. .pyx
+# and .h are excluded on the same principle; .pyi would disclose the API
+# surface the wheel is meant to keep opaque.
+FORBIDDEN_SUFFIXES = (".c", ".pyx", ".h", ".pyi")
+
+
 def check_no_leaked_source(wheel_path: Path) -> None:
     with zipfile.ZipFile(wheel_path) as zf:
-        py_files = [
-            n
-            for n in zf.namelist()
-            if n.startswith("cobolparser/") and n.endswith(".py")
-        ]
-    leaked = [n for n in py_files if not n.endswith("__init__.py")]
+        names = [n for n in zf.namelist() if n.startswith("cobolparser/")]
+
+    py_files = [n for n in names if n.endswith(".py")]
+    leaked = [n for n in py_files if not n.endswith(ALLOWED_PY_NAMES)]
     if leaked:
-        raise AssertionError(f"wheel leaks source for: {leaked}")
+        raise AssertionError(f"wheel leaks .py source for: {leaked}")
     if not py_files:
         raise AssertionError("expected at least the __init__.py stubs, found none")
-    print(f"OK: only {len(py_files)} __init__.py stub(s) present, no other .py source")
+
+    leaked_native = [n for n in names if n.endswith(FORBIDDEN_SUFFIXES)]
+    if leaked_native:
+        raise AssertionError(
+            "wheel leaks Cython/C source (these embed the original .py source "
+            f"verbatim in comments): {leaked_native}"
+        )
+
+    # The compiled-away modules must reappear as extension modules; a wheel
+    # with neither the .py nor the .so/.pyd would "pass" the checks above
+    # while being completely broken.
+    ext_files = [n for n in names if n.endswith((".so", ".pyd"))]
+    if not ext_files:
+        raise AssertionError("wheel contains no compiled extension modules at all")
+
+    print(
+        f"OK: {len(py_files)} allowed .py shim(s) "
+        f"({', '.join(sorted(ALLOWED_PY_NAMES))}), {len(ext_files)} compiled "
+        "extension(s), no .c/.pyx/.h/.pyi source"
+    )
 
 
 def smoke_test_install(wheel_path: Path, venv_dir: Path) -> None:

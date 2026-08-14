@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-08-10T00:00:00Z
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # Overview
@@ -57,7 +57,8 @@ from cobolparser.preprocess import (
 
 | File | Responsibility |
 |------|---------------|
-| `preprocess/__init__.py` | `normalize_fixed_format`, `preprocess_conditional_compilation`, `validate_copybook_content`, `validate_level_numbers`, plus exception classes |
+| `preprocess/__init__.py` | **Thin re-export stub only.** Re-exports everything from `_normalize.py` plus `copybook_expander.py`, and swaps in the `_preprocess_fast` Cython `normalize_fixed_format` when compiled (keeping the pure one reachable as `_normalize_fixed_format_pure`). Deliberately holds no implementation — the closed-source release build ships every `__init__.py` as readable `.py` source (see `setup.py`) |
+| `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, plus the `PreprocessingError` hierarchy. Split out of `__init__.py` on 2026-08-14; every name stays importable from `cobolparser.preprocess` unchanged |
 | `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion` — recursive COPY inlining with circular-reference detection, encoding detection, content validation, and LRU caching |
 | `preprocess/copy_statement_parser.py` | `CopyStatementLexer`, REPLACING clause handling, continuation line normalisation |
 | `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths |
