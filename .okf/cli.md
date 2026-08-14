@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-14T23:30:00Z
 ---
 
 # Overview
@@ -292,6 +292,22 @@ cobol-parser ims-dli <file.cbl>
 ```
 
 Runs `IMSSegmentAnalyzer` and reports IMS DLI segment calls.
+
+## Data-Items
+
+```bash
+cobol-parser data-items <file.cbl> [--profile ...]
+```
+
+Runs `compute_program_data_items()` (see [generators.md](generators.md)'s
+`layout_offsets.py` entry) and reports `{"items": [...], "unresolved":
+[...]}` — byte offset, byte length, REDEFINES chain, OCCURS min/max, and
+level-88 condition values for every data item across every DATA DIVISION
+section (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE) of the program.
+Registered the same way as `dead-code`/`io-sequence` (via
+`_build_analyzer_parser(..., profiling=True)`), so it also accepts the
+shared profiling flags. Added 2026-08-14 (Task 9 of the data-item-layout
+plan) as the final wiring step for Tasks 1-8's `layout_offsets.py` module.
 
 # See Also
 

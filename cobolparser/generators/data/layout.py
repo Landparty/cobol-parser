@@ -119,48 +119,61 @@ def _child_items(item: CobolDataItem) -> list[CobolDataItem]:
     return [c for c in item.children if isinstance(c, CobolDataItem)]
 
 
-def _condition_values(item: CobolDataItem) -> list[str]:
-    """Collect level-88 VALUEs under *item*, expanding ``THRU`` ranges.
+def expand_condition_values(raw_values: list[str]) -> list[str]:
+    """Expand one condition name's raw VALUE literals, THRU ranges included.
 
     The parser records ``VALUE 2 THRU 4`` as ``["2", "THROUGH:4"]`` -- the
-    range end is marked rather than expanded.  Numeric ranges are expanded
+    range end is marked rather than expanded. Numeric ranges are expanded
     here (bounded, so ``VALUE 1 THRU 999999`` cannot blow up memory); a
     non-numeric range contributes only its endpoints.
+    """
+    values: list[str] = []
+    previous: str | None = None
+    for raw in raw_values:
+        match = _THROUGH_RE.match(raw)
+        if match is None:
+            cleaned = _strip_literal_quotes(raw)
+            values.append(cleaned)
+            previous = cleaned
+            continue
+        end = _strip_literal_quotes(match.group(1))
+        start = previous
+        if (
+            start is not None
+            and _INTEGER_LITERAL_RE.match(start)
+            and _INTEGER_LITERAL_RE.match(end)
+        ):
+            low, high = int(start), int(end)
+            if low > high:
+                low, high = high, low
+            # Cap the expansion: the point is a representative domain,
+            # not an exhaustive enumeration of a six-digit range.
+            high = min(high, low + _MAX_RANGE_EXPANSION)
+            # Emit the closed interval, both endpoints included. Iterating
+            # from ``low`` rather than from ``start`` is what makes a
+            # descending ``VALUE 4 THRU 2`` yield 2 as well as 3 and 4;
+            # the ``dict.fromkeys`` dedup below drops the repeated
+            # endpoint that ``start`` already contributed.
+            values.extend(str(value) for value in range(low, high + 1))
+        elif end:
+            values.append(end)
+        previous = end
+    # Preserve first-seen order while removing duplicates.
+    return list(dict.fromkeys(v for v in values if v != ""))
+
+
+def _condition_values(item: CobolDataItem) -> list[str]:
+    """Collect level-88 VALUEs under *item*, merged across all its
+    level-88 children -- FieldSpec.condition_values needs "any value that
+    could apply to this field", not one condition name's values in
+    isolation. See ``expand_condition_values`` for the per-name expansion
+    this delegates to.
     """
     values: list[str] = []
     for child in item.children:
         if not isinstance(child, ConditionNameItem):
             continue
-        previous: str | None = None
-        for raw in child.values:
-            match = _THROUGH_RE.match(raw)
-            if match is None:
-                cleaned = _strip_literal_quotes(raw)
-                values.append(cleaned)
-                previous = cleaned
-                continue
-            end = _strip_literal_quotes(match.group(1))
-            start = previous
-            if (
-                start is not None
-                and _INTEGER_LITERAL_RE.match(start)
-                and _INTEGER_LITERAL_RE.match(end)
-            ):
-                low, high = int(start), int(end)
-                if low > high:
-                    low, high = high, low
-                # Cap the expansion: the point is a representative domain,
-                # not an exhaustive enumeration of a six-digit range.
-                high = min(high, low + _MAX_RANGE_EXPANSION)
-                # Emit the closed interval, both endpoints included. Iterating
-                # from ``low`` rather than from ``start`` is what makes a
-                # descending ``VALUE 4 THRU 2`` yield 2 as well as 3 and 4;
-                # the ``dict.fromkeys`` dedup below drops the repeated
-                # endpoint that ``start`` already contributed.
-                values.extend(str(value) for value in range(low, high + 1))
-            elif end:
-                values.append(end)
-            previous = end
+        values.extend(expand_condition_values(child.values))
     # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
 
