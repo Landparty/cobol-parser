@@ -28,6 +28,47 @@ behaviorally identical to the pure-Python fallback for both the returned
 text *and* the new `warnings` channel -- a divergence here means the
 compiled build silently reports different diagnostics than the
 non-accelerated build.
+
+**Word-boundary overflow (2026-08-14):** the mid-token check above requires
+columns 72 *and* 73 to both be non-blank, so it never fires when the
+overflow happens to break right after a word -- e.g. ``OCCURS 1 TO 10
+TIMES DEPENDING ON WS-COUNT.`` written on one line keeps ``DEPENDING``
+(it fits by column 72) but silently drops its `` ON WS-COUNT.`` operand
+(column 72 is a space, column 73 is "O"), producing a silently *fixed*
+``OCCURS 10 TIMES`` with no ODO clause and no diagnostic at all -- the
+mid-token rule treats it exactly like the traditional 80-column
+identification-area case, which it isn't.
+Distinguishing signal: a real 80-column punch-card line can never exceed
+80 columns by construction (72 code + 8 identification), so any non-comment
+line whose real content -- after trailing-whitespace is stripped -- extends
+past column 80 cannot be legitimate identification-area text, regardless of
+whether the column-72/73 boundary itself falls on a word break. See
+``TestWordBoundaryOverflowWarns`` below.
+
+**Sequence-numbered decks gate the whole check (2026-08-14):** wiring this
+warning into the real parse pipeline for the first time (previously
+``warnings=None`` everywhere -- see
+``tests/regression/test_fixed_format_word_boundary_overflow.py``) surfaced
+that the *original* mid-token rule above is far noisier on real 80-column
+source than its own tests suggested: measured against the vendored NIST
+CCVS85 corpus, 4434 of 4438 raw column-72/73 "mid-token" hits turned out to
+be lines like ``examples/cobol/IX209A.CBL:292`` --
+``029100          "...".IX2094.2`` -- where the statement's own closing
+period genuinely lands on column 72 and the file's own per-line
+identification code starts immediately at column 73 with zero authoring
+mistake; nothing was actually split. The `` "020100 ..." IC1014.2`` example
+this file's docstring already cited happens to leave a padding blank before
+its identification field, but that's not true fixed-format COBOL in
+general -- plenty of real 80-column decks don't bother with the padding,
+relying only on the compiler's blanket columns-73-80 ignore rule. A numeric
+sequence number in columns 1-6 is independent, reliable evidence that a
+line belongs to exactly that convention (hand-typed modern source never
+bothers with sequence numbers), so both the mid-token and word-boundary
+rules above now skip entirely whenever columns 1-6 hold one. See
+``test_numeric_sequence_area_does_not_warn_even_when_mid_token`` and
+``test_blank_sequence_area_with_same_shape_still_warns`` below, which
+isolate the sequence number as the deciding factor rather than the
+period-then-letter shape itself.
 """
 
 from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
@@ -132,6 +173,100 @@ class TestNonMidTokenOverflowDoesNotWarn:
             impl([line], warnings=warnings)
             assert warnings == [], name
 
+    def test_numeric_sequence_area_does_not_warn_even_when_mid_token(self):
+        # A real per-line sequence number in columns 1-6 is deck-format
+        # evidence this file deliberately uses the full 80-column
+        # convention, where the identification field may abut column 72
+        # with no separating blank -- even when the resulting column-72/73
+        # pair happens to both be non-blank. Reconstructs the exact shape
+        # found in the vendored NIST CCVS85 corpus (examples/cobol/
+        # IX209A.CBL:292): a statement whose closing period lands exactly
+        # on column 72, immediately followed (no gap) by the file's own
+        # per-line test-case id "IX2094.2" in the identification area.
+        # Before this gate, this shape alone accounted for 4434 of 4438
+        # "mid-token" false positives across the vendored example corpus.
+        code = '029100          "BBBBBBBBBC002EEEEEEEEEF002ALTKEY1WWWWWWWWWV398ALTKEY2".'
+        line = code + "IX2094.2"
+        assert len(code) == 72
+        assert line[71] == "."  # column 72: the statement's own period
+        assert line[72] == "I"  # column 73: unrelated identification text
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert warnings == [], name
+
+    def test_blank_sequence_area_with_same_shape_still_warns(self):
+        # Same column-72/73 shape as the sequence-numbered case above, but
+        # with a blank (not numeric) sequence area -- modern hand-typed
+        # source, where this shape is a genuine authoring mistake and must
+        # still be flagged. Isolates the sequence-number gate as the
+        # deciding factor, not the period-then-letter shape itself.
+        code = " " * 65 + "A" * 6 + "."
+        line = code + "IX2094.2"
+        assert len(code) == 72
+        assert line[:6].strip() == ""
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert len(warnings) == 1, name
+            assert "IX2094.2" in warnings[0], name
+
+
+class TestWordBoundaryOverflowWarns:
+    """Overflow that breaks exactly on a space at column 72/73 -- the
+    mid-token rule alone misses these, but a line that survives past column
+    80 (the traditional punch-card width) can never be legitimate
+    identification-area content."""
+
+    # Reconstructs the exact one-line form of the OCCURS ... DEPENDING ON
+    # fixture from tests/unit/generators/data/test_layout_offsets.py before
+    # it was manually wrapped onto a continuation line to work around this
+    # bug. "DEPENDING" itself fits by column 72; column 73 is "O" of
+    # "ON" -- a word boundary (column 72 is a space), not a mid-token split,
+    # so it still drops the ODO clause's operand entirely.
+    ODO_LINE = (
+        "           05  WS-TABLE         PIC X(2) OCCURS 1 TO 10 TIMES "
+        "DEPENDING ON WS-COUNT."
+    )
+
+    def test_occurs_depending_on_word_boundary_drop_warns(self):
+        assert self.ODO_LINE[71] == " "  # column 72
+        assert self.ODO_LINE[72] == "O"  # column 73 -- proves it's not mid-token
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            out = impl([self.ODO_LINE], warnings=warnings)
+            # "DEPENDING" survives (it fits by column 72); its operand doesn't.
+            assert "DEPENDING" in out, name
+            assert "ON WS-COUNT" not in out, name
+            assert len(warnings) == 1, name
+            assert "Line 1" in warnings[0], name
+            assert "ON WS-COUNT." in warnings[0], name
+
+    def test_exactly_80_columns_at_word_boundary_does_not_warn(self):
+        # 71 code columns + 1 boundary space + 8 identification columns = 80,
+        # the traditional maximum -- must NOT warn even though column 72 is
+        # blank and column 73 starts real-looking text.
+        line = "A" * 71 + " " + "B" * 8
+        assert len(line) == 80
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert warnings == [], name
+
+    def test_81_columns_at_word_boundary_warns(self):
+        # One character past the traditional 80-column width, still landing
+        # on a space at column 72/73 -- pins the exact boundary the fix adds.
+        line = "A" * 71 + " " + "B" * 9
+        assert len(line) == 81
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert warnings == [
+                "Line 1: content beyond column 72 was dropped -- line is 81 "
+                "columns wide, past the traditional 80-column "
+                "identification-area width: 'BBBBBBBBB'"
+            ], name
+
 
 class TestBackwardCompatibility:
     def test_no_warnings_argument_behaves_as_before(self):
@@ -155,6 +290,11 @@ class TestFastAndPureParity:
         "      *" + "Y" * 66,
         "      D" + "Z" * 66,
         " " * 65 + "A" * 7,
+        TestWordBoundaryOverflowWarns.ODO_LINE,
+        "A" * 71 + " " + "B" * 8,
+        "A" * 71 + " " + "B" * 9,
+        '029100          "BBBBBBBBBC002EEEEEEEEEF002ALTKEY1WWWWWWWWWV398ALTKEY2".IX2094.2',
+        " " * 65 + "A" * 6 + "." + "IX2094.2",
     ]
 
     def test_fast_and_pure_produce_identical_warnings(self):

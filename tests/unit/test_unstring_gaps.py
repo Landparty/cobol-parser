@@ -151,7 +151,11 @@ class TestUnstringCombined:
         result = parse_cobol(
             _prog(
                 '           UNSTRING WS-SRC DELIMITED BY "," OR ";"\n'
-                "               INTO WS-TGT-B DELIMITER IN WS-DELIM-B "
+                # 14 (not 15) leading spaces here: 15 pushed this line to 73
+                # columns, one past the fixed-format code area (column 72),
+                # which silently dropped the trailing comma -- see
+                # tests/regression/test_fixed_format_word_boundary_overflow.py.
+                "              INTO WS-TGT-B DELIMITER IN WS-DELIM-B "
                 "COUNT IN WS-COUNT-B,\n"
                 "                    WS-TGT-C DELIMITER IN WS-DELIM-C "
                 "COUNT IN WS-COUNT-C\n"

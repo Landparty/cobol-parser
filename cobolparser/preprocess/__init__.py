@@ -265,6 +265,7 @@ DEFAULT_SEQ_COL_END = 6  # 1-6 sequence numbers
 INDICATOR_COL = 7  # column 7 indicator position (1-based)
 TEXT_START_COL = 8  # program text begins (1-based)
 TEXT_END_COL = 72  # program text end (inclusive, 1-based)
+IDENTIFICATION_END_COL = 80  # 73-80 identification area end (inclusive, 1-based)
 
 
 def strip_compiler_directives(
@@ -429,14 +430,44 @@ def normalize_fixed_format(
     bounds-checks the line length). Traditional 80-column source
     legitimately puts non-blank sequence/identification text there (e.g.
     NIST CCVS85's ``IC1014.2`` on every line) -- flagging that would be
-    noise, not signal. What *is* worth flagging: a non-comment line whose
-    real program text runs past column 72 with no separating blank, i.e.
-    columns 72 and 73 are both non-blank -- content was actually split
-    mid-token, not merely followed by an unrelated identification field.
-    When `warnings` is given, each such line appends one
+    noise, not signal. Two independent shapes are worth flagging, checked
+    in this order:
+
+    1. **Mid-token split** -- columns 72 and 73 are both non-blank, i.e. a
+       word was split with no separating blank (``WS-PARM-DORM-DAYS`` ->
+       ``WS-PARM-DORM-D`` + dropped ``AYS``).
+    2. **Word-boundary overflow** -- the split lands on a space at column
+       72/73 (so case 1 misses it), but the line's real content -- after
+       trailing whitespace is stripped -- extends past column
+       ``IDENTIFICATION_END_COL`` (80), the traditional maximum width of an
+       80-column punch-card line (72 code + 8 identification). Content that
+       survives past column 80 can never be legitimate identification-area
+       text regardless of where exactly it broke (e.g. ``OCCURS 1 TO 10
+       TIMES DEPENDING ON WS-COUNT.`` on one line keeps ``DEPENDING`` but
+       silently drops its `` ON WS-COUNT.`` operand -- columns 72/73
+       straddle a space, so case 1 alone never catches it).
+
+    Both rules are skipped entirely when the line's own columns 1-6 hold a
+    real sequence number (all digits, ignoring surrounding blanks) --
+    strong evidence the file deliberately uses the traditional 80-column
+    convention, where the identification field may abut column 72 with no
+    separating blank at all. Without this gate, rule 1 alone false-positives
+    on the vast majority of genuinely traditional 80-column source (measured
+    at 4434 of 4438 raw hits across the vendored NIST CCVS85 corpus): a
+    line's own statement-terminating period frequently lands exactly on
+    column 72, immediately followed by an unrelated per-line identification
+    code at column 73 -- e.g. ``029100          "...".IX2094.2`` -- which
+    is not a split at all. Hand-typed modern source never bothers with
+    sequence numbers, so this gate leaves real truncation (this function's
+    own reviewer-repro case, `WS-PARM-DORM-DAYS`, the OCCURS/DEPENDING ON
+    case above) unaffected.
+
+    When `warnings` is given, each qualifying line appends one
     ``f"Line {n}: ..."`` message to it (comment lines are never checked:
     their text is discarded whether truncated or not, so truncation there
-    changes nothing).
+    changes nothing). A line whose content stays within the traditional
+    80-column width and doesn't split mid-token (the classic
+    sequence-number/identification-area case) is never flagged.
     """
     result: list[str] = []
     pending_literal = False
@@ -542,13 +573,55 @@ def normalize_fixed_format(
             continue
 
         if warnings is not None and len(line) > TEXT_END_COL:
-            before, after = line[TEXT_END_COL - 1], line[TEXT_END_COL]
-            if not before.isspace() and not after.isspace():
-                dropped = line[TEXT_END_COL:].rstrip()
-                warnings.append(
-                    f"Line {line_no}: content beyond column {TEXT_END_COL} "
-                    f"was dropped mid-token: {dropped!r}"
-                )
+            seq_area = line[: DEFAULT_SEQ_COL_END]
+            # A real per-line sequence number in columns 1-6 is strong,
+            # independent evidence that this file deliberately uses the
+            # full traditional 80-column punch-card convention -- which
+            # legitimately abuts a non-blank identification field at
+            # column 73 right after wherever the code happens to end,
+            # with no separating blank required. Measured against the
+            # vendored NIST CCVS85 corpus: 4434 of 4438 raw column-72/73
+            # "mid-token" hits carried a numeric sequence number here --
+            # e.g. `029100          "...".IX2094.2` genuinely ends its
+            # code with a period at column 72, and the unrelated
+            # test-case id "IX2094.2" starts immediately at column 73;
+            # nothing was actually split. Hand-typed modern source never
+            # bothers with sequence numbers, so gating on this leaves the
+            # real truncation cases (the reviewer's 77-column DISPLAY
+            # repro, ACCTMNT.cbl's WS-PARM-DORM-DAYS split, the
+            # OCCURS/DEPENDING ON word-boundary case) unaffected while
+            # eliminating the false-positive flood on sequence-numbered
+            # decks.
+            has_sequence_number = (
+                seq_area.strip() != "" and seq_area.strip().isdigit()
+            )
+            if not has_sequence_number:
+                before, after = line[TEXT_END_COL - 1], line[TEXT_END_COL]
+                mid_token = not before.isspace() and not after.isspace()
+                content_len = len(line.rstrip())
+                # A real 80-column punch-card line can't exceed 80 columns
+                # (72 code + 8 identification) by construction, so content
+                # that survives past column 80 can never be legitimate
+                # identification-area text -- it's overflow that happens
+                # to break on a word boundary (mid_token is False whenever
+                # the split lands on a space), which the mid-token check
+                # alone misses. See TestWordBoundaryOverflowWarns in
+                # tests/regression/test_normalize_column_overflow_warning.py.
+                exceeds_traditional_width = content_len > IDENTIFICATION_END_COL
+                if mid_token:
+                    dropped = line[TEXT_END_COL:].rstrip()
+                    warnings.append(
+                        f"Line {line_no}: content beyond column {TEXT_END_COL} "
+                        f"was dropped mid-token: {dropped!r}"
+                    )
+                elif exceeds_traditional_width:
+                    dropped = line[TEXT_END_COL:].rstrip()
+                    warnings.append(
+                        f"Line {line_no}: content beyond column {TEXT_END_COL} "
+                        f"was dropped -- line is {content_len} columns wide, "
+                        f"past the traditional {IDENTIFICATION_END_COL}-column "
+                        f"identification-area width: {dropped!r}"
+                    )
 
         is_cont = indicator == "-"
 
