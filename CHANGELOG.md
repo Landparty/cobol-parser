@@ -1315,6 +1315,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.6.0](https://github.com/Landparty/cobol-parser/compare/v1.5.6...v1.6.0) (2026-08-14)
+
+
+### Features
+
+* add UnusedVariableAnalyzer and unused-variables CLI subcommand ([b5ca723](https://github.com/Landparty/cobol-parser/commit/b5ca723dfdc7e20737b93ec7d73ae1ee874c406d))
+* add UnusedVariableAnalyzer and unused-variables CLI subcommand ([d525fc2](https://github.com/Landparty/cobol-parser/commit/d525fc27f07a076b45197b2e1d7ad28b0cc6e570))
+
+
+### Bug Fixes
+
+* DeadCodeAnalyzer no longer resurrects dead siblings via section propagation ([b3b5c6f](https://github.com/Landparty/cobol-parser/commit/b3b5c6ffb970ad64ef52da67854e39d461227dd6))
+* DeadCodeAnalyzer no longer resurrects dead siblings via section propagation ([74e6150](https://github.com/Landparty/cobol-parser/commit/74e6150eead83c778019a37c765445b28971882e))
+* extract identifiers from operand text instead of treating it as one name ([799741e](https://github.com/Landparty/cobol-parser/commit/799741e398f9934bd995467d6819e423e89fc9a0))
+* recognize SCREEN/REPORT/COMMUNICATION SECTION headers in DATA DIVISION ([71839d7](https://github.com/Landparty/cobol-parser/commit/71839d73ff62cd21afa3674cba6f18039e55b420))
+* recognize SCREEN/REPORT/COMMUNICATION SECTION headers in DATA DIVISION ([a0c44b3](https://github.com/Landparty/cobol-parser/commit/a0c44b3489197d3de7506d93998f0f7bd69d37a7))
+* unblock CI — mypy narrowing + black formatting drift on main ([916ffe8](https://github.com/Landparty/cobol-parser/commit/916ffe8682b86713b8721260c81249f80b908789))
+
 ## [1.5.6](https://github.com/Landparty/cobol-parser/compare/v1.5.5...v1.5.6) (2026-08-13)
 
 
