@@ -230,7 +230,7 @@ def _layout_item(
             data_children, item_path, start_offset, item_ambiguous, out
         )
         picture = None
-        usage = None
+        usage = item.usage.upper() if item.usage else None
     else:
         one_occurrence_length = _elementary_byte_length(item)
         picture = item.picture_clause.pattern if item.picture_clause else None
