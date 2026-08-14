@@ -150,7 +150,7 @@ build = "cp311-* cp312-* cp313-*"
 # 3 hot-path accelerators. See setup.py and
 # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
 environment = { COBOLPARSER_CLOSED_SOURCE = "1" }
-test-requires = "pytest"
+test-requires = "pytest pytest-cov"
 # Smoke-test against the INSTALLED wheel (not the source tree): verify
 # ordinary modules loaded as compiled extensions (no .py source backing
 # them), then run a fast subset of the suite. --no-cov disables this repo's
