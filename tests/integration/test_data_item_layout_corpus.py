@@ -53,7 +53,9 @@ class TestRedefinesFixture:
 class TestShamriceCorpusDoesNotRaise:
     @pytest.mark.parametrize("cbl_path", [pytest.param(p, id=p.name) for p in _ALL_CBL])
     def test_computes_without_raising(self, cbl_path: Path) -> None:
-        result = parse_cobol(str(cbl_path), error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+        result = parse_cobol(
+            str(cbl_path), error_recovery=ErrorRecoveryMode.COLLECT_ALL
+        )
         if result.ast is None:
             pytest.skip(f"{cbl_path.name} did not produce an AST")
         compute_program_data_items(result.ast)  # must not raise
