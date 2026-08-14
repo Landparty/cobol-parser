@@ -54,6 +54,16 @@ Repository = "https://github.com/Landparty/cobol-parser"
 [tool.setuptools.packages.find]
 include = ["cobolparser*"]
 
+# `include_package_data` defaults to True for pyproject.toml-configured
+# setuptools projects, and cythonize() writes each generated .c file next to
+# its .py/.pyx source *inside* the package tree. Cython embeds the original
+# source verbatim in C comments, so without this exclusion every closed-source
+# wheel would ship a fully readable copy of every module it just compiled.
+# Excluding by pattern (rather than setting include-package-data = false)
+# keeps cobolparser/py.typed shipping without having to redeclare it.
+[tool.setuptools.exclude-package-data]
+"*" = ["*.c", "*.pyx", "*.h"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -146,9 +156,28 @@ extend-exclude = '''
 [tool.cibuildwheel]
 # Build CPython 3.11–3.13 only (matches requires-python)
 build = "cp311-* cp312-* cp313-*"
-# Smoke-test: verify the C extension actually loaded, not just the pure-Python fallback
-test-command = "python -c \"from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('C extensions OK')\""
+# Full closed-source build: every cobolparser module compiles, not just the
+# 3 hot-path accelerators. See setup.py and
+# docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
+environment = { COBOLPARSER_CLOSED_SOURCE = "1" }
+test-requires = "pytest pytest-cov"
+# Smoke-test against the INSTALLED wheel (not the source tree): verify
+# ordinary modules loaded as compiled extensions (no .py source backing
+# them), then run a fast subset of the suite. --no-cov disables this repo's
+# default --cov-fail-under=81 gate (see [tool.pytest.ini_options] addopts),
+# which coverage.py can't evaluate meaningfully against compiled extensions.
+#
+# --import-mode=importlib is load-bearing, not cosmetic: tests/__init__.py
+# exists, so under pytest's default "prepend" mode {project} lands at
+# sys.path[0] and the SOURCE tree shadows the wheel installed in the test
+# venv -- silently testing the wrong thing. importlib mode leaves sys.path
+# alone, so `import cobolparser` resolves to the installed extensions.
+test-command = "python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py --no-cov -q --import-mode=importlib"
 
+# NOTE: release CI overrides these per job via CIBW_ARCHS (see
+# .github/workflows/release-please.yml) so that Linux x86_64 and the emulated
+# aarch64 build get separate jobs. These values still apply to local
+# `cibuildwheel` runs.
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
 

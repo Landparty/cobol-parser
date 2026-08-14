@@ -1,5 +1,32 @@
 # OKF Update Log
 
+## 2026-08-14 (preprocessing: implementation split out of `preprocess/__init__.py`)
+
+The closed-source PyPI release build (`COBOLPARSER_CLOSED_SOURCE=1`) compiles
+every module in the package to a `.so`/`.pyd` *except* `__init__.py` and
+`__main__.py`, on the premise that those are thin shims with no business logic.
+`cobolparser/preprocess/__init__.py` violated that premise outright: 1,446 lines
+holding `normalize_fixed_format`, `strip_compiler_directives`, the whole
+`>>IF`/`>>EVALUATE` constant-condition evaluator (`_ConditionParser`,
+`_evaluate_condition`), `validate_copybook_content`, `validate_level_numbers`,
+and the `PreprocessingError` hierarchy — all of which would have shipped as
+readable source in a wheel whose entire purpose is not to.
+
+Moved verbatim into a new `cobolparser/preprocess/_normalize.py`
+(the unused `typing.Optional` import was dropped — it only survived because
+ruff grants F401 to `__init__.py`). `preprocess/__init__.py` is now a re-export
+stub: the same `__all__`, the same `copybook_expander` re-exports, and the same
+`_preprocess_fast` Cython swap with `_normalize_fixed_format_pure` preserved.
+No public or private import path changed — `copybook_expander.py` and
+`path_resolver.py` keep working through `from . import ...` because the
+`._normalize` import sits above the `.copybook_expander` import in the stub.
+
+Verified with a real closed-source wheel: `preprocess/_normalize.pyd` is
+compiled, `preprocess/__init__.py` ships as the stub, and the wheel contains
+zero `.c`/`.pyx`/`.h` files (Cython embeds the original source verbatim in C
+comments, so a shipped `.c` is a full source leak — `exclude-package-data` in
+`pyproject.toml` now blocks them). See `.okf/preprocessing.md`.
+
 ## 2026-08-14 (Follow-up fix: misnested level-77 dropped as a group's only child)
 
 The final-review fix wave below (Finding 2) stopped a misnested
