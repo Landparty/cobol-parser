@@ -3,10 +3,47 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T23:58:00Z
+timestamp: 2026-08-15T00:20:00Z
 ---
 
 # Overview
+
+2026-08-15 (lint fix, PR #153): `black==26.3.0` reformatted
+`cobolparser/preprocess/__init__.py`,
+`tests/regression/test_fixed_format_word_boundary_overflow.py`, and
+`tests/regression/test_normalize_column_overflow_warning.py`
+(whitespace-only, CI's `lint` job caught it — no behavior change).
+
+2026-08-15 (Copilot review fix, PR #153): +1 in
+`tests/regression/test_fixed_format_word_boundary_overflow.py`'s new
+`TestInitialWarningsConsumedOnce` class —
+`test_initial_warnings_apply_only_to_the_first_parse_call` pins that
+`CobolParser(initial_warnings=...)` (see the entry directly below) is
+consumed after the first `parse()` call rather than re-applied on every
+call; reusing one `CobolParser` instance for a second, unrelated source no
+longer repeats the first source's pre-construction normalization
+warnings. See [parser.md](parser.md).
+
+2026-08-14 (fixed-format column-72 overflow wiring): +2 new tests in
+`tests/regression/test_normalize_column_overflow_warning.py`'s
+`TestWordBoundaryOverflowWarns` class (word-boundary overflow past column
+80, e.g. the `OCCURS ... DEPENDING ON` case) plus 2 more pinning the
+sequence-number gate (`test_numeric_sequence_area_does_not_warn_even_when_mid_token`
+/ `test_blank_sequence_area_with_same_shape_still_warns`, isolating a real
+numeric sequence number in columns 1-6 as the deciding factor against a
+false-positive class found in the vendored NIST corpus). New file
+`tests/regression/test_fixed_format_word_boundary_overflow.py` pins the
+diagnostic end-to-end through both `parse_cobol()` and
+`CobolParser.parse()` — `ParseResult.warnings` now actually surfaces it,
+and it stays a warning (not a hard error) under `FAIL_FAST`. See
+[preprocessing.md](preprocessing.md)'s "Column 73+ overflow warning"
+section for the full three-rule writeup and the corpus measurements this
+change is based on. One dormant real hit surfaced by wiring the
+(pre-existing) mid-token rule into the live pipeline for the first time:
+`tests/unit/test_unstring_gaps.py::TestUnstringCombined::
+test_full_combined_statement` had a 73-column fixture line silently
+dropping a trailing comma with zero effect on the test's own assertions —
+fixed by trimming one space of indentation, not by loosening the check.
 
 2026-08-14 (follow-up fix, misnested level-77 as only child): +1 in
 `tests/unit/generators/data/test_layout_offsets.py`'s

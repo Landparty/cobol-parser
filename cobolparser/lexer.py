@@ -1891,8 +1891,11 @@ def _tokenize_source(
         if _detect_fixed_format(source):
             physical_lines = source.splitlines()
             errors: list[LexerError] = []
+            normalize_warnings: list[str] = []
             try:
-                normalized = normalize_fixed_format(physical_lines)
+                normalized = normalize_fixed_format(
+                    physical_lines, warnings=normalize_warnings
+                )
             except ValueError as exc:
                 # Unterminated literal at EOF. Record the error and fall back
                 # to the never-raising normalization, mirroring
@@ -1903,8 +1906,15 @@ def _tokenize_source(
                         SourceLocation(max(len(physical_lines), 1), 1, 1),
                     )
                 )
+                # The raise happened partway through the line scan, so
+                # normalize_warnings may already hold entries from lines
+                # processed before it -- the retry rescans every line from
+                # the start and would duplicate them if not cleared first.
+                normalize_warnings.clear()
                 normalized = normalize_fixed_format(
-                    physical_lines, merge_continued_literals=False
+                    physical_lines,
+                    merge_continued_literals=False,
+                    warnings=normalize_warnings,
                 )
             lexer = CobolLexer(normalized, filename, dialect, free_form=True)
             tokens: list[Token] = lexer.tokenize()
@@ -1914,7 +1924,7 @@ def _tokenize_source(
                     _fixed_format_comment_tokens(physical_lines, normalized),
                 )
             errors.extend(lexer.get_errors())
-            return tokens, errors, lexer.get_warnings()
+            return tokens, errors, normalize_warnings + lexer.get_warnings()
 
     lexer = CobolLexer(source, filename, dialect, free_form=free_form)
     direct_tokens: list[Token] = lexer.tokenize()

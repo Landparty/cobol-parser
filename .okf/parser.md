@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-15T00:10:00Z
 ---
 
 # Overview
@@ -56,6 +56,18 @@ class ParseResult:
 (`ParseStatistics.copy()`, `plugins/core.py`) rather than the parser's live
 object, which the next `parse()` call `reset()`s in place — previously
 reusing one `CobolParser` clobbered earlier results' statistics.
+
+`CobolParser(..., initial_warnings=[...])` (2026-08-14, consumption fixed
+2026-08-15 per Copilot review on PR #153) seeds `self.warnings` with
+caller-supplied diagnostics at the top of the *first* `parse()` call, after
+`self.warnings.clear()` — for warnings a caller already collected before
+constructing the parser (`parse_cobol()`'s own pre-normalization of
+fixed-format source runs before its `CobolParser` instance exists; see
+[preprocessing.md](preprocessing.md)'s "Column 73+ overflow warning").
+Consumed (cleared) immediately after being applied, so reusing one
+`CobolParser` instance across multiple `parse()` calls only attributes
+those initial warnings to the first call, not every later, unrelated one —
+the same reuse hazard `statistics.copy()` above was fixed for.
 
 `warnings` is the "recognized but degraded" channel (2026-07-07): the parser
 populates it when it skips an unsupported verb (no registered statement

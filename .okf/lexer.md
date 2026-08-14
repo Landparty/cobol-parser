@@ -3,7 +3,7 @@ type: Module
 title: Lexer
 description: Tokenizes COBOL source into Token objects; 236 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-07-09T00:00:00Z
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
@@ -293,6 +293,18 @@ original line numbers. Free-form input behavior is unchanged, and the
 helpers are module-level additions — no `_lexer_fast.pyx` /
 `_preprocess_fast.pyx` mirror was touched. Pinned by
 `tests/regression/test_open_findings_m6_regression.py`.
+
+**Column-72 overflow warnings now flow through (2026-08-14):** `_tokenize_source`'s
+own `normalize_fixed_format` calls previously omitted `warnings=`, so any
+overflow diagnostic (see [preprocessing.md](preprocessing.md)'s "Column 73+
+overflow warning") was silently discarded even though the function's return
+type already carries a `warnings` slot. Now collected and prepended to the
+returned `(tokens, errors, warnings)` tuple's third element (ahead of the
+lexer's own `get_warnings()`), with the same clear-before-retry handling as
+the unterminated-literal recovery path (an EOF `ValueError` mid-scan can
+leave partial entries that the retry would otherwise duplicate). CLI
+`tokenize` still discards this element deliberately (best-effort token
+dump, unchanged); `tokenize_cobol()` callers now see it.
 
 # See Also
 

@@ -1,5 +1,81 @@
 # OKF Update Log
 
+## 2026-08-14 (Fixed-format column-72 overflow: word-boundary drops + wired into the real parse pipeline)
+
+Flagged during final whole-branch review of the data-item-layout plan (as
+out-of-scope, unrelated to that feature) and investigated separately: a
+test author writing `OCCURS 1 TO 10 TIMES DEPENDING ON WS-COUNT.` on one
+line hit a real, pre-existing lexer/preprocessor gap — the clause's
+` ON WS-COUNT.` operand was silently dropped, no error, no warning, and
+`compute_record_layout` happily produced a *fixed* `OCCURS 10 TIMES` with
+no ODO clause instead. Root cause was two independent things, both fixed
+in `cobolparser/preprocess/_normalize.py` (+ `_preprocess_fast.pyx`
+mirror, `.c` regenerated):
+
+1. **The existing mid-token overflow check (added 2026-08-03) missed
+   word-boundary drops.** It only fires when columns 72 and 73 are *both*
+   non-blank; the OCCURS/DEPENDING repro breaks on a space (column 72),
+   which the check treats identically to the traditional
+   sequence-number/identification-area case it's designed to stay silent
+   on. New second rule: a non-comment line whose real content (after
+   `rstrip()`) extends past column 80 — the traditional maximum width of
+   an 80-column punch-card line — is flagged regardless of where exactly
+   it broke, since content can never legitimately survive past column 80.
+2. **The diagnostic was never wired into any real entry point.**
+   `warnings=None` by default meant the check ran but collected nothing,
+   and none of `CobolParser.parse()` (`_parse_core`'s fixed-format
+   auto-detection), the module-level `parse_cobol()`, `lexer.py`'s
+   `_tokenize_source`/`tokenize_cobol()`, or the CLI's `preprocess`
+   subcommand passed `warnings=` — so the mechanism added on 2026-08-03
+   was completely unreachable from a normal parse the whole time. All four
+   now surface it (`ParseResult.warnings`, the `_tokenize_source` warnings
+   tuple element, and stderr for the CLI). `CobolParser.__init__` gained
+   an `initial_warnings` parameter so `parse_cobol()`'s pre-construction
+   normalization warnings survive the `self.warnings.clear()` at the top
+   of `parse()`.
+3. **Wiring rule 1 up for the first time revealed it was already far
+   noisier than its own tests suggested.** Measuring both rules against
+   the vendored NIST CCVS85 corpus (`examples/cobol/*.CBL`,
+   `examples/nist-cobol85/*.CBL`) before shipping — prompted by review —
+   found 4438 raw mid-token "hits", 4434 of them lines like
+   `examples/cobol/IX209A.CBL:292`:
+   `029100          "...".IX2094.2`, where the statement's own closing
+   period genuinely lands on column 72 and the file's own per-line
+   identification code starts immediately at column 73 with zero authoring
+   mistake — this specific shape (code ending exactly at column 72, no
+   padding blank before the identification field) was never covered by the
+   2026-08-03 fix's own tests, which only exercised a padded variant.
+   Fixed by gating both rules on the line's own columns 1-6: a real numeric
+   sequence number there (all digits, ignoring blanks) is independent,
+   reliable evidence the line belongs to the traditional 80-column
+   convention (hand-typed modern source never bothers with sequence
+   numbers) — dropped the corpus hit count to 4, all genuine (harmless)
+   truncation of `*>` free-form inline-comment text the preprocessor
+   doesn't parse `*>` semantics for (lexer-level only; a separate, smaller,
+   left-as-is gap).
+
+Column-72/TEXT_END_COL math itself was verified correct (not an off-by-one
+— column 72 is the last kept code column, matching IBM fixed-format
+convention exactly) before touching anything; see
+[preprocessing.md](preprocessing.md) for the full three-rule writeup.
+
+Surfacing the (already-existing) mid-token rule for the first time found
+one genuine dormant hit in the project's own test suite too:
+`tests/unit/test_unstring_gaps.py::TestUnstringCombined::
+test_full_combined_statement` had an INTO-clause continuation line at
+73 columns (one over) with a blank sequence area, silently dropping its
+trailing comma for as long as the test existed with no effect on the
+assertions — fixed by trimming one space of indentation. No other fixture
+in the full suite (8281 tests, 2 new in this change) tripped either rule
+after the fix; full suite + 91%+ coverage (floor 81%) both green.
+
+Tests: `tests/regression/test_normalize_column_overflow_warning.py`
+(`TestWordBoundaryOverflowWarns`, extended fast/pure parity) and new
+`tests/regression/test_fixed_format_word_boundary_overflow.py`
+(end-to-end through both `parse_cobol()` and `CobolParser.parse()`,
+confirming the warning surfaces without being promoted to a hard error
+under `FAIL_FAST`).
+
 ## 2026-08-14 (preprocessing: implementation split out of `preprocess/__init__.py`)
 
 The closed-source PyPI release build (`COBOLPARSER_CLOSED_SOURCE=1`) compiles
