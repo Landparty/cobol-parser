@@ -3,10 +3,35 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T23:30:00Z
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
+
+2026-08-14 (final-review fix wave, root-level 88s): +2 in
+`tests/unit/generators/data/test_layout_offsets.py`'s `TestLevel88`
+class — `test_root_level_condition_names_are_not_dropped` (01-level
+record root with two directly-attached 88s, the `WS-EOF-FLAG`/`WS-EOF`/
+`WS-NOT-EOF` flag idiom) and
+`test_root_level_condition_names_under_a_77_level_record_are_not_dropped`
+(same shape under a 77-level root, since 77-level records go through the
+same root-construction path in `compute_record_layout()`). Both pin the
+final-review fix for a whole-branch review finding that the record root
+silently dropped its own direct level-88 condition names — see
+[generators.md](generators.md)'s `layout_offsets.py` entry.
+
+2026-08-14 (final-review fix wave, misnested level-77): +1 in
+`tests/unit/generators/data/test_layout_offsets.py`'s
+`TestComputeProgramDataItems` class —
+`test_a_77_level_item_after_a_record_does_not_corrupt_the_preceding_records_length`
+reproduces `01 WS-REC. 05 WS-A PIC X(3). 77 WS-CTR PIC 9(4) COMP.` via
+`compute_program_data_items()` (not `compute_record_layout()` directly —
+the bug is in how the section walk classifies items, confirmed by first
+printing the actual AST: the parser nests `WS-CTR` as a child of `WS-A`,
+not as a section-level sibling of `WS-REC`) and asserts `WS-A`'s
+`byte_length` stays `3` (its own `PIC X(3)`, not swallowed into a
+misclassified GROUP) and `WS-REC.byte_length` likewise stays `3`. See
+[generators.md](generators.md)'s `layout_offsets.py` entry for the fix.
 
 2026-08-14 (Task 9): +6 in `tests/unit/cli/test_new_subcommands.py`'s new
 `TestCmdDataItems` class (following `TestCmdIoSequence`'s shape:

@@ -1,5 +1,61 @@
 # OKF Update Log
 
+## 2026-08-14 (Final whole-branch review fix wave for the data-item-layout plan)
+
+Two findings from a final whole-branch code review of the 9-task
+data-item-layout plan (each task's own per-task review had already
+passed, but missed these) were fixed in
+`cobolparser/generators/data/layout_offsets.py`:
+
+**Finding 1 (Critical) — root-level level-88s silently dropped.**
+`compute_record_layout()` builds the record's own root `LayoutItem` via
+a separate inline `out.insert(0, LayoutItem(...))` path that bypasses
+`_layout_item()`'s condition-children loop entirely. A level-88
+declared directly under a 01/77 record root with no intervening group
+level — COBOL's most common flag idiom (`01 WS-EOF-FLAG PIC X. 88
+WS-EOF VALUE "Y". 88 WS-NOT-EOF VALUE "N".`) — never appeared in the
+output; the same shape nested one level deeper (under a `05`) worked
+fine since that path goes through `_layout_item()`. Fixed by emitting
+the root's own direct condition children right after the root
+`LayoutItem` is inserted, mirroring `_layout_item()`'s loop exactly
+(same `LayoutItem` shape, reusing the root's own `byte_offset=0`,
+`byte_length=record_length`, `offset_ambiguous=False`).
+
+**Finding 2 (Important) — a misnested level-77 corrupted an unrelated
+preceding record's byte_length.** This is a pre-existing *parser*
+behavior, deliberately left unfixed at the parser level per the
+review's scope: the hierarchy builder nests items purely by
+level-number comparison, so `77  WS-CTR ...` declared immediately after
+`01 WS-REC. 05 WS-A PIC X(3).` becomes `WS-A`'s AST *child* (77 > 05),
+not a section-level sibling of `WS-REC`. Verified directly by parsing
+that exact fixture and printing the AST (not guessed) — confirmed
+`section.data_items` contains only `WS-REC`, and `WS-A.children`
+contains a `CobolDataItem` for `WS-CTR`. Since `_direct_data_children()`
+counted that misnested 77 as a real data child, `_layout_item()`'s `if
+data_children:` branch misclassified `WS-A` as a GROUP item and
+discarded its own elementary `PIC X(3)`/byte_length, corrupting both
+`WS-A`'s and `WS-REC`'s reported `byte_length`. Fixed with a guard
+directly in `_direct_data_children()` — excluding any `CobolDataItem`
+child with `level == 77`, since a level-77 item is never legitimately
+subordinate to anything under COBOL's own level-number rules — chosen
+over an alternative fix inside `compute_program_data_items()` because it
+requires no duplicate tree-walking logic and fixes the root cause at
+its single call-site-independent source. `test_77_level_record_is_its_own_flat_item`
+(a *legitimate* standalone 77-level record, no preceding-sibling
+entanglement) was re-run and still passes unchanged. Residual, in-scope
+limitation left as-is: a level-77 item misnested this way still doesn't
+appear as its own record in `compute_program_data_items()`'s output —
+it's excluded from its accidental parent's children, not promoted to a
+section-level sibling, since `section.data_items` never contained it.
+
+Tests: 2 new tests in `TestLevel88` (01-level and 77-level record roots
+with directly-attached 88s) and 1 new test in
+`TestComputeProgramDataItems` (the `WS-REC`/`WS-A`/`WS-CTR` corruption
+repro) — see [tests.md](tests.md). Full designated selection
+(`test_layout_offsets.py` + `test_data_item_layout_corpus.py` +
+`test_new_subcommands.py` + `test_layout.py`) and the full `tests/unit`
+suite both pass with no regressions (5329 passed, 1 skipped, 1 xfailed).
+
 ## 2026-08-14 (New `data-items` CLI subcommand — final task of the data-item-layout plan)
 
 Task 9 (last of 9) of the data-item-layout plan wires Task 8's

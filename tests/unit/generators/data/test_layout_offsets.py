@@ -295,6 +295,53 @@ class TestLevel88:
         entry = next(item for item in layout if item.name == "CODE-LOW-RANGE")
         assert entry.condition_values == ["2", "3", "4"]
 
+    def test_root_level_condition_names_are_not_dropped(self):
+        # COBOL's most common flag idiom: 88s declared directly under a
+        # 01 record root, with no intervening group level. The record
+        # root's own LayoutItem is built on a separate construction path
+        # in compute_record_layout (not via _layout_item), so this
+        # regression-tests that the root's own direct condition children
+        # still get emitted.
+        record = _parse_record(
+            '       01  WS-EOF-FLAG  PIC X VALUE "N".\n'
+            '           88  WS-EOF      VALUE "Y".\n'
+            '           88  WS-NOT-EOF  VALUE "N".\n'
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert "WS-EOF" in by_name
+        assert "WS-NOT-EOF" in by_name
+        assert by_name["WS-EOF"].condition_values == ["Y"]
+        assert by_name["WS-EOF"].parent_qualified_name == "WS-EOF-FLAG"
+        assert by_name["WS-EOF"].qualified_name == "WS-EOF-FLAG.WS-EOF"
+        assert by_name["WS-EOF"].byte_offset == 0
+        assert by_name["WS-EOF"].byte_length == 1
+        assert by_name["WS-EOF"].level == 88
+
+        assert by_name["WS-NOT-EOF"].condition_values == ["N"]
+        assert by_name["WS-NOT-EOF"].parent_qualified_name == "WS-EOF-FLAG"
+        assert by_name["WS-NOT-EOF"].byte_offset == 0
+        assert by_name["WS-NOT-EOF"].byte_length == 1
+
+    def test_root_level_condition_names_under_a_77_level_record_are_not_dropped(self):
+        # 77-level records go through the same root-construction path in
+        # compute_record_layout as 01-level records -- verify a directly
+        # attached 88 survives there too.
+        record = _parse_record(
+            '       77  WS-CTR-FLAG  PIC X VALUE "N".\n'
+            '           88  CTR-EOF     VALUE "Y".\n'
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert "CTR-EOF" in by_name
+        assert by_name["CTR-EOF"].condition_values == ["Y"]
+        assert by_name["CTR-EOF"].parent_qualified_name == "WS-CTR-FLAG"
+        assert by_name["CTR-EOF"].byte_offset == 0
+        assert by_name["CTR-EOF"].byte_length == 1
+        assert by_name["CTR-EOF"].level == 88
+
 
 class TestComputeProgramDataItems:
     def test_walks_working_storage_and_returns_items_plus_unresolved_keys(self):
@@ -321,3 +368,30 @@ class TestComputeProgramDataItems:
         by_name = {item["name"]: item for item in output["items"]}
         assert by_name["WS-FIELD-A"]["byte_offset"] == 0
         assert by_name["WS-FIELD-B"]["byte_offset"] == 0
+
+    def test_a_77_level_item_after_a_record_does_not_corrupt_the_preceding_records_length(self):
+        # The parser's hierarchy builder nests purely by level-number
+        # comparison: since 77 > 05, a 77-level item declared right after
+        # an 01 record (with a 05 as its deepest preceding item) becomes
+        # a nested AST child of that 05 -- not a sibling top-level
+        # record. That must not corrupt the preceding 05's (or its
+        # record's) reported byte_length by misclassifying the 05 as a
+        # GROUP item.
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROGTEST2.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-REC.
+           05  WS-A     PIC X(3).
+       77  WS-CTR       PIC 9(4) COMP.
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="progtest2.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        assert result.ast is not None, result.errors
+        output = compute_program_data_items(result.ast)
+        by_name = {item["name"]: item for item in output["items"]}
+
+        assert by_name["WS-A"]["byte_length"] == 3
+        assert by_name["WS-A"]["is_group"] is False
+        assert by_name["WS-REC"]["byte_length"] == 3

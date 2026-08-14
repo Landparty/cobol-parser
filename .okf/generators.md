@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-08-14T22:30:00Z
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
@@ -246,6 +246,41 @@ into focused, reusable modules:
   offsets are unaffected either way: each top-level record is
   independently record-relative and correctly starts at byte 0 whether or
   not it redefines a section sibling.
+
+  **Final-review fix: root-level level-88s were silently dropped.**
+  `compute_record_layout()` builds the record's own root `LayoutItem` on
+  a separate inline construction path (the `out.insert(0, LayoutItem(...))`
+  above), which bypassed `_layout_item()`'s condition-children loop
+  entirely — so a level-88 declared directly under a 01/77 record root
+  with no intervening group level (COBOL's most common flag idiom, e.g.
+  `01 WS-EOF-FLAG PIC X. 88 WS-EOF VALUE "Y".`) never made it into the
+  output. A level-88 nested under a 05+ group always worked, since those
+  go through `_layout_item()`. Fixed by mirroring `_layout_item()`'s
+  condition-children loop for the root itself right after the root
+  `LayoutItem` is inserted, reusing the root's own `byte_offset=0`,
+  `byte_length=record_length`, and `offset_ambiguous=False`.
+
+  **Final-review fix: a misnested level-77 could corrupt an unrelated
+  preceding record's byte_length.** This is a pre-existing parser
+  behavior, not a parser bug fix: the hierarchy builder nests items
+  purely by level-number comparison, so a `77`-level item declared
+  immediately after an `01` record (whose deepest preceding item is, say,
+  a `05`) becomes that `05`'s AST *child* (77 > 05), not a section-level
+  sibling. Since `_direct_data_children()` previously counted that
+  misnested 77 as a real data child, `_layout_item()`'s `if
+  data_children:` branch misclassified the `05` as a GROUP item and
+  discarded its own elementary PIC/byte_length. Fixed with a guard in
+  `_direct_data_children()` itself (not in `compute_program_data_items`):
+  a level-77 item is, by COBOL's own level-number rules, never
+  legitimately subordinate to anything, so it's excluded from every
+  `_direct_data_children()` call site — the lower-risk fix location,
+  since it doesn't require duplicating tree-walking logic in the
+  program-wide entry point. Known residual limitation, left as-is per the
+  review's scope: a level-77 item misnested this way still doesn't appear
+  as its own record in `compute_program_data_items()`'s output (it's
+  simply excluded from its accidental parent's children, not promoted to
+  a section-level sibling) — `section.data_items` genuinely never
+  contained it to begin with.
 
   **Task 6: ambiguity propagates across nesting levels, not just within one sibling list.** Task 5's `is_ambiguous` flag was local to each `_layout_siblings()` call — an OCCURS ... DEPENDING ON table nested *inside* a group only made that group's own children ambiguous; the group's own sibling in the *parent* list still got a concrete, wrong offset. `_layout_siblings()`/`_layout_item()` now both return `tuple[int, bool]` (`footprint, trailing_ambiguous`) instead of a bare `int`: a group's nested `_layout_siblings()` call reports whether *it* ended ambiguous, `_layout_item()` passes that straight through for group items (elementary items always report `False` here — their own direct `occurs.depending_on` is already handled by the caller's existing check), and the calling `_layout_siblings()` folds a `True` nested signal into its own `is_ambiguous`, exactly like a direct ODO child would. Propagates through arbitrarily many nesting levels for free (each level only needs its own direct child's signal) — confirmed with a two-level nesting test, not just by inspection. `compute_record_layout()`'s public contract (the `LayoutItem` list and every field on it) is unchanged; only the two private helpers' internal return shape changed. Root cause of the two brief-derived tests initially failing during development: unrelated to this propagation gap — fixed-format COBOL only recognizes columns 8-72 as the code area, and the brief's literal one-line `OCCURS 1 TO 10 TIMES DEPENDING ON WS-COUNT.` fixture at that indentation pushed `ON WS-COUNT.` past column 72, where the lexer silently drops it with no error, so the ODO parsed as a fixed `OCCURS 10` with `depending_on = None`. Test fixtures now wrap `DEPENDING ON <var>` onto a continuation line to stay inside the code area.
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints.

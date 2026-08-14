@@ -59,7 +59,15 @@ class LayoutItem:
 
 
 def _direct_data_children(item: CobolDataItem) -> list[CobolDataItem]:
-    return [c for c in item.children if isinstance(c, CobolDataItem)]
+    # A level-77 item is, by COBOL's own level-number rules, always a
+    # standalone record -- never legitimately subordinate to a group.
+    # The parser's hierarchy builder nests purely by level-number
+    # comparison though, so a 77 declared right after a record whose
+    # deepest preceding item has a lower level number (e.g. a 05) ends
+    # up as that item's AST child (77 > 5). Counting it as a real data
+    # child here would misclassify its *parent* as a GROUP item and
+    # discard the parent's own elementary PIC/length -- exclude it.
+    return [c for c in item.children if isinstance(c, CobolDataItem) and c.level != 77]
 
 
 def _direct_condition_children(item: CobolDataItem) -> list[ConditionNameItem]:
@@ -300,6 +308,32 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
             parent_qualified_name=None,
         ),
     )
+
+    # The record root bypasses _layout_item's own construction path (it
+    # has this separate inline path above), so it also bypasses that
+    # function's condition-children loop. Without this, a level-88
+    # declared directly under a 01/77 record root (COBOL's most common
+    # flag idiom) would be silently dropped -- mirror _layout_item's
+    # condition-children loop here for the root itself.
+    root_conditions = [
+        LayoutItem(
+            name=cond.name,
+            qualified_name=f"{record.name}.{cond.name}",
+            level=88,
+            is_group=False,
+            picture=None,
+            usage=None,
+            byte_offset=0,
+            byte_length=record_length,
+            offset_ambiguous=False,
+            redefines_chain=[],
+            occurs=None,
+            condition_values=expand_condition_values(cond.values),
+            parent_qualified_name=record.name,
+        )
+        for cond in _direct_condition_children(record)
+    ]
+    out[1:1] = root_conditions
     return out
 
 
