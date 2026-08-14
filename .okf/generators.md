@@ -2,8 +2,8 @@
 type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
-tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios]
-timestamp: 2026-08-14T00:00:00Z
+tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
@@ -220,7 +220,7 @@ into focused, reusable modules:
 - **`options.py`** — `DataGeneratorOptions` configuration (rows, seed, include/exclude flags, value hints).
 - **`errors.py`** — `CopybookLayoutError` exception for layout validation failures.
 - **`layout.py`** — `FieldCategory` enum, `FieldSpec` dataclass, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns. Also exports `expand_condition_values()` for condition-name value expansion.
-- **`layout_offsets.py`** — `LayoutItem` dataclass, `compute_record_layout()` function; byte-offset and byte-length computation for individual records, used by data-item hover details and offset-based lookups (Task 2+).
+- **`layout_offsets.py`** — `LayoutItem` dataclass, `compute_record_layout()` function; byte-offset and byte-length computation for individual records, used by data-item hover details and offset-based lookups (Task 2-3: initial implementation + nested group recursion).
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints.
 - **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods.
 - **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.

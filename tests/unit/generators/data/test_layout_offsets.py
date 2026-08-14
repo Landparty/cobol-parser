@@ -64,3 +64,30 @@ class TestFlatRecord:
         assert layout[0].byte_offset == 0
         assert layout[0].byte_length == 2  # COMP, <=4 digits -> 2 bytes
         assert layout[0].is_group is False
+
+
+class TestNestedGroups:
+    def test_group_length_is_sum_of_children_and_children_offsets_are_correct(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-HEADER.\n"
+            "               10  WS-ID        PIC 9(4).\n"
+            "               10  WS-NAME      PIC X(10).\n"
+            "           05  WS-TRAILER       PIC X(2).\n"
+        )
+        layout = compute_record_layout(record)
+        by_name = {item.name: item for item in layout}
+
+        assert by_name["WS-HEADER"].is_group is True
+        assert by_name["WS-HEADER"].byte_offset == 0
+        assert by_name["WS-HEADER"].byte_length == 14  # 4 + 10
+
+        assert by_name["WS-ID"].byte_offset == 0
+        assert by_name["WS-ID"].byte_length == 4
+        assert by_name["WS-ID"].qualified_name == "WS-REC.WS-HEADER.WS-ID"
+
+        assert by_name["WS-NAME"].byte_offset == 4
+        assert by_name["WS-NAME"].byte_length == 10
+
+        assert by_name["WS-TRAILER"].byte_offset == 14
+        assert by_name["WS-REC"].byte_length == 16

@@ -112,7 +112,13 @@ def _layout_item(
     item_ambiguous = ambiguous or start_offset is None
 
     if data_children:
-        one_occurrence_length = 0  # stub -- Task 3 replaces this branch with real recursion
+        group_offset = start_offset
+        child_offset = 0 if start_offset is None else start_offset
+        for child in data_children:
+            child_ambiguous = ambiguous or start_offset is None
+            length = _layout_item(child, item_path, child_offset if not child_ambiguous else None, child_ambiguous, [], out)
+            child_offset += length
+        one_occurrence_length = 0 if start_offset is None else child_offset - group_offset
         picture = None
         usage = None
     else:

@@ -3,12 +3,14 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
 
-2026-08-14: +3 in new `tests/unit/generators/data/test_layout_offsets.py` for the new `compute_record_layout()` function and `LayoutItem` dataclass (see [generators.md](generators.md)'s new `layout_offsets.py` entry) — flat records with sequential elementary items, COMP-3 packed-decimal byte-length calculation, and 77-level elementary-item handling. Pins the Task 2 deliverable: byte-offset and byte-length computation, with stub group-item recursion (Task 3 replaces).
+2026-08-14 (Task 3): +1 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestNestedGroups` class with `test_group_length_is_sum_of_children_and_children_offsets_are_correct` verifying that group items recurse properly: group's byte_length becomes sum of children's footprints, and children's offsets are relative to group's start. Pins Task 3 implementation of nested group recursion in `_layout_item()`.
+
+2026-08-14 (Task 2): +3 in new `tests/unit/generators/data/test_layout_offsets.py` for the new `compute_record_layout()` function and `LayoutItem` dataclass (see [generators.md](generators.md)'s `layout_offsets.py` entry) — flat records with sequential elementary items, COMP-3 packed-decimal byte-length calculation, and 77-level elementary-item handling. Pins the Task 2 deliverable: byte-offset and byte-length computation for elementary items and record roots.
 
 2026-08-13: +5 in `tests/unit/analysis/test_unused_variables.py`'s new
 `TestQualifiedAndFunctionOperands` — Copilot PR review on the
