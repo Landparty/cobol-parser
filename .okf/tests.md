@@ -3,10 +3,20 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T23:58:00Z
+timestamp: 2026-08-15T00:10:00Z
 ---
 
 # Overview
+
+2026-08-15 (Copilot review fix, PR #153): +1 in
+`tests/regression/test_fixed_format_word_boundary_overflow.py`'s new
+`TestInitialWarningsConsumedOnce` class —
+`test_initial_warnings_apply_only_to_the_first_parse_call` pins that
+`CobolParser(initial_warnings=...)` (see the entry directly below) is
+consumed after the first `parse()` call rather than re-applied on every
+call; reusing one `CobolParser` instance for a second, unrelated source no
+longer repeats the first source's pre-construction normalization
+warnings. See [parser.md](parser.md).
 
 2026-08-14 (fixed-format column-72 overflow wiring): +2 new tests in
 `tests/regression/test_normalize_column_overflow_warning.py`'s

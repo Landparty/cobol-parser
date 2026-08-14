@@ -97,3 +97,33 @@ class TestCobolParserParseSurfacesOverflowWarning:
         )
         result = parser.parse(clean)
         assert result.warnings == []
+
+
+class TestInitialWarningsConsumedOnce:
+    """``CobolParser(initial_warnings=...)`` carries ``parse_cobol()``'s own
+    pre-construction normalization warnings across the ``self.warnings.
+    clear()`` at the top of ``parse()`` (see ``CobolParser.__init__``). It
+    must not keep re-appending them on every subsequent ``parse()`` call if
+    a caller reuses the same ``CobolParser`` instance for a second,
+    unrelated source -- those warnings describe the *first* source only."""
+
+    _CLEAN = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. CLEAN.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           STOP RUN.\n"
+    )
+
+    def test_initial_warnings_apply_only_to_the_first_parse_call(self):
+        parser = CobolParser(
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+            initial_warnings=["Line 1: content beyond column 72 was dropped: 'X'"],
+        )
+
+        first = parser.parse(self._CLEAN)
+        assert first.warnings == [
+            "Line 1: content beyond column 72 was dropped: 'X'"
+        ]
+
+        second = parser.parse(self._CLEAN)
+        assert second.warnings == []

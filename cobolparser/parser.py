@@ -94,11 +94,14 @@ class CobolParser:
     ):
         """Initialize the COBOL parser with required configurations.
 
-        `initial_warnings`, when given, is re-added (via `add_warning`) at
-        the top of every `parse()` call, after `self.warnings` is cleared --
-        for diagnostics a caller already collected before constructing this
-        parser (e.g. `parse_cobol()`'s own pre-normalization of fixed-format
-        source, which runs before a `CobolParser` even exists).
+        `initial_warnings`, when given, is added (via `add_warning`) at the
+        top of the *first* `parse()` call, after `self.warnings` is cleared
+        -- for diagnostics a caller already collected before constructing
+        this parser (e.g. `parse_cobol()`'s own pre-normalization of
+        fixed-format source, which runs before a `CobolParser` even
+        exists). Consumed (cleared) after that first call so a `CobolParser`
+        instance reused to `parse()` multiple sources doesn't keep
+        re-appending warnings about a source it no longer reflects.
         """
         self.dialect = dialect
         self.error_recovery = error_recovery
@@ -185,6 +188,9 @@ class CobolParser:
         self._error_limit_reached = False
         for _initial_warning in self._initial_warnings:
             self.add_warning(_initial_warning)
+        # Consume once: these describe the source passed to the *first*
+        # parse() call, not any later reuse of this instance.
+        self._initial_warnings = []
 
         try:
             # Preprocess and tokenize
