@@ -3,10 +3,24 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-08-14T23:58:00Z
 ---
 
 # Overview
+
+2026-08-14 (follow-up fix, misnested level-77 as only child): +1 in
+`tests/unit/generators/data/test_layout_offsets.py`'s
+`TestComputeProgramDataItems` class —
+`test_a_77_level_item_that_is_a_records_only_child_is_recovered_as_its_own_record`
+reproduces `01 WS-REC. 77 WS-CTR PIC 9(4) COMP.` (no intervening `05`,
+so the misnested 77 is `WS-REC`'s *only* AST child) via
+`compute_program_data_items()`. Pins the narrower gap the final-review
+fix wave below left unhandled: pins `WS-REC`'s own childless-root
+reporting (`is_group=False`, `byte_length=0`) as the accepted baseline
+for this degenerate shape, and asserts `WS-CTR` is recovered as its own
+top-level record (`byte_length=2`, COMP `<=4` digits) instead of being
+silently dropped. See [generators.md](generators.md)'s `layout_offsets.py`
+entry for the `_find_misnested_level_77_items()` fix.
 
 2026-08-14 (final-review fix wave, root-level 88s): +2 in
 `tests/unit/generators/data/test_layout_offsets.py`'s `TestLevel88`

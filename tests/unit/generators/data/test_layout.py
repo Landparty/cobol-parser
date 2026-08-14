@@ -14,7 +14,7 @@ class TestExpandConditionValues:
         assert expand_condition_values(["4", "THROUGH:2"]) == ["4", "2", "3"]
 
     def test_non_numeric_thru_range_keeps_only_endpoints(self):
-        assert expand_condition_values(['"A"', "THROUGH:\"C\""]) == ["A", "C"]
+        assert expand_condition_values(['"A"', 'THROUGH:"C"']) == ["A", "C"]
 
     def test_duplicates_removed_preserving_first_seen_order(self):
         assert expand_condition_values(['"Y"', '"Y"', '"N"']) == ["Y", "N"]
