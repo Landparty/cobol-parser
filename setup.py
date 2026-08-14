@@ -72,11 +72,11 @@ def _build_ext_modules() -> list:
 
     try:
         from Cython.Build import cythonize
-    except ImportError:
+    except ImportError as exc:
         if _closed_source_enabled():
             raise RuntimeError(
                 f"{_CLOSED_SOURCE_ENV}=1 requires Cython to be installed"
-            )
+            ) from exc
         # No Cython -> build directly from the checked-in .c files.
         return [
             Extension(f"{_PKG}.{m}", [os.path.join(_PKG, f"{m}.c")])
@@ -100,10 +100,14 @@ def _build_ext_modules() -> list:
             "boundscheck": False,
             "wraparound": False,
             "cdivision": True,
-            # The 3 .pyx accelerators type their hot paths with explicit
-            # Cython syntax (`def f(str text, int pos)`), which this
-            # directive does not touch. It only matters for closed-source
-            # mode, where whole modules with plain PEP 484 annotations get
+            # Applies to every extension in this single cythonize() call,
+            # so it is in effect for any Cython-available build (including
+            # plain `pip install -e ".[fast]"` dev builds), not just
+            # closed-source mode. It is a no-op for the 3 .pyx
+            # accelerators, which type their hot paths with explicit
+            # Cython syntax (`def f(str text, int pos)`) rather than PEP
+            # 484 annotations. It matters only for closed-source mode,
+            # where whole modules with plain PEP 484 annotations get
             # cythonized: without it, Cython enforces those annotations as
             # runtime C-level argument types, which breaks on
             # `typing.overload` stub signatures like

@@ -3,6 +3,7 @@
 
 Usage: python scripts/verify_closed_source_wheel.py
 """
+
 from __future__ import annotations
 
 import os
