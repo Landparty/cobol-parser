@@ -81,6 +81,19 @@ class _ClosedSourceBuildPy(_build_py):
 
 def _build_ext_modules() -> list:
     if os.environ.get("COBOLPARSER_SKIP_EXT") == "1":
+        if _closed_source_enabled():
+            # Closed-source mode strips .py source for every compiled module
+            # (_ClosedSourceBuildPy). Skipping the extension build on top of
+            # that would ship a distribution with neither the compiled
+            # extension nor the .py source for those modules -- broken, not
+            # merely slower. Fail fast instead of silently producing it.
+            raise RuntimeError(
+                f"COBOLPARSER_SKIP_EXT=1 and {_CLOSED_SOURCE_ENV}=1 are "
+                "mutually exclusive: skipping the extension build while "
+                "also stripping .py source would produce a distribution "
+                "missing both the compiled extensions and the source for "
+                "every closed-source module."
+            )
         return []
 
     try:

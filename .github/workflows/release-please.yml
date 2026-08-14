@@ -22,7 +22,10 @@ on:
         options:
           - pypi
           - testpypi
-        default: pypi
+        # Defaults to the safe rehearsal target -- an accidental dispatch
+        # (e.g. clicking "Run workflow" without touching the dropdown)
+        # must not publish to the live index. Choose "pypi" explicitly.
+        default: testpypi
 
 permissions:
   contents: write
