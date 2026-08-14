@@ -29,6 +29,7 @@ _SUBCOMMANDS = frozenset(
         "linkage-check",
         "language-env",
         "ims-dli",
+        "data-items",
     }
 )
 
@@ -1345,6 +1346,19 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
     _emit_report(output, args, ast=ast)
 
 
+# -- Subcommand: data-items ----------------------------------------------------
+
+
+def _cmd_data_items(args: argparse.Namespace) -> None:
+    from ..generators.data.layout_offsets import compute_program_data_items
+
+    ast, prof = _parse_or_fail(args)
+
+    output = compute_program_data_items(ast)
+
+    _emit_report(output, args, prof, ast)
+
+
 # -- Path resolution ---------------------------------------------------------
 
 
@@ -1513,6 +1527,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "ims-dli",
         "Extract IMS DLI segment references from CBLTDLI/AIBTDLI/CEETDLI calls",
         _cmd_ims_dli,
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "data-items",
+        "Compute byte offset, byte length, REDEFINES chains, and level-88 "
+        "condition values for every data item in the program",
+        _cmd_data_items,
+        profiling=True,
     )
 
     return parser

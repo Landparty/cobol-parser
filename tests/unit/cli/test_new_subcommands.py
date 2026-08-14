@@ -1,6 +1,7 @@
 """Tests for the new CLI subcommands added to cobolparser.cli.parse:
 io-sequence, move-type-check, linkage-check, language-env, ims-dli,
-plus --output/-o flag and --glob flag for batch, and --version flag.
+data-items, plus --output/-o flag and --glob flag for batch, and
+--version flag.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import pytest
 from cobolparser import __version__
 from cobolparser.cli.parse import (
     _build_parser,
+    _cmd_data_items,
     _cmd_ims_dli,
     _cmd_io_sequence,
     _cmd_language_env,
@@ -349,6 +351,66 @@ class TestCmdImsDli:
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: data-items
+# ---------------------------------------------------------------------------
+
+
+class TestCmdDataItems:
+    def test_outputs_report_dict(self, capsys):
+        args = _make_args(_SIMPLE)
+        _cmd_data_items(args)
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert "items" in data
+        assert "unresolved" in data
+        assert isinstance(data["items"], list)
+        assert isinstance(data["unresolved"], list)
+
+    def test_compact_output(self, capsys):
+        args = _make_args(_SIMPLE, compact=True)
+        _cmd_data_items(args)
+        out = capsys.readouterr().out.strip()
+        assert "\n" not in out
+        json.loads(out)
+
+    def test_output_to_file(self, tmp_path):
+        out_file = str(tmp_path / "data_items.json")
+        args = _make_args(_SIMPLE, output=out_file)
+        _cmd_data_items(args)
+        assert Path(out_file).exists()
+        data = json.loads(Path(out_file).read_text())
+        assert "items" in data
+
+    def test_parse_failure_exits(self, tmp_path):
+        bad = tmp_path / "bad.cbl"
+        bad.write_text("@@@@ NOT COBOL")
+        args = _make_args(str(bad), error_recovery="fail-fast")
+        with pytest.raises(SystemExit):
+            _cmd_data_items(args)
+
+    def test_outputs_items_and_unresolved_keys(self, tmp_path, capsys):
+        cbl = tmp_path / "prog.cbl"
+        cbl.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PROGTEST.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  WS-REC.\n"
+            "           05  WS-FIELD         PIC X(3).\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        args = _make_args(str(cbl))
+        _cmd_data_items(args)
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert payload["source_file"] == str(cbl)
+        assert payload["program_id"] == "PROGTEST"
+        names = {item["name"] for item in payload["items"]}
+        assert {"WS-REC", "WS-FIELD"} <= names
+
+
+# ---------------------------------------------------------------------------
 # --output/-o flag via main() entry point
 # ---------------------------------------------------------------------------
 
@@ -516,6 +578,7 @@ class TestNewSubcommandsRegistered:
             "linkage-check",
             "language-env",
             "ims-dli",
+            "data-items",
         ],
     )
     def test_subcommand_in_parser(self, subcmd):
@@ -532,6 +595,7 @@ class TestNewSubcommandsRegistered:
             "linkage-check",
             "language-env",
             "ims-dli",
+            "data-items",
         ],
     )
     def test_subcommand_via_main(self, subcmd, capsys):
@@ -683,7 +747,14 @@ class TestBatchGlobRecursive:
 class TestNewSubcommandsOutputSilent:
     @pytest.mark.parametrize(
         "subcmd",
-        ["io-sequence", "move-type-check", "linkage-check", "language-env", "ims-dli"],
+        [
+            "io-sequence",
+            "move-type-check",
+            "linkage-check",
+            "language-env",
+            "ims-dli",
+            "data-items",
+        ],
     )
     def test_stdout_silent_when_output_flag_used(self, subcmd, tmp_path, capsys):
         out_file = str(tmp_path / f"{subcmd}.json")

@@ -3,10 +3,63 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
+
+2026-08-14 (final-review fix wave, root-level 88s): +2 in
+`tests/unit/generators/data/test_layout_offsets.py`'s `TestLevel88`
+class — `test_root_level_condition_names_are_not_dropped` (01-level
+record root with two directly-attached 88s, the `WS-EOF-FLAG`/`WS-EOF`/
+`WS-NOT-EOF` flag idiom) and
+`test_root_level_condition_names_under_a_77_level_record_are_not_dropped`
+(same shape under a 77-level root, since 77-level records go through the
+same root-construction path in `compute_record_layout()`). Both pin the
+final-review fix for a whole-branch review finding that the record root
+silently dropped its own direct level-88 condition names — see
+[generators.md](generators.md)'s `layout_offsets.py` entry.
+
+2026-08-14 (final-review fix wave, misnested level-77): +1 in
+`tests/unit/generators/data/test_layout_offsets.py`'s
+`TestComputeProgramDataItems` class —
+`test_a_77_level_item_after_a_record_does_not_corrupt_the_preceding_records_length`
+reproduces `01 WS-REC. 05 WS-A PIC X(3). 77 WS-CTR PIC 9(4) COMP.` via
+`compute_program_data_items()` (not `compute_record_layout()` directly —
+the bug is in how the section walk classifies items, confirmed by first
+printing the actual AST: the parser nests `WS-CTR` as a child of `WS-A`,
+not as a section-level sibling of `WS-REC`) and asserts `WS-A`'s
+`byte_length` stays `3` (its own `PIC X(3)`, not swallowed into a
+misclassified GROUP) and `WS-REC.byte_length` likewise stays `3`. See
+[generators.md](generators.md)'s `layout_offsets.py` entry for the fix.
+
+2026-08-14 (Task 9): +6 in `tests/unit/cli/test_new_subcommands.py`'s new
+`TestCmdDataItems` class (following `TestCmdIoSequence`'s shape:
+report-dict shape, compact output, `--output` file redirection, a
+parse-failure exit, plus a dedicated `test_outputs_items_and_unresolved_keys`
+pinning `_emit_report`'s `source_file`/`program_id` splice against a
+two-item WORKING-STORAGE fixture), wiring the new `data-items` CLI
+subcommand (`_cmd_data_items`, added to `_SUBCOMMANDS`) that exposes
+Task 8's `compute_program_data_items()` (see [generators.md](generators.md)
+and [cli.md](cli.md)'s "Data-Items" entry). Also added `"data-items"` to
+the existing `TestNewSubcommandsRegistered` and
+`TestNewSubcommandsOutputSilent` parametrized subcommand lists for the
+same registration/`-o`-silences-stdout coverage the other five analyzer
+subcommands already get.
+
+2026-08-14 (Task 8): +1 in `tests/unit/generators/data/test_layout_offsets.py` (new `TestComputeProgramDataItems` class) and +2 new test classes in new `tests/integration/test_data_item_layout_corpus.py`, for the new `compute_program_data_items()` program-wide entry point (see [generators.md](generators.md)'s `layout_offsets.py` entry). The unit test walks a two-record WORKING-STORAGE section and confirms both records' items land in `output["items"]` with independently 0-based offsets, plus the always-present `unresolved` key. The integration test's `TestRedefinesFixture` corrects a wrong assumption in this task's own brief: the brief guessed `tests/samples/redefines_test.cbl` contained a 3-way REDEFINES chain (`WS-REDEF-2 REDEFINES WS-REDEF-1 REDEFINES WS-BASE-AREA`); the real fixture (lines 16-21) is a fan-out — `WS-REDEF-1` and `WS-REDEF-2` both redefine `WS-BASE-AREA` directly — so the test asserts `redefines_chain == ["WS-BASE-AREA"]` for both, all three at `byte_offset == 0`. This also exercises the Task 8 top-level-REDEFINES fix: without it, `WS-REDEF-1`/`WS-REDEF-2` would report an empty `redefines_chain` despite genuinely redefining a section sibling (`compute_record_layout()`'s record-root `LayoutItem` hardcodes `redefines_chain=[]` since it has no visibility into section-level siblings). `TestShamriceCorpusDoesNotRaise` sweeps `examples/cobol/shamrice/*.cbl` for crash-free coverage only. The brief's Step 5 code sample also had a bare `ErrorRecoveryMode.RECOVER`, which does not exist on the enum (`FAIL_FAST`/`COLLECT_ALL` are the only members) — corrected to `COLLECT_ALL` to match every other corpus-sweep test in this suite.
+
+2026-08-14 (Task 7): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestLevel88` class pinning per-condition-name level-88 value expansion: `test_each_condition_name_gets_its_own_entry_with_its_own_values` verifies that each level-88 condition name gets its own `LayoutItem` entry with its own `condition_values` list (no merging/leaking across conditions), and `test_thru_range_expands_on_a_level_88_entry` verifies THRU ranges expand (VALUE 2 THRU 4 → ["2", "3", "4"]) on level-88 entries. Both tests pass against existing behavior: Task 2's `_layout_item()` already emits a `LayoutItem` per `ConditionNameItem` child using `expand_condition_values(cond.values)`, so no production changes needed. Confirms the per-condition-name value semantics are distinct from `layout.py`'s merged `_condition_values` approach.
+
+2026-08-14 (Task 6): +4 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestOccursDependingOn` class: the brief's `test_odo_table_itself_has_a_known_offset` and `test_everything_after_an_odo_table_is_flagged_ambiguous` pin single-level OCCURS DEPENDING ON behavior (the ODO table itself keeps a concrete offset; a direct sibling after it is `offset_ambiguous=True`/`byte_offset=None`; the record root stays `offset_ambiguous=False`). Two new tests cover the cross-level propagation gap Task 5's reviewer found: `test_odo_nested_inside_a_group_makes_the_groups_own_siblings_ambiguous` (ODO nested one level inside a group — the group's own *sibling*, not just the ODO's own siblings, must go ambiguous) and `test_odo_two_levels_deep_propagates_through_both_nesting_hops` (ODO nested two levels deep — both the one-hop and two-hop siblings must go ambiguous, proving propagation isn't limited to a single level). Verified via a stash-based revert of the `layout_offsets.py` fix that the nested-group test genuinely fails without it (`AFTER-GROUP` wrongly reported a concrete offset). Pins Task 6's `(footprint, trailing_ambiguous)` tuple threading through `_layout_siblings()`/`_layout_item()` — see [generators.md](generators.md)'s `layout_offsets.py` entry. Note: fixed-format COBOL's column-72 code-area limit means `OCCURS ... DEPENDING ON <var>` fixtures at deep indentation must wrap the `DEPENDING ON` clause onto a continuation line, or the lexer silently drops it past column 72 with no error.
+
+2026-08-14 (Task 5): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestOccurs` class: `test_elementary_occurs_reports_one_occurrence_length_but_advances_past_all` verifies an elementary OCCURS item's `byte_length` stays one occurrence's size while a later sibling's offset advances past all occurrences, and `occurs` reports `{"min": N, "max": N}`; `test_group_occurs_multiplies_the_whole_group_footprint` verifies the same for a *group* item's own OCCURS (its `byte_length` is one occurrence's footprint, but a later sibling's offset advances past every occurrence of the whole group). Pins Task 5's OCCURS-aware `slot_footprint` computation in `_layout_siblings()` and the `occurs` field wiring in `_layout_item()`.
+
+2026-08-14 (Task 4): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestRedefines` class: `test_redefines_shares_offset_and_advances_past_the_larger_alternative` verifies a REDEFINES slot shares its base offset and the running offset advances past the *larger* alternative, not the base item; `test_three_way_redefines_chain_is_reported_in_order` verifies a multi-hop REDEFINES chain (A redefines B redefines C) is reported oldest-target-last (`["WS-REDEF-1", "WS-BASE"]`) and every chain member shares offset 0. Pins Task 4's slot-based `_layout_siblings()` rewrite in `layout_offsets.py`.
+
+2026-08-14 (Task 3): +1 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestNestedGroups` class with `test_group_length_is_sum_of_children_and_children_offsets_are_correct` verifying that group items recurse properly: group's byte_length becomes sum of children's footprints, and children's offsets are relative to group's start. Pins Task 3 implementation of nested group recursion in `_layout_item()`.
+
+2026-08-14 (Task 2): +3 in new `tests/unit/generators/data/test_layout_offsets.py` for the new `compute_record_layout()` function and `LayoutItem` dataclass (see [generators.md](generators.md)'s `layout_offsets.py` entry) — flat records with sequential elementary items, COMP-3 packed-decimal byte-length calculation, and 77-level elementary-item handling. Pins the Task 2 deliverable: byte-offset and byte-length computation for elementary items and record roots.
 
 2026-08-13: +5 in `tests/unit/analysis/test_unused_variables.py`'s new
 `TestQualifiedAndFunctionOperands` — Copilot PR review on the
