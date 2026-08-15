@@ -127,7 +127,7 @@ jobs:
   # Publish the same closed-source wheels to PyPI via Trusted Publishing
   # (OIDC) -- no stored API token/secret. Requires a one-time manual step on
   # pypi.org registering this repo/workflow as a trusted publisher for the
-  # "cobolparser" project; see
+  # "cobol-parser" project; see
   # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
   publish-pypi:
     needs: [release-please, build-binary-wheels]
@@ -139,7 +139,7 @@ jobs:
     # below changes.
     environment:
       name: pypi
-      url: https://pypi.org/project/cobolparser/
+      url: https://pypi.org/project/cobol-parser/
     permissions:
       id-token: write
     steps:

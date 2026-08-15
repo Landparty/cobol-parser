@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel", "cython>=3.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cobolparser"
+name = "cobol-parser"
 version = "1.7.3"
 description = "A comprehensive COBOL parser for Python with IBM Enterprise COBOL focus"
 readme = "README.md"
