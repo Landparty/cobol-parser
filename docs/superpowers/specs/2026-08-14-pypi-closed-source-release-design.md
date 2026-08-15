@@ -1,11 +1,11 @@
-# Closed-source PyPI release for cobolparser
+# Closed-source PyPI release for cobol-parser
 
 **Date:** 2026-08-14
 **Status:** Approved for implementation
 
 ## Goal
 
-Publish `cobolparser` to the public PyPI index as `pip install cobolparser`,
+Publish `cobol-parser` to the public PyPI index as `pip install cobol-parser`,
 without shipping readable `.py` source in the distributed package. This is a
 new, separate release artifact — it does not change how the LegacyLens
 `backend/` repo consumes this library today (editable install + vendored
@@ -14,7 +14,7 @@ source from the sibling directory), which continues unchanged.
 ## Threat model
 
 **Casual access only.** The goal is to stop someone from doing
-`pip download cobolparser && unzip` and reading the `.py` files directly.
+`pip download cobol-parser && unzip` and reading the `.py` files directly.
 Native-compiled extension modules (Cython) satisfy this. Resistance to a
 motivated reverse engineer with a disassembler is explicitly out of scope —
 no code obfuscation, anti-tamper, or symbol-stripping pass beyond what Cython
@@ -119,7 +119,7 @@ using an introspection pattern Cython doesn't support identically).
 
 ## Manual steps (outside this repo, not part of implementation)
 
-1. Create the `cobolparser` project on PyPI (first upload of a brand-new
+1. Create the `cobol-parser` project on PyPI (first upload of a brand-new
    project name currently requires either a manual first upload or PyPI's
    pending-publisher flow — confirm which at implementation time) and
    register `Landparty/cobol-parser`'s `release-please.yml` workflow as a
