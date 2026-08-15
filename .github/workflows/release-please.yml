@@ -68,11 +68,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One job PER ARCHITECTURE on Linux, not one job for both. Closed-source
-        # mode compiles ~113 modules instead of 3, and the aarch64 half runs
-        # under QEMU emulation -- doing both in a single ubuntu-latest job
-        # risks blowing GitHub Actions' 6-hour per-job limit. Split, each arch
-        # gets its own budget and fails independently.
+        # Only the most common target per OS: manylinux x86_64 (not aarch64
+        # -- no known ARM-Linux consumer, and it'd need slow QEMU emulation),
+        # macOS arm64 (not x86_64 -- Intel Macs are a shrinking minority),
+        # Windows AMD64. See [tool.cibuildwheel.*] in pyproject.toml.
         #
         # CIBW_ARCHS overrides the per-platform `archs` in pyproject.toml's
         # [tool.cibuildwheel.*] sections (which still govern local
@@ -81,23 +80,15 @@ jobs:
           - os: ubuntu-latest
             archs: x86_64
             artifact: linux-x86_64
-          - os: ubuntu-latest
-            archs: aarch64
-            artifact: linux-aarch64
           - os: macos-latest
-            archs: x86_64 arm64
-            artifact: macos
+            archs: arm64
+            artifact: macos-arm64
           - os: windows-latest
             archs: AMD64
             artifact: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      # QEMU lets the Linux runner cross-compile aarch64 wheels without a real ARM machine.
-      - uses: docker/setup-qemu-action@v3
-        if: matrix.archs == 'aarch64'
-        with:
-          platforms: aarch64
       - uses: pypa/cibuildwheel@v2.21.3
         env:
           CIBW_ARCHS: ${{ matrix.archs }}

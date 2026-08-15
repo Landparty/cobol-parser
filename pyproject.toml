@@ -156,6 +156,9 @@ extend-exclude = '''
 [tool.cibuildwheel]
 # Build CPython 3.11–3.13 only (matches requires-python)
 build = "cp311-* cp312-* cp313-*"
+# Skip musllinux (Alpine) -- niche target for this library, and there's no
+# sdist published for it to fall back to source-build from anyway.
+skip = "*-musllinux*"
 # Full closed-source build: every cobolparser module compiles, not just the
 # 3 hot-path accelerators. See setup.py and
 # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
@@ -175,14 +178,18 @@ test-requires = "pytest pytest-cov"
 test-command = "python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py --no-cov -q --import-mode=importlib"
 
 # NOTE: release CI overrides these per job via CIBW_ARCHS (see
-# .github/workflows/release-please.yml) so that Linux x86_64 and the emulated
-# aarch64 build get separate jobs. These values still apply to local
+# .github/workflows/release-please.yml). These values still apply to local
 # `cibuildwheel` runs.
+#
+# Only the most common targets are covered: manylinux x86_64 (not aarch64 --
+# that required slow QEMU emulation with no known ARM-Linux consumer) and
+# macOS arm64 (not x86_64 -- Intel Macs are a shrinking minority for this
+# library). Revisit if a real user needs one of the dropped targets.
 [tool.cibuildwheel.linux]
-archs = ["x86_64", "aarch64"]
+archs = ["x86_64"]
 
 [tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
+archs = ["arm64"]
 
 [tool.cibuildwheel.windows]
 archs = ["AMD64"]
