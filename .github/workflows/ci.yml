@@ -49,10 +49,11 @@ jobs:
       - run: python setup.py build_ext --inplace
 
   # Full pytest suite (~8,100 tests), parallelized with pytest-xdist
-  # (already a dev dependency, previously unused). ~80s locally with
-  # -n auto; the suite was gated to workflow_dispatch-only before this
-  # because the unparallelized run was too slow for every push/PR.
+  # (already a dev dependency, previously unused). ~80s locally with -n auto,
+  # but kept off the push/PR path by default (workflow_dispatch-only) so CI
+  # stays fast; run manually via workflow_dispatch when you want the suite.
   test:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       matrix:
