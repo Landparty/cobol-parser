@@ -156,11 +156,6 @@ extend-exclude = '''
 [tool.cibuildwheel]
 # Build CPython 3.11–3.13 only (matches requires-python)
 build = "cp311-* cp312-* cp313-*"
-# musllinux (Alpine) wheels are skipped -- doubled the Linux build matrix
-# (manylinux + musllinux, x86_64 + aarch64) for a target we don't ship
-# prebuilt wheels for. Alpine users install from source (needs a C compiler +
-# Cython on their end).
-skip = "*-musllinux*"
 # Full closed-source build: every cobolparser module compiles, not just the
 # 3 hot-path accelerators. See setup.py and
 # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
@@ -180,9 +175,9 @@ test-requires = "pytest pytest-cov"
 test-command = "python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py --no-cov -q --import-mode=importlib"
 
 # NOTE: release CI overrides these per job via CIBW_ARCHS (see
-# .github/workflows/release-please.yml) so that Linux x86_64 (ubuntu-latest)
-# and aarch64 (native ubuntu-24.04-arm runner) get separate jobs. These
-# values still apply to local `cibuildwheel` runs.
+# .github/workflows/release-please.yml) so that Linux x86_64 and the emulated
+# aarch64 build get separate jobs. These values still apply to local
+# `cibuildwheel` runs.
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
 

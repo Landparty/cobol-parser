@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-14T23:30:00Z
+timestamp: 2026-08-14T23:45:00Z
 ---
 
 # Overview
@@ -92,6 +92,11 @@ All subcommands that run conditional compilation (`parse`, `preprocess`,
 (unknown `>>IF` conditions, stray `>>ELSE`/`>>END-IF`, malformed
 `>>DEFINE`, unclosed `>>IF` — audit 2026-07-07 H7) to **stderr** as
 `warning: ...` lines, so deleted guarded blocks are no longer silent.
+`preprocess` (fixed-format branch only) additionally prints
+`normalize_fixed_format`'s column-72 overflow diagnostics the same way
+(2026-08-14 — see [preprocessing.md](preprocessing.md)'s "Column 73+
+overflow warning" section): a non-comment line whose real content ran past
+column 72 and was silently truncated.
 `coverage status` reports malformed artifact JSON (or a non-object
 artifact) with a clean error and exit code 1 instead of an uncaught
 traceback (M10). `coverage generate` had the same gap (a malformed or

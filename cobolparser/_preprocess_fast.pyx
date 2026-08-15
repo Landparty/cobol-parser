@@ -15,18 +15,21 @@ cimport cython
 from collections.abc import Iterable
 
 # Cannot import from preprocess/__init__.py (circular import); values must mirror it.
+_SEQ_END    = 6   # DEFAULT_SEQ_COL_END
 _IND_IDX    = 6   # INDICATOR_COL - 1
 _TEXT_START = 7   # TEXT_START_COL - 1
 _TEXT_END   = 72  # TEXT_END_COL
+_ID_END     = 80  # IDENTIFICATION_END_COL
 
 
 def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True, warnings=None):
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
     Identical contract to the pure-Python version; see that function for
-    full documentation, including the column-73+ overflow warning rule
-    (columns 72 and 73 both non-blank -- a real mid-token split, not a
-    traditional identification-area field).
+    full documentation, including the column-73+ overflow warning rule:
+    a mid-token split (columns 72 and 73 both non-blank) or a
+    word-boundary overflow (line content extends past the traditional
+    80-column identification-area width even when it broke on a space).
     """
     cdef int  i, n
     cdef bint quote_open    = False
@@ -85,13 +88,39 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             continue
 
         if warnings is not None and len(line) > _TEXT_END:
-            before, after = line[_TEXT_END - 1], line[_TEXT_END]
-            if not before.isspace() and not after.isspace():
-                dropped = line[_TEXT_END:].rstrip()
-                warnings.append(
-                    f"Line {line_no}: content beyond column {_TEXT_END} "
-                    f"was dropped mid-token: {dropped!r}"
-                )
+            seq_area = line[:_SEQ_END]
+            # Mirrors the pure-Python rule: a numeric sequence number in
+            # columns 1-6 is strong evidence this line deliberately uses
+            # the traditional 80-column convention (identification field
+            # may abut column 72 with no separating blank), so the
+            # overflow check is skipped entirely for such lines -- avoids
+            # flooding sequence-numbered decks with false positives.
+            has_sequence_number = (
+                seq_area.strip() != "" and seq_area.strip().isdigit()
+            )
+            if not has_sequence_number:
+                before, after = line[_TEXT_END - 1], line[_TEXT_END]
+                mid_token = not before.isspace() and not after.isspace()
+                content_len = len(line.rstrip())
+                # A real 80-column punch-card line can't exceed 80 columns
+                # by construction, so content surviving past column 80 is
+                # overflow even when the split lands on a space
+                # (mid_token False) rather than mid-token.
+                exceeds_traditional_width = content_len > _ID_END
+                if mid_token:
+                    dropped = line[_TEXT_END:].rstrip()
+                    warnings.append(
+                        f"Line {line_no}: content beyond column {_TEXT_END} "
+                        f"was dropped mid-token: {dropped!r}"
+                    )
+                elif exceeds_traditional_width:
+                    dropped = line[_TEXT_END:].rstrip()
+                    warnings.append(
+                        f"Line {line_no}: content beyond column {_TEXT_END} "
+                        f"was dropped -- line is {content_len} columns wide, "
+                        f"past the traditional {_ID_END}-column "
+                        f"identification-area width: {dropped!r}"
+                    )
 
         is_cont = indicator == "-"
 

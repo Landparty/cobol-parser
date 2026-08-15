@@ -636,7 +636,12 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
             print(f"warning: {cw}", file=sys.stderr)
 
     if not args.free_form:
-        source = normalize_fixed_format(source.splitlines())
+        normalize_warnings: list[str] = []
+        source = normalize_fixed_format(
+            source.splitlines(), warnings=normalize_warnings
+        )
+        for nw in normalize_warnings:
+            print(f"warning: {nw}", file=sys.stderr)
 
     print(source, end="")
 

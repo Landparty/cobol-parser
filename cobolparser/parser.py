@@ -90,14 +90,26 @@ class CobolParser:
         serialization_config: SerializationConfig | None = None,
         plugin_manager: PluginManager | None = None,
         free_form: bool = False,
+        initial_warnings: list[str] | None = None,
     ):
-        """Initialize the COBOL parser with required configurations."""
+        """Initialize the COBOL parser with required configurations.
+
+        `initial_warnings`, when given, is added (via `add_warning`) at the
+        top of the *first* `parse()` call, after `self.warnings` is cleared
+        -- for diagnostics a caller already collected before constructing
+        this parser (e.g. `parse_cobol()`'s own pre-normalization of
+        fixed-format source, which runs before a `CobolParser` even
+        exists). Consumed (cleared) after that first call so a `CobolParser`
+        instance reused to `parse()` multiple sources doesn't keep
+        re-appending warnings about a source it no longer reflects.
+        """
         self.dialect = dialect
         self.error_recovery = error_recovery
         self.memory_config = memory_config or MemoryConfiguration()
         self.serialization_config = serialization_config or SerializationConfig()
         self.plugin_manager = plugin_manager or PluginManager()
         self.free_form = free_form
+        self._initial_warnings = list(initial_warnings) if initial_warnings else []
 
         # Parser state
         self.tokens: list[Token] = []
@@ -174,6 +186,11 @@ class CobolParser:
         self.errors.clear()
         self.warnings.clear()
         self._error_limit_reached = False
+        for _initial_warning in self._initial_warnings:
+            self.add_warning(_initial_warning)
+        # Consume once: these describe the source passed to the *first*
+        # parse() call, not any later reuse of this instance.
+        self._initial_warnings = []
 
         try:
             # Preprocess and tokenize
@@ -181,6 +198,12 @@ class CobolParser:
 
             # Strip CBL/PROCESS compiler directives before fixed-format detection
             cleaned_source = strip_compiler_directives(cleaned_source)
+
+            # Collects diagnostics from every preprocessing pass below
+            # (fixed-format normalization, un-expanded COPY stripping,
+            # REPLACE application) so they can be added to self.warnings in
+            # one place once preprocessing settles.
+            preprocess_warnings: list[str] = []
 
             # Auto-detect fixed-format if not explicitly specified
             actual_free_form = self.free_form
@@ -197,7 +220,9 @@ class CobolParser:
                     # no longer loses the whole program under COLLECT_ALL.
                     source_lines = cleaned_source.splitlines()
                     try:
-                        cleaned_source = normalize_fixed_format(source_lines)
+                        cleaned_source = normalize_fixed_format(
+                            source_lines, warnings=preprocess_warnings
+                        )
                     except ValueError as ve:
                         self.add_error(
                             ParseError(
@@ -209,8 +234,16 @@ class CobolParser:
                         if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                             self.statistics.end_timing()
                             return self._create_result(None)
+                        # The raise happened partway through the line scan,
+                        # so `preprocess_warnings` may already hold entries
+                        # from lines processed before it -- the retry below
+                        # rescans the same lines from the start and would
+                        # duplicate them if not cleared first.
+                        preprocess_warnings.clear()
                         cleaned_source = normalize_fixed_format(
-                            source_lines, merge_continued_literals=False
+                            source_lines,
+                            merge_continued_literals=False,
+                            warnings=preprocess_warnings,
                         )
                     actual_free_form = True
                 else:
@@ -233,7 +266,6 @@ class CobolParser:
             # preserve line count. In the copybook-expansion pipeline COPY is
             # already inlined before this point, so the COPY strip is a no-op
             # there.
-            preprocess_warnings: list[str] = []
             cleaned_source = strip_unexpanded_copy_statements(
                 cleaned_source, warnings=preprocess_warnings
             )
@@ -762,9 +794,18 @@ def parse_cobol(
         if not detected_fixed and not free_form:
             free_form = True
 
+    # Collects normalize_fixed_format's overflow/etc. diagnostics so they can
+    # reach the CobolParser instance below via `initial_warnings` -- this
+    # normalization runs before that instance exists, and its own
+    # `self.warnings` gets cleared at the top of `parse()`, so passing the
+    # list at construction time is the only way these survive.
+    normalize_warnings: list[str] = []
+
     if preprocess_fixed:
         try:
-            source_str = normalize_fixed_format(source_str.splitlines())
+            source_str = normalize_fixed_format(
+                source_str.splitlines(), warnings=normalize_warnings
+            )
             free_form = True
         except ValueError as exc:
             # Preprocessing hit an unterminated string literal at EOF. Rather
@@ -775,6 +816,10 @@ def parse_cobol(
             # Force free_form=False so the parser's fixed-format auto-detection
             # (and hence the recovery path) actually runs even if the caller
             # passed free_form=True; otherwise the error would go unrecorded.
+            # Discard any overflow warnings collected before the raise --
+            # CobolParser.parse() re-normalizes the same lines from scratch
+            # below and will collect its own, complete set.
+            normalize_warnings.clear()
             free_form = False
             logger.debug(
                 "Deferring fixed-format preprocessing recovery to parser for %s: %s",
@@ -784,7 +829,10 @@ def parse_cobol(
             )
 
     parser = CobolParser(
-        dialect=dialect, error_recovery=error_recovery, free_form=free_form
+        dialect=dialect,
+        error_recovery=error_recovery,
+        free_form=free_form,
+        initial_warnings=normalize_warnings,
     )
     return parser.parse(  # type: ignore[no-any-return]
         source_str,

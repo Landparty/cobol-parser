@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-08-10T00:00:00Z
+timestamp: 2026-08-15T00:20:00Z
 ---
 
 # Overview
@@ -57,7 +57,8 @@ from cobolparser.preprocess import (
 
 | File | Responsibility |
 |------|---------------|
-| `preprocess/__init__.py` | `normalize_fixed_format`, `preprocess_conditional_compilation`, `validate_copybook_content`, `validate_level_numbers`, plus exception classes |
+| `preprocess/__init__.py` | **Thin re-export stub only.** Re-exports everything from `_normalize.py` (including the fixed-format column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`, which stay reachable at `cobolparser.preprocess` for external consumers) plus `copybook_expander.py`, and swaps in the `_preprocess_fast` Cython `normalize_fixed_format` when compiled (keeping the pure one reachable as `_normalize_fixed_format_pure`). Deliberately holds no implementation — the closed-source release build ships every `__init__.py` as readable `.py` source (see `setup.py`) |
+| `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, plus the `PreprocessingError` hierarchy. Split out of `__init__.py` on 2026-08-14; every name stays importable from `cobolparser.preprocess` unchanged |
 | `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion` — recursive COPY inlining with circular-reference detection, encoding detection, content validation, and LRU caching |
 | `preprocess/copy_statement_parser.py` | `CopyStatementLexer`, REPLACING clause handling, continuation line normalisation |
 | `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths |
@@ -138,29 +139,86 @@ ignore them regardless of content — traditional 80-column source
 legitimately puts non-blank sequence/identification text there (e.g. NIST
 CCVS85's `IC1014.2`, repeated on every line of the vendored
 `examples/nist-cobol85` corpus). Flagging every such line would be noise. So
-`normalize_fixed_format` only flags a line whose column 72 (the last kept
-character) **and** column 73 (the first dropped character) are *both*
-non-blank — content actually split mid-token, not merely followed by an
-unrelated identification field. Comment lines (column-7 `*`/`/`, or `D`/`d`
-when `debug_lines_as_comments` is true) are never checked: their text is
-discarded whether truncated or not, so truncation there changes nothing.
+`normalize_fixed_format` flags a line under either of two rules:
 
-When `warnings` is passed a list, each qualifying line appends one
-`f"Line {n}: content beyond column {TEXT_END_COL} was dropped mid-token:
-{dropped!r}"` message (`n` is the 1-based physical line number). Default
-`None` means the check still runs but nothing is collected — existing
-callers that don't pass `warnings` see no behavior change (still silently
-truncates). The pure-Python and Cython (`_preprocess_fast`) paths produce
-byte-identical warning text; pinned by
-`tests/regression/test_normalize_column_overflow_warning.py`, including a
-parity test over the `warnings` list itself (not just the returned string).
+1. **Mid-token split** — column 72 (the last kept character) **and**
+   column 73 (the first dropped character) are *both* non-blank — content
+   actually split mid-token, not merely followed by an unrelated
+   identification field.
+2. **Word-boundary overflow** (added 2026-08-14) — the split lands on a
+   space at column 72/73 (rule 1 misses it), but the line's real content,
+   after trailing whitespace is stripped, extends past column 80 — the
+   traditional maximum width of an 80-column punch-card line (72 code + 8
+   identification). Content that survives past column 80 can never be
+   legitimate identification-area text, wherever exactly it broke. Found
+   via a data-item-layout test fixture: `OCCURS 1 TO 10 TIMES DEPENDING ON
+   WS-COUNT.` written on one line kept `DEPENDING` (it fit by column 72)
+   but silently dropped its ` ON WS-COUNT.` operand — columns 72/73
+   straddle a space, so rule 1 alone never caught it, producing a silently
+   *fixed* `OCCURS 10 TIMES` with no ODO clause and no diagnostic.
 
-Callers that want to turn this into a hard refusal (mocky-mock's `export`
-command does, via `checks.py` → `mockymock/analysis/refusal.py`'s
-`check_normalize_warnings`) should treat every entry in the returned list as
-actionable — the mid-token filter above already excludes the traditional
-sequence-number/identification-area case, so there is no further filtering
-to do caller-side.
+Comment lines (column-7 `*`/`/`, or `D`/`d` when `debug_lines_as_comments`
+is true) are never checked under either rule: their text is discarded
+whether truncated or not, so truncation there changes nothing.
+
+**Sequence-numbered lines gate both rules** (added 2026-08-14, alongside
+rule 2). Wiring the mid-token rule into the real parse pipeline for the
+first time exposed that it's far noisier on genuinely traditional
+80-column source than its own 2026-08-03 tests suggested: measured against
+the vendored NIST CCVS85 corpus, 4434 of 4438 raw column-72/73 "mid-token"
+hits were lines like `examples/cobol/IX209A.CBL:292` —
+`029100          "...".IX2094.2` — where the statement's own closing
+period genuinely lands on column 72 and the file's own per-line
+identification code starts immediately at column 73 with zero authoring
+mistake; nothing was actually split. A real numeric sequence number in
+columns 1-6 (all digits, ignoring surrounding blanks) is independent,
+reliable evidence a line belongs to that convention — hand-typed modern
+source never bothers with sequence numbers — so both rules now skip
+entirely whenever columns 1-6 hold one. Re-measured after the gate: 4
+residual hits across the full vendored corpus, all genuine (harmless)
+truncation of `*>` free-form inline-comment text running past column 72 in
+files the preprocessor doesn't yet parse `*>` semantics for (that
+recognition is lexer-level, not preprocessor-level — a separate, smaller
+gap left as-is).
+
+When `warnings` is passed a list, each qualifying line appends one message
+to it — `f"Line {n}: content beyond column {TEXT_END_COL} was dropped
+mid-token: {dropped!r}"` for rule 1, or `f"Line {n}: content beyond column
+{TEXT_END_COL} was dropped -- line is {content_len} columns wide, past the
+traditional {IDENTIFICATION_END_COL}-column identification-area width:
+{dropped!r}"` for rule 2 (`n` is the 1-based physical line number). The
+pure-Python and Cython (`_preprocess_fast`) paths produce byte-identical
+warning text; pinned by
+`tests/regression/test_normalize_column_overflow_warning.py` (unit-level,
+both rules, fast/pure parity) and
+`tests/regression/test_fixed_format_word_boundary_overflow.py` (end-to-end
+through `parse_cobol()`/`CobolParser.parse()`).
+
+**Wired into the real parse pipeline (fixed 2026-08-14).** From
+2026-08-03 to 2026-08-14 this was opt-in only — `warnings=None` by default
+meant the check still ran internally but nothing was collected, and *none*
+of the library's own entry points (`CobolParser.parse()`'s fixed-format
+auto-detection in `_parse_core`, the module-level `parse_cobol()`
+convenience function, `lexer.py`'s `_tokenize_source` / `tokenize_cobol()`,
+and the CLI's `preprocess` subcommand) passed `warnings=` — so the
+diagnostic channel existed but was completely unreachable from a normal
+parse, and every one of those callers silently truncated with zero
+indication. All four now collect and surface it: `CobolParser.parse()` and
+`parse_cobol()` add it to `ParseResult.warnings` (a `CobolParser.
+__init__(initial_warnings=...)` parameter carries `parse_cobol()`'s
+pre-construction normalization warnings across the `self.warnings.clear()`
+at the top of `parse()`, since that normalization runs before the
+`CobolParser` instance exists), `_tokenize_source` folds it into its
+returned warnings tuple element, and `cobol-parser preprocess` prints it to
+stderr (matching the existing `--define` conditional-warnings pattern).
+It's a warning, not an error, in both `FAIL_FAST` and `COLLECT_ALL` — the
+AST still reflects the (now-diagnosed) truncated source. Callers that want
+to turn this into a hard refusal (mocky-mock's `export` command does, via
+`checks.py` → `mockymock/analysis/refusal.py`'s `check_normalize_warnings`)
+should treat every entry in the returned list as actionable — the filters
+above (mid-token, word-boundary, and the sequence-number gate) already
+exclude the traditional sequence-number/identification-area case, so there
+is no further filtering to do caller-side.
 
 # Copybook Expansion
 
