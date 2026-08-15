@@ -33,7 +33,10 @@ jobs:
       - run: pip install "mypy==1.20.0"
       - run: mypy cobolparser/
 
+  # Runs on PRs (and manual dispatch) only -- not on every push to main,
+  # since a push to main is already-reviewed code landing post-merge.
   build:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -47,22 +50,3 @@ jobs:
       - run: pip install setuptools
       - run: pip install -e ".[dev,fast]"
       - run: python setup.py build_ext --inplace
-
-  # Full pytest suite (~8,100 tests), parallelized with pytest-xdist
-  # (already a dev dependency, previously unused). ~80s locally with -n auto,
-  # but kept off the push/PR path by default (workflow_dispatch-only) so CI
-  # stays fast; run manually via workflow_dispatch when you want the suite.
-  test:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: pip install -e ".[dev]"
-      - run: python -m pytest tests/ -n auto
