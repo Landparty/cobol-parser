@@ -200,7 +200,7 @@ from .profiling import (
 CobolParseError = ParseError
 
 # Version info
-__version__ = "1.7.3"
+__version__ = "1.7.4"
 __author__ = "Samuel Dion"
 __license__ = "Proprietary"
 
