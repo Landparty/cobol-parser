@@ -209,6 +209,86 @@ def __getattr__(name: str) -> object:
             "UnusedVariableItem": UnusedVariableItem,
         }
         return _map[name]
+    if name in (
+        "RecursionRiskAnalyzer",
+        "RecursionRiskReport",
+        "RecursionRisk",
+    ):
+        from .recursion_risk import (
+            RecursionRisk,
+            RecursionRiskAnalyzer,
+            RecursionRiskReport,
+        )
+
+        _map = {
+            "RecursionRiskAnalyzer": RecursionRiskAnalyzer,
+            "RecursionRiskReport": RecursionRiskReport,
+            "RecursionRisk": RecursionRisk,
+        }
+        return _map[name]
+    if name in (
+        "ComplexityAnalyzer",
+        "ComplexityReport",
+        "ComplexityThresholds",
+        "ProcedureComplexity",
+    ):
+        from .complexity import (
+            ComplexityAnalyzer,
+            ComplexityReport,
+            ComplexityThresholds,
+            ProcedureComplexity,
+        )
+
+        _map = {
+            "ComplexityAnalyzer": ComplexityAnalyzer,
+            "ComplexityReport": ComplexityReport,
+            "ComplexityThresholds": ComplexityThresholds,
+            "ProcedureComplexity": ProcedureComplexity,
+        }
+        return _map[name]
+    if name in (
+        "RedundancyAnalyzer",
+        "RedundancyReport",
+        "CloneGroup",
+        "CloneMember",
+    ):
+        from .redundancy import (
+            CloneGroup,
+            CloneMember,
+            RedundancyAnalyzer,
+            RedundancyReport,
+        )
+
+        _map = {
+            "RedundancyAnalyzer": RedundancyAnalyzer,
+            "RedundancyReport": RedundancyReport,
+            "CloneGroup": CloneGroup,
+            "CloneMember": CloneMember,
+        }
+        return _map[name]
+    if name in (
+        "TechnicalDebtAnalyzer",
+        "TechnicalDebtReport",
+        "DebtWeights",
+        "ComponentBreakdown",
+        "OffenderProcedure",
+    ):
+        from .technical_debt import (
+            ComponentBreakdown,
+            DebtWeights,
+            OffenderProcedure,
+            TechnicalDebtAnalyzer,
+            TechnicalDebtReport,
+        )
+
+        _map = {
+            "TechnicalDebtAnalyzer": TechnicalDebtAnalyzer,
+            "TechnicalDebtReport": TechnicalDebtReport,
+            "DebtWeights": DebtWeights,
+            "ComponentBreakdown": ComponentBreakdown,
+            "OffenderProcedure": OffenderProcedure,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -256,4 +336,20 @@ __all__ = [
     "UnusedVariableAnalyzer",
     "UnusedVariableReport",
     "UnusedVariableItem",
+    "RecursionRiskAnalyzer",
+    "RecursionRiskReport",
+    "RecursionRisk",
+    "ComplexityAnalyzer",
+    "ComplexityReport",
+    "ComplexityThresholds",
+    "ProcedureComplexity",
+    "RedundancyAnalyzer",
+    "RedundancyReport",
+    "CloneGroup",
+    "CloneMember",
+    "TechnicalDebtAnalyzer",
+    "TechnicalDebtReport",
+    "DebtWeights",
+    "ComponentBreakdown",
+    "OffenderProcedure",
 ]

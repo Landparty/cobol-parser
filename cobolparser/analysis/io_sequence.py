@@ -17,9 +17,11 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from ..models.ast_base import ASTNode, SourceLocation
-from ..models.program import CobolProgram
+from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ..models.statements import (
+    ExitStatement,
     GobackStatement,
+    GoStatement,
     IOCloseStatement,
     IODeleteStatement,
     IOOpenStatement,
@@ -27,6 +29,7 @@ from ..models.statements import (
     IORewriteStatement,
     IOStartStatement,
     IOWriteStatement,
+    PerformStatement,
     StopStatement,
 )
 
@@ -98,14 +101,18 @@ _OP_TO_VIOLATION: dict[str, IOViolationKind] = {
 class IOSequenceAnalyzer:
     """Analyzes a parsed COBOL AST for file I/O sequencing violations.
 
-    The analyzer walks all statements in program order, maintaining a set of
-    currently-open files.  It emits a violation for each rule broken.
+    The analyzer walks statements in (approximate) execution order,
+    maintaining a set of currently-open files: it starts at the entry
+    procedure, follows fall-through and unconditional GO TOs, and inlines
+    out-of-line ``PERFORM`` targets (including THRU ranges) at their call
+    sites.  It emits a violation for each rule broken.
 
     Note: this is a conservative static analysis.  Dynamic file names (variables)
     are tracked by their variable name string as-is.  Conditional branches are
     *not* forked — both paths share state — so the report may contain false
     positives in heavily branched code.  It will not produce false negatives for
-    straight-line programs.
+    straight-line programs.  Paragraphs unreachable from the entry procedure
+    are not walked at all.
 
     Usage::
 
@@ -123,6 +130,11 @@ class IOSequenceAnalyzer:
         self._open_files: set[str] = set()
         self._closed_files: set[str] = set()
         self._violations: list[IOSequenceViolation] = []
+        self._linear: list[CobolParagraph] = []
+        self._name_first: dict[str, int] = {}
+        self._name_last: dict[str, int] = {}
+        self._perform_stack: list[tuple[int, int]] = []
+        self._terminated = False
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
         """Analyze the AST and return an IOSequenceReport.
@@ -136,7 +148,17 @@ class IOSequenceAnalyzer:
         self._open_files = set()
         self._closed_files = set()
         self._violations = []
-        self._walk(ast)
+        self._linear = []
+        self._name_first = {}
+        self._name_last = {}
+        self._perform_stack = []
+        self._terminated = False
+
+        proc_division = ast.procedure_division
+        if proc_division is not None:
+            self._collect_procedures(proc_division)
+            if self._linear:
+                self._run_chain(0)
         # Any files still open at end-of-program are violations
         for file_name in sorted(self._open_files):
             self._violations.append(
@@ -153,15 +175,169 @@ class IOSequenceAnalyzer:
         return IOSequenceReport(violations=list(self._violations))
 
     # ------------------------------------------------------------------
-    # Internal traversal
+    # Internal traversal (execution order)
     # ------------------------------------------------------------------
+    #
+    # The walk approximates execution order rather than source order: it
+    # starts at the entry procedure and follows fall-through, inlines
+    # out-of-line PERFORM targets (and THRU ranges) at their call sites, and
+    # follows a paragraph's own unconditional GO TO. Without this, the
+    # canonical correct COBOL shape — OPEN/READ in a main paragraph that
+    # PERFORMs a WRAP-UP paragraph declared after it — produced
+    # CLOSE_NOT_OPEN + FILE_LEFT_OPEN false positives, because the CLOSE was
+    # visited in declaration order before its PERFORM site. Conditional
+    # branches still share one state (see the class docstring); a PERFORM
+    # recursion guard and per-chain visited sets keep GO TO cycles finite.
 
-    def _walk(self, node: ASTNode) -> None:
-        """Recursively walk the AST, handling IO statements."""
-        self._dispatch(node)
-        if hasattr(node, "children"):
-            for child in node.children:
-                self._walk(child)
+    def _collect_procedures(self, proc_division: CobolDivision) -> None:
+        """Build the source-ordered paragraph list and name → range maps.
+
+        Sections and top-level paragraphs are interleaved by source line
+        (paragraphs may legally precede the first SECTION header — same
+        observation ``dead_code.py`` makes). A section's name maps to the
+        range spanning all its paragraphs, so ``PERFORM section-name`` and
+        THRU endpoints resolve correctly.
+        """
+
+        def _line(node: ASTNode) -> int:
+            loc = getattr(node, "location", None)
+            return loc.line if loc is not None else 0
+
+        entities: list[CobolSection | CobolParagraph] = [
+            *proc_division._sections.values(),
+            *proc_division.paragraphs,
+        ]
+        entities.sort(key=_line)
+
+        for entity in entities:
+            if isinstance(entity, CobolSection):
+                sec_name = (entity.section_name or "").upper()
+                start = len(self._linear)
+                for para in entity.paragraphs:
+                    self._register_paragraph(para)
+                if sec_name and entity.paragraphs:
+                    self._name_first.setdefault(sec_name, start)
+                    self._name_last[sec_name] = max(
+                        self._name_last.get(sec_name, start), len(self._linear) - 1
+                    )
+            elif isinstance(entity, CobolParagraph):
+                self._register_paragraph(entity)
+
+    def _register_paragraph(self, para: CobolParagraph) -> None:
+        idx = len(self._linear)
+        self._linear.append(para)
+        name = (para.paragraph_name or "").upper()
+        if name:
+            self._name_first.setdefault(name, idx)
+            self._name_last.setdefault(name, idx)
+
+    def _run_chain(self, start_idx: int) -> None:
+        """Fall-through execution from *start_idx*, following GO TOs."""
+        visited: set[int] = set()
+        idx: int | None = start_idx
+        while (
+            idx is not None
+            and 0 <= idx < len(self._linear)
+            and not self._terminated
+            and idx not in visited
+        ):
+            visited.add(idx)
+            outcome, target = self._run_paragraph(self._linear[idx])
+            if self._terminated or outcome == "stop":
+                return
+            if outcome == "goto":
+                idx = self._name_first.get(target or "")
+                continue
+            idx += 1
+
+    def _run_paragraph(self, para: CobolParagraph) -> tuple[str, str | None]:
+        """Process one paragraph's statements; report how it ends.
+
+        Returns ``("fall", None)``, ``("stop", None)``, or
+        ``("goto", target-name)``.
+        """
+        for stmt in para.statements:
+            if self._terminated:
+                break
+            if (
+                isinstance(stmt, GoStatement)
+                and stmt.target_paragraph
+                and not stmt.depending_on_variable
+            ):
+                return ("goto", stmt.target_paragraph.upper())
+            if self._is_program_end(stmt):
+                self._process_statement(stmt)
+                self._terminated = True
+                return ("stop", None)
+            self._process_statement(stmt)
+        return ("fall", None)
+
+    @staticmethod
+    def _is_program_end(stmt: ASTNode) -> bool:
+        """STOP RUN / GOBACK / EXIT PROGRAM at a paragraph's top level."""
+        if isinstance(stmt, GobackStatement):
+            return True
+        if isinstance(stmt, StopStatement):
+            return stmt.stop_type == "RUN"
+        if isinstance(stmt, ExitStatement):
+            return getattr(stmt, "exit_type", None) == "PROGRAM"
+        return False
+
+    def _process_statement(self, stmt: ASTNode) -> None:
+        """Dispatch *stmt* and its nested statements in declaration order,
+        inlining out-of-line PERFORM targets at their call sites."""
+        visited: set[int] = set()
+
+        def _visit(node: ASTNode) -> None:
+            if id(node) in visited or self._terminated:
+                return
+            visited.add(id(node))
+            self._dispatch(node)
+            if (
+                isinstance(node, PerformStatement)
+                and node.target_paragraph
+                and not node.inline_statements
+            ):
+                self._run_perform(node.target_paragraph, node.thru_paragraph)
+            if hasattr(node, "children"):
+                for child in node.children:
+                    _visit(child)
+
+        _visit(stmt)
+
+    def _run_perform(self, target: str, thru: str | None) -> None:
+        """Execute a ``PERFORM target [THRU end]`` range at the call site."""
+        start = self._name_first.get(target.upper())
+        if start is None:
+            return
+        end = self._name_last.get(
+            (thru or target).upper(), self._name_last.get(target.upper(), start)
+        )
+        if end < start:
+            end = start
+        key = (start, end)
+        if key in self._perform_stack:
+            return  # re-entrant PERFORM: recursion guard
+        self._perform_stack.append(key)
+        try:
+            visited: set[int] = set()
+            i = start
+            while i <= end and not self._terminated and i not in visited:
+                visited.add(i)
+                outcome, gtarget = self._run_paragraph(self._linear[i])
+                if outcome == "stop":
+                    return
+                if outcome == "goto":
+                    t = self._name_first.get(gtarget or "")
+                    # Follow a GO TO only within the performed range; a jump
+                    # out of the range ends the PERFORM conservatively.
+                    if t is not None and start <= t <= end:
+                        i = t
+                        continue
+                    return
+                i += 1
+        finally:
+            self._perform_stack.pop()
 
     def _dispatch(self, node: ASTNode) -> None:
         """Handle a single node if it is an IO-relevant statement."""

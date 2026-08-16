@@ -82,7 +82,9 @@ class CallStatement(CobolStatement):
 
     def set_possible_values(self, values: list[str]) -> None:
         """Set all possible values."""
-        self._possible_values = list(set(values))  # Deduplicate
+        # Deduplicate and sort: a set's iteration order varies per process
+        # (hash randomization), and this list is emitted verbatim in JSON.
+        self._possible_values = sorted(set(values))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""

@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-08-16T00:00:00Z
 ---
 
 # Overview
@@ -202,7 +202,11 @@ cobol-parser analyze <file.cbl>
 
 Runs `DynamicCallAnalyzer` and prints a JSON summary of dynamic `CALL`
 targets only (`called_program`, `is_dynamic`, and `possible_values` when
-dynamic). Despite the generic name, this is *not* an all-analyzers summary —
+dynamic; a dynamic entry also carries `"possible_values_incomplete": true`
+when the analyzer flagged the value set as not fully resolvable — see
+`.okf/analysis.md`'s DynamicCallAnalyzer section — so the list is never
+silently presented as exhaustive; added in the 2026-08-16 audit). Despite
+the generic name, this is *not* an all-analyzers summary —
 dead code, IO, MOVE-type, linkage, and LE checks each have their own
 dedicated subcommand below.
 
@@ -241,7 +245,56 @@ Runs `ProgramFlowAnalyzer` and emits the control-flow graph. `--format`
 selects the output: `json` (default, raw `report.to_dict()` edges), `mermaid`
 (via `generators/flowchart.py`'s `MermaidFlowchartGenerator`), or `dot`
 (Graphviz DOT via `DotFlowchartGenerator`). Also accepts the shared
-profiling flags (`--profile`, `--profile-top-n`, `--profile-output`).
+profiling flags (`--profile`, `--profile-top-n`, `--profile-output`);
+`--profile` metrics can only be embedded in `json` output, so combining it
+with `mermaid`/`dot` prints a stderr warning instead of silently
+discarding the profiler result (2026-08-16 audit).
+
+## Recursion-Check
+
+```bash
+cobol-parser recursion-check <file.cbl> [--profile ...]
+```
+
+Runs `RecursionRiskAnalyzer` (see `.okf/analysis.md`) and reports recursion-
+driven infinite-loop risks: PERFORM/GO TO cycles reused from
+`ProgramFlowAnalyzer`'s `cycle_details` (`PERFORM_RECURSION` always `HIGH`;
+`GOTO_LOOP`/`MIXED` graded `HIGH`/`MEDIUM` by whether the cycle has an
+escape route) and self-recursive CALL statements (static or dynamic,
+targeting the program's own `PROGRAM-ID`, always `HIGH`). Registered the
+same way as `dead-code`/`data-items` (via `_build_analyzer_parser(...,
+profiling=True)`), so it also accepts the shared profiling flags.
+
+## Complexity
+
+```bash
+cobol-parser complexity <file.cbl> [--profile ...]
+```
+
+Runs `ComplexityAnalyzer` (see `.okf/analysis.md`) and reports per-paragraph
+McCabe cyclomatic complexity, an AND/OR-aware `extended_complexity`, max
+nesting depth, fan-in/fan-out (from `ProgramFlowAnalyzer`'s PERFORM/GO TO
+edges), and a LOW/MODERATE/HIGH `rating` per procedure, plus a program-level
+summary (`total_complexity`, `mean_complexity`, `goto_density`, ...).
+Registered the same way as `recursion-check` (`_build_analyzer_parser(...,
+profiling=True)`).
+
+## Health
+
+```bash
+cobol-parser health <file.cbl> [--profile ...]
+```
+
+Runs `TechnicalDebtAnalyzer` (see `.okf/analysis.md`) and reports a
+composite 0-100 technical-debt score with an A-F letter grade, a per-
+component breakdown (`complexity`/`redundancy`/`control_flow`/`size`, each
+with its own findings), and a `top_offenders` list of the worst procedures
+with the specific reasons (dead code, clone membership, GO TO count, no-
+escape recursion cycle, ...) that put them there. Embeds the underlying
+`ComplexityReport`/`RedundancyReport` summaries (`complexity_summary`/
+`redundancy_summary`) rather than the full per-procedure detail -- run
+`complexity` directly for that. Registered the same way as
+`recursion-check`.
 
 ## Batch
 
