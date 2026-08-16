@@ -46,6 +46,10 @@ from ..models.statements.misc import MergeStatement, SortStatement
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
 # parsers/divisions/data.py) -- the same convention LinkageChecker and
 # CRUDMatrixGenerator rely on.
+# TODO(known limitation): SCREEN SECTION / REPORT SECTION / COMMUNICATION
+# SECTION items (screen fields, report groups, CD entries) are entirely
+# invisible to this analyzer -- add them here if usage detection should
+# ever cover them.
 _DATA_SECTION_NAMES = frozenset({"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"})
 
 # Words that can appear as, or inside, an operand's text but are never
@@ -434,6 +438,12 @@ class UnusedVariableAnalyzer:
         # REDEFINES: when the redefining item is used, its target shares
         # the same physical storage and counts as used too. Iterated to a
         # fixpoint for REDEFINES chains (A REDEFINES B REDEFINES C).
+        # TODO(known limitation): resolved by uppercased *name* via
+        # `by_name` below, not structural item identity -- two same-named
+        # items at different qualification scopes (legal but rare in
+        # COBOL) are not distinguished. Same caveat applies to the
+        # OCCURS-DEPENDING-ON/RENAMES name lookups in
+        # `_collect_data_division_references`.
         redefines_edges = [
             (item, item.redefines.upper()) for item in declared_items if item.redefines
         ]
@@ -534,6 +544,10 @@ class UnusedVariableAnalyzer:
                     for selector in clause.selectors:
                         names |= self._selector_identifiers(selector)
             elif isinstance(stmt, SearchStatement):
+                # TODO(known limitation): SEARCH WHEN condition text is raw
+                # joined text, not a structural tree -- best-effort regex
+                # extraction only, not exact (same gap as EVALUATE TRUE
+                # Condition-type selectors in `_selector_identifiers` below).
                 for search_clause in stmt.when_clauses:
                     condition_text = search_clause.get("condition")
                     if condition_text:
@@ -543,6 +557,12 @@ class UnusedVariableAnalyzer:
             if expression_tree is not None:
                 names |= _walk_expression_operands(expression_tree)
 
+            # TODO(known limitation): EXEC CICS / EXEC DLI statement
+            # arguments are not scanned for identifiers at all -- no fixed
+            # argument-role shape to key off (only EXEC SQL's
+            # host_variables/null_indicators are handled here). A field
+            # referenced only inside one of these can be falsely reported
+            # unused.
             host_variables = getattr(stmt, "host_variables", None)
             if host_variables:
                 for v in host_variables:
@@ -567,6 +587,11 @@ class UnusedVariableAnalyzer:
             for key in ("start", "end"):
                 names |= _extract_identifiers(selector.get(key))
         elif selector_type == "Condition":
+            # TODO(known limitation): EVALUATE TRUE Condition-type
+            # selectors carry only raw joined text, never a structural
+            # tree (confirmed against evaluate_parser.py) -- best-effort
+            # regex extraction only, not exact (same gap as SEARCH WHEN
+            # condition text above).
             text = selector.get("text")
             if text:
                 names |= _extract_identifiers(str(text))
