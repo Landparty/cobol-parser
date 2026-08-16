@@ -184,6 +184,9 @@ class TestCallRecursionRisk:
         call_risks = [r for r in report.risks if r.mechanism == "CALL"]
         assert len(call_risks) == 1
         assert call_risks[0].is_dynamic is True
+        # program is the resolved target (the enclosing PROGRAM-ID), not the
+        # raw dynamic-CALL variable name ("TARGET-PROG").
+        assert call_risks[0].program == "SELFCALL"
 
     def test_dynamic_call_to_other_program_is_not_flagged(self) -> None:
         source = (

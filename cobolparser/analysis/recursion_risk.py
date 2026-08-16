@@ -238,7 +238,10 @@ class RecursionRiskAnalyzer:
                 RecursionRisk(
                     mechanism="CALL",
                     severity="HIGH",
-                    program=stmt.called_program,
+                    # The resolved target, not stmt.called_program -- for a
+                    # dynamic CALL that's a variable name (e.g. "TARGET-PROG"),
+                    # not the program name the recursion risk is actually about.
+                    program=program_name,
                     is_dynamic=stmt.is_dynamic,
                     explanation=(
                         f"This CALL {call_kind}targets '{program_name}', the "

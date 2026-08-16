@@ -15,13 +15,16 @@ Sizes: **S** = days, **M** = one to two weeks, **L** = multi-week initiative
 `cobolparser/dialects/__init__.py` already documents "IBM Enterprise COBOL,
 ANSI COBOL standards, Micro Focus COBOL, and GnuCOBOL extensions," but
 `dialects/` only contains `ibm_enterprise.py`. `DialectType` in
-`plugins/core.py` presumably enumerates the others already. The lexer and
-parser don't currently branch on dialect beyond IBM-specific tokens (COMP-3,
-EXEC SQL/CICS/DLI). A `GnuCobolDialect` (open-source COBOL used in most
-modernization/OSS pipelines — different reserved words, `SCREEN SECTION`,
-`>>DEFINE`/`>>IF` free-form directives) and an `AnsiCobolDialect` (rejects the
-IBM-only extensions so users can validate portability) would make the
-`dialect=` parameter on `CobolParser` actually mean something. Good on-ramp
+`plugins/core.py` already has `IBM_ENTERPRISE`, `ANSI_COBOL`, and
+`MICRO_FOCUS` members (no dialect *class* backs the latter two yet, and
+there's no `GNU_COBOL` member at all — it'd need adding to the enum too).
+The lexer and parser don't currently branch on dialect beyond IBM-specific
+tokens (COMP-3, EXEC SQL/CICS/DLI). A `GnuCobolDialect` (open-source COBOL
+used in most modernization/OSS pipelines — different reserved words,
+`SCREEN SECTION`, `>>DEFINE`/`>>IF` free-form directives) and an
+`AnsiCobolDialect` (rejects the IBM-only extensions so users can validate
+portability) would make the `dialect=` parameter on `CobolParser` actually
+mean something. Good on-ramp
 for expanding sample coverage beyond the IBM-flavored NIST/shamrice corpora.
 
 ## 2. Cyclomatic complexity & maintainability metrics (S)
