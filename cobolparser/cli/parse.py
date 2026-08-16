@@ -25,6 +25,8 @@ _SUBCOMMANDS = frozenset(
         "unused-variables",
         "program-flow",
         "recursion-check",
+        "complexity",
+        "health",
         "io-sequence",
         "move-type-check",
         "linkage-check",
@@ -1065,6 +1067,11 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         }
         if stmt.is_dynamic:
             entry["possible_values"] = stmt.possible_values
+            # DynamicCallAnalyzer marks a value set it could not fully
+            # resolve (an untracked identifier MOVE source, ...) so the
+            # list must not be presented as exhaustive.
+            if stmt.get_metadata("possible_values_incomplete"):
+                entry["possible_values_incomplete"] = True
         calls.append(entry)
 
     _emit_report({"calls": calls}, args, prof, ast)
@@ -1230,6 +1237,15 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
     fmt = getattr(args, "format", "json")
     output_path = getattr(args, "output", None)
 
+    if prof is not None and fmt != "json":
+        # Text flowchart formats have nowhere to embed the profiling dict;
+        # dropping it silently would make --profile look like a no-op.
+        print(
+            "warning: --profile metrics are only included in --format json "
+            "output; ignoring for --format " + fmt,
+            file=sys.stderr,
+        )
+
     if fmt == "mermaid":
         from ..generators.flowchart import FlowchartOptions, MermaidFlowchartGenerator
 
@@ -1255,6 +1271,32 @@ def _cmd_recursion_check(args: argparse.Namespace) -> None:
 
     flow_report = ProgramFlowAnalyzer().analyze(ast)
     report = RecursionRiskAnalyzer().analyze(ast, flow_report=flow_report)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
+# -- Subcommand: complexity ----------------------------------------------------
+
+
+def _cmd_complexity(args: argparse.Namespace) -> None:
+    from ..analysis.complexity import ComplexityAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = ComplexityAnalyzer().analyze(ast)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
+# -- Subcommand: health ---------------------------------------------------------
+
+
+def _cmd_health(args: argparse.Namespace) -> None:
+    from ..analysis.technical_debt import TechnicalDebtAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = TechnicalDebtAnalyzer().analyze(ast)
 
     _emit_report(report.to_dict(), args, prof, ast)
 
@@ -1525,6 +1567,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "Detect PERFORM/GO TO cycles and self-recursive CALLs that risk an "
         "infinite loop",
         _cmd_recursion_check,
+        profiling=True,
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "complexity",
+        "Compute per-paragraph cyclomatic complexity and maintainability metrics",
+        _cmd_complexity,
+        profiling=True,
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "health",
+        "Compute a composite technical-debt score (complexity, redundancy, "
+        "control-flow smells, size) with a top-offenders breakdown",
+        _cmd_health,
         profiling=True,
     )
     _build_analyzer_parser(

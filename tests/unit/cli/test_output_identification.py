@@ -43,6 +43,8 @@ class TestReportIdentification:
             "dead-code",
             "program-flow",
             "recursion-check",
+            "complexity",
+            "health",
             "io-sequence",
             "move-type-check",
             "linkage-check",
