@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 17 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, and more.
+description: 20 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
 timestamp: 2026-08-16T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 17 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 20 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -30,6 +30,9 @@ from cobolparser import (
     DynamicCallAnalyzer,
     UnusedVariableAnalyzer,
     RecursionRiskAnalyzer,
+    ComplexityAnalyzer,
+    RedundancyAnalyzer,
+    TechnicalDebtAnalyzer,
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 ```
@@ -550,6 +553,155 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
 Exported from both `cobolparser.analysis` and the top-level `cobolparser`
 package, same as `DeadCodeAnalyzer`/`ProgramFlowAnalyzer`. CLI:
 `cobol-parser recursion-check <file.cbl>` (see cli.md).
+
+## ComplexityAnalyzer (`complexity.py`, 2026-08-16)
+
+```python
+report: ComplexityReport = ComplexityAnalyzer().analyze(ast, flow_report=None)
+# report.procedures: list[ProcedureComplexity]
+# report.total_complexity / .max_complexity / .mean_complexity / .goto_density (properties)
+```
+
+Per-paragraph/section McCabe-style cyclomatic complexity, computed by
+walking each paragraph's own statement tree -- not the inter-paragraph CFG
+`ProgramFlowAnalyzer` builds, since most COBOL complexity lives *inside* a
+paragraph (IF/EVALUATE/SEARCH/loop-PERFORM, exception-handling clauses),
+not in how paragraphs call each other. An optional precomputed
+`ProgramFlowReport` can be passed via `flow_report=` (same convention as
+`RecursionRiskAnalyzer`) to avoid a second pass; `TechnicalDebtAnalyzer`
+below always does this.
+
+**Two numbers per procedure**: `cyclomatic_complexity` (1 plus one decision
+point per IF, per WHEN arm on EVALUATE/SEARCH excluding WHEN OTHER/default,
+per loop-form PERFORM -- TIMES/UNTIL/VARYING, a bare `PERFORM target` is not
+a decision point since it always runs exactly once -- and per *present*
+exception-handling clause: AT END, INVALID KEY, AT EOP, ON SIZE ERROR, ON
+OVERFLOW, ON EXCEPTION, and their NOT- counterparts, each independently);
+`extended_complexity` adds one per boolean AND/OR operator in every
+condition tree on top of that (`IF A AND B OR C` has more distinct paths
+than a bare `IF A`, even though both are "one IF" for classic McCabe). Also
+reports `max_nesting_depth` (only IF/EVALUATE/SEARCH/loop-PERFORM increase
+it -- an exception clause's own body does not, a deliberate choice: nesting
+depth here tracks control-flow block nesting, not exception-handling
+depth), `fan_in`/`fan_out` (distinct PERFORM/GO TO neighbors, from
+`flow_report.edges` filtered to `PERFORM_EDGE_TYPES | GOTO_EDGE_TYPES` --
+excludes the synthetic IF/EVALUATE branch-node edges and CALL's
+external-program targets, neither of which belong in an in-program fan
+count), and a LOW/MODERATE/HIGH `rating` from `ComplexityThresholds`
+(defaults `moderate=10`/`high=20`, overridable per analysis run).
+
+**Walk mechanics.** The clause-list attribute check
+(`at_end_clause`/`invalid_key_clause`/.../`on_exception`/`on_overflow`) is a
+local re-derivation of the same set `program_flow/scanner.py`'s
+`_CLAUSE_BODY_ATTRS` and `constraints.py`'s `_NESTED_STATEMENT_ATTRS`
+establish -- most of these are already reachable via the generic
+`.children` walk (every AST statement model wires its clause-list setters
+through `_set_clause`/explicit `add_child` calls), *except*
+`CallStatement.on_overflow`/`.on_exception`/`.not_on_exception`, which are
+never `add_child`ed (confirmed by auditing `models/statements/call.py`) --
+the one gap `scanner.py`'s own special-cased `push_sequential` dispatch for
+CALL exists to cover. Explicitly walking the full clause-attribute list on
+every visited statement (not just the CALL-specific gap) is cheap and
+matches established precedent; the `id()`-based visited-set prevents double
+counting on statement types where the attribute *is* already wired to
+`.children`.
+
+**A bare SECTION reports the trivial complexity of 1** -- a bare `SECTION`
+header holds no statements of its own (same observation `dead_code.py` and
+`program_flow/scanner.py` make), so there is nothing to walk.
+
+CLI: `cobol-parser complexity <file.cbl>` (see cli.md).
+
+## RedundancyAnalyzer (`redundancy.py`, 2026-08-16)
+
+```python
+report: RedundancyReport = RedundancyAnalyzer().analyze(ast, min_clone_statements=3)
+# report.dead_items / .unused_items: delegated straight from DeadCodeAnalyzer / UnusedVariableAnalyzer
+# report.dead_ratio / .unused_ratio (properties)
+# report.clone_groups: list[CloneGroup]
+```
+
+Two kinds of "redundant weight, not real work": unreferenced code/data
+(delegates directly to `DeadCodeAnalyzer` and `UnusedVariableAnalyzer`,
+reporting their items plus ratios) and duplicate (cloned) paragraphs, new in
+this module.
+
+**Whole-paragraph structural clones only** -- no sub-paragraph sliding
+window, no near-miss/type-3 similarity scoring, matching the design goal of
+"exact, no similarity-threshold tuning, no false-positive debate." Two
+kinds:
+
+- **Type-1 (exact)**: identical statement types, operands, and condition
+  text, verbatim.
+- **Type-2 (renamed)**: identical statement-type/control-flow shape with
+  identifier-shaped tokens (data-names, paragraph-names) consistently
+  substituted with per-paragraph positional placeholders (`ID1`, `ID2`,
+  ...) -- `MOVE WS-A TO WS-B` and `MOVE WS-X TO WS-Y` match. A changed
+  *literal* never matches (even for Type-2): a literal is behavior, not a
+  name, so quoted substrings are protected from substitution before the
+  identifier regex runs.
+
+`_Fingerprinter` builds a hashable nested-tuple fingerprint per paragraph
+(not a flat token stream -- a flat sequence could conflate two differently-
+nested trees that happen to serialize the same way; the nested-tuple shape
+encodes tree structure unambiguously). Paragraphs are grouped by exact
+fingerprint equality; Type-1 grouping runs first, and any paragraph already
+in a Type-1 group of size >= 2 is excluded from the Type-2 pass, so a
+paragraph is only ever reported in one clone group. Groups below
+`min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
+each other isn't meaningful redundancy) are dropped.
+
+**Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
+handling verbatim** rather than re-deriving a second reserved-word list --
+unlike the walking-discipline tuples other analysis modules duplicate
+(those differ per module's own traversal needs), "is this token a real
+data-name" is a single well-defined question both modules ask, and a second
+list would just drift out of sync with the first for no benefit.
+
+CLI: embedded in `cobol-parser health <file.cbl>`'s `redundancy_summary` (no
+standalone `redundancy` subcommand in v1; see cli.md).
+
+## TechnicalDebtAnalyzer (`technical_debt.py`, 2026-08-16)
+
+```python
+report: TechnicalDebtReport = TechnicalDebtAnalyzer(weights=None, size_threshold=50).analyze(ast)
+# report.score: float (0-100, higher = more debt); report.grade: "A".."F"
+# report.components: list[ComponentBreakdown]  -- one per weighted component, each with its own findings
+# report.top_offenders: list[OffenderProcedure]  -- worst procedures, with reasons
+```
+
+Composite, explainable debt score combining `ComplexityAnalyzer`,
+`RedundancyAnalyzer`, and control-flow smells from `ProgramFlowAnalyzer`/
+`RecursionRiskAnalyzer` (all four sub-reports can be passed in precomputed
+via keyword args to skip redundant passes). Every point on the score traces
+to a named finding in some component's `findings` list -- never a bare,
+unexplained number.
+
+**Four weighted components** (`DebtWeights`, defaults sum to 100 but any
+positive weights work -- the composite normalizes by the weights' actual
+sum): `complexity` (share of procedures rated MODERATE/HIGH, weighted units
+`moderate*1 + high*3` over `3*total`), `redundancy` (mean of
+`dead_ratio`/`unused_ratio`/cloned-statement ratio), `control_flow` (capped
+penalties: GO TO density, `ALTER` usage via `ast.find_all_by_type` --
+`ASTNode.find_all_by_type` is a *deep*, cached subtree search via
+`traverse_depth_first()`, not a shallow direct-children scan, confirmed
+empirically -- HIGH-severity `RecursionRiskAnalyzer` risks, unreachable-node
+ratio), `size` (share of procedures over `size_threshold`, default 50
+statements). Final score is the weighted average of the four 0-100
+component scores, clamped to `[0, 100]`; grade bands are A <= 10, B <= 25,
+C <= 45, D <= 70, else F.
+
+**`top_offenders`** ranks procedures by a severity score built from the
+same underlying findings (HIGH complexity +30, MODERATE +10, each GO TO +3,
+dead code +20, clone-group membership +15, unreachable +20, no-escape
+recursion-cycle membership +25), truncated to `top_n` (default 5). A
+paragraph whose only "offense" is a GOTO-to-itself is *not* reported as
+dead code -- `DeadCodeAnalyzer` counts a self-referencing GO TO as an
+incoming edge (it has no self-reference special case), so such a paragraph
+surfaces via its `unreachable`/`no-escape recursion cycle` reasons instead;
+confirmed empirically, not assumed, while writing this module's own tests.
+
+CLI: `cobol-parser health <file.cbl>` (see cli.md).
 
 ## IOLogger
 
@@ -1212,6 +1364,10 @@ programs without sections is unchanged. Pinned by
 | `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
 | `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
 | `unused_variables.py` | `UnusedVariableAnalyzer` |
+| `recursion_risk.py` | `RecursionRiskAnalyzer` |
+| `complexity.py` | `ComplexityAnalyzer` |
+| `redundancy.py` | `RedundancyAnalyzer` |
+| `technical_debt.py` | `TechnicalDebtAnalyzer` |
 
 # Silent-Failure Audit (2026-07-08)
 

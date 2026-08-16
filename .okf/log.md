@@ -1,5 +1,48 @@
 # OKF Update Log
 
+## 2026-08-16 (New analyzers: ComplexityAnalyzer, RedundancyAnalyzer, TechnicalDebtAnalyzer)
+
+Added three new static-analysis modules implementing the "cyclomatic
+complexity & maintainability metrics" idea from `docs/feature-ideas.md`
+(idea #2), extended to also cover redundancy (dead code/unused variables/
+duplicate-paragraph clones) and a composite technical-debt score:
+
+* **`cobolparser/analysis/complexity.py`** -- `ComplexityAnalyzer`:
+  per-paragraph/section McCabe cyclomatic complexity from a dedicated
+  statement-tree walk (not `ProgramFlowAnalyzer`'s inter-paragraph CFG, per
+  the design note in `docs/feature-ideas.md` -- most COBOL complexity lives
+  *inside* a paragraph). Also `extended_complexity` (AND/OR-aware),
+  `max_nesting_depth`, `fan_in`/`fan_out` (from `ProgramFlowReport` edges),
+  and LOW/MODERATE/HIGH ratings via overridable `ComplexityThresholds`.
+* **`cobolparser/analysis/redundancy.py`** -- `RedundancyAnalyzer`: wraps
+  `DeadCodeAnalyzer`/`UnusedVariableAnalyzer` for dead/unused ratios, and
+  adds new whole-paragraph Type-1 (exact)/Type-2 (renamed-identifier)
+  duplicate-code detection via a hashable nested-tuple statement
+  fingerprint -- deliberately exact matching only (no sub-paragraph
+  sliding-window or near-miss/type-3 similarity scoring), reusing
+  `unused_variables.py`'s `_NON_IDENTIFIER_WORDS` reserved-word set rather
+  than re-deriving a second one.
+* **`cobolparser/analysis/technical_debt.py`** -- `TechnicalDebtAnalyzer`:
+  composite 0-100 debt score (A-F grade) combining the above two plus
+  control-flow smells (GO TO density, `ALTER` usage, no-escape recursion
+  cycles from `RecursionRiskAnalyzer`, unreachable nodes) and a size
+  component, as a `DebtWeights`-weighted rollup where every point traces to
+  a named finding. Also produces a `top_offenders` list ranking the worst
+  procedures with their specific reasons.
+
+New CLI subcommands `complexity` and `health` (`_build_analyzer_parser`,
+`profiling=True`), both added to `_SUBCOMMANDS`/`cli.md` -- **catches an
+easy-to-repeat bug**: `main()`'s legacy-syntax backward-compatibility shim
+checks the first positional argument against `_SUBCOMMANDS` (a *second*,
+separately-maintained set from the argparse subparsers actually registered
+in `_build_parser`) to decide whether to prepend `"parse"`; forgetting to
+add a new subcommand there makes `cobol-parser health foo.cbl` silently
+misparse as `cobol-parser parse health foo.cbl` -- caught by a CLI smoke
+test in `tests/unit/cli/test_complexity_health_subcommands.py::
+TestSubcommandsRegistered::test_subcommand_via_main` before it shipped, not
+after. All three analyzers/CLI subcommands single-program scope only (no
+cross-file/batch redundancy in this pass, matching every other analyzer).
+
 ## 2026-08-14 (Fixed-format column-72 overflow: word-boundary drops + wired into the real parse pipeline)
 
 Flagged during final whole-branch review of the data-item-layout plan (as

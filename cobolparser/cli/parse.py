@@ -25,6 +25,8 @@ _SUBCOMMANDS = frozenset(
         "unused-variables",
         "program-flow",
         "recursion-check",
+        "complexity",
+        "health",
         "io-sequence",
         "move-type-check",
         "linkage-check",
@@ -1259,6 +1261,32 @@ def _cmd_recursion_check(args: argparse.Namespace) -> None:
     _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: complexity ----------------------------------------------------
+
+
+def _cmd_complexity(args: argparse.Namespace) -> None:
+    from ..analysis.complexity import ComplexityAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = ComplexityAnalyzer().analyze(ast)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
+# -- Subcommand: health ---------------------------------------------------------
+
+
+def _cmd_health(args: argparse.Namespace) -> None:
+    from ..analysis.technical_debt import TechnicalDebtAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = TechnicalDebtAnalyzer().analyze(ast)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
 # -- Subcommand: io-sequence --------------------------------------------------
 
 
@@ -1525,6 +1553,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "Detect PERFORM/GO TO cycles and self-recursive CALLs that risk an "
         "infinite loop",
         _cmd_recursion_check,
+        profiling=True,
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "complexity",
+        "Compute per-paragraph cyclomatic complexity and maintainability metrics",
+        _cmd_complexity,
+        profiling=True,
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "health",
+        "Compute a composite technical-debt score (complexity, redundancy, "
+        "control-flow smells, size) with a top-offenders breakdown",
+        _cmd_health,
         profiling=True,
     )
     _build_analyzer_parser(
