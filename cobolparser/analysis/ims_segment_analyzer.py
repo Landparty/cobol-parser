@@ -146,6 +146,13 @@ class IMSSegmentAnalyzer:
     def __init__(self) -> None:
         self._data_items: dict[str, CobolDataItem] = {}
         self._variable_values: dict[str, set[str]] = {}
+        # Values a variable received via MOVE only (no VALUE clauses).
+        # Needed by the group-SSA segment-name merge: VALUE clauses are
+        # keyed by bare name, so two SSAs whose child fields share a name
+        # (both called SSA-SEG-NAME, qualified differently) would cross-
+        # contaminate each other's static values if merged from
+        # _variable_values.
+        self._moved_values: dict[str, set[str]] = {}
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -160,6 +167,7 @@ class IMSSegmentAnalyzer:
         """
         self._data_items = {}
         self._variable_values = {}
+        self._moved_values = {}
 
         self._collect_data_items(ast)
         self._track_move_statements(ast)
@@ -237,6 +245,7 @@ class IMSSegmentAnalyzer:
                     self._variable_values.setdefault(tgt.upper(), set()).update(
                         src_values
                     )
+                    self._moved_values.setdefault(tgt.upper(), set()).update(src_values)
             else:
                 # Only propagate when source is a genuine literal (quoted string,
                 # numeric, or figurative constant).  Bare identifiers that are not
@@ -249,6 +258,7 @@ class IMSSegmentAnalyzer:
                         self._variable_values.setdefault(tgt.upper(), set()).add(
                             literal
                         )
+                        self._moved_values.setdefault(tgt.upper(), set()).add(literal)
 
         if hasattr(node, "children"):
             for child in node.children:
@@ -342,7 +352,7 @@ class IMSSegmentAnalyzer:
                     if name:
                         candidates.add(name)
                 child_name = (child.name or "").upper()
-                for v in self._variable_values.get(child_name, []):
+                for v in self._moved_values.get(child_name, []):
                     name = v[:_SSA_SEGMENT_NAME_LEN].rstrip()
                     if name:
                         candidates.add(name)

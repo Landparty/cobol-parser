@@ -901,7 +901,12 @@ audit fix):** `_resolve_ssa_segment`'s group branch used to return only
 the first child's static VALUE clause — `MOVE 'SEGB' TO SSA1-SEG-NAME`
 was ignored, reporting the stale initial VALUE with full confidence. The
 child field's MOVE-tracked values are now merged with its VALUE clause,
-multi-candidate results using the existing "/" convention. Pinned by
+multi-candidate results using the existing "/" convention. Only values
+from an actual MOVE are merged (a separate `_moved_values` dict, not
+`_variable_values`): VALUE clauses are keyed by *bare* name, and two SSAs
+whose child fields share a name (both `SSA-SEG-NAME`, qualified
+differently — the shape `test_multiple_ssas_path_call` pins) would
+otherwise cross-contaminate each other's static values. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA4IMSMovedSegmentName`.
 
 ## HostVariableResolver
