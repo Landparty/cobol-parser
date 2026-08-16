@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 16 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-16T00:00:00Z
 ---
 
 # Overview
@@ -282,6 +282,24 @@ selectors, per `constraints.py`'s same documented gap — see
 `ConstraintExtractor`'s section above). The fallback is deliberately
 over-inclusive: a false positive there only makes the analyzer *miss* an
 unused variable, never wrongly flag a used one.
+
+**EVALUATE subjects are walked explicitly — they never reach `.operands`
+either (found during a review of this module, 2026-08-16).**
+`evaluate_parser.py`'s `_parse_subjects` appends straight to
+`EvaluateStatement.subjects`, bypassing `add_subject()` — the setter that
+exists specifically to also call `add_operand()` — so `EVALUATE WS-CODE`/
+`EVALUATE WS-A ALSO WS-B` left the subject name(s) out of `.operands`
+entirely (confirmed empirically: `stmt.operands == []` for a bare
+`EVALUATE WS-CODE` while `stmt.subjects == ["WS-CODE"]`). Only the `WHEN`
+selectors were already special-cased in the `EvaluateStatement` branch of
+`_collect_referenced_names`; a field referenced solely as the subject was
+falsely reported unused. `constraints.py` and `program_flow/scanner.py`
+already read `stmt.subjects` directly and were unaffected — the fix is
+scoped to this module's `EvaluateStatement` branch, which now also walks
+`stmt.subjects` (via `_walk_expression_operands` for a `CobolExpression`
+subject, `_extract_identifiers` for the plain-string case the real parser
+always produces). Pinned by `TestEvaluateSubjects` in
+`tests/unit/analysis/test_unused_variables.py`.
 
 **Group items, level-88s, REDEFINES, and OCCURS DEPENDING ON are
 structural, not textual, dependencies.** A group item counts as used if

@@ -516,6 +516,17 @@ class UnusedVariableAnalyzer:
                     for key in ("variable", "from_value", "by_value"):
                         names |= _extract_identifiers(after.get(key))
             elif isinstance(stmt, EvaluateStatement):
+                # EVALUATE subject-1 [ALSO subject-2]...: the evaluate_parser
+                # appends straight to `stmt.subjects`, bypassing
+                # `EvaluateStatement.add_subject()` (the setter that would
+                # otherwise reach `.operands`) -- confirmed empirically, so
+                # subjects never appear in `stmt.operands` and must be
+                # walked here explicitly, same as the WHEN selectors below.
+                for subject in stmt.subjects:
+                    if isinstance(subject, CobolExpression):
+                        names |= _walk_expression_operands(subject)
+                    else:
+                        names |= _extract_identifiers(subject)
                 clauses = list(stmt.when_clauses)
                 if stmt.default_when is not None:
                     clauses.append(stmt.default_when)
