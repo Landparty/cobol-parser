@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis/cli:** `RecursionRiskAnalyzer` (`cobolparser.analysis.recursion_risk`)
+  detects recursion-driven infinite-loop risks: out-of-line PERFORM cycles
+  and GO TO cycles (reusing `ProgramFlowAnalyzer`'s `cycle_details`, graded
+  `HIGH`/`MEDIUM` by whether any paragraph in the cycle has an escape route
+  — a branch outside the loop or a program-terminating statement), and
+  self-recursive CALL statements (static or dynamic, resolved via
+  `DynamicCallAnalyzer`, targeting the program's own PROGRAM-ID). Backed by
+  the new `recursion-check` CLI subcommand and exported from both
+  `cobolparser.analysis` and the top-level `cobolparser` package.
 * **analysis/cli:** `UnusedVariableAnalyzer` (`cobolparser.analysis.unused_variables`)
   detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE)
   never referenced anywhere in the PROCEDURE DIVISION, including group

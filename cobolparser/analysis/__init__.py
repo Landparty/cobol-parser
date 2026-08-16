@@ -209,6 +209,23 @@ def __getattr__(name: str) -> object:
             "UnusedVariableItem": UnusedVariableItem,
         }
         return _map[name]
+    if name in (
+        "RecursionRiskAnalyzer",
+        "RecursionRiskReport",
+        "RecursionRisk",
+    ):
+        from .recursion_risk import (
+            RecursionRisk,
+            RecursionRiskAnalyzer,
+            RecursionRiskReport,
+        )
+
+        _map = {
+            "RecursionRiskAnalyzer": RecursionRiskAnalyzer,
+            "RecursionRiskReport": RecursionRiskReport,
+            "RecursionRisk": RecursionRisk,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -256,4 +273,7 @@ __all__ = [
     "UnusedVariableAnalyzer",
     "UnusedVariableReport",
     "UnusedVariableItem",
+    "RecursionRiskAnalyzer",
+    "RecursionRiskReport",
+    "RecursionRisk",
 ]

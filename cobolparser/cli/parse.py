@@ -24,6 +24,7 @@ _SUBCOMMANDS = frozenset(
         "dead-code",
         "unused-variables",
         "program-flow",
+        "recursion-check",
         "io-sequence",
         "move-type-check",
         "linkage-check",
@@ -1243,6 +1244,21 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
         _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: recursion-check -----------------------------------------------
+
+
+def _cmd_recursion_check(args: argparse.Namespace) -> None:
+    from ..analysis.program_flow import ProgramFlowAnalyzer
+    from ..analysis.recursion_risk import RecursionRiskAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    flow_report = ProgramFlowAnalyzer().analyze(ast)
+    report = RecursionRiskAnalyzer().analyze(ast, flow_report=flow_report)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
 # -- Subcommand: io-sequence --------------------------------------------------
 
 
@@ -1503,6 +1519,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _build_unused_variables_parser(subparsers)
     _build_program_flow_parser(subparsers)
+    _build_analyzer_parser(
+        subparsers,
+        "recursion-check",
+        "Detect PERFORM/GO TO cycles and self-recursive CALLs that risk an "
+        "infinite loop",
+        _cmd_recursion_check,
+        profiling=True,
+    )
     _build_analyzer_parser(
         subparsers,
         "io-sequence",

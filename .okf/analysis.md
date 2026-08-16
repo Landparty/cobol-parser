@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 16 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, and more.
-tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold]
-timestamp: 2026-08-13T00:00:00Z
+description: 17 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, and more.
+tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
+timestamp: 2026-08-16T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 16 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 17 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -29,6 +29,7 @@ from cobolparser import (
     CRUDMatrixGenerator,
     DynamicCallAnalyzer,
     UnusedVariableAnalyzer,
+    RecursionRiskAnalyzer,
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 ```
@@ -512,6 +513,43 @@ flowchart arrows. Fixed with a final `else` branch iterating
 `_CLAUSE_BODY_ATTRS`; the `id`-based `visited` set keeps the
 generic pass from double-counting statements the specialized branches already
 handled. Pinned by `tests/regression/test_tier6_silent_drop_audit.py`.
+
+## RecursionRiskAnalyzer (`recursion_risk.py`, 2026-08-16)
+
+```python
+report: RecursionRiskReport = RecursionRiskAnalyzer().analyze(ast)
+# report.risks: list[RecursionRisk]
+# RecursionRisk.mechanism: "PERFORM" | "GOTO" | "MIXED" | "CALL"
+# RecursionRisk.severity: "HIGH" | "MEDIUM"
+```
+
+Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
+`RecursionRisk` entries with a `severity` and a plain-English `explanation`:
+
+- **PERFORM/GO TO cycles** — reuses `ProgramFlowAnalyzer`'s `cycle_details`
+  (an optional precomputed `ProgramFlowReport` can be passed via
+  `analyze(ast, flow_report=...)` to avoid a second pass). A
+  `PERFORM_RECURSION` cycle (out-of-line paragraphs performing each other in
+  a loop — invalid re-entrant PERFORM in standard COBOL) is always `HIGH`,
+  independent of any UNTIL/TIMES/VARYING clause on the individual PERFORMs.
+  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape`: `HIGH` if no
+  paragraph in the cycle has an edge leaving it (to a paragraph outside the
+  cycle) or a program-terminating statement (`has_stop_run`/`has_goback`/
+  `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
+  fall-through-only cycles are never reported (fall-through can't actually
+  form a cycle).
+- **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
+  `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
+  equals the program's own `PROGRAM-ID`. Always `HIGH`: the parser does not
+  currently track an `IS RECURSIVE` `PROGRAM-ID` clause (not even accepted
+  syntactically — see `parsers/divisions/identification.py`'s `IS
+  INITIAL|COMMON` loop, which has no `RECURSIVE` branch), so there is no way
+  to tell a deliberately-recursive program from a bug; every self-CALL is
+  flagged the same way.
+
+Exported from both `cobolparser.analysis` and the top-level `cobolparser`
+package, same as `DeadCodeAnalyzer`/`ProgramFlowAnalyzer`. CLI:
+`cobol-parser recursion-check <file.cbl>` (see cli.md).
 
 ## IOLogger
 

@@ -95,6 +95,7 @@ cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser unused-variables <file.cbl> [--copybook-path DIR] [--exclude-copybook-variables]
 cobol-parser program-flow <file.cbl>
+cobol-parser recursion-check <file.cbl>
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
@@ -160,7 +161,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 16 static analysis modules:
+**`cobolparser/analysis/`** -- 17 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -174,6 +175,7 @@ COBOL source (.cbl/.cob)
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
 - `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`; public API re-exported from the package `__init__.py`)
+- `recursion_risk.py` -- `RecursionRiskAnalyzer` detects recursion-driven infinite-loop risks: PERFORM/GO TO cycles (reusing `ProgramFlowAnalyzer`'s `cycle_details`, graded HIGH/MEDIUM by whether the cycle has an escape route) and self-recursive CALL statements (static or dynamic, targeting the program's own PROGRAM-ID). Backs the `recursion-check` CLI subcommand. See `.okf/analysis.md`
 - `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
 - `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
 - `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE is poisoned unconditionally since the AST does not record BY vs INTO; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field still knowable at a DISPLAY/WRITE. See `.okf/analysis.md`
@@ -296,6 +298,7 @@ from cobolparser import (
     DeadCodeAnalyzer,           # report.dead_items
     UnusedVariableAnalyzer,     # report.unused_items (DATA DIVISION items never referenced)
     ProgramFlowAnalyzer,        # report.edges (typed PERFORM/GO TO/CALL/fall-through; THRU range_members; classified cycle_details)
+    RecursionRiskAnalyzer,      # report.risks — PERFORM/GO TO cycles + self-recursive CALLs that risk an infinite loop
     IOLogger,                   # report.operations
     IOSequenceAnalyzer,         # report.violations
     MoveTypeChecker,            # report.violations

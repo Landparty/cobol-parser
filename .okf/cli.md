@@ -243,6 +243,21 @@ selects the output: `json` (default, raw `report.to_dict()` edges), `mermaid`
 (Graphviz DOT via `DotFlowchartGenerator`). Also accepts the shared
 profiling flags (`--profile`, `--profile-top-n`, `--profile-output`).
 
+## Recursion-Check
+
+```bash
+cobol-parser recursion-check <file.cbl> [--profile ...]
+```
+
+Runs `RecursionRiskAnalyzer` (see `.okf/analysis.md`) and reports recursion-
+driven infinite-loop risks: PERFORM/GO TO cycles reused from
+`ProgramFlowAnalyzer`'s `cycle_details` (`PERFORM_RECURSION` always `HIGH`;
+`GOTO_LOOP`/`MIXED` graded `HIGH`/`MEDIUM` by whether the cycle has an
+escape route) and self-recursive CALL statements (static or dynamic,
+targeting the program's own `PROGRAM-ID`, always `HIGH`). Registered the
+same way as `dead-code`/`data-items` (via `_build_analyzer_parser(...,
+profiling=True)`), so it also accepts the shared profiling flags.
+
 ## Batch
 
 ```bash
