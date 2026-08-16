@@ -207,7 +207,11 @@ class TechnicalDebtAnalyzer:
             if total_weight > 0
             else 0.0
         )
-        score = max(0.0, min(100.0, score))
+        # Round to the same 2 decimals to_dict() serializes: grading the raw
+        # float let accumulated noise (10.000000000000002) push a score the
+        # JSON prints as 10.0 across the A/B band edge — the emitted score
+        # and grade must always agree.
+        score = round(max(0.0, min(100.0, score)), 2)
 
         top_offenders = self._top_offenders(
             complexity_report,
@@ -237,6 +241,7 @@ class TechnicalDebtAnalyzer:
         total = len(report.procedures)
         findings: list[str] = []
         if total == 0:
+            findings.append("no procedures to rate")
             return ComponentBreakdown("complexity", 0.0, weights.complexity, findings)
 
         units = report.moderate_count * 1 + report.high_count * 3
@@ -334,6 +339,7 @@ class TechnicalDebtAnalyzer:
         total = len(report.procedures)
         findings: list[str] = []
         if total == 0:
+            findings.append("no procedures to rate")
             return ComponentBreakdown("size", 0.0, weights.size, findings)
 
         oversized = [

@@ -102,7 +102,9 @@ class TestComponentIsolation:
         )
         report = _analyze(source, weights=weights)
         assert _component(report, "redundancy").score > 0
-        assert report.score == _component(report, "redundancy").score
+        # The composite score is rounded to the 2 decimals to_dict()
+        # serializes, so it and the grade always agree.
+        assert report.score == round(_component(report, "redundancy").score, 2)
 
     def test_goto_only_moves_control_flow_component(self) -> None:
         source = HEADER + """\
@@ -150,7 +152,8 @@ class TestWeightsAndScore:
         report = _analyze(source)
         total_weight = report.weights.total
         expected = sum(c.contribution for c in report.components) / total_weight
-        assert report.score == max(0.0, min(100.0, expected))
+        # Rounded to 2 decimals before grading (score/grade consistency).
+        assert report.score == round(max(0.0, min(100.0, expected)), 2)
 
     def test_custom_weights_are_honored(self) -> None:
         source = HEADER + """\

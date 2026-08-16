@@ -326,11 +326,29 @@ class IMSSegmentAnalyzer:
 
         item = self._data_items.get(var)
         if item is not None:
-            # Group item: segment name is in the VALUE clause of the first child
+            # Group item: the segment name lives in the first child field.
+            # Merge its static VALUE clause with any MOVE-tracked values on
+            # that child — programs routinely MOVE a new segment name into
+            # the child (MOVE 'SEGB' TO SSA1-SEG-NAME), and reporting only
+            # the static VALUE would state a stale name with full
+            # confidence. Multiple candidates use the "/" convention.
             data_children = [c for c in item.children if isinstance(c, CobolDataItem)]
-            if data_children and data_children[0].value_clause is not None:
-                raw = str(data_children[0].value_clause).strip("\"'")
-                return raw[:_SSA_SEGMENT_NAME_LEN].rstrip() or None
+            if data_children:
+                child = data_children[0]
+                candidates: set[str] = set()
+                if child.value_clause is not None:
+                    raw = str(child.value_clause).strip("\"'")
+                    name = raw[:_SSA_SEGMENT_NAME_LEN].rstrip()
+                    if name:
+                        candidates.add(name)
+                child_name = (child.name or "").upper()
+                for v in self._variable_values.get(child_name, []):
+                    name = v[:_SSA_SEGMENT_NAME_LEN].rstrip()
+                    if name:
+                        candidates.add(name)
+                if candidates:
+                    ordered = sorted(candidates)
+                    return "/".join(ordered) if len(ordered) > 1 else ordered[0]
 
             # Elementary item: VALUE clause holds the whole SSA; take first 8 bytes
             if item.value_clause is not None:
@@ -343,15 +361,15 @@ class IMSSegmentAnalyzer:
         # set to different segment names on different branches doesn't read
         # as a single certain answer.
         if var in self._variable_values:
-            candidates = sorted(
+            moved = sorted(
                 {
                     v[:_SSA_SEGMENT_NAME_LEN].rstrip()
                     for v in self._variable_values[var]
                     if v[:_SSA_SEGMENT_NAME_LEN].rstrip()
                 }
             )
-            if candidates:
-                return "/".join(candidates) if len(candidates) > 1 else candidates[0]
+            if moved:
+                return "/".join(moved) if len(moved) > 1 else moved[0]
 
         return None
 
