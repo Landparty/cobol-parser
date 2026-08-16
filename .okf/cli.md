@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-08-16T00:00:00Z
 ---
 
 # Overview
@@ -257,6 +257,37 @@ escape route) and self-recursive CALL statements (static or dynamic,
 targeting the program's own `PROGRAM-ID`, always `HIGH`). Registered the
 same way as `dead-code`/`data-items` (via `_build_analyzer_parser(...,
 profiling=True)`), so it also accepts the shared profiling flags.
+
+## Complexity
+
+```bash
+cobol-parser complexity <file.cbl> [--profile ...]
+```
+
+Runs `ComplexityAnalyzer` (see `.okf/analysis.md`) and reports per-paragraph
+McCabe cyclomatic complexity, an AND/OR-aware `extended_complexity`, max
+nesting depth, fan-in/fan-out (from `ProgramFlowAnalyzer`'s PERFORM/GO TO
+edges), and a LOW/MODERATE/HIGH `rating` per procedure, plus a program-level
+summary (`total_complexity`, `mean_complexity`, `goto_density`, ...).
+Registered the same way as `recursion-check` (`_build_analyzer_parser(...,
+profiling=True)`).
+
+## Health
+
+```bash
+cobol-parser health <file.cbl> [--profile ...]
+```
+
+Runs `TechnicalDebtAnalyzer` (see `.okf/analysis.md`) and reports a
+composite 0-100 technical-debt score with an A-F letter grade, a per-
+component breakdown (`complexity`/`redundancy`/`control_flow`/`size`, each
+with its own findings), and a `top_offenders` list of the worst procedures
+with the specific reasons (dead code, clone membership, GO TO count, no-
+escape recursion cycle, ...) that put them there. Embeds the underlying
+`ComplexityReport`/`RedundancyReport` summaries (`complexity_summary`/
+`redundancy_summary`) rather than the full per-procedure detail -- run
+`complexity` directly for that. Registered the same way as
+`recursion-check`.
 
 ## Batch
 

@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DynamicCallAnalyzer`, targeting the program's own PROGRAM-ID). Backed by
   the new `recursion-check` CLI subcommand and exported from both
   `cobolparser.analysis` and the top-level `cobolparser` package.
+* **analysis/cli:** `ComplexityAnalyzer` (`cobolparser.analysis.complexity`)
+  computes per-paragraph/section McCabe cyclomatic complexity from a
+  dedicated statement-tree walk, plus an AND/OR-aware `extended_complexity`,
+  max nesting depth, fan-in/fan-out (from `ProgramFlowAnalyzer`'s edges),
+  and LOW/MODERATE/HIGH ratings via overridable `ComplexityThresholds`.
+  Backed by the new `complexity` CLI subcommand.
+* **analysis/cli:** `RedundancyAnalyzer` (`cobolparser.analysis.redundancy`)
+  combines `DeadCodeAnalyzer`/`UnusedVariableAnalyzer` ratios with new
+  whole-paragraph duplicate-code (clone) detection — Type-1 (exact) and
+  Type-2 (renamed-identifier) matches via a structural statement
+  fingerprint, with no sub-paragraph or near-miss similarity scoring.
+* **analysis/cli:** `TechnicalDebtAnalyzer`
+  (`cobolparser.analysis.technical_debt`) computes a composite 0-100
+  technical-debt score (A–F grade) combining complexity, redundancy,
+  control-flow smells (GO TO density, ALTER usage, no-escape recursion
+  cycles, unreachable nodes), and procedure size, as a
+  `DebtWeights`-weighted, fully explainable rollup with a `top_offenders`
+  list naming the worst procedures and why. Backed by the new `health` CLI
+  subcommand. All three new analyzers/subcommands are exported from both
+  `cobolparser.analysis` and the top-level `cobolparser` package,
+  single-program scope only (matching every other analyzer).
 * **analysis/cli:** `UnusedVariableAnalyzer` (`cobolparser.analysis.unused_variables`)
   detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE)
   never referenced anywhere in the PROCEDURE DIVISION, including group
