@@ -10,6 +10,7 @@ Covers:
 - Report serialization shape
 """
 
+from cobolparser.analysis.recursion_risk import RecursionRisk, RecursionRiskReport
 from cobolparser.analysis.technical_debt import (
     DebtWeights,
     TechnicalDebtAnalyzer,
@@ -196,6 +197,37 @@ class TestTopOffenders:
         never_called = next(o for o in report.top_offenders if o.name == "NEVER-CALLED")
         assert any("unreachable" in r for r in never_called.reasons)
         assert any("recursion cycle" in r for r in never_called.reasons)
+
+    def test_medium_severity_recursion_risk_not_reported_as_no_escape(self) -> None:
+        """Regression: a MEDIUM-severity risk (RecursionRiskAnalyzer's own
+        grading for a GOTO_LOOP/MIXED cycle that DOES have an escape route)
+        must not be surfaced via the "no-escape recursion cycle" reason --
+        that text is only accurate for HIGH-severity, no-escape cycles."""
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           GO TO END-PARA.
+       END-PARA.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="debttest.cbl")
+        assert result.ast is not None
+        medium_recursion_report = RecursionRiskReport(
+            risks=[
+                RecursionRisk(
+                    mechanism="GOTO",
+                    severity="MEDIUM",
+                    explanation="cycle has an escape route",
+                    procedures=["MAIN-PARA"],
+                    has_escape=True,
+                )
+            ]
+        )
+        report = TechnicalDebtAnalyzer().analyze(
+            result.ast, recursion_report=medium_recursion_report
+        )
+        main_para = next(o for o in report.top_offenders if o.name == "MAIN-PARA")
+        assert not any("recursion cycle" in r for r in main_para.reasons)
 
     def test_dead_paragraph_is_top_offender(self) -> None:
         source = HEADER + """\

@@ -367,7 +367,14 @@ class RedundancyAnalyzer:
                     clone_type="TYPE_2" if type2 else "TYPE_1",
                     statement_count=leaf_counts[fingerprint],
                     members=[
-                        CloneMember(name=p.paragraph_name, location=p.location)
+                        # Uppercased to match the convention every other
+                        # analyzer uses for procedure names (DeadCodeItem,
+                        # FlowNode, ...) -- callers like
+                        # TechnicalDebtAnalyzer match clone membership by
+                        # name against those always-uppercase sets, and
+                        # `_find_clone_groups`'s own Type-1/Type-2 dedup
+                        # below compares against `.upper()` too.
+                        CloneMember(name=p.paragraph_name.upper(), location=p.location)
                         for p in members
                     ],
                 )

@@ -13,6 +13,10 @@ Covers:
 from cobolparser.analysis.dead_code import DeadCodeAnalyzer
 from cobolparser.analysis.redundancy import RedundancyAnalyzer
 from cobolparser.analysis.unused_variables import UnusedVariableAnalyzer
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.program import CobolDivision, CobolParagraph, CobolProgram
+from cobolparser.models.statements.control import StopStatement
+from cobolparser.models.statements.data import DisplayStatement, MoveStatement
 from cobolparser.parser import parse_cobol
 
 HEADER = """\
@@ -37,6 +41,48 @@ def _group_with(report, name: str):
         if any(m.name == name for m in g.members):
             return g
     return None
+
+
+LOC = SourceLocation(1, 12)
+
+
+def _make_program(paragraphs: list[tuple[str, list]]) -> CobolProgram:
+    """Build a CobolProgram directly from paragraph name/statement lists,
+    bypassing the parser entirely -- used to test invariants (like clone
+    member name casing) that the real parser happens to already normalize
+    for every paragraph name it produces, so a source-text-based test could
+    never actually exercise a lowercase `paragraph_name`."""
+    loc = SourceLocation(1, 1)
+    prog = CobolProgram("CASETEST", loc)
+    proc_div = CobolDivision("PROCEDURE", loc)
+    prog.add_division(proc_div)
+
+    line = 10
+    for pname, stmts in paragraphs:
+        para = CobolParagraph(pname, SourceLocation(line, 8))
+        for s in stmts:
+            para.add_statement(s)
+        proc_div.add_paragraph(para)
+        line += 1
+
+    return prog
+
+
+def _move(source: str, target: str) -> MoveStatement:
+    stmt = MoveStatement(LOC)
+    stmt.set_source(source)
+    stmt.add_target(target)
+    return stmt
+
+
+def _display(text: str) -> DisplayStatement:
+    stmt = DisplayStatement(LOC)
+    stmt.add_operand(text)
+    return stmt
+
+
+def _stop_run() -> StopStatement:
+    return StopStatement(LOC)
 
 
 class TestType1Clones:
@@ -249,6 +295,57 @@ class TestDeadAndUnusedRatios:
         assert report.clone_groups == []
         assert report.dead_ratio == 0.0
         assert report.unused_ratio == 0.0
+
+
+class TestCloneMemberNameCasing:
+    """CloneMember.name must be uppercased, matching the convention every
+    other analyzer uses for procedure names (DeadCodeItem, FlowNode, ...) --
+    TechnicalDebtAnalyzer's top-offender matching compares clone membership
+    by name against those always-uppercase sets. The real parser happens to
+    already uppercase every paragraph_name it produces regardless of source
+    casing, so this can only be exercised by constructing the AST directly."""
+
+    def test_clone_members_are_uppercased(self) -> None:
+        prog = _make_program(
+            [
+                ("main-para", [_stop_run()]),
+                (
+                    "clone-a",
+                    [_move("1", "ws-a"), _move("2", "ws-b"), _display("DONE")],
+                ),
+                (
+                    "clone-b",
+                    [_move("1", "ws-a"), _move("2", "ws-b"), _display("DONE")],
+                ),
+            ]
+        )
+        report = RedundancyAnalyzer().analyze(prog)
+        group = _group_with(report, "CLONE-A")
+        assert group is not None
+        assert {m.name for m in group.members} == {"CLONE-A", "CLONE-B"}
+
+    def test_lowercase_type1_pair_not_duplicated_into_type2(self) -> None:
+        """Regression: type1_names must be built from already-uppercased
+        member names so the Type-2 pass's `.upper()` comparison actually
+        excludes paragraphs already grouped as Type-1 -- otherwise a
+        lowercase-named Type-1 pair could double-report into a Type-2 group
+        too."""
+        prog = _make_program(
+            [
+                ("main-para", [_stop_run()]),
+                (
+                    "clone-a",
+                    [_move("1", "ws-a"), _move("2", "ws-b"), _display("DONE")],
+                ),
+                (
+                    "clone-b",
+                    [_move("1", "ws-a"), _move("2", "ws-b"), _display("DONE")],
+                ),
+            ]
+        )
+        report = RedundancyAnalyzer().analyze(prog)
+        assert len(report.clone_groups) == 1
+        assert report.clone_groups[0].clone_type == "TYPE_1"
 
 
 class TestReportSerialization:

@@ -365,9 +365,12 @@ class TechnicalDebtAnalyzer:
             for member in group.members
         }
         unreachable_names = set(flow_report.unreachable_nodes)
+        # HIGH only: a MEDIUM-severity GOTO_LOOP/MIXED cycle has an escape
+        # route (per RecursionRiskAnalyzer's own has_escape grading), so
+        # calling it a "no-escape recursion cycle" below would be wrong.
         recursive_names: set[str] = set()
         for risk in recursion_report.risks:
-            if risk.mechanism != "CALL":
+            if risk.mechanism != "CALL" and risk.severity == "HIGH":
                 recursive_names.update(risk.procedures)
 
         offenders: list[OffenderProcedure] = []
