@@ -205,8 +205,8 @@ targets only (`called_program`, `is_dynamic`, and `possible_values` when
 dynamic; a dynamic entry also carries `"possible_values_incomplete": true`
 when the analyzer flagged the value set as not fully resolvable — see
 `.okf/analysis.md`'s DynamicCallAnalyzer section — so the list is never
-silently presented as exhaustive, 2026-08-16 audit). Despite the generic
-name, this is *not* an all-analyzers summary —
+silently presented as exhaustive; added in the 2026-08-16 audit). Despite
+the generic name, this is *not* an all-analyzers summary —
 dead code, IO, MOVE-type, linkage, and LE checks each have their own
 dedicated subcommand below.
 
