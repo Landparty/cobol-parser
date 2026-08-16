@@ -1067,6 +1067,11 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         }
         if stmt.is_dynamic:
             entry["possible_values"] = stmt.possible_values
+            # DynamicCallAnalyzer marks a value set it could not fully
+            # resolve (an untracked identifier MOVE source, ...) so the
+            # list must not be presented as exhaustive.
+            if stmt.get_metadata("possible_values_incomplete"):
+                entry["possible_values_incomplete"] = True
         calls.append(entry)
 
     _emit_report({"calls": calls}, args, prof, ast)
@@ -1231,6 +1236,15 @@ def _cmd_program_flow(args: argparse.Namespace) -> None:
 
     fmt = getattr(args, "format", "json")
     output_path = getattr(args, "output", None)
+
+    if prof is not None and fmt != "json":
+        # Text flowchart formats have nowhere to embed the profiling dict;
+        # dropping it silently would make --profile look like a no-op.
+        print(
+            "warning: --profile metrics are only included in --format json "
+            "output; ignoring for --format " + fmt,
+            file=sys.stderr,
+        )
 
     if fmt == "mermaid":
         from ..generators.flowchart import FlowchartOptions, MermaidFlowchartGenerator

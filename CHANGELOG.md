@@ -63,6 +63,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **cli:** `analyze` now emits `"possible_values_incomplete": true` on a
+  dynamic CALL entry whenever `DynamicCallAnalyzer` marked the value set
+  as not fully resolvable (an untracked identifier-shaped MOVE source
+  feeding the target variable) — before this, the JSON presented a
+  known-incomplete `possible_values` list as if it were exhaustive
+  (2026-08-16 analyzer-subcommand audit).
+* **cli:** `program-flow --format mermaid|dot` combined with `--profile`
+  now prints a stderr warning that the profiling metrics are only
+  included in `--format json` output — previously the profiler ran and
+  its result was silently discarded, making `--profile` look like a
+  no-op (2026-08-16 analyzer-subcommand audit).
+
 * **analysis:** `DeadCodeAnalyzer` no longer resurrects genuinely dead
   paragraphs that share a section with a PERFORMed/GONE-TO sibling.
   `_propagate_section_references` used to mark a paragraph's parent
