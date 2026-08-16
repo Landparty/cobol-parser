@@ -3,10 +3,24 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-15T00:20:00Z
+timestamp: 2026-08-16T00:00:00Z
 ---
 
 # Overview
+
+2026-08-16 (unused-variable-function review): +2 in
+`tests/unit/analysis/test_unused_variables.py`'s new `TestEvaluateSubjects`
+class — `test_single_subject_marks_variable_used` and
+`test_also_joined_subjects_all_marked_used` pin the fix for a false
+positive found while reviewing `UnusedVariableAnalyzer`: a field
+referenced only as an `EVALUATE` subject (`EVALUATE WS-CODE` /
+`EVALUATE WS-A ALSO WS-B`) was reported unused because
+`evaluate_parser.py` appends subjects straight to
+`EvaluateStatement.subjects`, bypassing `add_subject()` (the setter that
+would otherwise reach `.operands`), and the analyzer's `EvaluateStatement`
+branch only special-cased `WHEN` selectors, not the subject itself. See
+[analysis.md](analysis.md)'s `UnusedVariableAnalyzer` entry. Brings the
+file to 32 tests (was 30 after the 2026-08-13 Copilot-review fix below).
 
 2026-08-15 (lint fix, PR #153): `black==26.3.0` reformatted
 `cobolparser/preprocess/__init__.py`,

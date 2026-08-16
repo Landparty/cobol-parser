@@ -63,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `UnusedVariableAnalyzer` no longer falsely reports a data
+  item as unused when it is referenced only as an `EVALUATE` subject
+  (`EVALUATE WS-CODE` / `EVALUATE WS-A ALSO WS-B`). `evaluate_parser.py`
+  appends subjects straight to `EvaluateStatement.subjects`, bypassing
+  `add_subject()` (the setter that would otherwise reach `.operands`), so
+  subjects never showed up in the flat operand bag the analyzer's base
+  case scans; only `WHEN` selectors were already special-cased. The
+  `EvaluateStatement` branch in `_collect_referenced_names` now also walks
+  `stmt.subjects` directly.
 * **analysis:** `IOSequenceAnalyzer` now walks statements in (approximate)
   *execution* order — entry procedure, fall-through, unconditional GO TO,
   and out-of-line `PERFORM`/`PERFORM THRU` targets inlined at their call

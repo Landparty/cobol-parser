@@ -359,6 +359,57 @@ class TestConditionExpressions:
         assert "WS-I" not in _names(report)
 
 
+class TestEvaluateSubjects:
+    """EVALUATE subject-1 [ALSO subject-2]...: evaluate_parser appends
+    straight to `EvaluateStatement.subjects`, bypassing `add_subject()` (the
+    setter that would otherwise reach `.operands`), so a subject referenced
+    only as the EVALUATE selector expression -- never inside a WHEN clause
+    or elsewhere -- must still be walked explicitly. See the EvaluateStatement
+    branch in `_collect_referenced_names`.
+    """
+
+    def test_single_subject_marks_variable_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-CODE PIC X(1).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-CODE
+               WHEN 'A'
+                   DISPLAY 'A'
+               WHEN OTHER
+                   DISPLAY 'OTHER'
+           END-EVALUATE
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert "WS-CODE" not in _names(report)
+
+    def test_also_joined_subjects_all_marked_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC X(1).
+       01 WS-B PIC X(1).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-A ALSO WS-B
+               WHEN 'A' ALSO 'B'
+                   DISPLAY 'AB'
+               WHEN OTHER
+                   DISPLAY 'OTHER'
+           END-EVALUATE
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert not ({"WS-A", "WS-B"} & _names(report))
+
+
 class TestRedefines:
     def test_redefines_target_used_when_redefiner_used(self):
         src = """\

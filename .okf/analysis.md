@@ -287,6 +287,24 @@ selectors, per `constraints.py`'s same documented gap — see
 over-inclusive: a false positive there only makes the analyzer *miss* an
 unused variable, never wrongly flag a used one.
 
+**EVALUATE subjects are walked explicitly — they never reach `.operands`
+either (found during a review of this module, 2026-08-16).**
+`evaluate_parser.py`'s `_parse_subjects` appends straight to
+`EvaluateStatement.subjects`, bypassing `add_subject()` — the setter that
+exists specifically to also call `add_operand()` — so `EVALUATE WS-CODE`/
+`EVALUATE WS-A ALSO WS-B` left the subject name(s) out of `.operands`
+entirely (confirmed empirically: `stmt.operands == []` for a bare
+`EVALUATE WS-CODE` while `stmt.subjects == ["WS-CODE"]`). Only the `WHEN`
+selectors were already special-cased in the `EvaluateStatement` branch of
+`_collect_referenced_names`; a field referenced solely as the subject was
+falsely reported unused. `constraints.py` and `program_flow/scanner.py`
+already read `stmt.subjects` directly and were unaffected — the fix is
+scoped to this module's `EvaluateStatement` branch, which now also walks
+`stmt.subjects` (via `_walk_expression_operands` for a `CobolExpression`
+subject, `_extract_identifiers` for the plain-string case the real parser
+always produces). Pinned by `TestEvaluateSubjects` in
+`tests/unit/analysis/test_unused_variables.py`.
+
 **Group items, level-88s, REDEFINES, and OCCURS DEPENDING ON are
 structural, not textual, dependencies.** A group item counts as used if
 any descendant field is used (post-order `is_used()` over `item.children`);
@@ -338,6 +356,19 @@ FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE, so no analyzer-side change
 was needed — the noise disappeared once the parser stopped corrupting
 WORKING-STORAGE. Confirmed empirically post-fix: `screen_section_io.cbl`'s
 WORKING-STORAGE dropped from 33 spurious items back to its real 5.
+
+**The four documented limitations are now tagged inline as `TODO`s
+(2026-08-16 review).** Each spot in the module backing a limitation
+already called out in the class docstring carries a `TODO(known
+limitation)` comment: `_DATA_SECTION_NAMES` (SCREEN/REPORT/COMMUNICATION
+SECTION out of scope), the `host_variables`/`null_indicators` block in
+`_collect_referenced_names` (EXEC CICS/DLI args unscanned), the
+`SearchStatement` branch and `_selector_identifiers`'s `"Condition"` case
+(SEARCH WHEN / EVALUATE TRUE regex-only fallback), and the `redefines_edges`
+comment in `analyze()` (REDEFINES/OCCURS-DEPENDING-ON/RENAMES resolved by
+name, not structural identity). No behavior change — purely so a
+`TODO`/`grep` sweep of the codebase surfaces these instead of only living
+in prose here and in the docstring.
 
 CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 
