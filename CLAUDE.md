@@ -34,16 +34,18 @@ The OKF is more specific and more current than this file for the above topics. W
 
 ## Project Overview
 
-**cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. Version 1.5.3 (see `pyproject.toml` — release-please keeps it current), authored by Samuel Dion.
+**cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. See `pyproject.toml` for the current version (release-please keeps it current); authored by Samuel Dion. License is proprietary ("All rights reserved" — see `LICENSE`), not open source.
 
 ## Backend Integration
 
-This library is **vendored** into `backend/_vendor/cobol-parser/` — it is not installed from PyPI. Changes to this standalone repo must be manually copied before they reach the backend:
+This library is **vendored** into `backend/_vendor/cobol-parser/` — the `backend/` repo does not install it from PyPI. Changes to this standalone repo must be manually copied before they reach the backend:
 ```bash
 cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/
 ```
 
-**Interface contract:** [`interface-contract.md`](interface-contract.md) — documents exactly which functions/classes the backend adapter calls, what attributes it reads off the AST, and what the `program_structure` dict it produces looks like. Read this before changing public API shapes.
+There is a *separate* PyPI package, `cobol-parser` (`pip install cobol-parser`), published as closed-source compiled wheels only (see "Release & Distribution" below) — it exists for the sibling `mocky-mock` repo and other external consumers, and does not change or replace the backend's vendoring flow.
+
+**Interface contract:** [`interface-contract.md`](interface-contract.md) — documents exactly what two external consumers call: (1) the backend adapter (`backend/src/parsers/cobol/parser.py`) — which functions/classes it calls, what attributes it reads off the AST, and what `program_structure` dict shape it expects back; (2) `mocky-mock`'s generators surface (`mockymock generate --with-data` / `mockymock fixtures`) — which calls `ProgramFixtureGenerator` directly and gates on `FixtureBundle`'s `bundle_version`. Read this before changing public API shapes; a breaking change to either surface means bumping the relevant version field.
 
 ## Commands
 
@@ -60,7 +62,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (81% minimum enforced; ~8,075 tests across 303 files)
+# Run all tests with coverage (81% minimum enforced; ~8,075 tests across 320 files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -104,6 +106,7 @@ cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>
 cobol-parser language-env <file.cbl>
 cobol-parser ims-dli <file.cbl>
+cobol-parser data-items <file.cbl>
 ```
 
 ## Architecture
@@ -149,7 +152,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 29 statement parser files (see "Statement Parsers" section below)
+- `statements/` -- 30 statement parser files (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -163,7 +166,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 20 static analysis modules:
+**`cobolparser/analysis/`** -- 21 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -171,6 +174,7 @@ COBOL source (.cbl/.cob)
 - `io_sequence.py` -- IO sequence validation
 - `crud_matrix.py` -- CRUD matrix generation for file operations
 - `dead_code.py` -- Unreferenced paragraph/section detection
+- `unused_variables.py` -- `UnusedVariableAnalyzer` detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE) never referenced in PROCEDURE DIVISION, including group items, level-88 condition names, REDEFINES propagation, and OCCURS ... DEPENDING ON. Backs the `unused-variables` CLI subcommand
 - `host_var_resolver.py` -- SQL host variable resolution
 - `ims_segment_analyzer.py` -- IMS DLI segment analysis
 - `language_env_analyzer.py` -- IBM Language Environment detection
@@ -188,7 +192,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
 - `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3/6/7 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle`. `generate`/`generate_from_file` produce one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. `generate_with_scenarios`/`generate_with_scenarios_from_file` (Phase 6) additionally accept `mode="branches"|"all"`, routing through Phase 5's `ScenarioPlanner` and pinning each `PlannedScenario`'s witnesses/sequence-lengths/status-overrides into an otherwise normally-generated fixture set; `mode="happy"` delegates to `generate()` unchanged (byte-identical). Every scenario's `expectations` also carries tier 1 (`Expectation(kind="call_count", ...)`, derived exactly from that scenario's own generated sequence length) and tier 2 (`Expectation(kind="field_equals", ...)`, from `analysis.const_fold.ConstantFolder` seeded with the scenario's own single-invocation mocked inputs) -- Phase 7. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`, `.okf/analysis.md`, and `docs/fixture-bundle-schema.md`
 - `scenarios.py` -- `ScenarioPlanner` (Phase 5 of the `gen-fixtures` initiative): turns a Phase 4 `ConstraintReport` and `ProgramFlowAnalyzer`'s CFG into a set of named `PlannedScenario`s -- one (or a merge of several) per reachable, satisfiable branch arm, plus fixed families (empty-input/error-status/boundary-values) for `mode="all"` -- with exact arm-coverage accounting (`ScenarioCoverage`: targeted + merged + missed == total, every miss carrying a reason). Wired into the `gen-fixtures` CLI as of Phase 6 via `program_fixtures.py`'s `generate_with_scenarios`. See `.okf/generators.md`
 
@@ -197,7 +201,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 
 **`cobolparser/cli/`** -- Command-line interface:
-- `parse.py` -- Implements all CLI subcommands: parse, tokenize, preprocess, expand, analyze, dead-code, program-flow, batch, io-sequence, move-type-check, linkage-check, language-env, ims-dli
+- `parse.py` -- Implements all CLI subcommands (see "Commands" above for the full list); most analyzer subcommands share argument-building via `_build_analyzer_parser()`
 - `coverage.py` -- IO coverage CLI tools
 
 ### Statement Parsers (cobolparser/parsers/statements/)
@@ -205,6 +209,7 @@ COBOL source (.cbl/.cob)
 | File | COBOL Verbs |
 |------|------------|
 | `accept_parser.py` | ACCEPT |
+| `allocate_free_parsers.py` | ALLOCATE, FREE |
 | `arithmetic_parsers.py` | ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE |
 | `call_parser.py` | CALL |
 | `close_parser.py` | CLOSE |
@@ -216,6 +221,7 @@ COBOL source (.cbl/.cob)
 | `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI |
 | `if_parser.py` | IF |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT |
+| `invoke_parser.py` | INVOKE |
 | `move_parser.py` | MOVE |
 | `open_parser.py` | OPEN |
 | `perform_parser.py` | PERFORM |
@@ -230,6 +236,9 @@ COBOL source (.cbl/.cob)
 | `string_unstring_parsers.py` | STRING, UNSTRING |
 | `unlock_parser.py` | UNLOCK |
 | `write_parser.py` | WRITE |
+| `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE |
+
+`_utils.py` (clause collection) and `_conditions.py` (shared condition-expression building for IF/EVALUATE/PERFORM UNTIL) are shared helpers, not verb parsers.
 
 ### AST Statement Models (cobolparser/models/statements/)
 
@@ -241,7 +250,7 @@ COBOL source (.cbl/.cob)
 | `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` |
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
-| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `EjectStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement` |
+| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `EjectStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `XmlJsonStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
 
 ### Data Flow Detail
 
@@ -425,7 +434,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~8,075 tests across 303 files in 5 directories:
+~8,075 tests across 320 files in 5 directories:
 
 ```
 tests/
@@ -470,13 +479,24 @@ tests/
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main` (and manual `workflow_dispatch`):
 
-1. **lint** -- `ruff check .` + `black --check .` (Python 3.13)
-2. **typecheck** -- `mypy cobolparser/` (Python 3.13)
-3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (verifies install and Cython extension build; no tests)
+1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, pinned versions matching `.pre-commit-config.yaml`)
+2. **typecheck** -- `mypy cobolparser/` (Python 3.13, pinned version)
+3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (verifies install and the Cython extension build; runs only on PRs/dispatch, not on push to `main`; no tests)
 
-The full pytest suite (`pytest tests/ -v`, ~8,075 tests) no longer runs automatically -- it's wired as a `test` job gated to `workflow_dispatch` only, since it's too slow to run on every push/PR. Run it locally during development, or trigger the workflow manually from the Actions tab when CI needs to confirm.
+There is no CI job that runs the pytest suite -- it does not run automatically on push or PR at all (not even gated behind `workflow_dispatch`). Run it locally during development (`python -m pytest tests/ -v`).
+
+## Release & Distribution
+
+`release-please` (`.github/workflows/release-please.yml`, driven by Conventional Commits, config in `release-please-config.json` / `.release-please-manifest.json`) automates versioning and `CHANGELOG.md` on every push to `main`. When it cuts a release, the same workflow also builds and publishes **closed-source binary wheels** to PyPI as `cobol-parser` (`pip install cobol-parser`):
+
+- `setup.py` (`COBOLPARSER_CLOSED_SOURCE=1`, set only by this CI job -- never by local dev or `pip install -e .`) Cythonizes every `cobolparser/**/*.py` module, not just the 3 hot-path accelerators, so the built wheel contains no readable `.py` source (only thin `__init__.py` re-export stubs, which only leak the public API surface already documented in this file).
+- `cibuildwheel` (`[tool.cibuildwheel]` in `pyproject.toml`) builds one wheel each for manylinux x86_64, macOS arm64, and Windows AMD64, across Python 3.11-3.13.
+- No sdist and no pure-Python fallback wheel are published anywhere -- both would ship full source.
+- `scripts/verify_closed_source_wheel.py` builds a wheel locally with the same env var and asserts no `.py` source leaked in, for manual verification outside CI.
+- This is a wholly separate release artifact from the backend's vendoring flow (see "Backend Integration" above) -- publishing to PyPI does not change how `backend/` consumes this library.
+- Design/implementation history: `docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md` and `docs/superpowers/plans/2026-08-14-pypi-closed-source-release.md`.
 
 ## Code Style and Conventions
 
@@ -510,8 +530,9 @@ The full pytest suite (`pytest tests/ -v`, ~8,075 tests) no longer runs automati
   - `metrics/io_ticket_tracker.py` -- Tracks IO-related work items
   - `perf/io_threshold_guard.py` -- Guards IO performance against thresholds
 - `scripts/validate_io_coverage.py` -- Standalone IO coverage validator
+- `scripts/verify_closed_source_wheel.py` -- Builds a closed-source wheel locally (`COBOLPARSER_CLOSED_SOURCE=1`) and verifies no `.py` source leaked in; see "Release & Distribution" above
 - `benchmarks/` -- Performance benchmark programs
 - `reports/` -- Audit reports
-- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely.
+- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely. Also implements the closed-source build mode (`COBOLPARSER_CLOSED_SOURCE=1`) used only by the release CI job — see "Release & Distribution" above.
 - `.pre-commit-config.yaml` -- Hooks for `ruff` (with `--fix`), `ruff-format`, `black`, and `mypy cobolparser/` (with `--ignore-missing-imports`). The CI lint/typecheck jobs duplicate these checks, so running `pre-commit run --all-files` locally catches the same issues.
 - `CHANGELOG.md` -- Keep-a-Changelog history. The Unreleased section is the source of truth for which analyzers and CLI subcommands are wired up beyond the 1.0.0 baseline.
