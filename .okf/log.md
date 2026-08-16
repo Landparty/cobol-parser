@@ -1,5 +1,49 @@
 # OKF Update Log
 
+## 2026-08-16 (Analyzer-subcommand audit: 9 fixes + gap tests)
+
+Full audit of the 13 analyzer CLI subcommands (smoke sweep over the whole
+sample + shamrice corpora, coverage-driven gap analysis, per-module review
+with executed repros). Fixes, each pinned in
+`tests/regression/test_audit_2026_08_16_analyzers.py`:
+
+* **io_sequence.py** — execution-order walk (entry chain + PERFORM
+  inlining + GO TO following) replaces the raw declaration-order AST walk
+  that false-positived on the canonical PERFORM-structured program. See
+  [analysis.md](analysis.md).
+* **models/statements/call.py** — `set_possible_values` sorts
+  (deterministic `analyze` JSON under hash randomization).
+* **language_env_analyzer.py** — quoted literals no longer scanned for
+  `FUNCTION <name>`.
+* **ims_segment_analyzer.py** — group-SSA segment names merge MOVE-tracked
+  child-field values with the static VALUE clause.
+* **move_type_checker.py** — multi-part alphabetic PICTUREs (`AA(3)`)
+  classify ALPHABETIC; trailing `CR`/`DB` classifies NUMERIC_EDITED.
+* **technical_debt.py** — score rounded to serialized precision before
+  grading; no-procedures components carry a finding.
+* **complexity.py** — same-named paragraphs in different sections
+  aggregate instead of dropping the second body.
+* **generators/data/layout_offsets.py** — PIC-less USAGE-only record roots
+  (`77 X USAGE COMP-1.`) report their usage.
+* **cli/parse.py** — `analyze` emits `possible_values_incomplete`;
+  `program-flow` warns when `--profile` meets a text format (see
+  [cli.md](cli.md)).
+
+New tests for previously-uncovered paths:
+`tests/unit/cli/test_analyzer_cli_gaps.py` (unused-variables copybook
+provenance flow, partial-parse warnings) and
+`tests/unit/analysis/test_analyzer_gap_coverage.py` (complexity exception
+clauses + precomputed flow_report, recursion-risk escape routes + MIXED
+cycles, EVALUATE/Type-2 clones, grade bands C-F, weight normalization,
+LINKAGE data-items).
+
+Known, deliberately unfixed: `data-items` emits duplicate
+`qualified_name`s for multiple FILLERs in one record (disambiguating would
+change the output contract); analyzer subcommands warn on parse *errors*
+but stay silent on dropped-content parse *warnings* (21/48 sample programs
+produce such warnings — the noise trade-off is intentional); analyzers
+remain single-program scope (no `contained_programs` recursion).
+
 ## 2026-08-16 (New analyzers: ComplexityAnalyzer, RedundancyAnalyzer, TechnicalDebtAnalyzer)
 
 Added three new static-analysis modules implementing the "cyclomatic

@@ -113,7 +113,7 @@ class MoveTypeReport:
 
 # Regex patterns for picture category classification
 _PIC_NUMERIC_ONLY_RE = re.compile(r"^[S9VP()\d]+$", re.IGNORECASE)
-_PIC_ALPHA_ONLY_RE = re.compile(r"^(?:A+|A\(\d+\))$", re.IGNORECASE)
+_PIC_ALPHA_ONLY_RE = re.compile(r"^(?:A(?:\(\d+\))?)+$", re.IGNORECASE)
 _PIC_X_ONLY_RE = re.compile(r"^X(\(\d+\))?$", re.IGNORECASE)
 _PIC_EDITED_CHARS_RE = re.compile(r"[Z\*\+\-\$\.,/B0]", re.IGNORECASE)
 # Strip repetition counts like (10) or (20) before checking for edit chars so
@@ -163,6 +163,13 @@ _WARN_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
 def _classify_picture(pic: PictureClause) -> DataCategory:
     """Determine the COBOL data category from a PictureClause node."""
     pattern = (pic.pattern or "").upper().strip()
+
+    # A trailing CR/DB credit/debit sign symbol makes the item
+    # numeric-edited. DB used to be caught only by accident (its 'B'
+    # matched the blank-insertion edit char) while CR fell through to
+    # UNKNOWN — the two equivalent sign symbols must classify identically.
+    if pattern.endswith(("CR", "DB")):
+        return DataCategory.NUMERIC_EDITED
 
     # Pure alphabetic: A or A(n)
     if _PIC_ALPHA_ONLY_RE.match(pattern):

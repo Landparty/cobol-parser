@@ -208,9 +208,15 @@ def _collect_text_fields(stmt: CobolStatement) -> list[str]:
     fields: list[str] = []
 
     def _add(text: str | None) -> None:
-        if text and text not in seen:
-            seen.add(text)
-            fields.append(text)
+        if not text or text in seen:
+            return
+        # A quoted string literal can never contain a real intrinsic-function
+        # reference — DISPLAY 'FUNCTION KEYS ARE DISABLED' is prose, not a
+        # FUNCTION call — so scanning it only manufactures false positives.
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+            return
+        seen.add(text)
+        fields.append(text)
 
     # Base operands list present on every statement
     for op in stmt.operands:

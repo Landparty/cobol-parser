@@ -63,6 +63,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `IOSequenceAnalyzer` now walks statements in (approximate)
+  *execution* order — entry procedure, fall-through, unconditional GO TO,
+  and out-of-line `PERFORM`/`PERFORM THRU` targets inlined at their call
+  sites — instead of raw AST declaration order. The canonical correct
+  COBOL shape (OPEN/READ in a main paragraph that PERFORMs a wrap-up
+  paragraph declared after it) used to produce CLOSE_NOT_OPEN,
+  FILE_LEFT_OPEN, and READ_BEFORE_OPEN false positives; paragraphs
+  unreachable from the entry procedure are no longer walked at all
+  (2026-08-16 analyzer-subcommand audit).
+* **analysis:** `CallStatement.set_possible_values` sorts the deduplicated
+  value list — `list(set(...))` made `analyze`'s JSON `possible_values`
+  order vary per process under hash randomization (2026-08-16 audit).
+* **analysis:** `LanguageEnvironmentAnalyzer` no longer scans quoted string
+  literals for `FUNCTION <name>` — `DISPLAY 'FUNCTION KEYS ARE DISABLED'`
+  used to report a fictitious intrinsic function `KEYS` and flip
+  `uses_intrinsic_functions` to true (2026-08-16 audit).
+* **analysis:** `IMSSegmentAnalyzer` merges MOVE-tracked values on a group
+  SSA's segment-name child field with its static VALUE clause (multi-
+  candidate "/" convention) — `MOVE 'SEGB' TO SSA1-SEG-NAME` was ignored
+  and the stale initial VALUE reported with full confidence (2026-08-16
+  audit).
+* **analysis:** `MoveTypeChecker` classifies multi-part alphabetic
+  PICTUREs (`AA(3)`, `A(2)A(3)`) as ALPHABETIC — they fell through to
+  ALPHANUMERIC, hiding illegal numeric→alphabetic MOVEs — and treats a
+  trailing `CR`/`DB` sign symbol as NUMERIC_EDITED (`9(5)CR` was UNKNOWN
+  while the equivalent `9(5)DB` was NUMERIC_EDITED only by accident, via
+  the 'B' insertion character) (2026-08-16 audit).
+* **analysis:** `TechnicalDebtAnalyzer` rounds the composite score to the
+  2 decimals `to_dict()` serializes *before* grading, so the emitted
+  score and grade always agree (a JSON score of 10.0 could carry grade
+  "B" against the documented A<=10 band); the complexity/size components
+  now carry a "no procedures to rate" finding instead of an empty
+  findings list on a program with no procedures (2026-08-16 audit).
+* **analysis:** `ComplexityAnalyzer` aggregates decision counts across
+  same-named paragraphs in different sections (legal COBOL) — the
+  name-keyed flow node already merged both bodies' statement counts, but
+  only the first body's complexity was analyzed, silently dropping the
+  second (2026-08-16 audit).
+* **generators:** `compute_program_data_items` (the `data-items`
+  subcommand) reports the usage of a PIC-less USAGE-only record root
+  (`77 X USAGE COMP-1.`) instead of `null` — the byte length was already
+  derived from that very usage (2026-08-16 audit).
+* **cli:** `analyze` now emits `"possible_values_incomplete": true` on a
+  dynamic CALL entry whenever `DynamicCallAnalyzer` marked the value set
+  as not fully resolvable (an untracked identifier-shaped MOVE source
+  feeding the target variable) — before this, the JSON presented a
+  known-incomplete `possible_values` list as if it were exhaustive
+  (2026-08-16 analyzer-subcommand audit).
+* **cli:** `program-flow --format mermaid|dot` combined with `--profile`
+  now prints a stderr warning that the profiling metrics are only
+  included in `--format json` output — previously the profiler ran and
+  its result was silently discarded, making `--profile` look like a
+  no-op (2026-08-16 analyzer-subcommand audit).
+
 * **analysis:** `DeadCodeAnalyzer` no longer resurrects genuinely dead
   paragraphs that share a section with a PERFORMed/GONE-TO sibling.
   `_propagate_section_references` used to mark a paragraph's parent

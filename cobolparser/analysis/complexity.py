@@ -242,10 +242,17 @@ class ComplexityAnalyzer:
                 extended = 1
                 max_depth = 0
             else:
-                para = paragraph_map.get(node.name)
-                decisions, extra_bool_ops, max_depth = (
-                    self._analyze_paragraph(para) if para is not None else (0, 0, 0)
-                )
+                decisions = extra_bool_ops = max_depth = 0
+                # A flow node is name-keyed, so two same-named paragraphs
+                # (legal COBOL when they live in different sections) share
+                # one node whose statement_count already merges both bodies
+                # — aggregate the decision counts the same way instead of
+                # silently analyzing only the first body.
+                for para in paragraph_map.get(node.name, []):
+                    d, b, m = self._analyze_paragraph(para)
+                    decisions += d
+                    extra_bool_ops += b
+                    max_depth = max(max_depth, m)
                 cyclomatic = 1 + decisions
                 extended = 1 + decisions + extra_bool_ops
 
@@ -274,22 +281,24 @@ class ComplexityAnalyzer:
     @staticmethod
     def _collect_paragraph_map(
         proc_division: CobolDivision,
-    ) -> dict[str, CobolParagraph]:
-        """Map every paragraph name (upper-cased) to its AST node.
+    ) -> dict[str, list[CobolParagraph]]:
+        """Map every paragraph name (upper-cased) to all its AST nodes.
 
         Mirrors ``dead_code.py``'s/``scanner.py``'s own procedure collection
         -- section-owned paragraphs first, then top-level ones -- but source
         order does not matter here (only name-keyed lookup does), so no
-        interleave-by-line step is needed.
+        interleave-by-line step is needed. The value is a *list* because two
+        same-named paragraphs in different sections are legal COBOL and the
+        (name-keyed) flow node merges both bodies.
         """
-        result: dict[str, CobolParagraph] = {}
+        result: dict[str, list[CobolParagraph]] = {}
         for section in proc_division._sections.values():
             for para in section.paragraphs:
                 if para.paragraph_name:
-                    result.setdefault(para.paragraph_name.upper(), para)
+                    result.setdefault(para.paragraph_name.upper(), []).append(para)
         for para in proc_division.paragraphs:
             if para.paragraph_name:
-                result.setdefault(para.paragraph_name.upper(), para)
+                result.setdefault(para.paragraph_name.upper(), []).append(para)
         return result
 
     @staticmethod

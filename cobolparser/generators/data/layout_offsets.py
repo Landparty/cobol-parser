@@ -331,8 +331,14 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
             level=record.level,
             is_group=bool(data_children),
             picture=record.picture_clause.pattern if record.picture_clause else None,
+            # Mirror _layout_item: an elementary root always has a usage
+            # (defaulting to DISPLAY) — gating on PICTURE presence nulled the
+            # usage of PIC-less USAGE-only roots (77 X USAGE COMP-1.) whose
+            # byte length was itself derived from that very usage.
             usage=(
-                (record.usage or "DISPLAY").upper() if record.picture_clause else None
+                (record.usage.upper() if record.usage else None)
+                if data_children
+                else (record.usage or "DISPLAY").upper()
             ),
             byte_offset=0,
             byte_length=record_length,

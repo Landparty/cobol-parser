@@ -610,6 +610,14 @@ counting on statement types where the attribute *is* already wired to
 header holds no statements of its own (same observation `dead_code.py` and
 `program_flow/scanner.py` make), so there is nothing to walk.
 
+**Same-named paragraphs aggregate (2026-08-16 audit fix):** the flow node
+is name-keyed, so two same-named paragraphs in different sections (legal
+COBOL) share one node whose `statement_count` merges both bodies —
+`_collect_paragraph_map` now maps a name to *all* its paragraph nodes and
+`analyze()` sums decisions/boolean operators and maxes nesting depth
+across them, instead of silently analyzing only the first body. Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA8SameNamedParagraphs`.
+
 CLI: `cobol-parser complexity <file.cbl>` (see cli.md).
 
 ## RedundancyAnalyzer (`redundancy.py`, 2026-08-16)
@@ -688,8 +696,15 @@ penalties: GO TO density, `ALTER` usage via `ast.find_all_by_type` --
 empirically -- HIGH-severity `RecursionRiskAnalyzer` risks, unreachable-node
 ratio), `size` (share of procedures over `size_threshold`, default 50
 statements). Final score is the weighted average of the four 0-100
-component scores, clamped to `[0, 100]`; grade bands are A <= 10, B <= 25,
-C <= 45, D <= 70, else F.
+component scores, clamped to `[0, 100]` and **rounded to the 2 decimals
+`to_dict()` serializes before grading** (2026-08-16 audit fix — grading
+the raw float let accumulated noise like 10.000000000000002 push a score
+the JSON prints as 10.0 across the A/B band edge); grade bands are A <=
+10, B <= 25, C <= 45, D <= 70, else F. The complexity/size components
+carry a `"no procedures to rate"` finding (rather than an empty findings
+list) on a program with no procedures, per the every-point-explained
+contract. Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA7GradeMatchesSerializedScore`.
 
 **`top_offenders`** ranks procedures by a severity score built from the
 same underlying findings (HIGH complexity +30, MODERATE +10, each GO TO +3,
@@ -726,6 +741,26 @@ report: IOSequenceReport = IOSequenceAnalyzer().analyze(ast)
 Validates that IO operations follow legal COBOL sequencing rules (file must be
 opened before read/write, etc.).
 
+**Execution-order walk, not source-order (2026-08-16 audit fix).** The
+analyzer used to walk the raw AST in declaration order, so the canonical
+correct COBOL shape — OPEN/READ in a main paragraph that PERFORMs a
+wrap-up paragraph declared *after* it — produced CLOSE_NOT_OPEN +
+FILE_LEFT_OPEN (and, for an OPEN living in a PERFORMed init paragraph,
+READ_BEFORE_OPEN) false positives. `analyze()` now linearizes the
+PROCEDURE DIVISION (sections and top-level paragraphs interleaved by
+source line, same observation `dead_code.py` makes) and runs an
+execution-order chain from the entry procedure: fall-through, a
+paragraph's own top-level unconditional GO TO followed, out-of-line
+`PERFORM target [THRU end]` inlined at the call site (section names
+resolve to their full paragraph range; a re-entrant PERFORM is skipped
+via a range stack; per-chain visited sets keep GO TO cycles finite).
+Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
+branches still share one state (unchanged conservatism); paragraphs
+unreachable from the entry procedure are no longer walked at all.
+Contained programs are no longer walked either (single-program scope,
+matching every other analyzer). Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA1IoSequenceExecutionOrder`.
+
 **Only `STOP RUN` is program termination (2026-08-12 fix, audit A-B1):**
 the end-of-program handling (flag still-open files, clear open-file state)
 used to fire for ANY `StopStatement`, but `STOP 'literal'` merely pauses for
@@ -749,6 +784,15 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
+
+**Picture classification fixes (2026-08-16 audit):** `_PIC_ALPHA_ONLY_RE`
+now matches any concatenation of `A`/`A(n)` parts (`AA(3)`, `A(2)A(3)`) —
+they previously fell through to ALPHANUMERIC, hiding illegal
+numeric→alphabetic MOVEs. A pattern ending in the `CR`/`DB` sign symbol
+classifies as NUMERIC_EDITED up front — `9(5)CR` was UNKNOWN (silently
+skipped into `unresolved_count`) while `9(5)DB` was NUMERIC_EDITED only
+because its 'B' happened to match the blank-insertion edit char. Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA5A6MoveTypePictureClassification`.
 
 **`unresolved_count` (2026-07-09, audit finding H5):** before this field
 existed, an unresolvable source category (`UNKNOWN`/`FIGURATIVE`) caused
@@ -784,6 +828,13 @@ result: LEAnalysisResult = LanguageEnvironmentAnalyzer().analyze(ast)
 
 Detects IBM Language Environment function calls (CEEGTST, CEEMGET, etc.) and
 LE service calls.
+
+**Quoted string literals are never scanned for `FUNCTION <name>`
+(2026-08-16 audit fix):** `_collect_text_fields`'s `_add` skips operands
+that are quoted literals — `DISPLAY 'FUNCTION KEYS ARE DISABLED'` used to
+report a fictitious intrinsic function `KEYS` and set
+`uses_intrinsic_functions` true. Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`.
 
 ## CRUDMatrixGenerator
 
@@ -829,6 +880,13 @@ dynamic CALL on such a variable gets
 `possible_values` (even when non-empty) is not exhaustive. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB3UntrackedIdentifierSourceIsNotAValue`.
 
+**`possible_values` is deterministic (2026-08-16 audit fix):**
+`CallStatement.set_possible_values` sorts the deduplicated list —
+`list(set(...))` made the JSON order vary per process under hash
+randomization. The `analyze` CLI also emits the
+`possible_values_incomplete` flag now (see cli.md). Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA2PossibleValuesDeterministic`.
+
 ## IMSSegmentAnalyzer
 
 ```python
@@ -837,6 +895,19 @@ result = IMSSegmentAnalyzer().analyze(ast)
 ```
 
 Analyses IMS DLI segment calls (EXEC DLI GU/GN/ISRT/DLET/REPL).
+
+**Group-SSA segment names merge MOVE-tracked child values (2026-08-16
+audit fix):** `_resolve_ssa_segment`'s group branch used to return only
+the first child's static VALUE clause — `MOVE 'SEGB' TO SSA1-SEG-NAME`
+was ignored, reporting the stale initial VALUE with full confidence. The
+child field's MOVE-tracked values are now merged with its VALUE clause,
+multi-candidate results using the existing "/" convention. Only values
+from an actual MOVE are merged (a separate `_moved_values` dict, not
+`_variable_values`): VALUE clauses are keyed by *bare* name, and two SSAs
+whose child fields share a name (both `SSA-SEG-NAME`, qualified
+differently — the shape `test_multiple_ssas_path_call` pins) would
+otherwise cross-contaminate each other's static values. Pinned by
+`tests/regression/test_audit_2026_08_16_analyzers.py::TestA4IMSMovedSegmentName`.
 
 ## HostVariableResolver
 
