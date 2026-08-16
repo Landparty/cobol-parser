@@ -42,6 +42,7 @@ class TestReportIdentification:
             "analyze",
             "dead-code",
             "program-flow",
+            "recursion-check",
             "io-sequence",
             "move-type-check",
             "linkage-check",
