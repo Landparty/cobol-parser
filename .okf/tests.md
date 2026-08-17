@@ -3,10 +3,30 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-16T00:00:00Z
+timestamp: 2026-08-17T00:00:00Z
 ---
 
 # Overview
+
+2026-08-17 (review follow-up on the entry below): +3 in
+`tests/unit/analysis/test_unused_variables.py`'s `TestEvaluateSubjects` —
+`test_subjects_reach_operands_and_public_lookup` (evaluate_parser now
+routes subjects through `add_subject()`, so they land in `.operands` and
+`find_statements_using_variable` sees them),
+`test_when_selector_only_variable_not_reported` (a data-name referenced
+only as a WHEN selector arrives as a `Literal`-typed selector dict —
+`_selector_identifiers` now scans those; previously falsely reported
+unused), and `test_expression_subject_walked_structurally` (programmatic
+`CobolExpression` subject via `add_subject()` — the analyzer's explicit
+subjects walk is its only coverage, and the opaque-expression fallback
+must scan every operand, not just `operands[0]`). Both parsed-source
+tests from the 2026-08-16 entry also gained a deliberately-unused
+`WS-DEAD` positive-control item asserted to BE reported, so their
+negative assertions can no longer pass vacuously if a parser regression
+drops the declarations. Note: the entry below describes `add_subject()`
+as "the setter that would otherwise reach `.operands`" — accurate only
+for string subjects; a `CobolExpression` subject goes to `add_child()`,
+never `add_operand()`. Brings the file to 35 tests.
 
 2026-08-16 (unused-variable-function review): +2 in
 `tests/unit/analysis/test_unused_variables.py`'s new `TestEvaluateSubjects`

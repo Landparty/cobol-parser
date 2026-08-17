@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 20 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
-timestamp: 2026-08-16T00:00:00Z
+timestamp: 2026-08-17T00:00:00Z
 ---
 
 # Overview
@@ -287,23 +287,42 @@ selectors, per `constraints.py`'s same documented gap — see
 over-inclusive: a false positive there only makes the analyzer *miss* an
 unused variable, never wrongly flag a used one.
 
-**EVALUATE subjects are walked explicitly — they never reach `.operands`
-either (found during a review of this module, 2026-08-16).**
-`evaluate_parser.py`'s `_parse_subjects` appends straight to
-`EvaluateStatement.subjects`, bypassing `add_subject()` — the setter that
-exists specifically to also call `add_operand()` — so `EVALUATE WS-CODE`/
-`EVALUATE WS-A ALSO WS-B` left the subject name(s) out of `.operands`
-entirely (confirmed empirically: `stmt.operands == []` for a bare
-`EVALUATE WS-CODE` while `stmt.subjects == ["WS-CODE"]`). Only the `WHEN`
-selectors were already special-cased in the `EvaluateStatement` branch of
-`_collect_referenced_names`; a field referenced solely as the subject was
-falsely reported unused. `constraints.py` and `program_flow/scanner.py`
-already read `stmt.subjects` directly and were unaffected — the fix is
-scoped to this module's `EvaluateStatement` branch, which now also walks
-`stmt.subjects` (via `_walk_expression_operands` for a `CobolExpression`
-subject, `_extract_identifiers` for the plain-string case the real parser
-always produces). Pinned by `TestEvaluateSubjects` in
-`tests/unit/analysis/test_unused_variables.py`.
+**EVALUATE subjects AND `Literal`-typed WHEN selectors (found during a
+review of this module, 2026-08-16; root-caused and widened by the
+2026-08-17 review follow-up).** The original 2026-08-16 fix walked
+`stmt.subjects` explicitly because `evaluate_parser.py`'s
+`_parse_subjects` appended straight to `EvaluateStatement.subjects`,
+bypassing `add_subject()`, leaving `stmt.operands == []`. The 2026-08-17
+follow-up moved that fix to its root: the parser now routes each subject
+through `add_subject()`, so string subjects reach `.operands` and every
+generic `.operands` consumer (`find_statements_using_variable`,
+intrinsic-function detection, `LanguageEnvironmentAnalyzer`,
+`BoundaryInventoryAnalyzer`'s caller-dataflow rung) sees them — see
+[parser.md](parser.md). This module's explicit subjects walk is KEPT: an
+earlier revision of this passage claimed `add_subject()` "exists
+specifically to also call `add_operand()`", which is wrong for half its
+branches — a `CobolExpression` subject goes to `add_child()`, never
+`add_operand()` (models/statements/control.py), so the explicit walk (now
+via the shared `_names_from_value` dispatch helper, also used for
+`FunctionCall` arguments and `ConditionalExpression`/
+`ArithmeticExpression` operands) is the ONLY coverage for
+expression-shaped subjects; the string double-count is a harmless set
+union. The same follow-up fixed the sibling false positive the original
+pass missed: `_build_selector` classifies a bare data-name (or level-88
+condition-name) WHEN selector as `{"type": "Literal"}` — it never emits
+`"Identifier"`, a fact constraints.py's EVALUATE handling also relies on —
+so `_selector_identifiers` now scans `Literal` values too; previously a
+variable referenced only as a WHEN selector was falsely reported unused.
+Caveat (documented in `_selector_identifiers`'s TODO): selector values
+arrive with string-literal quotes already stripped (the unquoted shape is
+pinned — see parser.md's blank-literal passage and the reverted `17fa400`
+attempt), so literal contents that coincidentally match a declared name
+mark it used — the accepted over-inclusive direction.
+`_walk_expression_operands`'s opaque-shape fallback also now scans every
+`expr.operands` entry, not just `operands[0]`. All pinned by
+`TestEvaluateSubjects` in `tests/unit/analysis/test_unused_variables.py`
+(each parsed-source test carries a deliberately-unused positive-control
+item so the negative assertions can never pass vacuously).
 
 **Group items, level-88s, REDEFINES, and OCCURS DEPENDING ON are
 structural, not textual, dependencies.** A group item counts as used if

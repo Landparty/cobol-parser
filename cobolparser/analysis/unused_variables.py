@@ -48,8 +48,11 @@ from ..models.statements.misc import MergeStatement, SortStatement
 # CRUDMatrixGenerator rely on.
 # TODO(known limitation): SCREEN SECTION / REPORT SECTION / COMMUNICATION
 # SECTION items (screen fields, report groups, CD entries) are entirely
-# invisible to this analyzer -- add them here if usage detection should
-# ever cover them.
+# invisible to this analyzer. Adding those names to this frozenset alone
+# would be a no-op: the DATA DIVISION parser's _skip_section
+# (parsers/divisions/data.py) discards those sections' content into
+# always-empty section nodes, so the parser must first retain their data
+# items before this set could expose them.
 _DATA_SECTION_NAMES = frozenset({"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"})
 
 # Words that can appear as, or inside, an operand's text but are never
@@ -265,6 +268,19 @@ def _extract_identifiers(operand: Any) -> set[str]:
     return tokens
 
 
+def _names_from_value(value: object) -> set[str]:
+    """Identifiers referenced by one operand-position value, dispatching on
+    shape: a ``CobolExpression`` is walked structurally, anything else is
+    treated as operand text. The one shared form of a dispatch previously
+    hand-rolled at three sites (``FunctionCall`` arguments,
+    ``ConditionalExpression``/``ArithmeticExpression`` operands, and the
+    ``EvaluateStatement`` subjects walk).
+    """
+    if isinstance(value, CobolExpression):
+        return _walk_expression_operands(value)
+    return _extract_identifiers(value)
+
+
 def _walk_expression_operands(expr: CobolExpression | None) -> set[str]:
     """Collect every leaf identifier referenced by a condition/arithmetic
     expression tree (IF conditions, PERFORM UNTIL guards, COMPUTE
@@ -284,24 +300,22 @@ def _walk_expression_operands(expr: CobolExpression | None) -> set[str]:
 
     if isinstance(expr, FunctionCall):
         for arg in expr.arguments:
-            if isinstance(arg, CobolExpression):
-                names |= _walk_expression_operands(arg)
-            else:
-                names |= _extract_identifiers(arg)
+            names |= _names_from_value(arg)
         return names
 
     if isinstance(expr, (ConditionalExpression, ArithmeticExpression)):
         for operand in (expr.left_operand, expr.right_operand):
-            if isinstance(operand, CobolExpression):
-                names |= _walk_expression_operands(operand)
-            else:
-                names |= _extract_identifiers(operand)
+            names |= _names_from_value(operand)
         return names
 
     # Unrecognized/opaque expression shape: fall back to the raw text this
-    # codebase always keeps around for exactly this situation.
+    # codebase always keeps around for exactly this situation. Scan every
+    # operand, not just the first -- a programmatically built expression may
+    # carry several, and dropping operands[1:] falsely reported those names
+    # unused.
     if expr.operands:
-        names |= _extract_identifiers(str(expr.operands[0]))
+        for operand in expr.operands:
+            names |= _extract_identifiers(str(operand))
         return names
     raw = expr.get_metadata("raw_condition")
     if raw:
@@ -526,17 +540,16 @@ class UnusedVariableAnalyzer:
                     for key in ("variable", "from_value", "by_value"):
                         names |= _extract_identifiers(after.get(key))
             elif isinstance(stmt, EvaluateStatement):
-                # EVALUATE subject-1 [ALSO subject-2]...: the evaluate_parser
-                # appends straight to `stmt.subjects`, bypassing
-                # `EvaluateStatement.add_subject()` (the setter that would
-                # otherwise reach `.operands`) -- confirmed empirically, so
-                # subjects never appear in `stmt.operands` and must be
-                # walked here explicitly, same as the WHEN selectors below.
+                # EVALUATE subject-1 [ALSO subject-2]...: string subjects
+                # now reach `.operands` too (evaluate_parser routes them
+                # through `add_subject()`), so the base-case operand scan
+                # already covers them -- the double-count here is a
+                # harmless set union. This walk must stay regardless: a
+                # `CobolExpression` subject goes to `add_child()`, never
+                # `add_operand()` (see EvaluateStatement.add_subject), so
+                # this is the ONLY coverage for expression-shaped subjects.
                 for subject in stmt.subjects:
-                    if isinstance(subject, CobolExpression):
-                        names |= _walk_expression_operands(subject)
-                    else:
-                        names |= _extract_identifiers(subject)
+                    names |= _names_from_value(subject)
                 clauses = list(stmt.when_clauses)
                 if stmt.default_when is not None:
                     clauses.append(stmt.default_when)
@@ -558,11 +571,15 @@ class UnusedVariableAnalyzer:
                 names |= _walk_expression_operands(expression_tree)
 
             # TODO(known limitation): EXEC CICS / EXEC DLI statement
-            # arguments are not scanned for identifiers at all -- no fixed
-            # argument-role shape to key off (only EXEC SQL's
-            # host_variables/null_indicators are handled here). A field
-            # referenced only inside one of these can be falsely reported
-            # unused.
+            # arguments are not scanned for identifiers yet -- only EXEC
+            # SQL's host_variables/null_indicators are handled here. The
+            # structured fields DO exist (`ExecCicsStatement.options` maps
+            # option keyword -> parenthesized argument text;
+            # `ExecImsStatement.arguments` is a positional list -- see
+            # parsers/statements/ibm_exec_statements.py), so a best-effort
+            # `_extract_identifiers` sweep over them is feasible; it simply
+            # has not been implemented. Until then a field referenced only
+            # inside one of these is falsely reported unused.
             host_variables = getattr(stmt, "host_variables", None)
             if host_variables:
                 for v in host_variables:
@@ -578,10 +595,30 @@ class UnusedVariableAnalyzer:
     def _selector_identifiers(selector: dict[str, Any]) -> set[str]:
         """Extract identifiers from a single EVALUATE WHEN selector dict
         (see ``WhenClause`` docstring for the selector shape vocabulary).
+
+        ``Literal`` selectors are scanned too: ``_build_selector`` in
+        evaluate_parser.py classifies a bare data-name (or level-88
+        condition-name) selector as ``{"type": "Literal"}`` -- it never
+        emits ``"Identifier"``, a fact constraints.py's EVALUATE handling
+        also relies on -- so skipping ``Literal`` values falsely reported
+        a variable referenced only as a WHEN selector unused. The
+        ``Identifier`` arm is kept defensively for programmatically built
+        selector dicts.
+
+        TODO(known limitation): unlike subject/IF text (re-quoted via
+        ``condition_token_text``), selector values arrive with string-
+        literal quotes already stripped by the lexer (the unquoted shape
+        is pinned by tests/regression/test_evaluate_space_literal_when.py
+        and consumed by constraints.py), so ``_extract_identifiers``'
+        quote-stripping cannot distinguish literal contents from
+        identifiers here. Literal contents that coincidentally match a
+        declared name mark it used -- the module's accepted over-inclusive
+        direction -- and a truly-unused variable sharing its name with a
+        WHEN literal's contents goes unreported.
         """
         names: set[str] = set()
         selector_type = selector.get("type")
-        if selector_type == "Identifier":
+        if selector_type in ("Identifier", "Literal"):
             names |= _extract_identifiers(selector.get("value"))
         elif selector_type == "Range":
             for key in ("start", "end"):
@@ -591,7 +628,8 @@ class UnusedVariableAnalyzer:
             # selectors carry only raw joined text, never a structural
             # tree (confirmed against evaluate_parser.py) -- best-effort
             # regex extraction only, not exact (same gap as SEARCH WHEN
-            # condition text above).
+            # condition text above), and quote-stripped like every other
+            # selector value (see the docstring's TODO).
             text = selector.get("text")
             if text:
                 names |= _extract_identifiers(str(text))
