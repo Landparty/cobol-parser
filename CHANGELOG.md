@@ -1426,6 +1426,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.7.8](https://github.com/Landparty/cobol-parser/compare/v1.7.7...v1.7.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **analysis:** 2026-08-16 analyzer-subcommand audit — 9 confirmed bugs ([a1678b0](https://github.com/Landparty/cobol-parser/commit/a1678b0b6997535d0f419a7ecab6bc8aed5eb95c))
+* **analysis:** merge only MOVE-tracked values into group-SSA segment names ([8c43778](https://github.com/Landparty/cobol-parser/commit/8c437789fc2455dfef476e537a45263966f88836))
+* **analysis:** UnusedVariableAnalyzer misses EVALUATE subject usage ([7b9be42](https://github.com/Landparty/cobol-parser/commit/7b9be421226e8a13c84ac4756d6f34064320647d))
+* **analysis:** UnusedVariableAnalyzer misses EVALUATE subject usage ([486cb08](https://github.com/Landparty/cobol-parser/commit/486cb08234aea41d6c7d09a07db0e76ceda6b963))
+* **cli:** surface incomplete dynamic-call values and ignored --profile; add analyzer CLI gap tests ([7e0c2dd](https://github.com/Landparty/cobol-parser/commit/7e0c2ddcde2c8cf20ad79655834c13faee7be48f))
+* **cobolparser:** EVALUATE subjects reach .operands; WHEN Literal selectors scanned ([9b35521](https://github.com/Landparty/cobol-parser/commit/9b355216277d3c6bd4f9f569c34957b2f79e8ff4))
+* **cobolparser:** EVALUATE subjects reach .operands; WHEN Literal selectors scanned ([4eb21bb](https://github.com/Landparty/cobol-parser/commit/4eb21bbc6f95c2ad78c462a6a2737ccc9e594d55))
+
+
+### Documentation
+
+* **analysis:** tag UnusedVariableAnalyzer's documented gaps as TODOs ([270da6f](https://github.com/Landparty/cobol-parser/commit/270da6fcc45ca3ffdaa8edb14352eddd392d1ce0))
+* **okf:** reword awkward parenthetical in analyze subcommand description ([0105f16](https://github.com/Landparty/cobol-parser/commit/0105f1643a6abd59acbcd7598c323dfb100f0a56))
+* update CLAUDE.md to match current repo state ([c9d7086](https://github.com/Landparty/cobol-parser/commit/c9d7086f33e3526a0dc1e822265d51eca71b00b4))
+
 ## [1.7.7](https://github.com/Landparty/cobol-parser/compare/v1.7.6...v1.7.7) (2026-08-16)
 
 
