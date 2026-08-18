@@ -227,7 +227,16 @@ def _text_out(text: str, output_path: str | None = None) -> None:
 def _build_parse_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
-    p = subparsers.add_parser("parse", help="Parse a COBOL source file to AST JSON")
+    p = subparsers.add_parser(
+        "parse",
+        help="Parse a COBOL source file to AST JSON",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser parse program.cbl\n"
+            "  cobol-parser parse program.cbl --errors --stats -o ast.json"
+        ),
+    )
     p.add_argument("file", help="Path to the COBOL source file")
     p.add_argument(
         "path",
@@ -420,7 +429,16 @@ def _cmd_parse(args: argparse.Namespace) -> None:
 def _build_batch_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
-    p = subparsers.add_parser("batch", help="Parse multiple COBOL files in parallel")
+    p = subparsers.add_parser(
+        "batch",
+        help="Parse multiple COBOL files in parallel",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser batch a.cbl b.cbl c.cbl\n"
+            "  cobol-parser batch --glob 'src/**/*.cbl' --workers 4"
+        ),
+    )
     p.add_argument("files", nargs="*", help="Paths to COBOL source files")
     p.add_argument(
         "--glob",
@@ -558,7 +576,16 @@ def _cmd_batch(args: argparse.Namespace) -> None:
 def _build_tokenize_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
-    p = subparsers.add_parser("tokenize", help="Tokenize a COBOL source file")
+    p = subparsers.add_parser(
+        "tokenize",
+        help="Tokenize a COBOL source file",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser tokenize program.cbl\n"
+            "  cobol-parser tokenize program.cbl --free-form"
+        ),
+    )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
     _add_free_form_arg(p)
@@ -604,7 +631,14 @@ def _build_preprocess_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
     p = subparsers.add_parser(
-        "preprocess", help="Preprocess fixed-format COBOL to free-form"
+        "preprocess",
+        help="Preprocess fixed-format COBOL to free-form",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser preprocess program.cbl\n"
+            "  cobol-parser preprocess program.cbl --define DEBUG"
+        ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_free_form_arg(p)
@@ -655,7 +689,14 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
 def _build_expand_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
-    p = subparsers.add_parser("expand", help="Expand COPY statements (copybooks)")
+    p = subparsers.add_parser(
+        "expand",
+        help="Expand COPY statements (copybooks)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Example:\n" "  cobol-parser expand program.cbl --copybook-path ./copybooks"
+        ),
+    )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_copybook_args(p)
     _add_compact_arg(p)
@@ -710,6 +751,12 @@ def _build_gen_data_parser(
     p = subparsers.add_parser(
         "gen-data",
         help="Generate synthetic CSV test data from a copybook record layout",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser gen-data CUSTOMER.cpy --rows 100 --seed 7 -o out.csv\n"
+            "  cobol-parser gen-data CUSTOMER.cpy --list-records"
+        ),
     )
     p.add_argument("file", help="Path to the copybook (or COBOL source) file")
     p.add_argument(
@@ -878,6 +925,12 @@ def _build_gen_fixtures_parser(
     p = subparsers.add_parser(
         "gen-fixtures",
         help="Generate program-scoped test fixtures (boundary mocks/asserts) for a COBOL program",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser gen-fixtures INVUPDT.cbl --seed 7 -o fixtures.json\n"
+            "  cobol-parser gen-fixtures INVUPDT.cbl --scenarios all --format csv-dir -o fixtures/"
+        ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_copybook_args(p)
@@ -1028,15 +1081,23 @@ def _build_analyzer_parser(
     func: Any,
     *,
     profiling: bool = False,
+    examples: str,
 ) -> None:
     """Build a standard analyzer subcommand.
 
     Shared by the analyzer subcommands whose argument set is identical:
     a ``file`` positional plus the common compact/free-form/dialect/
     error-recovery/copybook/define/output flags. ``profiling=True`` also adds
-    the profiling flags.
+    the profiling flags. ``examples`` is a "cobol-parser <name> ..." example
+    block (one or two lines, no leading "Example(s):" label) shown in --help.
     """
-    p = subparsers.add_parser(name, help=help)
+    label = "Example:" if "\n" not in examples else "Examples:"
+    p = subparsers.add_parser(
+        name,
+        help=help,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"{label}\n{examples}",
+    )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
     _add_free_form_arg(p)
@@ -1100,6 +1161,13 @@ def _build_unused_variables_parser(
     p = subparsers.add_parser(
         "unused-variables",
         help="Detect DATA DIVISION items never referenced in PROCEDURE DIVISION",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser unused-variables program.cbl\n"
+            "  cobol-parser unused-variables program.cbl --copybook-path ./copybooks "
+            "--exclude-copybook-variables"
+        ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
@@ -1206,6 +1274,12 @@ def _build_program_flow_parser(
     p = subparsers.add_parser(
         "program-flow",
         help="Display program control flow graph (paragraphs, PERFORM, GO TO, CALL)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser program-flow program.cbl\n"
+            "  cobol-parser program-flow program.cbl --format mermaid"
+        ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
     p.add_argument(
@@ -1551,6 +1625,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "Analyze dynamic CALL targets in COBOL source",
         _cmd_analyze,
         profiling=True,
+        examples="  cobol-parser analyze program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
@@ -1558,6 +1633,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "Detect unreferenced paragraphs/sections (dead code)",
         _cmd_dead_code,
         profiling=True,
+        examples="  cobol-parser dead-code program.cbl",
     )
     _build_unused_variables_parser(subparsers)
     _build_program_flow_parser(subparsers)
@@ -1568,6 +1644,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "infinite loop",
         _cmd_recursion_check,
         profiling=True,
+        examples="  cobol-parser recursion-check program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
@@ -1575,6 +1652,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "Compute per-paragraph cyclomatic complexity and maintainability metrics",
         _cmd_complexity,
         profiling=True,
+        examples="  cobol-parser complexity program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
@@ -1583,36 +1661,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "control-flow smells, size) with a top-offenders breakdown",
         _cmd_health,
         profiling=True,
+        examples="  cobol-parser health program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
         "io-sequence",
         "Validate file I/O operation ordering (OPEN/READ/WRITE/CLOSE lifecycle)",
         _cmd_io_sequence,
+        examples="  cobol-parser io-sequence program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
         "move-type-check",
         "Check MOVE statement data category compatibility",
         _cmd_move_type_check,
+        examples="  cobol-parser move-type-check program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
         "linkage-check",
         "Validate LINKAGE SECTION items against CALL/ENTRY USING clauses",
         _cmd_linkage_check,
+        examples="  cobol-parser linkage-check program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
         "language-env",
         "Detect COBOL intrinsic functions and IBM Language Environment service calls",
         _cmd_language_env,
+        examples="  cobol-parser language-env program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
         "ims-dli",
         "Extract IMS DLI segment references from CBLTDLI/AIBTDLI/CEETDLI calls",
         _cmd_ims_dli,
+        examples="  cobol-parser ims-dli program.cbl",
     )
     _build_analyzer_parser(
         subparsers,
@@ -1621,6 +1705,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "condition values for every data item in the program",
         _cmd_data_items,
         profiling=True,
+        examples="  cobol-parser data-items program.cbl",
     )
 
     return parser

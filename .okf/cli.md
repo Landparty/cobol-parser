@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-16T00:00:00Z
+timestamp: 2026-08-18T00:00:00Z
 ---
 
 # Overview
@@ -11,6 +11,15 @@ timestamp: 2026-08-16T00:00:00Z
 Entry point: `cobol-parser` → `cobolparser.cli:main`
 
 Source: `cobolparser/cli/parse.py` (all subcommands), `cobolparser/cli/coverage.py` (IO coverage tools).
+
+Every subcommand's `--help` now shows a `RawDescriptionHelpFormatter` epilog
+with one or two runnable `cobol-parser <name> ...` examples (2026-08-18).
+Purely a `--help` UX addition — no flags, defaults, or output shapes changed;
+`_build_analyzer_parser()` grew a required `examples` kwarg (a
+"cobol-parser <name> ..." block, no leading label) that its 13 callers each
+supply, and the remaining hand-built parsers (`parse`, `batch`, `tokenize`,
+`preprocess`, `expand`, `gen-data`, `gen-fixtures`, `unused-variables`,
+`program-flow`) set their own `epilog=` directly.
 
 # Output Identification
 

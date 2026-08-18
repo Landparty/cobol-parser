@@ -114,6 +114,11 @@ ENV/
 env.bak/
 venv.bak/
 
+# uv-managed build env, created ad hoc by mocky-mock-vscode-extension's
+# scripts/install-local.js --local-deps to rebuild the Cython extensions;
+# this repo is not otherwise uv-managed
+uv.lock
+
 # Spyder project settings
 .spyderproject
 .spyproject

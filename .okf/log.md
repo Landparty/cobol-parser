@@ -1,5 +1,13 @@
 # OKF Update Log
 
+## 2026-08-18 (`--help` epilogs with usage examples on every subcommand)
+
+`cobolparser/cli/parse.py` — every subcommand parser (both the hand-built
+ones and the 13 routed through `_build_analyzer_parser()`, which grew a
+required `examples` kwarg) now sets `formatter_class=RawDescriptionHelpFormatter`
+and an `epilog` with one or two runnable examples. `--help` UX only — no
+flag, default, or output-shape changes. See [cli.md](cli.md).
+
 ## 2026-08-16 (Analyzer-subcommand audit: 9 fixes + gap tests)
 
 Full audit of the 13 analyzer CLI subcommands (smoke sweep over the whole
