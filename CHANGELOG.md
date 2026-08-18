@@ -63,6 +63,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser/analysis:** review follow-up on the `EVALUATE`-subject fix
+  below. `evaluate_parser.py` now routes subjects through
+  `EvaluateStatement.add_subject()` (the root cause: it appended straight
+  to `stmt.subjects`, so `stmt.operands` stayed empty and every generic
+  `.operands` consumer — `find_statements_using_variable`,
+  intrinsic-function detection, `LanguageEnvironmentAnalyzer`,
+  `BoundaryInventoryAnalyzer`'s caller-dataflow rung — missed a variable
+  referenced only as an `EVALUATE` subject). `UnusedVariableAnalyzer`
+  additionally no longer falsely reports a variable referenced only as a
+  plain `WHEN` selector: `_build_selector` classifies a bare data-name
+  (or level-88 condition-name) selector as `{"type": "Literal"}` and
+  never emits `"Identifier"`, so `_selector_identifiers` now scans
+  `Literal` values too. The analyzer's opaque-expression fallback also
+  scans every `expr.operands` entry instead of only the first. The
+  analyzer keeps its explicit subjects walk because `add_subject()` sends
+  a `CobolExpression` subject to `add_child()`, never `add_operand()` —
+  the entry below's parenthetical ("the setter that would otherwise reach
+  `.operands`") is accurate only for string subjects.
 * **analysis:** `UnusedVariableAnalyzer` no longer falsely reports a data
   item as unused when it is referenced only as an `EVALUATE` subject
   (`EVALUATE WS-CODE` / `EVALUATE WS-A ALSO WS-B`). `evaluate_parser.py`

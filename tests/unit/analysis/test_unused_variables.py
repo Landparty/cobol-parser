@@ -33,6 +33,8 @@ from cobolparser.models.program import (
     CobolProgram,
     CobolSection,
 )
+from cobolparser.models.statements.base import CobolExpression
+from cobolparser.models.statements.control import EvaluateStatement
 from cobolparser.models.statements.data import InspectStatement
 
 
@@ -360,15 +362,70 @@ class TestConditionExpressions:
 
 
 class TestEvaluateSubjects:
-    """EVALUATE subject-1 [ALSO subject-2]...: evaluate_parser appends
-    straight to `EvaluateStatement.subjects`, bypassing `add_subject()` (the
-    setter that would otherwise reach `.operands`), so a subject referenced
-    only as the EVALUATE selector expression -- never inside a WHEN clause
-    or elsewhere -- must still be walked explicitly. See the EvaluateStatement
-    branch in `_collect_referenced_names`.
+    """EVALUATE subject-1 [ALSO subject-2]...: string subjects reach
+    `.operands` (evaluate_parser routes them through `add_subject()`), and
+    the analyzer additionally walks `stmt.subjects` explicitly -- the only
+    coverage for a `CobolExpression` subject, which `add_subject()` sends
+    to `add_child()`, never `add_operand()`. Each parsed-source test
+    declares a deliberately-unused sibling item asserted to BE reported,
+    as a positive control proving the analyzer really saw the
+    declarations (without it, a parser regression that dropped the
+    WORKING-STORAGE items would leave the negative assertions vacuously
+    green). See the EvaluateStatement branch in
+    `_collect_referenced_names`.
     """
 
     def test_single_subject_marks_variable_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-CODE PIC X(1).
+       01 WS-DEAD PIC X(1).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-CODE
+               WHEN 'A'
+                   DISPLAY 'A'
+               WHEN OTHER
+                   DISPLAY 'OTHER'
+           END-EVALUATE
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert "WS-CODE" not in _names(report)
+        assert "WS-DEAD" in _names(report)
+
+    def test_also_joined_subjects_all_marked_used(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC X(1).
+       01 WS-B PIC X(1).
+       01 WS-DEAD PIC X(1).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           EVALUATE WS-A ALSO WS-B
+               WHEN 'A' ALSO 'B'
+                   DISPLAY 'AB'
+               WHEN OTHER
+                   DISPLAY 'OTHER'
+           END-EVALUATE
+           STOP RUN.
+"""
+        report = _analyze(src)
+        assert "WS-A" not in _names(report)
+        assert "WS-B" not in _names(report)
+        assert "WS-DEAD" in _names(report)
+
+    def test_subjects_reach_operands_and_public_lookup(self):
+        """Parser-altitude regression pin: subjects are routed through
+        add_subject(), so they land in the generic .operands bag and
+        .operands-based public APIs (find_statements_using_variable here)
+        see a variable whose only reference is an EVALUATE subject."""
         src = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
@@ -385,29 +442,74 @@ class TestEvaluateSubjects:
            END-EVALUATE
            STOP RUN.
 """
-        report = _analyze(src)
-        assert "WS-CODE" not in _names(report)
+        result = parse_cobol(src)
+        assert result.ast is not None
+        evaluates = result.ast.find_all_by_type("EvaluateStatement")
+        assert evaluates
+        assert "WS-CODE" in evaluates[0].operands
+        assert result.ast.find_statements_using_variable("WS-CODE")
 
-    def test_also_joined_subjects_all_marked_used(self):
+    def test_when_selector_only_variable_not_reported(self):
+        """A data-name referenced ONLY as a WHEN selector arrives from
+        _build_selector as {'type': 'Literal'} (the parser never emits
+        'Identifier'), so _selector_identifiers must scan Literal values
+        -- skipping them falsely reported WS-LIMIT unused."""
         src = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. TESTPROG.
        DATA DIVISION.
        WORKING-STORAGE SECTION.
-       01 WS-A PIC X(1).
-       01 WS-B PIC X(1).
+       01 WS-CODE PIC 9(2).
+       01 WS-LIMIT PIC 9(2).
+       01 WS-DEAD PIC 9(2).
        PROCEDURE DIVISION.
        MAIN-LOGIC.
-           EVALUATE WS-A ALSO WS-B
-               WHEN 'A' ALSO 'B'
-                   DISPLAY 'AB'
+           MOVE 5 TO WS-CODE
+           EVALUATE WS-CODE
+               WHEN WS-LIMIT
+                   CONTINUE
                WHEN OTHER
-                   DISPLAY 'OTHER'
+                   CONTINUE
            END-EVALUATE
            STOP RUN.
 """
         report = _analyze(src)
-        assert not ({"WS-A", "WS-B"} & _names(report))
+        assert "WS-LIMIT" not in _names(report)
+        assert "WS-DEAD" in _names(report)
+
+    def test_expression_subject_walked_structurally(self):
+        """A CobolExpression subject (only constructible via add_subject;
+        the real parser always produces strings) goes to .children, never
+        .operands, so the analyzer's explicit subjects walk is its only
+        coverage -- including the opaque-shape fallback, which must scan
+        EVERY operand, not just operands[0]."""
+        loc = SourceLocation(1, 1)
+        prog = CobolProgram("TEST", loc)
+        prog.add_division(CobolDivision("IDENTIFICATION", loc))
+
+        data_div = CobolDivision("DATA", loc)
+        ws = CobolSection("WORKING-STORAGE", loc)
+        ws.add_data_item(CobolDataItem("WS-A", 1, loc))
+        ws.add_data_item(CobolDataItem("WS-B", 1, loc))
+        ws.add_data_item(CobolDataItem("WS-DEAD", 1, loc))
+        data_div.add_section(ws)
+        prog.add_division(data_div)
+
+        proc_div = CobolDivision("PROCEDURE", loc)
+        para = CobolParagraph("MAIN", loc)
+        stmt = EvaluateStatement(loc)
+        expr = CobolExpression("CONDITION", loc)
+        expr.operands.extend(["WS-A", "WS-B"])
+        stmt.add_subject(expr)
+        para.add_statement(stmt)
+        proc_div.add_paragraph(para)
+        prog.add_division(proc_div)
+
+        report = UnusedVariableAnalyzer().analyze(prog)
+        names = {i.name for i in report.unused_items}
+        assert "WS-A" not in names
+        assert "WS-B" not in names
+        assert "WS-DEAD" in names
 
 
 class TestRedefines:

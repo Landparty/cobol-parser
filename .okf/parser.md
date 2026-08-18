@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-08-15T00:10:00Z
+timestamp: 2026-08-17T00:00:00Z
 ---
 
 # Overview
@@ -475,6 +475,24 @@ their unquoted representation. Pinned by
 `condition_token_text()` quoting — `EVALUATE 'X'` renders its subject as
 `'X'` — since no contract pins the unquoted form there; the flow scanner's
 `WHEN <value>` edge labels follow the selector (unquoted) shape.
+
+**EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
+review follow-up):** `_parse_subjects` routes each parsed subject through
+`EvaluateStatement.add_subject()` instead of appending straight to
+`stmt.subjects` — for string subjects (the only kind this parser produces)
+`add_subject()` also calls `add_operand()`, so subjects now land in the
+generic `.operands` bag that `find_statements_using_variable`,
+intrinsic-function detection, `LanguageEnvironmentAnalyzer`, and
+`BoundaryInventoryAnalyzer`'s caller-dataflow rung all scan; previously
+`stmt.operands == []` for every EVALUATE and each of those saw a
+subject-only variable as unreferenced. `stmt.subjects` itself is unchanged
+(same strings, same order), so `constraints.py`/`program_flow/scanner.py`'s
+direct `.subjects` reads are unaffected; `to_dict()["operands"]` gains the
+subject strings (additive — no contract pinned it empty, verified against
+`tests/contracts/test_evaluate_serialization.py` and
+`interface-contract.md`). Pinned by `TestEvaluateSubjects.
+test_subjects_reach_operands_and_public_lookup` in
+`tests/unit/analysis/test_unused_variables.py`.
 
 **EVALUATE WHEN-clause child registration (`evaluate_parser.py`):** the
 `WhenClause` nodes (both regular `WHEN` branches and the `WHEN OTHER`

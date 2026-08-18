@@ -188,7 +188,16 @@ class EvaluateStatementParser(IStatementParser):
     def _parse_subjects(
         self, token_stream: ITokenStream, stmt: EvaluateStatement
     ) -> int:
-        """Parse EVALUATE subjects before the first WHEN clause."""
+        """Parse EVALUATE subjects before the first WHEN clause.
+
+        Subjects are added via ``stmt.add_subject()`` -- not appended to
+        ``stmt.subjects`` directly -- so each string subject also lands in
+        the generic ``.operands`` bag that ``.operands``-based consumers
+        (``find_statements_using_variable``, intrinsic-function detection,
+        ``LanguageEnvironmentAnalyzer``, ``BoundaryInventoryAnalyzer``'s
+        caller-dataflow rung) scan.
+        """
+        subjects: list[str] = []
         current_subject: list[str] = []
 
         while not token_stream.is_empty():
@@ -209,7 +218,7 @@ class EvaluateStatementParser(IStatementParser):
 
             if token_val_upper == "ALSO":
                 if current_subject:
-                    stmt.subjects.append(" ".join(current_subject).strip())
+                    subjects.append(" ".join(current_subject).strip())
                     current_subject = []
                 token_stream.consume()
                 continue
@@ -219,9 +228,11 @@ class EvaluateStatementParser(IStatementParser):
             token_stream.consume()
 
         if current_subject:
-            stmt.subjects.append(" ".join(current_subject).strip())
+            subjects.append(" ".join(current_subject).strip())
 
-        stmt.subjects = [subject for subject in stmt.subjects if subject]
+        for subject in subjects:
+            if subject:
+                stmt.add_subject(subject)
         return len(stmt.subjects)
 
     def _parse_selectors(
