@@ -110,17 +110,41 @@ def _build_ext_modules() -> list:
             if os.path.exists(os.path.join(_PKG, f"{m}.c"))
         ]
 
-    extensions = [
+    accelerator_extensions = [
         Extension(f"{_PKG}.{m}", [os.path.join(_PKG, f"{m}.pyx")]) for m in _MODULES
     ]
+    # boundscheck/wraparound/cdivision=False are safe ONLY for these 3
+    # accelerators: they're hand-written in explicit Cython-typed style and
+    # were audited for it. They must NOT extend to the ~113 auto-Cythonized
+    # closed-source modules below -- those are ordinary Python business
+    # logic that uses plain `list[-1]` indexing throughout (e.g.
+    # divisions/procedure.py's `active[-1]`), and wraparound=False silently
+    # turns that into an unchecked, unadjusted raw index -1: an
+    # out-of-bounds read, not a Python-level error. Root-caused via a gdb
+    # backtrace on a closed-source Linux build landing in
+    # __Pyx_GetItemInt_Fast with wraparound=0, i=-1 against a genuine
+    # one-element list -- confirmed by rebuilding with these two directive
+    # sets split apart, which alone fixed a reproducible segfault in
+    # CobolParser(free_form=True).parse(...). See
+    # docs/superpowers/specs/2026-08-18-overload-cython-crash-fix.md.
+    accelerators = cythonize(
+        accelerator_extensions,
+        compiler_directives={
+            "language_level": "3",
+            "boundscheck": False,
+            "wraparound": False,
+            "cdivision": True,
+        },
+    )
 
-    if _closed_source_enabled():
-        extensions += [
-            Extension(dotted, [rel]) for dotted, rel in _iter_closed_source_py_files()
-        ]
+    if not _closed_source_enabled():
+        return accelerators
 
-    return cythonize(
-        extensions,
+    closed_source_extensions = [
+        Extension(dotted, [rel]) for dotted, rel in _iter_closed_source_py_files()
+    ]
+    closed_source = cythonize(
+        closed_source_extensions,
         # Closed-source mode cythonizes ~113 modules; translating them one at
         # a time dominates the build (and, on the emulated aarch64 CI runner,
         # risks the 6-hour job limit). 0 means "serial" to Cython, so clamp to
@@ -128,26 +152,22 @@ def _build_ext_modules() -> list:
         nthreads=os.cpu_count() or 1,
         compiler_directives={
             "language_level": "3",
-            "boundscheck": False,
-            "wraparound": False,
-            "cdivision": True,
-            # Applies to every extension in this single cythonize() call,
-            # so it is in effect for any Cython-available build (including
-            # plain `pip install -e ".[fast]"` dev builds), not just
-            # closed-source mode. It is a no-op for the 3 .pyx
-            # accelerators, which type their hot paths with explicit
-            # Cython syntax (`def f(str text, int pos)`) rather than PEP
-            # 484 annotations. It matters only for closed-source mode,
-            # where whole modules with plain PEP 484 annotations get
-            # cythonized: without it, Cython enforces those annotations as
-            # runtime C-level argument types, which breaks on
-            # `typing.overload` stub signatures like
-            # `def parse(self, filename: str = ...)` (Ellipsis is not a
-            # str). Keeping annotations inert for typing purposes only
-            # matches the pure-Python fallback's behavior.
+            # Deliberately NOT boundscheck/wraparound/cdivision=False --
+            # see the comment above. Cython's real defaults (bounds- and
+            # wraparound-checked) are correctness-over-speed for this
+            # whole-program business-logic build.
+            #
+            # annotation_typing=False applies to every extension in this
+            # cythonize() call. It's a no-op here now that parser.py's
+            # @overload stubs are TYPE_CHECKING-guarded (never reach
+            # Cython at all), but is kept as a defensive default: without
+            # it, Cython enforces PEP 484 annotations as runtime C-level
+            # argument types, which breaks on any future
+            # `def f(x: str = ...)`-style overload stub the same way.
             "annotation_typing": False,
         },
     )
+    return accelerators + closed_source
 
 
 setup(

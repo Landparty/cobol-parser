@@ -10,7 +10,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 # Core parsing infrastructure
 from .core.token_stream import TokenStream
@@ -348,27 +348,39 @@ class CobolParser:
             self.add_error(err)
             return self._create_result(None)
 
-    @overload
-    def parse(
-        self,
-        source: str,
-        filename: str = ...,
-        error_recovery: ErrorRecoveryMode | None = ...,
-        enable_profiling: Literal[False] = ...,
-        top_n: int = ...,
-        prof_output: str | None = ...,
-    ) -> ParseResult: ...
+    # The @overload stubs below are for static type checkers only and must
+    # never be compiled: Cython's whole-module closed-source build evaluates
+    # each stub's `param: T = ...` default against its annotation at class-
+    # body execution time (CPython never does this), and under the release
+    # build's optimization flags that mismatch doesn't raise a clean error --
+    # it corrupts the compiled method table, and the real `parse()`/
+    # `parse_cobol()` crash with a native access violation on the very next
+    # call. Gating on TYPE_CHECKING keeps the overloads visible to mypy/IDEs
+    # while making them runtime-invisible, so Cython never sees them at all.
+    # See docs/superpowers/specs/2026-08-18-overload-cython-crash-fix.md.
+    if TYPE_CHECKING:
 
-    @overload
-    def parse(
-        self,
-        source: str,
-        filename: str = ...,
-        error_recovery: ErrorRecoveryMode | None = ...,
-        enable_profiling: Literal[True] = ...,
-        top_n: int = ...,
-        prof_output: str | None = ...,
-    ) -> tuple[ParseResult, ProfilingResult]: ...
+        @overload
+        def parse(
+            self,
+            source: str,
+            filename: str = ...,
+            error_recovery: ErrorRecoveryMode | None = ...,
+            enable_profiling: Literal[False] = ...,
+            top_n: int = ...,
+            prof_output: str | None = ...,
+        ) -> ParseResult: ...
+
+        @overload
+        def parse(
+            self,
+            source: str,
+            filename: str = ...,
+            error_recovery: ErrorRecoveryMode | None = ...,
+            enable_profiling: Literal[True] = ...,
+            top_n: int = ...,
+            prof_output: str | None = ...,
+        ) -> tuple[ParseResult, ProfilingResult]: ...
 
     def parse(
         self,
@@ -696,32 +708,35 @@ def _detect_fixed_format(source: str) -> bool:
     return fixed_format_indicators >= threshold
 
 
-@overload
-def parse_cobol(
-    source: str | os.PathLike[str],
-    filename: str = ...,
-    dialect: DialectType = ...,
-    error_recovery: ErrorRecoveryMode = ...,
-    free_form: bool = ...,
-    preprocess_fixed: bool | None = ...,
-    enable_profiling: Literal[False] = ...,
-    top_n: int = ...,
-    prof_output: str | None = ...,
-) -> ParseResult: ...
+# See the matching comment on CobolParser.parse -- same reason these stubs
+# are TYPE_CHECKING-only rather than unconditional @overload.
+if TYPE_CHECKING:
 
+    @overload
+    def parse_cobol(
+        source: str | os.PathLike[str],
+        filename: str = ...,
+        dialect: DialectType = ...,
+        error_recovery: ErrorRecoveryMode = ...,
+        free_form: bool = ...,
+        preprocess_fixed: bool | None = ...,
+        enable_profiling: Literal[False] = ...,
+        top_n: int = ...,
+        prof_output: str | None = ...,
+    ) -> ParseResult: ...
 
-@overload
-def parse_cobol(
-    source: str | os.PathLike[str],
-    filename: str = ...,
-    dialect: DialectType = ...,
-    error_recovery: ErrorRecoveryMode = ...,
-    free_form: bool = ...,
-    preprocess_fixed: bool | None = ...,
-    enable_profiling: Literal[True] = ...,
-    top_n: int = ...,
-    prof_output: str | None = ...,
-) -> tuple[ParseResult, ProfilingResult]: ...
+    @overload
+    def parse_cobol(
+        source: str | os.PathLike[str],
+        filename: str = ...,
+        dialect: DialectType = ...,
+        error_recovery: ErrorRecoveryMode = ...,
+        free_form: bool = ...,
+        preprocess_fixed: bool | None = ...,
+        enable_profiling: Literal[True] = ...,
+        top_n: int = ...,
+        prof_output: str | None = ...,
+    ) -> tuple[ParseResult, ProfilingResult]: ...
 
 
 def parse_cobol(
