@@ -570,16 +570,6 @@ class UnusedVariableAnalyzer:
             if expression_tree is not None:
                 names |= _walk_expression_operands(expression_tree)
 
-            # TODO(known limitation): EXEC CICS / EXEC DLI statement
-            # arguments are not scanned for identifiers yet -- only EXEC
-            # SQL's host_variables/null_indicators are handled here. The
-            # structured fields DO exist (`ExecCicsStatement.options` maps
-            # option keyword -> parenthesized argument text;
-            # `ExecImsStatement.arguments` is a positional list -- see
-            # parsers/statements/ibm_exec_statements.py), so a best-effort
-            # `_extract_identifiers` sweep over them is feasible; it simply
-            # has not been implemented. Until then a field referenced only
-            # inside one of these is falsely reported unused.
             host_variables = getattr(stmt, "host_variables", None)
             if host_variables:
                 for v in host_variables:
@@ -588,6 +578,28 @@ class UnusedVariableAnalyzer:
             if null_indicators:
                 for v in null_indicators:
                     names |= _extract_identifiers(v)
+
+        # EXEC CICS (`ExecCicsStatement.options`: option keyword ->
+        # parenthesized argument text, e.g. INTO(WS-BUFFER)) and EXEC
+        # IMS/DLI (`ExecImsStatement.arguments`: a positional list, e.g.
+        # ["PCB(1)", "SEGMENT(EMPLOYEE)"]) carry their operands as raw
+        # joined text rather than a structural tree, the same shape as EXEC
+        # SQL's host_variables above -- but unlike EXEC SQL, neither class
+        # extends CobolStatement (they extend ASTNode directly -- see
+        # parsers/statements/ibm_exec_statements.py), so neither ever
+        # appears in ``ast.get_all_statements()`` and the loop above never
+        # sees them at all. They're still real AST nodes reachable via
+        # ``find_all_by_type``, so swept here separately via duck typing
+        # (importing the classes would add an analysis -> parsers layering
+        # dependency for no real type-safety benefit, since these fields are
+        # untyped raw text either way). Previously a field referenced only
+        # inside one of these was falsely reported unused.
+        for exec_stmt in ast.find_all_by_type("ExecCicsStatement"):
+            for v in (getattr(exec_stmt, "options", None) or {}).values():
+                names |= _extract_identifiers(v)
+        for exec_stmt in ast.find_all_by_type("ExecImsStatement"):
+            for v in getattr(exec_stmt, "arguments", None) or []:
+                names |= _extract_identifiers(v)
 
         return names
 

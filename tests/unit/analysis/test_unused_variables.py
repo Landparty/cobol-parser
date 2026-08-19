@@ -770,6 +770,175 @@ class TestExtrasLookupIsMroAware:
         assert "WS-CONVERT-TARGET" not in {i.name for i in report.unused_items}
 
 
+class TestExecCicsAndImsArguments:
+    """EXEC CICS/EXEC DLI operands are raw joined text on ExecCicsStatement/
+    ExecImsStatement -- both extend ASTNode directly (not CobolStatement),
+    so they never appear in ast.get_all_statements() and need a dedicated
+    find_all_by_type() sweep distinct from the main per-statement loop that
+    handles EXEC SQL's host_variables."""
+
+    def test_exec_cics_option_argument_marks_field_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-BUFFER PIC X(80).
+01 WS-TRULY-UNUSED PIC X(4).
+PROCEDURE DIVISION.
+MAIN.
+    EXEC CICS
+        RECEIVE INTO(WS-BUFFER)
+    END-EXEC.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        names = _names(report)
+        assert "WS-BUFFER" not in names
+        assert "WS-TRULY-UNUSED" in names
+
+    def test_exec_dli_positional_argument_marks_field_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-SEGMENT PIC X(80).
+01 WS-TRULY-UNUSED PIC X(4).
+PROCEDURE DIVISION.
+MAIN.
+    EXEC DLI
+        GU SEGMENT(WS-SEGMENT)
+    END-EXEC.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        names = _names(report)
+        assert "WS-SEGMENT" not in names
+        assert "WS-TRULY-UNUSED" in names
+
+    def test_exec_cics_with_no_arguments_does_not_crash(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-TRULY-UNUSED PIC X(4).
+PROCEDURE DIVISION.
+MAIN.
+    EXEC CICS
+        RETURN
+    END-EXEC.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        assert "WS-TRULY-UNUSED" in _names(report)
+
+
+class TestExpressionAndSelectorCoverage:
+    """Targets the LogicalExpression/PERFORM-AFTER/RENAMES/EVALUATE-selector
+    branches of the reference walk that the basic-usage tests don't reach."""
+
+    def test_logical_and_expression_marks_both_sides_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-A PIC 9(3).
+01 WS-B PIC 9(3).
+PROCEDURE DIVISION.
+MAIN.
+    IF WS-A > 1 AND WS-B > 1
+        DISPLAY 'BOTH'
+    END-IF.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        assert _names(report) == set()
+
+    def test_perform_varying_after_clause_marks_second_index_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-I PIC 9(3).
+01 WS-J PIC 9(3).
+01 WS-LIMIT-I PIC 9(3) VALUE 5.
+01 WS-LIMIT-J PIC 9(3) VALUE 5.
+PROCEDURE DIVISION.
+MAIN.
+    PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > WS-LIMIT-I
+        AFTER WS-J FROM 1 BY 1 UNTIL WS-J > WS-LIMIT-J
+        DISPLAY WS-I
+    END-PERFORM.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        assert "WS-J" not in _names(report)
+        assert "WS-LIMIT-J" not in _names(report)
+
+    def test_renames_clause_marks_range_endpoints_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-GROUP.
+   05 WS-A PIC X(2).
+   05 WS-B PIC X(2).
+66 WS-RENAME RENAMES WS-A THRU WS-B.
+PROCEDURE DIVISION.
+MAIN.
+    DISPLAY WS-RENAME.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        names = _names(report)
+        assert "WS-A" not in names
+        assert "WS-B" not in names
+
+    def test_evaluate_true_condition_selector_marks_operand_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-A PIC 9(3).
+01 WS-TRULY-UNUSED PIC X(4).
+PROCEDURE DIVISION.
+MAIN.
+    EVALUATE TRUE
+        WHEN WS-A > 5
+            DISPLAY 'BIG'
+        WHEN OTHER
+            DISPLAY 'SMALL'
+    END-EVALUATE.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        names = _names(report)
+        assert "WS-A" not in names
+        assert "WS-TRULY-UNUSED" in names
+
+    def test_evaluate_range_selector_marks_bounds_used(self):
+        src = """IDENTIFICATION DIVISION.
+PROGRAM-ID. T1.
+DATA DIVISION.
+WORKING-STORAGE SECTION.
+01 WS-CODE PIC 9(3).
+01 WS-LOW PIC 9(3) VALUE 1.
+01 WS-HIGH PIC 9(3) VALUE 10.
+PROCEDURE DIVISION.
+MAIN.
+    EVALUATE WS-CODE
+        WHEN WS-LOW THRU WS-HIGH
+            DISPLAY 'IN-RANGE'
+        WHEN OTHER
+            DISPLAY 'OUT'
+    END-EVALUATE.
+    STOP RUN.
+"""
+        report = _analyze(src)
+        names = _names(report)
+        assert "WS-LOW" not in names
+        assert "WS-HIGH" not in names
+
+
 class TestExports:
     def test_exported_from_top_level_package(self):
         import cobolparser
