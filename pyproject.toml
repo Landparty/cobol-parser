@@ -61,8 +61,19 @@ include = ["cobolparser*"]
 # wheel would ship a fully readable copy of every module it just compiled.
 # Excluding by pattern (rather than setting include-package-data = false)
 # keeps cobolparser/py.typed shipping without having to redeclare it.
+#
+# "*.py" belongs in this same list even though setup.py's _ClosedSourceBuildPy
+# already restricts build_py's *module* copy (find_package_modules) to just
+# __init__.py/__main__.py: include_package_data=True drives a SEPARATE build_py
+# code path (build_package_data -> find_data_files -> manifest_files) that
+# independently re-adds every .py file tracked in the sdist manifest as
+# "package data", regardless of what find_package_modules already excluded.
+# Without "*.py" here, that second path silently ships every stripped module's
+# source right back into the wheel next to its compiled .pyd/.so twin.
+# __init__.py/__main__.py are unaffected -- they still ship via the module
+# path, which this setting does not touch.
 [tool.setuptools.exclude-package-data]
-"*" = ["*.c", "*.pyx", "*.h"]
+"*" = ["*.c", "*.pyx", "*.h", "*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -175,7 +186,13 @@ test-requires = "pytest pytest-cov"
 # sys.path[0] and the SOURCE tree shadows the wheel installed in the test
 # venv -- silently testing the wrong thing. importlib mode leaves sys.path
 # alone, so `import cobolparser` resolves to the installed extensions.
-test-command = "python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py --no-cov -q --import-mode=importlib"
+#
+# check_installed_no_leaked_source.py runs the same no-leaked-.py/.c/.pyx/.h/
+# .pyi assertion as scripts/verify_closed_source_wheel.py, but against the
+# installed package rather than the wheel zip -- cibuildwheel's test-command
+# has no access to the wheel path itself. It runs on every one of this
+# matrix's built wheels, not just a local/manual one.
+test-command = "python {project}/scripts/check_installed_no_leaked_source.py && python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py --no-cov -q --import-mode=importlib"
 
 # NOTE: release CI overrides these per job via CIBW_ARCHS (see
 # .github/workflows/release-please.yml). These values still apply to local

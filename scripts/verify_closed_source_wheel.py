@@ -14,6 +14,8 @@ import venv
 import zipfile
 from pathlib import Path
 
+from _closed_source_checks import assert_no_leaked_source
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -26,51 +28,24 @@ def build_wheel(dist_dir: Path) -> Path:
         env=env,
         check=True,
     )
-    wheels = list(dist_dir.glob("cobolparser-*.whl"))
+    # The PyPI distribution name is "cobol-parser" ([project].name in
+    # pyproject.toml), which wheel filenames normalize to "cobol_parser-*" --
+    # not the "cobolparser" import package name. dist_dir is a fresh tempdir
+    # from this one build, so a bare "*.whl" glob is unambiguous and doesn't
+    # need to track that normalization if the project name ever changes again.
+    wheels = list(dist_dir.glob("*.whl"))
     if len(wheels) != 1:
         raise RuntimeError(f"expected exactly one wheel, found {wheels}")
     return wheels[0]
-
-
-# Kept in sync with setup.py's _UNCOMPILED_FILENAMES: the only .py files a
-# closed-source wheel may legitimately contain.
-ALLOWED_PY_NAMES = ("__init__.py", "__main__.py")
-
-# Cython embeds the original source verbatim, line by line, in C comments, so
-# a shipped .c file is a fully readable copy of the module it came from. .pyx
-# and .h are excluded on the same principle; .pyi would disclose the API
-# surface the wheel is meant to keep opaque.
-FORBIDDEN_SUFFIXES = (".c", ".pyx", ".h", ".pyi")
 
 
 def check_no_leaked_source(wheel_path: Path) -> None:
     with zipfile.ZipFile(wheel_path) as zf:
         names = [n for n in zf.namelist() if n.startswith("cobolparser/")]
 
-    py_files = [n for n in names if n.endswith(".py")]
-    leaked = [n for n in py_files if not n.endswith(ALLOWED_PY_NAMES)]
-    if leaked:
-        raise AssertionError(f"wheel leaks .py source for: {leaked}")
-    if not py_files:
-        raise AssertionError("expected at least the __init__.py stubs, found none")
-
-    leaked_native = [n for n in names if n.endswith(FORBIDDEN_SUFFIXES)]
-    if leaked_native:
-        raise AssertionError(
-            "wheel leaks Cython/C source (these embed the original .py source "
-            f"verbatim in comments): {leaked_native}"
-        )
-
-    # The compiled-away modules must reappear as extension modules; a wheel
-    # with neither the .py nor the .so/.pyd would "pass" the checks above
-    # while being completely broken.
-    ext_files = [n for n in names if n.endswith((".so", ".pyd"))]
-    if not ext_files:
-        raise AssertionError("wheel contains no compiled extension modules at all")
-
+    py_count, ext_count = assert_no_leaked_source(names)
     print(
-        f"OK: {len(py_files)} allowed .py shim(s) "
-        f"({', '.join(sorted(ALLOWED_PY_NAMES))}), {len(ext_files)} compiled "
+        f"OK: {py_count} allowed .py shim(s), {ext_count} compiled "
         "extension(s), no .c/.pyx/.h/.pyi source"
     )
 
