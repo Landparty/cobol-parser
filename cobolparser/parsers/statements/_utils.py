@@ -1055,21 +1055,27 @@ _EXEC_SQL_NO_SPACE_BEFORE: frozenset[TokenType] = frozenset(
 )
 
 #: (previous token type, current token type) pairs that the lexer produces
-#: for a two-character relational operator it has no dedicated token for --
-#: ``>=``, ``<=``, and ``<>`` all lex as two single-char tokens (GREATER/LESS
-#: + ASSIGN, or LESS + GREATER). Rejoining them with ``" ".join`` would
-#: corrupt ``WHERE SALARY >= :WS-ID`` into ``"...SALARY > =:WS-ID..."``.
+#: for a two-character relational/concatenation operator it has no dedicated
+#: token for -- ``>=``, ``<=``, ``<>``, ``!=`` all lex as two single-char
+#: tokens (GREATER/LESS + ASSIGN, LESS + GREATER, or BANG + ASSIGN), and
+#: ``||`` (SQL string concatenation) lexes as two PIPE tokens. Rejoining them
+#: with ``" ".join`` would corrupt ``WHERE SALARY >= :WS-ID`` into
+#: ``"...SALARY > =:WS-ID..."`` (or turn ``COL1 || COL2`` into ``COL1 | |
+#: COL2``).
 _EXEC_SQL_SPLIT_RELOP_PAIRS: frozenset[tuple[TokenType, TokenType]] = frozenset(
     {
         (TokenType.GREATER, TokenType.ASSIGN),  # >=
         (TokenType.LESS, TokenType.ASSIGN),  # <=
         (TokenType.LESS, TokenType.GREATER),  # <>
+        (TokenType.BANG, TokenType.ASSIGN),  # !=
+        (TokenType.PIPE, TokenType.PIPE),  # ||
     }
 )
 
 
 def _is_split_relational_operator(prev_token: Token | None, token: Token) -> bool:
-    """Return True if *token* immediately abuts *prev_token* forming ``>=``/``<=``/``<>``.
+    """Return True if *token* immediately abuts *prev_token* forming
+    ``>=``/``<=``/``<>``/``!=``/``||``.
 
     Column adjacency (same line, ``token``'s column immediately following the
     end of ``prev_token``'s value) is used rather than a bare value check so

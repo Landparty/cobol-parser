@@ -6,6 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import SetStatement
 from ._utils import (
+    consume_optional_subscript,
     is_statement_boundary,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -86,7 +87,21 @@ class SetStatementParser(IStatementParser):
                 if val in ("ADDRESS", "OF"):
                     pass
                 else:
-                    stmt.add_target(token.value or "")
+                    # A trailing `(subscript[, subscript]...)` group (e.g.
+                    # a table reference like `TBL-ITEM(1)`) must be folded
+                    # into the target string, matching MOVE/ADD/SUBTRACT/
+                    # COMPUTE targets -- without this, the subscript tokens
+                    # are left unconsumed, breaking the rest of the
+                    # statement (TO ADDRESS OF ...) and dropping it as
+                    # "Unparsed tokens".
+                    parts: list[str] = [token.value] if token.value else []
+                    consume_optional_subscript(token_stream, parts)
+                    # Unconditional add (matching the pre-existing
+                    # `stmt.add_target(token.value or "")`) -- an empty
+                    # target_name (e.g. an empty STRING_LITERAL target with
+                    # no subscript) is still recorded rather than silently
+                    # dropped.
+                    stmt.add_target(" ".join(p for p in parts if p))
             else:
                 break
             skip_whitespace(token_stream)

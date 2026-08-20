@@ -52,6 +52,7 @@ from cobolparser.parsers.statements import (
     RollbackStatementParser,
     SearchStatementParser,
     SetStatementParser,
+    SkipStatementParser,
     SortStatementParser,
     StartStatementParser,
     StringStatementParser,
@@ -101,6 +102,7 @@ def create_statement_registry() -> StatementParserRegistry:
     registry.register(ExitStatementParser())
     registry.register(ContinueStatementParser())
     registry.register(EjectStatementParser())
+    registry.register(SkipStatementParser())
     registry.register(GobackStatementParser())
 
     # IO statements

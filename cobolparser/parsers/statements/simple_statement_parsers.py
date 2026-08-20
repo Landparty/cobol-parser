@@ -20,6 +20,7 @@ from ...models.statements import (
     ReleaseStatement,
     ReturnStatement,
     RollbackStatement,
+    SkipStatement,
     UseStatement,
 )
 from ._utils import (
@@ -73,6 +74,40 @@ class EjectStatementParser(IStatementParser):
     ) -> EjectStatement:
         start = token_stream.consume()
         stmt = EjectStatement(token_location(start))
+        skip_whitespace(token_stream)
+        consume_period(token_stream)
+        return stmt
+
+
+_SKIP_TOKEN_TYPES: tuple[Any, ...] = (
+    TokenType.SKIP1,
+    TokenType.SKIP2,
+    TokenType.SKIP3,
+)
+
+_SKIP_LINE_COUNTS: dict[Any, int] = {
+    TokenType.SKIP1: 1,
+    TokenType.SKIP2: 2,
+    TokenType.SKIP3: 3,
+}
+
+
+class SkipStatementParser(IStatementParser):
+    """Parser for SKIP1/SKIP2/SKIP3 statements (compiler-directing listing
+    no-ops, the same class as EJECT).
+
+    Syntax: SKIP1 | SKIP2 | SKIP3
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        token = token_stream.peek(0)
+        return token is not None and token.type in _SKIP_TOKEN_TYPES
+
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> SkipStatement:
+        start = token_stream.consume()
+        stmt = SkipStatement(token_location(start), _SKIP_LINE_COUNTS[start.type])
         skip_whitespace(token_stream)
         consume_period(token_stream)
         return stmt

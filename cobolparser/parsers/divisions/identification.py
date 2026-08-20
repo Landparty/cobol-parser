@@ -12,7 +12,11 @@ This module implements parsing of the Identification Division which contains:
 
 from typing import Any
 
-from cobolparser.core.exceptions import ParseError, TokenMismatch
+from cobolparser.core.exceptions import (
+    ParseError,
+    TokenMismatch,
+    UnexpectedEndOfInput,
+)
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision
@@ -238,14 +242,27 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 continue
             break
 
-        # Expect period after program name (or after IS clause if present)
+        # Expect period after program name (or after IS clause if present).
+        # IBM Enterprise COBOL tolerates a missing period here (verified
+        # against real mainframe compiler behavior) -- treating it as a hard
+        # error instead of a warning previously cascaded into "No
+        # recognizable COBOL division found near 'AUTHOR'" for every such
+        # program, since the raised ParseError aborted IDENTIFICATION
+        # DIVISION parsing before the following clauses (AUTHOR,
+        # DATE-WRITTEN, ...) were ever reached. Both exceptions
+        # token_stream.expect() can raise here are tolerated: TokenMismatch
+        # (something else follows the name) and UnexpectedEndOfInput (the
+        # stream ends right after the name -- the same truncated-file shape
+        # the missing-period tolerance is meant to cover).
         try:
             token_stream.expect(".")
-        except TokenMismatch as e:
-            raise ParseError(
-                f"Expected '.' after program name '{program_name}'",
-                line_number=name_token.location.line,
-            ) from e
+        except (TokenMismatch, UnexpectedEndOfInput):
+            add_warning = getattr(self.host, "add_warning", None)
+            if callable(add_warning):
+                add_warning(
+                    f"Missing '.' after program name '{program_name}' "
+                    "in PROGRAM-ID clause (tolerated)"
+                )
 
         return program_name
 

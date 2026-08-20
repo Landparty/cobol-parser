@@ -61,6 +61,28 @@ _STOP_KEYWORDS: frozenset = STATEMENT_KEYWORDS | frozenset(
 )
 
 
+def _looks_dedented_relative_to(
+    token_stream: ITokenStream, reference_column: int | None
+) -> bool:
+    """True when the token at the stream's current position starts at a
+    shallower column than *reference_column*.
+
+    Used to tell a genuine paragraph/section header (dedented back to Area A)
+    apart from an operand that merely continues the statement's own line
+    (Area B, same or deeper indentation) once :func:`looks_like_paragraph_boundary`
+    has already confirmed the token has the bare "IDENTIFIER then period/SECTION"
+    shape both share. Missing location info defaults to True (dedented) --
+    the same conservative "treat as boundary" behavior this replaces.
+    """
+    if reference_column is None:
+        return True
+    token = token_stream.peek(0)
+    col = getattr(getattr(token, "location", None), "column", None)
+    if col is None:
+        return True
+    return bool(col < reference_column)
+
+
 class MoveStatementParser(IStatementParser):
     """Parser for MOVE statements using IStatementParser interface.
 
@@ -77,6 +99,7 @@ class MoveStatementParser(IStatementParser):
     ) -> MoveStatement:
         """Parse a MOVE statement."""
         start_token = token_stream.consume()
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
         factory = get_factory()
         stmt = cast(
             MoveStatement,
@@ -144,9 +167,28 @@ class MoveStatementParser(IStatementParser):
 
             # A missing period on this MOVE followed by what looks like the
             # next paragraph/section header (H9): stop instead of folding it
-            # into the target list.
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            # into the target list. For the very first target (target_count
+            # == 0), that heuristic alone over-fires: COBOL's MOVE grammar
+            # guarantees an operand immediately follows TO, so a perfectly
+            # ordinary line-wrapped target (`MOVE A TO\n    B.`) was misread
+            # as a new paragraph whenever B wasn't in known_data_names --
+            # e.g. declared via an unexpanded COPY member -- leaving the
+            # MOVE with zero targets and a spurious "requires at least one
+            # target after TO" error instead of the target it actually had.
+            # Disambiguated by indentation: a genuine paragraph/section
+            # header is dedented back to Area A relative to the MOVE
+            # statement's own column, whereas a wrapped continuation-line
+            # operand stays at or deeper than it (Area B). A truly missing
+            # first target immediately followed by a real, dedented next
+            # paragraph is therefore still caught here instead of being
+            # silently absorbed as the MOVE's target.
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and (
+                    target_count > 0
+                    or _looks_dedented_relative_to(token_stream, start_column)
+                )
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break

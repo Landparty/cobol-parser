@@ -62,7 +62,7 @@ class TestNormalizeFixedFormatPreservesLineNumbers:
         "000600 MAIN-PARA.\n",
         "000700     DISPLAY WS-A.\n",
         "000800     DISPLAY WS-B.\n",
-        "000900     MOVE BOGUS !!! TO WS-A.\n",
+        "000900     MOVE BOGUS ~~~ TO WS-A.\n",
     ]
 
     def test_error_reports_true_physical_line(self):
@@ -116,7 +116,7 @@ class TestConditionalCompilationPreservesLineNumbers:
             ">>IF DEBUG IS DEFINED\n"
             "       DISPLAY 'D'.\n"
             ">>END-IF\n"
-            "       MOVE BOGUS !!! TO WS-A.\n"
+            "       MOVE BOGUS ~~~ TO WS-A.\n"
         )
         preprocessed = preprocess_conditional_compilation(source)
         # The preprocessed text is already free-form (leading directive lines

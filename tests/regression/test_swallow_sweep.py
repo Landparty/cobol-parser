@@ -127,6 +127,7 @@ FIXTURES: dict[str, Fixture] = {
     "ExitStatementParser": Fixture("ExitStatement", "    EXIT PROGRAM"),
     "ContinueStatementParser": Fixture("ContinueStatement", "    CONTINUE"),
     "EjectStatementParser": Fixture("EjectStatement", "    EJECT"),
+    "SkipStatementParser": Fixture("SkipStatement", "    SKIP1"),
     "GobackStatementParser": Fixture("GobackStatement", "    GOBACK"),
     "AcceptStatementParser": Fixture("IOAcceptStatement", "    ACCEPT WS-VAR"),
     "ReadStatementParser": Fixture(

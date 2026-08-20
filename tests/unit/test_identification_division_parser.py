@@ -273,8 +273,14 @@ class TestIdentificationDivisionErrorHandling:
             parser.parse(stream)
         assert "Expected '.'" in str(exc_info.value)
 
-    def test_error_missing_period_after_program_name(self):
-        """Test error when period is missing after program name."""
+    def test_missing_period_after_program_name_is_tolerated(self):
+        """IBM Enterprise COBOL tolerates a missing period after the
+        PROGRAM-ID program name (2026-08-20 real-corpus fix) -- this no
+        longer raises. Isolated to just PROGRAM-ID with no trailing clause,
+        unlike the old version of this test, so it actually exercises the
+        PROGRAM-ID-name period check rather than a coincidentally similar
+        exception from a following clause's own period check.
+        """
         parser = IdentificationDivisionParser()
         tokens = [
             Token(
@@ -287,13 +293,41 @@ class TestIdentificationDivisionErrorHandling:
             Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
             Token(TokenType.PERIOD, ".", SourceLocation(2, 11)),
             Token(TokenType.IDENTIFIER, "NOMINALNAME", SourceLocation(2, 13)),
-            Token(TokenType.AUTHOR, "AUTHOR", SourceLocation(2, 25)),  # Missing period
+            # Missing period, then EOF.
         ]
         stream = self.create_token_stream(tokens)
 
-        with pytest.raises(ParseError) as exc_info:
-            parser.parse(stream)
-        assert "Expected '.'" in str(exc_info.value)
+        division_node = parser.parse(stream)
+        assert division_node.metadata["program_id"] == "NOMINALNAME"
+
+    def test_missing_period_after_program_name_with_trailing_clause(self):
+        """Same tolerance, but with a following AUTHOR clause (itself
+        correctly period-terminated) reached afterward -- confirms parsing
+        continues past the missing period instead of stopping there.
+        """
+        parser = IdentificationDivisionParser()
+        tokens = [
+            Token(
+                TokenType.IDENTIFICATION_DIVISION,
+                "IDENTIFICATION",
+                SourceLocation(1, 1),
+            ),
+            Token(TokenType.IDENTIFIER, "DIVISION", SourceLocation(1, 20)),
+            Token(TokenType.PERIOD, ".", SourceLocation(1, 27)),
+            Token(TokenType.PROGRAM_ID, "PROGRAM-ID", SourceLocation(2, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(2, 11)),
+            Token(TokenType.IDENTIFIER, "NOMINALNAME", SourceLocation(2, 13)),
+            # Missing period here.
+            Token(TokenType.AUTHOR, "AUTHOR", SourceLocation(3, 1)),
+            Token(TokenType.PERIOD, ".", SourceLocation(3, 7)),
+            Token(TokenType.IDENTIFIER, "SOMEONE", SourceLocation(3, 9)),
+            Token(TokenType.PERIOD, ".", SourceLocation(3, 16)),
+        ]
+        stream = self.create_token_stream(tokens)
+
+        division_node = parser.parse(stream)
+        assert division_node.metadata["program_id"] == "NOMINALNAME"
+        assert division_node.metadata["author"] == "SOMEONE"
 
     def test_error_empty_stream_for_program_name(self):
         """Test error when stream ends unexpectedly during PROGRAM-ID parsing."""
