@@ -1,5 +1,69 @@
 # OKF Update Log
 
+## 2026-08-19 (Coverage audit: gap-closing tests + one correctness fix, floor raised 81% -> 90%)
+
+A full-suite coverage run (8,411 tests, no regressions) measured 91.79%,
+well above the enforced 81% floor. Closed the clearest gaps rather than
+chasing every scattered line:
+
+* **`program_fixtures.py`** (84.4% -> 92.6%): `_resolve_callees`/
+  `_find_callee_file` (the `--callee-path` file lookup for a static CALL
+  target not bundled in the same compilation unit) had no tests at all —
+  the existing `callee_paths=[]` test returns before that code ever runs.
+  9 new tests in `test_program_fixtures.py`'s `TestCalleeResolution`:
+  exact/lowercase/extension-fallback file matching, not-found, a swallowed
+  `ProgramLayoutError`, dynamic-CALL exclusion, contained-program precedence
+  over a same-named callee_paths file, and an end-to-end check that a
+  file-resolved callee's LINKAGE writes flip the caller argument's
+  direction via `callee-source` provenance.
+* **`invoke_parser.py`** (79.8% -> ~88%): new
+  `tests/unit/test_invoke_parser_error_paths.py` covers both
+  required-operand validations (missing object identifier, missing method
+  name), the `END-INVOKE` terminator, `BY REFERENCE/CONTENT/VALUE` in the
+  USING clause, comma-separated parameters, a `RETURNING` with no target,
+  an unrecognized `BY` mode word, and a following statement keyword with no
+  period correctly ending the USING clause instead of being swallowed.
+* **`unused_variables.py`** (80.2% -> 86.5%) — a real correctness fix, not
+  just coverage: `ExecCicsStatement`/`ExecImsStatement` extend `ASTNode`
+  directly, not `CobolStatement` (unlike `ExecSQLStatement`), so they never
+  appeared in `ast.get_all_statements()` at all — the per-statement
+  `host_variables`/`null_indicators` duck-typed sweep that already existed
+  for EXEC SQL was dead code for EXEC CICS/DLI regardless of what fields it
+  read, because the loop never saw those nodes. Fixed with a separate
+  `ast.find_all_by_type("ExecCicsStatement"/"ExecImsStatement")` sweep over
+  `.options`/`.arguments` in `_collect_referenced_names`. A field referenced
+  only inside `EXEC CICS`/`EXEC DLI` is no longer falsely reported unused.
+  8 new tests pin the fix (`TestExecCicsAndImsArguments`); 5 more
+  (`TestExpressionAndSelectorCoverage`) close LogicalExpression AND/OR,
+  PERFORM VARYING...AFTER, RENAMES, and EVALUATE TRUE Condition/Range
+  selector gaps in the same walk. See [analysis.md](analysis.md).
+* **`generators/data/values.py`** (81.4% -> 89.7%): new
+  `tests/unit/generators/data/test_values.py` (34 tests) drives
+  `ValueFactory` directly rather than through a copybook round-trip —
+  every `_semantic_text` branch (email, phone, state, zip, city, street,
+  first/last/bare name, date, description, code, flag), the numeric
+  semantic hints (ID/money/count/rate/date/time, including the
+  too-narrow-falls-back-to-random paths for date/time digits), the
+  COMP-1/2 float path, `_format_number`'s sign/ceiling/decimal-only/
+  zero-width clamping, `blank_rate`, the unique-field retry-then-sequential
+  fallback, and `render()`'s never-randomly-negates guarantee.
+* **`constraints.py`**/**`const_fold.py`**: both already carry deep
+  NIST/shamrice corpus sweeps, so remaining gaps are scattered single-line
+  defensive branches with low marginal value. Added the one clear gap in
+  each: `to_dict()` serialization was entirely untested in both
+  (`ConstraintReport`/`BranchConstraints`/`FieldConstraint`/
+  `SequenceConstraint`, and `ConstantFoldResult`, including the
+  copy-not-alias property), plus a multi-subject `EVALUATE ... ALSO`
+  unsupported-path test in constraints.py.
+
+Post-fix full-suite re-run: 8,476 tests (65 more than baseline), 0
+failures, 92.22% coverage. `--cov-fail-under` raised from 81 to 90 in
+`pyproject.toml` to lock in the new baseline with headroom (CLAUDE.md,
+`.okf/index.md`, `.okf/tests.md` updated to match). CI still does not run
+the suite automatically on push/PR — only `workflow_dispatch` — which
+remains the single largest gap in this area; out of scope for this pass
+per the requester's instruction.
+
 ## 2026-08-18 (`--help` epilogs with usage examples on every subcommand)
 
 `cobolparser/cli/parse.py` — every subcommand parser (both the hand-built

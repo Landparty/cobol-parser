@@ -14,10 +14,12 @@ import csv
 import json
 import os
 import tempfile
+from unittest.mock import patch
 
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators.data.bundle import BUNDLE_VERSION, _slugify
+from cobolparser.generators.data.errors import ProgramLayoutError
 from cobolparser.generators.data.program_layout import ProgramLayoutIndex
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
@@ -624,3 +626,141 @@ class TestTier2FieldEqualsExpectations:
         assert not any(
             e.kind == "field_equals" for e in bundle.scenarios[0].expectations
         )
+
+
+_CALLER_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLERPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-VAL               PIC 9(5).
+       01  WS-DYNAMIC-NAME      PIC X(8) VALUE 'EXTCALC'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'EXTCALC' USING WS-VAL
+           CALL WS-DYNAMIC-NAME USING WS-VAL
+           STOP RUN.
+"""
+
+_CALLEE_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXTCALC.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-VAL                PIC 9(5).
+       PROCEDURE DIVISION USING LK-VAL.
+       MAIN-PARA.
+           MOVE 99 TO LK-VAL
+           GOBACK.
+"""
+
+
+def _parsed_caller():
+    result = parse_cobol(_CALLER_SOURCE, filename="callerprog.cbl")
+    assert result.ast is not None, result.errors
+    return result.ast
+
+
+class TestCalleeResolution:
+    """Covers ProgramFixtureGenerator._resolve_callees / _find_callee_file --
+    the --callee-path file lookup used when a static CALL target isn't a
+    contained program in the same compilation unit."""
+
+    def test_find_callee_file_matches_exact_name(self, tmp_path):
+        callee_path = tmp_path / "EXTCALC.cbl"
+        callee_path.write_text(_CALLEE_SOURCE)
+        found = ProgramFixtureGenerator._find_callee_file("EXTCALC", [str(tmp_path)])
+        assert found == str(callee_path)
+
+    def test_find_callee_file_falls_back_to_lowercase_and_alt_extensions(
+        self, tmp_path
+    ):
+        callee_path = tmp_path / "extcalc.cob"
+        callee_path.write_text(_CALLEE_SOURCE)
+        found = ProgramFixtureGenerator._find_callee_file("EXTCALC", [str(tmp_path)])
+        assert found == str(callee_path)
+
+    def test_find_callee_file_returns_none_when_absent_from_every_directory(
+        self, tmp_path
+    ):
+        found = ProgramFixtureGenerator._find_callee_file("NOSUCHPROG", [str(tmp_path)])
+        assert found is None
+
+    def test_resolve_callees_finds_static_call_target_on_disk(self, tmp_path):
+        (tmp_path / "EXTCALC.cbl").write_text(_CALLEE_SOURCE)
+        ast = _parsed_caller()
+        indexes, asts = ProgramFixtureGenerator()._resolve_callees(ast, [str(tmp_path)])
+        assert "EXTCALC" in indexes
+        assert "EXTCALC" in asts
+        assert asts["EXTCALC"].program_name == "EXTCALC"
+
+    def test_resolve_callees_skips_dynamic_call_targets(self, tmp_path):
+        (tmp_path / "EXTCALC.cbl").write_text(_CALLEE_SOURCE)
+        ast = _parsed_caller()
+        # The dynamic CALL WS-DYNAMIC-NAME (identifier, not a literal) never
+        # contributes a static name, so its resolution shouldn't matter --
+        # only the static CALL 'EXTCALC' should be resolved either way, and
+        # no crash should come from the dynamic target being un-resolvable.
+        indexes, _ = ProgramFixtureGenerator()._resolve_callees(ast, [str(tmp_path)])
+        assert list(indexes) == ["EXTCALC"]
+
+    def test_resolve_callees_leaves_unfound_targets_absent(self, tmp_path):
+        ast = _parsed_caller()
+        indexes, asts = ProgramFixtureGenerator()._resolve_callees(ast, [str(tmp_path)])
+        assert indexes == {}
+        assert asts == {}
+
+    def test_resolve_callees_swallows_program_layout_error(self, tmp_path):
+        (tmp_path / "EXTCALC.cbl").write_text(_CALLEE_SOURCE)
+        ast = _parsed_caller()
+        with patch.object(
+            ProgramLayoutIndex,
+            "from_file",
+            side_effect=ProgramLayoutError("boom"),
+        ):
+            indexes, asts = ProgramFixtureGenerator()._resolve_callees(
+                ast, [str(tmp_path)]
+            )
+        assert indexes == {}
+        assert asts == {}
+
+    def test_resolve_callees_prefers_contained_program_over_callee_path(self, tmp_path):
+        # A caller/callee bundled in one compilation unit is resolved for
+        # free from `contained_programs` and never needs a file lookup --
+        # even if a --callee-path directory also has a matching name, the
+        # bundled AST wins (contained_programs is populated first and the
+        # callee_paths loop skips names already in callee_asts).
+        (tmp_path / "CALCULATOR.cbl").write_text(_CALLEE_SOURCE)
+        with open(SUBPROGRAM_DEMO) as handle:
+            result = parse_cobol(handle.read(), filename=SUBPROGRAM_DEMO)
+        assert result.ast is not None, result.errors
+        indexes, asts = ProgramFixtureGenerator()._resolve_callees(
+            result.ast, [str(tmp_path)]
+        )
+        assert asts["CALCULATOR"].program_name == "CALCULATOR"
+        # The bundled CALCULATOR (from subprogram_demo.cbl) has five LINKAGE
+        # items including LK-NUM1 -- the on-disk stand-in saved under the
+        # same name only has LK-VAL, so resolving LK-NUM1 proves the bundled
+        # AST won over the callee_paths file lookup.
+        assert indexes["CALCULATOR"].record_named("LK-NUM1") is not None
+        assert indexes["CALCULATOR"].record_named("LK-VAL") is None
+
+    def test_end_to_end_call_arg_direction_uses_callee_source_provenance(
+        self, tmp_path
+    ):
+        (tmp_path / "EXTCALC.cbl").write_text(_CALLEE_SOURCE)
+        caller_path = tmp_path / "CALLERPROG.cbl"
+        caller_path.write_text(_CALLER_SOURCE)
+        bundle = ProgramFixtureGenerator().generate_from_file(
+            str(caller_path), seed=1, callee_paths=[str(tmp_path)]
+        )
+        # EXTCALC writes to its one LINKAGE item (MOVE 99 TO LK-VAL), so the
+        # v1 "writes-at-all -> IN" rule resolves WS-VAL's direction from the
+        # callee's own source rather than falling back to the caller's own
+        # dataflow guess -- confirmed by the generated value showing up as
+        # part of the CALL fixture's IN payload.
+        call_fixtures = [
+            f for f in bundle.scenarios[0].fixtures if f.ref.category == "CALL"
+        ]
+        assert call_fixtures
+        assert any("WS-VAL" in fixture.sequence[0] for fixture in call_fixtures)

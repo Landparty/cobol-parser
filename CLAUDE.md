@@ -62,7 +62,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (81% minimum enforced; ~8,075 tests across 320 files)
+# Run all tests with coverage (90% minimum enforced; ~8,475 tests across 320+ files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -475,7 +475,7 @@ tests/
 
 ### Coverage Requirement
 
-81% line coverage is enforced by pytest (`--cov-fail-under=81`). Branch coverage is enabled. When running only a subset of tests, expect this check to fail -- that is normal.
+90% line coverage is enforced by pytest (`--cov-fail-under=90`). Branch coverage is enabled. When running only a subset of tests, expect this check to fail -- that is normal.
 
 ## CI/CD
 

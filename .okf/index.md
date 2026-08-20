@@ -20,7 +20,7 @@ Version 1.5.3. Author: Samuel Dion.
 * [Generators](generators.md) — flowcharts (Mermaid/DOT) and copybook → CSV synthetic test data
 * [Batch Parsing](batch.md) — `parse_files()` / `parse_files_with_copybooks()`, per-file fault isolation
 * [CLI](cli.md) — `cobol-parser` subcommands and flags
-* [Tests](tests.md) — Test layout, pytest markers, coverage floor (81 %)
+* [Tests](tests.md) — Test layout, pytest markers, coverage floor (90 %)
 
 ## Integration
 

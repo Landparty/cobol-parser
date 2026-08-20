@@ -85,7 +85,7 @@ addopts = [
     "--cov=cobolparser",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
-    "--cov-fail-under=81",
+    "--cov-fail-under=90",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
@@ -178,7 +178,7 @@ test-requires = "pytest pytest-cov"
 # Smoke-test against the INSTALLED wheel (not the source tree): verify
 # ordinary modules loaded as compiled extensions (no .py source backing
 # them), then run a fast subset of the suite. --no-cov disables this repo's
-# default --cov-fail-under=81 gate (see [tool.pytest.ini_options] addopts),
+# default --cov-fail-under=90 gate (see [tool.pytest.ini_options] addopts),
 # which coverage.py can't evaluate meaningfully against compiled extensions.
 #
 # --import-mode=importlib is load-bearing, not cosmetic: tests/__init__.py

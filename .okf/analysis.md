@@ -380,14 +380,32 @@ WORKING-STORAGE dropped from 33 spurious items back to its real 5.
 (2026-08-16 review).** Each spot in the module backing a limitation
 already called out in the class docstring carries a `TODO(known
 limitation)` comment: `_DATA_SECTION_NAMES` (SCREEN/REPORT/COMMUNICATION
-SECTION out of scope), the `host_variables`/`null_indicators` block in
-`_collect_referenced_names` (EXEC CICS/DLI args unscanned), the
-`SearchStatement` branch and `_selector_identifiers`'s `"Condition"` case
-(SEARCH WHEN / EVALUATE TRUE regex-only fallback), and the `redefines_edges`
-comment in `analyze()` (REDEFINES/OCCURS-DEPENDING-ON/RENAMES resolved by
-name, not structural identity). No behavior change — purely so a
-`TODO`/`grep` sweep of the codebase surfaces these instead of only living
-in prose here and in the docstring.
+SECTION out of scope), the `SearchStatement` branch and
+`_selector_identifiers`'s `"Condition"` case (SEARCH WHEN / EVALUATE TRUE
+regex-only fallback), and the `redefines_edges` comment in `analyze()`
+(REDEFINES/OCCURS-DEPENDING-ON/RENAMES resolved by name, not structural
+identity). No behavior change — purely so a `TODO`/`grep` sweep of the
+codebase surfaces these instead of only living in prose here and in the
+docstring.
+
+**EXEC CICS/DLI arguments fixed, not just documented (2026-08-19 coverage
+audit).** The former `TODO` here was wrong about *why* EXEC CICS/DLI args
+were unscanned: it isn't that the sweep was unimplemented, it's that
+`ExecCicsStatement`/`ExecImsStatement` extend `ASTNode` directly rather
+than `CobolStatement` (unlike `ExecSQLStatement`, which does extend
+`CobolStatement`), so neither ever appears in `ast.get_all_statements()` —
+the per-statement loop in `_collect_referenced_names` that holds the
+`host_variables`/`null_indicators` sweep for EXEC SQL never sees them at
+all, regardless of what fields it reads. Fixed with a separate sweep after
+that loop, using `ast.find_all_by_type("ExecCicsStatement")` /
+`ast.find_all_by_type("ExecImsStatement")` directly (these two classes
+aren't imported into `unused_variables.py` — an analysis -> parsers
+layering dependency for no real type-safety benefit, since `.options`/
+`.arguments` are untyped raw text either way) over `ExecCicsStatement.
+options` (option keyword -> parenthesized argument text) and
+`ExecImsStatement.arguments` (positional list). A field referenced only
+inside one of these statements is no longer falsely reported unused. See
+`TestExecCicsAndImsArguments` in `test_unused_variables.py`.
 
 CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 

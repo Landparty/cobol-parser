@@ -604,3 +604,12 @@ class TestObservationPoints:
         index = ProgramLayoutIndex.build(result.ast)
         fold = ConstantFolder().fold(result.ast, index, seed_values={"F1-QTY": "10"})
         assert fold.known == {"F1-QTY": "11"}
+
+
+class TestToDict:
+    def test_known_dict_round_trips(self):
+        fold = _fold("           MOVE 5 TO WS-A.\n" "           DISPLAY WS-A.\n")
+        assert fold.to_dict() == {"known": {"WS-A": "5"}}
+        # to_dict() must be a copy, not an alias, of the internal dict.
+        fold.to_dict()["known"]["WS-A"] = "mutated"
+        assert fold.known["WS-A"] == "5"

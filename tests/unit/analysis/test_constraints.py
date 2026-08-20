@@ -61,6 +61,45 @@ def _branch(report, line_contains=None):
     return report.branches[0]
 
 
+class TestToDictSerialization:
+    def test_field_constraint_branch_constraint_and_report_all_serialize(self):
+        _, _, _, report = _extract(
+            "           IF F1-QTY = 42\n"
+            "               DISPLAY 'HIT'\n"
+            "           END-IF.\n"
+        )
+        as_dict = report.to_dict()
+        assert as_dict["branches"]
+        branch_dict = as_dict["branches"][0]
+        assert branch_dict["branch_id"]
+        assert branch_dict["parent_proc"] == "MAIN-PARA"
+        assert set(branch_dict["arms"]) == {"THEN", "ELSE"}
+        then_constraint = branch_dict["arms"]["THEN"][0]
+        assert then_constraint == {
+            "field": "F1-REC.F1-QTY",
+            "op": "eq",
+            "values": ["42"],
+            "origin": then_constraint["origin"],
+            "negated": False,
+        }
+        assert branch_dict["unsupported"] == []
+
+    def test_sequence_constraint_serializes(self):
+        _, _, _, report = _extract(
+            "           PERFORM UNTIL WS-EOF = 'Y'\n"
+            "               READ F1\n"
+            "                   AT END MOVE 'Y' TO WS-EOF\n"
+            "               END-READ\n"
+            "           END-PERFORM.\n"
+        )
+        as_dict = report.to_dict()
+        assert as_dict["sequence_constraints"]
+        seq_dict = as_dict["sequence_constraints"][0]
+        assert seq_dict["boundary"] == {"category": "READ", "key": "F1"}
+        assert seq_dict["length"] is None
+        assert "PERFORM-UNTIL" in seq_dict["origin"]
+
+
 class TestRelationalComparisons:
     def test_equal_literal(self):
         _, _, _, report = _extract(
@@ -323,6 +362,19 @@ class TestSequenceConstraint:
         # The SequenceConstraint's BoundaryRef must be a real one from the
         # boundary report, not a freshly synthesized stand-in.
         assert seq.boundary in [b.ref for b in boundary_report.boundaries]
+
+    def test_multi_subject_evaluate_is_reported_unsupported_not_silently_dropped(self):
+        _, _, _, report = _extract(
+            "           EVALUATE F1-QTY ALSO F1-STATUS\n"
+            "               WHEN 42 ALSO 'A'\n"
+            "                   DISPLAY 'HIT'\n"
+            "               WHEN OTHER\n"
+            "                   DISPLAY 'MISS'\n"
+            "           END-EVALUATE.\n"
+        )
+        branch = _branch(report)
+        assert branch.arms == {}
+        assert "multi-subject EVALUATE (ALSO) not supported in v1" in branch.unsupported
 
     def test_pure_counter_loop_is_out_of_scope_not_a_gap(self):
         # WS-COUNTER (unlike WS-EOF) is never MOVEd inside any READ's AT END

@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Tests
-description: Test layout, pytest markers, coverage floor (81%), and shared fixtures for the cobolparser test suite.
+description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
 timestamp: 2026-08-17T00:00:00Z
 ---
@@ -316,9 +316,9 @@ that day, plus a Cython/pure-Python parity check — see
 section and [preprocessing.md](preprocessing.md)/[lexer.md](lexer.md)
 for the M4/M5/M7/M8/M14 write-ups; also includes the earlier same-day +21
 in `tests/regression/test_open_findings_high_regressions.py` for HIGH
-findings H1-H8). Coverage floor: **81% line coverage** enforced by
-`--cov-fail-under=81` in `pyproject.toml`; full-suite run measured
-91.43%. Branch coverage is enabled.
+findings H1-H8). Coverage floor: **90% line coverage** enforced by
+`--cov-fail-under=90` in `pyproject.toml`; full-suite run measured
+92.22% (see log.md's 2026-08-19 entry). Branch coverage is enabled.
 
 2026-08-12: +17 in `tests/unit/analysis/test_statement_text.py` (new —
 `summarize_statement`/`summarize_arm`, real-parse fixtures per statement
@@ -465,7 +465,7 @@ these directories can still opt in with an explicit `pytestmark` (e.g. the
 # Running Tests
 
 ```bash
-# All tests with coverage (81% min)
+# All tests with coverage (90% min)
 python -m pytest tests/ -v
 
 # Single file
@@ -498,7 +498,7 @@ addopts = [
     "--cov=cobolparser",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
-    "--cov-fail-under=81",
+    "--cov-fail-under=90",
 ]
 ```
 
