@@ -1426,6 +1426,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.8.0](https://github.com/Landparty/cobol-parser/compare/v1.7.8...v1.8.0) (2026-08-20)
+
+
+### Features
+
+* implement closed-source verification checks and enhance build process ([ba102c6](https://github.com/Landparty/cobol-parser/commit/ba102c6b3052f08df2bd755838433b77726820ed))
+* **parser:** enhance CLI help with examples for subcommands ([b64e26a](https://github.com/Landparty/cobol-parser/commit/b64e26a27df6193fd7c11db8f9ffc6ebcbe419a7))
+
+
+### Bug Fixes
+
+* prevent closed-source build segfault on free-form COBOL parsing ([d549531](https://github.com/Landparty/cobol-parser/commit/d549531ab9386a0a242265832e9eabd7473a7ccb))
+
 ## [1.7.8](https://github.com/Landparty/cobol-parser/compare/v1.7.7...v1.7.8) (2026-08-18)
 
 
