@@ -64,6 +64,55 @@ deliberately left alone (see below).
   registered directly after `EjectStatementParser` (same class of
   compiler-directing no-op).
 
+**Post-review corrections (`/code-review`, same day):** an 8-angle review of
+the PR caught one real regression and two smaller correctness gaps in the
+fixes above, all now corrected:
+
+* The MOVE fix's `target_count == 0` exemption over-corrected: a MOVE with
+  a *genuinely* missing target, immediately followed by a real next
+  paragraph, now silently absorbed that paragraph's header as the MOVE's
+  bogus target instead of erroring — the opposite failure mode from the one
+  being fixed, and the more dangerous one (silent AST corruption vs. a
+  reported error). Fixed by disambiguating on indentation instead of
+  disabling the check outright: a genuine paragraph header is dedented back
+  to Area A relative to the MOVE statement's own column, while a wrapped
+  continuation-line operand stays at or deeper than it (Area B) —
+  `_looks_dedented_relative_to` in `move_parser.py`.
+* `token_stream.expect(".")` in `_parse_program_id` can raise
+  `UnexpectedEndOfInput` (stream exhausted right after the program name),
+  not just `TokenMismatch` — the exact shape of a truncated real-world
+  file — and the original fix only caught the latter, so that case still
+  hard-failed. Now catches both. Also switched the `self.host.add_warning`
+  call to the `getattr(host, "add_warning", None)` + `callable(...)` guard
+  every other division parser already uses, for consistency.
+* `set_parser.py`'s new subscript-folding changed `stmt.add_target(...)`
+  from an unconditional call to one gated on `if target_name:`, silently
+  dropping an edge-case empty-string target that the prior code always
+  recorded. Reverted to the unconditional call.
+
+One existing test (`test_error_missing_period_after_program_name` in
+`tests/unit/test_identification_division_parser.py`) was found to be
+passing for the wrong reason after the PROGRAM-ID fix — a coincidental
+exception from the token *after* the one field being tested, not the field
+itself — and was rewritten into two tests that isolate the actual behavior,
+plus a new test for the truncated-file/`UnexpectedEndOfInput` case.
+
+Reviewed and deliberately left alone: SKIP1/SKIP2/SKIP3 as unconditional
+lexer keywords does shadow those words if used as a paragraph/data name or
+a PERFORM/MOVE/GO TO target — but they're genuine COBOL reserved words (no
+compilable program can declare them as identifiers), matching the existing
+precedent for EJECT/CONTINUE already being unconditional keywords in this
+lexer; no occurrence in this repo's test/example corpus either. The
+`SkipStatementParser`/`SkipStatement` direct instantiation (not via
+`ASTNodeFactory`) matches every sibling parser in the same file
+(`EjectStatementParser`, `ContinueStatementParser`, etc.), so it wasn't
+changed to avoid diverging from local convention for no functional gain.
+The same first-operand paragraph-boundary misdetection bug shape the MOVE
+fix addresses also exists, unfixed, in SET/DISPLAY/STRING/UNSTRING/SORT/
+MERGE's operand-collection loops — flagged as a follow-up, not fixed here,
+since (like the two items below) it has no concrete corpus repro backing
+it, unlike the five fixes above which were each reproduced directly.
+
 **Deliberately not fixed:** (1) `COMPUTE ... EQUAL` in place of `=` — the
 external analysis itself flagged this as needing confirmation against real
 mainframe compiler behavior before changing anything (1 file in the source

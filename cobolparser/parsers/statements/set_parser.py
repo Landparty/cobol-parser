@@ -96,9 +96,12 @@ class SetStatementParser(IStatementParser):
                     # "Unparsed tokens".
                     parts: list[str] = [token.value] if token.value else []
                     consume_optional_subscript(token_stream, parts)
-                    target_name = " ".join(p for p in parts if p)
-                    if target_name:
-                        stmt.add_target(target_name)
+                    # Unconditional add (matching the pre-existing
+                    # `stmt.add_target(token.value or "")`) -- an empty
+                    # target_name (e.g. an empty STRING_LITERAL target with
+                    # no subscript) is still recorded rather than silently
+                    # dropped.
+                    stmt.add_target(" ".join(p for p in parts if p))
             else:
                 break
             skip_whitespace(token_stream)

@@ -85,6 +85,12 @@ _SKIP_TOKEN_TYPES: tuple[Any, ...] = (
     TokenType.SKIP3,
 )
 
+_SKIP_LINE_COUNTS: dict[Any, int] = {
+    TokenType.SKIP1: 1,
+    TokenType.SKIP2: 2,
+    TokenType.SKIP3: 3,
+}
+
 
 class SkipStatementParser(IStatementParser):
     """Parser for SKIP1/SKIP2/SKIP3 statements (compiler-directing listing
@@ -101,12 +107,7 @@ class SkipStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> SkipStatement:
         start = token_stream.consume()
-        lines = {
-            TokenType.SKIP1: 1,
-            TokenType.SKIP2: 2,
-            TokenType.SKIP3: 3,
-        }[start.type]
-        stmt = SkipStatement(token_location(start), lines)
+        stmt = SkipStatement(token_location(start), _SKIP_LINE_COUNTS[start.type])
         skip_whitespace(token_stream)
         consume_period(token_stream)
         return stmt

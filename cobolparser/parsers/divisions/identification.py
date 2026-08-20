@@ -12,7 +12,11 @@ This module implements parsing of the Identification Division which contains:
 
 from typing import Any
 
-from cobolparser.core.exceptions import ParseError, TokenMismatch
+from cobolparser.core.exceptions import (
+    ParseError,
+    TokenMismatch,
+    UnexpectedEndOfInput,
+)
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision
@@ -245,12 +249,17 @@ class IdentificationDivisionParser(BaseDivisionParser):
         # recognizable COBOL division found near 'AUTHOR'" for every such
         # program, since the raised ParseError aborted IDENTIFICATION
         # DIVISION parsing before the following clauses (AUTHOR,
-        # DATE-WRITTEN, ...) were ever reached.
+        # DATE-WRITTEN, ...) were ever reached. Both exceptions
+        # token_stream.expect() can raise here are tolerated: TokenMismatch
+        # (something else follows the name) and UnexpectedEndOfInput (the
+        # stream ends right after the name -- the same truncated-file shape
+        # the missing-period tolerance is meant to cover).
         try:
             token_stream.expect(".")
-        except TokenMismatch:
-            if self.host is not None:
-                self.host.add_warning(
+        except (TokenMismatch, UnexpectedEndOfInput):
+            add_warning = getattr(self.host, "add_warning", None)
+            if callable(add_warning):
+                add_warning(
                     f"Missing '.' after program name '{program_name}' "
                     "in PROGRAM-ID clause (tolerated)"
                 )

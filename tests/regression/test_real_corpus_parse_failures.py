@@ -85,6 +85,38 @@ class TestMoveTargetOnContinuationLine:
         paragraphs = result.ast.procedure_division.paragraphs
         assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
 
+    def test_genuinely_missing_first_target_before_dedented_paragraph_still_errors(
+        self,
+    ):
+        # Guard against over-correcting the other way: a MOVE with no
+        # target at all (target_count == 0), immediately followed by a real
+        # paragraph header dedented back to Area A, must still be flagged
+        # as a boundary -- not silently absorbed as the MOVE's target,
+        # which would both hide the malformed MOVE and delete the
+        # following paragraph from the AST.
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01  WS-A PIC X(5).
+            01  WS-B PIC X(5).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                MOVE WS-A TO
+            NEXT-PARA.
+                DISPLAY WS-B.
+            """)
+        result = parse_cobol(program)
+        assert result.success is False
+        assert any(
+            "requires at least one target after TO" in str(e) for e in result.errors
+        ), result.errors
+        paragraphs = result.ast.procedure_division.paragraphs
+        assert [p.paragraph_name for p in paragraphs] == ["MAIN-PARA", "NEXT-PARA"]
+        move_stmt = result.ast.find_first_by_type("MoveStatement")
+        assert move_stmt.targets == []
+
 
 class TestEmbeddedSqlNotEqualAndConcatOperators:
     """'!=' and '||' inside EXEC SQL previously hit the lexer's
@@ -157,6 +189,21 @@ class TestProgramIdMissingTrailingPeriod:
         result = parse_cobol(program)
         assert result.success, result.errors
         assert not any(
+            "Missing '.' after program name" in w for w in result.warnings
+        ), result.warnings
+
+    def test_file_truncated_right_after_program_name_is_tolerated(self):
+        # token_stream.expect(".") raises UnexpectedEndOfInput (not
+        # TokenMismatch) when the stream is exhausted immediately after the
+        # program name -- the exact shape of a truncated real-world corpus
+        # file with nothing at all following PROGRAM-ID. NAME. Must be
+        # tolerated the same way as a mismatched next token.
+        program = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. REGTEST"
+        result = parse_cobol(program, filename="truncated.cbl")
+        assert result.success, result.errors
+        assert result.errors == []
+        assert result.ast.program_name == "REGTEST"
+        assert any(
             "Missing '.' after program name" in w for w in result.warnings
         ), result.warnings
 
