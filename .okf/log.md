@@ -1,5 +1,79 @@
 # OKF Update Log
 
+## 2026-08-20 (Real-corpus parse-failure sweep: 5 fixes from an external error-analysis pass)
+
+An external analysis of a 559-file real-world COBOL corpus (mainframe
+extracts, not NIST/shamrice) surfaced hard parse failures and silent
+content-drops that the existing test suite's synthetic fixtures never
+exercised. Five confirmed, reproduced, and fixed; two flagged items were
+deliberately left alone (see below).
+
+* **MOVE target on its own continuation line, dropped when the target isn't
+  a known DATA DIVISION name (`move_parser.py`):** `looks_like_paragraph_boundary`
+  (see the H9 entry above) fired on the *first* token after `TO` whenever
+  that token wasn't in `known_data_names` — e.g. it's declared via an
+  unexpanded `COPY` member — misreading a perfectly ordinary line-wrapped
+  target (`MOVE A TO\n    B.`) as the start of the next paragraph. The MOVE
+  ended up with zero targets and a spurious "requires at least one target
+  after TO" error. Fixed by exempting the very first target
+  (`target_count == 0`) from the paragraph-boundary check: COBOL's MOVE
+  grammar guarantees an operand immediately follows `TO`, so that position
+  can never legitimately be a paragraph header. The single highest-impact
+  fix in the sweep (~468 errors / 180 files in the source corpus).
+* **Embedded SQL `!=` and `||` crashed the entire parse
+  (`lexer.py`, `parsers/statements/_utils.py`):** `!` and `|` had no
+  `SINGLE_CHAR_TOKENS` entry, so hitting either inside an `EXEC SQL ...
+  END-EXEC` block (SQL not-equal / string concatenation) recorded a hard
+  `LexerError` — which fails the *whole* parse (`result.ast is None`), not
+  just that statement, since EXEC SQL text is reconstructed from already-lexed
+  tokens (`collect_exec_sql_text`) rather than scanned as raw opaque text at
+  the lexer level. Fixed by adding dedicated `BANG`/`PIPE` single-char
+  tokens (mirroring how `>=`/`<=`/`<>` already lex as two single-char
+  tokens and get rejoined) and extending `_EXEC_SQL_SPLIT_RELOP_PAIRS` so
+  `!=` and `||` rejoin without a spurious space in the reconstructed SQL
+  text. `<=`/`>=`/`<>` inside EXEC SQL already worked (no lexer error) —
+  only the two characters with no token at all were fatal.
+* **`PROGRAM-ID name` with no trailing period
+  (`parsers/divisions/identification.py`):** IBM Enterprise COBOL tolerates
+  a missing period after the program name (verified against real compiler
+  behavior); the parser raised a hard `ParseError` instead, which aborted
+  IDENTIFICATION DIVISION parsing before `AUTHOR`/`DATE-WRITTEN`/etc. were
+  ever reached — cascading into "No recognizable COBOL division found near
+  'AUTHOR'". Now records a `ParseResult.warnings` entry via `self.host.add_warning`
+  and continues (the *first* period, right after the `PROGRAM-ID` keyword
+  itself, is unaffected — only the confirmed real-world shape was
+  relaxed).
+* **`SET target(subscript) TO ADDRESS OF ...` dropped the subscript and the
+  entire value clause (`set_parser.py`):** the target-collection loop had
+  no subscript handling at all — a trailing `(1)` fell to the loop's
+  `else: break`, which stopped the loop *before* the `TO` keyword was ever
+  reached, so the whole rest of the statement (`TO ADDRESS OF ...`) was left
+  in the stream and reported as "Unparsed tokens". Fixed by folding a
+  trailing `(subscript[, subscript]...)` into the target via the shared
+  `consume_optional_subscript` helper (same pattern MOVE/ADD/SUBTRACT/
+  COMPUTE targets already use).
+* **`SKIP1`/`SKIP2`/`SKIP3` compiler-listing directives unrecognized
+  (`lexer.py`, `models/statements/misc.py`, `parsers/statements/
+  simple_statement_parsers.py`, `parsers/divisions/procedure_registry.py`):**
+  unlike `EJECT` (dedicated token + `EjectStatementParser`), `SKIP1`/`SKIP2`/
+  `SKIP3` lexed as plain `IDENTIFIER`s and fell through to the PROCEDURE
+  DIVISION's unrecognized-statement recovery, dropping the directive and
+  adjacent tokens from the AST (~7,100 occurrences in the source corpus —
+  the highest-frequency silent-drop found). Added dedicated `SKIP1`/`SKIP2`/
+  `SKIP3` tokens and a new `SkipStatement` AST node / `SkipStatementParser`,
+  registered directly after `EjectStatementParser` (same class of
+  compiler-directing no-op).
+
+**Deliberately not fixed:** (1) `COMPUTE ... EQUAL` in place of `=` — the
+external analysis itself flagged this as needing confirmation against real
+mainframe compiler behavior before changing anything (1 file in the source
+corpus); left alone pending that verification. (2) A vaguer report of
+"`PERFORM ... TIMES`/`UNTIL`, `OF` qualification, `TEST BEFORE`/`AFTER`
+tails dropped in various statements" and "67 real mid-token truncations
+past column 72" — neither came with a concrete reproducible example (unlike
+the five fixes above, all of which were reproduced against a minimal
+`.cbl` before and after the fix), so no speculative change was made.
+
 ## 2026-08-19 (Coverage audit: gap-closing tests + one correctness fix, floor raised 81% -> 90%)
 
 A full-suite coverage run (8,411 tests, no regressions) measured 91.79%,

@@ -71,6 +71,7 @@ from .simple_statement_parsers import (
     ReleaseStatementParser,
     ReturnStatementParser,
     RollbackStatementParser,
+    SkipStatementParser,
     UseStatementParser,
 )
 from .sort_merge_parsers import MergeStatementParser, SortStatementParser
@@ -109,6 +110,7 @@ __all__ = [
     "AcceptStatementParser",
     "ContinueStatementParser",
     "EjectStatementParser",
+    "SkipStatementParser",
     "ExitStatementParser",
     "GobackStatementParser",
     "CancelStatementParser",

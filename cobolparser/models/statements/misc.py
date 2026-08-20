@@ -256,6 +256,27 @@ class EjectStatement(CobolStatement):
         return super().to_dict()
 
 
+class SkipStatement(CobolStatement):
+    """AST node for SKIP1/SKIP2/SKIP3 statements (compiler-directing
+    listing no-ops, the same class as EJECT).
+
+    SKIP*n* forces *n* blank lines in the compiler source listing; it has no
+    effect on program logic. Recognizing it as its own statement (rather
+    than leaving it as a bare unrecognized IDENTIFIER) keeps it -- and its
+    surrounding tokens -- from being dropped by the PROCEDURE DIVISION's
+    unrecognized-statement recovery.
+    """
+
+    def __init__(self, location: SourceLocation, lines: int):
+        super().__init__("SKIP", location)
+        self.lines = lines
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["lines"] = self.lines
+        return result
+
+
 class ExitStatement(CobolStatement):
     """AST node for EXIT statements."""
 

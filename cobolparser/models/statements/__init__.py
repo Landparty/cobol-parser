@@ -85,6 +85,7 @@ from .misc import (
     ReturnStatement,
     RollbackStatement,
     SelectStatement,
+    SkipStatement,
     SortStatement,
     UseStatement,
     XmlJsonStatement,
@@ -116,6 +117,7 @@ __all__ = [
     # New statement types
     "ContinueStatement",
     "EjectStatement",
+    "SkipStatement",
     "ExitStatement",
     "GobackStatement",
     "CancelStatement",

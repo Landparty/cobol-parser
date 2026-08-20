@@ -144,9 +144,20 @@ class MoveStatementParser(IStatementParser):
 
             # A missing period on this MOVE followed by what looks like the
             # next paragraph/section header (H9): stop instead of folding it
-            # into the target list.
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            # into the target list. Not applied to the very first target
+            # (target_count == 0): COBOL's MOVE grammar guarantees an operand
+            # immediately follows TO, so this position can never legitimately
+            # be a paragraph/section header. Without this exemption, a
+            # perfectly ordinary line-wrapped target (`MOVE A TO\n    B.`)
+            # was misread as a new paragraph whenever B wasn't in
+            # known_data_names -- e.g. declared via an unexpanded COPY member
+            # -- leaving the MOVE with zero targets and a spurious
+            # "requires at least one target after TO" error instead of the
+            # target it actually had.
+            if (
+                target_count > 0
+                and token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break

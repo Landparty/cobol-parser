@@ -238,14 +238,22 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 continue
             break
 
-        # Expect period after program name (or after IS clause if present)
+        # Expect period after program name (or after IS clause if present).
+        # IBM Enterprise COBOL tolerates a missing period here (verified
+        # against real mainframe compiler behavior) -- treating it as a hard
+        # error instead of a warning previously cascaded into "No
+        # recognizable COBOL division found near 'AUTHOR'" for every such
+        # program, since the raised ParseError aborted IDENTIFICATION
+        # DIVISION parsing before the following clauses (AUTHOR,
+        # DATE-WRITTEN, ...) were ever reached.
         try:
             token_stream.expect(".")
-        except TokenMismatch as e:
-            raise ParseError(
-                f"Expected '.' after program name '{program_name}'",
-                line_number=name_token.location.line,
-            ) from e
+        except TokenMismatch:
+            if self.host is not None:
+                self.host.add_warning(
+                    f"Missing '.' after program name '{program_name}' "
+                    "in PROGRAM-ID clause (tolerated)"
+                )
 
         return program_name
 

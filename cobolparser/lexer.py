@@ -177,6 +177,9 @@ class TokenType(IntEnum):
     DISABLE = auto()
     DISPLAY_1 = auto()
     EJECT = auto()
+    SKIP1 = auto()
+    SKIP2 = auto()
+    SKIP3 = auto()
     ENABLE = auto()
     END_INVOKE = auto()
     END_PERFORM = auto()
@@ -295,6 +298,9 @@ class TokenType(IntEnum):
     CURRENCY = auto()  # Dollar sign in PICTURE clauses
     QUOTATION_MARK = auto()
     APOSTROPHE = auto()
+    BANG = auto()  # '!', not a COBOL operator on its own -- appears as the
+    # left half of embedded SQL's '!=' (not-equal); see SINGLE_CHAR_TOKENS.
+    PIPE = auto()  # '|', likewise the half of embedded SQL's '||' (concat).
 
     # Special tokens
     NEWLINE = auto()
@@ -384,6 +390,14 @@ class _CobolLexerPure:
         "$": TokenType.CURRENCY,
         ">": TokenType.GREATER,
         "<": TokenType.LESS,
+        # '!' and '|' are not COBOL operators, but embedded EXEC SQL text
+        # legitimately uses '!=' (not-equal) and '||' (concatenation) --
+        # without dedicated tokens these hit the "Invalid character" branch
+        # below, which records a hard LexerError and fails the *entire*
+        # parse (result.ast is None) over two characters the parser only
+        # ever needed to round-trip as opaque SQL text.
+        "!": TokenType.BANG,
+        "|": TokenType.PIPE,
     }
 
     # COBOL keywords mapping
@@ -521,6 +535,15 @@ class _CobolLexerPure:
         "DISABLE": TokenType.DISABLE,
         "DISPLAY-1": TokenType.DISPLAY_1,
         "EJECT": TokenType.EJECT,
+        # SKIP1/SKIP2/SKIP3 are compiler-directing listing no-ops, the same
+        # class of statement as EJECT (skip 1/2/3 lines in the source
+        # listing, no runtime effect). Without a dedicated token type they
+        # lexed as plain IDENTIFIERs, fell to the PROCEDURE DIVISION's
+        # unrecognized-statement recovery, and dropped both the directive
+        # and adjacent tokens from the AST.
+        "SKIP1": TokenType.SKIP1,
+        "SKIP2": TokenType.SKIP2,
+        "SKIP3": TokenType.SKIP3,
         "ENABLE": TokenType.ENABLE,
         "END-INVOKE": TokenType.END_INVOKE,
         "END-PERFORM": TokenType.END_PERFORM,
