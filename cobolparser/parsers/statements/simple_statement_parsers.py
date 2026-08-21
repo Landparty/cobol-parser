@@ -27,6 +27,7 @@ from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
     STATEMENT_KEYWORDS,
     consume_period,
+    is_procedure_name_token,
     is_statement_boundary,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -255,8 +256,9 @@ class AlterStatementParser(IStatementParser):
                 consume_period(token_stream)
                 break
 
-            # Read from-paragraph
-            if token.type != TokenType.IDENTIFIER:
+            # Read from-paragraph (an identifier, or an all-digit numeric
+            # paragraph name -- idiomatic THRU-style numbering).
+            if not is_procedure_name_token(token):
                 break
             from_para = token.value or ""
             token_stream.consume()

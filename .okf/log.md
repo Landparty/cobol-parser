@@ -123,6 +123,39 @@ past column 72" — neither came with a concrete reproducible example (unlike
 the five fixes above, all of which were reproduced against a minimal
 `.cbl` before and after the fix), so no speculative change was made.
 
+## 2026-08-21 (Follow-up: two more statements missing all-digit procedure-name support)
+
+Re-verifying the "digit/float paragraph names" item from the 2026-08-20
+sweep against the current parser found the underlying all-digit-name gap
+(fixed for `PERFORM`/paragraph headers back on 2026-07-20) was never
+extended to two sibling statements that also target a paragraph by name:
+
+* **`ALTER paragraph-1 TO [PROCEED TO] paragraph-2`
+  (`simple_statement_parsers.py`):** the from-paragraph read required an
+  `IDENTIFIER` token outright, so `ALTER 1000 TO PROCEED TO 2000` (an
+  all-digit from-paragraph) fell through the `while` loop's first check and
+  the entire `ALTER` statement was dropped as unrecognized. The
+  to-paragraph read was already unrestricted (any non-`PERIOD` token), so
+  only the from-paragraph needed the same `IDENTIFIER`-or-all-digit
+  `NUMERIC_LITERAL`/`LEVEL_NUMBER` check `perform_parser.py`'s
+  `_is_procedure_name_token` already uses.
+* **Computed `GO TO target-1 target-2 ... DEPENDING ON var` with
+  all-digit targets (`go_parser.py`):** the first target already accepted
+  any token value, but the scan-ahead loop that collects *additional*
+  targets (and looks for the `DEPENDING` keyword that confirms this is a
+  computed GO TO, not a single target followed by the next sentence)
+  required `TokenType.IDENTIFIER` specifically. Once the first target was
+  numeric, `GO TO 1000 2000 3000 DEPENDING ON WS-N` stopped scanning at
+  `2000`, never found `DEPENDING`, and left `2000 3000 DEPENDING ON WS-N`
+  — including the `DEPENDING ON` variable — unconsumed in the stream.
+
+Both fixed by inlining the same all-digit-token check
+(`IDENTIFIER`, or `NUMERIC_LITERAL`/`LEVEL_NUMBER` with an all-digit
+value) at the point each statement decides whether a token is a
+paragraph-name candidate. Regression coverage:
+`tests/regression/test_real_corpus_parse_failures.py`
+(`TestAlterNumericProcedureNames`, `TestGoToDependingOnNumericTargets`).
+
 ## 2026-08-19 (Coverage audit: gap-closing tests + one correctness fix, floor raised 81% -> 90%)
 
 A full-suite coverage run (8,411 tests, no regressions) measured 91.79%,

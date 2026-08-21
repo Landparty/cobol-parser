@@ -727,29 +727,52 @@ so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
 
-**All-digit procedure names / PERFORM THRU numbering (2026-07-20):** COBOL
-permits procedure names made entirely of digits, and `PERFORM 1000 THRU
-1999` numbering is idiomatic in THRU-style code. Those names lex as
-`NUMERIC_LITERAL` (or `LEVEL_NUMBER` for 1–2 digit values), never
-`IDENTIFIER`, so support is explicit in two places:
+**All-digit procedure names / PERFORM THRU numbering (2026-07-20, extended
+2026-08-21):** COBOL permits procedure names made entirely of digits, and
+`PERFORM 1000 THRU 1999` numbering is idiomatic in THRU-style code. Those
+names lex as `NUMERIC_LITERAL` (or `LEVEL_NUMBER` for 1–2 digit values),
+never `IDENTIFIER`, so support is explicit wherever a statement can target
+a paragraph by name:
 
-* `divisions/procedure_boundaries.py` — `_is_procedure_name_token` accepts
-  an identifier or an all-digit numeric token;
-  `is_paragraph_or_section_start` uses it in both its after-period and
-  at-name cases, so numeric paragraph headers (`1000.`) are recognized
-  instead of being skipped as unsupported statements.
-* `perform_parser.py` — the inline `PERFORM n TIMES` branch now checks for
-  a following `TIMES`/`TIME` via `_peek_next_meaningful` *before* consuming
+* `statements/_utils.py` — `is_procedure_name_token` is the single shared
+  predicate (an identifier, or an all-digit `NUMERIC_LITERAL`/
+  `LEVEL_NUMBER`), used by `perform_parser.py`, `go_parser.py`, and
+  `simple_statement_parsers.py`'s `AlterStatementParser`. It was
+  originally a `perform_parser.py`-local `_is_procedure_name_token`;
+  promoted to `_utils.py` once GO TO and ALTER needed the identical check,
+  to avoid a third copy drifting out of sync with the other two.
+* `divisions/procedure_boundaries.py` — a separate, division-level
+  `_is_procedure_name_token` (same shape, different module: it works off
+  `token.type.name` strings rather than `TokenType` enum identity) accepts
+  an identifier or an all-digit numeric token; `is_paragraph_or_section_start`
+  uses it in both its after-period and at-name cases, so numeric paragraph
+  headers (`1000.`) are recognized instead of being skipped as unsupported
+  statements.
+* `perform_parser.py` — the inline `PERFORM n TIMES` branch checks for a
+  following `TIMES`/`TIME` via `_peek_next_meaningful` *before* consuming
   the numeric. Previously the numeric was consumed speculatively and, when
   TIMES did not follow, simply lost — `PERFORM 1000 THRU 1999` set
   `target_paragraph` to the literal word `THRU`. A numeric token not
   followed by TIMES now falls through to the procedure-name-target branch,
-  and both the target and the THRU end accept all-digit names (shared
-  `_is_procedure_name_token` helper). `GO TO 1999` already worked (the GO
-  parser takes the token value regardless of type); SORT/MERGE `THRU`
-  procedure names remain IDENTIFIER-only.
+  and both the target and the THRU end accept all-digit names.
+* `go_parser.py` — the first `GO TO` target always accepted any token
+  value regardless of type, so a single-target `GO TO 1999` already
+  worked. The computed-GOTO scan-ahead that collects *additional* targets
+  before a `DEPENDING ON` required `TokenType.IDENTIFIER` specifically,
+  though, so once the first target was numeric the loop never found
+  `DEPENDING` and left the rest of the statement — remaining targets and
+  the `DEPENDING ON` variable — unconsumed. Fixed by routing that
+  scan-ahead through the shared predicate.
+* `simple_statement_parsers.py`'s `AlterStatementParser` — the
+  from-paragraph read required `TokenType.IDENTIFIER` outright, dropping
+  `ALTER 1000 TO PROCEED TO 2000` entirely as an unrecognized statement.
+  The to-paragraph read was already unrestricted (any non-`PERIOD` token),
+  so only the from-paragraph needed the fix. SORT/MERGE `THRU` procedure
+  names remain IDENTIFIER-only.
 
-Pinned by `tests/unit/test_perform_thru_numeric.py`.
+Pinned by `tests/unit/test_perform_thru_numeric.py` and
+`tests/regression/test_real_corpus_parse_failures.py`
+(`TestAlterNumericProcedureNames`, `TestGoToDependingOnNumericTargets`).
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH

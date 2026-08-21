@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     get_parse_context,
+    is_procedure_name_token,
     matches_keyword,
     report_parse_error,
 )
@@ -135,7 +136,7 @@ class GoStatementParser(IStatementParser):
                 not look.value
                 or look_upper == "."
                 or look_upper in STATEMENT_KEYWORDS
-                or look.type is not TokenType.IDENTIFIER
+                or not is_procedure_name_token(look)
             ):
                 break
             extra_targets.append(look.value)
