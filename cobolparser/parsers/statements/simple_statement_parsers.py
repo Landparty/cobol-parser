@@ -29,6 +29,7 @@ from ._utils import (
     consume_period,
     is_procedure_name_token,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -194,6 +195,7 @@ class CancelStatementParser(IStatementParser):
     ) -> CancelStatement:
         start = token_stream.consume()
         stmt = CancelStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -211,9 +213,15 @@ class CancelStatementParser(IStatementParser):
                 break
             # A missing period on this CANCEL followed by what looks like
             # the next paragraph/section header (H9): stop instead of
-            # folding it into the program-name list.
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            # folding it into the program-name list. Disambiguated by
+            # indentation (Area A vs Area B) so a program name that merely
+            # wraps onto its own continuation line -- legitimate for any
+            # name in the list, not just the first -- isn't misread as a
+            # boundary and dropped.
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break

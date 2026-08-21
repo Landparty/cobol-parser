@@ -8,6 +8,20 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-21 (second entry this date): +23 in
+`tests/regression/test_real_corpus_parse_failures.py`, pinning a second
+controlled re-probe's four fixes (see [parser.md](parser.md) and
+[lexer.md](lexer.md)): `TestSecondOperandOnContinuationLine` (MOVE/OPEN's
+second-or-later operand on its own continuation line, plus a guard that a
+genuinely dedented next paragraph is still caught as a boundary),
+`TestDigitLedHyphenatedProcedureNames` (`43E00-PROD`-shaped and
+`22310-01-TRAITE`-shaped paragraph names, plus a guard that plain
+scientific-notation literals like `5E10`/`5E+5`/`5E-3`/`1.5E10` are
+unaffected), `TestSetSubscriptedValue` (all four of SET's value-reading
+branches — plain `TO`, `TO ADDRESS OF`, `UP BY`, `DOWN BY` — with a
+subscripted value), and `TestEmbeddedSqlNotSignOperator` (`¬=` inside
+`EXEC SQL` no longer crashes the parse).
+
 2026-08-21: New `tests/regression/test_skip_statement.py` (7 tests) for
 `SKIP1`/`SKIP2`/`SKIP3` compiler-directing listing no-ops — mirrors
 `test_eject_statement.py`'s scenarios for the same class of statement:

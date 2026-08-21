@@ -301,6 +301,9 @@ class TokenType(IntEnum):
     BANG = auto()  # '!', not a COBOL operator on its own -- appears as the
     # left half of embedded SQL's '!=' (not-equal); see SINGLE_CHAR_TOKENS.
     PIPE = auto()  # '|', likewise the half of embedded SQL's '||' (concat).
+    NOT_SIGN = auto()  # '¬' (logical-NOT glyph), the left half of
+    # embedded SQL's '¬=' (not-equal) on EBCDIC-derived mainframe
+    # source; see SINGLE_CHAR_TOKENS.
 
     # Special tokens
     NEWLINE = auto()
@@ -398,6 +401,10 @@ class _CobolLexerPure:
         # ever needed to round-trip as opaque SQL text.
         "!": TokenType.BANG,
         "|": TokenType.PIPE,
+        # '¬' (U+00AC NOT SIGN) is how some EBCDIC-derived mainframe source
+        # renders logical NOT; embedded EXEC SQL text legitimately uses
+        # '¬=' as an alternate not-equal spelling, mirroring '!=' above.
+        "¬": TokenType.NOT_SIGN,
     }
 
     # COBOL keywords mapping
@@ -1219,29 +1226,73 @@ class _CobolLexerPure:
                 while lookahead_pos < length and (text[lookahead_pos].isdigit()):
                     lookahead_pos += 1
 
+                # If a scientific-notation-shaped exponent (E/e, optional
+                # sign, digits) follows immediately, skip past it too before
+                # deciding identifier vs number -- a bare `43E00` is a
+                # number, but `43E00-PROD` is a single hyphenated
+                # paragraph/data name whose first segment merely happens to
+                # look like an exponent. Checking only the character right
+                # after the leading digit run (as below) misread every such
+                # name as a numeric literal followed by a stray MINUS and
+                # identifier.
+                exponent_end = lookahead_pos
+                if exponent_end < length and text[exponent_end].upper() == "E":
+                    probe = exponent_end + 1
+                    if probe < length and text[probe] in ("+", "-"):
+                        probe += 1
+                    digits_start = probe
+                    while probe < length and text[probe].isdigit():
+                        probe += 1
+                    if probe > digits_start:
+                        exponent_end = probe
+
+                # Walk any further hyphen-joined segments (each a digit run
+                # or a letter run) looking for a letter anywhere in the rest
+                # of the word -- a single one-hop lookahead misses names
+                # like `22310-01-TRAITE`, where the first letter only
+                # appears two hyphens in.
+                has_alpha = False
+                scan_pos = exponent_end
+                while (
+                    scan_pos < length
+                    and text[scan_pos] == "-"
+                    and scan_pos + 1 < length
+                    and text[scan_pos + 1].isalnum()
+                ):
+                    scan_pos += 1
+                    if text[scan_pos].isalpha():
+                        has_alpha = True
+                    while scan_pos < length and text[scan_pos].isalnum():
+                        if text[scan_pos].isalpha():
+                            has_alpha = True
+                        scan_pos += 1
+
                 # Check if after digits we have a dash-then-letter OR a direct
                 # letter (identifier patterns like 42-DATANAMES or 25COUNT, 45A).
                 # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
                 # a digit or sign+digit stays on the read_number_from_text path.
-                if lookahead_pos < length and (
-                    (
-                        text[lookahead_pos] == "-"
-                        and lookahead_pos + 1 < length
-                        and text[lookahead_pos + 1].isalpha()
-                    )
-                    or (
-                        text[lookahead_pos].isalpha()
-                        and not (
-                            text[lookahead_pos].upper() == "E"
-                            and (
-                                (
-                                    lookahead_pos + 1 < length
-                                    and text[lookahead_pos + 1].isdigit()
-                                )
-                                or (
-                                    lookahead_pos + 2 < length
-                                    and text[lookahead_pos + 1] in ("+", "-")
-                                    and text[lookahead_pos + 2].isdigit()
+                if has_alpha or (
+                    lookahead_pos < length
+                    and (
+                        (
+                            text[lookahead_pos] == "-"
+                            and lookahead_pos + 1 < length
+                            and text[lookahead_pos + 1].isalpha()
+                        )
+                        or (
+                            text[lookahead_pos].isalpha()
+                            and not (
+                                text[lookahead_pos].upper() == "E"
+                                and (
+                                    (
+                                        lookahead_pos + 1 < length
+                                        and text[lookahead_pos + 1].isdigit()
+                                    )
+                                    or (
+                                        lookahead_pos + 2 < length
+                                        and text[lookahead_pos + 1] in ("+", "-")
+                                        and text[lookahead_pos + 2].isdigit()
+                                    )
                                 )
                             )
                         )

@@ -8,6 +8,7 @@ from ...models.statements import SetStatement
 from ._utils import (
     consume_optional_subscript,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -42,6 +43,7 @@ class SetStatementParser(IStatementParser):
     ) -> SetStatement:
         start = token_stream.consume()
         stmt = SetStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         # Collect targets until TO/UP/DOWN/period
@@ -62,9 +64,14 @@ class SetStatementParser(IStatementParser):
                 break
             # A missing period on this SET followed by what looks like the
             # next paragraph/section header (H9): stop instead of folding it
-            # into the target list.
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            # into the target list. Disambiguated by indentation (Area A vs
+            # Area B) so a target that merely wraps onto its own
+            # continuation line -- legitimate for any target in the list, not
+            # just the first -- isn't misread as a boundary and dropped.
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
@@ -137,14 +144,27 @@ class SetStatementParser(IStatementParser):
                     stmt.set_set_type("TO")
                     v2 = token_stream.peek()
                     if v2 and v2.type != TokenType.PERIOD:
+                        parts = [v2.value] if v2.value else []
                         token_stream.consume()
+                        # A trailing `(subscript[, subscript]...)` group
+                        # (e.g. `ADDRESS OF TABLE-ITEM(I)`) must be folded
+                        # into the value string -- without this, the
+                        # subscript tokens are left unconsumed and dropped.
+                        consume_optional_subscript(token_stream, parts)
                         stmt.set_value(
-                            _strip_period(v2.value or ""), is_address_of=True
+                            _strip_period(" ".join(p for p in parts if p)),
+                            is_address_of=True,
                         )
                 elif v.type != TokenType.PERIOD:
                     stmt.set_set_type("TO")
+                    parts = [v.value] if v.value else []
                     token_stream.consume()
-                    stmt.set_value(_strip_period(v.value or ""))
+                    # A trailing `(subscript[, subscript]...)` group (e.g.
+                    # `SET IDX TO TABLE-ITEM(5)`) must be folded into the
+                    # value string -- without this, the subscript tokens
+                    # are left unconsumed and dropped.
+                    consume_optional_subscript(token_stream, parts)
+                    stmt.set_value(_strip_period(" ".join(p for p in parts if p)))
         elif val == "UP":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -155,8 +175,14 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("UP_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
+                parts = [v.value] if v.value else []
                 token_stream.consume()
-                stmt.set_value(_strip_period(v.value or ""))
+                # A trailing `(subscript[, subscript]...)` group (e.g.
+                # `SET IDX UP BY INCREMENT-TABLE(I)`) must be folded into
+                # the value string -- without this, the subscript tokens
+                # are left unconsumed and dropped.
+                consume_optional_subscript(token_stream, parts)
+                stmt.set_value(_strip_period(" ".join(p for p in parts if p)))
         elif val == "DOWN":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -167,8 +193,14 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("DOWN_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
+                parts = [v.value] if v.value else []
                 token_stream.consume()
-                stmt.set_value(_strip_period(v.value or ""))
+                # A trailing `(subscript[, subscript]...)` group (e.g.
+                # `SET IDX DOWN BY DECREMENT-TABLE(J)`) must be folded into
+                # the value string -- without this, the subscript tokens
+                # are left unconsumed and dropped.
+                consume_optional_subscript(token_stream, parts)
+                stmt.set_value(_strip_period(" ".join(p for p in parts if p)))
 
         skip_whitespace(token_stream)
         # Consume period

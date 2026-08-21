@@ -1,5 +1,94 @@
 # OKF Update Log
 
+## 2026-08-21 (Second controlled re-probe on 1.8.0: 4 more real-corpus fixes)
+
+A follow-up re-probe of the same real-world corpus against 1.8.0 (after the
+two 2026-08-21 follow-ups above) found four items still standing from the
+2026-08-20 sweep's "reviewed and deliberately left alone" note. All four
+confirmed, reproduced, and fixed.
+
+* **Paragraph-boundary dedent disambiguation (H9) only applied to a
+  statement's *first* operand (`_utils.py`, and every operand-collection
+  loop that calls `looks_like_paragraph_boundary`):** the 2026-08-20 sweep's
+  MOVE fix disambiguated a real paragraph header (Area A, dedented) from a
+  wrapped continuation-line operand (Area B) via `_looks_dedented_relative_to`
+  — but only gated the check on `target_count == 0`; a *second-or-later*
+  operand on its own continuation line still always tripped the boundary
+  check regardless of indentation, exactly the same silent-drop bug shape
+  for every operand past the first. Confirmed repros: `MOVE SPACES TO
+  LKTRT-IND-PREMIER-APPEL\n    LKTRT-INDIC-SUITE.` and `OPEN OUTPUT
+  FD020-FDDATE-OUT\n    FD020-SI6658-OUT.`, both silently dropping the
+  second name. Fixed by hoisting `_looks_dedented_relative_to` into a shared
+  `looks_dedented_relative_to` in `_utils.py` and ANDing it into every
+  multi-operand call site regardless of position: `move_parser.py` (targets),
+  `open_parser.py`/`close_parser.py` (file-name lists), `set_parser.py`
+  (targets), `display_parser.py` (item list), `simple_statement_parsers.py`
+  (CANCEL program-name list), `sort_merge_parsers.py` (SORT/MERGE's own
+  clause-dispatch loop plus the shared `_parse_keys`/`_parse_file_list`
+  helpers, now both threading a `reference_column` parameter), `string_
+  unstring_parsers.py` (STRING's operand list, UNSTRING's clause loop, and
+  `_parse_into_targets`, likewise threaded), `initialize_inspect_parsers.py`
+  (INSPECT's "consume to period" trailer and `_parse_tallying`, likewise
+  threaded), and `arithmetic_parsers.py` (`_consume_additional_arithmetic_
+  targets`/`_consume_additional_giving_targets`, likewise threaded, plus
+  COMPUTE's expression-token collection loop). Each site's reference column
+  is the statement's own verb token column, matching MOVE's existing
+  convention. The single highest-impact fix in this pass (the corpus's own
+  count: 654 files affected).
+* **Digit-led-identifier lexer lookahead only peeked one hyphen segment
+  ahead (`lexer.py`, `_lexer_fast.pyx`):** the digit-branch of
+  `tokenize_program_text` decided identifier-vs-numeric-literal by checking
+  only the single character immediately after the leading digit run.
+  `43E00-PROD` and `4E000-X` — real paragraph/data names whose first
+  segment merely *looks* like scientific notation — hit the existing E-
+  exponent exclusion and were misread as a `NUMERIC_LITERAL` (`43E00`)
+  followed by a stray `MINUS` and `IDENTIFIER` (`PROD`). `22310-01-TRAITE`
+  failed the same way for a different reason: its second segment (`01`) is
+  also all-digit, so the one-hop lookahead never reached the third
+  segment's letters at all. (`150000-X` and `01-DEPOT` already worked —
+  their second segment starts with a letter directly.) Fixed by extending
+  the lookahead past a matched E-exponent shape and then walking any
+  further hyphen-joined segments for a letter anywhere in the rest of the
+  word, ORed with the original one-hop check (still needed for the
+  no-hyphen `25COUNT`/`45A` shapes the new hyphen-walk doesn't cover).
+  Verified unaffected: plain `5E10`, `5E+5`, `5E-3`, `1.5E10` (no trailing
+  hyphen segment, so `has_alpha` stays `False` and the numeric-literal path
+  is unchanged). Both the pure-Python and Cython-accelerated lexers carry
+  the identical fix (`.pyx` recompiled, `.c` regenerated) since the
+  compiled `_lexer_fast.CobolLexer` is what actually serves `tokenize()`
+  whenever the extension is built. Corrupted data-flow/CRUD analysis for
+  654 files in the source corpus (same count as the operand-list fix above
+  — both bugs hit largely the same file set).
+* **SET's subscript fix only covered the *target* side
+  (`set_parser.py`):** the 2026-08-20 sweep fixed `SET target(subscript) TO
+  ADDRESS OF ...` by folding the target's subscript via
+  `consume_optional_subscript` — but every *value*-reading branch (`TO`
+  plain value, `TO ADDRESS OF` value, `UP BY` value, `DOWN BY` value) still
+  read only a single token, silently truncating `SET IDX TO TABLE-ITEM(5)`
+  to a value of `TABLE-ITEM` (subscript tokens left unconsumed, then
+  swallowed as generic trailing tokens). Fixed by applying the same
+  `consume_optional_subscript` fold to all four value-reading branches.
+  428 occurrences across 112 files in the source corpus.
+* **Embedded SQL `¬=` crashed the entire parse (`lexer.py`,
+  `parsers/statements/_utils.py`):** the 2026-08-20 sweep added `BANG`/
+  `PIPE` tokens for `!=`/`||`, but `¬` (U+00AC NOT SIGN — how some
+  EBCDIC-derived mainframe source spells logical NOT) had no token of its
+  own and hit the same hard `LexerError` `!`/`|` used to. Fixed by adding a
+  `NOT_SIGN` token (mirroring `BANG`) and a `(NOT_SIGN, ASSIGN)` entry in
+  `_EXEC_SQL_SPLIT_RELOP_PAIRS` so `¬=` rejoins without a spurious space,
+  exactly like `!=`.
+
+**Deliberately not fixed (unchanged from 2026-08-20):** `COMPUTE ... EQUAL`
+in place of `=` was flagged again by this pass and again left alone —
+still unconfirmed against real IBM Enterprise COBOL compiler behavior, so
+likely invalid COBOL rather than a parser gap, not a case of "no repro" this
+time but "no compiler ground truth yet."
+
+Regression coverage for all four fixes: `tests/regression/
+test_real_corpus_parse_failures.py` (`TestSecondOperandOnContinuationLine`,
+`TestDigitLedHyphenatedProcedureNames`, `TestSetSubscriptedValue`,
+`TestEmbeddedSqlNotSignOperator`).
+
 ## 2026-08-20 (Real-corpus parse-failure sweep: 5 fixes from an external error-analysis pass)
 
 An external analysis of a 559-file real-world COBOL corpus (mainframe

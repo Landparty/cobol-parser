@@ -407,6 +407,36 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     return value_upper not in known_data_names
 
 
+def looks_dedented_relative_to(
+    token_stream: ITokenStream, reference_column: int | None
+) -> bool:
+    """True when the token at the stream's current position starts at a
+    shallower column than *reference_column*.
+
+    Used to tell a genuine paragraph/section header (dedented back to Area A)
+    apart from an operand that merely continues the statement's own line
+    (Area B, same or deeper indentation) once :func:`looks_like_paragraph_boundary`
+    has already confirmed the token has the bare "IDENTIFIER then period/SECTION"
+    shape both share. *reference_column* is normally the statement's own verb
+    column; missing location info (either side) defaults to True (dedented) --
+    the conservative "treat as boundary" behavior this call replaces.
+
+    Every operand-collection loop that calls :func:`looks_like_paragraph_boundary`
+    must AND it with this check, not just for the loop's first operand: a
+    second-or-later operand sitting on its own continuation line (same or
+    deeper column than the verb) is exactly as legitimate as the first one,
+    and skipping the dedent check once at least one operand has already been
+    collected silently truncates the operand list (see reports/open-findings.md).
+    """
+    if reference_column is None:
+        return True
+    token = token_stream.peek(0)
+    col = getattr(getattr(token, "location", None), "column", None)
+    if col is None:
+        return True
+    return bool(col < reference_column)
+
+
 def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
     """Record a warning when :func:`looks_like_paragraph_boundary` stops an
     operand-collection loop early instead of consuming what looks like the
@@ -1080,18 +1110,19 @@ _EXEC_SQL_NO_SPACE_BEFORE: frozenset[TokenType] = frozenset(
 
 #: (previous token type, current token type) pairs that the lexer produces
 #: for a two-character relational/concatenation operator it has no dedicated
-#: token for -- ``>=``, ``<=``, ``<>``, ``!=`` all lex as two single-char
-#: tokens (GREATER/LESS + ASSIGN, LESS + GREATER, or BANG + ASSIGN), and
-#: ``||`` (SQL string concatenation) lexes as two PIPE tokens. Rejoining them
-#: with ``" ".join`` would corrupt ``WHERE SALARY >= :WS-ID`` into
-#: ``"...SALARY > =:WS-ID..."`` (or turn ``COL1 || COL2`` into ``COL1 | |
-#: COL2``).
+#: token for -- ``>=``, ``<=``, ``<>``, ``!=``, ``¬=`` all lex as two
+#: single-char tokens (GREATER/LESS + ASSIGN, LESS + GREATER, BANG + ASSIGN,
+#: or NOT_SIGN + ASSIGN), and ``||`` (SQL string concatenation) lexes as two
+#: PIPE tokens. Rejoining them with ``" ".join`` would corrupt
+#: ``WHERE SALARY >= :WS-ID`` into ``"...SALARY > =:WS-ID..."`` (or turn
+#: ``COL1 || COL2`` into ``COL1 | | COL2``).
 _EXEC_SQL_SPLIT_RELOP_PAIRS: frozenset[tuple[TokenType, TokenType]] = frozenset(
     {
         (TokenType.GREATER, TokenType.ASSIGN),  # >=
         (TokenType.LESS, TokenType.ASSIGN),  # <=
         (TokenType.LESS, TokenType.GREATER),  # <>
         (TokenType.BANG, TokenType.ASSIGN),  # !=
+        (TokenType.NOT_SIGN, TokenType.ASSIGN),  # ¬=
         (TokenType.PIPE, TokenType.PIPE),  # ||
     }
 )
@@ -1099,7 +1130,7 @@ _EXEC_SQL_SPLIT_RELOP_PAIRS: frozenset[tuple[TokenType, TokenType]] = frozenset(
 
 def _is_split_relational_operator(prev_token: Token | None, token: Token) -> bool:
     """Return True if *token* immediately abuts *prev_token* forming
-    ``>=``/``<=``/``<>``/``!=``/``||``.
+    ``>=``/``<=``/``<>``/``!=``/``¬=``/``||``.
 
     Column adjacency (same line, ``token``'s column immediately following the
     end of ``prev_token``'s value) is used rather than a bare value check so

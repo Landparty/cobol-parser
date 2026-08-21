@@ -7,6 +7,7 @@ from ...lexer import TokenType
 from ...models.statements import MergeStatement, SortStatement
 from ._utils import (
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -16,7 +17,9 @@ from ._utils import (
 from ._utils import token_value_upper as _val
 
 
-def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:
+def _parse_keys(
+    ts: ITokenStream, reference_column: int | None = None
+) -> list[dict[str, str]]:
     """Parse ON ASCENDING/DESCENDING KEY field-1 [field-2 ...] clauses."""
     keys: list[dict[str, str]] = []
     while not ts.is_empty():
@@ -80,8 +83,14 @@ def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:
                         break
                     # A missing period followed by what looks like the next
                     # paragraph/section header (H9): stop instead of folding
-                    # it into the KEY field list.
-                    if looks_like_paragraph_boundary(ts):
+                    # it into the KEY field list. Disambiguated by
+                    # indentation (Area A vs Area B) so a key field that
+                    # merely wraps onto its own continuation line --
+                    # legitimate for any field in the list, not just the
+                    # first -- isn't misread as a boundary and dropped.
+                    if looks_like_paragraph_boundary(ts) and looks_dedented_relative_to(
+                        ts, reference_column
+                    ):
                         warn_paragraph_boundary_swallowed(ts)
                         break
                     ts.consume()
@@ -95,7 +104,9 @@ def _parse_keys(ts: ITokenStream) -> list[dict[str, str]]:
     return keys
 
 
-def _parse_file_list(ts: ITokenStream) -> list[str]:
+def _parse_file_list(
+    ts: ITokenStream, reference_column: int | None = None
+) -> list[str]:
     """Parse a list of file names."""
     files: list[str] = []
     while not ts.is_empty():
@@ -124,8 +135,15 @@ def _parse_file_list(ts: ITokenStream) -> list[str]:
             break
         # A missing period followed by what looks like the next
         # paragraph/section header (H9): stop instead of folding it into
-        # the file-name list.
-        if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(ts):
+        # the file-name list. Disambiguated by indentation (Area A vs
+        # Area B) so a file name that merely wraps onto its own
+        # continuation line -- legitimate for any file in the list, not
+        # just the first -- isn't misread as a boundary and dropped.
+        if (
+            token.type == TokenType.IDENTIFIER
+            and looks_like_paragraph_boundary(ts)
+            and looks_dedented_relative_to(ts, reference_column)
+        ):
             warn_paragraph_boundary_swallowed(ts)
             break
         if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
@@ -157,6 +175,7 @@ class SortStatementParser(IStatementParser):
     ) -> SortStatement:
         start = token_stream.consume()
         stmt = SortStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         # File name
@@ -167,7 +186,7 @@ class SortStatementParser(IStatementParser):
         skip_whitespace(token_stream)
 
         # Parse keys
-        keys = _parse_keys(token_stream)
+        keys = _parse_keys(token_stream, start_column)
         for k in keys:
             stmt.add_key(k["field"], k["order"])
 
@@ -185,8 +204,10 @@ class SortStatementParser(IStatementParser):
                 # No period before the next statement: stop rather than
                 # swallow it as a bogus SORT clause token.
                 break
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 # A missing period on this SORT followed by what looks like
                 # the next paragraph/section header (H9): stop instead of
@@ -225,12 +246,12 @@ class SortStatementParser(IStatementParser):
             elif val == "USING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                for f in _parse_file_list(token_stream):
+                for f in _parse_file_list(token_stream, start_column):
                     stmt.add_using_file(f)
             elif val == "GIVING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                for f in _parse_file_list(token_stream):
+                for f in _parse_file_list(token_stream, start_column):
                     stmt.add_giving_file(f)
             elif val == "INPUT":
                 token_stream.consume()
@@ -312,6 +333,7 @@ class MergeStatementParser(IStatementParser):
     ) -> MergeStatement:
         start = token_stream.consume()
         stmt = MergeStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         # File name
@@ -322,7 +344,7 @@ class MergeStatementParser(IStatementParser):
         skip_whitespace(token_stream)
 
         # Parse keys
-        keys = _parse_keys(token_stream)
+        keys = _parse_keys(token_stream, start_column)
         for k in keys:
             stmt.add_key(k["field"], k["order"])
 
@@ -340,8 +362,10 @@ class MergeStatementParser(IStatementParser):
                 # No period before the next statement: stop rather than
                 # swallow it as a bogus MERGE clause token.
                 break
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 # A missing period on this MERGE followed by what looks like
                 # the next paragraph/section header (H9): stop instead of
@@ -366,12 +390,12 @@ class MergeStatementParser(IStatementParser):
             elif val == "USING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                for f in _parse_file_list(token_stream):
+                for f in _parse_file_list(token_stream, start_column):
                     stmt.add_using_file(f)
             elif val == "GIVING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                for f in _parse_file_list(token_stream):
+                for f in _parse_file_list(token_stream, start_column):
                     stmt.add_giving_file(f)
             elif val == "OUTPUT":
                 token_stream.consume()

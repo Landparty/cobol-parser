@@ -12,6 +12,35 @@ the all-digit-procedure-name support ``PERFORM`` already had: ``ALTER``'s
 from-paragraph, and the extra targets of a computed ``GO TO ... DEPENDING
 ON`` list. Both silently dropped content the same way the five fixes above
 did.
+
+A second controlled re-probe against the same corpus on 1.8.0 (2026-08-21)
+found four items still standing:
+
+* The paragraph-boundary heuristic's dedent disambiguation (H9) was only
+  ever applied to a statement's *first* operand -- a second-or-later
+  operand on its own continuation line was still misread as a paragraph
+  header and dropped across every multi-operand statement (MOVE, OPEN,
+  CLOSE, SET, DISPLAY, CANCEL, SORT/MERGE's KEY/USING/GIVING lists,
+  STRING/UNSTRING, INITIALIZE/INSPECT's TALLYING, ADD/SUBTRACT/MULTIPLY/
+  DIVIDE's extra TO/FROM/GIVING targets, and COMPUTE's expression).
+* The lexer's digit-led-identifier lookahead only peeked one hyphen
+  segment ahead, so a hyphenated paragraph/data name was misread as a
+  numeric literal (plus a stray MINUS and identifier) whenever its first
+  segment happened to look like scientific notation (``43E00-PROD``,
+  ``4E000-X``) or its first letter only appeared two hyphens in
+  (``22310-01-TRAITE``).
+* SET's subscript fix from the first sweep only covered the *target* side
+  (``SET tbl(1) TO ...``); the *value* side (``SET x TO tbl(1)``, ``... TO
+  ADDRESS OF tbl(1)``, ``... UP/DOWN BY tbl(1)``) still dropped the
+  subscript.
+* Embedded SQL's ``¬=`` (the EBCDIC-derived not-equal spelling some
+  mainframe source uses instead of ``!=``) had no lexer token and hit the
+  same hard ``LexerError`` ``!=``/``||`` did before the first sweep.
+
+``COMPUTE ... EQUAL`` (using the word ``EQUAL`` in place of ``=``) was
+flagged again and again left alone: still unconfirmed against real IBM
+Enterprise COBOL compiler behavior, so likely invalid COBOL rather than a
+parser gap.
 """
 
 import textwrap
@@ -345,3 +374,232 @@ class TestGoToDependingOnNumericTargets:
         go_stmt = result.ast.find_first_by_type("GoStatement")
         assert go_stmt.target_paragraphs == ["1000", "2000", "3000"]
         assert go_stmt.depending_on_variable == "WS-N"
+
+
+class TestSecondOperandOnContinuationLine:
+    """The H9 paragraph-boundary dedent disambiguation previously only
+    applied to a statement's *first* operand; any later operand wrapped
+    onto its own continuation line -- exactly as legitimate as the first --
+    was still misread as the start of the next paragraph and dropped.
+    """
+
+    def test_move_second_target_on_continuation_line_is_not_dropped(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                MOVE SPACES TO LKTRT-IND-PREMIER-APPEL
+                    LKTRT-INDIC-SUITE.
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.warnings == []
+        move_stmt = result.ast.find_first_by_type("MoveStatement")
+        assert move_stmt.targets == [
+            "LKTRT-IND-PREMIER-APPEL",
+            "LKTRT-INDIC-SUITE",
+        ]
+
+    def test_open_second_file_on_continuation_line_is_not_dropped(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                OPEN OUTPUT FD020-FDDATE-OUT
+                    FD020-SI6658-OUT.
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.warnings == []
+        open_stmt = result.ast.find_first_by_type("IOOpenStatement")
+        assert open_stmt.file_names == ["FD020-FDDATE-OUT", "FD020-SI6658-OUT"]
+
+    def test_a_genuinely_dedented_next_paragraph_is_still_a_boundary(self):
+        # A real missing-target case: the follow-on token really is a
+        # dedented (Area A) paragraph header, so it must still be treated
+        # as a boundary rather than absorbed as a second MOVE target.
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01  WS-A  PIC X(5).
+            01  WS-B  PIC X(5).
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                MOVE WS-A TO WS-B
+            NEXT-PARA.
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        move_stmt = result.ast.find_first_by_type("MoveStatement")
+        assert move_stmt.targets == ["WS-B"]
+        assert any(
+            "NEXT-PARA" in w and "paragraph" in w for w in result.warnings
+        ), result.warnings
+        paragraphs = [
+            p.paragraph_name for p in result.ast.find_all_by_type("CobolParagraph")
+        ]
+        assert "NEXT-PARA" in paragraphs
+
+
+class TestDigitLedHyphenatedProcedureNames:
+    """The lexer's digit-led-identifier lookahead only peeked one character
+    past the leading digit run. A hyphenated paragraph/data name was
+    misread as a numeric literal (plus a stray MINUS and identifier)
+    whenever its first segment happened to look like scientific notation
+    (``43E00-PROD``) or its first letter only appeared two hyphens in
+    (``22310-01-TRAITE``).
+    """
+
+    def test_exponent_shaped_first_segment_is_one_identifier(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+                PERFORM 43E00-PROD.
+                STOP RUN.
+            43E00-PROD.
+                DISPLAY "IN PARA".
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.errors == []
+        paragraphs = [
+            p.paragraph_name for p in result.ast.find_all_by_type("CobolParagraph")
+        ]
+        assert "43E00-PROD" in paragraphs
+
+    def test_letter_two_hyphens_in_is_one_identifier(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+                PERFORM 22310-01-TRAITE.
+                STOP RUN.
+            22310-01-TRAITE.
+                DISPLAY "IN PARA".
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.errors == []
+        paragraphs = [
+            p.paragraph_name for p in result.ast.find_all_by_type("CobolParagraph")
+        ]
+        assert "22310-01-TRAITE" in paragraphs
+
+    def test_plain_scientific_notation_literals_are_unaffected(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                COMPUTE WS-A = 5E10.
+                COMPUTE WS-B = 5E+5.
+                COMPUTE WS-C = 5E-3.
+                COMPUTE WS-D = 1.5E10.
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.errors == []
+        computes = result.ast.find_all_by_type("ComputeStatement")
+        assert [c.expression for c in computes] == ["5E10", "5E+5", "5E-3", "1.5E10"]
+
+
+class TestSetSubscriptedValue:
+    """SET's subscript fix from the first sweep only covered the *target*
+    side (``SET tbl(1) TO ...``); the *value* side dropped the subscript
+    for every SET form (plain TO, TO ADDRESS OF, UP BY, DOWN BY).
+    """
+
+    def test_plain_to_value_subscript_is_captured(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                SET WS-IDX TO TABLE-ITEM(5).
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        set_stmt = result.ast.find_first_by_type("SetStatement")
+        assert set_stmt.value == "TABLE-ITEM ( 5 )"
+
+    def test_address_of_value_subscript_is_captured(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                SET WS-PTR TO ADDRESS OF TABLE-ITEM(I).
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        set_stmt = result.ast.find_first_by_type("SetStatement")
+        assert set_stmt.value == "TABLE-ITEM ( I )"
+        assert set_stmt.value_is_address_of is True
+
+    def test_up_by_value_subscript_is_captured(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                SET WS-IDX UP BY INCREMENT-TABLE(I).
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        set_stmt = result.ast.find_first_by_type("SetStatement")
+        assert set_stmt.value == "INCREMENT-TABLE ( I )"
+
+    def test_down_by_value_subscript_is_captured(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                SET WS-IDX DOWN BY DECREMENT-TABLE(J).
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        set_stmt = result.ast.find_first_by_type("SetStatement")
+        assert set_stmt.value == "DECREMENT-TABLE ( J )"
+
+
+class TestEmbeddedSqlNotSignOperator:
+    """Embedded SQL's ``¬=`` (the EBCDIC-derived not-equal spelling some
+    mainframe source uses instead of ``!=``) had no lexer token and hit the
+    lexer's unrecognized-character branch, failing the entire parse just
+    like ``!=``/``||`` did before the first sweep.
+    """
+
+    def test_not_sign_equal_operator_does_not_crash_the_parse(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                EXEC SQL
+                    SELECT COL1 INTO :WS-HOST-VAR
+                    FROM TABLE1
+                    WHERE STATUS ¬= 'X'
+                END-EXEC.
+                DISPLAY "AFTER SQL".
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.errors == []
+        exec_stmt = result.ast.find_first_by_type("ExecSQLStatement")
+        assert "¬=" in exec_stmt.sql_text
+        display_stmt = result.ast.find_first_by_type("DisplayStatement")
+        assert display_stmt.display_items == ['"AFTER SQL"']
