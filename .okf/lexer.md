@@ -333,6 +333,20 @@ TestDigitLedHyphenatedProcedureNames`. Both lexers needed the identical fix
 independently (no shared helper — see "Cython Acceleration" above): the
 `.pyx` was recompiled and its checked-in `.c` regenerated.
 
+**Accepted trade-off, not a bug (found by a `/code-review` pass on the fix
+itself):** a *space-free* arithmetic expression whose left operand happens to
+look like scientific notation — `COMPUTE X = 5E10-Y.` — now lexes as one
+`IDENTIFIER("5E10-Y")` instead of `NUMERIC_LITERAL("5E10") MINUS
+IDENTIFIER("Y")`. This is unavoidable: the character sequence is
+structurally identical to a real hyphenated name (`43E00-PROD`, this fix's
+own corpus-confirmed repro), and no context-free lexer can tell the two
+apart without look-ahead into the statement's semantics. Real COBOL
+arithmetic is written with spaces around operators (this shape requires
+omitting every space), so the trade-off favors the common, corpus-confirmed
+case. Pinned as an *expected* result (not a regression to chase) by
+`TestDigitLedHyphenatedProcedureNames::
+test_space_free_exponent_shaped_subtraction_is_an_accepted_tradeoff`.
+
 # See Also
 
 * [preprocessing.md](preprocessing.md) — upstream fixed-format normalisation

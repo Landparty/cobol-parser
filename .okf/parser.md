@@ -2104,6 +2104,24 @@ source spells logical NOT) had no lexer token and hit the same hard
 reconstructed SQL text without a spurious space, exactly like `!=`. Pinned
 by `TestEmbeddedSqlNotSignOperator` in the same regression file.
 
+**Known limitation, not new (found and traced by a `/code-review` pass on
+this fix):** `looks_dedented_relative_to`'s strict `col < reference_column`
+test cannot distinguish a real paragraph header from a wrapped operand when
+both sit at *exactly* the same column — e.g. a missing-period MOVE whose
+second target and the following paragraph name are both written flush left.
+This ambiguity is not new: it already existed for a statement's *first*
+operand from the original 2026-08-20 MOVE fix onward (verified directly
+against that commit) — this pass's change only extends the *same*
+pre-existing trade-off uniformly to every operand position instead of just
+the first, rather than introducing a new failure mode. A stricter
+disambiguation (e.g. also requiring the enclosing paragraph/section to
+already be known) was considered and not pursued: the same-column case
+requires source that is simultaneously missing its terminating period *and*
+using non-conventional indentation (paragraph headers are virtually always
+in Area A, well left of any statement body), an even narrower double
+coincidence than the "no repro" items already deferred elsewhere in this
+log.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

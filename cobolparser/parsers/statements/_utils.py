@@ -428,11 +428,9 @@ def looks_dedented_relative_to(
     and skipping the dedent check once at least one operand has already been
     collected silently truncates the operand list (see reports/open-findings.md).
     """
-    if reference_column is None:
-        return True
     token = token_stream.peek(0)
     col = getattr(getattr(token, "location", None), "column", None)
-    if col is None:
+    if reference_column is None or col is None:
         return True
     return bool(col < reference_column)
 

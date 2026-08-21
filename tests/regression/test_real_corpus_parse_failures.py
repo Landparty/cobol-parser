@@ -510,6 +510,32 @@ class TestDigitLedHyphenatedProcedureNames:
         computes = result.ast.find_all_by_type("ComputeStatement")
         assert [c.expression for c in computes] == ["5E10", "5E+5", "5E-3", "1.5E10"]
 
+    def test_space_free_exponent_shaped_subtraction_is_an_accepted_tradeoff(self):
+        # A code-review pass on this fix flagged `COMPUTE X = 5E10-Y.` (a
+        # space-free subtraction whose left operand happens to look like
+        # scientific notation) as now lexing as one IDENTIFIER("5E10-Y")
+        # instead of NUMERIC_LITERAL("5E10") MINUS IDENTIFIER("Y"). This is
+        # a genuine, inherent trade-off, not an oversight: the character
+        # sequence is structurally identical to a real hyphenated name like
+        # `43E00-PROD` (this fix's own corpus-confirmed repro), and no
+        # context-free lexer can tell them apart. Real COBOL arithmetic is
+        # written with spaces around operators (this exact shape requires
+        # deliberately omitting every space), so this trade-off favors the
+        # common, corpus-confirmed case over a synthetic, unspaced one.
+        # Pinned here so a future pass finds an intentional decision, not a
+        # silent regression to re-discover.
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                COMPUTE WS-A = 5E10-Y.
+                STOP RUN.
+            """)
+        result = parse_cobol(program)
+        compute = result.ast.find_first_by_type("ComputeStatement")
+        assert compute.expression == "5E10-Y"
+
 
 class TestSetSubscriptedValue:
     """SET's subscript fix from the first sweep only covered the *target*

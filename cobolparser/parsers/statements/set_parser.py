@@ -25,6 +25,21 @@ def _strip_period(value: str) -> str:
     return value
 
 
+def _consume_subscripted_value(token_stream: ITokenStream, first_token: Any) -> str:
+    """Consume *first_token* (already peeked, not yet consumed) plus an
+    optional trailing ``(subscript[, subscript]...)`` group, returning the
+    joined, period-stripped value string.
+
+    Shared by all four of SET's value-reading forms (``TO``, ``TO ADDRESS
+    OF``, ``UP BY``, ``DOWN BY``) -- without folding a subscript group in,
+    e.g. `SET IDX TO TABLE-ITEM(5)` silently dropped the `(5)`.
+    """
+    parts: list[str] = [first_token.value] if first_token.value else []
+    token_stream.consume()
+    consume_optional_subscript(token_stream, parts)
+    return _strip_period(" ".join(p for p in parts if p))
+
+
 class SetStatementParser(IStatementParser):
     """Parser for SET statements.
 
@@ -144,27 +159,13 @@ class SetStatementParser(IStatementParser):
                     stmt.set_set_type("TO")
                     v2 = token_stream.peek()
                     if v2 and v2.type != TokenType.PERIOD:
-                        parts = [v2.value] if v2.value else []
-                        token_stream.consume()
-                        # A trailing `(subscript[, subscript]...)` group
-                        # (e.g. `ADDRESS OF TABLE-ITEM(I)`) must be folded
-                        # into the value string -- without this, the
-                        # subscript tokens are left unconsumed and dropped.
-                        consume_optional_subscript(token_stream, parts)
                         stmt.set_value(
-                            _strip_period(" ".join(p for p in parts if p)),
+                            _consume_subscripted_value(token_stream, v2),
                             is_address_of=True,
                         )
                 elif v.type != TokenType.PERIOD:
                     stmt.set_set_type("TO")
-                    parts = [v.value] if v.value else []
-                    token_stream.consume()
-                    # A trailing `(subscript[, subscript]...)` group (e.g.
-                    # `SET IDX TO TABLE-ITEM(5)`) must be folded into the
-                    # value string -- without this, the subscript tokens
-                    # are left unconsumed and dropped.
-                    consume_optional_subscript(token_stream, parts)
-                    stmt.set_value(_strip_period(" ".join(p for p in parts if p)))
+                    stmt.set_value(_consume_subscripted_value(token_stream, v))
         elif val == "UP":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -175,14 +176,7 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("UP_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                parts = [v.value] if v.value else []
-                token_stream.consume()
-                # A trailing `(subscript[, subscript]...)` group (e.g.
-                # `SET IDX UP BY INCREMENT-TABLE(I)`) must be folded into
-                # the value string -- without this, the subscript tokens
-                # are left unconsumed and dropped.
-                consume_optional_subscript(token_stream, parts)
-                stmt.set_value(_strip_period(" ".join(p for p in parts if p)))
+                stmt.set_value(_consume_subscripted_value(token_stream, v))
         elif val == "DOWN":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -193,14 +187,7 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("DOWN_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                parts = [v.value] if v.value else []
-                token_stream.consume()
-                # A trailing `(subscript[, subscript]...)` group (e.g.
-                # `SET IDX DOWN BY DECREMENT-TABLE(J)`) must be folded into
-                # the value string -- without this, the subscript tokens
-                # are left unconsumed and dropped.
-                consume_optional_subscript(token_stream, parts)
-                stmt.set_value(_strip_period(" ".join(p for p in parts if p)))
+                stmt.set_value(_consume_subscripted_value(token_stream, v))
 
         skip_whitespace(token_stream)
         # Consume period

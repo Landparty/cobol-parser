@@ -1260,8 +1260,6 @@ class _CobolLexerPure:
                     and text[scan_pos + 1].isalnum()
                 ):
                     scan_pos += 1
-                    if text[scan_pos].isalpha():
-                        has_alpha = True
                     while scan_pos < length and text[scan_pos].isalnum():
                         if text[scan_pos].isalpha():
                             has_alpha = True

@@ -8,8 +8,9 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
-2026-08-21 (second entry this date): +23 in
-`tests/regression/test_real_corpus_parse_failures.py`, pinning a second
+2026-08-21 (second entry this date): +11 in
+`tests/regression/test_real_corpus_parse_failures.py` (23 total in the
+file), pinning a second
 controlled re-probe's four fixes (see [parser.md](parser.md) and
 [lexer.md](lexer.md)): `TestSecondOperandOnContinuationLine` (MOVE/OPEN's
 second-or-later operand on its own continuation line, plus a guard that a

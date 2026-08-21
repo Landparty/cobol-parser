@@ -89,6 +89,57 @@ test_real_corpus_parse_failures.py` (`TestSecondOperandOnContinuationLine`,
 `TestDigitLedHyphenatedProcedureNames`, `TestSetSubscriptedValue`,
 `TestEmbeddedSqlNotSignOperator`).
 
+**Post-fix `/code-review` (8-angle pass, same day):** caught two small dead
+code/duplication issues, both fixed:
+
+* The lexer's new hyphen-segment walk (`lexer.py`, `_lexer_fast.pyx`) had a
+  standalone `if text[scan_pos].isalpha(): has_alpha = True` check
+  immediately before a `while` loop whose first iteration re-examines that
+  exact same character — a pure duplicate. Removed; the `while` alone
+  covers it. `.pyx` recompiled, `.c` regenerated.
+* `set_parser.py`'s four value-reading branches (`TO`, `TO ADDRESS OF`,
+  `UP BY`, `DOWN BY`) each hand-copied the same 4-line "build parts, consume,
+  fold subscript, join+strip" sequence. Factored into one
+  `_consume_subscripted_value` helper.
+* `_utils.py`'s `looks_dedented_relative_to` collapsed its two separate
+  `is None` guards into one, and dropped a pointless `bool(...)` wrap
+  around an already-boolean comparison.
+* `.okf/tests.md` mis-stated this commit's own test-count delta as "+23"
+  (the file's post-commit *total*) instead of "+11" (what this commit
+  actually added) — corrected.
+
+Two review findings were investigated and found to be **pre-existing
+trade-offs, not new regressions** (both now pinned as expected results
+rather than left as future "surprises"):
+
+* `COMPUTE X = 5E10-Y.` (space-free subtraction, left operand shaped like
+  scientific notation) now lexes as one `IDENTIFIER("5E10-Y")` instead of
+  `NUMERIC_LITERAL MINUS IDENTIFIER`. Verified genuinely new (checked
+  against the pre-fix pure-Python lexer directly, bypassing the compiled
+  extension) but an unavoidable trade-off, not an oversight: the character
+  sequence is structurally identical to a real hyphenated name
+  (`43E00-PROD`), and real COBOL arithmetic is written with spaces around
+  operators. See lexer.md's "Accepted trade-off" note.
+* A missing-period statement whose second-or-later operand and the
+  following paragraph header sit at *exactly* the same column can still be
+  silently absorbed as an extra operand instead of recognized as a
+  boundary. Verified via a worktree checkout of the pre-fix code that this
+  exact ambiguity already existed for a statement's *first* operand from
+  the original 2026-08-20 MOVE fix onward — not introduced by this pass,
+  which only extends the same trade-off uniformly to every operand
+  position. See parser.md's "Known limitation, not new" note.
+
+One architectural observation from the review, deliberately not acted on in
+this pass: the dedent-disambiguation *predicate* is now centralized
+(`looks_dedented_relative_to`), but the operand-collection *loop* that
+calls it is still hand-copied into 9+ parser files, and this bug shape
+(an operand-collection loop mishandling a trailing operand) has now
+recurred across five separate dated entries in this log. A shared
+higher-order collection helper in `_utils.py`, or threading
+`reference_column` through `ParseContext` instead of by hand, would remove
+the need to re-derive this fix a sixth time -- flagged for a future,
+dedicated pass rather than folded into this bug-fix PR.
+
 ## 2026-08-20 (Real-corpus parse-failure sweep: 5 fixes from an external error-analysis pass)
 
 An external analysis of a 559-file real-world COBOL corpus (mainframe
