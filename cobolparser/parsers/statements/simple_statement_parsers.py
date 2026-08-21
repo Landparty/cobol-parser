@@ -27,6 +27,7 @@ from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
     STATEMENT_KEYWORDS,
     consume_period,
+    is_procedure_name_token,
     is_statement_boundary,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -255,15 +256,9 @@ class AlterStatementParser(IStatementParser):
                 consume_period(token_stream)
                 break
 
-            # Read from-paragraph. COBOL permits all-digit paragraph names
-            # (idiomatic THRU-style numbering); the lexer emits those as
-            # NUMERIC_LITERAL or LEVEL_NUMBER (1-2 digit values), never
-            # IDENTIFIER.
-            is_name_token = token.type == TokenType.IDENTIFIER or (
-                token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
-                and (token.value or "").isdigit()
-            )
-            if not is_name_token:
+            # Read from-paragraph (an identifier, or an all-digit numeric
+            # paragraph name -- idiomatic THRU-style numbering).
+            if not is_procedure_name_token(token):
                 break
             from_para = token.value or ""
             token_stream.consume()

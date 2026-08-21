@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     get_parse_context,
+    is_procedure_name_token,
     matches_keyword,
     report_parse_error,
 )
@@ -131,18 +132,11 @@ class GoStatementParser(IStatementParser):
             if look_upper == "DEPENDING":
                 found_depending = True
                 break
-            # COBOL permits all-digit paragraph/section names (idiomatic in
-            # THRU-style numbering); the lexer emits those as NUMERIC_LITERAL
-            # or LEVEL_NUMBER (1-2 digit values), never IDENTIFIER.
-            is_name_token = look.type is TokenType.IDENTIFIER or (
-                look.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
-                and look.value.isdigit()
-            )
             if (
                 not look.value
                 or look_upper == "."
                 or look_upper in STATEMENT_KEYWORDS
-                or not is_name_token
+                or not is_procedure_name_token(look)
             ):
                 break
             extra_targets.append(look.value)

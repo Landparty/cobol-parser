@@ -17,6 +17,9 @@ from cobolparser.parsers.statements._utils import (
     skip_whitespace,
     try_parse_nested_statement,
 )
+from cobolparser.parsers.statements._utils import (
+    is_procedure_name_token as _is_procedure_name_token,
+)
 
 from ...core.ast_factory import get_factory
 from ...core.exceptions import ParseError, TokenMismatch, UnexpectedEndOfInput
@@ -33,23 +36,6 @@ _NOISE_TOKEN_TYPES = (
     TokenType.NEWLINE,
     TokenType.CONTINUATION,
 )
-
-
-def _is_procedure_name_token(token: Token | None) -> bool:
-    """True if *token* can name a procedure: an identifier, or an all-digit
-    numeric token. COBOL permits all-digit paragraph/section names, and
-    ``PERFORM 1000 THRU 1999`` numbering is idiomatic in THRU-style code;
-    the lexer emits those names as NUMERIC_LITERAL (or LEVEL_NUMBER for 1-2
-    digit values), never IDENTIFIER.
-    """
-    if token is None or not token.value:
-        return False
-    if token.type == TokenType.IDENTIFIER:
-        return True
-    return (
-        token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
-        and token.value.isdigit()
-    )
 
 
 def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | None:

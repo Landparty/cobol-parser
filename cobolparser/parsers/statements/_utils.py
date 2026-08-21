@@ -268,6 +268,24 @@ def token_location(token: Token | None) -> SourceLocation:
     return token.location if token else SourceLocation(0, 0)
 
 
+def is_procedure_name_token(token: Token | None) -> bool:
+    """True if *token* can name a procedure: an identifier, or an all-digit
+    numeric token. COBOL permits all-digit paragraph/section names, and
+    ``PERFORM 1000 THRU 1999`` numbering is idiomatic in THRU-style code;
+    the lexer emits those names as NUMERIC_LITERAL (or LEVEL_NUMBER for 1-2
+    digit values), never IDENTIFIER. Shared by every statement that can
+    target a paragraph by name (PERFORM, GO TO, ALTER).
+    """
+    if token is None or not token.value:
+        return False
+    if token.type == TokenType.IDENTIFIER:
+        return True
+    return (
+        token.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+        and token.value.isdigit()
+    )
+
+
 def is_statement_boundary(token: Token | None) -> bool:
     """Return True if *token* begins a new statement or closes an enclosing scope.
 
