@@ -63,6 +63,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** `SKIP1`/`SKIP2`/`SKIP3` (the compiler-directing listing no-ops,
+  the same class of statement as `EJECT`) were missing from the shared
+  `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` sets in
+  `parsers/statements/_utils.py` that every operand/parameter-collection
+  loop (`CALL ... USING`, `MOVE`, `PERFORM`, `SET`, etc.) and the
+  PROCEDURE DIVISION paragraph-boundary scanner consult to recognize
+  "this token starts a new statement." `SKIP1`/`SKIP2`/`SKIP3` already had
+  their own `TokenType` and a dedicated `SkipStatementParser` ->
+  `SkipStatement` no-op node, so no incorrect parse was observed in
+  testing, but the gap left them one refactor away from the exact
+  misparse `EJECT` was fixed for (`test_eject_statement.py`) — a
+  boundary-token type not in these sets can be swallowed as an operand by
+  a preceding statement's argument-collection loop. Added alongside
+  `EJECT`'s existing entries for parity; new regression coverage in
+  `tests/regression/test_skip_statement.py` mirrors
+  `test_eject_statement.py`'s scenarios (trailing-period paragraph-split
+  guard, no-period marker survival, back-to-back directives, AST node
+  shape, COPY-expansion) for `SKIP1`/`SKIP2`/`SKIP3`.
 * **parser/analysis:** review follow-up on the `EVALUATE`-subject fix
   below. `evaluate_parser.py` now routes subjects through
   `EvaluateStatement.add_subject()` (the root cause: it appended straight

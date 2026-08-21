@@ -8,6 +8,23 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-21: New `tests/regression/test_skip_statement.py` (7 tests) for
+`SKIP1`/`SKIP2`/`SKIP3` compiler-directing listing no-ops — mirrors
+`test_eject_statement.py`'s scenarios for the same class of statement:
+trailing-period paragraph-split guard (`SKIP1.` between two paragraphs must
+not create a bogus paragraph), a real user-named paragraph immediately
+followed by a bare `SKIP2.` statement, no-period marker survival
+(`SKIP3` with no trailing period must not swallow the following
+statement), back-to-back directives across all three variants, AST node
+`to_dict()` shape plus each variant's own `lines` count via
+`find_all_by_type("SkipStatement")`, and COPY-expansion parity. Written
+after confirming via direct repro that `SKIP1`/`SKIP2`/`SKIP3` already
+parsed correctly in every one of these scenarios (they already had their
+own `TokenType`s and a registered `SkipStatementParser`) — the accompanying
+production change in [parser.md](parser.md) closes a related
+defense-in-depth gap (`STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` parity
+with `EJECT`) rather than fixing an observed misparse.
+
 2026-08-17 (review follow-up on the entry below): +3 in
 `tests/unit/analysis/test_unused_variables.py`'s `TestEvaluateSubjects` —
 `test_subjects_reach_operands_and_public_lookup` (evaluate_parser now

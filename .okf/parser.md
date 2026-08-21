@@ -2015,6 +2015,36 @@ All pinned by `tests/regression/test_audit_2026_08_12_core.py`.
   digits/spaces prefix (`^(?:[0-9 ]{6})?\s*...`) — exactly-6 (not "up to 6")
   so arbitrary text that merely starts with digits still doesn't match.
 
+# SKIP1/SKIP2/SKIP3 hardened to match EJECT's boundary-detection coverage (2026-08-21)
+
+`SKIP1`/`SKIP2`/`SKIP3` (compiler-directing listing no-ops, the same class of
+statement as `EJECT` above — blank-line hints for the source listing, no
+runtime effect) already had their own `TokenType`s, `KEYWORDS` entries, and a
+registered `SkipStatementParser` -> `SkipStatement` no-op node
+(`simple_statement_parsers.py` / `models/statements/misc.py`) by the time
+this entry was written, so direct repro found no misparse: `SKIP1.` between
+two paragraphs did not split them, and a period-less `SKIP2`/`SKIP3` did not
+swallow the following statement or warn, both inline and via COPY-expanded
+copybook text.
+
+What was actually missing: unlike `EJECT`, `SKIP1`/`SKIP2`/`SKIP3` were never
+added to `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` (`_utils.py`) — the
+sets every operand/parameter-collection loop (`CALL ... USING`, `MOVE`,
+`PERFORM`, `SET`, etc.) and the paragraph-boundary scanner consult to
+recognize "this token starts a new statement, stop consuming operands here."
+Having a dedicated `TokenType` already keeps a token out of the `IDENTIFIER`
+checks these sets exist to backstop for *unreserved* verb words (see the
+`EJECT` entry above and the 2026-07-08 "unsupported-verb boundary gap" audit
+for the general pattern), so nothing was live-broken — but the gap left
+`SKIP1`/`SKIP2`/`SKIP3` one refactor away from being swallowed as an operand
+by a preceding statement's own collection loop, exactly the failure class
+`EJECT` needed fixing for. Added `TokenType.SKIP1`/`SKIP2`/`SKIP3` and
+`"SKIP1"`/`"SKIP2"`/`"SKIP3"` to both sets for parity. Pinned by the new
+`tests/regression/test_skip_statement.py`, mirroring every scenario in
+`test_eject_statement.py` (trailing-period paragraph-split guard, no-period
+marker survival, back-to-back directives across all three variants, AST
+node shape including each variant's own `lines` count, COPY expansion).
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation
