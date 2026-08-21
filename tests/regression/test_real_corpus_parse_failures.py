@@ -6,6 +6,12 @@ surfaced hard parse failures and silent content-drops that the existing
 synthetic test fixtures never exercised. See the dated entry in
 ``.okf/log.md`` for the full writeup; each test below pins one of the five
 confirmed, reproduced fixes.
+
+A follow-up pass (2026-08-21) found two more statements that never learned
+the all-digit-procedure-name support ``PERFORM`` already had: ``ALTER``'s
+from-paragraph, and the extra targets of a computed ``GO TO ... DEPENDING
+ON`` list. Both silently dropped content the same way the five fixes above
+did.
 """
 
 import textwrap
@@ -271,3 +277,71 @@ class TestSkipCompilerDirectives:
         ]
         skip_stmts = result.ast.find_all_by_type("SkipStatement")
         assert [s.lines for s in skip_stmts] == [1, 2, 3]
+
+
+class TestAlterNumericProcedureNames:
+    """``ALTER``'s from-paragraph required an IDENTIFIER token, so an
+    all-digit paragraph name (idiomatic THRU-style numbering, already
+    supported everywhere ``PERFORM`` targets one) fell through as an
+    unrecognized statement, dropping ``ALTER ... TO PROCEED TO ...``
+    entirely.
+    """
+
+    def test_alter_with_numeric_from_paragraph_is_not_dropped(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                ALTER 1000 TO PROCEED TO 2000.
+                STOP RUN.
+            1000.
+                GO TO 3000.
+            2000.
+                DISPLAY "B".
+            3000.
+                DISPLAY "C".
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.errors == []
+        assert result.warnings == []
+        alter_stmt = result.ast.find_first_by_type("AlterStatement")
+        assert alter_stmt.alterations == [
+            {"from_paragraph": "1000", "to_paragraph": "2000"}
+        ]
+
+
+class TestGoToDependingOnNumericTargets:
+    """A computed ``GO TO target-1 target-2 ... DEPENDING ON`` list only
+    recognized IDENTIFIER tokens as extra targets, so once the first
+    target was an all-digit procedure name the scan-ahead for more targets
+    (and for the ``DEPENDING`` keyword itself) never found them, leaving
+    the rest of the statement -- including the ``DEPENDING ON`` variable
+    -- unconsumed in the stream.
+    """
+
+    def test_all_numeric_targets_and_depending_on_are_captured(self):
+        program = textwrap.dedent("""\
+            IDENTIFICATION DIVISION.
+            PROGRAM-ID. REGTEST.
+            DATA DIVISION.
+            WORKING-STORAGE SECTION.
+            01  WS-N  PIC 9  VALUE 1.
+            PROCEDURE DIVISION.
+            MAIN-PARA.
+                GO TO 1000 2000 3000 DEPENDING ON WS-N.
+            1000.
+                DISPLAY "A".
+            2000.
+                DISPLAY "B".
+            3000.
+                DISPLAY "C".
+            """)
+        result = parse_cobol(program)
+        assert result.success, result.errors
+        assert result.errors == []
+        assert result.warnings == []
+        go_stmt = result.ast.find_first_by_type("GoStatement")
+        assert go_stmt.target_paragraphs == ["1000", "2000", "3000"]
+        assert go_stmt.depending_on_variable == "WS-N"
