@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     create_statement,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -36,7 +37,8 @@ class OpenStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOOpenStatement:
         """Parse an OPEN statement."""
-        stmt, _ = create_statement(token_stream, IOOpenStatement)
+        stmt, start_token = create_statement(token_stream, IOOpenStatement)
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
 
         skip_whitespace(token_stream)
 
@@ -91,8 +93,14 @@ class OpenStatementParser(IStatementParser):
                     break
                 # A missing period on this OPEN followed by what looks like
                 # the next paragraph/section header (H9): stop instead of
-                # folding it into the file-name list.
-                if looks_like_paragraph_boundary(token_stream):
+                # folding it into the file-name list. Disambiguated by
+                # indentation (Area A vs Area B) so a file name that merely
+                # wraps onto its own continuation line -- legitimate for any
+                # file in the list, not just the first -- isn't misread as a
+                # boundary and dropped.
+                if looks_like_paragraph_boundary(
+                    token_stream
+                ) and looks_dedented_relative_to(token_stream, start_column):
                     warn_paragraph_boundary_swallowed(token_stream)
                     break
                 # Otherwise it's a file name

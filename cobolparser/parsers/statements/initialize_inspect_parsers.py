@@ -8,6 +8,7 @@ from ...models.statements import InitializeStatement, InspectStatement
 from ._utils import (
     consume_period,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -151,6 +152,7 @@ class InspectStatementParser(IStatementParser):
     ) -> InspectStatement:
         start = token_stream.consume()
         stmt = InspectStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         # Target identifier
@@ -170,7 +172,7 @@ class InspectStatementParser(IStatementParser):
             stmt.set_inspect_type("TALLYING")
             token_stream.consume()
             skip_whitespace(token_stream)
-            self._parse_tallying(token_stream, stmt)
+            self._parse_tallying(token_stream, stmt, start_column)
         elif val == "REPLACING":
             stmt.set_inspect_type("REPLACING")
             token_stream.consume()
@@ -205,8 +207,10 @@ class InspectStatementParser(IStatementParser):
             # A missing period on this INSPECT followed by what looks like
             # the next paragraph/section header (H9): stop instead of
             # silently discarding it in this "consume to period" trailer.
-            if t.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            if (
+                t.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
@@ -215,7 +219,12 @@ class InspectStatementParser(IStatementParser):
 
         return stmt
 
-    def _parse_tallying(self, ts: ITokenStream, stmt: InspectStatement) -> None:
+    def _parse_tallying(
+        self,
+        ts: ITokenStream,
+        stmt: InspectStatement,
+        reference_column: int | None = None,
+    ) -> None:
         """Parse TALLYING clauses: counter FOR {CHARACTERS|ALL|LEADING} [value] ..."""
         while not ts.is_empty():
             token = ts.peek()
@@ -236,10 +245,15 @@ class InspectStatementParser(IStatementParser):
                 break
             # A missing period on this INSPECT followed by what looks like
             # the next paragraph/section header (H9): stop instead of
-            # mistaking it for a TALLYING counter name. The "consume to
-            # period" trailer in parse() re-checks this same token and
-            # owns the warning, so this just needs to break, not warn.
-            if looks_like_paragraph_boundary(ts):
+            # mistaking it for a TALLYING counter name -- for any counter in
+            # the clause, not just the first, so a counter name that merely
+            # wraps onto its own continuation line isn't dropped. The
+            # "consume to period" trailer in parse() re-checks this same
+            # token and owns the warning, so this just needs to break, not
+            # warn.
+            if looks_like_paragraph_boundary(ts) and looks_dedented_relative_to(
+                ts, reference_column
+            ):
                 break
 
             # Counter name

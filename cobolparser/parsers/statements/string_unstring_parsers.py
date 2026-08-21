@@ -9,6 +9,7 @@ from ._utils import (
     collect_clause_stmts,
     consume_period,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -57,6 +58,7 @@ class StringStatementParser(IStatementParser):
     ) -> StringStatement:
         start = token_stream.consume()
         stmt = StringStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -77,12 +79,18 @@ class StringStatementParser(IStatementParser):
                 # No period / END-STRING terminator before the next statement:
                 # stop rather than swallow it (audit 2026-07-06 H2).
                 break
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 # A missing period on this STRING followed by what looks
                 # like the next paragraph/section header (H9): stop instead
-                # of folding it into the operand list.
+                # of folding it into the operand list. Disambiguated by
+                # indentation (Area A vs Area B) so an operand that merely
+                # wraps onto its own continuation line -- legitimate for any
+                # operand in the list, not just the first -- isn't misread
+                # as a boundary and dropped.
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
             if val == "DELIMITED":
@@ -181,6 +189,7 @@ class UnstringStatementParser(IStatementParser):
     ) -> UnstringStatement:
         start = token_stream.consume()
         stmt = UnstringStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         # Source identifier
@@ -208,8 +217,10 @@ class UnstringStatementParser(IStatementParser):
                 # No period / END-UNSTRING terminator before the next
                 # statement: stop rather than swallow it (audit 2026-07-06 H2).
                 break
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 # A missing period on this UNSTRING followed by what looks
                 # like the next paragraph/section header (H9): stop instead
@@ -244,7 +255,7 @@ class UnstringStatementParser(IStatementParser):
             elif val == "INTO":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                self._parse_into_targets(token_stream, stmt)
+                self._parse_into_targets(token_stream, stmt, start_column)
             elif val == "WITH":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -300,7 +311,9 @@ class UnstringStatementParser(IStatementParser):
 
     @staticmethod
     def _parse_into_targets(
-        token_stream: ITokenStream, stmt: UnstringStatement
+        token_stream: ITokenStream,
+        stmt: UnstringStatement,
+        reference_column: int | None = None,
     ) -> None:
         """Parse INTO target-1 [DELIMITER IN d1] [COUNT IN c1] ..."""
         current_target: str | None = None
@@ -347,14 +360,19 @@ class UnstringStatementParser(IStatementParser):
                 # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated
                 # TokenType) must not be folded into the INTO target list.
                 break
-            elif tgt.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            elif (
+                tgt.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, reference_column)
             ):
                 # A missing period on this UNSTRING followed by what looks
                 # like the next paragraph/section header (H9): stop instead
-                # of folding it into the INTO target list. The outer clause
-                # dispatch loop in parse() re-checks this same token and
-                # owns the warning, so this just needs to break, not warn.
+                # of folding it into the INTO target list -- for any target
+                # in the list, not just the first, so a target that merely
+                # wraps onto its own continuation line isn't dropped. The
+                # outer clause dispatch loop in parse() re-checks this same
+                # token and owns the warning, so this just needs to break,
+                # not warn.
                 break
             elif tgt.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
                 # Flush previous target if any

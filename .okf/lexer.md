@@ -306,6 +306,47 @@ leave partial entries that the retry would otherwise duplicate). CLI
 `tokenize` still discards this element deliberately (best-effort token
 dump, unchanged); `tokenize_cobol()` callers now see it.
 
+# Digit-led hyphenated names beyond one hyphen segment (2026-08-21)
+
+`tokenize_program_text`'s digit-branch (identical logic in `lexer.py` and
+`_lexer_fast.pyx`) decides identifier-vs-numeric-literal for a token
+starting with a digit. It previously only looked one hyphen segment past
+the leading digit run, which misread two real-corpus paragraph/data-name
+shapes as numbers:
+
+* `43E00-PROD` / `4E000-X` — the first segment alone looks like scientific
+  notation (`E` followed by digits), so the existing E-exponent exclusion
+  fired and the name was split into `NUMERIC_LITERAL("43E00")` + `MINUS` +
+  `IDENTIFIER("PROD")`.
+* `22310-01-TRAITE` — the *second* segment (`01`) is also all-digit, so the
+  one-hop lookahead never reached the third segment's letters at all.
+
+Fixed by extending the lookahead past any matched E-exponent shape and then
+walking further hyphen-joined segments (each a digit run or a letter run)
+for a letter anywhere in the rest of the word; that `has_alpha` result is
+ORed with the original one-hop check (still needed for no-hyphen shapes
+like `25COUNT`/`45A`, which the hyphen-walk doesn't cover since it only
+triggers on a `-` continuation). Plain scientific-notation literals with no
+trailing hyphen segment (`5E10`, `5E+5`, `5E-3`, `1.5E10`) are unaffected —
+verified via `tests/regression/test_real_corpus_parse_failures.py::
+TestDigitLedHyphenatedProcedureNames`. Both lexers needed the identical fix
+independently (no shared helper — see "Cython Acceleration" above): the
+`.pyx` was recompiled and its checked-in `.c` regenerated.
+
+**Accepted trade-off, not a bug (found by a `/code-review` pass on the fix
+itself):** a *space-free* arithmetic expression whose left operand happens to
+look like scientific notation — `COMPUTE X = 5E10-Y.` — now lexes as one
+`IDENTIFIER("5E10-Y")` instead of `NUMERIC_LITERAL("5E10") MINUS
+IDENTIFIER("Y")`. This is unavoidable: the character sequence is
+structurally identical to a real hyphenated name (`43E00-PROD`, this fix's
+own corpus-confirmed repro), and no context-free lexer can tell the two
+apart without look-ahead into the statement's semantics. Real COBOL
+arithmetic is written with spaces around operators (this shape requires
+omitting every space), so the trade-off favors the common, corpus-confirmed
+case. Pinned as an *expected* result (not a regression to chase) by
+`TestDigitLedHyphenatedProcedureNames::
+test_space_free_exponent_shaped_subtraction_is_an_accepted_tradeoff`.
+
 # See Also
 
 * [preprocessing.md](preprocessing.md) — upstream fixed-format normalisation

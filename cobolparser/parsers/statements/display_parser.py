@@ -15,6 +15,7 @@ from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
 from ._utils import (
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -58,6 +59,7 @@ class DisplayStatementParser(IStatementParser):
         # Consume DISPLAY keyword
         start_token = token_stream.consume()
         start_location = start_token.location if start_token else SourceLocation(0, 0)
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
 
         # Use factory for validated node creation
         factory = get_factory()
@@ -144,9 +146,14 @@ class DisplayStatementParser(IStatementParser):
 
             # A missing period on this DISPLAY followed by what looks like
             # the next paragraph/section header (H9): stop instead of
-            # folding it into the item list.
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            # folding it into the item list. Disambiguated by indentation
+            # (Area A vs Area B) so an item that merely wraps onto its own
+            # continuation line -- legitimate for any item in the list, not
+            # just the first -- isn't misread as a boundary and dropped.
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break

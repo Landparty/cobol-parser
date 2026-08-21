@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     create_statement,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -30,7 +31,8 @@ class CloseStatementParser(IStatementParser):
         self, token_stream: ITokenStream, context: Any | None = None
     ) -> IOCloseStatement:
         """Parse a CLOSE statement."""
-        stmt, _ = create_statement(token_stream, IOCloseStatement)
+        stmt, start_token = create_statement(token_stream, IOCloseStatement)
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
 
         skip_whitespace(token_stream)
 
@@ -51,8 +53,13 @@ class CloseStatementParser(IStatementParser):
                 break
             # A missing period on this CLOSE followed by what looks like the
             # next paragraph/section header (H9): stop instead of folding it
-            # into the file-name list.
-            if looks_like_paragraph_boundary(token_stream):
+            # into the file-name list. Disambiguated by indentation (Area A
+            # vs Area B) so a file name that merely wraps onto its own
+            # continuation line -- legitimate for any file in the list, not
+            # just the first -- isn't misread as a boundary and dropped.
+            if looks_like_paragraph_boundary(
+                token_stream
+            ) and looks_dedented_relative_to(token_stream, start_column):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
 

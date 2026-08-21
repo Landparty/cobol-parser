@@ -34,6 +34,7 @@ from ._utils import (
     consume_optional_subscript,
     get_parse_context,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     parse_arithmetic_operands,
@@ -78,6 +79,7 @@ class AddStatementParser(IStatementParser):
         """Parse an ADD statement."""
         start_token = token_stream.consume()
         start_loc = token_location(start_token)
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
         stmt: AddStatement = create_node(AddStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
@@ -104,7 +106,7 @@ class AddStatementParser(IStatementParser):
                 stmt.set_target(target)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
-                _consume_additional_arithmetic_targets(token_stream, stmt)
+                _consume_additional_arithmetic_targets(token_stream, stmt, start_column)
             else:
                 report_or_raise(
                     ctx, "ADD ... TO requires a target identifier", start_loc
@@ -114,14 +116,14 @@ class AddStatementParser(IStatementParser):
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
-                _consume_additional_giving_targets(token_stream, stmt)
+                _consume_additional_giving_targets(token_stream, stmt, start_column)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
-                _consume_additional_giving_targets(token_stream, stmt)
+                _consume_additional_giving_targets(token_stream, stmt, start_column)
             else:
                 report_or_raise(
                     ctx, "ADD ... GIVING requires a target identifier", start_loc
@@ -145,6 +147,7 @@ class SubtractStatementParser(IStatementParser):
         """Parse a SUBTRACT statement."""
         start_token = token_stream.consume()
         start_loc = token_location(start_token)
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
         stmt: SubtractStatement = create_node(SubtractStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
@@ -224,7 +227,7 @@ class SubtractStatementParser(IStatementParser):
                     stmt.set_rounded(True)
                 # SUBTRACT allows multiple FROM targets, each individually
                 # ROUNDED: ``FROM b [ROUNDED], c [ROUNDED] ...``.
-                _consume_additional_arithmetic_targets(token_stream, stmt)
+                _consume_additional_arithmetic_targets(token_stream, stmt, start_column)
             # SUBTRACT a FROM b GIVING c: the 3-operand form stores the
             # result in c instead of back into b (mirrors ADD's TO branch,
             # which already checks for a trailing GIVING the same way).
@@ -233,14 +236,14 @@ class SubtractStatementParser(IStatementParser):
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
-                _consume_additional_giving_targets(token_stream, stmt)
+                _consume_additional_giving_targets(token_stream, stmt, start_column)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
-                _consume_additional_giving_targets(token_stream, stmt)
+                _consume_additional_giving_targets(token_stream, stmt, start_column)
             else:
                 report_or_raise(
                     ctx, "SUBTRACT ... GIVING requires a target identifier", start_loc
@@ -305,6 +308,7 @@ def _parse_binary_arithmetic(
     """
     start_token = token_stream.consume()
     start_loc = token_location(start_token)
+    start_column = getattr(getattr(start_token, "location", None), "column", None)
     stmt = cast(_ArithT, create_node(cast(type[ASTNode], node_class), start_loc))
     ctx = get_parse_context(token_stream)
 
@@ -367,12 +371,12 @@ def _parse_binary_arithmetic(
     if giving:
         # GIVING accepts a comma/space-separated list of result targets,
         # each optionally ROUNDED (``GIVING z, w ROUNDED``).
-        _consume_additional_giving_targets(token_stream, stmt)
+        _consume_additional_giving_targets(token_stream, stmt, start_column)
     elif second_operand is not None:
         # Format 1 accepts a comma/space-separated target list too:
         # ``BY id-2 [ROUNDED], id-3 [ROUNDED] ...`` /
         # ``INTO id-2 [ROUNDED], id-3 [ROUNDED] ...``.
-        _consume_additional_arithmetic_targets(token_stream, stmt)
+        _consume_additional_arithmetic_targets(token_stream, stmt, start_column)
 
     # REMAINDER is DIVIDE-only (``DIVIDE x INTO y GIVING z REMAINDER r``,
     # or the non-standard-but-tolerated ``DIVIDE x INTO y REMAINDER r``
@@ -539,7 +543,9 @@ _ADDITIONAL_TARGET_STOP_KEYWORDS: frozenset[str] = (
 )
 
 
-def _consume_additional_arithmetic_targets(stream: ITokenStream, stmt: Any) -> None:
+def _consume_additional_arithmetic_targets(
+    stream: ITokenStream, stmt: Any, reference_column: int | None = None
+) -> None:
     """Consume further TO/FROM targets after the first, each optionally ROUNDED.
 
     COBOL allows a comma- or space-separated target list -- ``TO id-2
@@ -558,8 +564,14 @@ def _consume_additional_arithmetic_targets(stream: ITokenStream, stmt: Any) -> N
         # section header (H9): stop instead of folding the header into the
         # target list -- without this, `ADD A TO B` with no trailing period
         # would swallow a following `NEXT-PARA.` as a bogus extra target and
-        # the paragraph would vanish from the AST entirely.
-        if looks_like_paragraph_boundary(stream):
+        # the paragraph would vanish from the AST entirely. Disambiguated by
+        # indentation (Area A vs Area B) so a target that merely wraps onto
+        # its own continuation line -- legitimate for any target in the
+        # list, not just the first -- isn't misread as a boundary and
+        # dropped.
+        if looks_like_paragraph_boundary(stream) and looks_dedented_relative_to(
+            stream, reference_column
+        ):
             warn_paragraph_boundary_swallowed(stream)
             break
         extra_target = _consume_arithmetic_target(stream)
@@ -581,7 +593,9 @@ _ADDITIONAL_GIVING_STOP_KEYWORDS: frozenset[str] = (
 )
 
 
-def _consume_additional_giving_targets(stream: ITokenStream, stmt: Any) -> None:
+def _consume_additional_giving_targets(
+    stream: ITokenStream, stmt: Any, reference_column: int | None = None
+) -> None:
     """Consume further GIVING targets after the first, each optionally ROUNDED.
 
     COBOL allows a comma- or space-separated GIVING target list --
@@ -599,8 +613,13 @@ def _consume_additional_giving_targets(stream: ITokenStream, stmt: Any) -> None:
             break
         # Same H9-pattern guard as _consume_additional_arithmetic_targets:
         # don't swallow a following paragraph header as a bogus extra
-        # GIVING target when this statement's period is missing.
-        if looks_like_paragraph_boundary(stream):
+        # GIVING target when this statement's period is missing, but only
+        # once dedentation also confirms it (Area A vs Area B) -- a GIVING
+        # target that merely wraps onto its own continuation line is
+        # legitimate for any target in the list, not just the first.
+        if looks_like_paragraph_boundary(stream) and looks_dedented_relative_to(
+            stream, reference_column
+        ):
             warn_paragraph_boundary_swallowed(stream)
             break
         extra_giving = _consume_arithmetic_target(stream)
@@ -850,6 +869,7 @@ class ComputeStatementParser(IStatementParser):
         """Parse a COMPUTE statement."""
         start_token = token_stream.consume()
         start_loc = token_location(start_token)
+        start_column = getattr(getattr(start_token, "location", None), "column", None)
         stmt: ComputeStatement = create_node(ComputeStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
@@ -930,12 +950,18 @@ class ComputeStatementParser(IStatementParser):
                         or upper in SCOPE_TERMINATORS
                     ):
                         break
-                if tok_type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                    token_stream
+                if (
+                    tok_type == TokenType.IDENTIFIER
+                    and looks_like_paragraph_boundary(token_stream)
+                    and looks_dedented_relative_to(token_stream, start_column)
                 ):
                     # A missing period on this COMPUTE followed by what looks
                     # like the next paragraph/section header (H9): stop
                     # instead of folding it into the expression string.
+                    # Disambiguated by indentation (Area A vs Area B) so an
+                    # expression term that merely wraps onto its own
+                    # continuation line isn't misread as a boundary and
+                    # dropped from the expression.
                     warn_paragraph_boundary_swallowed(token_stream)
                     break
 

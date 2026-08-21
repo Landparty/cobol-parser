@@ -8,6 +8,7 @@ from ...models.statements import SetStatement
 from ._utils import (
     consume_optional_subscript,
     is_statement_boundary,
+    looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
@@ -22,6 +23,21 @@ def _strip_period(value: str) -> str:
     if value.endswith(".") and len(value) > 1:
         return value[:-1]
     return value
+
+
+def _consume_subscripted_value(token_stream: ITokenStream, first_token: Any) -> str:
+    """Consume *first_token* (already peeked, not yet consumed) plus an
+    optional trailing ``(subscript[, subscript]...)`` group, returning the
+    joined, period-stripped value string.
+
+    Shared by all four of SET's value-reading forms (``TO``, ``TO ADDRESS
+    OF``, ``UP BY``, ``DOWN BY``) -- without folding a subscript group in,
+    e.g. `SET IDX TO TABLE-ITEM(5)` silently dropped the `(5)`.
+    """
+    parts: list[str] = [first_token.value] if first_token.value else []
+    token_stream.consume()
+    consume_optional_subscript(token_stream, parts)
+    return _strip_period(" ".join(p for p in parts if p))
 
 
 class SetStatementParser(IStatementParser):
@@ -42,6 +58,7 @@ class SetStatementParser(IStatementParser):
     ) -> SetStatement:
         start = token_stream.consume()
         stmt = SetStatement(token_location(start))
+        start_column = getattr(getattr(start, "location", None), "column", None)
         skip_whitespace(token_stream)
 
         # Collect targets until TO/UP/DOWN/period
@@ -62,9 +79,14 @@ class SetStatementParser(IStatementParser):
                 break
             # A missing period on this SET followed by what looks like the
             # next paragraph/section header (H9): stop instead of folding it
-            # into the target list.
-            if token.type == TokenType.IDENTIFIER and looks_like_paragraph_boundary(
-                token_stream
+            # into the target list. Disambiguated by indentation (Area A vs
+            # Area B) so a target that merely wraps onto its own
+            # continuation line -- legitimate for any target in the list, not
+            # just the first -- isn't misread as a boundary and dropped.
+            if (
+                token.type == TokenType.IDENTIFIER
+                and looks_like_paragraph_boundary(token_stream)
+                and looks_dedented_relative_to(token_stream, start_column)
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
@@ -137,14 +159,13 @@ class SetStatementParser(IStatementParser):
                     stmt.set_set_type("TO")
                     v2 = token_stream.peek()
                     if v2 and v2.type != TokenType.PERIOD:
-                        token_stream.consume()
                         stmt.set_value(
-                            _strip_period(v2.value or ""), is_address_of=True
+                            _consume_subscripted_value(token_stream, v2),
+                            is_address_of=True,
                         )
                 elif v.type != TokenType.PERIOD:
                     stmt.set_set_type("TO")
-                    token_stream.consume()
-                    stmt.set_value(_strip_period(v.value or ""))
+                    stmt.set_value(_consume_subscripted_value(token_stream, v))
         elif val == "UP":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -155,8 +176,7 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("UP_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                token_stream.consume()
-                stmt.set_value(_strip_period(v.value or ""))
+                stmt.set_value(_consume_subscripted_value(token_stream, v))
         elif val == "DOWN":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -167,8 +187,7 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("DOWN_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                token_stream.consume()
-                stmt.set_value(_strip_period(v.value or ""))
+                stmt.set_value(_consume_subscripted_value(token_stream, v))
 
         skip_whitespace(token_stream)
         # Consume period

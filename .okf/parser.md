@@ -2045,6 +2045,83 @@ by a preceding statement's own collection loop, exactly the failure class
 marker survival, back-to-back directives across all three variants, AST
 node shape including each variant's own `lines` count, COPY expansion).
 
+# H9 dedent disambiguation extended to every operand, not just the first (2026-08-21)
+
+The H9 paragraph-boundary check (see above) gained an indentation-based
+disambiguation (`_looks_dedented_relative_to`) so a genuine dedented
+paragraph header (Area A) isn't confused with an operand that merely wraps
+onto its own continuation line (Area B, same or deeper column than the
+statement's verb) — but that disambiguation was gated on `target_count ==
+0` in `move_parser.py` alone: a *second-or-later* operand still tripped
+the boundary check unconditionally, regardless of indentation, dropping it
+exactly like the pre-dedent-fix behavior. A real-corpus re-probe found live
+repros (`MOVE SPACES TO a\n    b.` and `OPEN OUTPUT a\n    b.`, both
+dropping `b`).
+
+Fixed by hoisting the helper into a shared `looks_dedented_relative_to` in
+`_utils.py` and ANDing it into every multi-operand call site of
+`looks_like_paragraph_boundary`, unconditionally rather than only for the
+first operand: `move_parser.py` (targets — the `target_count > 0`
+short-circuit removed entirely, since dedentation alone now decides it
+uniformly), `open_parser.py`/`close_parser.py` (file-name lists, previously
+with no dedent guard at all), `set_parser.py` (targets),
+`display_parser.py` (item list), `simple_statement_parsers.py`
+(`CancelStatementParser`'s program-name list), `sort_merge_parsers.py`
+(SORT/MERGE's own clause-dispatch loop plus the module-level
+`_parse_keys`/`_parse_file_list` helpers, both now threading an optional
+`reference_column` parameter from their caller's verb-token column),
+`string_unstring_parsers.py` (STRING's operand list, UNSTRING's
+clause-dispatch loop, and `UnstringStatementParser._parse_into_targets`,
+likewise threaded), `initialize_inspect_parsers.py`
+(`InspectStatementParser`'s "consume to period" trailer and
+`_parse_tallying`, likewise threaded), and `arithmetic_parsers.py`
+(`_consume_additional_arithmetic_targets`/`_consume_additional_giving_
+targets`, likewise threaded from every ADD/SUBTRACT/MULTIPLY/DIVIDE call
+site, plus `ComputeStatementParser`'s expression-token collection loop).
+Each site's reference column is the statement's own verb token's column
+(`start_token.location.column`), matching the convention MOVE already
+established. Regression coverage: `tests/regression/
+test_real_corpus_parse_failures.py::TestSecondOperandOnContinuationLine`
+(plus a guard test confirming a genuinely dedented next paragraph is still
+caught as a boundary).
+
+**SET's subscript fix (2026-08-20, above) only covered the target side.**
+`SET target(subscript) TO ...` folds the target's `(subscript)` via
+`consume_optional_subscript`, but every value-reading branch (`TO` plain
+value, `TO ADDRESS OF` value, `UP BY` value, `DOWN BY` value) still read a
+single token, silently truncating e.g. `SET IDX TO TABLE-ITEM(5)` to a
+value of `TABLE-ITEM` (the `(5)` left unconsumed and swallowed as generic
+trailing tokens). Fixed by applying the same `consume_optional_subscript`
+fold to all four value-reading branches in `set_parser.py`. Pinned by
+`TestSetSubscriptedValue` in the same regression file.
+
+**Embedded SQL `¬=` (2026-08-20's `!=`/`||` fix, above, missed one
+spelling):** `¬` (U+00AC NOT SIGN — how some EBCDIC-derived mainframe
+source spells logical NOT) had no lexer token and hit the same hard
+`LexerError` `!`/`|` used to before that fix. Added a `NOT_SIGN` token
+(`lexer.py`) and a `(NOT_SIGN, ASSIGN)` entry in
+`_EXEC_SQL_SPLIT_RELOP_PAIRS` (`_utils.py`) so `¬=` rejoins in
+reconstructed SQL text without a spurious space, exactly like `!=`. Pinned
+by `TestEmbeddedSqlNotSignOperator` in the same regression file.
+
+**Known limitation, not new (found and traced by a `/code-review` pass on
+this fix):** `looks_dedented_relative_to`'s strict `col < reference_column`
+test cannot distinguish a real paragraph header from a wrapped operand when
+both sit at *exactly* the same column — e.g. a missing-period MOVE whose
+second target and the following paragraph name are both written flush left.
+This ambiguity is not new: it already existed for a statement's *first*
+operand from the original 2026-08-20 MOVE fix onward (verified directly
+against that commit) — this pass's change only extends the *same*
+pre-existing trade-off uniformly to every operand position instead of just
+the first, rather than introducing a new failure mode. A stricter
+disambiguation (e.g. also requiring the enclosing paragraph/section to
+already be known) was considered and not pursued: the same-column case
+requires source that is simultaneously missing its terminating period *and*
+using non-conventional indentation (paragraph headers are virtually always
+in Area A, well left of any statement body), an even narrower double
+coincidence than the "no repro" items already deferred elsewhere in this
+log.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation
