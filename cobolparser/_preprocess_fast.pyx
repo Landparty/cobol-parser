@@ -107,14 +107,23 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 # overflow even when the split lands on a space
                 # (mid_token False) rather than mid-token.
                 exceeds_traditional_width = content_len > _ID_END
-                if mid_token:
-                    dropped = line[_TEXT_END:].rstrip()
+                dropped = line[_TEXT_END:].rstrip()
+                # Second, independent gate (mirrors the pure-Python rule): a
+                # purely-numeric dropped tail that still fits within the
+                # traditional 80-column width is a per-line sequence/
+                # change-tracking stamp (e.g. IBM Z Open Editor/ISPF-style
+                # auto numbering like 03050009) even when columns 1-6 are
+                # blank -- not an actual token split. A mixed alnum tail
+                # (e.g. NIST's IX2094.2 test-case id) doesn't qualify.
+                is_numeric_id_stamp = (
+                    not exceeds_traditional_width and dropped.isdigit()
+                )
+                if mid_token and not is_numeric_id_stamp:
                     warnings.append(
                         f"Line {line_no}: content beyond column {_TEXT_END} "
                         f"was dropped mid-token: {dropped!r}"
                     )
                 elif exceeds_traditional_width:
-                    dropped = line[_TEXT_END:].rstrip()
                     warnings.append(
                         f"Line {line_no}: content beyond column {_TEXT_END} "
                         f"was dropped -- line is {content_len} columns wide, "

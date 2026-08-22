@@ -213,6 +213,53 @@ class TestNonMidTokenOverflowDoesNotWarn:
             assert len(warnings) == 1, name
             assert "IX2094.2" in warnings[0], name
 
+    def test_numeric_identification_stamp_does_not_warn_with_blank_seq_area(self):
+        # Real-world shape found in a vendored mainframe program: columns 1-6
+        # are blank (this file does not use the traditional cols-1-6
+        # sequence-number convention the gate above recognizes), but every
+        # line carries an 8-digit, purely-numeric change/sequence stamp in
+        # columns 73-80 (e.g. IBM Z Open Editor/ISPF-style auto numbering:
+        # 03040000, 03050009, 03060000, ... incrementing per line). A
+        # VALUE clause's closing quote and statement-terminating period land
+        # exactly on column 72, immediately followed by that stamp with no
+        # separating blank -- satisfying the mid-token shape by column
+        # position alone, but the dropped tail is unambiguously an
+        # identification-area stamp, not split code.
+        prefix = "10  WS000-D0000022-X   PIC X(008)   VALUE"
+        suffix = "'D0000022'."
+        pad = 65 - len(prefix) - len(suffix)
+        text = prefix + " " * pad + suffix  # cols 8-72
+        line = " " * 7 + text + "03050009"  # cols 1-7 blank, then cols 73-80
+        assert len(text) == 65
+        assert len(line) == 80
+        assert line[:6].strip() == ""  # no sequence number in columns 1-6
+        assert line[71] == "."  # column 72: the VALUE clause's own period
+        assert line[72] == "0"  # column 73: first digit of the stamp
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            out = impl([line], warnings=warnings)
+            assert warnings == [], name
+            assert out == text + "\n", name
+
+    def test_numeric_identification_stamp_still_warns_past_traditional_width(self):
+        # The numeric-tail gate only excuses drops that still fit within the
+        # traditional 80-column width (columns 73-80). A longer purely-
+        # numeric tail spilling past column 80 is no longer plausible
+        # identification-area content and must still warn (via the
+        # word-boundary/exceeds-traditional-width rule).
+        prefix = "10  WS000-D0000022-X   PIC X(008)   VALUE"
+        suffix = "'D0000022'."
+        pad = 65 - len(prefix) - len(suffix)
+        text = prefix + " " * pad + suffix  # cols 8-72
+        line = " " * 7 + text + "030500091"  # 9 digits: one past the 8-col ID area
+        assert len(text) == 65
+        assert len(line) == 81
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert len(warnings) == 1, name
+            assert "030500091" in warnings[0], name
+
 
 class TestWordBoundaryOverflowWarns:
     """Overflow that breaks exactly on a space at column 72/73 -- the
@@ -297,6 +344,14 @@ class TestFastAndPureParity:
         "A" * 71 + " " + "B" * 9,
         '029100          "BBBBBBBBBC002EEEEEEEEEF002ALTKEY1WWWWWWWWWV398ALTKEY2".IX2094.2',
         " " * 65 + "A" * 6 + "." + "IX2094.2",
+        (
+            "       10  WS000-D0000022-X   PIC X(008)   VALUE             "
+            "'D0000022'.03050009"
+        ),
+        (
+            "       10  WS000-D0000022-X   PIC X(008)   VALUE             "
+            "'D0000022'.030500091"
+        ),
     ]
 
     def test_fast_and_pure_produce_identical_warnings(self):

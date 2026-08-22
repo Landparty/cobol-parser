@@ -428,6 +428,19 @@ def normalize_fixed_format(
     own reviewer-repro case, `WS-PARM-DORM-DAYS`, the OCCURS/DEPENDING ON
     case above) unaffected.
 
+    Rule 1 has a second, independent gate: a *purely numeric* dropped tail
+    that fits within the traditional 80-column width never warns either,
+    regardless of columns 1-6. This covers editors/shops that stamp a
+    per-line sequence or change-tracking number into columns 73-80 without
+    also filling columns 1-6 (e.g. IBM Z Open Editor/ISPF-style auto
+    numbering such as ``03050009``, incrementing on every line) -- a real,
+    observed convention distinct from the columns-1-6 case above, where the
+    *whole file* doesn't carry sequence numbers at the start of the line but
+    still does at the end. This is narrower than "any dropped tail": a
+    mixed alphanumeric tail like NIST's own ``IX2094.2`` test-case id does
+    not qualify (it isn't all-digit), so that shape still warns -- see
+    ``test_blank_sequence_area_with_same_shape_still_warns``.
+
     When `warnings` is given, each such line appends one
     ``f"Line {n}: ..."`` message to it (comment lines are never checked:
     their text is discarded whether truncated or not, so truncation there
@@ -546,14 +559,29 @@ def normalize_fixed_format(
                 mid_token = not before.isspace() and not after.isspace()
                 content_len = len(line.rstrip())
                 exceeds_traditional_width = content_len > IDENTIFICATION_END_COL
-                if mid_token:
-                    dropped = line[TEXT_END_COL:].rstrip()
+                dropped = line[TEXT_END_COL:].rstrip()
+                # A purely-numeric tail that fits within the traditional
+                # 80-column identification-area width (columns 73-80) is a
+                # per-line sequence/change-tracking stamp -- e.g. IBM Z Open
+                # Editor/ISPF-style auto numbering (03050009, incrementing on
+                # every line) -- not a token that was actually split. Unlike
+                # the columns-1-6 gate above, this doesn't require the
+                # *whole file* to carry sequence numbers there; it trusts the
+                # shape of the dropped content itself. A mixed
+                # alnum+punctuation tail (e.g. the NIST-style `IX2094.2`
+                # test-case id already covered by
+                # test_blank_sequence_area_with_same_shape_still_warns) does
+                # NOT qualify -- `.isdigit()` rejects it -- so that case still
+                # warns exactly as before.
+                is_numeric_id_stamp = (
+                    not exceeds_traditional_width and dropped.isdigit()
+                )
+                if mid_token and not is_numeric_id_stamp:
                     warnings.append(
                         f"Line {line_no}: content beyond column {TEXT_END_COL} "
                         f"was dropped mid-token: {dropped!r}"
                     )
                 elif exceeds_traditional_width:
-                    dropped = line[TEXT_END_COL:].rstrip()
                     warnings.append(
                         f"Line {line_no}: content beyond column {TEXT_END_COL} "
                         f"was dropped -- line is {content_len} columns wide, "
