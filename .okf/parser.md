@@ -650,7 +650,7 @@ the four call sites now passes its own verb's terminator (`"END-ADD"`,
 `"END-COMPUTE"`); this composes with the pre-existing `ON`/`NOT ON SIZE
 ERROR` handling since both an ON SIZE ERROR clause *and* an explicit
 terminator can appear on the same statement. Pinned by
-`tests/regression/test_tier7_arithmetic_scope_terminator.py`.
+`tests/regression/test_tier8_arithmetic_scope_terminator.py`.
 
 **INSPECT / STRING / UNSTRING also swallowed a following statement, and EXEC
 SQL/CICS/IMS silently ate the rest of the program on a missing `END-EXEC`

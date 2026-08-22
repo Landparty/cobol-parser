@@ -1102,9 +1102,7 @@ def parse_size_error_clauses(
         elif end_keyword is not None and token_upper == end_keyword:
             stream.consume()
             skip_whitespace(stream)
-            trailing = stream.peek()
-            if trailing and trailing.type == TokenType.PERIOD:
-                stream.consume()
+            consume_period(stream)
             break
         else:
             break
