@@ -1,5 +1,46 @@
 # OKF Update Log
 
+## 2026-08-22 (normalize_fixed_format: numeric identification-area stamps no longer trip the mid-token overflow warning)
+
+A concrete real-corpus repro (not a vague report — see the 2026-08-20 entry's
+"deliberately not fixed" note for why that distinction matters here) found a
+false-positive gap in the 2026-08-14 column-72 overflow-warning gate: a
+vendored program's `WS000-D0000022-X PIC X(008) VALUE 'D0000022'.` line has
+its statement-terminating period land exactly on column 72, immediately
+followed (no separating blank) by `03050009` — an 8-digit, purely numeric,
+per-line change/sequence stamp filling columns 73-80. Neighboring lines carry
+the same shape (`03040000`, `03060000`, `03070000`, ... incrementing), an IBM
+Z Open Editor/ISPF-style auto-numbering convention. Columns 1-6 are blank, so
+the existing columns-1-6 sequence-number gate never recognized this file's
+real (but differently-located) sequence-number convention, and every such
+line spuriously warned `content beyond column 72 was dropped mid-token:
+'03050009'` even though nothing was actually split — the digits are
+legitimate, always-ignored identification-area content.
+
+* **Changed** `cobolparser/preprocess/_normalize.py` and
+  `cobolparser/_preprocess_fast.pyx` (mirrored, rebuilt via `python setup.py
+  build_ext --inplace`, regenerated `.c` committed): rule 1 (mid-token split)
+  now also skips whenever the dropped tail is non-empty and entirely digits
+  *and* the line's total width still fits the traditional 80-column
+  identification-area boundary. Deliberately narrower than "any dropped
+  tail" so it doesn't reopen the exact case
+  `test_blank_sequence_area_with_same_shape_still_warns` locks in (NIST's
+  `IX2094.2`-shaped mixed alnum tail, blank columns 1-6, still a likely
+  authoring mistake and still flagged) -- `.isdigit()` rejects that shape.
+* **Updated** [preprocessing.md](preprocessing.md): documented the new gate
+  as a named subsection under the existing column-73+ overflow write-up.
+  Frontmatter `timestamp` bumped.
+* **Added** two tests to
+  `tests/regression/test_normalize_column_overflow_warning.py`:
+  `test_numeric_identification_stamp_does_not_warn_with_blank_seq_area`
+  (the repro shape above, both fast and pure implementations, must not warn)
+  and `test_numeric_identification_stamp_still_warns_past_traditional_width`
+  (a 9-digit tail spilling one column past the traditional 80-column width
+  must still warn, via the existing word-boundary/exceeds-traditional-width
+  rule) -- plus both new line shapes added to `TestFastAndPureParity.CASES`.
+  Full suite (8,520 tests) re-run clean after the change; ruff/black/mypy
+  clean on the touched files.
+
 ## 2026-08-21 (Second controlled re-probe on 1.8.0: 4 more real-corpus fixes)
 
 A follow-up re-probe of the same real-world corpus against 1.8.0 (after the

@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-08-15T00:20:00Z
+timestamp: 2026-08-22T00:00:00Z
 ---
 
 # Overview
@@ -180,6 +180,33 @@ truncation of `*>` free-form inline-comment text running past column 72 in
 files the preprocessor doesn't yet parse `*>` semantics for (that
 recognition is lexer-level, not preprocessor-level — a separate, smaller
 gap left as-is).
+
+**Rule 1 has a second, independent gate: a purely-numeric dropped tail
+never warns either** (added 2026-08-22). The columns-1-6 gate above assumes
+the traditional convention stamps a sequence number at the *start* of the
+line; some real shops instead (or additionally) stamp a per-line, purely
+numeric sequence/change-tracking number into columns 73-80 with columns 1-6
+left blank — e.g. IBM Z Open Editor/ISPF-style auto numbering such as
+`03050009`, incrementing on nearly every line. Found via a real vendored
+program (`WS000-D0000022-X PIC X(008) VALUE 'D0000022'.` immediately
+followed, no separating blank, by `03050009`): the VALUE clause's own
+closing period lands exactly on column 72, satisfying rule 1's mid-token
+shape by column position alone even though columns 1-6 are blank and
+nothing was actually split. `normalize_fixed_format` now also skips rule 1
+whenever the dropped tail (`line[TEXT_END_COL:]`, right-stripped) is
+non-empty and entirely digits *and* the line's total width still fits the
+traditional 80-column identification-area boundary
+(`not exceeds_traditional_width`) — a longer numeric run spilling past
+column 80 is no longer plausible identification-area content and still
+warns via rule 2. This is deliberately narrower than "any dropped tail":
+a mixed alphanumeric tail like NIST's own `IX2094.2` test-case id does
+**not** qualify (`.isdigit()` rejects it), so
+`test_blank_sequence_area_with_same_shape_still_warns` — locking in that a
+period-then-identification-text shape with blank columns 1-6 is still
+flagged as a likely authoring mistake — is unaffected. Pinned by
+`test_numeric_identification_stamp_does_not_warn_with_blank_seq_area` and
+`test_numeric_identification_stamp_still_warns_past_traditional_width` in
+`tests/regression/test_normalize_column_overflow_warning.py`.
 
 When `warnings` is passed a list, each qualifying line appends one message
 to it — `f"Line {n}: content beyond column {TEXT_END_COL} was dropped
