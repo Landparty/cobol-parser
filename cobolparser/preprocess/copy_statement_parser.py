@@ -208,6 +208,11 @@ def is_comment_line(line: str) -> bool:
     - Column 7 (index 6) contains '*' for full-line comments
     - Column 7 contains '/' for page break comments (also treated as comments)
     - Column 7 contains 'D' or 'd' for debugging lines (typically treated as comments)
+    - Column 7 contains 'V' or 'v' for shop-specific change-control
+      version-tag lines (e.g. a short tag like ``V97``/``TFEC`` stamped into
+      Area A) -- not a standard COBOL indicator, but standard fixed-format
+      source never puts live code in column 7 either, so treating it as a
+      comment is unambiguous with real code.
 
     Args:
         line: A single line of COBOL source code
@@ -224,7 +229,7 @@ def is_comment_line(line: str) -> bool:
     if len(line) < 7:
         return False
     indicator = line[6]
-    return indicator in ("*", "/", "D", "d")
+    return indicator in ("*", "/", "D", "d", "V", "v")
 
 
 def is_within_string_literal(source: str, match_start: int, match_end: int) -> bool:

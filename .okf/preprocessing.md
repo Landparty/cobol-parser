@@ -72,6 +72,7 @@ def normalize_fixed_format(
     *,
     merge_continued_literals: bool = True,
     debug_lines_as_comments: bool = True,
+    version_tag_lines_as_comments: bool = True,
     warnings: list[str] | None = None,
 ) -> str: ...
 ```
@@ -85,6 +86,20 @@ finding M4 to match `copy_statement_parser.is_comment_line()`, which
 already treated `D`/`d` as a comment; pass `debug_lines_as_comments=False`
 to compile debug lines as live code instead), and merges continuation
 lines (column-7 is `-`). Returns a single free-form text string.
+
+**`V`/`v` version-tag lines (added 2026-08-22):** `V`/`v` in column 7 is
+also treated as a comment by default (`version_tag_lines_as_comments`,
+default `True`), matching a real shop's change-control convention that
+stamps a short version tag (e.g. `V97`, `TFEC`) into Area A with `V` in
+column 7 of its own line. Standard fixed-format COBOL never puts live code
+in column 7 (reserved for `*`/`/`/`-`/`D`/`d`), so this is unambiguous with
+real source. Without it, the tag text reached the lexer as un-normalized
+code and surfaced as "Unparsed tokens" errors. Pass
+`version_tag_lines_as_comments=False` to compile V-lines as live code
+instead. `copy_statement_parser.is_comment_line()` and
+`parser._detect_fixed_format`'s valid-indicator set were updated to match,
+on both the pure-Python and Cython (`_preprocess_fast`) paths. Pinned by
+`tests/regression/test_version_tag_line_handling.py`.
 
 Continuation-line joining follows the COBOL rule that a continuation line's
 first non-blank character is the successor of the continued line's last
@@ -157,9 +172,10 @@ CCVS85's `IC1014.2`, repeated on every line of the vendored
    straddle a space, so rule 1 alone never caught it, producing a silently
    *fixed* `OCCURS 10 TIMES` with no ODO clause and no diagnostic.
 
-Comment lines (column-7 `*`/`/`, or `D`/`d` when `debug_lines_as_comments`
-is true) are never checked under either rule: their text is discarded
-whether truncated or not, so truncation there changes nothing.
+Comment lines (column-7 `*`/`/`, or `D`/`d`/`V`/`v` when
+`debug_lines_as_comments`/`version_tag_lines_as_comments` is true) are never
+checked under either rule: their text is discarded whether truncated or
+not, so truncation there changes nothing.
 
 **Sequence-numbered lines gate both rules** (added 2026-08-14, alongside
 rule 2). Wiring the mid-token rule into the real parse pipeline for the

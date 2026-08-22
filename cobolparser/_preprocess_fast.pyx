@@ -22,7 +22,7 @@ _TEXT_END   = 72  # TEXT_END_COL
 _ID_END     = 80  # IDENTIFICATION_END_COL
 
 
-def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True, warnings=None):
+def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True, version_tag_lines_as_comments=True, warnings=None):
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
 
     Identical contract to the pure-Python version; see that function for
@@ -37,6 +37,7 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     cdef str  quote_ch      = None
     cdef str  ch
     cdef bint is_debug_comment
+    cdef bint is_version_tag_comment
     # True once a non-comment, non-short physical line has started (or
     # continued) the logical line currently buffered in `parts`. Distinguishes
     # "no logical line accumulated yet" (nothing to flush) from "a logical
@@ -73,10 +74,11 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
         text_slice = line[_TEXT_START : _TEXT_END]
 
         is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")
-        if indicator == "*" or indicator == "/" or is_debug_comment:
-            # Comment line (incl. page eject, debug lines): flush buffer,
-            # discard comment text, but still emit an empty placeholder to
-            # preserve line numbering.
+        is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")
+        if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:
+            # Comment line (incl. page eject, debug lines, version-tag
+            # lines): flush buffer, discard comment text, but still emit an
+            # empty placeholder to preserve line numbering.
             if has_line:
                 result.append("".join(parts))
             result.append("")

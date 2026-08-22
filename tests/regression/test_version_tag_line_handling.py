@@ -1,0 +1,114 @@
+"""Regression coverage for 'V'/'v' in the fixed-format indicator column
+(column 7) being treated as a comment line by ``normalize_fixed_format``.
+
+Found via a real shop's change-control convention: a short version tag
+(e.g. ``V97``, ``TFEC``) is stamped into Area A with 'V' in column 7 of its
+own line, matching the shape of existing indicator markers like '*'/'/'
+(comments) and 'D'/'d' (debug lines) but recognized by neither
+``normalize_fixed_format`` nor the free-form lexer. The un-normalized
+Area-A text (e.g. ``74C``, ``74A``) then reached the lexer as live source
+and surfaced as "Unparsed tokens" parse errors.
+
+Standard fixed-format COBOL never puts live code in column 7 (it is
+reserved for '*'/'/'/'-'/'D'/'d'), so treating 'V'/'v' as a comment
+indicator too is unambiguous with real source -- mirrors the existing
+``debug_lines_as_comments`` precedent (M4) for 'D'/'d', including a
+``version_tag_lines_as_comments=False`` opt-out for callers that need
+V-lines compiled as code, and the same default-True behavior on both the
+pure-Python and Cython (``_preprocess_fast``) paths.
+"""
+
+from cobolparser import parse_cobol
+from cobolparser.preprocess import (
+    _normalize_fixed_format_pure,
+    normalize_fixed_format,
+)
+from cobolparser.preprocess.copy_statement_parser import is_comment_line
+
+IMPLS = [
+    ("fast", normalize_fixed_format),
+    ("pure", _normalize_fixed_format_pure),
+]
+
+
+def _line(indicator: str, text: str) -> str:
+    # cols 1-6 seq area, col 7 indicator, cols 8+ text
+    return " " * 6 + indicator + text
+
+
+class TestVersionTagLineHandling:
+    def test_v_line_is_dropped_by_default(self):
+        lines = [
+            _line(" ", "       DISPLAY 'BEFORE'."),
+            _line("V", "    74C"),
+            _line(" ", "       DISPLAY 'AFTER'."),
+        ]
+        for name, impl in IMPLS:
+            out = impl(lines)
+            assert "74C" not in out, name
+            assert "BEFORE" in out, name
+            assert "AFTER" in out, name
+
+    def test_lowercase_v_line_is_dropped_by_default(self):
+        lines = [
+            _line(" ", "       DISPLAY 'BEFORE'."),
+            _line("v", "    74A"),
+        ]
+        for name, impl in IMPLS:
+            out = impl(lines)
+            assert "74A" not in out, name
+
+    def test_v_line_kept_as_code_when_opted_in(self):
+        lines = [
+            _line(" ", "       DISPLAY 'BEFORE'."),
+            _line("V", "    74C"),
+        ]
+        for name, impl in IMPLS:
+            out = impl(lines, version_tag_lines_as_comments=False)
+            assert "74C" in out, name
+
+    def test_line_numbering_preserved_across_v_lines(self):
+        # A dropped V-line must still emit a blank placeholder so later
+        # lines keep their true line number (same contract as '*'/'D').
+        lines = [
+            _line(" ", "       DISPLAY 'ONE'."),
+            _line("V", "    74C"),
+            _line("V", "    74A"),
+            _line(" ", "       DISPLAY 'TWO'."),
+        ]
+        for name, impl in IMPLS:
+            out = impl(lines)
+            assert out.count("\n") == len(lines), name
+
+    def test_is_comment_line_recognizes_v_and_lowercase_v(self):
+        assert is_comment_line(_line("V", "    74C"))
+        assert is_comment_line(_line("v", "    74A"))
+
+
+class TestVersionTagLineEndToEndParse:
+    """The screenshot's exact reproducing shape: V-tag lines interleaved
+    with real PROCEDURE DIVISION statements used to surface as "Unparsed
+    tokens" -- now parse cleanly."""
+
+    def _padded(self, indicator: str, text: str) -> str:
+        return _line(indicator, text).ljust(72)
+
+    def test_program_with_version_tag_lines_parses_error_free(self):
+        source = (
+            "\n".join(
+                [
+                    self._padded(" ", "       IDENTIFICATION DIVISION."),
+                    self._padded(" ", "       PROGRAM-ID. VTAGTEST."),
+                    self._padded(" ", "       PROCEDURE DIVISION."),
+                    self._padded(" ", "       MAIN-PARA."),
+                    self._padded("V", "    74C"),
+                    self._padded(" ", "           DISPLAY 'HELLO'."),
+                    self._padded("V", "    74A"),
+                    self._padded(" ", "           STOP RUN."),
+                ]
+            )
+            + "\n"
+        )
+        result = parse_cobol(source, filename="vtagtest.cbl")
+        assert result.success, result.errors
+        assert result.errors == []

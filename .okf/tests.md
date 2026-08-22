@@ -8,6 +8,19 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-22: New `tests/regression/test_version_tag_line_handling.py` (7
+tests) for `normalize_fixed_format`'s new `version_tag_lines_as_comments`
+handling (see [preprocessing.md](preprocessing.md)) -- 'V'/'v' in the
+fixed-format indicator column (column 7) is now treated as a comment,
+matching a real shop's change-control version-tag convention (e.g. `V97`,
+`TFEC` stamped into Area A) that previously reached the lexer as live
+source and surfaced as "Unparsed tokens" errors. Covers: dropped by
+default (upper- and lowercase), kept as code with
+`version_tag_lines_as_comments=False`, line-number preservation across
+dropped V-lines, `copy_statement_parser.is_comment_line()` parity, fast/pure
+(`_preprocess_fast`) parity, and an end-to-end `parse_cobol()` repro of the
+original interleaved-V-lines shape parsing error-free.
+
 2026-08-21 (second entry this date): +11 in
 `tests/regression/test_real_corpus_parse_failures.py` (23 total in the
 file), pinning a second
