@@ -131,7 +131,7 @@ class AddStatementParser(IStatementParser):
         else:
             report_or_raise(ctx, "ADD statement missing TO or GIVING clause", start_loc)
 
-        parse_size_error_clauses(token_stream, stmt)
+        parse_size_error_clauses(token_stream, stmt, "END-ADD")
         return stmt
 
 
@@ -253,7 +253,7 @@ class SubtractStatementParser(IStatementParser):
                 ctx, "SUBTRACT statement missing FROM or GIVING clause", start_loc
             )
 
-        parse_size_error_clauses(token_stream, stmt)
+        parse_size_error_clauses(token_stream, stmt, "END-SUBTRACT")
         return stmt
 
 
@@ -386,7 +386,7 @@ def _parse_binary_arithmetic(
         if remainder:
             cast(DivideStatement, stmt).set_remainder(remainder)
 
-    parse_size_error_clauses(token_stream, stmt)
+    parse_size_error_clauses(token_stream, stmt, f"END-{verb}")
     return stmt
 
 
@@ -1010,5 +1010,5 @@ class ComputeStatementParser(IStatementParser):
                 start_loc,
             )
 
-        parse_size_error_clauses(token_stream, stmt)
+        parse_size_error_clauses(token_stream, stmt, "END-COMPUTE")
         return stmt

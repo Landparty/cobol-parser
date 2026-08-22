@@ -1030,12 +1030,23 @@ def _skip_newlines(stream: ITokenStream) -> Any | None:
     return token
 
 
-def parse_size_error_clauses(stream: ITokenStream, stmt: Any) -> None:
+def parse_size_error_clauses(
+    stream: ITokenStream, stmt: Any, end_keyword: str | None = None
+) -> None:
     """Parse optional ON SIZE ERROR / NOT ON SIZE ERROR clauses.
 
     Calls ``stmt.set_on_size_error_clause()`` and
     ``stmt.set_not_on_size_error_clause()`` when the clauses are present and
-    consumes the trailing period.  Used by ADD and COMPUTE statement parsers.
+    consumes the trailing period. Used by ADD, SUBTRACT, MULTIPLY, DIVIDE, and
+    COMPUTE statement parsers.
+
+    *end_keyword* is the verb's explicit scope terminator (``"END-ADD"``,
+    ``"END-COMPUTE"``, ...). When present in the token stream at this point --
+    with or without a preceding ON/NOT ON SIZE ERROR clause -- it is consumed
+    along with an optional trailing period. Without this, the terminator (an
+    IDENTIFIER token with no dedicated TokenType) was left unconsumed and the
+    procedure division's paragraph-boundary lookahead misread it as a new
+    paragraph header, silently reparenting every statement that followed it.
     """
     while not stream.is_empty():
         token = stream.peek()
@@ -1088,6 +1099,11 @@ def parse_size_error_clauses(stream: ITokenStream, stmt: Any) -> None:
                         stmt.set_not_on_size_error_clause(
                             _parse_size_error_stmts(stream)
                         )
+        elif end_keyword is not None and token_upper == end_keyword:
+            stream.consume()
+            skip_whitespace(stream)
+            consume_period(stream)
+            break
         else:
             break
 

@@ -626,6 +626,32 @@ string (`"Y + 1 END-READ"`) instead of ending the clause, which the
 `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
 and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
 
+**ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consumed their own explicit
+scope terminator, causing a phantom paragraph (`arithmetic_parsers.py`,
+`_utils.py`):** `END-ADD`/`END-SUBTRACT`/`END-MULTIPLY`/`END-DIVIDE`/
+`END-COMPUTE` have no dedicated `TokenType` (unlike `END-IF`/`END-PERFORM`/
+`END-EVALUATE`) — they lex as plain `IDENTIFIER`, recognized only by value
+via `SCOPE_TERMINATORS`. Every arithmetic parser's operand/expression
+collection loop correctly *stopped* at these terminators (so they were never
+folded into the statement), but `parse_size_error_clauses()` — the shared
+helper all five call last — only handled `ON`/`NOT ON SIZE ERROR` and a bare
+`PERIOD`; any other token, including the statement's own terminator, hit an
+unconditional `else: break` and was left unconsumed in the stream. Since the
+terminator is an `IDENTIFIER` immediately followed by a period, the
+procedure division's paragraph-boundary lookahead then misread it as the
+start of a new paragraph — e.g. `ADD 1 TO WS-X END-ADD. DISPLAY WS-X.` inside
+`MAIN-PARA` produced a bogus `END-ADD` paragraph and silently reparented
+`DISPLAY WS-X` (and everything after it) under it instead of `MAIN-PARA`.
+Fixed by giving `parse_size_error_clauses()` an optional `end_keyword`
+parameter: when the next token's value matches it, the terminator is
+consumed along with an optional trailing period before returning. Each of
+the four call sites now passes its own verb's terminator (`"END-ADD"`,
+`"END-SUBTRACT"`, `f"END-{verb}"` for the shared MULTIPLY/DIVIDE helper,
+`"END-COMPUTE"`); this composes with the pre-existing `ON`/`NOT ON SIZE
+ERROR` handling since both an ON SIZE ERROR clause *and* an explicit
+terminator can appear on the same statement. Pinned by
+`tests/regression/test_tier8_arithmetic_scope_terminator.py`.
+
 **INSPECT / STRING / UNSTRING also swallowed a following statement, and EXEC
 SQL/CICS/IMS silently ate the rest of the program on a missing `END-EXEC`
 (`initialize_inspect_parsers.py`, `string_unstring_parsers.py`,

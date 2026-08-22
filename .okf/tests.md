@@ -8,6 +8,19 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-22 (second entry this date): New
+`tests/regression/test_tier8_arithmetic_scope_terminator.py` (9 tests)
+pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consuming
+their own explicit scope terminator (`END-ADD`, `END-SUBTRACT`,
+`END-MULTIPLY`, `END-DIVIDE`, `END-COMPUTE`) — see [parser.md](parser.md).
+Left unconsumed in the stream, the terminator (a plain `IDENTIFIER`, no
+dedicated `TokenType`) was misread by the procedure division's
+paragraph-boundary lookahead as a new paragraph header, silently reparenting
+every following statement under it. One test per verb, plus: no-trailing-
+period termination (`END-ADD` alone is a valid terminator), an ON SIZE ERROR
+/ NOT ON SIZE ERROR clause followed by the terminator, and a period-only
+control to confirm the pre-existing path is unaffected.
+
 2026-08-22: New `tests/regression/test_version_tag_line_handling.py` (7
 tests) for `normalize_fixed_format`'s new `version_tag_lines_as_comments`
 handling (see [preprocessing.md](preprocessing.md)) -- 'V'/'v' in the
