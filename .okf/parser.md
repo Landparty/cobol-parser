@@ -2148,6 +2148,39 @@ in Area A, well left of any statement body), an even narrower double
 coincidence than the "no repro" items already deferred elsewhere in this
 log.
 
+# ADD/SUBTRACT/MULTIPLY/DIVIDE targets and operands dropped their OF/IN qualifier chain (2026-08-22)
+
+`_consume_arithmetic_target` (ADD's `TO`/SUBTRACT's `FROM` target) never
+consumed a trailing `OF`/`IN` qualifier chain at all — only an optional
+`(subscript)` group via `consume_optional_subscript`. A statement like `ADD
+X TO Y OF Z` (or `ADD X TO Y\n    OF Z` — a qualifier chain wrapped onto a
+continuation line, which is ordinary free-form COBOL layout) left `OF Z`
+sitting unconsumed in the token stream after the target was read, orphaned
+for whatever ran next to misinterpret. `_consume_arithmetic_operand`
+(MULTIPLY/DIVIDE's `BY`/`INTO` operands) had a related but different bug:
+its own OF/IN-consuming loop *did* advance the token stream past the
+qualifier chain (so parsing didn't outright fail), but never folded the
+consumed `OF`/`IN` keyword or qualifier name into the returned string —
+silently discarding the qualification from the AST (`ADD 1 TO QUAL OF
+GROUP-A` reported a target of just `"QUAL"`, losing which `QUAL` it was).
+Both symptoms trace to the same root cause: subscript groups were folded
+into the result string via `consume_optional_subscript`/manual
+paren-tracking, but qualifier chains were only ever *consumed*, never
+*composed* into the value.
+
+Fixed by extracting a new shared helper,
+`consume_optional_qualifiers` (`_utils.py`), that loops consuming an
+optional `(subscript)` group and/or `OF`/`IN` qualifier hops — any number of
+them, each optionally followed by another subscript, and skipping NEWLINEs
+between hops so a chain split across a continuation line still resolves —
+appending each piece to the caller's `parts` list in source order. Wired
+into both `_consume_arithmetic_target` and `_consume_arithmetic_operand`
+(replacing each function's own ad hoc subscript-only/consume-without-append
+logic), so `ADD X TO Y OF Z` now reports a target of `"Y OF Z"` and
+`MULTIPLY A BY QUAL OF GROUP-A` reports an operand of `"QUAL OF GROUP-A"`,
+matching the qualifier syntax COBOL itself uses. Pinned by
+`tests/regression/test_arithmetic_qualifier_chain.py`.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

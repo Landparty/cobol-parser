@@ -8,6 +8,14 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-22 (third entry this date): New
+`tests/regression/test_arithmetic_qualifier_chain.py` (5 tests) pinning the
+fix for ADD/SUBTRACT/MULTIPLY/DIVIDE dropping a qualified target/operand's
+`OF`/`IN` chain -- see [parser.md](parser.md). Covers: a single `OF`
+qualifier on an ADD target, a multi-hop chain split across a continuation
+line (the corpus repro shape), SUBTRACT's `FROM` target, MULTIPLY's operand,
+and DIVIDE's operand with a subscript following the qualifier.
+
 2026-08-22 (second entry this date): New
 `tests/regression/test_tier8_arithmetic_scope_terminator.py` (9 tests)
 pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consuming

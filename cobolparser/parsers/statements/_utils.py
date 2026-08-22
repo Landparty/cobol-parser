@@ -972,6 +972,42 @@ def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
             break
 
 
+def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
+    """Consume a trailing ``(...)`` subscript and/or ``OF``/``IN`` qualifier
+    chain, appending each piece to *parts* in source order.
+
+    Handles ``TABLE1 (INDEX1)``, ``QUAL OF PARENT``, ``QUAL OF PARENT
+    (IDX)``, and a qualifier chain spanning a continuation line (e.g.
+    ``NAME\\n    IN GROUP-48 IN GROUP-47``) -- COBOL places no limit on how
+    many OF/IN hops a qualified reference may carry, and each hop may itself
+    be followed by a subscript once it resolves to a table element. Shared
+    by every identifier-consuming helper that must fold subscripts/
+    qualifiers into its result string instead of leaving them to be dropped
+    as unparsed trailing tokens (:func:`_consume_arithmetic_target` and
+    :func:`_consume_arithmetic_operand` in ``arithmetic_parsers.py``).
+    """
+    while not stream.is_empty():
+        _skip_newlines(stream)  # qualifiers/subscripts may span continuation lines
+        token = stream.peek()
+        if not token:
+            break
+        if token.type == TokenType.LEFT_PAREN:
+            consume_optional_subscript(stream, parts)
+            continue
+        if token.type in (TokenType.OF, TokenType.IN):
+            qualifier_kw = token.value or ("IN" if token.type == TokenType.IN else "OF")
+            stream.consume()  # consume OF/IN
+            _skip_newlines(stream)
+            qname = stream.peek()
+            if qname and qname.type == TokenType.IDENTIFIER and qname.value:
+                stream.consume()
+                parts.append(qualifier_kw)
+                parts.append(qname.value)
+                continue
+            break
+        break
+
+
 def consume_keyword_and_operand(
     stream: ITokenStream,
     keyword: str,

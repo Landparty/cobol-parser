@@ -63,6 +63,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** `ADD ... TO`/`SUBTRACT ... FROM` targets and MULTIPLY/DIVIDE
+  operands silently dropped a trailing `OF`/`IN` qualifier chain —
+  `_consume_arithmetic_target` never consumed one at all (leaving `OF Z` in
+  `ADD X TO Y OF Z` unconsumed in the token stream, including when the
+  chain wrapped onto its own continuation line, e.g. `ADD X TO Y\n    OF
+  Z`), and `_consume_arithmetic_operand` consumed but never composed one
+  into its returned value (`ADD 1 TO QUAL OF GROUP-A` reported a target of
+  just `"QUAL"`). Fixed by a new shared `consume_optional_qualifiers`
+  helper (`_utils.py`) that folds an optional `(subscript)` group and/or an
+  `OF`/`IN` chain of any length into the caller's result string, wired into
+  both functions. Pinned by
+  `tests/regression/test_arithmetic_qualifier_chain.py`.
+
 * **preprocessing:** `normalize_fixed_format` now treats `'V'`/`'v'` in the
   fixed-format indicator column (column 7) as a comment line, mirroring the
   existing `'D'`/`'d'` debug-line handling — new
