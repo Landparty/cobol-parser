@@ -75,7 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code there, so the un-normalized tag text previously reached the lexer and
   surfaced as "Unparsed tokens" errors. Pass
   `version_tag_lines_as_comments=False` to compile V-lines as live code
-  instead. Pinned by
+  instead. Also fixes a follow-on gap caught in PR review:
+  `lexer.py`'s `_fixed_format_comment_tokens` (backs
+  `tokenize_cobol(..., keep_comments=True)`) re-scans physical lines to
+  reconstruct `COMMENT` tokens for lines `normalize_fixed_format` blanks
+  out, but only recognized `*`/`D`/`d` (plus `/` for page breaks) — a
+  V-line's blank placeholder had no matching re-scan entry, desyncing every
+  later comment/blank pairing by one and misattributing the next real
+  comment to the V-line's own line number. Pinned by
   `tests/regression/test_version_tag_line_handling.py`.
 * **parser:** `SKIP1`/`SKIP2`/`SKIP3` (the compiler-directing listing no-ops,
   the same class of statement as `EJECT`) were missing from the shared

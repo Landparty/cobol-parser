@@ -18,7 +18,7 @@ V-lines compiled as code, and the same default-True behavior on both the
 pure-Python and Cython (``_preprocess_fast``) paths.
 """
 
-from cobolparser import parse_cobol
+from cobolparser import TokenType, parse_cobol, tokenize_cobol
 from cobolparser.preprocess import (
     _normalize_fixed_format_pure,
     normalize_fixed_format,
@@ -112,3 +112,41 @@ class TestVersionTagLineEndToEndParse:
         result = parse_cobol(source, filename="vtagtest.cbl")
         assert result.success, result.errors
         assert result.errors == []
+
+
+class TestVersionTagCommentTokenPreservation:
+    """``tokenize_cobol(..., keep_comments=True)`` reconstructs COMMENT
+    tokens for lines normalize_fixed_format blanked out, by re-scanning the
+    physical lines and pairing each blank normalized line with the physical
+    comment/blank line that produced it, in order (``_fixed_format_comment_tokens``
+    in ``lexer.py``). That rescan originally only recognized '*'/'D'/'d' (plus
+    '/' for page breaks) -- a V-line produced a blank placeholder in the
+    normalized text (via normalize_fixed_format) but no matching entry in the
+    rescan's placeholder list, desynchronizing every later pairing by one: the
+    next real comment after a V-line was misattributed to the V-line's own
+    (earlier) line number, and its own placeholder was silently dropped."""
+
+    def _padded(self, indicator: str, text: str) -> str:
+        return _line(indicator, text).ljust(72)
+
+    def test_v_line_comment_and_following_real_comment_keep_own_line_numbers(self):
+        source = (
+            "\n".join(
+                [
+                    self._padded(" ", "       IDENTIFICATION DIVISION."),
+                    self._padded(" ", "       PROGRAM-ID. VTAGTEST."),
+                    self._padded(" ", "       PROCEDURE DIVISION."),
+                    self._padded("V", "    74C"),
+                    self._padded("*", "  A REAL COMMENT"),
+                    self._padded(" ", "           DISPLAY 'HELLO'."),
+                    self._padded(" ", "           STOP RUN."),
+                ]
+            )
+            + "\n"
+        )
+        tokens = tokenize_cobol(source, keep_comments=True)
+        comments = [t for t in tokens if t.type == TokenType.COMMENT]
+        assert [(t.location.line, t.value.strip()) for t in comments] == [
+            (4, "V    74C"),
+            (5, "*  A REAL COMMENT"),
+        ]

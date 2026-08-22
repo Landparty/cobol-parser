@@ -306,6 +306,22 @@ leave partial entries that the retry would otherwise duplicate). CLI
 `tokenize` still discards this element deliberately (best-effort token
 dump, unchanged); `tokenize_cobol()` callers now see it.
 
+**`_fixed_format_comment_tokens` V/v gap (fixed 2026-08-22, caught in PR
+review):** when `normalize_fixed_format` gained `version_tag_lines_as_comments`
+(see [preprocessing.md](preprocessing.md)), `_fixed_format_comment_tokens`'s
+own re-scan of the physical lines was not updated to match — it still only
+recognized `*`/`D`/`d` (plus `/` for page breaks) when building its
+`placeholders` list. A V-line still produces a blank placeholder line in
+`normalize_fixed_format`'s output (comment lines are always blanked,
+regardless of which indicator triggered it), but the re-scan skipped it
+entirely (no placeholder appended), desynchronizing the 1:1 pairing between
+blank normalized lines and physical placeholder-producing lines by one:
+`tokenize_cobol(..., keep_comments=True)` then attributed the *next* real
+comment to the V-line's own (earlier) line number, and the V-line's own
+comment text was dropped instead of re-emitted. Fixed by adding `V`/`v` to
+the same `elif` branch as `D`/`d`. Pinned by
+`tests/regression/test_version_tag_line_handling.py::TestVersionTagCommentTokenPreservation`.
+
 # Digit-led hyphenated names beyond one hyphen segment (2026-08-21)
 
 `tokenize_program_text`'s digit-branch (identical logic in `lexer.py` and

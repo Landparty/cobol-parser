@@ -1867,14 +1867,15 @@ def _fixed_format_comment_tokens(
     """Recover COMMENT tokens for comment lines dropped by normalization.
 
     ``normalize_fixed_format`` emits an empty placeholder line for every
-    comment line (indicator ``*``, ``/`` or debug ``D``) and every blank/short
-    line so later lines keep their line numbers, but the comment text itself
-    is dropped before the free-form lexer runs. This helper re-scans the
-    original physical lines, pairs each empty line in *normalized* with the
-    physical comment/blank line that produced it (they correspond 1:1, in
-    order), and builds COMMENT tokens whose line numbers use the same
-    (normalized) coordinate system as the tokens lexed from *normalized* —
-    so the two streams interleave consistently.
+    comment line (indicator ``*``, ``/``, debug ``D``/``d``, or version-tag
+    ``V``/``v``) and every blank/short line so later lines keep their line
+    numbers, but the comment text itself is dropped before the free-form
+    lexer runs. This helper re-scans the original physical lines, pairs each
+    empty line in *normalized* with the physical comment/blank line that
+    produced it (they correspond 1:1, in order), and builds COMMENT tokens
+    whose line numbers use the same (normalized) coordinate system as the
+    tokens lexed from *normalized* — so the two streams interleave
+    consistently.
     """
     # One entry per placeholder-producing physical line, in order: the
     # COMMENT token value, or None for blank/short lines (no token).
@@ -1889,7 +1890,7 @@ def _fixed_format_comment_tokens(
             # Page eject — same token value the legacy fixed-format
             # lexer path emitted.
             placeholders.append("/ PAGE BREAK")
-        elif indicator in ("*", "D", "d"):
+        elif indicator in ("*", "D", "d", "V", "v"):
             placeholders.append(line[_FF_INDICATOR:_FF_LINE_END].rstrip())
         # Code / continuation lines produce no placeholder.
 

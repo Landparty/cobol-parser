@@ -18,8 +18,17 @@ source and surfaced as "Unparsed tokens" errors. Covers: dropped by
 default (upper- and lowercase), kept as code with
 `version_tag_lines_as_comments=False`, line-number preservation across
 dropped V-lines, `copy_statement_parser.is_comment_line()` parity, fast/pure
-(`_preprocess_fast`) parity, and an end-to-end `parse_cobol()` repro of the
-original interleaved-V-lines shape parsing error-free.
+(`_preprocess_fast`) parity, an end-to-end `parse_cobol()` repro of the
+original interleaved-V-lines shape parsing error-free, and (caught in PR
+review) `lexer.py`'s `_fixed_format_comment_tokens` -- the
+`tokenize_cobol(..., keep_comments=True)` helper that reconstructs COMMENT
+tokens for lines `normalize_fixed_format` blanks out -- which only
+recognized `*`/`D`/`d` (plus `/` for page breaks) in its own re-scan of the
+physical lines; a V-line's blank placeholder in the normalized text had no
+matching re-scan entry, desynchronizing every later comment/blank pairing
+by one and misattributing the next real comment to the V-line's line
+number. Fixed alongside (same file, `lexer.py`) and pinned by
+`TestVersionTagCommentTokenPreservation`.
 
 2026-08-21 (second entry this date): +11 in
 `tests/regression/test_real_corpus_parse_failures.py` (23 total in the
