@@ -63,6 +63,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocessing:** `normalize_fixed_format` now treats `'V'`/`'v'` in the
+  fixed-format indicator column (column 7) as a comment line, mirroring the
+  existing `'D'`/`'d'` debug-line handling — new
+  `version_tag_lines_as_comments: bool = True` parameter (both the
+  pure-Python and Cython `_preprocess_fast` paths; `.c` regenerated), and
+  `copy_statement_parser.is_comment_line()` / `parser._detect_fixed_format`
+  updated to match. Found via a shop-specific change-control convention that
+  stamps a short version tag (e.g. `V97`, `TFEC`) into Area A with `V` in
+  column 7 of its own line — standard fixed-format COBOL never puts live
+  code there, so the un-normalized tag text previously reached the lexer and
+  surfaced as "Unparsed tokens" errors. Pass
+  `version_tag_lines_as_comments=False` to compile V-lines as live code
+  instead. Also fixes a follow-on gap caught in PR review:
+  `lexer.py`'s `_fixed_format_comment_tokens` (backs
+  `tokenize_cobol(..., keep_comments=True)`) re-scans physical lines to
+  reconstruct `COMMENT` tokens for lines `normalize_fixed_format` blanks
+  out, but only recognized `*`/`D`/`d` (plus `/` for page breaks) — a
+  V-line's blank placeholder had no matching re-scan entry, desyncing every
+  later comment/blank pairing by one and misattributing the next real
+  comment to the V-line's own line number. Pinned by
+  `tests/regression/test_version_tag_line_handling.py`.
 * **parser:** `SKIP1`/`SKIP2`/`SKIP3` (the compiler-directing listing no-ops,
   the same class of statement as `EJECT`) were missing from the shared
   `STATEMENT_TOKEN_TYPES`/`STATEMENT_KEYWORDS` sets in

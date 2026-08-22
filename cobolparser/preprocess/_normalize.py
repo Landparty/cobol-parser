@@ -372,6 +372,7 @@ def normalize_fixed_format(
     *,
     merge_continued_literals: bool = True,
     debug_lines_as_comments: bool = True,
+    version_tag_lines_as_comments: bool = True,
     warnings: list[str] | None = None,
 ) -> str:
     """Normalize fixed-format COBOL lines into a pseudo free-form block.
@@ -382,7 +383,12 @@ def normalize_fixed_format(
     - Capture indicator column; treat '*' and '/' lines as comments (preserve as-is).
       Optionally treat 'D'/'d' in the indicator column as a comment too
       (debug_lines_as_comments, default True) -- matches
-      copy_statement_parser.is_comment_line().
+      copy_statement_parser.is_comment_line(). Optionally treat 'V'/'v' in
+      the indicator column as a comment too (version_tag_lines_as_comments,
+      default True) -- some shops stamp a short change-control version tag
+      (e.g. ``V97``, ``TFEC``) into Area A with 'V' in column 7; standard
+      fixed-format COBOL never puts live code there, so this is unambiguous
+      with real source and also matches copy_statement_parser.is_comment_line().
     - Extract program text cols 8-72.
     - If a continuation line (indicator '-') occurs and previous line ended inside a literal,
       merge without inserting a newline.
@@ -540,9 +546,13 @@ def normalize_fixed_format(
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else " "
         text_slice = line[TEXT_START_COL - 1 : TEXT_END_COL]
         is_debug_comment = debug_lines_as_comments and indicator in ("D", "d")
+        is_version_tag_comment = version_tag_lines_as_comments and indicator in (
+            "V",
+            "v",
+        )
         if (
-            indicator in ("*", "/") or is_debug_comment
-        ):  # comment (incl. page eject, debug lines)
+            indicator in ("*", "/") or is_debug_comment or is_version_tag_comment
+        ):  # comment (incl. page eject, debug lines, version-tag lines)
             # Comment lines: flush pending buffer but do not emit comment text
             # (emitting it would let the free-form lexer tokenize it as code).
             # Still emit an empty placeholder to preserve line numbering.

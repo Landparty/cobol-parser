@@ -8,9 +8,10 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
-2026-08-22: New `tests/regression/test_tier8_arithmetic_scope_terminator.py`
-(9 tests) pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never
-consuming their own explicit scope terminator (`END-ADD`, `END-SUBTRACT`,
+2026-08-22 (second entry this date): New
+`tests/regression/test_tier8_arithmetic_scope_terminator.py` (9 tests)
+pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consuming
+their own explicit scope terminator (`END-ADD`, `END-SUBTRACT`,
 `END-MULTIPLY`, `END-DIVIDE`, `END-COMPUTE`) — see [parser.md](parser.md).
 Left unconsumed in the stream, the terminator (a plain `IDENTIFIER`, no
 dedicated `TokenType`) was misread by the procedure division's
@@ -19,6 +20,28 @@ every following statement under it. One test per verb, plus: no-trailing-
 period termination (`END-ADD` alone is a valid terminator), an ON SIZE ERROR
 / NOT ON SIZE ERROR clause followed by the terminator, and a period-only
 control to confirm the pre-existing path is unaffected.
+
+2026-08-22: New `tests/regression/test_version_tag_line_handling.py` (7
+tests) for `normalize_fixed_format`'s new `version_tag_lines_as_comments`
+handling (see [preprocessing.md](preprocessing.md)) -- 'V'/'v' in the
+fixed-format indicator column (column 7) is now treated as a comment,
+matching a real shop's change-control version-tag convention (e.g. `V97`,
+`TFEC` stamped into Area A) that previously reached the lexer as live
+source and surfaced as "Unparsed tokens" errors. Covers: dropped by
+default (upper- and lowercase), kept as code with
+`version_tag_lines_as_comments=False`, line-number preservation across
+dropped V-lines, `copy_statement_parser.is_comment_line()` parity, fast/pure
+(`_preprocess_fast`) parity, an end-to-end `parse_cobol()` repro of the
+original interleaved-V-lines shape parsing error-free, and (caught in PR
+review) `lexer.py`'s `_fixed_format_comment_tokens` -- the
+`tokenize_cobol(..., keep_comments=True)` helper that reconstructs COMMENT
+tokens for lines `normalize_fixed_format` blanks out -- which only
+recognized `*`/`D`/`d` (plus `/` for page breaks) in its own re-scan of the
+physical lines; a V-line's blank placeholder in the normalized text had no
+matching re-scan entry, desynchronizing every later comment/blank pairing
+by one and misattributing the next real comment to the V-line's line
+number. Fixed alongside (same file, `lexer.py`) and pinned by
+`TestVersionTagCommentTokenPreservation`.
 
 2026-08-21 (second entry this date): +11 in
 `tests/regression/test_real_corpus_parse_failures.py` (23 total in the
