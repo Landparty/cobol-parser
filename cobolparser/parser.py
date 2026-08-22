@@ -699,7 +699,7 @@ def _detect_fixed_format(source: str) -> bool:
             seq_area.strip() == "" or seq_area.replace(" ", "").isdigit()
         )
 
-        valid_indicator = indicator in (" ", "*", "/", "-", "D", "d")
+        valid_indicator = indicator in (" ", "*", "/", "-", "D", "d", "V", "v")
 
         if seq_is_spaces_or_digits and valid_indicator:
             fixed_format_indicators += 1
