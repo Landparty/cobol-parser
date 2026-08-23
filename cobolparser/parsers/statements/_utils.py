@@ -1005,7 +1005,12 @@ def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
     addend list).
     """
     while not stream.is_empty():
-        _skip_newlines(stream)  # qualifiers/subscripts may span continuation lines
+        # qualifiers/subscripts may span a continuation line, which in
+        # fixed-format source carries a leading CONTINUATION token
+        # (column-7 '-'), not just NEWLINE -- skip_whitespace (not the
+        # narrower _skip_newlines) covers both, mirroring
+        # consume_keyword_and_operand's own rationale below.
+        skip_whitespace(stream)
         token = stream.peek()
         if not token:
             break
@@ -1015,7 +1020,7 @@ def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
         if token.type in (TokenType.OF, TokenType.IN):
             qualifier_kw = token.value
             stream.consume()  # consume OF/IN
-            _skip_newlines(stream)
+            skip_whitespace(stream)
             qname = stream.peek()
             if qname and qname.type == TokenType.IDENTIFIER and qname.value:
                 stream.consume()

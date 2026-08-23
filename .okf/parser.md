@@ -2200,6 +2200,26 @@ Both now route through `consume_optional_qualifiers` too. Pinned by the
 same regression file's `TestGivingAndRemainderQualifierChain` and
 `TestAddendListQualifierChain` classes.
 
+**A second `/code-review` pass, same day, caught one more gap:**
+`consume_optional_qualifiers` skipped only `NEWLINE` tokens
+(`_skip_newlines`) between an operand/qualifier and the next hop, but a
+genuine fixed-format continuation line carries a leading `CONTINUATION`
+token (column-7 `-`), not `NEWLINE` -- `consume_keyword_and_operand`'s own
+docstring already documents this distinction and uses the broader
+`skip_whitespace` (which also covers `WHITESPACE`/`COMMENT`) for exactly
+this reason. Fixed by switching `consume_optional_qualifiers` to
+`skip_whitespace` too -- a strict superset of `_skip_newlines`, so no
+narrowing of previously-accepted input. The same pass also fixed a test
+correctness bug (not a source bug) in the DIVIDE-operand-with-subscript
+regression test: per COBOL's qualified-reference grammar (`data-name
+[(subscript)] [OF/IN data-name-2]...`), a subscript binds to the
+identifier it immediately trails, so subscripting a table that appears
+*before* the `OF` requires the subscript before the qualifier too
+(`QUAL-TBL (IDX) OF GROUP-A`, not `QUAL-TBL OF GROUP-A (IDX)`, which
+subscripts the non-table `GROUP-A` instead) -- the parser's lenient
+token-concatenation made the old (backwards) form "pass" regardless of
+binding order, so it wasn't actually validating a realistic construct.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

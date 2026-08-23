@@ -117,7 +117,13 @@ class TestMultiplyDivideOperandQualifierChain:
         mul = result.ast.find_all_by_type("MultiplyStatement")[0]
         assert mul.operands[0] == "QUAL OF GROUP-A"
 
-    def test_divide_qualified_operand_with_subscript_after_qualifier(self):
+    def test_divide_qualified_operand_with_subscript_before_qualifier(self):
+        # Per COBOL's qualified-reference grammar (data-name [(subscript)]
+        # [OF/IN data-name-2]...), a subscript binds to the identifier it
+        # immediately trails -- so subscripting QUAL-TBL (the table) means
+        # the subscript comes *before* the OF, not after: QUAL-TBL (IDX)
+        # OF GROUP-A, not QUAL-TBL OF GROUP-A (IDX) (which would subscript
+        # GROUP-A, not a table here).
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. DIVQUALTEST.
@@ -128,12 +134,12 @@ class TestMultiplyDivideOperandQualifierChain:
        01 IDX PIC 9 VALUE 1.
        01 RESULT-FIELD PIC 9(3).
        PROCEDURE DIVISION.
-           DIVIDE QUAL-TBL OF GROUP-A (IDX) BY 2 GIVING RESULT-FIELD.
+           DIVIDE QUAL-TBL (IDX) OF GROUP-A BY 2 GIVING RESULT-FIELD.
            STOP RUN.
 """
         result = _parse(source)
         div = result.ast.find_all_by_type("DivideStatement")[0]
-        assert div.operands[0] == "QUAL-TBL OF GROUP-A ( IDX )"
+        assert div.operands[0] == "QUAL-TBL ( IDX ) OF GROUP-A"
 
 
 class TestGivingAndRemainderQualifierChain:

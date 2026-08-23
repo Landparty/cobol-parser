@@ -83,7 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TO`/`FROM`) didn't fold a chain at all, instead silently splitting a
   qualified addend into two spurious separate addends (`ADD QUAL OF
   GROUP-A TO Y` produced addends `"QUAL"` and `"GROUP-A"`). Both now route
-  through the same shared helper. Pinned by
+  through the same shared helper. A second review pass caught one more
+  gap: `consume_optional_qualifiers` skipped only `NEWLINE` between hops,
+  not the `CONTINUATION` token a genuine fixed-format continuation line
+  carries (column-7 `-`) — switched to the broader `skip_whitespace`,
+  matching `consume_keyword_and_operand`'s existing precedent. Pinned by
   `tests/regression/test_arithmetic_qualifier_chain.py`.
 
 * **preprocessing:** `normalize_fixed_format` now treats `'V'`/`'v'` in the
