@@ -29,9 +29,24 @@ keyword and appended the qualifier name as a spurious *separate* addend
 (``ADD QUAL OF GROUP-A TO ...`` produced two addends, ``"QUAL"`` and
 ``"GROUP-A"``, instead of one qualified ``"QUAL OF GROUP-A"``). Both are
 now wired to the same shared helper.
+
+Further review passes on malformed (not well-formed) input found two more
+issues in ``consume_optional_qualifiers``/``consume_optional_subscript``
+themselves, both fixed here: (1) a dangling ``OF``/``IN`` with no
+identifier following it was consumed and discarded unconditionally before
+checking whether an identifier actually followed -- fixed by confirming an
+identifier is present via non-destructive lookahead *before* consuming the
+keyword, so a malformed qualifier leaves ``OF``/``IN`` untouched in the
+stream instead of vanishing with no trace; (2) an unbalanced ``(`` in a
+subscript (e.g. a typo dropping the closing paren) had no bound other than
+end-of-stream, so it could run past the current statement's own period and
+devour every following statement looking for a ``)`` that was never there
+-- fixed by stopping the paren-depth loop at the first token that can never
+legally appear inside a subscript (a period, scope terminator, or real
+statement/control-flow keyword).
 """
 
-from cobolparser import parse_cobol
+from cobolparser import ErrorRecoveryMode, parse_cobol
 
 
 def _parse(source: str):
@@ -232,3 +247,54 @@ class TestAddendListQualifierChain:
         result = _parse(source)
         sub = result.ast.find_all_by_type("SubtractStatement")[0]
         assert sub.operands == ["QUAL OF GROUP-B", "QUAL OF GROUP-A"]
+
+
+class TestMalformedQualifierChainInput:
+    """``consume_optional_qualifiers``/``consume_optional_subscript`` must
+    stay well-behaved on malformed (not just well-formed) input: a dangling
+    ``OF``/``IN`` with nothing valid after it, and an unbalanced ``(`` that
+    never closes."""
+
+    def test_target_side_dangling_of_leaves_token_unconsumed_not_corrupted(self):
+        # 'OF 5' is malformed (OF must be followed by a data-name, not a
+        # numeric literal). consume_optional_qualifiers must not consume
+        # the OF token speculatively and then discard it -- the target
+        # itself must come back as the clean base value, not a string
+        # corrupted by a half-folded qualifier.
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DANGLEOFTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 Y PIC 9(3).
+       PROCEDURE DIVISION.
+           ADD 1 TO Y OF 5.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="dangleoftest.cbl")
+        add = result.ast.find_all_by_type("AddStatement")[0]
+        assert add.target == "Y"
+
+    def test_unbalanced_paren_does_not_devour_following_statements(self):
+        # A missing ')' in a subscript must not run past the malformed
+        # statement's own period hunting for a close paren that was never
+        # there -- STOP RUN must survive in the AST even though the ADD
+        # itself fails to parse.
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. UNBALPARENTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 TBL PIC 9(3) OCCURS 3 TIMES.
+       01 IDX PIC 9 VALUE 1.
+       01 C PIC 9(3).
+       PROCEDURE DIVISION.
+           ADD TBL (IDX TO C.
+           STOP RUN.
+"""
+        result = parse_cobol(
+            source,
+            filename="unbalparentest.cbl",
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+        assert len(result.ast.find_all_by_type("StopStatement")) == 1

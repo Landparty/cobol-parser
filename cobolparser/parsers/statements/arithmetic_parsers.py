@@ -430,9 +430,7 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
         # PARENT``, ``QUAL OF PARENT (IDX)``, or a chain split across a
         # continuation line like ``NAME\n    IN GROUP-48 IN GROUP-47 ...``.
         if token.type == TokenType.IDENTIFIER:
-            parts: list[str] = [value]
-            consume_optional_qualifiers(stream, parts)
-            value = " ".join(p for p in parts if p)
+            value = consume_optional_qualifiers(stream, value)
 
         return value
     return None
@@ -455,13 +453,11 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
     if not (token and token.type == TokenType.IDENTIFIER and token.value):
         return None
 
-    parts: list[str] = [token.value]
+    value = token.value
     stream.consume()
 
     # Optional subscript group and/or OF/IN qualifier chain.
-    consume_optional_qualifiers(stream, parts)
-
-    return " ".join(p for p in parts if p)
+    return consume_optional_qualifiers(stream, value)
 
 
 def _consume_optional_rounded(stream: ITokenStream) -> bool:

@@ -2220,6 +2220,61 @@ subscripts the non-table `GROUP-A` instead) -- the parser's lenient
 token-concatenation made the old (backwards) form "pass" regardless of
 binding order, so it wasn't actually validating a realistic construct.
 
+**Four more findings from continued review passes, same day, all fixed:**
+
+1. **MOVE's target left the identical bug live one file over.** MOVE's
+   target-collection loop (`move_parser.py`) only folded a trailing
+   `(subscript)` via `consume_optional_subscript` -- no `OF`/`IN` handling
+   at all. A qualified target (`MOVE X TO QUAL OF GROUP-A`) fell into the
+   loop's generic "skip anything unrecognized" branch for the `OF` token,
+   and the qualifier name then looped back around and was collected as a
+   spurious *separate* target instead of completing the qualified one --
+   the exact bug class `consume_optional_qualifiers` was built to fix.
+   Fixed by wiring MOVE's target loop to the same shared helper. (MOVE's
+   *source* side was already unaffected: `_parse_source` accumulates every
+   token generically, not just IDENTIFIERs, so a qualified source like
+   `MOVE WS-A OF WS-GRP TO ...` already round-tripped correctly -- only the
+   target side had the narrower IDENTIFIER-only collection loop.) Pinned
+   by the new `tests/regression/test_move_qualifier_chain.py`.
+2. **Dangling `OF`/`IN` was consumed and discarded even when malformed.**
+   `consume_optional_qualifiers` consumed an `OF`/`IN` token unconditionally
+   before checking whether an identifier actually followed it, so a
+   malformed qualifier (`ADD A OF 5 TO B.` -- `OF` must be followed by a
+   data-name, not a numeric literal) vanished from the token stream with no
+   trace and no diagnostic. Fixed by confirming a real identifier is
+   present via non-destructive lookahead (scanning past
+   `WHITESPACE`/`COMMENT`/`NEWLINE`/`CONTINUATION` tokens with
+   `stream.peek(offset)`, which never consumes) *before* consuming the
+   `OF`/`IN` keyword -- a malformed qualifier now leaves it untouched in
+   the stream for the caller, the same as an unqualified reference would.
+3. **An unbalanced `(` could devour every following statement.**
+   `consume_optional_subscript`'s paren-depth loop had no bound other than
+   end-of-stream, so a subscript missing its closing `)` (e.g. `ADD TBL
+   (IDX TO C.\n STOP RUN.`) ran past the malformed statement's own period
+   and swallowed every statement after it while hunting for a `)` that was
+   never there -- `STOP RUN` silently vanished from the AST with only a
+   generic "missing TO or GIVING clause" error to show for it. Fixed by
+   stopping the loop (without consuming the boundary token) at the first
+   token that can never legally appear inside a subscript expression: a
+   period, an arithmetic scope terminator, or a real statement/control-flow
+   keyword (`_looks_like_statement_boundary`, gated on paren depth > 0 so a
+   legitimate closing `)` at depth 0 is unaffected).
+4. **Duplicated three-line glue at every call site.** The pattern `parts =
+   [value]; consume_optional_qualifiers(stream, parts); value = " ".join(p
+   for p in parts if p)` was copy-pasted at all four call sites. Collapsed
+   by changing `consume_optional_qualifiers`'s signature from
+   `(stream, parts: list[str]) -> None` to `(stream, value: str) -> str`
+   (it builds and joins its own `parts` list internally now), so every
+   call site is just `value = consume_optional_qualifiers(stream, value)`.
+   `consume_optional_subscript` keeps the original `(stream, parts) -> None`
+   shape since it is still called with an in-progress `parts` list from
+   inside `consume_optional_qualifiers` itself.
+
+All four pinned by `tests/regression/test_arithmetic_qualifier_chain.py`
+(the `TestMalformedQualifierChainInput` class for findings 2-3) and the new
+`tests/regression/test_move_qualifier_chain.py` (finding 1); finding 4 is a
+pure refactor covered by the full existing test suite passing unchanged.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

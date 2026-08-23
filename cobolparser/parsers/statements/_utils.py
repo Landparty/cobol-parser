@@ -943,13 +943,27 @@ def parse_arithmetic_operands(
             value = token.value
             stream.consume()
             if token.type == TokenType.IDENTIFIER:
-                parts: list[str] = [value]
-                consume_optional_qualifiers(stream, parts)
-                value = " ".join(p for p in parts if p)
+                value = consume_optional_qualifiers(stream, value)
             operands.append(value)
             continue
         stream.consume()
     return operands, ""
+
+
+def _looks_like_statement_boundary(token: Token) -> bool:
+    """True if *token* can never legally appear inside a subscript's parens.
+
+    A period, an arithmetic scope terminator, or a real statement/control-
+    flow keyword can never be part of a subscript expression -- used to stop
+    :func:`consume_optional_subscript`'s paren-depth loop before it runs
+    past the current statement.
+    """
+    if token.type in ARITHMETIC_OPERAND_STOP_TYPES:
+        return True
+    upper = token.value.upper() if token.value else ""
+    return bool(upper) and (
+        upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES
+    )
 
 
 def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
@@ -964,6 +978,14 @@ def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
     ``OF``/``IN`` qualifier chain, and backs COMPUTE/ADD/SUBTRACT targets,
     MULTIPLY/DIVIDE operands, the arithmetic ``GIVING`` clause, and
     DIVIDE's ``REMAINDER`` clause).
+
+    An unclosed ``(`` (missing ``)``) stops at the first token that could
+    never legally appear inside a subscript (see
+    :func:`_looks_like_statement_boundary`) rather than running to end of
+    stream looking for a ``)`` that was never there -- without this, a
+    malformed addend like ``ADD TBL (IDX TO C.`` would devour every
+    following statement (including the closing ``.`` and everything past
+    it) while hunting for a matching paren.
     """
     next_token = stream.peek()
     if not (next_token and next_token.type == TokenType.LEFT_PAREN):
@@ -972,6 +994,8 @@ def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
     while not stream.is_empty():
         t = stream.peek()
         if not t:
+            break
+        if depth > 0 and _looks_like_statement_boundary(t):
             break
         if t.type == TokenType.LEFT_PAREN:
             depth += 1
@@ -986,9 +1010,9 @@ def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
             break
 
 
-def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
-    """Consume a trailing ``(...)`` subscript and/or ``OF``/``IN`` qualifier
-    chain, appending each piece to *parts* in source order.
+def consume_optional_qualifiers(stream: ITokenStream, value: str) -> str:
+    """Fold a trailing ``(...)`` subscript and/or ``OF``/``IN`` qualifier
+    chain onto *value*, returning the combined string.
 
     Handles ``TABLE1 (INDEX1)``, ``QUAL OF PARENT``, ``QUAL OF PARENT
     (IDX)``, and a qualifier chain spanning a continuation line (e.g.
@@ -1001,9 +1025,18 @@ def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
     :func:`_consume_arithmetic_operand` (``arithmetic_parsers.py``, backing
     COMPUTE/ADD/SUBTRACT targets and MULTIPLY/DIVIDE operands),
     :func:`consume_keyword_and_operand` below (the ``GIVING``/``REMAINDER``
-    clauses), and :func:`parse_arithmetic_operands` above (ADD's/SUBTRACT's
-    addend list).
+    clauses), :func:`parse_arithmetic_operands` above (ADD's/SUBTRACT's
+    addend list), and MOVE's target (``move_parser.py``).
+
+    A dangling ``OF``/``IN`` with no identifier following it (a malformed
+    qualifier, e.g. ``ADD A OF TO B.``) is left untouched in the stream
+    rather than consumed and discarded -- the lookahead below confirms an
+    identifier is actually there *before* consuming the keyword, so a
+    caller further up the chain sees the same unconsumed ``OF``/``IN`` an
+    unqualified reference would have left behind, instead of it vanishing
+    with no trace.
     """
+    parts: list[str] = [value]
     while not stream.is_empty():
         # qualifiers/subscripts may span a continuation line, which in
         # fixed-format source carries a leading CONTINUATION token
@@ -1018,17 +1051,32 @@ def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
             consume_optional_subscript(stream, parts)
             continue
         if token.type in (TokenType.OF, TokenType.IN):
+            # Confirm a real identifier follows *before* consuming OF/IN --
+            # peek() doesn't skip WHITESPACE/COMMENT/NEWLINE/CONTINUATION,
+            # so scan past those non-destructively first.
+            offset = 1
+            lookahead = stream.peek(offset)
+            while lookahead is not None and lookahead.type in (
+                TokenType.WHITESPACE,
+                TokenType.COMMENT,
+                TokenType.NEWLINE,
+                TokenType.CONTINUATION,
+            ):
+                offset += 1
+                lookahead = stream.peek(offset)
+            if not (
+                lookahead and lookahead.type == TokenType.IDENTIFIER and lookahead.value
+            ):
+                break
             qualifier_kw = token.value
             stream.consume()  # consume OF/IN
             skip_whitespace(stream)
-            qname = stream.peek()
-            if qname and qname.type == TokenType.IDENTIFIER and qname.value:
-                stream.consume()
-                parts.append(qualifier_kw)
-                parts.append(qname.value)
-                continue
-            break
+            qname = stream.consume()
+            parts.append(qualifier_kw)
+            parts.append(qname.value or "")
+            continue
         break
+    return " ".join(p for p in parts if p)
 
 
 def consume_keyword_and_operand(
@@ -1070,10 +1118,9 @@ def consume_keyword_and_operand(
     skip_whitespace(stream)
     token = stream.peek()
     if token and token.type == TokenType.IDENTIFIER and token.value:
-        parts: list[str] = [token.value]
+        value = token.value
         stream.consume()
-        consume_optional_qualifiers(stream, parts)
-        return " ".join(p for p in parts if p)
+        return consume_optional_qualifiers(stream, value)
     return None
 
 

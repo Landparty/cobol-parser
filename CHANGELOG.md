@@ -87,8 +87,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gap: `consume_optional_qualifiers` skipped only `NEWLINE` between hops,
   not the `CONTINUATION` token a genuine fixed-format continuation line
   carries (column-7 `-`) — switched to the broader `skip_whitespace`,
-  matching `consume_keyword_and_operand`'s existing precedent. Pinned by
-  `tests/regression/test_arithmetic_qualifier_chain.py`.
+  matching `consume_keyword_and_operand`'s existing precedent. Further
+  review passes fixed four more gaps: (1) MOVE's target-collection loop
+  (`move_parser.py`) had the identical bug — no `OF`/`IN` handling at all
+  — left unfixed since MOVE is a different statement parser the arithmetic
+  fix never touched; wired to the same shared helper. (2)
+  `consume_optional_qualifiers` consumed a dangling `OF`/`IN` (no
+  identifier following, e.g. `ADD A OF 5 TO B.`) unconditionally before
+  checking, discarding it with no trace; now confirms an identifier is
+  present via non-destructive lookahead before consuming the keyword. (3)
+  `consume_optional_subscript`'s paren-depth loop had no bound but
+  end-of-stream, so an unclosed `(` (e.g. `ADD TBL (IDX TO C.\n STOP
+  RUN.`) devoured every following statement hunting for a `)` that was
+  never there; now stops at the first token that can never legally appear
+  inside a subscript (period, scope terminator, or statement/control-flow
+  keyword). (4) Simplified `consume_optional_qualifiers`'s signature from
+  `(stream, parts: list[str]) -> None` to `(stream, value: str) -> str`,
+  collapsing the identical three-line glue that had been copy-pasted at
+  all four call sites. Pinned by
+  `tests/regression/test_arithmetic_qualifier_chain.py` and
+  `tests/regression/test_move_qualifier_chain.py`.
 
 * **preprocessing:** `normalize_fixed_format` now treats `'V'`/`'v'` in the
   fixed-format indicator column (column 7) as a comment line, mirroring the
