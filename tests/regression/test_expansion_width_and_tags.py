@@ -22,9 +22,12 @@ short lines through verbatim ("might be free-format"), so the tag survived
 the strip; the 6-space re-pad then shifted its first letter into the
 indicator column and the rest into columns 8+ as live code -- surfacing as
 "Unparsed tokens" (or silently swallowed garbage) in the final parse.
-Fixed by blanking short lines in ``strip_sequence_area``: every character
-of a sub-7-character line lies within columns 1-6, the exact area the
-function exists to strip.
+Fixed in ``strip_sequence_area`` by blanking short *tag-shaped* lines --
+a single blank-free token with no terminating period that is not a
+compiler-directing word. Blanking every short line (the first version of
+the fix) was too eager: flush-left copybooks without sequence numbers
+carry short code lines like ``01 A.`` or ``EXIT.`` that the old
+passthrough kept working, and blanking those silently deleted code.
 """
 
 from cobolparser import parse_cobol
@@ -173,3 +176,57 @@ class TestSequenceAreaChangeTags:
         # The blanked tag line must stay a line so later locations hold.
         src = "P2P\n       01  WS-A PIC X."
         assert strip_sequence_area(src).count("\n") == src.count("\n")
+
+
+class TestReviewPassRefinements:
+    """Refinements from a `/code-review` pass on the initial fixes."""
+
+    def test_wrap_break_allowed_at_exactly_column_72(self):
+        # head = stripped[:break_at] has length break_at, so break_at == 72
+        # yields a 72-char head -- fully inside the code area. The old
+        # <= 71 cap left a token ending exactly at column 72 unsplittable,
+        # silently dropping its tail past the slice.
+        line = " " * 7 + "X" * 65 + " Y."
+        assert len(line.rstrip()) == 75
+        out = _fit_fixed_format_width(line)
+        assert len(out) == 2
+        assert len(out[0].rstrip()) == 72
+        assert "Y." in out[1]
+
+    def test_total_lines_matches_output_after_wrap(self, tmp_path):
+        # The wrap fallback adds physical lines; the documented "total
+        # lines in the expanded output" stat must count the source that is
+        # actually returned, not the pre-re-pad line list.
+        long_line = "       88  :T:-OK VALUE 'AAAA' 'BBBB' 'CCCC' 'DDDD' 'EEEE' 'FFFF'."
+        (tmp_path / "WRAP.CPY").write_text(
+            "       01  :T:-FLAG PIC X.\n" + long_line + "\n"
+        )
+        src = (
+            "\n".join(
+                [
+                    _pad72("IDENTIFICATION DIVISION."),
+                    _pad72("PROGRAM-ID. WRAPSTAT."),
+                    _pad72("DATA DIVISION."),
+                    _pad72("WORKING-STORAGE SECTION."),
+                    _pad72("COPY WRAP REPLACING ==:T:== BY ==LONG-RENAMED-PREFIX==."),
+                    _pad72("PROCEDURE DIVISION."),
+                    _pad72("    STOP RUN."),
+                ]
+            )
+            + "\n"
+        )
+        result = expand_copybooks(src, copybook_paths=[str(tmp_path)])
+        assert result.statistics.total_lines == len(result.expanded_source.splitlines())
+
+    def test_short_code_lines_survive_strip(self):
+        # Blanking every sub-7-char line silently deleted real code from
+        # flush-left (sequence-number-less) copybooks -- `01 A.` vanished
+        # from the AST with no warning. Only tag-shaped content (single
+        # blank-free token, no terminating period, not a compiler
+        # directive) is blanked now.
+        out = strip_sequence_area("P2P\n01 A.\nEXIT.\nM1005\nEJECT").split("\n")
+        assert out[0] == ""  # tag blanked
+        assert out[1] == "01 A."  # short code kept
+        assert out[2] == "EXIT."  # short statement kept
+        assert out[3] == ""  # tag blanked
+        assert out[4] == "EJECT"  # compiler directive kept

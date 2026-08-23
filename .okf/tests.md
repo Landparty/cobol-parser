@@ -8,6 +8,23 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-23 (second entry this date): the three corpus-retry regression
+files grew review-pass hardening classes -- see [parser.md](parser.md)
+and [preprocessing.md](preprocessing.md):
+`test_occurs_clause_line_splits.py` is now 11 tests
+(+`TestOccursMissingCountRecovery` -- a malformed OCCURS with no count
+must not swallow the next item's level number; `TestDependingOnLineSplit`;
+`TestSignClauseLineSplit`); `test_perform_varying_signed_values.py` is now
+9 tests (+`TestSignSplitAcrossLines` -- sign and digits straddling a
+72-column break; `TestSubscriptedFromByValues`; `TestSetSignedValues` --
+`SET ... DOWN BY -1`/`UP BY +2`/`TO -1` through the shared
+`consume_signed_numeric`); `test_expansion_width_and_tags.py` is now 13
+tests (+`TestReviewPassRefinements` -- wrap break allowed at exactly
+column 72, `total_lines` recounted after a wrap, short flush-left code
+lines like `01 A.`/`EXIT.`/`EJECT` surviving `strip_sequence_area`'s
+narrowed tag heuristic).
+
+
 2026-08-23: Three new regression files pinning the second mainframe-corpus
 retry's remaining warning buckets — see [parser.md](parser.md) and
 [preprocessing.md](preprocessing.md) for the fixes:

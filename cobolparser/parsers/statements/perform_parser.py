@@ -10,6 +10,8 @@ from cobolparser.parsers.statements._conditions import (
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    consume_optional_qualifiers,
+    consume_signed_numeric,
     get_parse_context,
     is_statement_boundary,
     matches_keyword,
@@ -59,33 +61,28 @@ def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | No
 def _consume_from_by_value(stream: ITokenStream) -> str | None:
     """Consume a PERFORM VARYING/AFTER ``FROM``/``BY`` value if present.
 
-    A single token in the common case (a literal or a data name), but a
-    *signed* numeric literal -- ``BY -1`` is how every countdown loop is
-    written -- lexes as two tokens (MINUS/PLUS then the number), and the
-    old single-token read captured only the sign: the leftover digits then
-    made the UNTIL lookahead fail, so the whole VARYING clause was reported
-    "not fully recognized" and dropped. Returns the composed value (e.g.
-    ``"-1"``) or ``None`` when no value token is present.
+    A single token in the common case (a literal or a data name), with two
+    real-deck extensions handled by shared ``_utils`` helpers: a *signed*
+    numeric literal (``BY -1`` is how every countdown loop is written)
+    lexes as two tokens -- MINUS/PLUS then the number, possibly split
+    across a 72-column line break -- and is recomposed by
+    ``consume_signed_numeric``; a subscripted or qualified data-name value
+    (``FROM WS-TAB-VAL(I)``, ``FROM WS-START OF WS-CTL``) has its trailing
+    tokens folded in by ``consume_optional_qualifiers``, which would
+    otherwise strand ``( I )`` in the stream and break the UNTIL lookahead
+    exactly the way a stranded signed digit used to. Returns the composed
+    value or ``None`` when no value token is present.
     """
+    signed = consume_signed_numeric(stream)
+    if signed is not None:
+        return signed
     token = stream.peek()
-    if not token:
-        return None
-    if token.type in (TokenType.MINUS, TokenType.PLUS):
-        next_tok = stream.peek(1)
-        if (
-            next_tok
-            and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
-            and next_tok.value
-        ):
-            sign = token.value or ""
-            stream.consume()  # sign
-            stream.consume()  # number
-            return sign + next_tok.value
-        return None
-    if not token.value:
+    if not token or not token.value:
         return None
     value = token.value
     stream.consume()
+    if token.type == TokenType.IDENTIFIER:
+        value = consume_optional_qualifiers(stream, value)
     return value
 
 

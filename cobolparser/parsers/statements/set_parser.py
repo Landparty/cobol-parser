@@ -7,6 +7,7 @@ from ...lexer import TokenType
 from ...models.statements import SetStatement
 from ._utils import (
     consume_optional_subscript,
+    consume_signed_numeric,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
@@ -33,7 +34,17 @@ def _consume_subscripted_value(token_stream: ITokenStream, first_token: Any) -> 
     Shared by all four of SET's value-reading forms (``TO``, ``TO ADDRESS
     OF``, ``UP BY``, ``DOWN BY``) -- without folding a subscript group in,
     e.g. `SET IDX TO TABLE-ITEM(5)` silently dropped the `(5)`.
+
+    A sign-prefixed numeric value (``SET IDX DOWN BY -1`` -- the canonical
+    index-decrement idiom) lexes as two tokens (MINUS/PLUS then the
+    number); the shared ``consume_signed_numeric`` recomposes it. Without
+    that, the value recorded was the bare ``"-"`` and the stranded digits
+    were dropped as an unparsed statement token -- the same lexing split
+    the PERFORM VARYING FROM/BY values hit.
     """
+    signed = consume_signed_numeric(token_stream)
+    if signed is not None:
+        return _strip_period(signed)
     parts: list[str] = [first_token.value] if first_token.value else []
     token_stream.consume()
     consume_optional_subscript(token_stream, parts)

@@ -98,6 +98,61 @@ def parse_picture_clause_fast(
     return None, pos
 
 
+cdef int _peek_count_pos(
+    list tokens,
+    int pos,
+    int n,
+    object newline_type,
+    object numeric_literal_type,
+    object level_number_type,
+):
+    """Locate an OCCURS count/max token from ``pos`` without consuming.
+
+    Mirrors ``DataItemClauseParser._peek_count_token``: returns the index
+    of the count token, or -1 when none is acceptable. A NUMERIC_LITERAL
+    is always the count; a LEVEL_NUMBER on the same line keeps the
+    historical unconditional read; a LEVEL_NUMBER reached only by
+    crossing a line break is the count only when the token after it reads
+    like the OCCURS clause continuing -- otherwise it is the next data
+    item's own level number and must not be swallowed.
+    """
+    cdef int i = pos
+    cdef int j
+    cdef object tok
+    cdef object follow
+    cdef str follow_upper
+    while i < n and tokens[i] is not None and tokens[i].type is newline_type:
+        i += 1
+    if i >= n:
+        return -1
+    tok = tokens[i]
+    if tok is None:
+        return -1
+    if tok.type is numeric_literal_type:
+        return i
+    if tok.type is not level_number_type:
+        return -1
+    if i == pos:
+        return i
+    j = i + 1
+    while j < n and tokens[j] is not None and tokens[j].type is newline_type:
+        j += 1
+    follow = tokens[j] if j < n else None
+    follow_upper = follow.value.upper() if follow is not None and follow.value else ""
+    if follow_upper in (
+        "TIMES",
+        "TO",
+        "DEPENDING",
+        "INDEXED",
+        "ASCENDING",
+        "DESCENDING",
+        "PIC",
+        "PICTURE",
+    ):
+        return i
+    return -1
+
+
 def parse_data_item_clauses_fast(
     list tokens,
     int pos,
@@ -117,6 +172,7 @@ def parse_data_item_clauses_fast(
     object identifier_type,
     object numeric_literal_type,
     object newline_type,
+    object comma_type,
 ):
     """Drive the per-clause loop of :meth:`_parse_data_item`.
 
@@ -241,27 +297,27 @@ def parse_data_item_clauses_fast(
             max_count = 0
 
             # The count may sit on the line after OCCURS (mirrors the
-            # pure-Python fix: without the newline skip, a two-digit count
-            # on the next line -- a LEVEL_NUMBER token -- was misread by
-            # the caller as a new data item's level number, fabricating a
-            # phantom item while this OCCURS recorded a size of 0).
-            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                pos += 1
-            if pos < n:
-                count_token = tokens[pos]
-                if count_token is not None and count_token.type in (
-                    numeric_literal_type,
-                    level_number_type,
-                ):
-                    try:
-                        min_count = int(count_token.value)
-                        max_count = min_count
-                    except (TypeError, ValueError):
-                        pass
-                    pos += 1
+            # pure-Python fix and its _peek_count_token guard: a
+            # LEVEL_NUMBER reached only by crossing a line break is
+            # accepted as the count only when the token after it reads
+            # like the OCCURS clause continuing -- otherwise a malformed
+            # OCCURS with no count would swallow the next data item's own
+            # level number as the count, deleting that item).
+            count_pos = _peek_count_pos(
+                tokens, pos, n, newline_type, numeric_literal_type, level_number_type
+            )
+            if count_pos >= 0:
+                count_token = tokens[count_pos]
+                try:
+                    min_count = int(count_token.value)
+                    max_count = min_count
+                except (TypeError, ValueError):
+                    pass
+                pos = count_pos + 1
 
             # Variable OCCURS: OCCURS min TO max
-            # (TO and the max count may each start a continuation line)
+            # (TO and the max count may each start a continuation line;
+            # the max-count read carries the same crossing guard)
             while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                 pos += 1
             if pos < n:
@@ -272,19 +328,16 @@ def parse_data_item_clauses_fast(
                     and nxt.value.upper() == "TO"
                 ):
                     pos += 1  # consume TO
-                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                        pos += 1
-                    if pos < n:
-                        max_token = tokens[pos]
-                        if max_token is not None and max_token.type in (
-                            numeric_literal_type,
-                            level_number_type,
-                        ):
-                            try:
-                                max_count = int(max_token.value)
-                            except (TypeError, ValueError):
-                                max_count = min_count
-                            pos += 1
+                    count_pos = _peek_count_pos(
+                        tokens, pos, n, newline_type, numeric_literal_type, level_number_type
+                    )
+                    if count_pos >= 0:
+                        max_token = tokens[count_pos]
+                        try:
+                            max_count = int(max_token.value)
+                        except (TypeError, ValueError):
+                            max_count = min_count
+                        pos = count_pos + 1
 
             # Skip newlines, optional TIMES keyword
             while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
@@ -294,7 +347,9 @@ def parse_data_item_clauses_fast(
                 if nxt is not None and nxt.value and nxt.value.upper() == "TIMES":
                     pos += 1
 
-            # DEPENDING ON clause
+            # DEPENDING ON clause (ON and the variable may each start a
+            # continuation line; the variable read requires an IDENTIFIER,
+            # so crossing the break can never swallow a level number)
             depending_var = ""
             has_depending = False
             while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
@@ -303,10 +358,14 @@ def parse_data_item_clauses_fast(
                 nxt = tokens[pos]
                 if nxt is not None and nxt.value and nxt.value.upper() == "DEPENDING":
                     pos += 1
+                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                        pos += 1
                     if pos < n:
                         on_token = tokens[pos]
                         if on_token is not None and on_token.value and on_token.value.upper() == "ON":
                             pos += 1
+                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                        pos += 1
                     if pos < n:
                         dep_token = tokens[pos]
                         if dep_token is not None and dep_token.type is identifier_type:
@@ -342,7 +401,7 @@ def parse_data_item_clauses_fast(
                         pos += 1
                     # Comma-separated key list: a comma is only a
                     # separator, never a key name -- consume and continue.
-                    if pos < n and tokens[pos] is not None and tokens[pos].value == ",":
+                    if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
                         pos += 1
                         continue
                     if (
@@ -378,7 +437,7 @@ def parse_data_item_clauses_fast(
                     while True:
                         while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                             pos += 1
-                        if pos < n and tokens[pos] is not None and tokens[pos].value == ",":
+                        if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
                             pos += 1
                             continue
                         if pos < n and tokens[pos] is not None and tokens[pos].type is identifier_type:

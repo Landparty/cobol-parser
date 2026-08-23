@@ -32,6 +32,7 @@ from ._utils import (
     _skip_newlines,
     consume_keyword_and_operand,
     consume_optional_qualifiers,
+    consume_signed_numeric,
     get_parse_context,
     is_statement_boundary,
     looks_dedented_relative_to,
@@ -406,20 +407,13 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
     if token is None:
         return None
 
-    # Sign-prefixed numeric literal: MINUS/PLUS followed immediately by a number.
-    # Single-digit numbers tokenize as LEVEL_NUMBER, so accept both.
-    if token.type in (TokenType.MINUS, TokenType.PLUS):
-        next_tok = stream.peek(1)
-        if (
-            next_tok
-            and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
-            and next_tok.value
-        ):
-            sign = token.value or ""
-            stream.consume()  # sign
-            value = next_tok.value
-            stream.consume()  # number
-            return sign + value
+    # Sign-prefixed numeric literal: MINUS/PLUS followed by a number
+    # (single/double-digit numbers tokenize as LEVEL_NUMBER, so the shared
+    # helper accepts both -- and tolerates a line break between the sign
+    # and its digits).
+    signed = consume_signed_numeric(stream)
+    if signed is not None:
+        return signed
 
     if token and token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
         value = token.value

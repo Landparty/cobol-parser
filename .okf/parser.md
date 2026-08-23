@@ -2322,6 +2322,54 @@ handling of the same lexing split), wired into all four FROM/BY reads (the
 VARYING header and every AFTER dimension). Pinned by
 `tests/regression/test_perform_varying_signed_values.py`.
 
+# Review-pass hardening of the 2026-08-23 corpus fixes (same day)
+
+A `/code-review` pass over the corpus-retry fixes above confirmed four
+correctness gaps (each reproduced before fixing) and drove one
+consolidation:
+
+1. **OCCURS missing-count error-recovery regression.** The unconditional
+   newline-skip before the count read meant a malformed `OCCURS` with *no*
+   count consumed the next data item's own level number as the count --
+   fabricating a table size from the neighbor's level, overwriting the
+   OCCURS item's PIC with the neighbor's, and deleting the neighbor from
+   the AST. Now guarded by `_peek_count_token` (pure) / `_peek_count_pos`
+   (`_data_fast.pyx`): a NUMERIC_LITERAL is always the count; a
+   LEVEL_NUMBER on the same line keeps the historical unconditional read;
+   a LEVEL_NUMBER reached only by crossing a line break counts only when
+   the token after it reads like the OCCURS clause continuing
+   (TIMES/TO/DEPENDING/INDEXED/ASCENDING/DESCENDING/PIC). Applies to both
+   the first count and the `TO` max.
+2. **`DEPENDING ON` had the same line-split gap** one clause further down
+   in the very function being fixed: `DEPENDING ON` at end of line with
+   the variable on the next silently degraded to a *fixed* OCCURS and
+   dropped the variable as an unparsed token. Newline skips added before
+   `ON` and the variable (which requires an IDENTIFIER, so the crossing
+   can never swallow a level number). Both paths.
+3. **`SIGN IS` at end of line recorded a raw `"\n"` as the sign clause**
+   -- the direction read accepted any truthy token value. Restricted to
+   LEADING/TRAILING with newline skips between all the clause's keywords
+   (pure path only; the fast loop already hands SIGN back).
+4. **Signed values consolidated into `_utils.consume_signed_numeric`.**
+   The MINUS/PLUS + digits lexing split had grown per-file copies, and the
+   sibling consumers were still broken: `SET IDX DOWN BY -1` recorded a
+   value of `"-"`, and PERFORM's fix missed a sign and digits straddling a
+   72-column line break (`BY -` / newline / `1`). The shared helper does a
+   non-destructive lookahead past WHITESPACE/COMMENT/NEWLINE/CONTINUATION
+   before composing, and now backs PERFORM VARYING/AFTER FROM/BY, SET's
+   value reads (via `_consume_subscripted_value`), and
+   `_consume_arithmetic_operand`. PERFORM's FROM/BY values also fold
+   subscripts/qualifiers via `consume_optional_qualifiers` (a subscripted
+   `FROM WS-TBL (2)` used to strand `( 2 )` and kill the UNTIL lookahead).
+   The `.pyx` comma checks were also aligned to compare the COMMA token
+   *type* (new `comma_type` parameter) instead of the value `","`, which a
+   `','` STRING_LITERAL would have matched.
+
+Pinned by new classes in the three 2026-08-23 regression files
+(`TestOccursMissingCountRecovery`, `TestDependingOnLineSplit`,
+`TestSignClauseLineSplit`, `TestSignSplitAcrossLines`,
+`TestSubscriptedFromByValues`, `TestSetSignedValues`).
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

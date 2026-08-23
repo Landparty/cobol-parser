@@ -63,6 +63,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser/preprocessing:** review-pass hardening of the corpus-retry
+  fixes below (each gap reproduced before fixing): the OCCURS count read's
+  newline-skip no longer swallows the *next data item's level number* as
+  the count when a malformed `OCCURS` has no count at all (guarded
+  `_peek_count_token`/`_peek_count_pos`, both paths); `DEPENDING ON` and
+  `SIGN IS` split across a 72-column line break now parse (SIGN's
+  direction read is also restricted to LEADING/TRAILING — it used to
+  record a raw newline as the sign clause); signed values were
+  consolidated into a shared `consume_signed_numeric` helper that also
+  fixes `SET ... DOWN BY -1` (recorded `"-"` before) and a sign/digits
+  pair straddling a line break, with PERFORM's FROM/BY values now folding
+  subscripts/qualifiers too; `strip_sequence_area`'s short-line blanking
+  was narrowed to tag-shaped content only (blanking every short line
+  silently deleted `01 A.`-style code from flush-left copybooks); the
+  expander wrap pass allows a break at exactly column 72 (off-by-one left
+  a token ending there unsplittable) and `ExpansionStatistics.total_lines`
+  is recounted after wrapping; the `_data_fast` comma checks compare the
+  COMMA token type (a `','` string literal no longer matches). Pinned by
+  new classes in the three regression files below.
+
 * **parser:** the OCCURS clause walk (pure-Python and Cython `_data_fast`
   paths, fixed identically; `.c` regenerated) now handles real-deck line
   splits and separators: a count on the line after `OCCURS` (previously a

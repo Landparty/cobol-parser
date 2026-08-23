@@ -589,25 +589,16 @@ def _fit_fixed_format_width(line: str) -> list[str]:
 
     runs, _ = _blank_runs_outside_literals(stripped, _CONTENT_START_IDX)
     excess = len(stripped) - _CODE_AREA_WIDTH
-    if runs:
-        # Shrink rightmost runs first: trailing alignment padding (before a
-        # PIC clause, a VALUE literal, ...) is the least meaningful layout.
-        cuts: dict[int, int] = {}
-        for idx, length in reversed(runs):
-            if excess <= 0:
-                break
-            take = min(length - 1, excess)
-            cuts[idx] = take
-            excess -= take
-        if cuts:
-            pieces: list[str] = []
-            pos = 0
-            for idx, length in runs:
-                take = cuts.get(idx, 0)
-                pieces.append(stripped[pos : idx + length - take])
-                pos = idx + length
-            pieces.append(stripped[pos:])
-            stripped = "".join(pieces)
+    # Shrink rightmost runs first: trailing alignment padding (before a
+    # PIC clause, a VALUE literal, ...) is the least meaningful layout.
+    # Editing right-to-left keeps every earlier run's indices valid, so
+    # the string can be cut in place per run.
+    for idx, length in reversed(runs):
+        if excess <= 0:
+            break
+        take = min(length - 1, excess)
+        stripped = stripped[: idx + length - take] + stripped[idx + length :]
+        excess -= take
 
     if len(stripped) <= _CODE_AREA_WIDTH:
         return [stripped]
@@ -624,8 +615,14 @@ def _fit_fixed_format_width(line: str) -> list[str]:
         # prefix re-creates every iteration) would emit an empty head and
         # loop forever on the same tail.
         content_start = len(stripped) - len(stripped.lstrip())
+        # ``head = stripped[:break_at]`` has length ``break_at``, so a break
+        # at index ``_CODE_AREA_WIDTH`` (72) yields a head of exactly 72
+        # characters -- still fully inside the code area. Capping one lower
+        # left a token ending exactly at column 72 unsplittable, silently
+        # dropping its tail past the slice -- the very defect this helper
+        # exists to prevent.
         break_at = max(
-            (b for b in safe_blanks if content_start < b <= _CODE_AREA_WIDTH - 1),
+            (b for b in safe_blanks if content_start < b <= _CODE_AREA_WIDTH),
             default=None,
         )
         if break_at is None:
@@ -637,8 +634,10 @@ def _fit_fixed_format_width(line: str) -> list[str]:
         tail = stripped[break_at:].lstrip()
         # 6-char sequence area + blank indicator + 4-space indent: the
         # continuation content starts at column 12, safely inside Area B.
+        # (head is never empty: the content_start filter above guarantees
+        # the break lands after the first non-blank character.)
         next_line = " " * 11 + tail
-        if not head.strip() or len(next_line) >= len(stripped):
+        if len(next_line) >= len(stripped):
             # No forward progress possible (e.g. the tail is a single
             # unbreakable 62+-character token): emit as-is rather than
             # loop, same escape hatch as the no-break-point case above.
@@ -794,18 +793,29 @@ def expand_copybooks(
         for line in expanded_lines:
             if not line:
                 final_lines.append(line)
+                continue
+            # Prepend 6 spaces for sequence area. A REPLACING clause
+            # that lengthens its replaced text (e.g. ==:LKPCB:== BY
+            # ==LKPCB-PCB1==, +3 chars) can push a line's tail -- often
+            # a data item's terminating period -- past column 72, where
+            # the final parse's fixed-format slice silently drops it.
+            # _fit_fixed_format_width squeezes/wraps such a line back
+            # within the 72-column code area (see its docstring). The
+            # length guard keeps the overwhelmingly common in-width case
+            # a plain append -- no helper call, no rstrip copy, no
+            # throwaway single-element list per line.
+            padded = " " * 6 + line
+            if len(padded) <= _CODE_AREA_WIDTH:
+                final_lines.append(padded)
             else:
-                # Prepend 6 spaces for sequence area. A REPLACING clause
-                # that lengthens its replaced text (e.g. ==:LKPCB:== BY
-                # ==LKPCB-PCB1==, +3 chars) can push a line's tail -- often
-                # a data item's terminating period -- past column 72, where
-                # the final parse's fixed-format slice silently drops it.
-                # _fit_fixed_format_width squeezes/wraps such a line back
-                # within the 72-column code area (see its docstring).
-                final_lines.extend(_fit_fixed_format_width(" " * 6 + line))
+                final_lines.extend(_fit_fixed_format_width(padded))
         final_source = "\n".join(final_lines)
         if expanded_source.endswith("\n"):
             final_source += "\n"
+        # The wrap fallback can add lines after the count above was taken;
+        # keep the documented "total lines in the expanded output" invariant
+        # true against the source actually returned.
+        stats.total_lines = len(final_lines)
 
     return CopybookExpansion(
         expanded_source=final_source,

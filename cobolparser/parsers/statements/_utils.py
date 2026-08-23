@@ -555,6 +555,55 @@ def consume_period(stream: ITokenStream) -> None:
             stream.consume()
 
 
+#: Token types that carry no clause meaning between a unary sign and its
+#: digits (same set skip_whitespace consumes).
+_SIGN_NOISE_TOKEN_TYPES = (
+    TokenType.WHITESPACE,
+    TokenType.COMMENT,
+    TokenType.NEWLINE,
+    TokenType.CONTINUATION,
+)
+
+
+def consume_signed_numeric(stream: ITokenStream) -> str | None:
+    """Consume a sign-prefixed numeric literal (``-1``, ``+2``) if present.
+
+    The lexer emits a signed literal as two tokens -- MINUS/PLUS, then the
+    number (which for one/two digits is a LEVEL_NUMBER token, not
+    NUMERIC_LITERAL) -- so every single-token value read that meets one
+    captures only the sign and strands the digits. This is the shared home
+    for the recomposition: PERFORM VARYING/AFTER's FROM/BY values, SET's
+    TO/UP BY/DOWN BY values, and the arithmetic verbs' operands all hit
+    the same split (``BY -1`` is every countdown loop).
+
+    Returns the composed value (e.g. ``"-1"``) when the next token is a
+    sign followed -- possibly across a line break, since a 72-column deck
+    can wrap between the sign and its digits -- by a numeric token, and
+    ``None`` (consuming nothing) otherwise. The lookahead past
+    WHITESPACE/COMMENT/NEWLINE/CONTINUATION tokens is non-destructive, so
+    a sign that turns out not to prefix a number is left untouched for
+    the caller.
+    """
+    token = stream.peek()
+    if not token or token.type not in (TokenType.MINUS, TokenType.PLUS):
+        return None
+    offset = 1
+    next_tok = stream.peek(offset)
+    while next_tok is not None and next_tok.type in _SIGN_NOISE_TOKEN_TYPES:
+        offset += 1
+        next_tok = stream.peek(offset)
+    if not (
+        next_tok
+        and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+        and next_tok.value
+    ):
+        return None
+    sign = token.value or ""
+    for _ in range(offset + 1):
+        stream.consume()
+    return sign + next_tok.value
+
+
 # ---------------------------------------------------------------------------
 # Clause-token collector (used by IO statement parsers)
 # ---------------------------------------------------------------------------

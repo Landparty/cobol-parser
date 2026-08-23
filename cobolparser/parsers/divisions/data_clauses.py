@@ -232,6 +232,7 @@ class DataItemClauseParser:
                     TokenType.IDENTIFIER,
                     TokenType.NUMERIC_LITERAL,
                     TokenType.NEWLINE,
+                    TokenType.COMMA,
                 )
                 token_stream._pos = new_pos  # type: ignore[attr-defined]
                 # Fall through (no early return): the Python loop below
@@ -342,18 +343,34 @@ class DataItemClauseParser:
                 token_stream.consume()
 
             # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
+            # (each keyword may start a continuation line -- and the
+            # direction read is restricted to LEADING/TRAILING: the old
+            # any-truthy-value read recorded a raw "\n" as the sign clause
+            # whenever SIGN IS landed at the end of a 72-column line)
             elif value_upper == "SIGN":
                 token_stream.consume()
+                self._skip_newlines(token_stream)
                 nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() == "IS":
                     token_stream.consume()
+                self._skip_newlines(token_stream)
                 dir_tok = token_stream.peek()
-                if dir_tok and dir_tok.value:
+                if (
+                    dir_tok
+                    and dir_tok.value
+                    and dir_tok.value.upper()
+                    in (
+                        "LEADING",
+                        "TRAILING",
+                    )
+                ):
                     direction = dir_tok.value.upper()
                     token_stream.consume()
+                    self._skip_newlines(token_stream)
                     sep = token_stream.peek()
                     if sep and sep.value and sep.value.upper() == "SEPARATE":
                         token_stream.consume()
+                        self._skip_newlines(token_stream)
                         ch = token_stream.peek()
                         if ch and ch.value and ch.value.upper() == "CHARACTER":
                             token_stream.consume()
@@ -487,44 +504,45 @@ class DataItemClauseParser:
 
         # Read first (minimum or fixed) count. The count may sit on the
         # line after OCCURS (a long data name pushing OCCURS to the end of
-        # its 72-column line is routine in real decks), so skip NEWLINEs
-        # first -- without this, a two-digit count on the next line (which
-        # lexes as LEVEL_NUMBER) was misread by the caller's clause loop as
-        # a *new data item's level number*, fabricating a phantom item
-        # named after whatever token followed, while this OCCURS silently
-        # recorded a table size of 0.
+        # its 72-column line is routine in real decks) -- without crossing
+        # the line break, a two-digit count on the next line (which lexes
+        # as LEVEL_NUMBER) was misread by the caller's clause loop as a
+        # *new data item's level number*, fabricating a phantom item while
+        # this OCCURS silently recorded a table size of 0. The crossing is
+        # guarded, though: when the count would come from a *following*
+        # line and is a LEVEL_NUMBER token, it is only accepted if the
+        # token after it reads like the OCCURS clause continuing -- else a
+        # malformed ``OCCURS`` with no count at all would swallow the
+        # *next data item's own level number* as the count, deleting that
+        # item from the AST (a worse failure than the missing count).
+        # Same-line counts keep the historical unconditional read.
         min_count = 0
         max_count = 0
-        self._skip_newlines(token_stream)
-        count_token = token_stream.peek()
-        if count_token and count_token.type in [
-            TokenType.NUMERIC_LITERAL,
-            TokenType.LEVEL_NUMBER,
-        ]:
+        count_token, count_offset = self._peek_count_token(token_stream)
+        if count_token is not None:
             try:
                 min_count = int(count_token.value)
                 max_count = min_count
             except (TypeError, ValueError):
                 pass
-            token_stream.consume()
+            for _ in range(count_offset + 1):
+                token_stream.consume()
 
         # Variable OCCURS: OCCURS min TO max [TIMES] DEPENDING ON var
-        # (TO and the max count may each start a continuation line too)
+        # (TO and the max count may each start a continuation line too;
+        # the max-count read carries the same crossing guard as the first)
         self._skip_newlines(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "TO":
             token_stream.consume()  # consume TO
-            self._skip_newlines(token_stream)
-            max_token = token_stream.peek()
-            if max_token and max_token.type in [
-                TokenType.NUMERIC_LITERAL,
-                TokenType.LEVEL_NUMBER,
-            ]:
+            max_token, max_offset = self._peek_count_token(token_stream)
+            if max_token is not None:
                 try:
                     max_count = int(max_token.value)
                 except (TypeError, ValueError):
                     max_count = min_count
-                token_stream.consume()
+                for _ in range(max_offset + 1):
+                    token_stream.consume()
 
         # Skip optional TIMES keyword (may be preceded by newlines)
         self._skip_newlines(token_stream)
@@ -532,15 +550,19 @@ class DataItemClauseParser:
         if nxt and nxt.value and nxt.value.upper() == "TIMES":
             token_stream.consume()
 
-        # DEPENDING ON clause
+        # DEPENDING ON clause (ON and the variable may each start a
+        # continuation line; the variable read requires an IDENTIFIER, so
+        # crossing the break can never swallow a level number)
         depending_var = None
         self._skip_newlines(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "DEPENDING":
             token_stream.consume()  # consume DEPENDING
+            self._skip_newlines(token_stream)
             on_token = token_stream.peek()
             if on_token and on_token.value and on_token.value.upper() == "ON":
                 token_stream.consume()  # consume ON
+            self._skip_newlines(token_stream)
             dep_token = token_stream.peek()
             if dep_token and dep_token.type == TokenType.IDENTIFIER:
                 depending_var = dep_token.value
@@ -677,6 +699,59 @@ class DataItemClauseParser:
                 token_stream.consume()
             else:
                 break
+
+    @staticmethod
+    def _peek_count_token(token_stream: ITokenStream) -> tuple[Any, int]:
+        """Locate an OCCURS count/max token without consuming anything.
+
+        Returns ``(token, newline_offset)`` where *newline_offset* is how
+        many NEWLINE tokens precede the count at the current position, or
+        ``(None, 0)`` when no acceptable count is present. Non-destructive
+        so the caller can decline to cross a line break.
+
+        Acceptance rules encode the error-recovery guard the plain
+        skip-newlines-then-read version lacked: a NUMERIC_LITERAL (3+
+        digits -- can never start a data item) is always the count; a
+        LEVEL_NUMBER on the *same* line keeps the historical unconditional
+        read; a LEVEL_NUMBER on a *following* line is the count only when
+        the token after it (past further newlines) reads like the OCCURS
+        clause continuing (TIMES/TO/DEPENDING/INDEXED/ASCENDING/
+        DESCENDING/PIC...). Otherwise -- e.g. a malformed ``OCCURS`` with
+        no count, followed by the next item's ``05  WS-NEXT`` -- the
+        two-digit token is that next item's own level number, and
+        consuming it would delete the item from the AST.
+        """
+        offset = 0
+        tok = token_stream.peek(offset)
+        while tok is not None and tok.type == TokenType.NEWLINE:
+            offset += 1
+            tok = token_stream.peek(offset)
+        if tok is None:
+            return None, 0
+        if tok.type == TokenType.NUMERIC_LITERAL:
+            return tok, offset
+        if tok.type != TokenType.LEVEL_NUMBER:
+            return None, 0
+        if offset == 0:
+            return tok, 0
+        follow_offset = offset + 1
+        follow = token_stream.peek(follow_offset)
+        while follow is not None and follow.type == TokenType.NEWLINE:
+            follow_offset += 1
+            follow = token_stream.peek(follow_offset)
+        follow_upper = follow.value.upper() if follow and follow.value else ""
+        if follow_upper in (
+            "TIMES",
+            "TO",
+            "DEPENDING",
+            "INDEXED",
+            "ASCENDING",
+            "DESCENDING",
+            "PIC",
+            "PICTURE",
+        ):
+            return tok, offset
+        return None, 0
 
     @staticmethod
     def _period_is_picture_decimal(period: Any, nxt: Any) -> bool:

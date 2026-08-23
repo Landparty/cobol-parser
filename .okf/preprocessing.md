@@ -679,6 +679,37 @@ emits a blank placeholder for sub-7-char lines.)
 
 Both pinned by `tests/regression/test_expansion_width_and_tags.py`.
 
+# Review-pass hardening of the expansion-output fixes (2026-08-23, same day)
+
+A `/code-review` pass over the fixes above confirmed three gaps (each
+reproduced before fixing):
+
+1. **`strip_sequence_area` short-line blanking was too eager.** Blanking
+   *every* sub-7-character line silently deleted real code from flush-left
+   copybooks maintained without sequence numbers (`01 A.` vanished from
+   the AST with no warning). Narrowed to tag-shaped content only: a single
+   blank-free token that neither ends with a period nor is a
+   compiler-directing word (EJECT/SKIP1/SKIP2/SKIP3). `01 A.`, `EXIT.`
+   keep the passthrough; `P2P`, `M1005` are still blanked.
+2. **Wrap break-point off-by-one.** `head = stripped[:break_at]` has
+   length `break_at`, so a break at index 72 yields a 72-character head --
+   fully inside the code area -- yet the filter capped at 71, leaving a
+   token ending exactly at column 72 unsplittable and silently dropping
+   its tail past the slice. Now `<= _CODE_AREA_WIDTH`.
+3. **`ExpansionStatistics.total_lines` drift.** The stat was computed from
+   the pre-re-pad line list, but the wrap fallback can add lines after
+   that; recounted from the final emitted source so the documented "total
+   lines in the expanded output" invariant holds.
+
+Also from the same pass: the in-width common case is now guarded at the
+re-pad call site (plain `append`, no helper call/rstrip copy per line),
+the squeeze pass edits the string directly right-to-left (dropping the
+cuts-dict/pieces reassembly), and the dead `not head.strip()` half of the
+wrap progress check was removed (the `content_start` filter already
+guarantees a non-empty head). Pinned by `TestReviewPassRefinements` and
+the updated `TestSequenceAreaChangeTags` in
+`tests/regression/test_expansion_width_and_tags.py`.
+
 # See Also
 
 * [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`

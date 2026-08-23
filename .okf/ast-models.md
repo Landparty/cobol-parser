@@ -175,7 +175,12 @@ Both OCCURS clause walks that populate this node — the pure-Python
 (count/`TO`/`BY` starting a continuation line) and comma-separated
 `INDEXED BY` / `KEY` name lists; before that, a count on the line after
 `OCCURS` could fabricate a phantom data item while this node recorded
-`max_times == 0`. See [parser.md](parser.md).
+`max_times == 0`. A same-day review pass then guarded the count read
+(`_peek_count_token` / `_peek_count_pos`): a LEVEL_NUMBER reached only by
+crossing a line break counts only when the clause visibly continues after
+it, so a malformed `OCCURS` with no count can no longer swallow the next
+item's own level number as a fabricated table size. See
+[parser.md](parser.md).
 
 Two shapes here regularly surprise consumers (both confirmed against source
 2026-08-02, and both compensated for in
