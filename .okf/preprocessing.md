@@ -629,6 +629,56 @@ misdetected. `CopybookSearchPath.encoding_errors` /
 count; `"strict"` raises `EncodingError` with file/offset context. Pinned
 by `tests/regression/test_open_findings_m15_regression.py`.
 
+# Expansion output: REPLACING width overflow + sequence-area change tags (2026-08-23)
+
+Two `expand_copybooks` *output* defects found in a mainframe corpus retry
+(the raw inputs were valid in both cases — only the re-assembled expansion
+output was broken):
+
+**REPLACING column overflow.** A `COPY ... REPLACING` whose replacement
+text is longer than what it replaces (`==:LKPCB:== BY ==LKPCB-PCB1==`, +3
+chars per occurrence) lengthens the lines it lands on; the expander's
+6-space re-pad then leaves the tail — typically a data item's terminating
+period — past column 72, where the final parse's fixed-format slice
+silently drops it ("content beyond column 72 was dropped mid-token: '.'").
+A dropped period merges the data item into its neighbor. Fixed by
+`_fit_fixed_format_width` (`copybook_expander.py`), applied to every
+re-padded line: interior multi-blank runs *outside quoted literals* are
+squeezed, rightmost first, each to no less than one blank, until the line
+fits — blanks are only separators in COBOL, alignment padding before a PIC
+clause almost always has enough slack, and squeezing keeps the line count
+(and every later line number) unchanged. When squeezing alone cannot fit
+the line, it wraps at the rightmost quote-safe blank onto a fresh Area-B
+continuation line (later line numbers then shift — the cost of not
+corrupting the statement). A line with no safe break at all (one giant
+token or literal) is left untouched so the parse's existing column-72
+warning reports the drop instead of this helper corrupting a literal. The
+wrap loop anchors its break point *after* the line's first non-blank
+character and bails on any iteration that makes no forward progress — the
+first version broke at any blank past index 7, and a wrapped tail's own
+fresh 11-space prefix re-created such a blank every iteration, so a short
+head followed by an unbreakable 62+-char token looped forever emitting
+empty heads (caught when it hung the full test suite before ever
+shipping).
+
+**Sequence-area change tags.** Shops stamp a short change tag (`P2P`,
+`M1005`, `E1A`, ... — any prefix, unlike the column-7 `V` convention
+`normalize_fixed_format` handles via `version_tag_lines_as_comments`) into
+columns 1-6 of its own line with nothing after it, so the physical line is
+under 7 characters. `strip_sequence_area` (`copy_statement_parser.py`)
+passed short lines through verbatim (rationalized as "might be
+free-format" — incoherent, since the function unconditionally eats 6
+leading chars off every full-width line); the 6-space re-pad then shifted
+the tag's first letter into the indicator column and the rest into columns
+8+ as live code, surfacing as "Unparsed tokens" or silently swallowed
+garbage. Fixed: short lines are now blanked — every character of a
+sub-7-char line lies within columns 1-6, the exact area the function
+exists to strip — with line numbering preserved. (The direct
+`parse_cobol` path was never affected: `normalize_fixed_format` already
+emits a blank placeholder for sub-7-char lines.)
+
+Both pinned by `tests/regression/test_expansion_width_and_tags.py`.
+
 # See Also
 
 * [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`

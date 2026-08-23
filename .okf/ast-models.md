@@ -169,6 +169,14 @@ class OccursClause(ASTNode):
                                #  "keys": [...]} — SEARCH ALL keys (2026-07-09)
 ```
 
+Both OCCURS clause walks that populate this node — the pure-Python
+`data_clauses._parse_occurs_clause` and its Cython mirror in
+`_data_fast.pyx` — were hardened 2026-08-23 against real-deck line splits
+(count/`TO`/`BY` starting a continuation line) and comma-separated
+`INDEXED BY` / `KEY` name lists; before that, a count on the line after
+`OCCURS` could fabricate a phantom data item while this node recorded
+`max_times == 0`. See [parser.md](parser.md).
+
 Two shapes here regularly surprise consumers (both confirmed against source
 2026-08-02, and both compensated for in
 [generators.md](generators.md)'s data generator):

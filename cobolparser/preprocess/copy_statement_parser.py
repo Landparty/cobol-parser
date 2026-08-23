@@ -183,8 +183,24 @@ def strip_sequence_area(source: str) -> str:
 
     for line in lines:
         if len(line) < 7:
-            # Short line - might be free-format or empty, keep as-is
-            result.append(line)
+            # Short line: every character it has lies within columns 1-6 --
+            # the sequence area this function exists to strip. Emit a blank
+            # line (not the line verbatim) so the content is dropped exactly
+            # like a full-width line's sequence area, while line numbering
+            # is preserved. Passing it through unchanged instead (the old
+            # behavior, rationalized as "might be free-format") let shop
+            # change-control tags stamped into columns 1-6 of their own
+            # line (e.g. ``P2P``, ``M1005`` -- any prefix, unlike the
+            # column-7 V-convention) survive the strip; the expander's
+            # 6-space re-pad then shifted the tag's first letter into the
+            # indicator column and the rest into columns 8+ as live code,
+            # surfacing as "Unparsed tokens" (or silently swallowed
+            # garbage) in the final parse. The free-format rationale was
+            # never coherent here: this function unconditionally eats 6
+            # leading characters off every full-width line, so genuinely
+            # free-format source was already mangled before this branch
+            # could matter.
+            result.append("")
         else:
             # Extract columns 7-72 (indicator + program text)
             # Column 7 (index 6) is indicator area - keep it

@@ -240,6 +240,13 @@ def parse_data_item_clauses_fast(
             min_count = 0
             max_count = 0
 
+            # The count may sit on the line after OCCURS (mirrors the
+            # pure-Python fix: without the newline skip, a two-digit count
+            # on the next line -- a LEVEL_NUMBER token -- was misread by
+            # the caller as a new data item's level number, fabricating a
+            # phantom item while this OCCURS recorded a size of 0).
+            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                pos += 1
             if pos < n:
                 count_token = tokens[pos]
                 if count_token is not None and count_token.type in (
@@ -254,6 +261,9 @@ def parse_data_item_clauses_fast(
                     pos += 1
 
             # Variable OCCURS: OCCURS min TO max
+            # (TO and the max count may each start a continuation line)
+            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                pos += 1
             if pos < n:
                 nxt = tokens[pos]
                 if (
@@ -262,6 +272,8 @@ def parse_data_item_clauses_fast(
                     and nxt.value.upper() == "TO"
                 ):
                     pos += 1  # consume TO
+                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                        pos += 1
                     if pos < n:
                         max_token = tokens[pos]
                         if max_token is not None and max_token.type in (
@@ -328,6 +340,11 @@ def parse_data_item_clauses_fast(
                 while True:
                     while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                         pos += 1
+                    # Comma-separated key list: a comma is only a
+                    # separator, never a key name -- consume and continue.
+                    if pos < n and tokens[pos] is not None and tokens[pos].value == ",":
+                        pos += 1
+                        continue
                     if (
                         pos < n
                         and tokens[pos] is not None
@@ -344,13 +361,16 @@ def parse_data_item_clauses_fast(
                 while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                     pos += 1
 
-            # INDEXED BY clause (one or more index names)
+            # INDEXED BY clause (one or more index names, optionally
+            # comma-separated; INDEXED and BY may straddle a line break)
             while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                 pos += 1
             if pos < n:
                 nxt = tokens[pos]
                 if nxt is not None and nxt.value and nxt.value.upper() == "INDEXED":
                     pos += 1
+                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+                        pos += 1
                     if pos < n:
                         by_token = tokens[pos]
                         if by_token is not None and by_token.value and by_token.value.upper() == "BY":
@@ -358,6 +378,9 @@ def parse_data_item_clauses_fast(
                     while True:
                         while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
                             pos += 1
+                        if pos < n and tokens[pos] is not None and tokens[pos].value == ",":
+                            pos += 1
+                            continue
                         if pos < n and tokens[pos] is not None and tokens[pos].type is identifier_type:
                             occurs.add_index_name(tokens[pos].value)
                             pos += 1

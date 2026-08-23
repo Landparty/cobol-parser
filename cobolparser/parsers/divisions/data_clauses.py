@@ -330,6 +330,17 @@ class DataItemClauseParser:
                 data_item.set_usage(value_upper)
                 token_stream.consume()
 
+            # INDEX without the USAGE keyword: ``05 X [USAGE [IS]] INDEX.``
+            # -- both USAGE and IS are optional in the grammar, and INDEX
+            # is a reserved word, so a bare INDEX in clause position is
+            # unambiguously the usage (a data item can never be *named*
+            # INDEX). USAGE IS INDEX already worked via parse_usage_clause;
+            # only this bare form fell through to the unknown-clause branch
+            # and was dropped with an "Unparsed token 'INDEX'" warning.
+            elif value_upper == "INDEX":
+                data_item.set_usage("INDEX")
+                token_stream.consume()
+
             # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
             elif value_upper == "SIGN":
                 token_stream.consume()
@@ -407,9 +418,9 @@ class DataItemClauseParser:
 
             # Leading "IS" ahead of EXTERNAL / GLOBAL / a bare
             # USAGE-family keyword (POINTER, PROCEDURE-POINTER,
-            # FUNCTION-POINTER). EXTERNAL and GLOBAL are standard
-            # "[IS] <keyword>" clauses; the USAGE-omitted POINTER forms
-            # accept the same optional "IS" as a real-world IBM
+            # FUNCTION-POINTER, INDEX). EXTERNAL and GLOBAL are standard
+            # "[IS] <keyword>" clauses; the USAGE-omitted POINTER/INDEX
+            # forms accept the same optional "IS" as a real-world IBM
             # Enterprise convention. The keyword itself is handled by its
             # own branch above/below on the very next loop iteration, so
             # this branch only needs to swallow the "IS" -- silently,
@@ -423,6 +434,7 @@ class DataItemClauseParser:
                 if nxt_upper in _POINTER_KEYWORDS or nxt_upper in (
                     "EXTERNAL",
                     "GLOBAL",
+                    "INDEX",
                 ):
                     token_stream.consume()  # Consume the optional IS
                 else:
@@ -473,9 +485,17 @@ class DataItemClauseParser:
         """
         occurs = OccursClause(location)
 
-        # Read first (minimum or fixed) count
+        # Read first (minimum or fixed) count. The count may sit on the
+        # line after OCCURS (a long data name pushing OCCURS to the end of
+        # its 72-column line is routine in real decks), so skip NEWLINEs
+        # first -- without this, a two-digit count on the next line (which
+        # lexes as LEVEL_NUMBER) was misread by the caller's clause loop as
+        # a *new data item's level number*, fabricating a phantom item
+        # named after whatever token followed, while this OCCURS silently
+        # recorded a table size of 0.
         min_count = 0
         max_count = 0
+        self._skip_newlines(token_stream)
         count_token = token_stream.peek()
         if count_token and count_token.type in [
             TokenType.NUMERIC_LITERAL,
@@ -489,9 +509,12 @@ class DataItemClauseParser:
             token_stream.consume()
 
         # Variable OCCURS: OCCURS min TO max [TIMES] DEPENDING ON var
+        # (TO and the max count may each start a continuation line too)
+        self._skip_newlines(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "TO":
             token_stream.consume()  # consume TO
+            self._skip_newlines(token_stream)
             max_token = token_stream.peek()
             if max_token and max_token.type in [
                 TokenType.NUMERIC_LITERAL,
@@ -554,6 +577,11 @@ class DataItemClauseParser:
             while True:
                 self._skip_newlines(token_stream)
                 key_token = token_stream.peek()
+                if key_token and key_token.type == TokenType.COMMA:
+                    # Comma-separated key list: the comma is only a
+                    # separator, never a key name -- consume and continue.
+                    token_stream.consume()
+                    continue
                 if (
                     key_token
                     and key_token.type == TokenType.IDENTIFIER
@@ -570,17 +598,22 @@ class DataItemClauseParser:
             self._skip_newlines(token_stream)
             nxt = token_stream.peek()
 
-        # INDEXED BY clause (one or more index names)
+        # INDEXED BY clause (one or more index names, optionally
+        # comma-separated; INDEXED and BY may straddle a line break)
         self._skip_newlines(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "INDEXED":
             token_stream.consume()  # consume INDEXED
+            self._skip_newlines(token_stream)
             by_token = token_stream.peek()
             if by_token and by_token.value and by_token.value.upper() == "BY":
                 token_stream.consume()  # consume BY
             while True:
                 self._skip_newlines(token_stream)
                 idx_token = token_stream.peek()
+                if idx_token and idx_token.type == TokenType.COMMA:
+                    token_stream.consume()
+                    continue
                 if idx_token and idx_token.type == TokenType.IDENTIFIER:
                     occurs.add_index_name(idx_token.value)
                     token_stream.consume()

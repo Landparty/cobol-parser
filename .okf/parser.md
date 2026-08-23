@@ -2275,6 +2275,53 @@ All four pinned by `tests/regression/test_arithmetic_qualifier_chain.py`
 `tests/regression/test_move_qualifier_chain.py` (finding 1); finding 4 is a
 pure refactor covered by the full existing test suite passing unchanged.
 
+# OCCURS clause line splits, comma-separated INDEXED BY, bare INDEX usage (2026-08-23)
+
+A mainframe corpus retry surfaced "Unparsed token 'TIMES'/'INDEX' ...
+clause not fully supported" warnings from four independent gaps in the
+OCCURS clause walk (`data_clauses._parse_occurs_clause`, mirrored
+identically in the `_data_fast.pyx` fast path — `.c` regenerated):
+
+1. **Count on the line after OCCURS.** The count read did not skip
+   NEWLINEs, so with `OCCURS` at end-of-line (long data names push it
+   there routinely in 72-column decks) and `40 TIMES INDEXED BY ...` on
+   the next line, the two-digit count — a LEVEL_NUMBER token — was misread
+   by the caller's clause loop as a *new data item's level number*,
+   fabricating a phantom `ANONYMOUS-...` item while the real item silently
+   recorded `max_times == 0`. Worse than the warning: layout corruption.
+   Fixed with newline-skips before the count, before `TO`, and before the
+   max count (the variable-OCCURS form splits the same way).
+2. **`INDEXED BY I1, I2`** — the index-name loop broke on the COMMA token,
+   dropping every name after the first (same for ASCENDING/DESCENDING KEY
+   name lists). Commas are pure separators; both loops now consume them
+   and continue.
+3. **`INDEXED` / `BY` straddling a line break** — the BY check did not
+   skip NEWLINEs; the whole INDEXED BY clause was dropped. Fixed.
+4. **Bare `INDEX` usage** (`05 X INDEX.`) — USAGE and IS are both optional
+   in the grammar and INDEX is a reserved word (a data item can never be
+   *named* INDEX), but only `USAGE [IS] INDEX` was recognized; the bare
+   form fell through to the unknown-clause branch. New dispatch branch
+   (plus `INDEX` added to the `IS`-lookahead set); the Cython fast loop
+   needs no change for this one — it already hands unknown clauses back to
+   the pure-Python loop, which is the single source of truth for them.
+
+Pinned by `tests/regression/test_occurs_clause_line_splits.py`.
+
+# PERFORM VARYING dropped its whole clause on a signed FROM/BY value (2026-08-23)
+
+The same corpus retry: `PERFORM SUB-PARA VARYING WS-I FROM 5 BY -1 UNTIL
+WS-I < 1` — every countdown loop — surfaced as "PERFORM VARYING clause:
+FROM/BY/UNTIL not fully recognized" plus an "Unparsed tokens" warning. A
+signed numeric literal lexes as two tokens (MINUS/PLUS then the number);
+the FROM/BY value reads in `perform_parser` each consumed a single token,
+so `BY -1` captured only `"-"`, the leftover `1` made the UNTIL lookahead
+fail, and the whole VARYING clause was dropped. Fixed by
+`_consume_from_by_value`, composing MINUS/PLUS + NUMERIC_LITERAL/
+LEVEL_NUMBER into one value (mirroring `_consume_arithmetic_operand`'s
+handling of the same lexing split), wired into all four FROM/BY reads (the
+VARYING header and every AFTER dimension). Pinned by
+`tests/regression/test_perform_varying_signed_values.py`.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

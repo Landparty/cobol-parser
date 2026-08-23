@@ -56,6 +56,39 @@ def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | No
         offset += 1
 
 
+def _consume_from_by_value(stream: ITokenStream) -> str | None:
+    """Consume a PERFORM VARYING/AFTER ``FROM``/``BY`` value if present.
+
+    A single token in the common case (a literal or a data name), but a
+    *signed* numeric literal -- ``BY -1`` is how every countdown loop is
+    written -- lexes as two tokens (MINUS/PLUS then the number), and the
+    old single-token read captured only the sign: the leftover digits then
+    made the UNTIL lookahead fail, so the whole VARYING clause was reported
+    "not fully recognized" and dropped. Returns the composed value (e.g.
+    ``"-1"``) or ``None`` when no value token is present.
+    """
+    token = stream.peek()
+    if not token:
+        return None
+    if token.type in (TokenType.MINUS, TokenType.PLUS):
+        next_tok = stream.peek(1)
+        if (
+            next_tok
+            and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+            and next_tok.value
+        ):
+            sign = token.value or ""
+            stream.consume()  # sign
+            stream.consume()  # number
+            return sign + next_tok.value
+        return None
+    if not token.value:
+        return None
+    value = token.value
+    stream.consume()
+    return value
+
+
 def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
     """Build the UNTIL condition node from its collected token strings.
 
@@ -515,12 +548,10 @@ class PerformStatementParser(IStatementParser):
         stream.consume()
         skip_whitespace(stream)
 
-        # Get FROM value
-        token = stream.peek()
-        if not token or not token.value:
+        # Get FROM value (may be sign-prefixed, e.g. FROM -1)
+        from_value = _consume_from_by_value(stream)
+        if from_value is None:
             return
-        from_value = token.value
-        stream.consume()
         skip_whitespace(stream)
 
         # Expect BY
@@ -530,12 +561,10 @@ class PerformStatementParser(IStatementParser):
         stream.consume()
         skip_whitespace(stream)
 
-        # Get BY value
-        token = stream.peek()
-        if not token or not token.value:
+        # Get BY value (may be sign-prefixed: BY -1 is every countdown loop)
+        by_value = _consume_from_by_value(stream)
+        if by_value is None:
             return
-        by_value = token.value
-        stream.consume()
         skip_whitespace(stream)
 
         # Check for WITH TEST clause (before UNTIL)
@@ -605,12 +634,10 @@ class PerformStatementParser(IStatementParser):
                 return
             stream.consume()
             skip_whitespace(stream)
-            token = stream.peek()
-            if not token or not token.value:
+            from_value = _consume_from_by_value(stream)
+            if from_value is None:
                 stmt.add_after_clause(variable_name, "", "")
                 return
-            from_value = token.value
-            stream.consume()
             skip_whitespace(stream)
 
             # Expect BY
@@ -620,12 +647,10 @@ class PerformStatementParser(IStatementParser):
                 return
             stream.consume()
             skip_whitespace(stream)
-            token = stream.peek()
-            if not token or not token.value:
+            by_value = _consume_from_by_value(stream)
+            if by_value is None:
                 stmt.add_after_clause(variable_name, from_value, "")
                 return
-            by_value = token.value
-            stream.consume()
             skip_whitespace(stream)
 
             # Optional UNTIL condition for this dimension
