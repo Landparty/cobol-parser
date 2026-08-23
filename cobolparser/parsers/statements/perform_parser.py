@@ -10,6 +10,8 @@ from cobolparser.parsers.statements._conditions import (
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    consume_optional_qualifiers,
+    consume_signed_numeric,
     get_parse_context,
     is_statement_boundary,
     matches_keyword,
@@ -54,6 +56,34 @@ def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | No
         if token.type not in _NOISE_TOKEN_TYPES:
             return token
         offset += 1
+
+
+def _consume_from_by_value(stream: ITokenStream) -> str | None:
+    """Consume a PERFORM VARYING/AFTER ``FROM``/``BY`` value if present.
+
+    A single token in the common case (a literal or a data name), with two
+    real-deck extensions handled by shared ``_utils`` helpers: a *signed*
+    numeric literal (``BY -1`` is how every countdown loop is written)
+    lexes as two tokens -- MINUS/PLUS then the number, possibly split
+    across a 72-column line break -- and is recomposed by
+    ``consume_signed_numeric``; a subscripted or qualified data-name value
+    (``FROM WS-TAB-VAL(I)``, ``FROM WS-START OF WS-CTL``) has its trailing
+    tokens folded in by ``consume_optional_qualifiers``, which would
+    otherwise strand ``( I )`` in the stream and break the UNTIL lookahead
+    exactly the way a stranded signed digit used to. Returns the composed
+    value or ``None`` when no value token is present.
+    """
+    signed = consume_signed_numeric(stream)
+    if signed is not None:
+        return signed
+    token = stream.peek()
+    if not token or not token.value:
+        return None
+    value = token.value
+    stream.consume()
+    if token.type == TokenType.IDENTIFIER:
+        value = consume_optional_qualifiers(stream, value)
+    return value
 
 
 def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
@@ -515,12 +545,10 @@ class PerformStatementParser(IStatementParser):
         stream.consume()
         skip_whitespace(stream)
 
-        # Get FROM value
-        token = stream.peek()
-        if not token or not token.value:
+        # Get FROM value (may be sign-prefixed, e.g. FROM -1)
+        from_value = _consume_from_by_value(stream)
+        if from_value is None:
             return
-        from_value = token.value
-        stream.consume()
         skip_whitespace(stream)
 
         # Expect BY
@@ -530,12 +558,10 @@ class PerformStatementParser(IStatementParser):
         stream.consume()
         skip_whitespace(stream)
 
-        # Get BY value
-        token = stream.peek()
-        if not token or not token.value:
+        # Get BY value (may be sign-prefixed: BY -1 is every countdown loop)
+        by_value = _consume_from_by_value(stream)
+        if by_value is None:
             return
-        by_value = token.value
-        stream.consume()
         skip_whitespace(stream)
 
         # Check for WITH TEST clause (before UNTIL)
@@ -605,12 +631,10 @@ class PerformStatementParser(IStatementParser):
                 return
             stream.consume()
             skip_whitespace(stream)
-            token = stream.peek()
-            if not token or not token.value:
+            from_value = _consume_from_by_value(stream)
+            if from_value is None:
                 stmt.add_after_clause(variable_name, "", "")
                 return
-            from_value = token.value
-            stream.consume()
             skip_whitespace(stream)
 
             # Expect BY
@@ -620,12 +644,10 @@ class PerformStatementParser(IStatementParser):
                 return
             stream.consume()
             skip_whitespace(stream)
-            token = stream.peek()
-            if not token or not token.value:
+            by_value = _consume_from_by_value(stream)
+            if by_value is None:
                 stmt.add_after_clause(variable_name, from_value, "")
                 return
-            by_value = token.value
-            stream.consume()
             skip_whitespace(stream)
 
             # Optional UNTIL condition for this dimension

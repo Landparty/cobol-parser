@@ -500,6 +500,155 @@ def read_file_with_encoding(
         raise EncodingError(file_path, f"Failed to read file: {str(e)}") from e
 
 
+#: Last column of the fixed-format code area (inclusive, 1-based). Re-padded
+#: expansion output must fit within it -- the final parse's fixed-format
+#: slice (``normalize_fixed_format``) silently drops anything past it.
+_CODE_AREA_WIDTH = 72
+
+#: First 0-based index the squeeze/wrap passes may touch: the re-added
+#: 6-character sequence area plus the indicator column (7 chars total) stay
+#: untouched so the emitted line keeps valid fixed-format column semantics.
+_CONTENT_START_IDX = 7
+
+
+def _blank_runs_outside_literals(
+    line: str, start: int
+) -> tuple[list[tuple[int, int]], list[int]]:
+    """Scan *line* from *start*, tracking alphanumeric-literal quote state.
+
+    Returns ``(runs, safe_blanks)`` where *runs* is every maximal run of two
+    or more blanks that sits outside any quoted literal (as ``(index,
+    length)`` pairs, in order) and *safe_blanks* is the index of every
+    single blank outside a literal (run members included). A doubled quote
+    inside a literal toggles the state twice, leaving it open -- exactly
+    COBOL's escape convention.
+    """
+    runs: list[tuple[int, int]] = []
+    safe_blanks: list[int] = []
+    quote: str | None = None
+    i = start
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            continue
+        if ch == " ":
+            j = i
+            while j < n and line[j] == " ":
+                j += 1
+            safe_blanks.extend(range(i, j))
+            if j - i >= 2:
+                runs.append((i, j - i))
+            i = j
+            continue
+        i += 1
+    return runs, safe_blanks
+
+
+def _fit_fixed_format_width(line: str) -> list[str]:
+    """Fit a re-padded expansion line back inside the 72-column code area.
+
+    A ``COPY ... REPLACING`` whose replacement text is longer than what it
+    replaces (e.g. ``==:LKPCB:== BY ==LKPCB-PCB1==``, +3 characters per
+    occurrence) lengthens the line it lands on; once this module re-pads the
+    normalized text with a 6-character sequence area, that overflow sits
+    past column 72 -- where ``normalize_fixed_format`` in the final parse
+    silently drops it. The classic casualty is a data item's terminating
+    period, whose loss merges the item into its neighbor.
+
+    Two passes, both quote-aware (never touching the inside of an
+    alphanumeric literal) and both leaving the 7-column sequence/indicator
+    prefix intact:
+
+    1. **Squeeze** -- shrink interior multi-blank runs, rightmost first,
+       each down to no less than a single blank, until the line fits.
+       Blanks are only separators in COBOL, and the alignment padding
+       between a data name and its PIC clause almost always has enough
+       slack, so this usually suffices -- and it keeps the line count (and
+       with it every following line's number) unchanged.
+    2. **Wrap** -- if squeezing alone cannot fit the line, break it at the
+       rightmost safe blank within the width and continue on a fresh
+       Area-B line (a new physical line, so later line numbers shift by
+       one -- the cost of not corrupting the statement).
+
+    A line with no safe break point at all (a single 65+-character token,
+    or one long literal) is returned unchanged; the final parse's existing
+    column-72 overflow warning then reports the drop rather than this
+    helper corrupting the literal to avoid it.
+    """
+    stripped = line.rstrip()
+    if len(stripped) <= _CODE_AREA_WIDTH:
+        return [line]
+
+    runs, _ = _blank_runs_outside_literals(stripped, _CONTENT_START_IDX)
+    excess = len(stripped) - _CODE_AREA_WIDTH
+    # Shrink rightmost runs first: trailing alignment padding (before a
+    # PIC clause, a VALUE literal, ...) is the least meaningful layout.
+    # Editing right-to-left keeps every earlier run's indices valid, so
+    # the string can be cut in place per run.
+    for idx, length in reversed(runs):
+        if excess <= 0:
+            break
+        take = min(length - 1, excess)
+        stripped = stripped[: idx + length - take] + stripped[idx + length :]
+        excess -= take
+
+    if len(stripped) <= _CODE_AREA_WIDTH:
+        return [stripped]
+
+    # Wrap: break at the rightmost safe blank that keeps the head within
+    # the code area, and continue on a fresh Area-B line. Loop for the
+    # (pathological) case of a tail that is itself still too long.
+    out: list[str] = []
+    while len(stripped) > _CODE_AREA_WIDTH:
+        _, safe_blanks = _blank_runs_outside_literals(stripped, _CONTENT_START_IDX)
+        # The break point must fall *after* the line's first non-blank
+        # character, so the head always carries real content -- a break
+        # inside the leading pad (which a wrapped tail's own fresh 11-space
+        # prefix re-creates every iteration) would emit an empty head and
+        # loop forever on the same tail.
+        content_start = len(stripped) - len(stripped.lstrip())
+        # ``head = stripped[:break_at]`` has length ``break_at``, so a break
+        # at index ``_CODE_AREA_WIDTH`` (72) yields a head of exactly 72
+        # characters -- still fully inside the code area. Capping one lower
+        # left a token ending exactly at column 72 unsplittable, silently
+        # dropping its tail past the slice -- the very defect this helper
+        # exists to prevent.
+        break_at = max(
+            (b for b in safe_blanks if content_start < b <= _CODE_AREA_WIDTH),
+            default=None,
+        )
+        if break_at is None:
+            # No safe break point: emit as-is and let the final parse's
+            # column-overflow warning report the drop.
+            out.append(stripped)
+            return out
+        head = stripped[:break_at].rstrip()
+        tail = stripped[break_at:].lstrip()
+        # 6-char sequence area + blank indicator + 4-space indent: the
+        # continuation content starts at column 12, safely inside Area B.
+        # (head is never empty: the content_start filter above guarantees
+        # the break lands after the first non-blank character.)
+        next_line = " " * 11 + tail
+        if len(next_line) >= len(stripped):
+            # No forward progress possible (e.g. the tail is a single
+            # unbreakable 62+-character token): emit as-is rather than
+            # loop, same escape hatch as the no-break-point case above.
+            out.append(stripped)
+            return out
+        out.append(head)
+        stripped = next_line
+    out.append(stripped)
+    return out
+
+
 def expand_copybooks(
     source_code: str,
     copybook_paths: list[str],
@@ -644,12 +793,29 @@ def expand_copybooks(
         for line in expanded_lines:
             if not line:
                 final_lines.append(line)
+                continue
+            # Prepend 6 spaces for sequence area. A REPLACING clause
+            # that lengthens its replaced text (e.g. ==:LKPCB:== BY
+            # ==LKPCB-PCB1==, +3 chars) can push a line's tail -- often
+            # a data item's terminating period -- past column 72, where
+            # the final parse's fixed-format slice silently drops it.
+            # _fit_fixed_format_width squeezes/wraps such a line back
+            # within the 72-column code area (see its docstring). The
+            # length guard keeps the overwhelmingly common in-width case
+            # a plain append -- no helper call, no rstrip copy, no
+            # throwaway single-element list per line.
+            padded = " " * 6 + line
+            if len(padded) <= _CODE_AREA_WIDTH:
+                final_lines.append(padded)
             else:
-                # Prepend 6 spaces for sequence area
-                final_lines.append(" " * 6 + line)
+                final_lines.extend(_fit_fixed_format_width(padded))
         final_source = "\n".join(final_lines)
         if expanded_source.endswith("\n"):
             final_source += "\n"
+        # The wrap fallback can add lines after the count above was taken;
+        # keep the documented "total lines in the expanded output" invariant
+        # true against the source actually returned.
+        stats.total_lines = len(final_lines)
 
     return CopybookExpansion(
         expanded_source=final_source,

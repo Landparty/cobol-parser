@@ -8,6 +8,40 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-23 (second entry this date): the three corpus-retry regression
+files grew review-pass hardening classes -- see [parser.md](parser.md)
+and [preprocessing.md](preprocessing.md):
+`test_occurs_clause_line_splits.py` is now 11 tests
+(+`TestOccursMissingCountRecovery` -- a malformed OCCURS with no count
+must not swallow the next item's level number; `TestDependingOnLineSplit`;
+`TestSignClauseLineSplit`); `test_perform_varying_signed_values.py` is now
+9 tests (+`TestSignSplitAcrossLines` -- sign and digits straddling a
+72-column break; `TestSubscriptedFromByValues`; `TestSetSignedValues` --
+`SET ... DOWN BY -1`/`UP BY +2`/`TO -1` through the shared
+`consume_signed_numeric`); `test_expansion_width_and_tags.py` is now 13
+tests (+`TestReviewPassRefinements` -- wrap break allowed at exactly
+column 72, `total_lines` recounted after a wrap, short flush-left code
+lines like `01 A.`/`EXIT.`/`EJECT` surviving `strip_sequence_area`'s
+narrowed tag heuristic).
+
+
+2026-08-23: Three new regression files pinning the second mainframe-corpus
+retry's remaining warning buckets — see [parser.md](parser.md) and
+[preprocessing.md](preprocessing.md) for the fixes:
+`tests/regression/test_occurs_clause_line_splits.py` (8 tests: OCCURS
+count/TO/BY line splits, comma-separated INDEXED BY and KEY name lists,
+bare `INDEX` usage — all realistic 80-column deck lines with sequence
+numbers and identification stamps);
+`tests/regression/test_perform_varying_signed_values.py` (4 tests: signed
+FROM/BY values — `BY -1` countdown loops, negative FROM, a signed AFTER
+dimension, `+`-prefixed BY); and
+`tests/regression/test_expansion_width_and_tags.py` (10 tests: REPLACING
+column overflow squeezed/wrapped back within column 72 by
+`_fit_fixed_format_width` including quote-safety, the unbreakable-line
+escape hatch, and a termination pin for the short-head/unbreakable-tail
+shape whose first fix looped forever, plus columns-1-6 change-tag lines
+blanked by `strip_sequence_area` with line numbering preserved).
+
 2026-08-22 (third entry this date, updated across four `/code-review`
 passes): `tests/regression/test_arithmetic_qualifier_chain.py` (11 tests)
 pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE dropping a qualified

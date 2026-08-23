@@ -63,6 +63,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser/preprocessing:** review-pass hardening of the corpus-retry
+  fixes below (each gap reproduced before fixing): the OCCURS count read's
+  newline-skip no longer swallows the *next data item's level number* as
+  the count when a malformed `OCCURS` has no count at all (guarded
+  `_peek_count_token`/`_peek_count_pos`, both paths); `DEPENDING ON` and
+  `SIGN IS` split across a 72-column line break now parse (SIGN's
+  direction read is also restricted to LEADING/TRAILING — it used to
+  record a raw newline as the sign clause); signed values were
+  consolidated into a shared `consume_signed_numeric` helper that also
+  fixes `SET ... DOWN BY -1` (recorded `"-"` before) and a sign/digits
+  pair straddling a line break, with PERFORM's FROM/BY values now folding
+  subscripts/qualifiers too; `strip_sequence_area`'s short-line blanking
+  was narrowed to tag-shaped content only (blanking every short line
+  silently deleted `01 A.`-style code from flush-left copybooks); the
+  expander wrap pass allows a break at exactly column 72 (off-by-one left
+  a token ending there unsplittable) and `ExpansionStatistics.total_lines`
+  is recounted after wrapping; the `_data_fast` comma checks compare the
+  COMMA token type (a `','` string literal no longer matches). Pinned by
+  new classes in the three regression files below.
+
+* **parser:** the OCCURS clause walk (pure-Python and Cython `_data_fast`
+  paths, fixed identically; `.c` regenerated) now handles real-deck line
+  splits and separators: a count on the line after `OCCURS` (previously a
+  two-digit count — a LEVEL_NUMBER token — was misread as a *new data
+  item's level number*, fabricating a phantom item while the real item
+  recorded a table size of 0), `TO`/max-count and `INDEXED`/`BY` straddling
+  a line break, and comma-separated `INDEXED BY` index names and
+  `ASCENDING`/`DESCENDING KEY` name lists. Also recognizes the bare
+  `INDEX` usage clause (`05 X [USAGE [IS]] INDEX.` — USAGE and IS are both
+  optional; only the `USAGE`-prefixed spelling worked before). Pinned by
+  `tests/regression/test_occurs_clause_line_splits.py`.
+
+* **parser:** `PERFORM ... VARYING` dropped its whole clause on a signed
+  `FROM`/`BY` value — `BY -1` (every countdown loop) lexes as two tokens
+  (MINUS then the number) and each value read consumed a single token, so
+  the BY value captured only `"-"`, the leftover digits broke the UNTIL
+  lookahead, and the VARYING clause vanished from the AST with a
+  "FROM/BY/UNTIL not fully recognized" warning. Fixed by a shared
+  `_consume_from_by_value` helper composing the sign and number, wired
+  into the VARYING header and every AFTER dimension. Pinned by
+  `tests/regression/test_perform_varying_signed_values.py`.
+
+* **preprocessing:** two `expand_copybooks` output defects (raw inputs
+  valid in both cases): (1) a `COPY ... REPLACING` whose replacement text
+  is longer than what it replaces pushed the line's tail — typically the
+  data item's terminating period — past column 72 of the re-padded output,
+  where the final parse's fixed-format slice silently dropped it; new
+  `_fit_fixed_format_width` squeezes interior multi-blank runs (outside
+  quoted literals, rightmost first, line count unchanged) and falls back
+  to a word-boundary wrap onto a fresh Area-B line. (2) shop change-tag
+  lines stamped into columns 1-6 of their own line (`P2P`, `M1005`, ... —
+  any prefix) leaked through `strip_sequence_area`'s short-line
+  passthrough and were shifted into the indicator column by the 6-space
+  re-pad, surfacing as "Unparsed tokens" or silently swallowed garbage;
+  short (sub-7-character) lines are now blanked — their every character
+  lies within the sequence area the function exists to strip. Pinned by
+  `tests/regression/test_expansion_width_and_tags.py`.
+
 * **parser:** `ADD ... TO`/`SUBTRACT ... FROM` targets and MULTIPLY/DIVIDE
   operands silently dropped a trailing `OF`/`IN` qualifier chain —
   `_consume_arithmetic_target` never consumed one at all (leaving `OF Z` in
