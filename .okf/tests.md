@@ -8,6 +8,35 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-22 (third entry this date, updated across four `/code-review`
+passes): `tests/regression/test_arithmetic_qualifier_chain.py` (11 tests)
+pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE dropping a qualified
+target/operand's `OF`/`IN` chain -- see [parser.md](parser.md). Covers: a
+single `OF` qualifier on an ADD target, a multi-hop chain split across a
+continuation line (the corpus repro shape), SUBTRACT's `FROM` target,
+MULTIPLY's operand, DIVIDE's operand with a subscript *before* the
+qualifier (`QUAL-TBL (IDX) OF GROUP-A` -- corrected by the second review
+pass from a backwards `QUAL-TBL OF GROUP-A (IDX)` that "passed" only
+because the parser's lenient concatenation doesn't enforce COBOL's
+subscript-binds-to-its-immediate-identifier grammar), the `GIVING` clause
+(shared by all four verbs) and DIVIDE's `REMAINDER` clause
+(`TestGivingAndRemainderQualifierChain`, added once the first review pass
+caught these two call sites still dropping the chain after the initial
+fix), ADD's/SUBTRACT's leading addend list before `TO`/`FROM`
+(`TestAddendListQualifierChain`, added once the first review pass caught
+it splitting a qualified addend into two spurious separate addends instead
+of just dropping the qualifier), and malformed-input handling
+(`TestMalformedQualifierChainInput`, added once a fourth review pass
+caught a dangling `OF`/`IN` with no identifier following it being consumed
+and discarded rather than left untouched, and an unbalanced `(` in a
+subscript running past the malformed statement's own period and devouring
+every statement after it). The same fourth pass also added a sibling file,
+`tests/regression/test_move_qualifier_chain.py` (4 tests), pinning the
+identical qualifier-chain bug found live in MOVE's target-collection loop
+-- a distinct call site the arithmetic-verb fix never touched, since MOVE
+is a different statement parser (`move_parser.py`) with its own bespoke
+target loop.
+
 2026-08-22 (second entry this date): New
 `tests/regression/test_tier8_arithmetic_scope_terminator.py` (9 tests)
 pinning the fix for ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consuming

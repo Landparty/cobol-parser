@@ -63,6 +63,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** `ADD ... TO`/`SUBTRACT ... FROM` targets and MULTIPLY/DIVIDE
+  operands silently dropped a trailing `OF`/`IN` qualifier chain —
+  `_consume_arithmetic_target` never consumed one at all (leaving `OF Z` in
+  `ADD X TO Y OF Z` unconsumed in the token stream, including when the
+  chain wrapped onto its own continuation line, e.g. `ADD X TO Y\n    OF
+  Z`), and `_consume_arithmetic_operand` consumed but never composed one
+  into its returned value (`ADD 1 TO QUAL OF GROUP-A` reported a target of
+  just `"QUAL"`). Fixed by a new shared `consume_optional_qualifiers`
+  helper (`_utils.py`) that folds an optional `(subscript)` group and/or an
+  `OF`/`IN` chain of any length into the caller's result string, wired into
+  both functions. A `/code-review` pass on this fix caught two more call
+  sites sharing the same responsibility that were left unfixed:
+  `consume_keyword_and_operand` (the `GIVING` clause shared by all four
+  verbs, and DIVIDE's `REMAINDER` clause) still called only
+  `consume_optional_subscript`, dropping the same qualifier chain (`ADD X
+  TO Y GIVING QUAL OF GROUP-A` reported a giving of just `"QUAL"`); and
+  `parse_arithmetic_operands` (ADD's/SUBTRACT's leading addend list before
+  `TO`/`FROM`) didn't fold a chain at all, instead silently splitting a
+  qualified addend into two spurious separate addends (`ADD QUAL OF
+  GROUP-A TO Y` produced addends `"QUAL"` and `"GROUP-A"`). Both now route
+  through the same shared helper. A second review pass caught one more
+  gap: `consume_optional_qualifiers` skipped only `NEWLINE` between hops,
+  not the `CONTINUATION` token a genuine fixed-format continuation line
+  carries (column-7 `-`) — switched to the broader `skip_whitespace`,
+  matching `consume_keyword_and_operand`'s existing precedent. Further
+  review passes fixed four more gaps: (1) MOVE's target-collection loop
+  (`move_parser.py`) had the identical bug — no `OF`/`IN` handling at all
+  — left unfixed since MOVE is a different statement parser the arithmetic
+  fix never touched; wired to the same shared helper. (2)
+  `consume_optional_qualifiers` consumed a dangling `OF`/`IN` (no
+  identifier following, e.g. `ADD A OF 5 TO B.`) unconditionally before
+  checking, discarding it with no trace; now confirms an identifier is
+  present via non-destructive lookahead before consuming the keyword. (3)
+  `consume_optional_subscript`'s paren-depth loop had no bound but
+  end-of-stream, so an unclosed `(` (e.g. `ADD TBL (IDX TO C.\n STOP
+  RUN.`) devoured every following statement hunting for a `)` that was
+  never there; now stops at the first token that can never legally appear
+  inside a subscript (period, scope terminator, or statement/control-flow
+  keyword). (4) Simplified `consume_optional_qualifiers`'s signature from
+  `(stream, parts: list[str]) -> None` to `(stream, value: str) -> str`,
+  collapsing the identical three-line glue that had been copy-pasted at
+  all four call sites. Pinned by
+  `tests/regression/test_arithmetic_qualifier_chain.py` and
+  `tests/regression/test_move_qualifier_chain.py`.
+
 * **preprocessing:** `normalize_fixed_format` now treats `'V'`/`'v'` in the
   fixed-format indicator column (column 7) as a comment line, mirroring the
   existing `'D'`/`'d'` debug-line handling — new

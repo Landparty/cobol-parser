@@ -31,7 +31,7 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     _skip_newlines,
     consume_keyword_and_operand,
-    consume_optional_subscript,
+    consume_optional_qualifiers,
     get_parse_context,
     is_statement_boundary,
     looks_dedented_relative_to,
@@ -425,85 +425,39 @@ def _consume_arithmetic_operand(stream: ITokenStream) -> str | None:
         value = token.value
         stream.consume()
 
-        # Consume optional subscript group ``(...)`` for IDENTIFIER operands
+        # Consume an optional subscript group and/or OF/IN qualifier chain
+        # for IDENTIFIER operands -- e.g. ``TABLE1 (INDEX1)``, ``QUAL OF
+        # PARENT``, ``QUAL OF PARENT (IDX)``, or a chain split across a
+        # continuation line like ``NAME\n    IN GROUP-48 IN GROUP-47 ...``.
         if token.type == TokenType.IDENTIFIER:
-            next_tok = stream.peek()
-            if next_tok and next_tok.type == TokenType.LEFT_PAREN:
-                depth = 0
-                parts: list[str] = [value]
-                while not stream.is_empty():
-                    t = stream.peek()
-                    if not t:
-                        break
-                    if t.type == TokenType.LEFT_PAREN:
-                        depth += 1
-                        parts.append("(")
-                    elif t.type == TokenType.RIGHT_PAREN:
-                        depth -= 1
-                        parts.append(")")
-                    else:
-                        parts.append(t.value if t.value else "")
-                    stream.consume()
-                    if depth == 0:
-                        break
-                value = " ".join(p for p in parts if p)
-
-            # Consume optional subscript or OF/IN qualifier chain.
-            # Loop handles both ``QUAL OF PARENT (IDX)`` and multi-line chains
-            # like ``NAME\n    IN GROUP-48 IN GROUP-47 ...``.
-            while not stream.is_empty():
-                _skip_newlines(stream)  # qualifiers may span continuation lines
-                qt = stream.peek()
-                if qt and qt.type == TokenType.LEFT_PAREN:
-                    # Subscript group — consume ``(...)``
-                    depth = 0
-                    while not stream.is_empty():
-                        t = stream.peek()
-                        if not t:
-                            break
-                        if t.type == TokenType.LEFT_PAREN:
-                            depth += 1
-                        elif t.type == TokenType.RIGHT_PAREN:
-                            depth -= 1
-                        stream.consume()
-                        if depth == 0:
-                            break
-                elif qt and qt.type in (TokenType.OF, TokenType.IN):
-                    stream.consume()  # consume OF/IN
-                    _skip_newlines(stream)
-                    qname = stream.peek()
-                    if qname and qname.type == TokenType.IDENTIFIER and qname.value:
-                        stream.consume()
-                    else:
-                        break
-                else:
-                    break
+            value = consume_optional_qualifiers(stream, value)
 
         return value
     return None
 
 
 def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
-    """Consume an IDENTIFIER target, including any subscript group.
+    """Consume an IDENTIFIER target, including any subscript group and/or
+    OF/IN qualifier chain.
 
     Distinct from :func:`_consume_arithmetic_operand`: COBOL targets must be
     data items, not literals or level numbers. ``COMPUTE 1 = A`` is therefore
-    rejected. A trailing ``(subscript[, subscript]...)`` group is folded into
-    the returned string so subscripted references like ``WS-T(I, J)`` survive
-    intact instead of leaking ``(...)`` tokens into the expression.
+    rejected. A trailing ``(subscript[, subscript]...)`` group and/or
+    ``OF``/``IN`` qualifier chain is folded into the returned string so
+    subscripted/qualified references like ``WS-T(I, J)`` and ``QUAL OF
+    PARENT`` (including a chain split across a continuation line) survive
+    intact instead of leaking unconsumed tokens into the following clause.
     """
     _skip_newlines(stream)
     token = stream.peek()
     if not (token and token.type == TokenType.IDENTIFIER and token.value):
         return None
 
-    parts: list[str] = [token.value]
+    value = token.value
     stream.consume()
 
-    # Optional subscript group: ``(...)``.
-    consume_optional_subscript(stream, parts)
-
-    return " ".join(p for p in parts if p)
+    # Optional subscript group and/or OF/IN qualifier chain.
+    return consume_optional_qualifiers(stream, value)
 
 
 def _consume_optional_rounded(stream: ITokenStream) -> bool:

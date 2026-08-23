@@ -6,7 +6,7 @@ from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
-    consume_optional_subscript,
+    consume_optional_qualifiers,
     get_parse_context,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
@@ -173,16 +173,19 @@ class MoveStatementParser(IStatementParser):
 
             # Parse target - only collect IDENTIFIERs. A trailing
             # ``(subscript[, subscript]...)`` group (e.g. a table reference
-            # like ``TBL (3, 5, 2)``) is folded into the target string via
-            # consume_optional_subscript, matching how ADD/SUBTRACT/COMPUTE
+            # like ``TBL (3, 5, 2)``) and/or an ``OF``/``IN`` qualifier chain
+            # (e.g. ``QUAL OF GROUP-A``) is folded into the target string via
+            # consume_optional_qualifiers, matching how ADD/SUBTRACT/COMPUTE
             # targets and the arithmetic GIVING clause already do -- without
-            # this, the subscript tokens fall to the `else` branch below and
-            # are silently discarded, losing which table element was set.
+            # this, a qualified target's OF/IN keyword falls to the `else`
+            # branch below and is silently skipped, and the qualifier name
+            # then loops back around and is collected as a spurious
+            # *separate* target instead of completing this one (the same
+            # bug class the arithmetic verbs' addend list had).
             if token.type == TokenType.IDENTIFIER:
-                parts: list[str] = [token.value] if token.value else []
+                value = token.value or ""
                 token_stream.consume()
-                consume_optional_subscript(token_stream, parts)
-                target_name = " ".join(p for p in parts if p)
+                target_name = consume_optional_qualifiers(token_stream, value)
                 if target_name:
                     stmt.add_target(target_name)
                 target_count += 1

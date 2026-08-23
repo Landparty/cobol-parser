@@ -2148,6 +2148,133 @@ in Area A, well left of any statement body), an even narrower double
 coincidence than the "no repro" items already deferred elsewhere in this
 log.
 
+# ADD/SUBTRACT/MULTIPLY/DIVIDE targets and operands dropped their OF/IN qualifier chain (2026-08-22)
+
+`_consume_arithmetic_target` (ADD's `TO`/SUBTRACT's `FROM` target) never
+consumed a trailing `OF`/`IN` qualifier chain at all — only an optional
+`(subscript)` group via `consume_optional_subscript`. A statement like `ADD
+X TO Y OF Z` (or `ADD X TO Y\n    OF Z` — a qualifier chain wrapped onto a
+continuation line, which is ordinary free-form COBOL layout) left `OF Z`
+sitting unconsumed in the token stream after the target was read, orphaned
+for whatever ran next to misinterpret. `_consume_arithmetic_operand`
+(MULTIPLY/DIVIDE's `BY`/`INTO` operands) had a related but different bug:
+its own OF/IN-consuming loop *did* advance the token stream past the
+qualifier chain (so parsing didn't outright fail), but never folded the
+consumed `OF`/`IN` keyword or qualifier name into the returned string —
+silently discarding the qualification from the AST (`ADD 1 TO QUAL OF
+GROUP-A` reported a target of just `"QUAL"`, losing which `QUAL` it was).
+Both symptoms trace to the same root cause: subscript groups were folded
+into the result string via `consume_optional_subscript`/manual
+paren-tracking, but qualifier chains were only ever *consumed*, never
+*composed* into the value.
+
+Fixed by extracting a new shared helper,
+`consume_optional_qualifiers` (`_utils.py`), that loops consuming an
+optional `(subscript)` group and/or `OF`/`IN` qualifier hops — any number of
+them, each optionally followed by another subscript, and skipping NEWLINEs
+between hops so a chain split across a continuation line still resolves —
+appending each piece to the caller's `parts` list in source order. Wired
+into both `_consume_arithmetic_target` and `_consume_arithmetic_operand`
+(replacing each function's own ad hoc subscript-only/consume-without-append
+logic), so `ADD X TO Y OF Z` now reports a target of `"Y OF Z"` and
+`MULTIPLY A BY QUAL OF GROUP-A` reports an operand of `"QUAL OF GROUP-A"`,
+matching the qualifier syntax COBOL itself uses. Pinned by
+`tests/regression/test_arithmetic_qualifier_chain.py`.
+
+**Two more call sites caught by a `/code-review` pass on the fix above,
+same day:** `consume_keyword_and_operand` (backs the `GIVING` clause
+shared by all four verbs, and DIVIDE's `REMAINDER` clause) still called
+only `consume_optional_subscript`, so a qualified `GIVING`/`REMAINDER`
+target exhibited the exact same drop (`ADD X TO Y GIVING QUAL OF GROUP-A`
+reported a giving of just `"QUAL"`) even after the fix above landed —
+this call site shares the identical target-consuming responsibility but
+was never rewired. `parse_arithmetic_operands` (ADD's/SUBTRACT's leading
+addend list before `TO`/`FROM`) had a worse variant: it didn't just drop
+the qualifier, it silently skipped the `OF`/`IN` token and appended the
+qualifier name as a *separate, spurious* addend (`ADD QUAL OF GROUP-A TO
+Y` produced addends `"QUAL"`, `"GROUP-A"`, `"Y"` instead of `"QUAL OF
+GROUP-A"`, `"Y"`) — confirmed to poison `analysis.const_fold.ConstantFolder`
+downstream (the phantom `"GROUP-A"` addend fails to resolve to a numeric
+value, poisoning the whole accumulation instead of folding correctly).
+Both now route through `consume_optional_qualifiers` too. Pinned by the
+same regression file's `TestGivingAndRemainderQualifierChain` and
+`TestAddendListQualifierChain` classes.
+
+**A second `/code-review` pass, same day, caught one more gap:**
+`consume_optional_qualifiers` skipped only `NEWLINE` tokens
+(`_skip_newlines`) between an operand/qualifier and the next hop, but a
+genuine fixed-format continuation line carries a leading `CONTINUATION`
+token (column-7 `-`), not `NEWLINE` -- `consume_keyword_and_operand`'s own
+docstring already documents this distinction and uses the broader
+`skip_whitespace` (which also covers `WHITESPACE`/`COMMENT`) for exactly
+this reason. Fixed by switching `consume_optional_qualifiers` to
+`skip_whitespace` too -- a strict superset of `_skip_newlines`, so no
+narrowing of previously-accepted input. The same pass also fixed a test
+correctness bug (not a source bug) in the DIVIDE-operand-with-subscript
+regression test: per COBOL's qualified-reference grammar (`data-name
+[(subscript)] [OF/IN data-name-2]...`), a subscript binds to the
+identifier it immediately trails, so subscripting a table that appears
+*before* the `OF` requires the subscript before the qualifier too
+(`QUAL-TBL (IDX) OF GROUP-A`, not `QUAL-TBL OF GROUP-A (IDX)`, which
+subscripts the non-table `GROUP-A` instead) -- the parser's lenient
+token-concatenation made the old (backwards) form "pass" regardless of
+binding order, so it wasn't actually validating a realistic construct.
+
+**Four more findings from continued review passes, same day, all fixed:**
+
+1. **MOVE's target left the identical bug live one file over.** MOVE's
+   target-collection loop (`move_parser.py`) only folded a trailing
+   `(subscript)` via `consume_optional_subscript` -- no `OF`/`IN` handling
+   at all. A qualified target (`MOVE X TO QUAL OF GROUP-A`) fell into the
+   loop's generic "skip anything unrecognized" branch for the `OF` token,
+   and the qualifier name then looped back around and was collected as a
+   spurious *separate* target instead of completing the qualified one --
+   the exact bug class `consume_optional_qualifiers` was built to fix.
+   Fixed by wiring MOVE's target loop to the same shared helper. (MOVE's
+   *source* side was already unaffected: `_parse_source` accumulates every
+   token generically, not just IDENTIFIERs, so a qualified source like
+   `MOVE WS-A OF WS-GRP TO ...` already round-tripped correctly -- only the
+   target side had the narrower IDENTIFIER-only collection loop.) Pinned
+   by the new `tests/regression/test_move_qualifier_chain.py`.
+2. **Dangling `OF`/`IN` was consumed and discarded even when malformed.**
+   `consume_optional_qualifiers` consumed an `OF`/`IN` token unconditionally
+   before checking whether an identifier actually followed it, so a
+   malformed qualifier (`ADD A OF 5 TO B.` -- `OF` must be followed by a
+   data-name, not a numeric literal) vanished from the token stream with no
+   trace and no diagnostic. Fixed by confirming a real identifier is
+   present via non-destructive lookahead (scanning past
+   `WHITESPACE`/`COMMENT`/`NEWLINE`/`CONTINUATION` tokens with
+   `stream.peek(offset)`, which never consumes) *before* consuming the
+   `OF`/`IN` keyword -- a malformed qualifier now leaves it untouched in
+   the stream for the caller, the same as an unqualified reference would.
+3. **An unbalanced `(` could devour every following statement.**
+   `consume_optional_subscript`'s paren-depth loop had no bound other than
+   end-of-stream, so a subscript missing its closing `)` (e.g. `ADD TBL
+   (IDX TO C.\n STOP RUN.`) ran past the malformed statement's own period
+   and swallowed every statement after it while hunting for a `)` that was
+   never there -- `STOP RUN` silently vanished from the AST with only a
+   generic "missing TO or GIVING clause" error to show for it. Fixed by
+   stopping the loop (without consuming the boundary token) at the first
+   token that can never legally appear inside a subscript expression: a
+   period, an arithmetic scope terminator, or a real statement/control-flow
+   keyword (`_looks_like_statement_boundary`, gated on paren depth > 0 so a
+   legitimate closing `)` at depth 0 is unaffected).
+4. **Duplicated three-line glue at every call site.** The pattern `parts =
+   [value]; consume_optional_qualifiers(stream, parts); value = " ".join(p
+   for p in parts if p)` was copy-pasted at all four call sites. Collapsed
+   by changing `consume_optional_qualifiers`'s signature from
+   `(stream, parts: list[str]) -> None` to `(stream, value: str) -> str`
+   (it builds and joins its own `parts` list internally now), so every
+   call site is just `value = consume_optional_qualifiers(stream, value)`.
+   `consume_optional_subscript` keeps the original `(stream, parts) -> None`
+   shape since it is still called with an in-progress `parts` list from
+   inside `consume_optional_qualifiers` itself.
+
+All four pinned by `tests/regression/test_arithmetic_qualifier_chain.py`
+(the `TestMalformedQualifierChainInput` class for findings 2-3) and the new
+`tests/regression/test_move_qualifier_chain.py` (finding 1); finding 4 is a
+pure refactor covered by the full existing test suite passing unchanged.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation
