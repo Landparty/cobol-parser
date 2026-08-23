@@ -2181,6 +2181,25 @@ logic), so `ADD X TO Y OF Z` now reports a target of `"Y OF Z"` and
 matching the qualifier syntax COBOL itself uses. Pinned by
 `tests/regression/test_arithmetic_qualifier_chain.py`.
 
+**Two more call sites caught by a `/code-review` pass on the fix above,
+same day:** `consume_keyword_and_operand` (backs the `GIVING` clause
+shared by all four verbs, and DIVIDE's `REMAINDER` clause) still called
+only `consume_optional_subscript`, so a qualified `GIVING`/`REMAINDER`
+target exhibited the exact same drop (`ADD X TO Y GIVING QUAL OF GROUP-A`
+reported a giving of just `"QUAL"`) even after the fix above landed —
+this call site shares the identical target-consuming responsibility but
+was never rewired. `parse_arithmetic_operands` (ADD's/SUBTRACT's leading
+addend list before `TO`/`FROM`) had a worse variant: it didn't just drop
+the qualifier, it silently skipped the `OF`/`IN` token and appended the
+qualifier name as a *separate, spurious* addend (`ADD QUAL OF GROUP-A TO
+Y` produced addends `"QUAL"`, `"GROUP-A"`, `"Y"` instead of `"QUAL OF
+GROUP-A"`, `"Y"`) — confirmed to poison `analysis.const_fold.ConstantFolder`
+downstream (the phantom `"GROUP-A"` addend fails to resolve to a numeric
+value, poisoning the whole accumulation instead of folding correctly).
+Both now route through `consume_optional_qualifiers` too. Pinned by the
+same regression file's `TestGivingAndRemainderQualifierChain` and
+`TestAddendListQualifierChain` classes.
+
 # See Also
 
 * [lexer.md](lexer.md) — upstream tokenisation

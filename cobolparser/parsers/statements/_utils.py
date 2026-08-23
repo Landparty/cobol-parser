@@ -902,8 +902,13 @@ def parse_arithmetic_operands(
     Tokens of type IDENTIFIER, NUMERIC_LITERAL, or LEVEL_NUMBER are appended
     to the result; other intermediate tokens (commas, newlines, whitespace)
     are silently consumed so the parser is tolerant of incidental
-    punctuation. Stops without consuming the boundary when any of these
-    occur:
+    punctuation. An IDENTIFIER operand also folds a trailing
+    ``(subscript)`` group and/or ``OF``/``IN`` qualifier chain into the
+    same result entry via :func:`consume_optional_qualifiers` (e.g. ``ADD
+    QUAL OF GROUP-A TO ...`` yields the single addend ``"QUAL OF
+    GROUP-A"``, not a bare ``"QUAL"`` followed by a spurious separate
+    ``"GROUP-A"`` addend). Stops without consuming the boundary when any of
+    these occur:
 
     * stream exhaustion;
     * a token whose upper-cased value is in *stop_keywords* (the expected
@@ -935,7 +940,14 @@ def parse_arithmetic_operands(
             # Don't devour the next statement when this one is malformed.
             return operands, ""
         if token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
-            operands.append(token.value)
+            value = token.value
+            stream.consume()
+            if token.type == TokenType.IDENTIFIER:
+                parts: list[str] = [value]
+                consume_optional_qualifiers(stream, parts)
+                value = " ".join(p for p in parts if p)
+            operands.append(value)
+            continue
         stream.consume()
     return operands, ""
 
@@ -947,9 +959,11 @@ def consume_optional_subscript(stream: ITokenStream, parts: list[str]) -> None:
     depth is tracked so a nested call like ``WS-T(FUNCTION FOO(I))`` is
     captured correctly. Shared by every target-consuming helper that must
     fold a subscript group into its result string instead of leaving it to
-    be dropped as an unparsed trailing token -- COMPUTE/ADD/SUBTRACT targets
-    (:func:`_consume_arithmetic_target` in ``arithmetic_parsers.py``) and the
-    arithmetic ``GIVING`` clause (:func:`consume_keyword_and_operand` below).
+    be dropped as an unparsed trailing token -- directly by
+    :func:`consume_optional_qualifiers` below (which also folds a trailing
+    ``OF``/``IN`` qualifier chain, and backs COMPUTE/ADD/SUBTRACT targets,
+    MULTIPLY/DIVIDE operands, the arithmetic ``GIVING`` clause, and
+    DIVIDE's ``REMAINDER`` clause).
     """
     next_token = stream.peek()
     if not (next_token and next_token.type == TokenType.LEFT_PAREN):
@@ -983,8 +997,12 @@ def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
     be followed by a subscript once it resolves to a table element. Shared
     by every identifier-consuming helper that must fold subscripts/
     qualifiers into its result string instead of leaving them to be dropped
-    as unparsed trailing tokens (:func:`_consume_arithmetic_target` and
-    :func:`_consume_arithmetic_operand` in ``arithmetic_parsers.py``).
+    as unparsed trailing tokens: :func:`_consume_arithmetic_target` and
+    :func:`_consume_arithmetic_operand` (``arithmetic_parsers.py``, backing
+    COMPUTE/ADD/SUBTRACT targets and MULTIPLY/DIVIDE operands),
+    :func:`consume_keyword_and_operand` below (the ``GIVING``/``REMAINDER``
+    clauses), and :func:`parse_arithmetic_operands` above (ADD's/SUBTRACT's
+    addend list).
     """
     while not stream.is_empty():
         _skip_newlines(stream)  # qualifiers/subscripts may span continuation lines
@@ -995,7 +1013,7 @@ def consume_optional_qualifiers(stream: ITokenStream, parts: list[str]) -> None:
             consume_optional_subscript(stream, parts)
             continue
         if token.type in (TokenType.OF, TokenType.IN):
-            qualifier_kw = token.value or ("IN" if token.type == TokenType.IN else "OF")
+            qualifier_kw = token.value
             stream.consume()  # consume OF/IN
             _skip_newlines(stream)
             qname = stream.peek()
@@ -1029,11 +1047,13 @@ def consume_keyword_and_operand(
     The same tokens between the keyword and the identifier are also skipped
     so that COBOL line continuations don't break clause recognition.
 
-    A trailing ``(subscript[, subscript]...)`` group on the operand is folded
-    into the returned string via :func:`consume_optional_subscript` (e.g.
-    ``GIVING RESULT (H, I, 1)`` -> ``"RESULT ( H , I , 1 )"``) -- a GIVING
-    target is a data item just like an ADD/SUBTRACT ``TO``/``FROM`` target
-    and may equally be table-subscripted.
+    A trailing ``(subscript[, subscript]...)`` group and/or ``OF``/``IN``
+    qualifier chain on the operand is folded into the returned string via
+    :func:`consume_optional_qualifiers` (e.g. ``GIVING RESULT (H, I, 1)``
+    -> ``"RESULT ( H , I , 1 )"``, ``GIVING RESULT-F OF GROUP-A`` ->
+    ``"RESULT-F OF GROUP-A"``) -- a GIVING/REMAINDER target is a data item
+    just like an ADD/SUBTRACT ``TO``/``FROM`` target and may equally be
+    table-subscripted or qualified.
 
     Returns ``None`` if the keyword is not present at the current position or
     if no identifier follows it. The keyword check is case-insensitive.
@@ -1047,7 +1067,7 @@ def consume_keyword_and_operand(
     if token and token.type == TokenType.IDENTIFIER and token.value:
         parts: list[str] = [token.value]
         stream.consume()
-        consume_optional_subscript(stream, parts)
+        consume_optional_qualifiers(stream, parts)
         return " ".join(p for p in parts if p)
     return None
 

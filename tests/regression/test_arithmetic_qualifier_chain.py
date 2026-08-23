@@ -17,6 +17,18 @@ optional ``(subscript)`` group and/or an ``OF``/``IN`` chain -- of any
 length, each hop optionally itself followed by a subscript, and tolerant
 of a chain split across a continuation line -- into the caller's result
 string.
+
+A `/code-review` pass on the fix caught two more call sites sharing the
+same target/operand-consuming responsibility that were left unfixed:
+``consume_keyword_and_operand`` (backs the ``GIVING`` clause shared by all
+four verbs and DIVIDE's ``REMAINDER`` clause) still called only
+``consume_optional_subscript``, and ``parse_arithmetic_operands`` (ADD's/
+SUBTRACT's addend list before ``TO``/``FROM``) didn't fold a qualifier
+chain into an addend at all -- it silently skipped the ``OF``/``IN``
+keyword and appended the qualifier name as a spurious *separate* addend
+(``ADD QUAL OF GROUP-A TO ...`` produced two addends, ``"QUAL"`` and
+``"GROUP-A"``, instead of one qualified ``"QUAL OF GROUP-A"``). Both are
+now wired to the same shared helper.
 """
 
 from cobolparser import parse_cobol
@@ -122,3 +134,95 @@ class TestMultiplyDivideOperandQualifierChain:
         result = _parse(source)
         div = result.ast.find_all_by_type("DivideStatement")[0]
         assert div.operands[0] == "QUAL-TBL OF GROUP-A ( IDX )"
+
+
+class TestGivingAndRemainderQualifierChain:
+    """``GIVING``/``REMAINDER`` route through the shared
+    ``consume_keyword_and_operand`` helper -- a distinct call site from the
+    TO/FROM targets and BY/INTO operands covered above, and one a
+    /code-review pass on the original fix caught still dropping the
+    qualifier chain (it called ``consume_optional_subscript`` directly
+    instead of the new ``consume_optional_qualifiers``)."""
+
+    def test_add_giving_qualifier_chain(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GIVQUALTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 GROUP-A.
+          05 RESULT-F PIC 9(3).
+       01 X PIC 9(3).
+       01 Y PIC 9(3).
+       PROCEDURE DIVISION.
+           ADD X TO Y GIVING RESULT-F OF GROUP-A.
+           STOP RUN.
+"""
+        result = _parse(source)
+        add = result.ast.find_all_by_type("AddStatement")[0]
+        assert add.giving == "RESULT-F OF GROUP-A"
+
+    def test_divide_remainder_qualifier_chain(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REMQUALTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 GROUP-A.
+          05 REM-F PIC 9(3).
+       01 X PIC 9(3).
+       01 Y PIC 9(3).
+       01 Z PIC 9(3).
+       PROCEDURE DIVISION.
+           DIVIDE X INTO Y GIVING Z REMAINDER REM-F OF GROUP-A.
+           STOP RUN.
+"""
+        result = _parse(source)
+        div = result.ast.find_all_by_type("DivideStatement")[0]
+        assert div.remainder == "REM-F OF GROUP-A"
+
+
+class TestAddendListQualifierChain:
+    """``parse_arithmetic_operands`` (ADD's/SUBTRACT's leading addend list
+    before TO/FROM) is a third, distinct call site: unlike the target/
+    operand helpers above, it didn't just drop a qualifier chain -- it
+    split a qualified addend into two spurious separate addends (``ADD
+    QUAL OF GROUP-A TO ...`` produced addends ``"QUAL"`` and ``"GROUP-A"``,
+    since the ``OF`` token was silently skipped and the qualifier name
+    tokenized as if it were its own addend)."""
+
+    def test_add_addend_qualifier_chain(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ADDENDQUALTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 GROUP-A.
+          05 QUAL PIC 9(3).
+       01 GROUP-B.
+          05 QUAL PIC 9(3).
+       PROCEDURE DIVISION.
+           ADD QUAL OF GROUP-B TO QUAL OF GROUP-A.
+           STOP RUN.
+"""
+        result = _parse(source)
+        add = result.ast.find_all_by_type("AddStatement")[0]
+        assert add.operands == ["QUAL OF GROUP-B", "QUAL OF GROUP-A"]
+
+    def test_subtract_addend_qualifier_chain(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUBADDENDQUALTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 GROUP-A.
+          05 QUAL PIC 9(3).
+       01 GROUP-B.
+          05 QUAL PIC 9(3).
+       PROCEDURE DIVISION.
+           SUBTRACT QUAL OF GROUP-B FROM QUAL OF GROUP-A.
+           STOP RUN.
+"""
+        result = _parse(source)
+        sub = result.ast.find_all_by_type("SubtractStatement")[0]
+        assert sub.operands == ["QUAL OF GROUP-B", "QUAL OF GROUP-A"]

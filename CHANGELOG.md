@@ -73,7 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   just `"QUAL"`). Fixed by a new shared `consume_optional_qualifiers`
   helper (`_utils.py`) that folds an optional `(subscript)` group and/or an
   `OF`/`IN` chain of any length into the caller's result string, wired into
-  both functions. Pinned by
+  both functions. A `/code-review` pass on this fix caught two more call
+  sites sharing the same responsibility that were left unfixed:
+  `consume_keyword_and_operand` (the `GIVING` clause shared by all four
+  verbs, and DIVIDE's `REMAINDER` clause) still called only
+  `consume_optional_subscript`, dropping the same qualifier chain (`ADD X
+  TO Y GIVING QUAL OF GROUP-A` reported a giving of just `"QUAL"`); and
+  `parse_arithmetic_operands` (ADD's/SUBTRACT's leading addend list before
+  `TO`/`FROM`) didn't fold a chain at all, instead silently splitting a
+  qualified addend into two spurious separate addends (`ADD QUAL OF
+  GROUP-A TO Y` produced addends `"QUAL"` and `"GROUP-A"`). Both now route
+  through the same shared helper. Pinned by
   `tests/regression/test_arithmetic_qualifier_chain.py`.
 
 * **preprocessing:** `normalize_fixed_format` now treats `'V'`/`'v'` in the
