@@ -427,11 +427,21 @@ def looks_dedented_relative_to(
 
     Used to tell a genuine paragraph/section header (dedented back to Area A)
     apart from an operand that merely continues the statement's own line
-    (Area B, same or deeper indentation) once :func:`looks_like_paragraph_boundary`
+    (Area B, deeper indentation) once :func:`looks_like_paragraph_boundary`
     has already confirmed the token has the bare "IDENTIFIER then period/SECTION"
     shape both share. *reference_column* is normally the statement's own verb
     column; missing location info (either side) defaults to True (dedented) --
     the conservative "treat as boundary" behavior this call replaces.
+
+    A token at the SAME column as the verb also counts as dedented: at
+    equal columns the indentation signal cannot distinguish the two
+    readings, and treating the token as an operand there silently swallows
+    the next paragraph out of the AST with no diagnostic (real decks do
+    write statements flush in Area A alongside their headers), whereas
+    treating it as a boundary at worst truncates one operand list WITH the
+    :func:`warn_paragraph_boundary_swallowed` warning attached -- the same
+    visible, pre-guard behavior. Only a strictly deeper token (the normal
+    continuation-line layout) is treated as an operand.
 
     Every operand-collection loop that calls :func:`looks_like_paragraph_boundary`
     must AND it with this check, not just for the loop's first operand: a
@@ -444,7 +454,7 @@ def looks_dedented_relative_to(
     col = token_column(token)
     if reference_column is None or col is None:
         return True
-    return bool(col < reference_column)
+    return bool(col <= reference_column)
 
 
 def warn_paragraph_boundary_swallowed(token_stream: ITokenStream) -> None:
@@ -1007,6 +1017,15 @@ def parse_arithmetic_operands(
         if upper and (upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES):
             # Don't devour the next statement when this one is malformed.
             return operands, ""
+        # A sign-prefixed numeric addend (``ADD -1 TO WS-X`` -- the same
+        # two-token MINUS/PLUS + number split every other value-reading
+        # path recomposes) must go through consume_signed_numeric here
+        # too, or the fall-through consume below silently drops the sign
+        # and records a sign-inverted operand.
+        signed = consume_signed_numeric(stream)
+        if signed is not None:
+            operands.append(signed)
+            continue
         if token.type in ARITHMETIC_OPERAND_TOKEN_TYPES and token.value:
             value = token.value
             stream.consume()

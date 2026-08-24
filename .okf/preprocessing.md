@@ -737,3 +737,11 @@ the updated `TestSequenceAreaChangeTags` in
   state at an index depends only on the prefix), so a pathologically long
   REPLACING-expanded line wraps in O(len) total instead of O(len²).
   `_blank_runs_outside_literals` returns only the squeeze pass's runs now.
+
+**Short-line tag blanking exempts all reserved words (same pass):**
+`strip_sequence_area` blanks a sub-7-char single-token line only when the
+token is not ANY COBOL reserved word (`_cobol_reserved_words()`, lazily
+imported from `CobolLexer.KEYWORDS` -- eager import would be circular).
+The first version excluded only EJECT/SKIP1-3, silently deleting flush-left
+`GOBACK`/`EXIT`/`STOP` lines during expansion. Pinned by
+`tests/regression/test_diff_scan_findings.py`.

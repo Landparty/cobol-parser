@@ -2413,3 +2413,13 @@ and `DynamicCallAnalyzer`'s MOVE tracking already do (pinned by
 `tests/regression/test_folded_reference_analyzers.py`); a new analyzer
 that does a raw `name in catalog` lookup will silently miss qualified
 references.
+
+**H9 dedent guard equality rule (same pass):** `looks_dedented_relative_to`
+compares `col <= reference_column` -- a boundary-shaped token at the SAME
+column as the verb is a boundary (base behavior, warning attached), because
+at equal columns the indentation signal cannot distinguish the readings and
+the operand reading silently swallows the next paragraph. Only strictly
+deeper tokens are operands. `parse_arithmetic_operands` also routes
+sign-prefixed numerics through `consume_signed_numeric` (previously ADD/
+SUBTRACT recorded `-1` as `1`). Pinned by
+`tests/regression/test_diff_scan_findings.py`.

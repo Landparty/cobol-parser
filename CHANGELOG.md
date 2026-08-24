@@ -63,6 +63,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** the H9 dedent guard treats a paragraph-header-shaped token
+  at the SAME column as the statement's verb as a boundary again (with the
+  missing-period warning), not as a trailing operand -- the strict
+  less-than comparison silently swallowed the next paragraph out of the
+  AST for decks that write statements flush in Area A alongside their
+  headers. Only a strictly deeper token (the normal continuation-line
+  layout) is read as an operand.
+* **parser:** ADD/SUBTRACT addend lists recompose a sign-prefixed numeric
+  (`ADD -1 TO WS-X`) via the shared `consume_signed_numeric` -- the
+  fall-through consume was silently dropping the sign, recording a
+  sign-inverted operand, while MULTIPLY/DIVIDE/SET/PERFORM already
+  recomposed it.
+* **preprocessing:** `strip_sequence_area`'s short-line change-tag
+  blanking now exempts every COBOL reserved word (lazily imported from
+  the lexer's keyword table), not just EJECT/SKIP1-3 -- a flush-left
+  `GOBACK`/`EXIT`/`STOP`/`MOVE` line under 7 characters was silently
+  deleted during copybook expansion. Shop tags (`P2P`, `M1005`) are never
+  reserved words and are still blanked. All three pinned by
+  `tests/regression/test_diff_scan_findings.py`.
 * **parser:** SET now folds `OF`/`IN` qualifier chains into its targets and
   values via the shared `consume_optional_qualifiers`/`consume_value_operand`
   helpers, matching MOVE/arithmetic/PERFORM. Previously `SET WS-IDX TO
