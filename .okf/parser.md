@@ -2423,3 +2423,62 @@ deeper tokens are operands. `parse_arithmetic_operands` also routes
 sign-prefixed numerics through `consume_signed_numeric` (previously ADD/
 SUBTRACT recorded `-1` as `1`). Pinned by
 `tests/regression/test_diff_scan_findings.py`.
+
+# Residual corpus findings (2026-08-24)
+
+A follow-up sweep against a 105-program real-world corpus (88 OK / 17
+refused, all refusals `PARSE_WARNING`) found four more gaps, three of them
+residual to the earlier "Defect 4" (subscript/reference-mod/paren
+qualifier folding) and "Defect 5" (`PERFORM ... WITH TEST BEFORE/AFTER`)
+fixes. Pinned by `tests/regression/test_corpus_residual_findings.py`.
+
+* **`NEXT SENTENCE` had no statement parser at all.** IF/EVALUATE/SEARCH's
+  condition-collection loops stop at a known statement-starting keyword
+  (`STATEMENT_KEYWORDS`/`STATEMENT_TOKEN_TYPES`), but `NEXT` (lexed as its
+  own `TokenType.NEXT`, distinct from `IDENTIFIER`) was never in either
+  set -- so the words "NEXT SENTENCE" were silently swallowed into the
+  *condition* text (`IF WS-A = "Y" NEXT SENTENCE` parsed as a comparison
+  against `"'Y' NEXT SENTENCE"`) instead of becoming a statement in the
+  THEN/ELSE branch. Fixed by adding `TokenType.NEXT`/`"NEXT"` to both sets
+  (`_utils.py`) and a new `NextSentenceStatementParser`
+  (`simple_statement_parsers.py`, registered in `procedure_registry.py`
+  right after `ContinueStatementParser`) whose `matches()` requires a
+  `SENTENCE` lookahead (via `peek_past_noise`) so it can never mis-fire.
+  New AST node `NextSentenceStatement` (`models/statements/misc.py`) --
+  deliberately its own class, not reusing `ContinueStatement`: NEXT
+  SENTENCE transfers control past the rest of the current sentence, a true
+  no-op only in the shallow sense this parser models statements at all.
+
+* **`PERFORM ... WITH TEST BEFORE/AFTER` split across continuation lines.**
+  All three call sites in `perform_parser.py` (the inline/no-target-
+  paragraph form at the top of `parse()`, the out-of-line form after a
+  target paragraph name, and inside `_parse_varying_header` for `PERFORM
+  VARYING ... WITH TEST ...`) peeked the token immediately after consuming
+  `WITH` or `TEST` with no `skip_whitespace` first. Whenever WITH, TEST, or
+  BEFORE/AFTER landed on separate continuation lines (`PERFORM WITH\n
+  TEST AFTER\n UNTIL ...`), the peek hit a NEWLINE/CONTINUATION token
+  instead of the keyword it expected, leaving TEST (or BEFORE/AFTER)
+  unconsumed and reported as "Unparsed tokens starting at 'TEST'" --
+  `perform_type` also silently fell back to `SIMPLE` instead of `UNTIL`/
+  `VARYING`. Fixed by adding `skip_whitespace` before every peek in all
+  three call sites (mirrors the newline-tolerance pattern already used by
+  `consume_optional_qualifiers`/`consume_signed_numeric`).
+
+* **DISPLAY's subscript fold didn't tolerate a continuation-line
+  subscript.** `DisplayStatementParser._consume_subscript` peeked for a
+  `LEFT_PAREN` immediately after the preceding item token with no
+  whitespace-skip, so `DISPLAY WS-ITEM\n    (WS-IDX).` left the `(` for
+  the next loop iteration, which has no handling for a bare LEFT_PAREN and
+  aborts the item list ("Unparsed tokens starting at '('"). Fixed via a
+  non-destructive `peek_past_noise(stream, 0)` lookahead before deciding
+  whether to fold a subscript, so an unrelated next display item on its
+  own continuation line (no subscript at all) is unaffected.
+
+* **`consume_optional_qualifiers` was only wired into MOVE/arithmetic/
+  SET.** WRITE's record-name and FROM source, READ's INTO target and KEY
+  name, and START's KEY name still consumed a single IDENTIFIER token with
+  no subscript/OF-IN-qualifier fold, dropping a qualified or subscripted
+  operand's trailing tokens as unparsed (e.g. `WRITE OUT-REC FROM WS-LINE
+  OF WS-GROUP` stranded `OF WS-GROUP`). Fixed by routing all five through
+  `consume_optional_qualifiers` (`write_parser.py`, `read_parser.py`,
+  `start_parser.py`).

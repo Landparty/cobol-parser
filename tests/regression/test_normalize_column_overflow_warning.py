@@ -69,6 +69,15 @@ rules above now skip entirely whenever columns 1-6 hold one. See
 ``test_blank_sequence_area_with_same_shape_still_warns`` below, which
 isolate the sequence number as the deciding factor rather than the
 period-then-letter shape itself.
+
+**Bare terminal period does not warn (2026-08-24):** a corpus sweep found a
+banner-style ``VALUE`` literal (e.g. ``VALUE '**** REPORT TITLE ****'.``)
+whose closing quote lands exactly on column 72, immediately followed by the
+statement-terminating period at column 73 with no separating blank --
+satisfying the mid-token shape (both columns non-blank) even though nothing
+was split: the string closed cleanly, and the dropped tail is *only* the
+period, a single-character token the parser already tolerates missing
+entirely. See ``TestBareTerminalPeriodDoesNotWarn`` below.
 """
 
 from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
@@ -261,6 +270,40 @@ class TestNonMidTokenOverflowDoesNotWarn:
             assert "030500091" in warnings[0], name
 
 
+class TestBareTerminalPeriodDoesNotWarn:
+    """A dropped tail that is only the statement-terminating period must not
+    warn -- the token before it (almost always a string literal's closing
+    quote) closed cleanly on column 72, so nothing was actually split."""
+
+    def test_value_clause_quote_at_column_72_then_period_does_not_warn(self):
+        prefix = "01  WS-BANNER PIC X(40) VALUE "
+        # Pad so the closing quote lands exactly on column 72 (1-based).
+        content_len = 72 - (7 + len(prefix) + 1) - 1
+        line = " " * 7 + prefix + "'" + "*" * content_len + "'" + "."
+        assert len(line) == 73
+        assert line[71] == "'"  # column 72: the literal's own closing quote
+        assert line[72] == "."  # column 73: the statement period, dropped
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            out = impl([line], warnings=warnings)
+            assert warnings == [], name
+            assert out.rstrip("\n").endswith("'"), name
+
+    def test_dropped_period_plus_more_content_still_warns(self):
+        # Guard against over-correcting: a dropped tail that happens to
+        # START with a period but carries more than just that one character
+        # is a genuine mid-token split and must still warn.
+        line = " " * 65 + "A" * 7 + ".B"
+        assert len(line) == 74
+        assert line[71] == "A"  # column 72
+        assert line[72:74] == ".B"  # dropped tail, columns 73-74
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert len(warnings) == 1, name
+            assert ".B" in warnings[0], name
+
+
 class TestWordBoundaryOverflowWarns:
     """Overflow that breaks exactly on a space at column 72/73 -- the
     mid-token rule alone misses these, but a line that survives past column
@@ -352,6 +395,8 @@ class TestFastAndPureParity:
             "       10  WS000-D0000022-X   PIC X(008)   VALUE             "
             "'D0000022'.030500091"
         ),
+        " " * 7 + "01  WS-BANNER PIC X(40) VALUE " + "'" + "*" * 32 + "'" + ".",
+        " " * 65 + "A" * 7 + ".B",
     ]
 
     def test_fast_and_pure_produce_identical_warnings(self):

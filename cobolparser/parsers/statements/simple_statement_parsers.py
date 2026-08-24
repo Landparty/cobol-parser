@@ -17,6 +17,7 @@ from ...models.statements import (
     ExitStatement,
     GenerateStatement,
     GobackStatement,
+    NextSentenceStatement,
     ReleaseStatement,
     ReturnStatement,
     RollbackStatement,
@@ -32,6 +33,7 @@ from ._utils import (
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
+    peek_past_noise,
     skip_whitespace,
     token_column,
     token_location,
@@ -54,6 +56,36 @@ class ContinueStatementParser(IStatementParser):
     ) -> ContinueStatement:
         start = token_stream.consume()
         stmt = ContinueStatement(token_location(start))
+        skip_whitespace(token_stream)
+        consume_period(token_stream)
+        return stmt
+
+
+class NextSentenceStatementParser(IStatementParser):
+    """Parser for NEXT SENTENCE statements.
+
+    Only matches when NEXT is actually followed by SENTENCE -- TokenType.NEXT
+    is reserved for this phrase at statement-start position (READ's ``NEXT
+    RECORD`` form is consumed internally by the READ parser, never reaching
+    the top-level statement registry), but the explicit lookahead keeps this
+    parser from ever mis-firing on a malformed program.
+    """
+
+    def matches(self, token_stream: ITokenStream) -> bool:
+        if not matches_keyword(token_stream, TokenType.NEXT, "NEXT"):
+            return False
+        lookahead, _ = peek_past_noise(token_stream, 1)
+        return bool(
+            lookahead and lookahead.value and lookahead.value.upper() == "SENTENCE"
+        )
+
+    def parse(
+        self, token_stream: ITokenStream, context: Any | None = None
+    ) -> NextSentenceStatement:
+        start = token_stream.consume()  # NEXT
+        stmt = NextSentenceStatement(token_location(start))
+        skip_whitespace(token_stream)
+        token_stream.consume()  # SENTENCE
         skip_whitespace(token_stream)
         consume_period(token_stream)
         return stmt

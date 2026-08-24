@@ -126,6 +126,9 @@ FIXTURES: dict[str, Fixture] = {
     "GoStatementParser": Fixture("GoStatement", "    GO TO OTHER-PARA"),
     "ExitStatementParser": Fixture("ExitStatement", "    EXIT PROGRAM"),
     "ContinueStatementParser": Fixture("ContinueStatement", "    CONTINUE"),
+    "NextSentenceStatementParser": Fixture(
+        "NextSentenceStatement", "    NEXT SENTENCE"
+    ),
     "EjectStatementParser": Fixture("EjectStatement", "    EJECT"),
     "SkipStatementParser": Fixture("SkipStatement", "    SKIP1"),
     "GobackStatementParser": Fixture("GobackStatement", "    GOBACK"),

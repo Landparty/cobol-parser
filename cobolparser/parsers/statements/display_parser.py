@@ -18,6 +18,7 @@ from ._utils import (
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
+    peek_past_noise,
     skip_whitespace,
     token_column,
     warn_paragraph_boundary_swallowed,
@@ -280,10 +281,18 @@ class DisplayStatementParser(IStatementParser):
         depth so a nested subscript/function call like `TAB(FUNCTION
         MOD(X 3))` is consumed as one unit and its inner parens are kept
         literally (mirrors move_parser._parse_source, which also tracks
-        depth rather than assuming a single paren pair)."""
-        token = token_stream.peek()
+        depth rather than assuming a single paren pair).
+
+        The subscript may sit on its own continuation line (``DISPLAY
+        WS-ITEM\\n    (WS-IDX).``) -- a non-destructive lookahead past
+        whitespace/newline/continuation tokens confirms a LEFT_PAREN is
+        actually there before any whitespace is consumed, so a following
+        display item with no subscript at all isn't affected.
+        """
+        token, _ = peek_past_noise(token_stream, 0)
         if not token or token.type != TokenType.LEFT_PAREN:
             return ""
+        skip_whitespace(token_stream)
 
         parts: list[str] = []
         paren_depth = 0

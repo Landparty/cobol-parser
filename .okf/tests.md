@@ -8,6 +8,28 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-24 (second entry this date): New
+`tests/regression/test_corpus_residual_findings.py` (10 tests) pinning a
+follow-up 105-program corpus sweep's four residual findings -- see
+[parser.md](parser.md)'s "Residual corpus findings" section:
+`TestNextSentenceStatement` (NEXT SENTENCE in an IF THEN-branch and an
+EVALUATE WHEN, confirming the condition text isn't corrupted and a real
+`NextSentenceStatement` node is produced), `TestPerformWithTestNewlineTolerance`
+(WITH TEST BEFORE/AFTER split across continuation lines in all three
+PERFORM forms -- inline UNTIL, out-of-line, and VARYING), `TestDisplaySubscriptOnContinuationLine`
+(a DISPLAY item's subscript wrapped onto its own line, plus a guard that
+an unrelated next item on its own line isn't mistaken for one), and
+`TestQualifierFoldingOnWriteReadStart` (WRITE's FROM source, READ's INTO
+target, and START's KEY name all folding an OF-qualified operand). Also +2
+in `tests/regression/test_normalize_column_overflow_warning.py`'s new
+`TestBareTerminalPeriodDoesNotWarn` class (see
+[preprocessing.md](preprocessing.md)), plus the new
+`NextSentenceStatementParser` registration threaded through the existing
+self-maintaining registry fixtures/parametrizations in
+`tests/regression/test_swallow_sweep.py` and
+`tests/unit/test_procedure_registry_dispatch_order.py` (new `FIXTURES`
+entry, `EXPECTED_ORDER` position, and `DISPATCH_CASES` case).
+
 2026-08-23 (second entry this date): the three corpus-retry regression
 files grew review-pass hardening classes -- see [parser.md](parser.md)
 and [preprocessing.md](preprocessing.md):

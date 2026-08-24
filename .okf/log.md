@@ -1,5 +1,51 @@
 # OKF Update Log
 
+## 2026-08-24 (Residual corpus findings: NEXT SENTENCE, PERFORM WITH TEST newline tolerance, DISPLAY subscript fold, WRITE/READ/START qualifier fold, bare-terminal-period overflow gate)
+
+A follow-up sweep against a 105-program real-world corpus (88 OK / 17
+refused, all refusals `PARSE_WARNING`) found six causes, four of them
+worth code fixes; the other two (an apostrophe inside a single-quoted
+literal closing the string early, and the general lenient
+"closed-at-end-of-line" behavior for a genuinely unterminated string) are
+inherent context-free-lexer ambiguity already handled as leniently as
+possible (warn, don't hard-fail) and were left alone.
+
+* **Fixed** (all five detailed in [parser.md](parser.md)'s "Residual
+  corpus findings" section and [preprocessing.md](preprocessing.md)'s
+  "Bare terminal period does not warn" section):
+  - `NEXT SENTENCE` had no statement parser at all -- new
+    `NextSentenceStatementParser` (`simple_statement_parsers.py`) + AST
+    node `NextSentenceStatement` (`models/statements/misc.py`), and
+    `TokenType.NEXT`/`"NEXT"` added to `STATEMENT_TOKEN_TYPES`/
+    `STATEMENT_KEYWORDS` so condition-collection loops stop there instead
+    of swallowing the words into the condition text.
+  - `PERFORM ... WITH TEST BEFORE/AFTER` newline-intolerant at all three
+    call sites in `perform_parser.py` -- added `skip_whitespace` before
+    every peek following WITH/TEST.
+  - DISPLAY's `_consume_subscript` newline-intolerant -- switched to a
+    non-destructive `peek_past_noise` lookahead before consuming.
+  - `consume_optional_qualifiers` wired into `write_parser.py`,
+    `read_parser.py`, `start_parser.py` (previously only MOVE/arithmetic/
+    SET).
+  - `_normalize.py` + `_preprocess_fast.pyx` (mirrored, `.c` regenerated
+    via `cythonize(..., compiler_directives={"language_level": "3",
+    "boundscheck": False, "wraparound": False, "cdivision": True})`
+    matching `setup.py`'s accelerator build): the column-72 mid-token
+    overflow warning's rule 1 gains a third false-positive gate for a
+    dropped tail that is only the statement-terminating period.
+* **Updated** [parser.md](parser.md), [ast-models.md](ast-models.md),
+  [preprocessing.md](preprocessing.md), [tests.md](tests.md).
+* **Added** `tests/regression/test_corpus_residual_findings.py` (10 tests)
+  and `TestBareTerminalPeriodDoesNotWarn` (+2) in
+  `tests/regression/test_normalize_column_overflow_warning.py`. The new
+  `NextSentenceStatementParser` registration also required updates to the
+  self-maintaining registry-completeness tests:
+  `tests/regression/test_swallow_sweep.py` (new `FIXTURES` entry) and
+  `tests/unit/test_procedure_registry_dispatch_order.py` (new
+  `EXPECTED_ORDER` position + `DISPATCH_CASES` case). Full suite (8,618
+  tests) re-run clean against both the pure-Python and freshly-rebuilt
+  Cython-accelerated paths.
+
 ## 2026-08-22 (normalize_fixed_format: numeric identification-area stamps no longer trip the mid-token overflow warning)
 
 A concrete real-corpus repro (not a vague report — see the 2026-08-20 entry's

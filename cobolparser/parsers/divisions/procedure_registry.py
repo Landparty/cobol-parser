@@ -43,6 +43,7 @@ from cobolparser.parsers.statements import (
     MergeStatementParser,
     MoveStatementParser,
     MultiplyStatementParser,
+    NextSentenceStatementParser,
     OpenStatementParser,
     PerformStatementParser,
     ReadStatementParser,
@@ -101,6 +102,7 @@ def create_statement_registry() -> StatementParserRegistry:
     registry.register(GoStatementParser())
     registry.register(ExitStatementParser())
     registry.register(ContinueStatementParser())
+    registry.register(NextSentenceStatementParser())
     registry.register(EjectStatementParser())
     registry.register(SkipStatementParser())
     registry.register(GobackStatementParser())
