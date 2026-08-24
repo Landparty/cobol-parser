@@ -2375,3 +2375,41 @@ Pinned by new classes in the three 2026-08-23 regression files
 * [lexer.md](lexer.md) — upstream tokenisation
 * [ast-models.md](ast-models.md) — what `ParseResult.ast` contains
 * [preprocessing.md](preprocessing.md) — input normalisation
+
+# Shared operand helpers + SET qualifier folding (2026-08-24, /code-review pass)
+
+`parsers/statements/_utils.py` is now the single home for four
+previously-duplicated pieces:
+
+* `_NOISE_TOKEN_TYPES` + `peek_past_noise(stream, offset)` — the
+  non-destructive skip-past-WHITESPACE/COMMENT/NEWLINE/CONTINUATION
+  lookahead. `consume_signed_numeric`, `consume_optional_qualifiers`,
+  `previous_meaningful_token`, and perform_parser (which deleted its local
+  `_NOISE_TOKEN_TYPES`/`_peek_next_meaningful`) all use it.
+* `token_column(token)` — the H9 dedent guard's
+  `getattr(getattr(token, "location", None), "column", None)` accessor,
+  replacing 16 hand-rolled copies across 10 statement-parser files. Pass
+  its result to `looks_dedented_relative_to`.
+* `consume_value_operand(stream)` — one value operand: signed numeric
+  (via `consume_signed_numeric`), then IDENTIFIERs get
+  `consume_optional_qualifiers` folding. Shared by PERFORM VARYING/AFTER
+  FROM/BY (moved from perform_parser's `_consume_from_by_value`) and
+  SET's TO / UP BY / DOWN BY values (`_consume_set_value` wraps it with
+  period-stripping).
+
+**SET was the last qualifier-folding straggler** (fixed same pass): its
+targets now route through `consume_optional_qualifiers` (previously
+`SET FLAG-ON OF WS-REC TO TRUE` recorded two spurious targets with the OF
+silently discarded — no warning) and its values through
+`consume_value_operand` (previously `SET WS-IDX TO WS-VAL OF WS-CTL`
+stranded `OF WS-CTL` as "Unparsed tokens"). Pinned by
+`tests/regression/test_set_qualifier_chain.py`.
+
+**Folded references and analyzers:** operand strings now carry the full
+qualified/subscripted reference (`"WS-NUM OF GRP-1"`, `"WS-TAB ( 3 )"`).
+Any analyzer keying data items by bare name must normalize via
+`analysis._names.base_data_name` — `MoveTypeChecker._resolve_category`
+and `DynamicCallAnalyzer`'s MOVE tracking already do (pinned by
+`tests/regression/test_folded_reference_analyzers.py`); a new analyzer
+that does a raw `name in catalog` lookup will silently miss qualified
+references.

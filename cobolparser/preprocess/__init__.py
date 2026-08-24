@@ -51,11 +51,15 @@ Usage Example:
 # readable .py source in the published wheel. Implementation belongs in
 # _normalize.py (or another private sibling), not here.
 from ._normalize import (
+    ALL_COMMENT_INDICATORS,
+    COMMENT_INDICATORS,
+    DEBUG_INDICATORS,
     DEFAULT_SEQ_COL_END,
     IDENTIFICATION_END_COL,
     INDICATOR_COL,
     TEXT_END_COL,
     TEXT_START_COL,
+    VERSION_TAG_INDICATORS,
     CircularReferenceError,
     CopybookNotFoundError,
     CopybookSizeExceededError,
@@ -74,6 +78,10 @@ from ._normalize import (
 )
 
 __all__ = [
+    "ALL_COMMENT_INDICATORS",
+    "COMMENT_INDICATORS",
+    "DEBUG_INDICATORS",
+    "VERSION_TAG_INDICATORS",
     "CircularReferenceError",
     "CopybookNotFoundError",
     "PathTraversalError",

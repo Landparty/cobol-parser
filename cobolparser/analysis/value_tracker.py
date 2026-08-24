@@ -10,6 +10,7 @@ from ..models.ast_base import ASTNode
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
 from ..models.statements import CallStatement, MoveStatement
+from ._names import base_data_name
 
 
 class DynamicCallAnalyzer:
@@ -103,14 +104,18 @@ class DynamicCallAnalyzer:
             targets = node.targets
 
             if source and targets:
-                source_upper = source.upper()
+                # A qualified/subscripted reference string ("WS-PROG OF
+                # GRP-1") is keyed by its base data name -- a later bare
+                # `CALL WS-PROG` looks the variable up by that bare name,
+                # so keying the folded string would silently miss it.
+                source_upper = base_data_name(source).upper()
 
                 # Check if source is a known variable (propagate its values)
                 if source_upper in self._variable_values:
                     source_values = self._variable_values[source_upper]
                     source_incomplete = source_upper in self._incomplete_variables
                     for target in targets:
-                        target_name = target.upper()
+                        target_name = base_data_name(target).upper()
                         if target_name not in self._variable_values:
                             self._variable_values[target_name] = set()
                         self._variable_values[target_name].update(source_values)
@@ -123,7 +128,7 @@ class DynamicCallAnalyzer:
 
                     if source_value:
                         for target in targets:
-                            target_name = target.upper()
+                            target_name = base_data_name(target).upper()
                             if target_name not in self._variable_values:
                                 self._variable_values[target_name] = set()
                             self._variable_values[target_name].add(source_value)
@@ -137,7 +142,7 @@ class DynamicCallAnalyzer:
                     # dynamic CALL nodes via the
                     # "possible_values_incomplete" metadata flag.
                     for target in targets:
-                        self._incomplete_variables.add(target.upper())
+                        self._incomplete_variables.add(base_data_name(target).upper())
 
         # Recursively process children
         if hasattr(node, "children"):

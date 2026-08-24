@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     warn_paragraph_boundary_swallowed,
 )
 
@@ -32,7 +33,7 @@ class CloseStatementParser(IStatementParser):
     ) -> IOCloseStatement:
         """Parse a CLOSE statement."""
         stmt, start_token = create_statement(token_stream, IOCloseStatement)
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
 
         skip_whitespace(token_stream)
 

@@ -10,11 +10,11 @@ from cobolparser.parsers.statements._conditions import (
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
-    consume_optional_qualifiers,
-    consume_signed_numeric,
+    consume_value_operand,
     get_parse_context,
     is_statement_boundary,
     matches_keyword,
+    peek_past_noise,
     report_parse_error,
     skip_whitespace,
     try_parse_nested_statement,
@@ -31,59 +31,6 @@ from ...models.ast_base import SourceLocation
 from ...models.statements import CobolExpression, PerformStatement
 
 logger = logging.getLogger(__name__)
-
-_NOISE_TOKEN_TYPES = (
-    TokenType.WHITESPACE,
-    TokenType.COMMENT,
-    TokenType.NEWLINE,
-    TokenType.CONTINUATION,
-)
-
-
-def _peek_next_meaningful(stream: ITokenStream, start_offset: int) -> Token | None:
-    """Look ahead past whitespace/comment/newline/continuation tokens without consuming.
-
-    Used to decide *before* committing a speculative consume (e.g. "is this
-    trailing identifier actually the start of a TIMES clause?") so a
-    non-matching token is left in the stream for the caller to handle
-    instead of being silently swallowed.
-    """
-    offset = start_offset
-    while True:
-        token = stream.peek(offset)
-        if token is None:
-            return None
-        if token.type not in _NOISE_TOKEN_TYPES:
-            return token
-        offset += 1
-
-
-def _consume_from_by_value(stream: ITokenStream) -> str | None:
-    """Consume a PERFORM VARYING/AFTER ``FROM``/``BY`` value if present.
-
-    A single token in the common case (a literal or a data name), with two
-    real-deck extensions handled by shared ``_utils`` helpers: a *signed*
-    numeric literal (``BY -1`` is how every countdown loop is written)
-    lexes as two tokens -- MINUS/PLUS then the number, possibly split
-    across a 72-column line break -- and is recomposed by
-    ``consume_signed_numeric``; a subscripted or qualified data-name value
-    (``FROM WS-TAB-VAL(I)``, ``FROM WS-START OF WS-CTL``) has its trailing
-    tokens folded in by ``consume_optional_qualifiers``, which would
-    otherwise strand ``( I )`` in the stream and break the UNTIL lookahead
-    exactly the way a stranded signed digit used to. Returns the composed
-    value or ``None`` when no value token is present.
-    """
-    signed = consume_signed_numeric(stream)
-    if signed is not None:
-        return signed
-    token = stream.peek()
-    if not token or not token.value:
-        return None
-    value = token.value
-    stream.consume()
-    if token.type == TokenType.IDENTIFIER:
-        value = consume_optional_qualifiers(stream, value)
-    return value
 
 
 def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
@@ -267,7 +214,7 @@ class PerformStatementParser(IStatementParser):
                 and token.value.isdigit()
             )
         ):
-            lookahead = _peek_next_meaningful(token_stream, 1)
+            lookahead = peek_past_noise(token_stream, 1)[0]
             if lookahead and (
                 lookahead.type == TokenType.TIMES
                 or (
@@ -343,7 +290,7 @@ class PerformStatementParser(IStatementParser):
             # statement's leading token) is left in the stream instead of
             # being silently discarded with no warning (H3).
             if token and token.type == TokenType.IDENTIFIER:
-                lookahead = _peek_next_meaningful(token_stream, 1)
+                lookahead = peek_past_noise(token_stream, 1)[0]
                 if lookahead and (
                     lookahead.type == TokenType.TIMES
                     or (
@@ -380,7 +327,7 @@ class PerformStatementParser(IStatementParser):
                 token.type == TokenType.NUMERIC_LITERAL
                 or token.type == TokenType.LEVEL_NUMBER
             ):
-                lookahead = _peek_next_meaningful(token_stream, 1)
+                lookahead = peek_past_noise(token_stream, 1)[0]
                 if lookahead and (
                     lookahead.type == TokenType.TIMES
                     or (
@@ -546,7 +493,7 @@ class PerformStatementParser(IStatementParser):
         skip_whitespace(stream)
 
         # Get FROM value (may be sign-prefixed, e.g. FROM -1)
-        from_value = _consume_from_by_value(stream)
+        from_value = consume_value_operand(stream)
         if from_value is None:
             return
         skip_whitespace(stream)
@@ -559,7 +506,7 @@ class PerformStatementParser(IStatementParser):
         skip_whitespace(stream)
 
         # Get BY value (may be sign-prefixed: BY -1 is every countdown loop)
-        by_value = _consume_from_by_value(stream)
+        by_value = consume_value_operand(stream)
         if by_value is None:
             return
         skip_whitespace(stream)
@@ -631,7 +578,7 @@ class PerformStatementParser(IStatementParser):
                 return
             stream.consume()
             skip_whitespace(stream)
-            from_value = _consume_from_by_value(stream)
+            from_value = consume_value_operand(stream)
             if from_value is None:
                 stmt.add_after_clause(variable_name, "", "")
                 return
@@ -644,7 +591,7 @@ class PerformStatementParser(IStatementParser):
                 return
             stream.consume()
             skip_whitespace(stream)
-            by_value = _consume_from_by_value(stream)
+            by_value = consume_value_operand(stream)
             if by_value is None:
                 stmt.add_after_clause(variable_name, from_value, "")
                 return

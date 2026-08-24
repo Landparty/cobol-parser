@@ -43,6 +43,7 @@ from ._utils import (
     peek_value_upper,
     report_or_raise,
     skip_whitespace,
+    token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -80,7 +81,7 @@ class AddStatementParser(IStatementParser):
         """Parse an ADD statement."""
         start_token = token_stream.consume()
         start_loc = token_location(start_token)
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
         stmt: AddStatement = create_node(AddStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
@@ -148,7 +149,7 @@ class SubtractStatementParser(IStatementParser):
         """Parse a SUBTRACT statement."""
         start_token = token_stream.consume()
         start_loc = token_location(start_token)
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
         stmt: SubtractStatement = create_node(SubtractStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 
@@ -309,7 +310,7 @@ def _parse_binary_arithmetic(
     """
     start_token = token_stream.consume()
     start_loc = token_location(start_token)
-    start_column = getattr(getattr(start_token, "location", None), "column", None)
+    start_column = token_column(start_token)
     stmt = cast(_ArithT, create_node(cast(type[ASTNode], node_class), start_loc))
     ctx = get_parse_context(token_stream)
 
@@ -817,7 +818,7 @@ class ComputeStatementParser(IStatementParser):
         """Parse a COMPUTE statement."""
         start_token = token_stream.consume()
         start_loc = token_location(start_token)
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
         stmt: ComputeStatement = create_node(ComputeStatement, start_loc)  # type: ignore[assignment]
         ctx = get_parse_context(token_stream)
 

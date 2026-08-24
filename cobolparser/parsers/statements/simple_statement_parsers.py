@@ -33,6 +33,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     token_location,
     try_parse_nested_statement,
     warn_paragraph_boundary_swallowed,
@@ -81,12 +82,9 @@ class EjectStatementParser(IStatementParser):
         return stmt
 
 
-_SKIP_TOKEN_TYPES: tuple[Any, ...] = (
-    TokenType.SKIP1,
-    TokenType.SKIP2,
-    TokenType.SKIP3,
-)
-
+#: The one home for which token types are SKIP statements AND how many
+#: lines each skips -- matches() tests membership here, so a SKIP variant
+#: cannot be dispatchable without a line count (or vice versa).
 _SKIP_LINE_COUNTS: dict[Any, int] = {
     TokenType.SKIP1: 1,
     TokenType.SKIP2: 2,
@@ -103,7 +101,7 @@ class SkipStatementParser(IStatementParser):
 
     def matches(self, token_stream: ITokenStream) -> bool:
         token = token_stream.peek(0)
-        return token is not None and token.type in _SKIP_TOKEN_TYPES
+        return token is not None and token.type in _SKIP_LINE_COUNTS
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
@@ -195,7 +193,7 @@ class CancelStatementParser(IStatementParser):
     ) -> CancelStatement:
         start = token_stream.consume()
         stmt = CancelStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():

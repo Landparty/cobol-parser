@@ -714,3 +714,26 @@ the updated `TestSequenceAreaChangeTags` in
 
 * [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`
 * [parser.md](parser.md) — `CobolParser` calls `strip_compiler_directives` internally
+
+# Indicator constants, stamp-gate narrowing, bounded wrap scan (2026-08-24)
+
+* The column-7 comment-indicator characters live in ONE place now:
+  `_normalize.py`'s `COMMENT_INDICATORS` (`*` `/`), `DEBUG_INDICATORS`
+  (`D` `d`), `VERSION_TAG_INDICATORS` (`V` `v`), and their union
+  `ALL_COMMENT_INDICATORS` (all re-exported from
+  `cobolparser.preprocess`). Consumers: `normalize_fixed_format` (flag
+  gating unchanged), `copy_statement_parser.is_comment_line`,
+  `parser._detect_fixed_format`, `lexer._fixed_format_comment_tokens`
+  (deferred import). `_preprocess_fast.pyx` keeps mirrored literals with a
+  pointer comment — extend both together.
+* The numeric identification-stamp gate on the column-72 mid-token
+  truncation warning is stricter: the all-digit dropped tail must fill
+  columns 73-80 EXACTLY (`content_len == 80`) — the real ISPF/Z Open
+  Editor auto-number shape. Any shorter all-digit tail (a data name's own
+  trailing digits spilling past 72 on, say, a 75-column line) warns again;
+  the first version suppressed those silently. Both normalizers.
+* `_fit_fixed_format_width`'s wrap loop uses `_rightmost_safe_blank(line,
+  start, after, limit)` — quote-aware scan bounded at column 72 (quote
+  state at an index depends only on the prefix), so a pathologically long
+  REPLACING-expanded line wraps in O(len) total instead of O(len²).
+  `_blank_runs_outside_literals` returns only the squeeze pass's runs now.

@@ -11,6 +11,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -175,7 +176,7 @@ class SortStatementParser(IStatementParser):
     ) -> SortStatement:
         start = token_stream.consume()
         stmt = SortStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         # File name
@@ -333,7 +334,7 @@ class MergeStatementParser(IStatementParser):
     ) -> MergeStatement:
         start = token_stream.consume()
         stmt = MergeStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         # File name

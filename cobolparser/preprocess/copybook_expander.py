@@ -511,20 +511,15 @@ _CODE_AREA_WIDTH = 72
 _CONTENT_START_IDX = 7
 
 
-def _blank_runs_outside_literals(
-    line: str, start: int
-) -> tuple[list[tuple[int, int]], list[int]]:
+def _blank_runs_outside_literals(line: str, start: int) -> list[tuple[int, int]]:
     """Scan *line* from *start*, tracking alphanumeric-literal quote state.
 
-    Returns ``(runs, safe_blanks)`` where *runs* is every maximal run of two
-    or more blanks that sits outside any quoted literal (as ``(index,
-    length)`` pairs, in order) and *safe_blanks* is the index of every
-    single blank outside a literal (run members included). A doubled quote
+    Returns every maximal run of two or more blanks that sits outside any
+    quoted literal (as ``(index, length)`` pairs, in order). A doubled quote
     inside a literal toggles the state twice, leaving it open -- exactly
     COBOL's escape convention.
     """
     runs: list[tuple[int, int]] = []
-    safe_blanks: list[int] = []
     quote: str | None = None
     i = start
     n = len(line)
@@ -543,13 +538,40 @@ def _blank_runs_outside_literals(
             j = i
             while j < n and line[j] == " ":
                 j += 1
-            safe_blanks.extend(range(i, j))
             if j - i >= 2:
                 runs.append((i, j - i))
             i = j
             continue
         i += 1
-    return runs, safe_blanks
+    return runs
+
+
+def _rightmost_safe_blank(line: str, start: int, after: int, limit: int) -> int | None:
+    """Rightmost blank index in ``(after, limit]`` outside any quoted literal.
+
+    Same quote-state tracking as :func:`_blank_runs_outside_literals`, but
+    scanning stops at *limit*: quote state at an index depends only on the
+    characters before it, so nothing past *limit* can change which of the
+    candidate blanks are safe. That bound is what keeps the wrap loop in
+    :func:`_fit_fixed_format_width` linear -- each iteration scans at most
+    ``limit`` characters of the (possibly much longer) remaining tail
+    instead of all of it.
+    """
+    best: int | None = None
+    quote: str | None = None
+    i = start
+    n = min(len(line), limit + 1)
+    while i < n:
+        ch = line[i]
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == " " and i > after:
+            best = i
+        i += 1
+    return best
 
 
 def _fit_fixed_format_width(line: str) -> list[str]:
@@ -587,7 +609,7 @@ def _fit_fixed_format_width(line: str) -> list[str]:
     if len(stripped) <= _CODE_AREA_WIDTH:
         return [line]
 
-    runs, _ = _blank_runs_outside_literals(stripped, _CONTENT_START_IDX)
+    runs = _blank_runs_outside_literals(stripped, _CONTENT_START_IDX)
     excess = len(stripped) - _CODE_AREA_WIDTH
     # Shrink rightmost runs first: trailing alignment padding (before a
     # PIC clause, a VALUE literal, ...) is the least meaningful layout.
@@ -608,7 +630,6 @@ def _fit_fixed_format_width(line: str) -> list[str]:
     # (pathological) case of a tail that is itself still too long.
     out: list[str] = []
     while len(stripped) > _CODE_AREA_WIDTH:
-        _, safe_blanks = _blank_runs_outside_literals(stripped, _CONTENT_START_IDX)
         # The break point must fall *after* the line's first non-blank
         # character, so the head always carries real content -- a break
         # inside the leading pad (which a wrapped tail's own fresh 11-space
@@ -621,9 +642,8 @@ def _fit_fixed_format_width(line: str) -> list[str]:
         # left a token ending exactly at column 72 unsplittable, silently
         # dropping its tail past the slice -- the very defect this helper
         # exists to prevent.
-        break_at = max(
-            (b for b in safe_blanks if content_start < b <= _CODE_AREA_WIDTH),
-            default=None,
+        break_at = _rightmost_safe_blank(
+            stripped, _CONTENT_START_IDX, content_start, _CODE_AREA_WIDTH
         )
         if break_at is None:
             # No safe break point: emit as-is and let the final parse's

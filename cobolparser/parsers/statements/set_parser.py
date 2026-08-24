@@ -6,13 +6,14 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import SetStatement
 from ._utils import (
-    consume_optional_subscript,
-    consume_signed_numeric,
+    consume_optional_qualifiers,
+    consume_value_operand,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -26,29 +27,19 @@ def _strip_period(value: str) -> str:
     return value
 
 
-def _consume_subscripted_value(token_stream: ITokenStream, first_token: Any) -> str:
-    """Consume *first_token* (already peeked, not yet consumed) plus an
-    optional trailing ``(subscript[, subscript]...)`` group, returning the
-    joined, period-stripped value string.
+def _consume_set_value(token_stream: ITokenStream) -> str:
+    """Consume one SET value operand, returning the period-stripped string.
 
     Shared by all four of SET's value-reading forms (``TO``, ``TO ADDRESS
-    OF``, ``UP BY``, ``DOWN BY``) -- without folding a subscript group in,
-    e.g. `SET IDX TO TABLE-ITEM(5)` silently dropped the `(5)`.
-
-    A sign-prefixed numeric value (``SET IDX DOWN BY -1`` -- the canonical
-    index-decrement idiom) lexes as two tokens (MINUS/PLUS then the
-    number); the shared ``consume_signed_numeric`` recomposes it. Without
-    that, the value recorded was the bare ``"-"`` and the stranded digits
-    were dropped as an unparsed statement token -- the same lexing split
-    the PERFORM VARYING FROM/BY values hit.
+    OF``, ``UP BY``, ``DOWN BY``). The heavy lifting -- a sign-prefixed
+    numeric (``SET IDX DOWN BY -1``), a trailing subscript group
+    (``SET IDX TO TABLE-ITEM(5)``), and an ``OF``/``IN`` qualifier chain
+    (``SET IDX TO WS-VAL OF WS-CTL``, previously stranded in the stream
+    and dropped as unparsed tokens) -- is the shared
+    :func:`~._utils.consume_value_operand`, the same helper PERFORM
+    VARYING/AFTER's FROM/BY values use.
     """
-    signed = consume_signed_numeric(token_stream)
-    if signed is not None:
-        return _strip_period(signed)
-    parts: list[str] = [first_token.value] if first_token.value else []
-    token_stream.consume()
-    consume_optional_subscript(token_stream, parts)
-    return _strip_period(" ".join(p for p in parts if p))
+    return _strip_period(consume_value_operand(token_stream) or "")
 
 
 class SetStatementParser(IStatementParser):
@@ -69,7 +60,7 @@ class SetStatementParser(IStatementParser):
     ) -> SetStatement:
         start = token_stream.consume()
         stmt = SetStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         # Collect targets until TO/UP/DOWN/period
@@ -121,20 +112,21 @@ class SetStatementParser(IStatementParser):
                     pass
                 else:
                     # A trailing `(subscript[, subscript]...)` group (e.g.
-                    # a table reference like `TBL-ITEM(1)`) must be folded
-                    # into the target string, matching MOVE/ADD/SUBTRACT/
-                    # COMPUTE targets -- without this, the subscript tokens
-                    # are left unconsumed, breaking the rest of the
-                    # statement (TO ADDRESS OF ...) and dropping it as
-                    # "Unparsed tokens".
-                    parts: list[str] = [token.value] if token.value else []
-                    consume_optional_subscript(token_stream, parts)
+                    # a table reference like `TBL-ITEM(1)`) and an OF/IN
+                    # qualifier chain (`SET FLAG-ON OF WS-REC TO TRUE`)
+                    # must be folded into the target string, matching MOVE/
+                    # ADD/SUBTRACT/COMPUTE targets -- without this, a
+                    # subscript broke the rest of the statement as
+                    # "Unparsed tokens", and a qualifier's name looped back
+                    # around as a spurious separate target with the OF
+                    # silently discarded.
                     # Unconditional add (matching the pre-existing
                     # `stmt.add_target(token.value or "")`) -- an empty
-                    # target_name (e.g. an empty STRING_LITERAL target with
-                    # no subscript) is still recorded rather than silently
+                    # target_name is still recorded rather than silently
                     # dropped.
-                    stmt.add_target(" ".join(p for p in parts if p))
+                    stmt.add_target(
+                        consume_optional_qualifiers(token_stream, token.value or "")
+                    )
             else:
                 break
             skip_whitespace(token_stream)
@@ -171,12 +163,12 @@ class SetStatementParser(IStatementParser):
                     v2 = token_stream.peek()
                     if v2 and v2.type != TokenType.PERIOD:
                         stmt.set_value(
-                            _consume_subscripted_value(token_stream, v2),
+                            _consume_set_value(token_stream),
                             is_address_of=True,
                         )
                 elif v.type != TokenType.PERIOD:
                     stmt.set_set_type("TO")
-                    stmt.set_value(_consume_subscripted_value(token_stream, v))
+                    stmt.set_value(_consume_set_value(token_stream))
         elif val == "UP":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -187,7 +179,7 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("UP_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                stmt.set_value(_consume_subscripted_value(token_stream, v))
+                stmt.set_value(_consume_set_value(token_stream))
         elif val == "DOWN":
             token_stream.consume()
             skip_whitespace(token_stream)
@@ -198,7 +190,7 @@ class SetStatementParser(IStatementParser):
             stmt.set_set_type("DOWN_BY")
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                stmt.set_value(_consume_subscripted_value(token_stream, v))
+                stmt.set_value(_consume_set_value(token_stream))
 
         skip_whitespace(token_stream)
         # Consume period

@@ -197,7 +197,14 @@ class EvaluateStatementParser(IStatementParser):
         ``LanguageEnvironmentAnalyzer``, ``BoundaryInventoryAnalyzer``'s
         caller-dataflow rung) scan.
         """
-        subjects: list[str] = []
+
+        def add_current() -> None:
+            # Guarded add: an all-noise buffer joins to "" and is dropped
+            # rather than recorded as an empty subject.
+            subject = " ".join(current_subject).strip()
+            if subject:
+                stmt.add_subject(subject)
+
         current_subject: list[str] = []
 
         while not token_stream.is_empty():
@@ -217,9 +224,8 @@ class EvaluateStatementParser(IStatementParser):
                 break
 
             if token_val_upper == "ALSO":
-                if current_subject:
-                    subjects.append(" ".join(current_subject).strip())
-                    current_subject = []
+                add_current()
+                current_subject = []
                 token_stream.consume()
                 continue
 
@@ -227,12 +233,7 @@ class EvaluateStatementParser(IStatementParser):
                 current_subject.append(condition_token_text(token))
             token_stream.consume()
 
-        if current_subject:
-            subjects.append(" ".join(current_subject).strip())
-
-        for subject in subjects:
-            if subject:
-                stmt.add_subject(subject)
+        add_current()
         return len(stmt.subjects)
 
     def _parse_selectors(

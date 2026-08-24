@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     try_consume_keyword,
     warn_paragraph_boundary_swallowed,
 )
@@ -38,7 +39,7 @@ class OpenStatementParser(IStatementParser):
     ) -> IOOpenStatement:
         """Parse an OPEN statement."""
         stmt, start_token = create_statement(token_stream, IOOpenStatement)
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
 
         skip_whitespace(token_stream)
 

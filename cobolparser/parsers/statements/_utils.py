@@ -274,6 +274,18 @@ def token_location(token: Token | None) -> SourceLocation:
     return token.location if token else SourceLocation(0, 0)
 
 
+def token_column(token: Token | None) -> int | None:
+    """Return the source column of *token*, or ``None`` when either the
+    token or its location is absent.
+
+    The single home for the ``getattr(getattr(token, "location", None),
+    "column", None)`` incantation every statement parser's H9 dedent guard
+    needs for its verb token -- pass the result to
+    :func:`looks_dedented_relative_to`.
+    """
+    return getattr(getattr(token, "location", None), "column", None)
+
+
 def is_procedure_name_token(token: Token | None) -> bool:
     """True if *token* can name a procedure: an identifier, or an all-digit
     numeric token. COBOL permits all-digit paragraph/section names, and
@@ -429,7 +441,7 @@ def looks_dedented_relative_to(
     collected silently truncates the operand list (see reports/open-findings.md).
     """
     token = token_stream.peek(0)
-    col = getattr(getattr(token, "location", None), "column", None)
+    col = token_column(token)
     if reference_column is None or col is None:
         return True
     return bool(col < reference_column)
@@ -555,14 +567,30 @@ def consume_period(stream: ITokenStream) -> None:
             stream.consume()
 
 
-#: Token types that carry no clause meaning between a unary sign and its
-#: digits (same set skip_whitespace consumes).
-_SIGN_NOISE_TOKEN_TYPES = (
+#: Token types that carry no statement meaning between two meaningful
+#: tokens (same set skip_whitespace consumes). Shared by every
+#: non-destructive lookahead in this package -- keep it the single home
+#: for this set so a new noise token type cannot desynchronize one
+#: lookahead from the others.
+_NOISE_TOKEN_TYPES = (
     TokenType.WHITESPACE,
     TokenType.COMMENT,
     TokenType.NEWLINE,
     TokenType.CONTINUATION,
 )
+
+
+def peek_past_noise(stream: ITokenStream, offset: int) -> tuple[Token | None, int]:
+    """Return the first non-noise token at or after *offset*, and its offset.
+
+    Non-destructive: nothing is consumed, so a lookahead that turns out not
+    to match leaves the stream untouched for the caller.
+    """
+    token = stream.peek(offset)
+    while token is not None and token.type in _NOISE_TOKEN_TYPES:
+        offset += 1
+        token = stream.peek(offset)
+    return token, offset
 
 
 def consume_signed_numeric(stream: ITokenStream) -> str | None:
@@ -587,11 +615,7 @@ def consume_signed_numeric(stream: ITokenStream) -> str | None:
     token = stream.peek()
     if not token or token.type not in (TokenType.MINUS, TokenType.PLUS):
         return None
-    offset = 1
-    next_tok = stream.peek(offset)
-    while next_tok is not None and next_tok.type in _SIGN_NOISE_TOKEN_TYPES:
-        offset += 1
-        next_tok = stream.peek(offset)
+    next_tok, offset = peek_past_noise(stream, 1)
     if not (
         next_tok
         and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
@@ -616,12 +640,7 @@ def previous_meaningful_token(stream: ITokenStream) -> Token | None:
         token = stream.peek(offset)
         if token is None:
             return None
-        if token.type not in (
-            TokenType.WHITESPACE,
-            TokenType.COMMENT,
-            TokenType.NEWLINE,
-            TokenType.CONTINUATION,
-        ):
+        if token.type not in _NOISE_TOKEN_TYPES:
             return token
         offset -= 1
 
@@ -1101,18 +1120,9 @@ def consume_optional_qualifiers(stream: ITokenStream, value: str) -> str:
             continue
         if token.type in (TokenType.OF, TokenType.IN):
             # Confirm a real identifier follows *before* consuming OF/IN --
-            # peek() doesn't skip WHITESPACE/COMMENT/NEWLINE/CONTINUATION,
-            # so scan past those non-destructively first.
-            offset = 1
-            lookahead = stream.peek(offset)
-            while lookahead is not None and lookahead.type in (
-                TokenType.WHITESPACE,
-                TokenType.COMMENT,
-                TokenType.NEWLINE,
-                TokenType.CONTINUATION,
-            ):
-                offset += 1
-                lookahead = stream.peek(offset)
+            # peek() doesn't skip noise tokens, so scan past those
+            # non-destructively first.
+            lookahead, _ = peek_past_noise(stream, 1)
             if not (
                 lookahead and lookahead.type == TokenType.IDENTIFIER and lookahead.value
             ):
@@ -1126,6 +1136,35 @@ def consume_optional_qualifiers(stream: ITokenStream, value: str) -> str:
             continue
         break
     return " ".join(p for p in parts if p)
+
+
+def consume_value_operand(stream: ITokenStream) -> str | None:
+    """Consume one value operand (a literal or data name) if present.
+
+    A single token in the common case, with two real-deck extensions: a
+    *signed* numeric literal (``BY -1`` is how every countdown loop is
+    written) lexes as two tokens -- MINUS/PLUS then the number, possibly
+    split across a 72-column line break -- and is recomposed by
+    :func:`consume_signed_numeric`; a subscripted or qualified data-name
+    value (``FROM WS-TAB-VAL(I)``, ``TO WS-START OF WS-CTL``) has its
+    trailing tokens folded in by :func:`consume_optional_qualifiers`, which
+    would otherwise strand them in the stream to be dropped as unparsed
+    trailing tokens. Shared by PERFORM VARYING/AFTER's ``FROM``/``BY``
+    values and SET's ``TO``/``UP BY``/``DOWN BY`` values. Returns the
+    composed value, or ``None`` (consuming nothing) when no value token is
+    present.
+    """
+    signed = consume_signed_numeric(stream)
+    if signed is not None:
+        return signed
+    token = stream.peek()
+    if not token or not token.value:
+        return None
+    value = token.value
+    stream.consume()
+    if token.type == TokenType.IDENTIFIER:
+        value = consume_optional_qualifiers(stream, value)
+    return value
 
 
 def consume_keyword_and_operand(

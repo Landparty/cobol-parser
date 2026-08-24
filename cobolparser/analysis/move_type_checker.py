@@ -28,6 +28,7 @@ from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem, PictureClause
 from ..models.program import CobolProgram
 from ..models.statements import MoveStatement
+from ._names import base_data_name
 
 
 class DataCategory(Enum):
@@ -362,8 +363,14 @@ class MoveTypeChecker:
                 )
 
     def _resolve_category(self, name: str) -> DataCategory:
-        """Look up a data item name in the catalog, falling back to literal classification."""
-        upper = name.upper()
+        """Look up a data item name in the catalog, falling back to literal classification.
+
+        A qualified/subscripted reference string ("WS-NUM OF GRP-1",
+        "WS-TAB ( 3 )") is looked up by its base data name -- the catalog is
+        keyed by bare item names, so the folded reference would otherwise
+        miss every entry and silently classify as a literal.
+        """
+        upper = base_data_name(name).upper()
         if upper in self._catalog:
             return self._catalog[upper]
         return _classify_literal(name)

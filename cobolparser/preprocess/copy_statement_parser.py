@@ -15,6 +15,7 @@ Properly handles:
 import bisect
 import re
 
+from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
 # Fixed-format COBOL column boundaries
@@ -251,8 +252,7 @@ def is_comment_line(line: str) -> bool:
     """
     if len(line) < 7:
         return False
-    indicator = line[6]
-    return indicator in ("*", "/", "D", "d", "V", "v")
+    return line[6] in ALL_COMMENT_INDICATORS
 
 
 def is_within_string_literal(source: str, match_start: int, match_end: int) -> bool:

@@ -233,6 +233,19 @@ TEXT_START_COL = 8  # program text begins (1-based)
 TEXT_END_COL = 72  # program text end (inclusive, 1-based)
 IDENTIFICATION_END_COL = 80  # 73-80 identification area end (inclusive, 1-based)
 
+# Column-7 indicator characters that mark a line as a comment. These are the
+# single source of truth for every site that classifies indicator characters
+# -- normalize_fixed_format below, copy_statement_parser.is_comment_line,
+# parser._detect_fixed_format, and lexer._fixed_format_comment_tokens all
+# derive from these sets (the Cython mirror _preprocess_fast.pyx repeats the
+# literals by design, like the rest of its body -- keep it in sync when
+# extending these). The next shop convention from the corpus goes here, not
+# into another hand-maintained per-site tuple.
+COMMENT_INDICATORS = frozenset({"*", "/"})  # unconditional: comment / page eject
+DEBUG_INDICATORS = frozenset({"D", "d"})  # debug lines (flag-gated in normalize)
+VERSION_TAG_INDICATORS = frozenset({"V", "v"})  # version tags (flag-gated too)
+ALL_COMMENT_INDICATORS = COMMENT_INDICATORS | DEBUG_INDICATORS | VERSION_TAG_INDICATORS
+
 
 def strip_compiler_directives(
     source: str, *, preserve_line_numbers: bool = True
@@ -545,13 +558,14 @@ def normalize_fixed_format(
             continue
         indicator = line[INDICATOR_COL - 1] if len(line) >= INDICATOR_COL else " "
         text_slice = line[TEXT_START_COL - 1 : TEXT_END_COL]
-        is_debug_comment = debug_lines_as_comments and indicator in ("D", "d")
-        is_version_tag_comment = version_tag_lines_as_comments and indicator in (
-            "V",
-            "v",
+        is_debug_comment = debug_lines_as_comments and indicator in DEBUG_INDICATORS
+        is_version_tag_comment = (
+            version_tag_lines_as_comments and indicator in VERSION_TAG_INDICATORS
         )
         if (
-            indicator in ("*", "/") or is_debug_comment or is_version_tag_comment
+            indicator in COMMENT_INDICATORS
+            or is_debug_comment
+            or is_version_tag_comment
         ):  # comment (incl. page eject, debug lines, version-tag lines)
             # Comment lines: flush pending buffer but do not emit comment text
             # (emitting it would let the free-form lexer tokenize it as code).
@@ -570,21 +584,26 @@ def normalize_fixed_format(
                 content_len = len(line.rstrip())
                 exceeds_traditional_width = content_len > IDENTIFICATION_END_COL
                 dropped = line[TEXT_END_COL:].rstrip()
-                # A purely-numeric tail that fits within the traditional
-                # 80-column identification-area width (columns 73-80) is a
-                # per-line sequence/change-tracking stamp -- e.g. IBM Z Open
-                # Editor/ISPF-style auto numbering (03050009, incrementing on
-                # every line) -- not a token that was actually split. Unlike
-                # the columns-1-6 gate above, this doesn't require the
-                # *whole file* to carry sequence numbers there; it trusts the
-                # shape of the dropped content itself. A mixed
+                # A purely-numeric tail that fills the traditional 80-column
+                # identification area (columns 73-80) EXACTLY is a per-line
+                # sequence/change-tracking stamp -- e.g. IBM Z Open Editor/
+                # ISPF-style auto numbering (03050009, incrementing on every
+                # line, always writing the full 8-column field) -- not a
+                # token that was actually split. Unlike the columns-1-6 gate
+                # above, this doesn't require the *whole file* to carry
+                # sequence numbers there; it trusts the shape of the dropped
+                # content itself, so the shape requirement is strict: the
+                # line must span the full 80 columns with digits from 73
+                # through 80. A shorter all-digit tail (a data name's own
+                # trailing digits spilling a few columns past 72 on a
+                # 75-column line) does NOT qualify and warns as the
+                # mid-token truncation it really is, and a mixed
                 # alnum+punctuation tail (e.g. the NIST-style `IX2094.2`
                 # test-case id already covered by
-                # test_blank_sequence_area_with_same_shape_still_warns) does
-                # NOT qualify -- `.isdigit()` rejects it -- so that case still
-                # warns exactly as before.
+                # test_blank_sequence_area_with_same_shape_still_warns)
+                # fails `.isdigit()` -- both keep warning exactly as before.
                 is_numeric_id_stamp = (
-                    not exceeds_traditional_width and dropped.isdigit()
+                    content_len == IDENTIFICATION_END_COL and dropped.isdigit()
                 )
                 if mid_token and not is_numeric_id_stamp:
                     warnings.append(

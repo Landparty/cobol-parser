@@ -31,7 +31,11 @@ from .plugins.core import (
     PluginManager,
     SerializationConfig,
 )
-from .preprocess import normalize_fixed_format, strip_compiler_directives
+from .preprocess import (
+    ALL_COMMENT_INDICATORS,
+    normalize_fixed_format,
+    strip_compiler_directives,
+)
 from .preprocess.replace_statement import (
     apply_replace_statements,
     strip_unexpanded_copy_statements,
@@ -699,7 +703,7 @@ def _detect_fixed_format(source: str) -> bool:
             seq_area.strip() == "" or seq_area.replace(" ", "").isdigit()
         )
 
-        valid_indicator = indicator in (" ", "*", "/", "-", "D", "d", "V", "v")
+        valid_indicator = indicator in (" ", "-") or indicator in ALL_COMMENT_INDICATORS
 
         if seq_is_spaces_or_digits and valid_indicator:
             fixed_format_indicators += 1

@@ -12,6 +12,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -152,7 +153,7 @@ class InspectStatementParser(IStatementParser):
     ) -> InspectStatement:
         start = token_stream.consume()
         stmt = InspectStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         # Target identifier

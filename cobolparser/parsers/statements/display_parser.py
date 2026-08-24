@@ -19,6 +19,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     warn_paragraph_boundary_swallowed,
 )
 
@@ -59,7 +60,7 @@ class DisplayStatementParser(IStatementParser):
         # Consume DISPLAY keyword
         start_token = token_stream.consume()
         start_location = start_token.location if start_token else SourceLocation(0, 0)
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
 
         # Use factory for validated node creation
         factory = get_factory()
