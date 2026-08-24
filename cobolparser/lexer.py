@@ -1250,11 +1250,14 @@ class _CobolLexerPure:
                 # or a letter run) looking for a letter anywhere in the rest
                 # of the word -- a single one-hop lookahead misses names
                 # like `22310-01-TRAITE`, where the first letter only
-                # appears two hyphens in.
+                # appears two hyphens in. The first letter found settles the
+                # question, so both loops stop there -- read_word_from_text
+                # re-scans the whole word anyway.
                 has_alpha = False
                 scan_pos = exponent_end
                 while (
-                    scan_pos < length
+                    not has_alpha
+                    and scan_pos < length
                     and text[scan_pos] == "-"
                     and scan_pos + 1 < length
                     and text[scan_pos + 1].isalnum()
@@ -1263,35 +1266,31 @@ class _CobolLexerPure:
                     while scan_pos < length and text[scan_pos].isalnum():
                         if text[scan_pos].isalpha():
                             has_alpha = True
+                            break
                         scan_pos += 1
 
-                # Check if after digits we have a dash-then-letter OR a direct
-                # letter (identifier patterns like 42-DATANAMES or 25COUNT, 45A).
+                # Check if after the digits (and any exponent-shaped suffix)
+                # we have a direct letter (identifier patterns like 25COUNT,
+                # 45A). The dash-then-letter case (42-DATANAMES) is already
+                # covered: the hyphen-segment scan above sets has_alpha for
+                # it, and when an exponent was consumed the character at
+                # lookahead_pos is E/e, never a dash.
                 # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
                 # a digit or sign+digit stays on the read_number_from_text path.
                 if has_alpha or (
                     lookahead_pos < length
-                    and (
-                        (
-                            text[lookahead_pos] == "-"
-                            and lookahead_pos + 1 < length
-                            and text[lookahead_pos + 1].isalpha()
-                        )
-                        or (
-                            text[lookahead_pos].isalpha()
-                            and not (
-                                text[lookahead_pos].upper() == "E"
-                                and (
-                                    (
-                                        lookahead_pos + 1 < length
-                                        and text[lookahead_pos + 1].isdigit()
-                                    )
-                                    or (
-                                        lookahead_pos + 2 < length
-                                        and text[lookahead_pos + 1] in ("+", "-")
-                                        and text[lookahead_pos + 2].isdigit()
-                                    )
-                                )
+                    and text[lookahead_pos].isalpha()
+                    and not (
+                        text[lookahead_pos].upper() == "E"
+                        and (
+                            (
+                                lookahead_pos + 1 < length
+                                and text[lookahead_pos + 1].isdigit()
+                            )
+                            or (
+                                lookahead_pos + 2 < length
+                                and text[lookahead_pos + 1] in ("+", "-")
+                                and text[lookahead_pos + 2].isdigit()
                             )
                         )
                     )
@@ -1836,7 +1835,37 @@ class _CobolLexerPure:
         final_location = SourceLocation(len(self.lines) + 1, 1, 1)
         self.tokens.append(Token(TokenType.EOF, "", final_location))
 
+        self._flag_stray_sql_chars()
         return self.tokens
+
+    def _flag_stray_sql_chars(self) -> None:
+        """Record an "Invalid character" error for '!' / '|' / '¬' tokens
+        outside any ``EXEC ... END-EXEC`` block.
+
+        These characters lex to BANG/PIPE/NOT_SIGN tokens solely so embedded
+        EXEC SQL text (``!=``, ``||``, ``¬=``) round-trips instead of
+        failing the whole parse -- see SINGLE_CHAR_TOKENS. Outside an EXEC
+        block they are exactly as invalid as before those tokens existed,
+        and silently folding them into a statement's operand text would turn
+        garbage input into a "successful" parse with no diagnostic at all.
+        A single linear post-pass (shared verbatim by the Cython fast path,
+        which inherits this method) restores the old error for that case.
+        """
+        in_exec = False
+        for token in self.tokens:
+            ttype = token.type
+            if ttype == TokenType.EXEC:
+                in_exec = True
+            elif ttype == TokenType.END_EXEC:
+                in_exec = False
+            elif not in_exec and ttype in (
+                TokenType.BANG,
+                TokenType.PIPE,
+                TokenType.NOT_SIGN,
+            ):
+                self.errors.append(
+                    LexerError(f"Invalid character: {token.value}", token.location)
+                )
 
     def get_tokens(self) -> list[Token]:
         """Get the list of tokens (tokenize if not already done)."""
@@ -1877,6 +1906,11 @@ def _fixed_format_comment_tokens(
     tokens lexed from *normalized* — so the two streams interleave
     consistently.
     """
+    # Deferred import: keeping preprocess out of module scope avoids import
+    # cycles (same rationale as the tokenize helper below). The constant is
+    # the shared home for the comment-indicator set — see _normalize.py.
+    from .preprocess import ALL_COMMENT_INDICATORS
+
     # One entry per placeholder-producing physical line, in order: the
     # COMMENT token value, or None for blank/short lines (no token).
     placeholders: list[str | None] = []
@@ -1890,7 +1924,7 @@ def _fixed_format_comment_tokens(
             # Page eject — same token value the legacy fixed-format
             # lexer path emitted.
             placeholders.append("/ PAGE BREAK")
-        elif indicator in ("*", "D", "d", "V", "v"):
+        elif indicator in ALL_COMMENT_INDICATORS:
             placeholders.append(line[_FF_INDICATOR:_FF_LINE_END].rstrip())
         # Code / continuation lines produce no placeholder.
 

@@ -1534,3 +1534,15 @@ apply elsewhere (see [cli.md](cli.md) M10). Pinned by
 * `docs/plans/2026-08-02-program-data-generation-design.md` and its per-phase
   implementation plan — the full 9-phase `gen-fixtures` plan this file
   documents Phases 2, 4, and 7 of
+
+# Folded-reference normalization: `_names.base_data_name` (2026-08-24)
+
+Statement parsers fold `OF`/`IN` qualifier chains and `( subscript )`
+groups into single operand strings. `analysis/_names.py::base_data_name`
+recovers the referenced item's own name (first word, split off only when
+followed by OF/IN or `(` — literals with spaces and `ALL 'X'` pass through
+unchanged). Used by `MoveTypeChecker._resolve_category` (catalog lookup)
+and `DynamicCallAnalyzer`'s MOVE source/target keying (a bare `CALL
+WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
+keying data items by bare name needs it too. Pinned by
+`tests/regression/test_folded_reference_analyzers.py`.

@@ -13,6 +13,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
 )
@@ -58,7 +59,7 @@ class StringStatementParser(IStatementParser):
     ) -> StringStatement:
         start = token_stream.consume()
         stmt = StringStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -189,7 +190,7 @@ class UnstringStatementParser(IStatementParser):
     ) -> UnstringStatement:
         start = token_stream.consume()
         stmt = UnstringStatement(token_location(start))
-        start_column = getattr(getattr(start, "location", None), "column", None)
+        start_column = token_column(start)
         skip_whitespace(token_stream)
 
         # Source identifier

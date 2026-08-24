@@ -594,12 +594,17 @@ class UnusedVariableAnalyzer:
         # dependency for no real type-safety benefit, since these fields are
         # untyped raw text either way). Previously a field referenced only
         # inside one of these was falsely reported unused.
-        for exec_stmt in ast.find_all_by_type("ExecCicsStatement"):
-            for v in (getattr(exec_stmt, "options", None) or {}).values():
-                names |= _extract_identifiers(v)
-        for exec_stmt in ast.find_all_by_type("ExecImsStatement"):
-            for v in getattr(exec_stmt, "arguments", None) or []:
-                names |= _extract_identifiers(v)
+        # One shared traversal for both node types (find_all_by_type would
+        # walk the whole AST once per type -- two extra full walks on every
+        # analysis run, for nodes most programs don't contain at all).
+        for node in ast.traverse_depth_first():
+            type_name = type(node).__name__
+            if type_name == "ExecCicsStatement":
+                for v in (getattr(node, "options", None) or {}).values():
+                    names |= _extract_identifiers(v)
+            elif type_name == "ExecImsStatement":
+                for v in getattr(node, "arguments", None) or []:
+                    names |= _extract_identifiers(v)
 
         return names
 

@@ -63,6 +63,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** the H9 dedent guard treats a paragraph-header-shaped token
+  at the SAME column as the statement's verb as a boundary again (with the
+  missing-period warning), not as a trailing operand -- the strict
+  less-than comparison silently swallowed the next paragraph out of the
+  AST for decks that write statements flush in Area A alongside their
+  headers. Only a strictly deeper token (the normal continuation-line
+  layout) is read as an operand.
+* **parser:** ADD/SUBTRACT addend lists recompose a sign-prefixed numeric
+  (`ADD -1 TO WS-X`) via the shared `consume_signed_numeric` -- the
+  fall-through consume was silently dropping the sign, recording a
+  sign-inverted operand, while MULTIPLY/DIVIDE/SET/PERFORM already
+  recomposed it.
+* **preprocessing:** `strip_sequence_area`'s short-line change-tag
+  blanking now exempts every COBOL reserved word (lazily imported from
+  the lexer's keyword table), not just EJECT/SKIP1-3 -- a flush-left
+  `GOBACK`/`EXIT`/`STOP`/`MOVE` line under 7 characters was silently
+  deleted during copybook expansion. Shop tags (`P2P`, `M1005`) are never
+  reserved words and are still blanked. All three pinned by
+  `tests/regression/test_diff_scan_findings.py`.
+* **parser:** SET now folds `OF`/`IN` qualifier chains into its targets and
+  values via the shared `consume_optional_qualifiers`/`consume_value_operand`
+  helpers, matching MOVE/arithmetic/PERFORM. Previously `SET WS-IDX TO
+  WS-VAL OF WS-CTL` stranded `OF WS-CTL` in the stream (dropped as
+  "Unparsed tokens") and `SET FLAG-ON OF WS-REC TO TRUE` silently recorded
+  two spurious targets with the `OF` discarded. Pinned by
+  `tests/regression/test_set_qualifier_chain.py`.
+* **analysis:** `MoveTypeChecker` and `DynamicCallAnalyzer` now resolve
+  folded qualified/subscripted reference strings (`"WS-NUM OF GRP-1"`,
+  `"WS-TAB ( 3 )"`) by their base data name (new shared
+  `analysis._names.base_data_name`). The qualifier-folding parser series
+  had silently broken both: a qualified MOVE target missed every catalog
+  lookup (zero move-type violations where the bare form flagged one) and a
+  dynamic CALL's possible values came back empty when the value arrived
+  via a qualified MOVE target. Pinned by
+  `tests/regression/test_folded_reference_analyzers.py`.
+* **lexer:** `'!'`/`'|'`/`'¬'` outside an `EXEC ... END-EXEC` block are
+  hard "Invalid character" lexer errors again (a linear
+  `_flag_stray_sql_chars` post-pass shared by the Cython fast path). The
+  BANG/PIPE/NOT_SIGN tokens added for embedded SQL (`!=`, `||`, `¬=`)
+  accepted these characters *everywhere*, silently turning garbage COBOL
+  into a successful parse with zero diagnostics. Inside EXEC blocks they
+  still round-trip. Pinned by `tests/regression/test_stray_sql_chars.py`.
+* **preprocessing:** the numeric identification-stamp gate on the
+  column-72 mid-token truncation warning now requires the all-digit tail
+  to fill columns 73-80 exactly (the real ISPF/Z Open Editor auto-number
+  shape), instead of accepting any all-digit tail that fits under column
+  80 — a split data name whose trailing digits spilled a few columns past
+  72 was truncated with no warning at all. Both the pure-Python and Cython
+  normalizers.
+* **parser/preprocessing/lexer (maintenance):** consolidated per-file
+  copies behind shared homes so they cannot drift: the noise-token
+  lookahead set (`_NOISE_TOKEN_TYPES` + `peek_past_noise` in
+  `parsers/statements/_utils.py`), the H9 dedent guard's
+  `token_column` accessor (replacing 16 hand-rolled `getattr` chains
+  across 10 parser files), the value-operand reader
+  (`consume_value_operand`, shared by PERFORM FROM/BY and SET), and the
+  column-7 comment-indicator sets (`COMMENT_INDICATORS` /
+  `DEBUG_INDICATORS` / `VERSION_TAG_INDICATORS` in
+  `preprocess/_normalize.py`, used by `normalize_fixed_format`,
+  `is_comment_line`, `_detect_fixed_format`, and
+  `_fixed_format_comment_tokens`). Also: the digit-led-identifier scan in
+  both lexers stops at the first letter found and drops a dead
+  dash-then-letter disjunct; the copybook expander's wrap loop scans only
+  up to column 72 per iteration (`_rightmost_safe_blank`) instead of
+  rescanning the whole remaining line; `UnusedVariableAnalyzer`'s EXEC
+  CICS/IMS sweep is one traversal instead of two; EVALUATE subject
+  collection and the SKIP1/2/3 dispatch table lost redundant
+  intermediates. No behavior change.
+
 * **parser/preprocessing:** review-pass hardening of the corpus-retry
   fixes below (each gap reproduced before fixing): the OCCURS count read's
   newline-skip no longer swallows the *next data item's level number* as

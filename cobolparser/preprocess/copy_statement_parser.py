@@ -15,6 +15,7 @@ Properly handles:
 import bisect
 import re
 
+from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
 # Fixed-format COBOL column boundaries
@@ -148,6 +149,25 @@ def _count_unmatched_quotes(text: str, quote_char: str) -> int:
     return count
 
 
+_RESERVED_WORDS_CACHE: frozenset[str] | None = None
+
+
+def _cobol_reserved_words() -> frozenset[str]:
+    """The lexer's COBOL keyword set, imported lazily and cached.
+
+    Deferred import: ``cobolparser.lexer`` must stay out of this module's
+    import-time dependencies (the package ``__init__`` chain would make an
+    eager import circular), same rationale as the lexer's own deferred
+    preprocess imports.
+    """
+    global _RESERVED_WORDS_CACHE
+    if _RESERVED_WORDS_CACHE is None:
+        from ..lexer import CobolLexer
+
+        _RESERVED_WORDS_CACHE = frozenset(CobolLexer.KEYWORDS)
+    return _RESERVED_WORDS_CACHE
+
+
 def strip_sequence_area(source: str) -> str:
     """
     Strip the sequence areas from fixed-format COBOL for regex-based extraction.
@@ -198,14 +218,19 @@ def strip_sequence_area(source: str) -> str:
             # passthrough kept working -- blanking those silently deletes
             # code with no warning. So blank only tag-shaped content: a
             # single blank-free token that neither ends the statement with
-            # a period nor is a compiler-directing word. Everything else
-            # keeps the passthrough.
+            # a period nor is ANY COBOL reserved word. The keyword check
+            # matters beyond compiler-directing words: a flush-left
+            # ``GOBACK`` (6 chars) with its period on the next line, or a
+            # verb like ``MOVE``/``EXIT``/``STOP`` split from its operands,
+            # is real code -- shop change tags (``P2P``, ``M1005``,
+            # ``E1A``) are never reserved words. Everything else keeps the
+            # passthrough.
             content = line.strip()
             is_tag = (
                 bool(content)
                 and " " not in content
                 and not content.endswith(".")
-                and content.upper() not in ("EJECT", "SKIP1", "SKIP2", "SKIP3")
+                and content.upper() not in _cobol_reserved_words()
             )
             result.append("" if is_tag else line)
         else:
@@ -251,8 +276,7 @@ def is_comment_line(line: str) -> bool:
     """
     if len(line) < 7:
         return False
-    indicator = line[6]
-    return indicator in ("*", "/", "D", "d", "V", "v")
+    return line[6] in ALL_COMMENT_INDICATORS
 
 
 def is_within_string_literal(source: str, match_start: int, match_end: int) -> bool:

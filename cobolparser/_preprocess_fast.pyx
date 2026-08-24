@@ -73,6 +73,10 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
         indicator  = line[_IND_IDX] if len(line) > _IND_IDX else " "
         text_slice = line[_TEXT_START : _TEXT_END]
 
+        # Indicator characters mirror _normalize.py's COMMENT_INDICATORS /
+        # DEBUG_INDICATORS / VERSION_TAG_INDICATORS constants (inlined here
+        # for C-level char comparisons, like the rest of this mirror) --
+        # extend those sets and this line together.
         is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")
         is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")
         if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:
@@ -111,14 +115,17 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 exceeds_traditional_width = content_len > _ID_END
                 dropped = line[_TEXT_END:].rstrip()
                 # Second, independent gate (mirrors the pure-Python rule): a
-                # purely-numeric dropped tail that still fits within the
-                # traditional 80-column width is a per-line sequence/
-                # change-tracking stamp (e.g. IBM Z Open Editor/ISPF-style
-                # auto numbering like 03050009) even when columns 1-6 are
-                # blank -- not an actual token split. A mixed alnum tail
-                # (e.g. NIST's IX2094.2 test-case id) doesn't qualify.
+                # purely-numeric dropped tail that fills the traditional
+                # 80-column identification area EXACTLY (digits from column
+                # 73 through 80) is a per-line sequence/change-tracking
+                # stamp (e.g. IBM Z Open Editor/ISPF-style auto numbering
+                # like 03050009, always the full 8-column field) even when
+                # columns 1-6 are blank -- not an actual token split. A
+                # shorter all-digit tail (a data name's own trailing digits
+                # spilling past 72) and a mixed alnum tail (e.g. NIST's
+                # IX2094.2 test-case id) both still warn.
                 is_numeric_id_stamp = (
-                    not exceeds_traditional_width and dropped.isdigit()
+                    content_len == _ID_END and dropped.isdigit()
                 )
                 if mid_token and not is_numeric_id_stamp:
                     warnings.append(

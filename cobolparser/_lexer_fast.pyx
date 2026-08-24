@@ -171,6 +171,10 @@ class CobolLexer(_CobolLexerBase):
         out_tokens.append(
             Token(TokenType.EOF, "", SourceLocation(n_lines + 1, 1, 1))
         )
+        # Inherited pure-Python post-pass (lexer.py): flags '!'/'|'/'¬'
+        # tokens outside EXEC ... END-EXEC as the invalid characters they
+        # are. One linear scan; not worth a C-typed mirror.
+        self._flag_stray_sql_chars()
         return out_tokens
 
     # ------------------------------------------------------------------
@@ -417,11 +421,14 @@ class CobolLexer(_CobolLexerBase):
                 # or a letter run) looking for a letter anywhere in the rest
                 # of the word -- a single one-hop lookahead misses names
                 # like `22310-01-TRAITE`, where the first letter only
-                # appears two hyphens in.
+                # appears two hyphens in. The first letter found settles the
+                # question, so both loops stop there -- read_word_from_text
+                # re-scans the whole word anyway.
                 has_alpha = False
                 scan_pos = exponent_end
                 while (
-                    scan_pos < length
+                    not has_alpha
+                    and scan_pos < length
                     and text[scan_pos] == "-"
                     and scan_pos + 1 < length
                     and text[scan_pos + 1].isalnum()
@@ -430,34 +437,30 @@ class CobolLexer(_CobolLexerBase):
                     while scan_pos < length and text[scan_pos].isalnum():
                         if text[scan_pos].isalpha():
                             has_alpha = True
+                            break
                         scan_pos += 1
 
-                # Patterns "42-DATANAMES" and "25COUNT" / "45A" — identifier.
+                # Patterns "25COUNT" / "45A" — identifier. The dash-then-
+                # letter case (42-DATANAMES) is already covered: the hyphen-
+                # segment scan above sets has_alpha for it, and when an
+                # exponent was consumed the character at lookahead_pos is
+                # E/e, never a dash.
                 # Scientific notation (3E2, 1E+5) is excluded: E/e followed by
                 # a digit or sign+digit stays on the read_number_from_text path.
                 if has_alpha or (
                     lookahead_pos < length
-                    and (
-                        (
-                            text[lookahead_pos] == "-"
-                            and lookahead_pos + 1 < length
-                            and text[lookahead_pos + 1].isalpha()
-                        )
-                        or (
-                            text[lookahead_pos].isalpha()
-                            and not (
-                                text[lookahead_pos].upper() == "E"
-                                and (
-                                    (
-                                        lookahead_pos + 1 < length
-                                        and text[lookahead_pos + 1].isdigit()
-                                    )
-                                    or (
-                                        lookahead_pos + 2 < length
-                                        and text[lookahead_pos + 1] in ("+", "-")
-                                        and text[lookahead_pos + 2].isdigit()
-                                    )
-                                )
+                    and text[lookahead_pos].isalpha()
+                    and not (
+                        text[lookahead_pos].upper() == "E"
+                        and (
+                            (
+                                lookahead_pos + 1 < length
+                                and text[lookahead_pos + 1].isdigit()
+                            )
+                            or (
+                                lookahead_pos + 2 < length
+                                and text[lookahead_pos + 1] in ("+", "-")
+                                and text[lookahead_pos + 2].isdigit()
                             )
                         )
                     )

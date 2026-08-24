@@ -13,6 +13,7 @@ from cobolparser.parsers.statements._utils import (
     matches_keyword,
     report_parse_error,
     skip_whitespace,
+    token_column,
     try_consume_keyword,
     warn_paragraph_boundary_swallowed,
 )
@@ -78,7 +79,7 @@ class MoveStatementParser(IStatementParser):
     ) -> MoveStatement:
         """Parse a MOVE statement."""
         start_token = token_stream.consume()
-        start_column = getattr(getattr(start_token, "location", None), "column", None)
+        start_column = token_column(start_token)
         factory = get_factory()
         stmt = cast(
             MoveStatement,

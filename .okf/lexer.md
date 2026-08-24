@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Lexer
-description: Tokenizes COBOL source into Token objects; 236 TokenType values; optional Cython hot-path.
+description: Tokenizes COBOL source into Token objects; 243 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
 timestamp: 2026-08-14T23:45:00Z
 ---
@@ -29,7 +29,7 @@ tokens: list[Token] = tokenize_cobol(text)       # convenience wrapper
 
 # TokenType Enum
 
-`TokenType(IntEnum)` — 236 members. Using `IntEnum` rather than plain `Enum`
+`TokenType(IntEnum)` — 243 members. Using `IntEnum` rather than plain `Enum`
 makes hot-path membership tests and `hash()` lookups significantly cheaper.
 
 Major groups:
@@ -367,3 +367,22 @@ test_space_free_exponent_shaped_subtraction_is_an_accepted_tradeoff`.
 
 * [preprocessing.md](preprocessing.md) — upstream fixed-format normalisation
 * [parser.md](parser.md) — consumes `List[Token]` via `TokenStream`
+
+# Stray '!' / '|' / '¬' post-pass + digit-word scan early exit (2026-08-24)
+
+`CobolLexer._flag_stray_sql_chars()` runs at the end of `tokenize()` (both
+the pure-Python and `_lexer_fast.pyx` implementations call it — the fast
+path inherits the pure-Python method; one linear scan, no C mirror): every
+BANG/PIPE/NOT_SIGN token *outside* an `EXEC ... END-EXEC` token span
+records the old hard `Invalid character` LexerError. The tokens exist only
+so embedded EXEC SQL (`!=`, `||`, `¬=`) round-trips; the first version
+accepted them everywhere, which let garbage like `MOVE BOGUS !!! TO WS-A`
+parse "successfully" with zero diagnostics. Pinned by
+`tests/regression/test_stray_sql_chars.py`.
+
+The digit-led-identifier heuristic's hyphen-segment scan (`has_alpha`,
+both lexers) stops at the first letter found — the answer is final there,
+and `read_word_from_text` re-scans the whole word anyway. The old
+dash-then-letter disjunct in the decision expression was removed as dead:
+the segment scan already sets `has_alpha` for it, and when an exponent was
+consumed the character at `lookahead_pos` is E/e, never a dash.
