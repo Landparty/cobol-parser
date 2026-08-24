@@ -239,6 +239,22 @@ class ContinueStatement(CobolStatement):
         return super().to_dict()
 
 
+class NextSentenceStatement(CobolStatement):
+    """AST node for NEXT SENTENCE statements.
+
+    Transfers control to the statement following the next period, skipping
+    the rest of the current sentence -- unlike CONTINUE (a true no-op that
+    falls through to the very next statement), so it gets its own node
+    rather than reusing ContinueStatement.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("NEXT-SENTENCE", location)
+
+    def to_dict(self) -> dict[str, Any]:
+        return super().to_dict()
+
+
 class EjectStatement(CobolStatement):
     """AST node for EJECT statements (compiler-directing listing no-op).
 

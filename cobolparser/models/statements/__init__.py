@@ -81,6 +81,7 @@ from .misc import (
     GobackStatement,
     InvokeStatement,
     MergeStatement,
+    NextSentenceStatement,
     ReleaseStatement,
     ReturnStatement,
     RollbackStatement,
@@ -116,6 +117,7 @@ __all__ = [
     "IOUnlockStatement",
     # New statement types
     "ContinueStatement",
+    "NextSentenceStatement",
     "EjectStatement",
     "SkipStatement",
     "ExitStatement",

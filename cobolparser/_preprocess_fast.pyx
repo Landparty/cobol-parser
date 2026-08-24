@@ -127,7 +127,12 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 is_numeric_id_stamp = (
                     content_len == _ID_END and dropped.isdigit()
                 )
-                if mid_token and not is_numeric_id_stamp:
+                # Mirrors the pure-Python rule: a dropped tail that is only
+                # the statement-terminating period (e.g. a banner-style
+                # VALUE literal whose closing quote lands on column 72)
+                # closed cleanly -- nothing was actually split mid-token.
+                is_bare_terminal_period = dropped == "."
+                if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:
                     warnings.append(
                         f"Line {line_no}: content beyond column {_TEXT_END} "
                         f"was dropped mid-token: {dropped!r}"

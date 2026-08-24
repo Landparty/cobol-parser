@@ -6,6 +6,7 @@ from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
     consume_end_keyword_and_period,
     consume_key_is,
+    consume_optional_qualifiers,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
@@ -122,8 +123,10 @@ class StartStatementParser(IStatementParser):
                 and token.value
                 and token.value.upper() not in SCOPE_TERMINATORS
             ):
-                stmt.set_key_name(token.value)
+                key_name = token.value or ""
                 token_stream.consume()
+                key_name = consume_optional_qualifiers(token_stream, key_name)
+                stmt.set_key_name(key_name)
                 skip_whitespace(token_stream)
 
         parse_invalid_key_clauses(token_stream, stmt, "END-START")

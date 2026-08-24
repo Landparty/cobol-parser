@@ -63,6 +63,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** `NEXT SENTENCE` is now a recognized statement (new
+  `NextSentenceStatement` AST node) instead of being silently swallowed
+  into the enclosing IF/EVALUATE/SEARCH condition's text -- `IF WS-A = "Y"
+  NEXT SENTENCE` previously parsed as a comparison against `"'Y' NEXT
+  SENTENCE"` with an empty THEN branch. Pinned by
+  `tests/regression/test_corpus_residual_findings.py`.
+* **parser:** `PERFORM ... WITH TEST BEFORE/AFTER` now tolerates WITH,
+  TEST, and BEFORE/AFTER each landing on their own continuation line, in
+  all three PERFORM forms (inline UNTIL, out-of-line, and VARYING) --
+  previously the clause was left partially unconsumed ("Unparsed tokens
+  starting at 'TEST'") and `perform_type` silently fell back to `SIMPLE`.
+* **parser:** DISPLAY's subscript fold tolerates a subscript wrapped onto
+  its own continuation line (`DISPLAY WS-ITEM\n    (WS-IDX).`) -- the
+  bare `(` was previously left unconsumed and aborted the display-item
+  list ("Unparsed tokens starting at '('").
+* **parser:** WRITE's record-name/FROM source, READ's INTO target/KEY
+  name, and START's KEY name now fold a trailing `OF`/`IN` qualifier chain
+  or subscript via the shared `consume_optional_qualifiers` helper
+  (previously only wired into MOVE/arithmetic/SET) -- e.g. `WRITE OUT-REC
+  FROM WS-LINE OF WS-GROUP` stranded `OF WS-GROUP` as unparsed tokens.
+* **preprocessing:** the column-72 mid-token overflow warning no longer
+  fires when the entire dropped tail is just the statement-terminating
+  period -- a banner-style `VALUE` literal whose closing quote lands
+  exactly on column 72 (`VALUE '**** TITLE ****'.`) closed cleanly, and a
+  lone dropped period costs nothing (every statement parser already
+  tolerates a missing terminator). Both the pure-Python and Cython
+  normalizers. Pinned by `TestBareTerminalPeriodDoesNotWarn` in
+  `tests/regression/test_normalize_column_overflow_warning.py`.
 * **parser:** the H9 dedent guard treats a paragraph-header-shaped token
   at the SAME column as the statement's verb as a boundary again (with the
   missing-period warning), not as a trailing operand -- the strict

@@ -605,7 +605,23 @@ def normalize_fixed_format(
                 is_numeric_id_stamp = (
                     content_len == IDENTIFICATION_END_COL and dropped.isdigit()
                 )
-                if mid_token and not is_numeric_id_stamp:
+                # A dropped tail that is *only* the statement-terminating
+                # period (nothing else survives the rstrip) never corrupts a
+                # token: whatever ended at column 72 -- most commonly a
+                # string literal's closing quote in a banner-style VALUE
+                # clause -- closed cleanly, and the period is a separate,
+                # single-character token the parser already tolerates
+                # missing entirely (PROGRAM-ID, MOVE, and every other
+                # statement recover from a missing terminator). Flagging
+                # this as a "mid-token" split is misleading -- nothing was
+                # split -- and floods well-formed source whose closing quote
+                # merely lands on column 72 with a spurious warning.
+                is_bare_terminal_period = dropped == "."
+                if (
+                    mid_token
+                    and not is_numeric_id_stamp
+                    and not is_bare_terminal_period
+                ):
                     warnings.append(
                         f"Line {line_no}: content beyond column {TEXT_END_COL} "
                         f"was dropped mid-token: {dropped!r}"

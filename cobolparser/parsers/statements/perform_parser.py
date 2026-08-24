@@ -174,13 +174,18 @@ class PerformStatementParser(IStatementParser):
             self._parse_varying_clause(token_stream, stmt)
             return stmt
 
-        # Check for TEST clause (WITH TEST BEFORE/AFTER)
+        # Check for TEST clause (WITH TEST BEFORE/AFTER) -- WITH, TEST, and
+        # BEFORE/AFTER may each land on their own continuation line, so a
+        # skip_whitespace before every peek is required or the clause is
+        # silently left unconsumed (H3-style newline-intolerance bug).
         if token.type == TokenType.WITH:
             try:
                 token_stream.consume()  # Skip WITH
+                skip_whitespace(token_stream)
                 token = token_stream.peek()
                 if token and token.type == TokenType.TEST:
                     token_stream.consume()  # Skip TEST
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
                         val = token.type.name  # "BEFORE" or "AFTER"
@@ -354,13 +359,16 @@ class PerformStatementParser(IStatementParser):
             skip_whitespace(token_stream)
             token = token_stream.peek()
 
-            # Check for WITH TEST clause after paragraph name (WITH TEST BEFORE/AFTER)
+            # Check for WITH TEST clause after paragraph name (WITH TEST
+            # BEFORE/AFTER) -- see the newline-tolerance note above.
             if token and token.type == TokenType.WITH:
                 try:
                     token_stream.consume()  # Skip WITH
+                    skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.TEST:
                         token_stream.consume()  # Skip TEST
+                        skip_whitespace(token_stream)
                         token = token_stream.peek()
                         if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
                             val = token.type.name  # "BEFORE" or "AFTER"
@@ -511,14 +519,17 @@ class PerformStatementParser(IStatementParser):
             return
         skip_whitespace(stream)
 
-        # Check for WITH TEST clause (before UNTIL)
+        # Check for WITH TEST clause (before UNTIL) -- see the
+        # newline-tolerance note in the top-level WITH TEST check above.
         token = stream.peek()
         if token and token.type == TokenType.WITH:
             try:
                 stream.consume()  # Skip WITH
+                skip_whitespace(stream)
                 token = stream.peek()
                 if token and token.type == TokenType.TEST:
                     stream.consume()  # Skip TEST
+                    skip_whitespace(stream)
                     token = stream.peek()
                     if token and token.type in (TokenType.BEFORE, TokenType.AFTER):
                         val = token.type.name  # "BEFORE" or "AFTER"

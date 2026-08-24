@@ -745,3 +745,20 @@ imported from `CobolLexer.KEYWORDS` -- eager import would be circular).
 The first version excluded only EJECT/SKIP1-3, silently deleting flush-left
 `GOBACK`/`EXIT`/`STOP` lines during expansion. Pinned by
 `tests/regression/test_diff_scan_findings.py`.
+
+**Bare terminal period does not warn (2026-08-24):** the column-72
+mid-token overflow warning's rule 1 gains a third gate (alongside the
+columns-1-6 sequence-number gate and the numeric-identification-stamp
+gate): a dropped tail that is *only* the statement-terminating period
+(`dropped == "."` exactly) never warns. Found via a banner-style `VALUE`
+literal (`VALUE '**** REPORT TITLE ****'.`) whose closing quote lands
+exactly on column 72, immediately followed by the period at column 73 with
+no separating blank -- satisfying the "columns 72 and 73 both non-blank"
+mid-token shape even though nothing was split: the literal closed cleanly,
+and a lone dropped period costs nothing (every statement parser already
+tolerates a missing terminating period). A dropped tail that merely
+*starts* with a period but carries more (`.B`, `. WS-COUNT`) still warns —
+the gate only matches the exact one-character tail. Mirrored in both
+`_normalize.py` and `_preprocess_fast.pyx` (`.c` regenerated). Pinned by
+`TestBareTerminalPeriodDoesNotWarn` in
+`tests/regression/test_normalize_column_overflow_warning.py`.

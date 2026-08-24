@@ -6,6 +6,7 @@ from cobolparser.parsers.statements._utils import (
     collect_clause_stmts,
     consume_end_keyword_and_period,
     consume_key_is,
+    consume_optional_qualifiers,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
@@ -77,16 +78,20 @@ class ReadStatementParser(IStatementParser):
             skip_whitespace(token_stream)
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
-                stmt.set_into(token.value)
+                into_target = token.value or ""
                 token_stream.consume()
+                into_target = consume_optional_qualifiers(token_stream, into_target)
+                stmt.set_into(into_target)
                 skip_whitespace(token_stream)
 
         # Optional KEY IS clause (may be tokenized as KEY_IS or KEY + IS)
         if consume_key_is(token_stream):
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
-                stmt.set_key(token.value)
+                key_name = token.value or ""
                 token_stream.consume()
+                key_name = consume_optional_qualifiers(token_stream, key_name)
+                stmt.set_key(key_name)
                 skip_whitespace(token_stream)
 
         # Optional WITH [NO] LOCK

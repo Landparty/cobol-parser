@@ -226,7 +226,7 @@ AST nodes for EXEC SQL, EXEC CICS, and EXEC IMS DLI blocks captured by
 | `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` |
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
-| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
+| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `NextSentenceStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
 
 **`InvokeStatement`/`AllocateStatement`/`FreeStatement` (2026-08-05, `misc.py`):**
 back the new `invoke_parser.py`/`allocate_free_parsers.py` statement parsers
@@ -312,6 +312,15 @@ subcommands rely on.
 * Consumers (`ProgramFlowAnalyzer`, `coverage_analyzer`,
   backend extractors per `interface-contract.md`) need no changes — all
   historical fields/keys are untouched.
+
+# New node: NextSentenceStatement (2026-08-24)
+
+`NextSentenceStatement` (`statement_type` `"NEXT-SENTENCE"`) backs `NEXT
+SENTENCE`, previously unparsed entirely (see [parser.md](parser.md)'s
+"Residual corpus findings" section). Deliberately its own node rather than
+reusing `ContinueStatement`: NEXT SENTENCE transfers control past the rest
+of the current sentence, not a true fall-through no-op, even at the depth
+this parser models control flow.
 
 # See Also
 

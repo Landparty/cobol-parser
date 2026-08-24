@@ -5,6 +5,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     collect_clause_stmts,
     consume_end_keyword_and_period,
+    consume_optional_qualifiers,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
@@ -50,9 +51,10 @@ class WriteStatementParser(IStatementParser):
         # Parse record name (required)
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER:
-            record_name = token.value
-            stmt.set_record_name(record_name)
+            record_name = token.value or ""
             token_stream.consume()
+            record_name = consume_optional_qualifiers(token_stream, record_name)
+            stmt.set_record_name(record_name)
         else:
             # Missing record name - just return what we have
             return stmt
@@ -61,15 +63,18 @@ class WriteStatementParser(IStatementParser):
 
         # Check for FROM clause: lexer emits TokenType.FROM for "FROM"
         if try_consume_keyword(token_stream, TokenType.FROM, "FROM"):
-            # Parse FROM source: an identifier (the common case) or a
-            # literal -- `WRITE rec FROM 'some text'` is a real IBM/
-            # GnuCOBOL extension seen in production batch programs (e.g.
-            # writing a fixed exception-message record).
+            # Parse FROM source: an identifier (the common case, folding a
+            # trailing subscript/OF-IN qualifier chain -- `WRITE rec FROM
+            # WS-ITEM(1)` in a table-driven print routine) or a literal --
+            # `WRITE rec FROM 'some text'` is a real IBM/GnuCOBOL extension
+            # seen in production batch programs (e.g. writing a fixed
+            # exception-message record).
             token = token_stream.peek()
             if token and token.type == TokenType.IDENTIFIER:
-                source = token.value
-                stmt.set_from(source)
+                source = token.value or ""
                 token_stream.consume()
+                source = consume_optional_qualifiers(token_stream, source)
+                stmt.set_from(source)
             elif token and token.type == TokenType.STRING_LITERAL:
                 stmt.set_from(f'"{token.value or ""}"')
                 token_stream.consume()
