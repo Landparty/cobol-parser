@@ -1973,6 +1973,7 @@ def _tokenize_source(
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
     free_form: bool = False,
     keep_comments: bool = True,
+    preprocess_fixed: bool | None = None,
 ) -> tuple[list[Token], list[LexerError], list[str]]:
     """Tokenize *source* on the same pipeline ``parse_cobol`` uses (M6).
 
@@ -1986,6 +1987,12 @@ def _tokenize_source(
     original positions. Free-form (or non-fixed-detected) input is lexed
     directly, unchanged.
 
+    *preprocess_fixed* overrides that auto-detection when not None: True
+    always normalizes, False never does. Mirrors ``parse_cobol``'s parameter
+    of the same name, so ``cobol-parser tokenize --source-format=fixed``
+    agrees with ``cobol-parser parse --source-format=fixed`` on source whose
+    layout the detector cannot infer on its own.
+
     Returns:
         Tuple of (tokens, lexer errors, lexer warnings).
     """
@@ -1995,7 +2002,12 @@ def _tokenize_source(
         from .parser import _detect_fixed_format
         from .preprocess import normalize_fixed_format
 
-        if _detect_fixed_format(source):
+        should_normalize = (
+            _detect_fixed_format(source)
+            if preprocess_fixed is None
+            else preprocess_fixed
+        )
+        if should_normalize:
             physical_lines = source.splitlines()
             errors: list[LexerError] = []
             normalize_warnings: list[str] = []

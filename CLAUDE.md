@@ -87,7 +87,7 @@ python -m black .
 python -m mypy cobolparser/
 
 # CLI subcommands
-cobol-parser parse <file.cbl> [path] [--compact] [--free-form] [--dialect ibm-enterprise] [--errors] [--stats]
+cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--dialect ibm-enterprise] [--errors] [--stats]
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks

@@ -59,12 +59,52 @@ def _add_compact_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_free_form_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+def _add_source_format_args(parser: argparse.ArgumentParser) -> None:
+    """Add the source-layout flags shared by every source-reading subcommand.
+
+    ``--source-format`` is the current spelling; ``--free-form`` predates it
+    and is kept as an exact alias for ``--source-format=free`` so existing
+    invocations and scripts keep working. They are mutually exclusive because
+    ``--free-form --source-format=fixed`` has no coherent meaning.
+    """
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--source-format",
+        choices=["auto", "fixed", "free"],
+        default="auto",
+        help=(
+            "How to interpret source columns (default: auto). 'fixed' forces "
+            "fixed-format normalization -- columns 1-6 are stripped even when "
+            "they hold change-tracking tags rather than blanks or sequence "
+            "numbers; 'free' disables normalization entirely"
+        ),
+    )
+    group.add_argument(
         "--free-form",
         action="store_true",
-        help="Treat source as free-form COBOL",
+        help="Alias for --source-format=free",
     )
+
+
+def _resolve_source_format(args: argparse.Namespace) -> str:
+    """Collapse the two layout flags into one 'auto' | 'fixed' | 'free' value."""
+    if getattr(args, "free_form", False):
+        return "free"
+    return str(getattr(args, "source_format", "auto"))
+
+
+def _source_format_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    """Map the resolved layout onto ``parse_cobol``'s two format parameters.
+
+    ``preprocess_fixed`` is the override (None = auto-detect) and
+    ``free_form`` selects the lexer mode used when no normalization runs.
+    """
+    source_format = _resolve_source_format(args)
+    if source_format == "free":
+        return {"free_form": True, "preprocess_fixed": False}
+    if source_format == "fixed":
+        return {"free_form": False, "preprocess_fixed": True}
+    return {"free_form": False, "preprocess_fixed": None}
 
 
 def _add_error_recovery_arg(parser: argparse.ArgumentParser) -> None:
@@ -245,7 +285,7 @@ def _build_parse_parser(
         help="Dot-separated AST path (e.g., procedure.MAIN-LOGIC.display)",
     )
     _add_compact_arg(p)
-    _add_free_form_arg(p)
+    _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
@@ -298,7 +338,7 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     parse_kwargs: dict[str, Any] = {
         "dialect": dialect,
         "error_recovery": error_recovery,
-        "free_form": getattr(args, "free_form", False),
+        **_source_format_kwargs(args),
     }
 
     if not enable_profiling:
@@ -588,7 +628,7 @@ def _build_tokenize_parser(
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
-    _add_free_form_arg(p)
+    _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_output_arg(p)
     p.set_defaults(func=_cmd_tokenize)
@@ -605,7 +645,7 @@ def _cmd_tokenize(args: argparse.Namespace) -> None:
     # preserved as COMMENT tokens. Lexer errors are ignored here, matching
     # the previous behavior of this subcommand (best-effort token dump).
     tokens, _errors, _warnings = _tokenize_source(
-        source, args.file, dialect, free_form=args.free_form
+        source, args.file, dialect, **_source_format_kwargs(args)
     )
 
     output = {
@@ -641,7 +681,7 @@ def _build_preprocess_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
-    _add_free_form_arg(p)
+    _add_source_format_args(p)
     _add_define_args(p)
     p.add_argument(
         "--strip-directives",
@@ -672,7 +712,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         for cw in conditional_warnings:
             print(f"warning: {cw}", file=sys.stderr)
 
-    if not args.free_form:
+    if _resolve_source_format(args) != "free":
         normalize_warnings: list[str] = []
         source = normalize_fixed_format(
             source.splitlines(), warnings=normalize_warnings
@@ -1100,7 +1140,7 @@ def _build_analyzer_parser(
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
-    _add_free_form_arg(p)
+    _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
@@ -1171,7 +1211,7 @@ def _build_unused_variables_parser(
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_compact_arg(p)
-    _add_free_form_arg(p)
+    _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
@@ -1216,7 +1256,7 @@ def _parse_without_copybook_expansion(args: argparse.Namespace) -> Any:
     parse_kwargs: dict[str, Any] = {
         "dialect": dialect,
         "error_recovery": error_recovery,
-        "free_form": getattr(args, "free_form", False),
+        **_source_format_kwargs(args),
     }
     return parse_cobol(source, filename=args.file, **parse_kwargs)
 
@@ -1290,7 +1330,7 @@ def _build_program_flow_parser(
         help="Output format: json (default), mermaid (Mermaid flowchart), or dot (Graphviz DOT)",
     )
     _add_compact_arg(p)
-    _add_free_form_arg(p)
+    _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)

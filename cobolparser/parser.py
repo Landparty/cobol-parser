@@ -33,6 +33,8 @@ from .plugins.core import (
 )
 from .preprocess import (
     ALL_COMMENT_INDICATORS,
+    TEXT_END_COL,
+    TEXT_START_COL,
     normalize_fixed_format,
     strip_compiler_directives,
 )
@@ -678,10 +680,94 @@ class CobolParser:
         )
 
 
+#: A change-tracking tag as shops stamp it into the sequence area (columns
+#: 1-6): a single unbroken token of letters/digits and the punctuation that
+#: turns up in ticket ids (``SAPR24``, ``28486``, ``GART``, ``JSINT``,
+#: ``ABC-12``). The "no internal whitespace" property is what keeps ordinary
+#: free-form statement text (``MOVE A``, ``IF A =``) out -- see
+#: :func:`_sequence_area_is_fixed_like`.
+_CHANGE_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_/#$.-]*$")
+
+#: Area A headers used to corroborate a *tagged* sequence area. Anchored at
+#: the start of the code area (column 8+), which is exactly where free-form
+#: source does not put them.
+_AREA_A_HEADERS = (
+    "IDENTIFICATION DIVISION",
+    "ID DIVISION",
+    "ENVIRONMENT DIVISION",
+    "DATA DIVISION",
+    "PROCEDURE DIVISION",
+    "PROGRAM-ID",
+)
+
+#: How far into the file to look for the Area A anchor above. Division headers
+#: cluster at the top of a program, so a bounded scan keeps this O(1)-ish on a
+#: 28,000-line expanded source.
+_HEADER_SCAN_LIMIT = 100
+
+
+def _sequence_area_is_fixed_like(seq_area: str) -> tuple[bool, bool]:
+    """Classify a line's columns 1-6 as fixed-format evidence.
+
+    Returns ``(strict, relaxed)``:
+
+    * ``strict`` -- blank or all-digits, the two conventional sequence-area
+      fills. This is the historical rule and still decides on its own.
+    * ``relaxed`` -- additionally allows a change-tracking *tag*
+      (:data:`_CHANGE_TAG_RE`). Only ever consulted together with the Area A
+      anchor in :func:`_detect_fixed_format`, because a bare tag test alone
+      would also match free-form lines whose first six characters happen to
+      be a word followed by a blank column 7 (``ACCEPT X``, ``SEARCH T``).
+    """
+    stripped = seq_area.strip()
+    if stripped == "" or seq_area.replace(" ", "").isdigit():
+        return True, True
+    if _CHANGE_TAG_RE.match(stripped):
+        return False, True
+    return False, False
+
+
+def _has_area_a_division_header(non_empty_lines: list[str]) -> bool:
+    """True when a division/PROGRAM-ID header starts in the code area.
+
+    Fixed-format source puts these in Area A (columns 8-11); free-form source
+    puts them at column 1, where ``line[7:]`` slices into the middle of the
+    word (``IDENTIFICATION DIVISION.`` -> ``ICATION DIVISION.``) and cannot
+    match. That asymmetry is what makes this a safe corroborating signal for
+    a sequence area holding something other than blanks or digits.
+    """
+    for line in non_empty_lines[:_HEADER_SCAN_LIMIT]:
+        if len(line) < 8 or line[6] in ALL_COMMENT_INDICATORS:
+            continue
+        if (
+            line[TEXT_START_COL - 1 : TEXT_END_COL]
+            .lstrip()
+            .upper()
+            .startswith(_AREA_A_HEADERS)
+        ):
+            return True
+    return False
+
+
 def _detect_fixed_format(source: str) -> bool:
     """Detect if source appears to be in fixed-format COBOL.
 
     Returns True if source appears to be fixed-format, False if free-form.
+
+    Two rules, in order:
+
+    1. **Strict** -- at least 60% of the sampled lines carry a blank or
+       all-digit sequence area with a valid indicator column. Unchanged
+       historical behavior; decides on its own.
+    2. **Tagged sequence area** -- the same 60% bar, but also counting lines
+       whose columns 1-6 hold a change-tracking tag (``SAPR24``, ``28486``),
+       *and* requiring an Area A division header to corroborate. Shops that
+       stamp ticket ids into the sequence area used to fail rule 1 outright,
+       so the whole file was misclassified as free-form, normalization was
+       skipped, and the tag text lexed as code -- surfacing as stray
+       identifier/number tokens before the first division. The corroborating
+       anchor is what keeps genuine free-form source (which never puts a
+       division header at column 8) from being dragged in by rule 2.
     """
     lines = source.splitlines()
     non_empty_lines = [line for line in lines if line.strip()]
@@ -690,7 +776,8 @@ def _detect_fixed_format(source: str) -> bool:
         return False
 
     sample_size = min(10, len(non_empty_lines))
-    fixed_format_indicators = 0
+    strict_hits = 0
+    relaxed_hits = 0
 
     for line in non_empty_lines[:sample_size]:
         if len(line) < 7:
@@ -699,17 +786,18 @@ def _detect_fixed_format(source: str) -> bool:
         seq_area = line[:6]
         indicator = line[6] if len(line) > 6 else " "
 
-        seq_is_spaces_or_digits = (
-            seq_area.strip() == "" or seq_area.replace(" ", "").isdigit()
-        )
-
         valid_indicator = indicator in (" ", "-") or indicator in ALL_COMMENT_INDICATORS
+        if not valid_indicator:
+            continue
 
-        if seq_is_spaces_or_digits and valid_indicator:
-            fixed_format_indicators += 1
+        strict, relaxed = _sequence_area_is_fixed_like(seq_area)
+        strict_hits += strict
+        relaxed_hits += relaxed
 
     threshold = sample_size * 0.6
-    return fixed_format_indicators >= threshold
+    if strict_hits >= threshold:
+        return True
+    return relaxed_hits >= threshold and _has_area_a_division_header(non_empty_lines)
 
 
 # See the matching comment on CobolParser.parse -- same reason these stubs
