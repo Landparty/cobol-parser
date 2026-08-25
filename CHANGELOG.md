@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **cli:** `--source-format {auto,fixed,free}` (default `auto`) on every
+  source-reading subcommand, as an explicit override for layouts the
+  detector cannot infer in either direction — `fixed` always normalizes
+  (stripping columns 1-6 whatever they hold), `free` never does. The
+  pre-existing `--free-form` flag is retained as an exact alias for
+  `--source-format=free`; the two are mutually exclusive. `_tokenize_source`
+  gained a matching `preprocess_fixed` parameter so `tokenize` and `parse`
+  agree under a forced layout.
 * **analysis/cli:** `RecursionRiskAnalyzer` (`cobolparser.analysis.recursion_risk`)
   detects recursion-driven infinite-loop risks: out-of-line PERFORM cycles
   and GO TO cycles (reusing `ProgramFlowAnalyzer`'s `cycle_details`, graded
@@ -62,6 +70,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can no longer break CI without a deliberate version bump.
 
 ### Fixed
+
+* **parser:** fixed-format source whose sequence area (columns 1-6) holds a
+  change-tracking tag (`SAPR24`, `28486`, `GART`, `JSINT` — a common
+  mainframe convention) is no longer misclassified as free-form.
+  `_detect_fixed_format` counted a line as fixed-format evidence only when
+  columns 1-6 were blank or all digits, so a tagged program fell below the
+  60% threshold, `normalize_fixed_format` never ran, and the tag text
+  reached the lexer as code — surfacing as `No recognizable COBOL division
+  found near 'SAPR24'`, or as stray identifier/number tokens once copybook
+  content shifted which lines the detector sampled. Detection now also
+  counts a tag-like sequence area, gated on an Area A division header to
+  corroborate, so genuine free-form source (which never puts a division
+  header at column 8) is unaffected. Pinned by
+  `tests/regression/test_tagged_sequence_area_detection.py`.
 
 * **parser:** `NEXT SENTENCE` is now a recognized statement (new
   `NextSentenceStatement` AST node) instead of being silently swallowed

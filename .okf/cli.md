@@ -57,7 +57,8 @@ pinned by `tests/unit/cli/test_output_identification.py`):
 ## Parse
 
 ```bash
-cobol-parser parse <file.cbl> [json-path] [--compact] [--free-form] \
+cobol-parser parse <file.cbl> [json-path] [--compact] \
+    [--source-format auto|fixed|free] [--free-form] \
     [--dialect ibm-enterprise] [--errors] [--stats] [--find-type NODE_TYPE] \
     [--profile] [--profile-top-n N] [--profile-output PATH]
 ```
@@ -95,6 +96,27 @@ cobol-parser preprocess <file.cbl> [--define DEBUG]
 
 Runs fixed-format normalisation and conditional compilation; prints the resulting
 free-form text. `--define` sets compiler flags for conditional blocks.
+`--source-format=free` skips normalisation entirely.
+
+## Source layout (`--source-format`)
+
+Every source-reading subcommand accepts
+`--source-format {auto,fixed,free}` (default `auto`):
+
+| Value | Behaviour |
+|-------|-----------|
+| `auto` | Detect via `_detect_fixed_format` (see [parser.md](parser.md)) |
+| `fixed` | Always normalise — strips columns 1-6 whatever they hold |
+| `free`  | Never normalise |
+
+`--free-form` is an exact alias for `--source-format=free`, kept for
+backwards compatibility; passing both is rejected by argparse.
+
+Reach for `fixed` when a shop's layout defeats auto-detection — e.g. a
+sequence area holding a tag with an internal space. Auto-detection already
+handles the common case of a solid change-tracking tag (`SAPR24`, `28486`)
+in columns 1-6; before that fix such files were silently treated as
+free-form and their tag text lexed as code.
 
 All subcommands that run conditional compilation (`parse`, `preprocess`,
 `expand` with `--define`) print any conditional-compilation diagnostics

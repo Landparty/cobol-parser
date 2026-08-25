@@ -101,6 +101,33 @@ instead. `copy_statement_parser.is_comment_line()` and
 on both the pure-Python and Cython (`_preprocess_fast`) paths. Pinned by
 `tests/regression/test_version_tag_line_handling.py`.
 
+**Change-tracking tags in columns 1-6 (added 2026-08-25):** a related shop
+convention stamps a ticket id (`SAPR24`, `28486`, `GART`, `JSINT`) into the
+*sequence area* rather than column 7. `normalize_fixed_format` always
+handled these — it slices `line[7:72]` regardless of what columns 1-6 hold
+— but `parser._detect_fixed_format`, which decides *whether* to normalize
+at all, counted a line as fixed-format evidence only when columns 1-6 were
+blank or all digits. A tagged program therefore fell below the 60%
+threshold, was classified free-form, skipped normalization entirely, and
+its tag text reached the lexer as code (`No recognizable COBOL division
+found near 'SAPR24'`). Because the detector samples only the first 10
+non-blank lines, the misclassification could also flip as copybook
+expansion changed which lines those were, making it look intermittent.
+
+Detection now applies a second rule: a *tag-like* sequence area (a single
+unbroken `[A-Za-z0-9][A-Za-z0-9_/#$.-]*` token — the "no internal
+whitespace" property is what excludes ordinary free-form statement text
+like `MOVE A`) also counts, but only when corroborated by an Area A
+division header, i.e. a line whose columns 8+ start with
+`IDENTIFICATION DIVISION`/`PROGRAM-ID`/etc. Free-form source puts those at
+column 1, where the `line[7:]` slice lands mid-word and cannot match, so
+the anchor is what keeps rule 2 from dragging free-form input in. The
+strict blank/digit rule still decides on its own and is unchanged, so this
+only ever *adds* detections. Pinned by
+`tests/regression/test_tagged_sequence_area_detection.py`; the
+`--source-format` escape hatch for layouts neither rule infers is in
+[cli.md](cli.md).
+
 Continuation-line joining follows the COBOL rule that a continuation line's
 first non-blank character is the successor of the continued line's last
 non-blank character, **without an intervening space**:
