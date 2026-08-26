@@ -119,11 +119,18 @@ unbroken `[A-Za-z0-9][A-Za-z0-9_/#$.-]*` token — the "no internal
 whitespace" property is what excludes ordinary free-form statement text
 like `MOVE A`) also counts, but only when corroborated by an Area A
 division header, i.e. a line whose columns 8+ start with
-`IDENTIFICATION DIVISION`/`PROGRAM-ID`/etc. Free-form source puts those at
-column 1, where the `line[7:]` slice lands mid-word and cannot match, so
-the anchor is what keeps rule 2 from dragging free-form input in. The
-strict blank/digit rule still decides on its own and is unchanged, so this
-only ever *adds* detections. Pinned by
+`IDENTIFICATION DIVISION`/`PROGRAM-ID`/etc. **at a word boundary** — the
+header must be followed by a period, a space, or end of text, so an
+identifier merely starting with a header string (`PROGRAM-ID-VAL`) can
+never anchor. Free-form source puts real headers at column 1, where the
+`line[7:]` slice lands mid-word and cannot match, so the anchor is what
+keeps rule 2 from dragging free-form input in. The anchor scan is bounded
+(`_HEADER_SCAN_LIMIT` candidate lines), but comment lines (column-7
+indicator) and too-short lines do not consume the budget — tag-stamping
+shops open programs with 100+-line change-history banners, which would
+otherwise push the header out of the window and re-introduce the
+misclassification. The strict blank/digit rule still decides on its own
+and is unchanged, so this only ever *adds* detections. Pinned by
 `tests/regression/test_tagged_sequence_area_detection.py`; the
 `--source-format` escape hatch for layouts neither rule infers is in
 [cli.md](cli.md).
