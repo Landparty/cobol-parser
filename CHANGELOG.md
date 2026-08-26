@@ -83,6 +83,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **core:** `ASTNode.find_all_by_type()` returned its internal per-type
+  cache list by reference; a caller mutating the result silently corrupted
+  every later lookup for that node_type on the same AST. Now returns a
+  copy on every call. Pinned by
+  `test_find_all_by_type_mutation_does_not_corrupt_cache` in
+  `tests/unit/test_ast_base.py`.
+* **core:** `ASTNodeFactory.register_validator()` stored its config but
+  `create()` never consulted it, so a registered required-field/field-type
+  check was silently never enforced; `_node_validators` was also
+  class-level shared state, leaking registrations across factory
+  instances. `create()` now applies a matching registered validator after
+  node construction, and the registry is per-instance. Pinned by new tests
+  in `tests/unit/test_ast_factory.py`.
+
 * **parser:** fixed-format source whose sequence area (columns 1-6) holds a
   change-tracking tag (`SAPR24`, `28486`, `GART`, `JSINT` — a common
   mainframe convention) is no longer misclassified as free-form.

@@ -165,11 +165,11 @@ in rough priority order (identifiers reference the audit report's sections):
 - **P-D4** — statement `column` numbers are normalized-text coordinates
   (columns 1–7 stripped), systematically -7 from fixed-format source
   columns; undocumented. Document or translate.
-- **P-D5** — `ASTNodeFactory._node_validators` is class-level shared state
-  and is never consulted by `create()`; the advertised field validation is
-  unreachable. Wire it up or remove the registry.
-- **P-D6** — `ASTNode.find_all_by_type` returns the internal cache list;
-  callers mutating it corrupt later lookups. Return a copy.
+- ~~**P-D5**~~ — fixed 2026-08-26: `_node_validators` is now per-instance
+  state, and `create()` consults a registered validator after node
+  construction (`tests/unit/test_ast_factory.py`).
+- ~~**P-D6**~~ — fixed 2026-08-26: `find_all_by_type` now returns a copy of
+  its per-type cache (`tests/unit/test_ast_base.py`).
 - **P-C3/P-C4/P-C6** — test-only legacy char-cursor lexer API
   (`read_string_literal` et al.), uncalled `TokenStream.transaction()`,
   and dead newline-strip branches in both lexer variants.
