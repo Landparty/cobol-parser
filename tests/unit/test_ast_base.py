@@ -349,6 +349,25 @@ class TestASTNode:
         assert gc1 in results
         assert gc2 in results
 
+    def test_find_all_by_type_mutation_does_not_corrupt_cache(self):
+        """A caller mutating the returned list must not affect later calls.
+
+        find_all_by_type() caches its result per node_type internally; it
+        must hand back a copy of that cache, not the cache itself.
+        """
+        root = ConcreteASTNode("Root", SourceLocation(1, 1))
+        child = ConcreteASTNode("Target", SourceLocation(2, 1))
+        root.add_child(child)
+
+        first = root.find_all_by_type("Target")
+        assert len(first) == 1
+
+        first.append(ConcreteASTNode("Poison", SourceLocation(9, 1)))
+
+        second = root.find_all_by_type("Target")
+        assert len(second) == 1
+        assert second[0] == child
+
     def test_get_root_single_node(self):
         """Test getting root of single node."""
         node = ConcreteASTNode("Single", SourceLocation(1, 1))

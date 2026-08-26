@@ -69,9 +69,6 @@ class ASTNodeFactory:
         )
     """
 
-    # Registry of known node types and their validation rules
-    _node_validators: dict[str, dict[str, Any]] = {}
-
     # node_class -> name of its __init__'s first argument after `self`,
     # memoized so the constructor-shape check in create() (guarding against
     # the location-mis-binding landmine) only introspects each class once
@@ -84,6 +81,9 @@ class ASTNodeFactory:
         """Initialize the AST node factory."""
         self._creation_count = 0
         self._validation_errors: list[str] = []
+        # Registry of known node types and their validation rules, consulted
+        # by create() after a node is instantiated (see _validate_created_node).
+        self._node_validators: dict[str, dict[str, Any]] = {}
 
     def register_validator(
         self, node_type: str, validator_config: dict[str, Any]
@@ -267,6 +267,19 @@ class ASTNodeFactory:
         # Validate node_type is set
         if not hasattr(node, "node_type") or not node.node_type:
             raise ValidationError(type(node).__name__, "Node type must be set")
+
+        # Apply any validator registered for this concrete node class via
+        # register_validator().
+        node_type_name = type(node).__name__
+        validator_config = self._node_validators.get(node_type_name)
+        if validator_config is not None:
+            required_fields = validator_config.get("required_fields", [])
+            if required_fields:
+                self.validate_required_fields(node, required_fields, node_type_name)
+
+            field_types = validator_config.get("field_types", {})
+            if field_types:
+                self.validate_field_types(node, field_types, node_type_name)
 
     def with_metadata(self, node: ASTNode, metadata: dict[str, Any]) -> ASTNode:
         """Add metadata to a node.

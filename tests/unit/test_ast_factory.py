@@ -315,6 +315,60 @@ class TestASTNodeFactoryValidator:
         assert retrieved["class"] is DisplayStatement
         assert "location" in retrieved["required_fields"]
 
+    def test_registered_validator_is_consulted_by_create(self):
+        """A registered validator must actually run during create().
+
+        register_validator() previously stored its config but create() never
+        looked it up, so a registered required-field check was silently
+        never enforced.
+        """
+        factory = ASTNodeFactory()
+        factory.register_validator(
+            "DisplayStatement",
+            {
+                "class": DisplayStatement,
+                "required_fields": ["items"],
+                "field_types": {},
+            },
+        )
+
+        with pytest.raises(FieldValidationError):
+            factory.create(DisplayStatement, SourceLocation(10, 1))
+
+    def test_unregistered_type_is_unaffected_by_validators(self):
+        """Registering a validator for one type must not affect another."""
+        factory = ASTNodeFactory()
+        factory.register_validator(
+            "DisplayStatement",
+            {
+                "class": DisplayStatement,
+                "required_fields": ["items"],
+                "field_types": {},
+            },
+        )
+
+        node = factory.create(MoveStatement, SourceLocation(10, 1))
+        assert isinstance(node, MoveStatement)
+
+    def test_node_validators_are_not_shared_across_factory_instances(self):
+        """_node_validators must be per-instance, not class-level state."""
+        factory1 = ASTNodeFactory()
+        factory2 = ASTNodeFactory()
+
+        factory1.register_validator(
+            "DisplayStatement",
+            {
+                "class": DisplayStatement,
+                "required_fields": ["items"],
+                "field_types": {},
+            },
+        )
+
+        assert "DisplayStatement" not in factory2._node_validators
+        # factory2 must remain unaffected by factory1's registration.
+        node = factory2.create(DisplayStatement, SourceLocation(10, 1))
+        assert isinstance(node, DisplayStatement)
+
 
 # ---------------------------------------------------------------------------
 # _validate_created_node: paths for None location, wrong location type,

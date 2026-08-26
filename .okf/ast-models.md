@@ -296,6 +296,10 @@ class name (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`,
 statement kind — this is what the CLI `analyze` and `parse --find-type`
 subcommands rely on.
 
+`find_all_by_type()` results are cached per `node_type` on the node, but
+each call returns a fresh copy of that cache — mutating the returned list
+never corrupts a later lookup.
+
 # Additive expression-tree fields (2026-07-20, M12)
 
 * `ComputeStatement.expression_tree: CobolExpression | None` — structural

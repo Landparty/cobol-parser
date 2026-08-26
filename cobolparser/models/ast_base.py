@@ -171,7 +171,9 @@ class ASTNode(ABC):
 
         Matches the ``node_type`` attribute or the concrete class name (see
         :meth:`_matches_type`). Results are cached per node_type; the cache is
-        invalidated automatically when children are added or removed.
+        invalidated automatically when children are added or removed. Returns
+        a fresh copy on every call so a caller mutating the result cannot
+        corrupt the cache for subsequent lookups.
         """
         if self._type_cache is None:
             self._type_cache = {}
@@ -181,7 +183,7 @@ class ASTNode(ABC):
                 for node in self.traverse_depth_first()
                 if node._matches_type(node_type)
             ]
-        return self._type_cache[node_type]
+        return list(self._type_cache[node_type])
 
     def get_root(self) -> "ASTNode":
         """Get the root node of the AST."""
