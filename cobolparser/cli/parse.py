@@ -60,11 +60,14 @@ def _add_compact_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_source_format_args(parser: argparse.ArgumentParser) -> None:
-    """Add the source-layout flags shared by every source-reading subcommand.
+    """Add the source-layout flags shared by the source-reading subcommands.
 
-    ``--source-format`` is the current spelling; ``--free-form`` predates it
-    and is kept as an exact alias for ``--source-format=free`` so existing
-    invocations and scripts keep working. They are mutually exclusive because
+    ``--source-format`` is the current spelling. ``--free-form`` predates it
+    and keeps its historical, weaker semantics: a lexer-mode hint that
+    fixed-format auto-detection may still override by normalizing (so
+    existing invocations that passed it against conventional fixed-format
+    members keep working). ``--source-format=free`` is the strict form that
+    disables normalization outright. They are mutually exclusive because
     ``--free-form --source-format=fixed`` has no coherent meaning.
     """
     group = parser.add_mutually_exclusive_group()
@@ -82,7 +85,11 @@ def _add_source_format_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--free-form",
         action="store_true",
-        help="Alias for --source-format=free",
+        help=(
+            "Legacy free-form hint; auto-detection may still normalize source "
+            "it classifies as fixed-format. Use --source-format=free to "
+            "disable normalization outright"
+        ),
     )
 
 
@@ -94,16 +101,26 @@ def _resolve_source_format(args: argparse.Namespace) -> str:
 
 
 def _source_format_kwargs(args: argparse.Namespace) -> dict[str, Any]:
-    """Map the resolved layout onto ``parse_cobol``'s two format parameters.
+    """Map the layout flags onto ``parse_cobol``'s two format parameters.
 
     ``preprocess_fixed`` is the override (None = auto-detect) and
     ``free_form`` selects the lexer mode used when no normalization runs.
+
+    Legacy ``--free-form`` deliberately maps to ``preprocess_fixed=None``,
+    not ``False``: before ``--source-format`` existed, the flag passed only
+    ``free_form=True`` and ``parse_cobol``'s auto-detection still normalized
+    source it classified as fixed-format -- scripts that always passed
+    ``--free-form`` against conventional fixed-format members relied on
+    that. ``--source-format=free`` is the strict spelling that hard-disables
+    normalization.
     """
-    source_format = _resolve_source_format(args)
+    source_format = str(getattr(args, "source_format", "auto"))
     if source_format == "free":
         return {"free_form": True, "preprocess_fixed": False}
     if source_format == "fixed":
         return {"free_form": False, "preprocess_fixed": True}
+    if getattr(args, "free_form", False):
+        return {"free_form": True, "preprocess_fixed": None}
     return {"free_form": False, "preprocess_fixed": None}
 
 
@@ -692,6 +709,7 @@ def _build_preprocess_parser(
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> None:
+    from ..parser import _detect_fixed_format
     from ..preprocess import (
         normalize_fixed_format,
         preprocess_conditional_compilation,
@@ -712,7 +730,14 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         for cw in conditional_warnings:
             print(f"warning: {cw}", file=sys.stderr)
 
-    if _resolve_source_format(args) != "free":
+    # 'fixed' always normalizes; 'auto' (the default) normalizes only when
+    # detection classifies the source as fixed-format -- previously auto
+    # normalized unconditionally, silently slicing columns off genuine
+    # free-form input; 'free' never normalizes.
+    source_format = _resolve_source_format(args)
+    if source_format == "fixed" or (
+        source_format == "auto" and _detect_fixed_format(source)
+    ):
         normalize_warnings: list[str] = []
         source = normalize_fixed_format(
             source.splitlines(), warnings=normalize_warnings

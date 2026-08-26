@@ -1988,15 +1988,18 @@ def _tokenize_source(
     directly, unchanged.
 
     *preprocess_fixed* overrides that auto-detection when not None: True
-    always normalizes, False never does. Mirrors ``parse_cobol``'s parameter
-    of the same name, so ``cobol-parser tokenize --source-format=fixed``
-    agrees with ``cobol-parser parse --source-format=fixed`` on source whose
-    layout the detector cannot infer on its own.
+    always normalizes -- even when *free_form* is True, matching
+    ``parse_cobol``, which honors an explicit ``preprocess_fixed=True``
+    regardless of ``free_form`` -- and False never does. Mirrors
+    ``parse_cobol``'s parameter of the same name, so ``cobol-parser
+    tokenize --source-format=fixed`` agrees with ``cobol-parser parse
+    --source-format=fixed`` on source whose layout the detector cannot
+    infer on its own.
 
     Returns:
         Tuple of (tokens, lexer errors, lexer warnings).
     """
-    if not free_form:
+    if not free_form or preprocess_fixed:
         # Deferred imports: parser.py imports this module at load time, and
         # keeping preprocess out of module scope avoids import cycles.
         from .parser import _detect_fixed_format

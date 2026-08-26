@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import pytest
 
-from cobolparser import parse_cobol
+from cobolparser import ErrorRecoveryMode, parse_cobol
+from cobolparser.lexer import _tokenize_source
 from cobolparser.parser import _detect_fixed_format
 
 _TAGS = ("SAPR24", "28486 ", "GART  ", "JSINT ")
@@ -112,6 +113,48 @@ class TestDetection:
         source = "\n".join(banner) + "\n" + _tagged()
         assert _detect_fixed_format(source) is True
 
+    def test_long_banner_does_not_exhaust_the_anchor_scan(self):
+        """Comment lines must not consume the anchor scan's line budget.
+
+        Tag-stamping shops are exactly the shops that open every program
+        with a change-history banner; a banner longer than the scan limit
+        used to push the IDENTIFICATION DIVISION header out of the window,
+        so rule 2 abstained and the tagged file was misclassified free-form
+        again.
+        """
+        banner = [
+            f"{_TAGS[i % len(_TAGS)]:<6}* CHANGE HISTORY LINE {i:04d}"
+            for i in range(120)
+        ]
+        source = "\n".join(banner) + "\n" + _tagged()
+        assert _detect_fixed_format(source) is True
+
+    def test_identifier_prefix_of_a_header_is_not_an_anchor(self):
+        """An identifier merely *starting* with a header string must not
+        corroborate rule 2.
+
+        Free-form lines whose first six characters are a verb plus a blank
+        column 7 satisfy the relaxed sequence-area test; with columns 8+
+        holding ``PROGRAM-ID-VAL`` (an ordinary data name), a prefix match
+        would flip the whole free-form program to fixed and normalization
+        would silently corrupt its statements.
+        """
+        source = "\n".join(
+            [
+                "ACCEPT WS-A",
+                "SEARCH WS-T",
+                "MOVE   PROGRAM-ID-VAL TO WS-A",
+                "DIVIDE WS-A BY WS-B",
+                "UNLOCK WS-F",
+                "CANCEL WS-P",
+                "RETURN WS-R",
+                "COMMIT WS-C",
+                "INVOKE WS-I",
+                "STRING WS-S",
+            ]
+        )
+        assert _detect_fixed_format(source) is False
+
     def test_short_lines_do_not_break_the_anchor_scan(self):
         """A line too short to hold a code area is skipped, not indexed into."""
         source = "\n".join(["SAP", "28486", ""]) + "\n" + _tagged()
@@ -174,3 +217,71 @@ class TestParsing:
             _tagged(), filename="x.cbl", free_form=True, preprocess_fixed=False
         )
         assert result.errors != []
+
+    def test_preprocess_fixed_false_alone_skips_the_preprocessor(self):
+        """An explicit ``preprocess_fixed=False`` must be honored without
+        also passing ``free_form=True``.
+
+        It used to be silently ignored in that combination: only the
+        None-branch forced ``free_form``, so ``CobolParser.parse`` re-ran
+        auto-detection and pushed the source through
+        ``normalize_fixed_format`` anyway -- while ``_tokenize_source``
+        honored the same override, so parse and tokenize ran different
+        pipelines for identical arguments. The observable pin is a
+        fixed-format comment line: the preprocessor drops it, the lexer's
+        native fixed mode does not, so its text reaches the token stream
+        only when the preprocessor was genuinely skipped.
+        """
+        lines = _tagged().splitlines()
+        lines.insert(4, "GART  *COMMENT-MARKER-XYZ VANISHES WHEN PREPROCESSED")
+        source = "\n".join(lines)
+
+        tokens, _, _ = _tokenize_source(source, preprocess_fixed=False)
+        assert any("COMMENT-MARKER-XYZ" in t.value for t in tokens)
+        tokens, _, _ = _tokenize_source(source, keep_comments=False)
+        assert not any("COMMENT-MARKER-XYZ" in t.value for t in tokens)
+
+        # parse_cobol under the same override still parses -- the lexer's
+        # own fixed-format column handling covers the tag columns -- and
+        # agrees with _tokenize_source that no preprocessor ran.
+        result = parse_cobol(source, filename="x.cbl", preprocess_fixed=False)
+        assert result.ast is not None
+        assert result.ast.program_name == "HY09001"
+
+    def test_tokenize_source_forced_fixed_normalizes_despite_free_form_true(self):
+        """``preprocess_fixed=True`` wins over ``free_form=True`` in
+        ``_tokenize_source``, matching ``parse_cobol``'s resolution of the
+        same combination (it normalizes regardless of ``free_form``)."""
+        tokens, _, _ = _tokenize_source(
+            _tagged(), free_form=True, preprocess_fixed=True
+        )
+        values = [t.value for t in tokens]
+        assert "SAPR24" not in values
+        assert "HY09001" in values
+
+    def test_forced_fixed_survives_unterminated_literal_recovery(self):
+        """The ValueError deferral must keep the forced-fixed decision.
+
+        The recovery path used to hand the un-normalized source back to
+        ``CobolParser.parse``'s auto-detection -- which, for exactly the
+        layouts ``preprocess_fixed=True`` exists for (the detector declines
+        them), returned False: normalization was silently dropped and the
+        unterminated-literal error never recorded.
+        """
+        body = _BODY[:-1] + ['    DISPLAY "OOPS']  # literal open at EOF
+        source = "\n".join(
+            f"{'AB 2' + str(i % 10):<6} {line}" for i, line in enumerate(body)
+        )
+        assert _detect_fixed_format(source) is False
+
+        result = parse_cobol(
+            source,
+            filename="x.cbl",
+            preprocess_fixed=True,
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+        # Normalization ran (the tag columns never reached the lexer) ...
+        assert result.ast is not None
+        assert result.ast.program_name == "HY09001"
+        # ... and the unterminated-literal diagnostic was recorded.
+        assert any("nterminated" in str(e) for e in result.errors)

@@ -9,14 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-* **cli:** `--source-format {auto,fixed,free}` (default `auto`) on every
-  source-reading subcommand, as an explicit override for layouts the
-  detector cannot infer in either direction — `fixed` always normalizes
-  (stripping columns 1-6 whatever they hold), `free` never does. The
-  pre-existing `--free-form` flag is retained as an exact alias for
-  `--source-format=free`; the two are mutually exclusive. `_tokenize_source`
-  gained a matching `preprocess_fixed` parameter so `tokenize` and `parse`
-  agree under a forced layout.
+* **cli:** `--source-format {auto,fixed,free}` (default `auto`) on the
+  subcommands that parse or lex a program directly — `parse`, `tokenize`,
+  `preprocess`, the analyzer subcommands (`analyze`, `dead-code`,
+  `complexity`, `health`, ...), `unused-variables`, and `program-flow` —
+  as an explicit override for layouts the detector cannot infer in either
+  direction: `fixed` always normalizes (stripping columns 1-6 whatever
+  they hold), `free` never does. `batch`, `expand`, `gen-data`, and
+  `gen-fixtures` do not take the flag (their underlying APIs expose no
+  layout override yet) and always auto-detect. The pre-existing
+  `--free-form` flag keeps its historical, weaker semantics — a hint that
+  auto-detection may still override by normalizing source it classifies
+  as fixed-format — rather than becoming an alias for the new hard
+  override; the two flags are mutually exclusive. `_tokenize_source` and
+  `CobolParser` gained matching `preprocess_fixed` parameters so
+  `tokenize` and `parse` agree under a forced layout, including on the
+  unterminated-literal recovery path (the forced-fixed decision survives
+  deferral instead of being re-detected away) and under an explicit
+  `preprocess_fixed=False` with `free_form` unset. `preprocess` under
+  `auto` now actually detects instead of normalizing unconditionally, so
+  genuine free-form input is no longer mangled by default.
 * **analysis/cli:** `RecursionRiskAnalyzer` (`cobolparser.analysis.recursion_risk`)
   detects recursion-driven infinite-loop risks: out-of-line PERFORM cycles
   and GO TO cycles (reusing `ProgramFlowAnalyzer`'s `cycle_details`, graded

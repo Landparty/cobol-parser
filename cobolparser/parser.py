@@ -97,6 +97,7 @@ class CobolParser:
         plugin_manager: PluginManager | None = None,
         free_form: bool = False,
         initial_warnings: list[str] | None = None,
+        preprocess_fixed: bool | None = None,
     ):
         """Initialize the COBOL parser with required configurations.
 
@@ -108,6 +109,13 @@ class CobolParser:
         exists). Consumed (cleared) after that first call so a `CobolParser`
         instance reused to `parse()` multiple sources doesn't keep
         re-appending warnings about a source it no longer reflects.
+
+        `preprocess_fixed` mirrors `parse_cobol`'s parameter of the same
+        name: None (the default) auto-detects fixed format when `free_form`
+        is False -- the historical behavior; True always normalizes,
+        regardless of what `_detect_fixed_format` would say (the
+        `--source-format=fixed` escape hatch for layouts the detector
+        declines); False never normalizes.
         """
         self.dialect = dialect
         self.error_recovery = error_recovery
@@ -115,6 +123,7 @@ class CobolParser:
         self.serialization_config = serialization_config or SerializationConfig()
         self.plugin_manager = plugin_manager or PluginManager()
         self.free_form = free_form
+        self.preprocess_fixed = preprocess_fixed
         self._initial_warnings = list(initial_warnings) if initial_warnings else []
 
         # Parser state
@@ -211,12 +220,21 @@ class CobolParser:
             # one place once preprocessing settles.
             preprocess_warnings: list[str] = []
 
-            # Auto-detect fixed-format if not explicitly specified
+            # Auto-detect fixed-format if not explicitly specified.
+            # preprocess_fixed=True skips detection and always normalizes
+            # (the forced-layout escape hatch -- also how parse_cobol's
+            # ValueError deferral keeps its already-made fixed decision on
+            # exactly the layouts the detector declines); False skips this
+            # whole block, never normalizing.
             actual_free_form = self.free_form
-            if (
-                not self.free_form
-            ):  # Only auto-detect if not explicitly set to free-form
-                detected_fixed = _detect_fixed_format(cleaned_source)
+            if self.preprocess_fixed is True or (
+                self.preprocess_fixed is None and not self.free_form
+            ):
+                detected_fixed = (
+                    True
+                    if self.preprocess_fixed
+                    else _detect_fixed_format(cleaned_source)
+                )
                 if detected_fixed:
                     # Preprocess fixed-format source to free-form. An
                     # unterminated literal at EOF makes normalization raise; in
@@ -735,17 +753,34 @@ def _has_area_a_division_header(non_empty_lines: list[str]) -> bool:
     word (``IDENTIFICATION DIVISION.`` -> ``ICATION DIVISION.``) and cannot
     match. That asymmetry is what makes this a safe corroborating signal for
     a sequence area holding something other than blanks or digits.
+
+    A header only counts at a word boundary -- followed by a period, a
+    space, or end of text -- so an identifier that merely starts with a
+    header string (``PROGRAM-ID-VAL``, ``DATA-DIVISION-FLAG``) in free-form
+    source indented past column 8 can never anchor rule 2 and drag a
+    genuine free-form program into normalization.
+
+    Only candidate lines consume the ``_HEADER_SCAN_LIMIT`` budget: comment
+    lines (column 7 indicator) and too-short lines are skipped without
+    counting, because the tag-stamping shops this rule exists for are the
+    same shops that open every program with a 100+-line change-history
+    banner block -- counting those against the window would push the
+    IDENTIFICATION DIVISION header out of reach and re-introduce the very
+    misclassification rule 2 fixes.
     """
-    for line in non_empty_lines[:_HEADER_SCAN_LIMIT]:
+    scanned = 0
+    for line in non_empty_lines:
+        if scanned >= _HEADER_SCAN_LIMIT:
+            break
         if len(line) < 8 or line[6] in ALL_COMMENT_INDICATORS:
             continue
-        if (
-            line[TEXT_START_COL - 1 : TEXT_END_COL]
-            .lstrip()
-            .upper()
-            .startswith(_AREA_A_HEADERS)
-        ):
-            return True
+        scanned += 1
+        text = line[TEXT_START_COL - 1 : TEXT_END_COL].lstrip().upper()
+        for header in _AREA_A_HEADERS:
+            if text.startswith(header) and (
+                len(text) == len(header) or text[len(header)] in " ."
+            ):
+                return True
     return False
 
 
@@ -784,7 +819,7 @@ def _detect_fixed_format(source: str) -> bool:
             continue
 
         seq_area = line[:6]
-        indicator = line[6] if len(line) > 6 else " "
+        indicator = line[6]  # the len(line) < 7 guard above makes this safe
 
         valid_indicator = indicator in (" ", "-") or indicator in ALL_COMMENT_INDICATORS
         if not valid_indicator:
@@ -852,7 +887,11 @@ def parse_cobol(
         dialect: COBOL dialect
         error_recovery: Error recovery mode
         free_form: Whether source is in free-form format
-        preprocess_fixed: Whether to preprocess fixed-format COBOL (auto-detect if None)
+        preprocess_fixed: Whether to preprocess fixed-format COBOL. None
+            (default) auto-detects; True always normalizes, even for layouts
+            the detector declines; False never normalizes -- the source is
+            lexed as-is in the mode ``free_form`` selects, with no
+            auto-detection anywhere on the path
 
     Returns:
         ParseResult with AST and metadata
@@ -893,6 +932,14 @@ def parse_cobol(
     # Strip CBL/PROCESS compiler directives before fixed-format detection
     source_str = strip_compiler_directives(source_str)
 
+    # What the CobolParser instance below is told about fixed-format
+    # preprocessing. None on the happy path (the source is normalized right
+    # here, then lexed free-form, so the parser must not detect/normalize
+    # again); False when the caller explicitly disabled normalization
+    # (threaded through so CobolParser.parse does not re-run auto-detection
+    # and normalize anyway); True only on the ValueError deferral below.
+    parser_preprocess_fixed: bool | None = None
+
     # Auto-detect fixed-format if not explicitly specified
     if preprocess_fixed is None:
         detected_fixed = _detect_fixed_format(source_str)
@@ -900,6 +947,8 @@ def parse_cobol(
         # If we detected free-format (not fixed), ensure free_form is True
         if not detected_fixed and not free_form:
             free_form = True
+    elif not preprocess_fixed:
+        parser_preprocess_fixed = False
 
     # Collects normalize_fixed_format's overflow/etc. diagnostics so they can
     # reach the CobolParser instance below via `initial_warnings` -- this
@@ -917,17 +966,23 @@ def parse_cobol(
         except ValueError as exc:
             # Preprocessing hit an unterminated string literal at EOF. Rather
             # than losing the whole program here, leave the source un-normalized
-            # and let CobolParser re-detect fixed format and normalize with
-            # best-effort recovery. That records the error once and, under
-            # COLLECT_ALL, still yields a partial AST; FAIL_FAST still aborts.
-            # Force free_form=False so the parser's fixed-format auto-detection
-            # (and hence the recovery path) actually runs even if the caller
-            # passed free_form=True; otherwise the error would go unrecorded.
-            # Discard any overflow warnings collected before the raise --
-            # CobolParser.parse() re-normalizes the same lines from scratch
-            # below and will collect its own, complete set.
+            # and defer to CobolParser.parse's recovery, which records the
+            # error once and, under COLLECT_ALL, retries with
+            # merge_continued_literals=False for a partial AST; FAIL_FAST
+            # still aborts. The fixed decision already made here (whether
+            # detected or forced by the caller) is passed through as
+            # preprocess_fixed=True rather than letting the parser re-run
+            # auto-detection: for layouts the detector declines -- the very
+            # case --source-format=fixed exists for -- re-detection would
+            # return False and silently drop the forced normalization along
+            # with the unterminated-literal diagnostic. free_form=False so
+            # the parser's normalization path runs even if the caller passed
+            # free_form=True. Discard any overflow warnings collected before
+            # the raise -- CobolParser.parse() re-normalizes the same lines
+            # from scratch below and will collect its own, complete set.
             normalize_warnings.clear()
             free_form = False
+            parser_preprocess_fixed = True
             logger.debug(
                 "Deferring fixed-format preprocessing recovery to parser for %s: %s",
                 filename,
@@ -940,6 +995,7 @@ def parse_cobol(
         error_recovery=error_recovery,
         free_form=free_form,
         initial_warnings=normalize_warnings,
+        preprocess_fixed=parser_preprocess_fixed,
     )
     return parser.parse(  # type: ignore[no-any-return]
         source_str,

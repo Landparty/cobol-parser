@@ -3,8 +3,12 @@
 Auto-detection is the default and now understands change-tracking tags in
 columns 1-6 (see
 ``tests/regression/test_tagged_sequence_area_detection.py``). This flag is the
-escape hatch for the cases the heuristic cannot infer, in both directions, and
-``--free-form`` is retained as an alias for ``--source-format=free``.
+escape hatch for the cases the heuristic cannot infer, in both directions.
+``--free-form`` is retained with its historical, weaker semantics: a hint
+that auto-detection may still override by normalizing source it classifies
+as fixed-format -- scripts that always passed it against conventional
+fixed-format members relied on exactly that. ``--source-format=free`` is the
+strict spelling that disables normalization outright.
 """
 
 from __future__ import annotations
@@ -79,12 +83,35 @@ class TestParseSubcommand:
         assert out["errors"] == []
         assert out["program_id"] == "HYTEST"
 
-    @pytest.mark.parametrize("flag", ("--source-format=free", "--free-form"))
-    def test_forced_free_form_does_not_strip_columns(self, capsys, tagged, flag):
-        """Explicitly asking for free-form must be honored, tags and all."""
-        out = _run(capsys, "parse", tagged, "--errors", "--compact", flag)
+    def test_forced_free_form_does_not_strip_columns(self, capsys, tagged):
+        """``--source-format=free`` must be honored, tags and all."""
+        out = _run(
+            capsys, "parse", tagged, "--errors", "--compact", "--source-format=free"
+        )
         assert out["errors"] != []
         assert "SAPR24" in out["errors"][0]
+
+    def test_legacy_free_form_stays_advisory(self, capsys, tmp_path, tagged):
+        """``--free-form`` keeps its pre-``--source-format`` semantics.
+
+        The old CLI passed only ``free_form=True`` and ``parse_cobol``'s
+        auto-detection still normalized source it classified as fixed --
+        scripts that always passed ``--free-form`` against conventional
+        fixed-format members relied on that lenience, so the flag must not
+        silently become a hard override (that is ``--source-format=free``'s
+        job). Detection now classifies tagged members as fixed too, so both
+        layouts parse cleanly under the legacy flag.
+        """
+        numbered = _write(
+            tmp_path, "numbered.cbl", ("000100", "000200", "000300", "000400")
+        )
+        out = _run(capsys, "parse", numbered, "--errors", "--compact", "--free-form")
+        assert out["errors"] == []
+        assert out["program_id"] == "HYTEST"
+
+        out = _run(capsys, "parse", tagged, "--errors", "--compact", "--free-form")
+        assert out["errors"] == []
+        assert out["program_id"] == "HYTEST"
 
     def test_forced_fixed_overrides_a_declining_detector(self, capsys, tmp_path):
         """A sequence area with an internal space is deliberately not inferred."""
@@ -114,6 +141,29 @@ class TestOtherSubcommands:
         out = capsys.readouterr().out
         assert "SAPR24" not in out
         assert "IDENTIFICATION DIVISION." in out
+
+    def test_preprocess_auto_leaves_free_form_source_alone(self, capsys, tmp_path):
+        """Under ``auto`` (the default), ``preprocess`` must detect, not
+        normalize unconditionally -- it used to slice the first 7 columns
+        off genuine free-form input (``IDENTIFICATION DIVISION.`` came out
+        as ``ICATION DIVISION.``) while ``parse`` on the same file
+        correctly detected free-form."""
+        path = tmp_path / "free.cbl"
+        path.write_text("\n".join(_BODY) + "\n", encoding="utf-8")
+        _run_main(["preprocess", str(path)])
+        out = capsys.readouterr().out
+        assert "IDENTIFICATION DIVISION." in out
+
+    def test_preprocess_forced_fixed_still_normalizes_unconditionally(
+        self, capsys, tmp_path
+    ):
+        """``--source-format=fixed`` keeps the force: columns are stripped
+        even from input detection would call free-form."""
+        path = tmp_path / "free.cbl"
+        path.write_text("\n".join(_BODY) + "\n", encoding="utf-8")
+        _run_main(["preprocess", str(path), "--source-format=fixed"])
+        out = capsys.readouterr().out
+        assert "IDENTIFICATION DIVISION." not in out
 
     def test_tokenize_forced_free_form_keeps_tag_tokens(self, capsys, tagged):
         out = _run(capsys, "tokenize", tagged, "--compact", "--source-format=free")

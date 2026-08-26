@@ -96,12 +96,21 @@ cobol-parser preprocess <file.cbl> [--define DEBUG]
 
 Runs fixed-format normalisation and conditional compilation; prints the resulting
 free-form text. `--define` sets compiler flags for conditional blocks.
-`--source-format=free` skips normalisation entirely.
+Under `auto` (the default) normalisation runs only when `_detect_fixed_format`
+classifies the source as fixed (it used to run unconditionally, silently
+slicing columns off genuine free-form input); `--source-format=fixed` forces
+it; `--source-format=free` skips it entirely.
 
 ## Source layout (`--source-format`)
 
-Every source-reading subcommand accepts
-`--source-format {auto,fixed,free}` (default `auto`):
+The subcommands that parse or lex a program directly — `parse`, `tokenize`,
+`preprocess`, every analyzer subcommand built via `_build_analyzer_parser`
+(`analyze`, `dead-code`, `complexity`, `health`, ...), `unused-variables`,
+and `program-flow` — accept `--source-format {auto,fixed,free}` (default
+`auto`). `batch`, `expand`, `gen-data`, and `gen-fixtures` do **not** take
+the flag (their underlying APIs — `parse_files`, `ProgramLayoutIndex`,
+`CopybookDataGenerator` — expose no layout override yet); they always
+auto-detect.
 
 | Value | Behaviour |
 |-------|-----------|
@@ -109,8 +118,12 @@ Every source-reading subcommand accepts
 | `fixed` | Always normalise — strips columns 1-6 whatever they hold |
 | `free`  | Never normalise |
 
-`--free-form` is an exact alias for `--source-format=free`, kept for
-backwards compatibility; passing both is rejected by argparse.
+`--free-form` is retained with its historical, *weaker* semantics — a
+lexer-mode hint that auto-detection may still override by normalising
+source it classifies as fixed-format (scripts that always passed it
+against conventional fixed-format members relied on that lenience). It is
+**not** an alias for `--source-format=free`, which hard-disables
+normalisation. Passing both flags is rejected by argparse.
 
 Reach for `fixed` when a shop's layout defeats auto-detection — e.g. a
 sequence area holding a tag with an internal space. Auto-detection already

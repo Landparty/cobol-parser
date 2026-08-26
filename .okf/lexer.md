@@ -306,6 +306,19 @@ leave partial entries that the retry would otherwise duplicate). CLI
 `tokenize` still discards this element deliberately (best-effort token
 dump, unchanged); `tokenize_cobol()` callers now see it.
 
+**`preprocess_fixed` honored in every flag combination (2026-08-26):**
+`_tokenize_source`'s whole normalization block sat under `if not
+free_form:`, so `free_form=True, preprocess_fixed=True` silently ignored
+the forced layout even though the docstring claimed the parameter
+"mirrors `parse_cobol`'s" (which normalizes for that combination). The
+guard is now `if not free_form or preprocess_fixed:` — an explicit True
+wins over `free_form`, matching `parse_cobol`; an explicit False still
+never normalizes, and `parse_cobol` now honors False without
+`free_form=True` too, via `CobolParser`'s new `preprocess_fixed`
+parameter (see [preprocessing.md](preprocessing.md) and the CHANGELOG
+Unreleased entry). Pinned by
+`tests/regression/test_tagged_sequence_area_detection.py`.
+
 **`_fixed_format_comment_tokens` V/v gap (fixed 2026-08-22, caught in PR
 review):** when `normalize_fixed_format` gained `version_tag_lines_as_comments`
 (see [preprocessing.md](preprocessing.md)), `_fixed_format_comment_tokens`'s

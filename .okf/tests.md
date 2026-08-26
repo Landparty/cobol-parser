@@ -8,6 +8,22 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-08-26: `tests/regression/test_tagged_sequence_area_detection.py`
+grew five review-hardening pins for the change-tag detection fix: a
+120-line banner must not exhaust the Area A anchor scan, an identifier
+merely prefixed by a header string (`PROGRAM-ID-VAL`) must not anchor
+rule 2, `preprocess_fixed=False` alone skips the normalization
+preprocessor (comment-line marker text reaches the token stream),
+`_tokenize_source(free_form=True, preprocess_fixed=True)` normalizes
+like `parse_cobol`, and a forced-fixed layout survives the
+unterminated-literal recovery deferral with the diagnostic recorded.
+`tests/unit/cli/test_source_format_flag.py` re-pins `--free-form` as the
+legacy *advisory* flag (auto-detection may still normalize -- numbered
+and tagged members parse cleanly under it; only `--source-format=free`
+hard-disables) and adds `preprocess` auto-detection pins (free-form
+input passes through untouched by default; `--source-format=fixed`
+still forces).
+
 2026-08-24 (second entry this date): New
 `tests/regression/test_corpus_residual_findings.py` (10 tests) pinning a
 follow-up 105-program corpus sweep's four residual findings -- see
