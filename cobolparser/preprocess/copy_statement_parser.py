@@ -34,6 +34,12 @@ COMMENT_LINE_PATTERN = re.compile(r"^.{6}[*\/]", re.MULTILINE)
 # last char of the EOL so col_num arithmetic stays correct across conventions.
 _EOL_RE = re.compile(r"\r\n|\r|\n")
 
+# A PROCESS/CBL compiler-directing statement must start in column 1 per the
+# COBOL standard -- even inside an otherwise strictly fixed-format program
+# that carries real sequence numbers on every other line -- so its own
+# columns 1-6 are never a sequence area. See strip_sequence_area's use below.
+_COMPILER_DIRECTIVE_RE = re.compile(r"^(?:PROCESS|CBL)(?:[ \t].*)?$", re.IGNORECASE)
+
 # NOTE (audit 2026-08-12, S-1): the module previously exported a monolithic
 # COPY_PATTERN regex here. It was unused by the live expansion path (the real
 # scanner is CopyStatementLexer.tokenize_copy_statements, a linear
@@ -234,6 +240,24 @@ def strip_sequence_area(source: str) -> str:
             )
             result.append("" if is_tag else line)
         else:
+            # A flush-left PROCESS/CBL directive is real code occupying
+            # columns 1+, not a sequence number -- unconditionally eating
+            # columns 1-6 turns "PROCESS &CICS-31&..." into a mangled
+            # "S &CICS-31&..." before any later PROCESS-stripping pass ever
+            # sees the directive intact. Only lines whose columns 1-6 do NOT
+            # already look like a real sequence area (blank or all-digit)
+            # are considered, so ordinary numbered/tagged source is
+            # unaffected -- this line is passed through untouched rather
+            # than re-sliced at column 7, since there is no indicator column
+            # to preserve when the directive itself starts at column 1.
+            first_six = line[:SEQUENCE_NUMBER_END]
+            has_sequence_area = (
+                first_six.strip() == "" or first_six.replace(" ", "").isdigit()
+            )
+            if not has_sequence_area and _COMPILER_DIRECTIVE_RE.match(line):
+                result.append(line[:FIXED_FORMAT_CODE_END_COLUMN])
+                continue
+
             # Extract columns 7-72 (indicator + program text)
             # Column 7 (index 6) is indicator area - keep it
             # Columns 8-72 (indices 7-71) are program text area

@@ -796,3 +796,26 @@ the gate only matches the exact one-character tail. Mirrored in both
 `_normalize.py` and `_preprocess_fast.pyx` (`.c` regenerated). Pinned by
 `TestBareTerminalPeriodDoesNotWarn` in
 `tests/regression/test_normalize_column_overflow_warning.py`.
+
+**Flush-left PROCESS/CBL directive mangled by `strip_sequence_area`
+(2026-08-27):** a PROCESS/CBL compiler-directing statement must start in
+column 1 per the COBOL standard -- even inside an otherwise strictly
+fixed-format program that carries real sequence numbers on every other
+line -- so its own columns 1-6 are never a sequence area. `strip_sequence_area`
+stripped columns 1-6 from every full-width line unconditionally, so
+`PROCESS &CICS-31& &HAUTE-PERFORM-DB2&` was mangled into
+`S &CICS-31& &HAUTE-PERFORM-DB2&` before any later PROCESS-stripping pass
+(e.g. `strip_compiler_directives`, or a downstream consumer's own
+directive handling) ever saw it intact -- the corrupted first line then
+surfaced downstream as a missing PROGRAM-ID header. Fixed: a full-width
+line is exempted from the columns-1-6 strip (passed through untouched,
+not re-sliced at column 7) when its own columns 1-6 do NOT already look
+like a real sequence area (blank or all-digit, the same strict test
+`_sequence_area_is_fixed_like`/`strip_compiler_directives` use) AND the
+line matches `^(?:PROCESS|CBL)(?:[ \t].*)?$` case-insensitively
+(`_COMPILER_DIRECTIVE_RE`). Ordinary numbered/tagged source is
+unaffected -- the sequence-area gate keeps a data name like
+`PROCESS-FLAG` on a real numbered line from being misread as the
+directive. Multi-line PROCESS/CBL continuation is out of scope (not
+reproduced in the corpus). Pinned by `TestFlushLeftCompilerDirective` in
+`tests/regression/test_expansion_width_and_tags.py`.

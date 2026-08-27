@@ -110,6 +110,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corroborate, so genuine free-form source (which never puts a division
   header at column 8) is unaffected. Pinned by
   `tests/regression/test_tagged_sequence_area_detection.py`.
+* **preprocessing:** `strip_sequence_area` unconditionally stripped columns
+  1-6 from every full-width line, but a PROCESS/CBL compiler-directing
+  statement must start in column 1 per the COBOL standard, even inside an
+  otherwise strictly fixed-format program with real sequence numbers
+  elsewhere. A flush-left directive like `PROCESS &CICS-31&
+  &HAUTE-PERFORM-DB2&` was mangled into `S &CICS-31& &HAUTE-PERFORM-DB2&`
+  before any later PROCESS-stripping pass ever saw it intact, surfacing
+  downstream as a missing PROGRAM-ID header. A full-width line is now
+  exempted from the strip when its own columns 1-6 do not already look
+  like a real sequence area (blank or all-digit) and the line is a
+  PROCESS/CBL directive; ordinary numbered/tagged source is unaffected.
+  Pinned by `TestFlushLeftCompilerDirective` in
+  `tests/regression/test_expansion_width_and_tags.py`.
 
 * **parser:** `NEXT SENTENCE` is now a recognized statement (new
   `NextSentenceStatement` AST node) instead of being silently swallowed
