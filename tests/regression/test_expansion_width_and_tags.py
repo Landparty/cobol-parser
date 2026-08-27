@@ -28,6 +28,19 @@ compiler-directing word. Blanking every short line (the first version of
 the fix) was too eager: flush-left copybooks without sequence numbers
 carry short code lines like ``01 A.`` or ``EXIT.`` that the old
 passthrough kept working, and blanking those silently deleted code.
+
+**3. Flush-left PROCESS/CBL directive mangled.** A PROCESS/CBL
+compiler-directing statement must start in column 1 per the COBOL
+standard, even inside an otherwise strictly fixed-format program that
+carries real sequence numbers on every other line. ``strip_sequence_area``
+unconditionally strips columns 1-6 from every full-width line, so
+``PROCESS &CICS-31& &HAUTE-PERFORM-DB2&`` was mangled into
+``S &CICS-31& &HAUTE-PERFORM-DB2&`` before any later PROCESS-stripping
+pass ever saw it intact -- surfacing downstream as a missing PROGRAM-ID
+header. Fixed by exempting a line from the strip when its own columns 1-6
+do not already look like a real sequence area (blank or all-digit) AND the
+line is a PROCESS/CBL directive; ordinary numbered/tagged source is
+unaffected.
 """
 
 from cobolparser import parse_cobol
@@ -230,3 +243,42 @@ class TestReviewPassRefinements:
         assert out[2] == "EXIT."  # short statement kept
         assert out[3] == ""  # tag blanked
         assert out[4] == "EJECT"  # compiler directive kept
+
+
+class TestFlushLeftCompilerDirective:
+    def test_process_directive_survives_strip(self):
+        line = "PROCESS &CICS-31& &HAUTE-PERFORM-DB2&"
+        out = strip_sequence_area(line).split("\n")
+        assert out[0] == line
+
+    def test_cbl_directive_survives_strip(self):
+        out = strip_sequence_area("CBL APOST").split("\n")
+        assert out[0] == "CBL APOST"
+
+    def test_numbered_sequence_area_still_stripped(self):
+        # A real sequence-numbered line must still lose columns 1-6, even
+        # when the code area happens to start with "PROCESS" as a data
+        # name or similar -- only a flush-left directive is exempted.
+        line = "012345 PROCESS-FLAG PIC X."
+        out = strip_sequence_area(line).split("\n")
+        assert out[0] == " PROCESS-FLAG PIC X."
+
+    def test_process_directive_does_not_break_program_id(self, tmp_path):
+        src = (
+            "\n".join(
+                [
+                    "PROCESS &CICS-31& &HAUTE-PERFORM-DB2&",
+                    _pad72("IDENTIFICATION DIVISION."),
+                    _pad72("PROGRAM-ID. HY0900IC."),
+                    _pad72("PROCEDURE DIVISION."),
+                    _pad72("    STOP RUN."),
+                ]
+            )
+            + "\n"
+        )
+        result = expand_copybooks(src, copybook_paths=[str(tmp_path)])
+        assert "PROCESS &CICS-31& &HAUTE-PERFORM-DB2&" in result.expanded_source
+
+        parse = parse_cobol(result.expanded_source, filename="hy0900ic.cbl")
+        assert parse.success, parse.errors
+        assert parse.ast.program_name == "HY0900IC"
