@@ -8,6 +8,7 @@ Uses ASTNodeFactory for validated node creation.
 
 from typing import Any
 
+from ..._literals import quote_literal
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
@@ -187,7 +188,7 @@ class DisplayStatementParser(IStatementParser):
                     item_value = (
                         item_token.raw_value
                         if item_token.raw_value
-                        else f'"{item_value}"'
+                        else quote_literal(item_value)
                     )
 
                 # Subscripted operand, e.g. `SQLERRD(3)`: fold the
@@ -314,7 +315,9 @@ class DisplayStatementParser(IStatementParser):
                 continue
             value = token.value or ""
             parts.append(
-                f'"{value}"' if token.type == TokenType.STRING_LITERAL else value
+                quote_literal(value)
+                if token.type == TokenType.STRING_LITERAL
+                else value
             )
             token_stream.consume()
 

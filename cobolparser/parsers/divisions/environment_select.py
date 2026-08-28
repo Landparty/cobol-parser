@@ -11,6 +11,7 @@ PASSWORD) into a plain data dict, and converts that dict into a
 
 from typing import Any
 
+from cobolparser._literals import quote_literal
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements import SelectStatement
@@ -422,7 +423,7 @@ class SelectClauseParser:
             # Handle string literals - need to reconstruct quotes
             if token.type.name == "STRING_LITERAL":
                 # String literals come without quotes from tokenizer, add them back
-                assign_to_parts.append(f'"{token.value}"')
+                assign_to_parts.append(quote_literal(token.value))
             else:
                 assign_to_parts.append(token.value)
             token_stream.consume()

@@ -18,6 +18,7 @@ from cobolparser.parsers.statements._utils import (
     warn_paragraph_boundary_swallowed,
 )
 
+from ..._literals import quote_literal
 from ...core.ast_factory import get_factory
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
@@ -244,7 +245,7 @@ class MoveStatementParser(IStatementParser):
                 if token.raw_value:
                     source_parts.append(token.raw_value)
                 else:
-                    source_parts.append(f'"{token.value}"')
+                    source_parts.append(quote_literal(token.value))
             elif token.value:
                 source_parts.append(token.value)
 
