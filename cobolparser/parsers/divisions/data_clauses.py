@@ -14,6 +14,7 @@ around this class — so the compiled extension's callback surface is unchanged.
 
 from typing import Any
 
+from cobolparser._literals import quote_literal
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
@@ -969,7 +970,7 @@ class DataItemClauseParser:
             literal = token_stream.peek()
             if literal and literal.type == TokenType.STRING_LITERAL:
                 token_stream.consume()
-                return f'ALL "{literal.value}"'
+                return f"ALL {quote_literal(literal.value)}"
             if literal and literal.type == TokenType.FIGURATIVE_CONSTANT:
                 token_stream.consume()
                 return f"ALL {literal.value}"
@@ -995,7 +996,7 @@ class DataItemClauseParser:
             TokenType.LEVEL_NUMBER,
         ]:
             value = (
-                f'"{token.value}"'
+                quote_literal(token.value)
                 if token.type == TokenType.STRING_LITERAL
                 else f"{sign}{token.value}"
             )

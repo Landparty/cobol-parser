@@ -83,6 +83,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **parser:** a decoded alphanumeric literal containing a double quote was
+  re-emitted with that quote **undoubled**, producing an unterminated COBOL
+  literal. CICS's own `DFHAID` copybook declares exactly this shape --
+  `DFHTRIG PIC X VALUE IS '"'`, a single-quote-delimited literal whose content
+  is one `"` character -- and it came back as three quote characters. A
+  consumer re-emitting the clause as COBOL source (mockymock's generated
+  `UT-RESET-WORKING-STORAGE` paragraph is the case that surfaced this) then
+  desynchronized GnuCOBOL's tokenizer for the rest of the program, reported
+  as a bogus `invalid symbol '%'` two lines further on. Every re-quoting site
+  now routes through the new zero-dependency
+  `cobolparser/_literals.py::quote_literal()`, which doubles embedded quotes
+  the way COBOL requires: `parse_value_clause` (both the plain-literal and
+  the `VALUE ALL <literal>` branches), MOVE/DISPLAY/WRITE operands, and
+  SELECT's `ASSIGN TO` literal. Round-trip verified -- re-parsing an emitted
+  clause yields the identical clause -- and the emitted form verified to
+  compile and run under real GnuCOBOL 4.0. Pinned by
+  `tests/regression/test_embedded_quote_literals.py`.
 * **core:** `ASTNode.find_all_by_type()` returned its internal per-type
   cache list by reference; a caller mutating the result silently corrupted
   every later lookup for that node_type on the same AST. Now returns a

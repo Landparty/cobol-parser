@@ -13,6 +13,7 @@ from cobolparser.parsers.statements._utils import (
     try_consume_keyword,
 )
 
+from ..._literals import quote_literal
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOWriteStatement
@@ -76,7 +77,7 @@ class WriteStatementParser(IStatementParser):
                 source = consume_optional_qualifiers(token_stream, source)
                 stmt.set_from(source)
             elif token and token.type == TokenType.STRING_LITERAL:
-                stmt.set_from(f'"{token.value or ""}"')
+                stmt.set_from(quote_literal(token.value))
                 token_stream.consume()
 
             skip_whitespace(token_stream)

@@ -1,5 +1,28 @@
 # OKF Update Log
 
+## 2026-08-28 (Embedded double quotes in re-emitted literals)
+
+User-reported from mockymock's real-world corpus: `mockymock run` on a
+~31k-line CICS/IMS program failed to compile with a bogus
+`invalid symbol '%'` error. Root cause was here, not there.
+
+* **Fixed** (detailed in [parser.md](parser.md)'s "Literal Re-Quoting"
+  section): every site that re-emits a decoded `STRING_LITERAL` as COBOL
+  source wrapped it in `"..."` without doubling an embedded `"`. CICS's
+  `DFHAID` copybook declares `DFHTRIG PIC X VALUE IS '"'` -- content: one
+  quote character -- which round-tripped to three quote characters, an
+  unterminated literal that desynchronizes `cobc`'s tokenizer for the rest
+  of the program. New zero-dependency `cobolparser/_literals.py::
+  quote_literal()` now backs `parse_value_clause` (plain and `VALUE ALL`
+  branches), `environment_select.py`'s `ASSIGN TO`, and the MOVE/DISPLAY/
+  WRITE literal operands. Level-88 values are untouched -- they are stored
+  undelimited, a different convention.
+* **Verified** against real GnuCOBOL 4.0: the emitted four-quote form
+  compiles and prints the quote character; the old three-quote form does
+  not compile. Pinned by
+  `tests/regression/test_embedded_quote_literals.py` (5 cases, including a
+  parse -> emit -> re-parse round-trip).
+
 ## 2026-08-24 (Residual corpus findings: NEXT SENTENCE, PERFORM WITH TEST newline tolerance, DISPLAY subscript fold, WRITE/READ/START qualifier fold, bare-terminal-period overflow gate)
 
 A follow-up sweep against a 105-program real-world corpus (88 OK / 17

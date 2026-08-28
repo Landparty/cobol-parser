@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-08-17T00:00:00Z
+timestamp: 2026-08-28T00:00:00Z
 ---
 
 # Overview
@@ -1354,6 +1354,51 @@ Statement-level and data-item-level locations inside sections were already
 accurate — this fix is scoped to the `Division` → `Section` → `Paragraph`
 container nodes' own location metadata. Pinned by
 `tests/regression/test_section_location_tracking.py`.
+
+# Literal Re-Quoting (`cobolparser/_literals.py`, 2026-08-28)
+
+The lexer hands every `STRING_LITERAL` token over **decoded**: delimiters
+stripped and any doubled delimiter collapsed to one character, so both
+`'IT''S'` and `"IT'S"` arrive as `IT'S`. Anything that re-emits such a value
+as COBOL source text therefore has to re-apply COBOL's only escape for the
+delimiter inside a literal -- repeating it -- and until 2026-08-28 none of
+the re-quoting sites did.
+
+The failure is narrow and loud only much later. CICS's `DFHAID` copybook
+legitimately declares `DFHTRIG PIC X VALUE IS '"'` -- a single-quote-
+delimited literal whose content is one `"` character. `parse_value_clause`
+wrapped that decoded content in `"..."` verbatim, yielding three quote
+characters: an unterminated literal. cobolparser itself never notices (it
+only stores the string), so the damage lands in whatever re-emits the
+clause -- mockymock's generated `UT-RESET-WORKING-STORAGE` paragraph was
+the reporter -- where it desynchronizes `cobc`'s tokenizer for the rest of
+the program and surfaces as a bogus `invalid symbol '%'` error two lines
+further on.
+
+`_literals.quote_literal(value)` is the single fix: `""" + value.replace(one
+quote, two quotes) + """`. It lives in its own zero-internal-dependency
+module (same rationale as `_errors.py`) because its callers span both
+`parsers/divisions/` and `parsers/statements/`:
+
+| Site | Clause |
+|---|---|
+| `divisions/data_clauses.py::parse_value_clause` | `VALUE <literal>` and `VALUE ALL <literal>` |
+| `divisions/environment_select.py` | SELECT's `ASSIGN TO <literal>` |
+| `statements/move_parser.py` | MOVE's literal source |
+| `statements/display_parser.py` | DISPLAY items and function-call operands |
+| `statements/write_parser.py` | WRITE's `FROM <literal>` |
+
+Level-88 condition values are deliberately **not** in that list:
+`data_special_entries.py` stores them undelimited (`item.add_value(t.value)`),
+a different convention that never claims to be COBOL source text.
+
+The property that matters is round-tripping: re-parsing an emitted clause
+must yield the identical clause (the lexer already decodes doubled
+delimiters, so it does). Pinned by
+`tests/regression/test_embedded_quote_literals.py`, which also verifies the
+`VALUE ALL` branch and the MOVE/DISPLAY operands. The emitted four-quote
+form was additionally verified to compile and run under real GnuCOBOL 4.0;
+the old three-quote form does not compile at all.
 
 # Adding a New Statement Parser
 
