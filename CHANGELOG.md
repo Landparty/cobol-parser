@@ -1743,6 +1743,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.8.1](https://github.com/Landparty/cobol-parser/compare/v1.8.0...v1.8.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* address /code-review findings on the corpus-hardening series ([365e7c4](https://github.com/Landparty/cobol-parser/commit/365e7c4a89d06fbcc01cae4832a62a3ed7ed973d))
+* ALTER and computed GO TO accept all-digit paragraph names ([9ee1be6](https://github.com/Landparty/cobol-parser/commit/9ee1be6eb358084cf3c7ca6f51906f8cee83fa04))
+* **core:** stop find_all_by_type cache aliasing and wire up ASTNodeFactory validators ([82db123](https://github.com/Landparty/cobol-parser/commit/82db1235d6844b5fcd257191abd8410ff35ef50f))
+* **core:** stop find_all_by_type cache aliasing and wire up ASTNodeFactory validators ([5ec1433](https://github.com/Landparty/cobol-parser/commit/5ec143348ee68ac5b51870327c89118a993fa855))
+* five real-corpus parser bugs (MOVE continuation targets, EXEC SQL operators, PROGRAM-ID period, SET subscripts, SKIP1-3) ([e8ac0ea](https://github.com/Landparty/cobol-parser/commit/e8ac0ea61b016b643c303b23612c580ef2b0129d))
+* five real-corpus parser bugs (MOVE continuation targets, EXEC SQL operators, PROGRAM-ID period, SET subscripts, SKIP1-3) ([50a928c](https://github.com/Landparty/cobol-parser/commit/50a928cf6a7a1324879b0818451b726cd2258faf))
+* five residual findings from a follow-up 105-program corpus sweep ([1409e05](https://github.com/Landparty/cobol-parser/commit/1409e05726a573fbdb5d5b6f2584b4521ce7dda3))
+* harden corpus-retry fixes per review findings ([096cd4f](https://github.com/Landparty/cobol-parser/commit/096cd4f6af3c9ae7ab9a9e5e0a2b871802d56870))
+* **lexer:** reconstruct COMMENT tokens for V/v lines too ([c2c6d1c](https://github.com/Landparty/cobol-parser/commit/c2c6d1c21852924dde1ba554e906fc92c0c6959d))
+* **parser,cli:** harden tagged-sequence-area detection and forced-layout plumbing ([1ce22f2](https://github.com/Landparty/cobol-parser/commit/1ce22f2e4bff8662ee67632a164837a9526609ce))
+* **parser:** close SKIP1/SKIP2/SKIP3 boundary-detection gap vs EJECT ([d037ec8](https://github.com/Landparty/cobol-parser/commit/d037ec8de56570bc38071c402a28f855efdec4ec))
+* **parser:** consume explicit scope terminator on arithmetic statements ([b2c7097](https://github.com/Landparty/cobol-parser/commit/b2c70976a419eacd3dbe83ef4b609a787fd3bd0e))
+* **parser:** detect fixed-format source with change-tracking tags in cols 1-6 ([a39f37d](https://github.com/Landparty/cobol-parser/commit/a39f37d54c8c5f925816f3e8c7f55e77d47342d6))
+* **parser:** double embedded quotes when re-emitting a decoded literal ([5e5b992](https://github.com/Landparty/cobol-parser/commit/5e5b9926a78e83909b19dea94b124f580f2d36f1))
+* **parser:** fix MOVE qualifier chain, dangling OF/IN, unbalanced paren ([a937851](https://github.com/Landparty/cobol-parser/commit/a937851e9decf06318b885c6107550e4f3ee611a))
+* **parser:** fold ADD/SUBTRACT/MULTIPLY/DIVIDE OF/IN qualifier chains into operands/targets ([965a8e5](https://github.com/Landparty/cobol-parser/commit/965a8e563308f2f418f6e63ae39406f7853b3fd4))
+* **parser:** fold GIVING/REMAINDER and addend-list OF/IN qualifiers too ([df6c507](https://github.com/Landparty/cobol-parser/commit/df6c507849503c7ca8c2851734f2faecf974f111))
+* **parser:** skip CONTINUATION tokens in qualifier chains, fix test realism ([99c4dcc](https://github.com/Landparty/cobol-parser/commit/99c4dcc76f97457934d0f2f1f9a5e1b88065d6f0))
+* **preprocess:** don't warn on numeric identification-area stamps past column 72 ([9d660b5](https://github.com/Landparty/cobol-parser/commit/9d660b56e7cc9ba3604e57659db29b6a18786314))
+* **preprocessing:** stop strip_sequence_area mangling flush-left PROCESS/CBL directives ([ea2c214](https://github.com/Landparty/cobol-parser/commit/ea2c214ff018d2d75d802c753c817b253a1932e9))
+* **preprocessing:** treat V/v in column 7 as a comment line ([c55c4f5](https://github.com/Landparty/cobol-parser/commit/c55c4f514b745083b49d5346e2339ef64306fbf7))
+* resolve the corpus retry's four remaining warning buckets ([8546d1b](https://github.com/Landparty/cobol-parser/commit/8546d1b64f15966ee645ae06231a25b6767714a8))
+* resolve the corpus retry's four remaining warning buckets (OCCURS splits, signed VARYING, REPLACING overflow, change tags) ([40ecf3f](https://github.com/Landparty/cobol-parser/commit/40ecf3fed7fe916fc2a9eb2d0f65bcf48a095f05))
+* review-driven corrections to real-corpus parser fixes ([1a9eea4](https://github.com/Landparty/cobol-parser/commit/1a9eea450e4f5ab2365013bad400736b27b74eb1))
+* second controlled re-probe fixes - operand-list drops, digit-led names, SET values, SQL not-sign ([9e74d36](https://github.com/Landparty/cobol-parser/commit/9e74d36cff5d21b258a5da6554a2a09100bf69aa))
+* three more verified diff-scan findings on the corpus series ([fbefe84](https://github.com/Landparty/cobol-parser/commit/fbefe84a9c4d4f548de2e62dd159cbeddbbaec56))
+
 ## [1.8.0](https://github.com/Landparty/cobol-parser/compare/v1.7.8...v1.8.0) (2026-08-20)
 
 
