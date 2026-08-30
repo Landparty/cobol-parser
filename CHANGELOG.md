@@ -1743,6 +1743,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.8.2](https://github.com/Landparty/cobol-parser/compare/v1.8.1...v1.8.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* avoid Cython compiler crash on (x or default).method() pattern ([5b0dbd3](https://github.com/Landparty/cobol-parser/commit/5b0dbd3b89e630801bda897079e2a7ac1ee9baf6))
+* avoid Cython compiler crash on (x or default).method() pattern ([6c389b4](https://github.com/Landparty/cobol-parser/commit/6c389b4422388579d769b5e53358e3cd52fed2ac))
+
 ## [1.8.1](https://github.com/Landparty/cobol-parser/compare/v1.8.0...v1.8.1) (2026-08-28)
 
 
