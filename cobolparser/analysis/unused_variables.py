@@ -600,7 +600,8 @@ class UnusedVariableAnalyzer:
         for node in ast.traverse_depth_first():
             type_name = type(node).__name__
             if type_name == "ExecCicsStatement":
-                for v in (getattr(node, "options", None) or {}).values():
+                options = getattr(node, "options", None) or {}
+                for v in options.values():
                     names |= _extract_identifiers(v)
             elif type_name == "ExecImsStatement":
                 for v in getattr(node, "arguments", None) or []:

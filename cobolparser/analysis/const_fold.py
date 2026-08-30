@@ -181,7 +181,8 @@ class ConstantFolder:
         seed_values: dict[str, str] | None = None,
     ) -> ConstantFoldResult:
         env: dict[str, Decimal | str] = {}
-        for name, raw in (seed_values or {}).items():
+        seeds: dict[str, str] = seed_values if seed_values is not None else {}
+        for name, raw in seeds.items():
             resolved = _safe_resolve(index, name)
             if resolved is None:
                 continue
