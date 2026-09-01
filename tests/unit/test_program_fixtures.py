@@ -14,6 +14,7 @@ import csv
 import json
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from cobolparser import parse_cobol
@@ -23,9 +24,15 @@ from cobolparser.generators.data.errors import ProgramLayoutError
 from cobolparser.generators.data.program_layout import ProgramLayoutIndex
 from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
 
-FILE_OPERATIONS = "tests/samples/file_operations.cbl"
-SUBPROGRAM_DEMO = "tests/samples/subprogram_demo.cbl"
-IBM_EXTENSIONS = "tests/samples/ibm_extensions.cbl"
+# Resolved relative to this file rather than the process cwd: cibuildwheel's
+# test-command runs pytest against the installed wheel from a directory that
+# isn't the repo root, so a cwd-relative "tests/samples/..." string silently
+# resolves to nothing there even though it works under `pytest tests/`.
+_SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
+
+FILE_OPERATIONS = str(_SAMPLES_DIR / "file_operations.cbl")
+SUBPROGRAM_DEMO = str(_SAMPLES_DIR / "subprogram_demo.cbl")
+IBM_EXTENSIONS = str(_SAMPLES_DIR / "ibm_extensions.cbl")
 
 _SCENARIO_MODE_HEADER = """\
        IDENTIFICATION DIVISION.

@@ -83,6 +83,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **tests/generators:** the closed-source release wheels (Linux, macOS,
+  Windows) failed `cibuildwheel`'s post-install test step across all three
+  platforms, blocking `publish`/`publish-pypi`. Two independent bugs, both
+  only visible under `cibuildwheel`'s test-command (never under
+  `pytest tests/` from the repo root, which is why the normal dev/CI loop
+  never caught either):
+  * `tests/unit/test_program_fixtures.py`'s `FILE_OPERATIONS`/
+    `SUBPROGRAM_DEMO`/`IBM_EXTENSIONS` constants were `cwd`-relative
+    strings (`"tests/samples/....cbl"`). `cibuildwheel` runs its
+    test-command against the installed wheel from a directory that isn't
+    the repo root (deliberately, per the `--import-mode=importlib` note
+    below, to avoid the source tree shadowing the installed package), so
+    every test built on those constants failed with
+    `ProgramLayoutError: ...: no such file` on all three platforms. Fixed
+    by resolving them against `Path(__file__).resolve().parent.parent /
+    "samples"` instead.
+  * `ProgramFixtureGenerator._find_callee_file`'s exact-name attempt used
+    `os.path.isfile()`, which matches case-insensitively on macOS and
+    Windows — so probing for `EXTCALC.cob` against an on-disk
+    `extcalc.cob` reported success and returned the wrong-case path
+    instead of falling through to the explicit lowercase candidate,
+    failing `test_find_callee_file_falls_back_to_lowercase_and_alt_extensions`
+    on those two platforms (Linux's case-sensitive filesystem was
+    unaffected). Fixed by matching candidates against the directory's own
+    `os.listdir()` entries, which is case-sensitive on every platform.
 * **generators:** `BoundaryInventoryAnalyzer._classify()` raised
   `TypeError: Expected type, got ABCMeta` on every statement, in the
   published closed-source PyPI wheel only -- an editable/pure-Python
