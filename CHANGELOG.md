@@ -83,6 +83,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **generators:** `BoundaryInventoryAnalyzer._classify()` raised
+  `TypeError: Expected type, got ABCMeta` on every statement, in the
+  published closed-source PyPI wheel only -- an editable/pure-Python
+  install was unaffected. `_FILE_OP_SPECS`'s
+  `tuple[tuple[type, str], ...]` variable annotation is a non-binding
+  hint in ordinary Python, but Cython's closed-source build
+  (`COBOLPARSER_CLOSED_SOURCE=1`) enforces it as a runtime C-level type
+  check on every element -- and every AST node class is `ABCMeta`-based
+  (`ASTNode(ABC)`), not exactly `type`, so the very first iteration of
+  the tuple failed regardless of what statement was being classified.
+  This broke `ProgramFixtureGenerator.generate_from_file`/
+  `generate_with_scenarios_from_file` -- the entire `gen-fixtures` CLI
+  subcommand and the "Generators Surface (mocky-mock)" documented in
+  `interface-contract.md` -- for every PyPI install of `cobol-parser`
+  (no sdist or pure-Python wheel is published to fall back to). The
+  existing `annotation_typing: False` compiler directive does not cover
+  this: it only protects function-parameter annotations (confirmed by
+  isolating and Cython-compiling `core/ast_factory.py`, whose
+  `type[ASTNode]`-annotated parameters worked correctly), not
+  module-level PEP 526 variable annotations. Fixed by dropping the
+  annotation (mypy still infers a precise type from the tuple literal).
+  Verified by isolating `boundary_inventory.py`, Cython-compiling it
+  with the same directives as the real closed-source build, and
+  reproducing both the failure and the fix against the compiled
+  extension directly -- the ordinary pure-Python test suite cannot
+  catch this class of bug by itself. Also widened `cibuildwheel`'s
+  `test-command` fast post-install subset to include
+  `tests/unit/test_program_fixtures.py` (0.5s, 42 tests) so this class
+  of regression is caught on future releases -- the previous subset
+  (`test_lexer.py` + `test_all_samples.py`) never exercised the
+  generators package at all.
 * **parser:** a decoded alphanumeric literal containing a double quote was
   re-emitted with that quote **undoubled**, producing an unterminated COBOL
   literal. CICS's own `DFHAID` copybook declares exactly this shape --

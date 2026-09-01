@@ -153,7 +153,7 @@ def _is_write_shaped(statement: Any) -> bool:
     return any(getattr(statement, attr, None) for attr in _WRITE_SHAPED_ATTRS)
 
 
-_FILE_OP_SPECS: tuple[tuple[type, str], ...] = (
+_FILE_OP_SPECS = (
     (IOReadStatement, "READ"),
     (IOWriteStatement, "WRITE"),
     (IORewriteStatement, "REWRITE"),

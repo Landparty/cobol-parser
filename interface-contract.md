@@ -206,6 +206,7 @@ generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=10))  # rows= opti
 bundle = generator.generate_with_scenarios_from_file(
     "PROGRAM.cbl",
     copybook_paths=["path/to/copybooks"],   # optional, same convention as expand_copybooks
+    # callee_paths=[...],                    # optional; mocky-mock never passes this (defaults apply)
     mode="happy",                            # "happy" | "branches" | "all"
     seed=7,                                  # optional; a drawn seed is reported on bundle.seed
 )
@@ -218,11 +219,11 @@ bundle.to_json()   # str  -- printed verbatim as `mockymock fixtures`'s entire s
 |---|---|
 | `cobolparser.generators.ProgramFixtureGenerator` | constructor; optionally takes a `DataGeneratorOptions` |
 | `cobolparser.generators.DataGeneratorOptions` | `rows=` is the only field mocky-mock ever overrides (from its own `--rows` flag; only passed when given, so the generator's own default otherwise applies) |
-| `ProgramFixtureGenerator.generate_with_scenarios_from_file(path, *, copybook_paths=None, mode="happy", seed=None) -> FixtureBundle` | the single entry point both mocky-mock subcommands call |
+| `ProgramFixtureGenerator.generate_with_scenarios_from_file(path, *, copybook_paths=None, callee_paths=None, mode="happy", seed=None) -> FixtureBundle` | the single entry point both mocky-mock subcommands call; mocky-mock only ever passes `copybook_paths`, `mode`, `seed` — `callee_paths` exists for other callers and defaults to `None` |
 | `FixtureBundle.to_dict() -> dict` | input to `mockymock generate --with-data`'s bundle→surface join |
 | `FixtureBundle.to_json() -> str` | `mockymock fixtures`'s entire stdout output |
-| `dict["bundle_version"]` | **the gate**: mocky-mock raises its own `WithDataError` and refuses to consume the bundle (stderr + exit 1) the moment this isn't `1`, rather than guess at a schema that may have changed meaning underneath it |
-| `BoundaryFixture` keys `"category"`, `"key"`, `"line"`, `"direction"`, `"layout"`, `"sequence"`, `"terminal"`, `"status"` | joined against mocky-mock's own `mock_surface.BoundarySite`s — non-EXEC categories by `(category, key)`; SQL/CICS/DLI categories by `(category, line)` instead, since mocky-mock's surface records no stable key for those sites (matched by normalized-text prefix). See `docs/fixture-bundle-schema.md`'s `BoundaryFixture` table for every key's full type and meaning. |
+| `dict["bundle_version"]` | **the gate**: mocky-mock raises its own `UnsupportedBundleVersionError` and refuses to consume the bundle (stderr + exit 1) the moment this isn't `1`, rather than guess at a schema that may have changed meaning underneath it |
+| `BoundaryFixture` keys `"category"`, `"key"`, `"direction"`, `"layout"`, `"sequence"`, `"terminal"`, `"status"` (also carries `"line"`, `"paragraph"`, `"provenance"`, `"unresolved"`, which mocky-mock's loader reads into memory but does not join on) | joined against mocky-mock's own `mock_surface.BoundarySite`s uniformly by `(category, key)`, including SQL/CICS/DLI — for those, `key` holds a normalized shortest-unique-prefix of the EXEC statement's text (mocky-mock's surface records no stable identifier-style key for those sites), computed independently by the same prefix rule on both sides so they land on the same string. See `docs/fixture-bundle-schema.md`'s `BoundaryFixture` table for every key's full type and meaning. |
 
 **Versioning contract this surface must honor:** any change to
 `generate_with_scenarios_from_file`'s signature, a key removed or
