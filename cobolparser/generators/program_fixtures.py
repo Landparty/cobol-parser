@@ -600,11 +600,20 @@ class ProgramFixtureGenerator:
     def _find_callee_file(name: str, callee_paths: list[str]) -> str | None:
         candidates = (name, name.lower())
         for directory in callee_paths:
+            # Match against the directory listing itself, not os.path.isfile,
+            # so the exact-name attempt can't silently "succeed" against a
+            # differently-cased file on a case-insensitive filesystem (macOS,
+            # Windows) and skip the lowercase fallback that would have
+            # returned the real on-disk name.
+            try:
+                entries = set(os.listdir(directory))
+            except OSError:
+                continue
             for candidate in candidates:
                 for ext in _CALLEE_EXTENSIONS:
-                    path = os.path.join(directory, candidate + ext)
-                    if os.path.isfile(path):
-                        return path
+                    filename = candidate + ext
+                    if filename in entries:
+                        return os.path.join(directory, filename)
         return None
 
 
