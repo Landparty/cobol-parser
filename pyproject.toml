@@ -177,9 +177,18 @@ environment = { COBOLPARSER_CLOSED_SOURCE = "1" }
 test-requires = "pytest pytest-cov"
 # Smoke-test against the INSTALLED wheel (not the source tree): verify
 # ordinary modules loaded as compiled extensions (no .py source backing
-# them), then run a fast subset of the suite. --no-cov disables this repo's
-# default --cov-fail-under=90 gate (see [tool.pytest.ini_options] addopts),
-# which coverage.py can't evaluate meaningfully against compiled extensions.
+# them), then run a fast subset of the suite. test_program_fixtures.py is
+# in this subset deliberately, not just for speed (42 tests, ~0.5s): it's
+# the fastest test file that actually calls into the generators package
+# (ProgramFixtureGenerator -> BoundaryInventoryAnalyzer), which
+# test_lexer.py/test_all_samples.py never touch. That gap is exactly how
+# a closed-source-only TypeError in BoundaryInventoryAnalyzer._classify()
+# (see CHANGELOG's Unreleased -> Fixed) shipped undetected -- Cython's
+# closed-source build enforces module-level PEP 526 variable annotations
+# as runtime C-level type checks, which plain pure-Python test runs can
+# never exercise. --no-cov disables this repo's default
+# --cov-fail-under=90 gate (see [tool.pytest.ini_options] addopts), which
+# coverage.py can't evaluate meaningfully against compiled extensions.
 #
 # --import-mode=importlib is load-bearing, not cosmetic: tests/__init__.py
 # exists, so under pytest's default "prepend" mode {project} lands at
@@ -192,7 +201,7 @@ test-requires = "pytest pytest-cov"
 # installed package rather than the wheel zip -- cibuildwheel's test-command
 # has no access to the wheel path itself. It runs on every one of this
 # matrix's built wheels, not just a local/manual one.
-test-command = "python {project}/scripts/check_installed_no_leaked_source.py && python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py --no-cov -q --import-mode=importlib"
+test-command = "python {project}/scripts/check_installed_no_leaked_source.py && python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py {project}/tests/unit/test_program_fixtures.py --no-cov -q --import-mode=importlib"
 
 # NOTE: release CI overrides these per job via CIBW_ARCHS (see
 # .github/workflows/release-please.yml). These values still apply to local
