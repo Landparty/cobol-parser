@@ -1,5 +1,36 @@
 # OKF Update Log
 
+## 2026-09-02 (Statement-coverage audit: every COBOL verb parses; silent-drop fixes)
+
+Asked: are there silent gaps or drops of statements, and is every COBOL
+statement supported? Answered with a per-verb probe and a 540-file corpus
+sweep (statement-drop warnings ~370 -> 30, the rest being malformed
+samples / unexpanded COPY / screen extensions).
+
+* **Fixed** (all detailed in [parser.md](parser.md)'s "Statement-coverage
+  audit (2026-09-02)" section): `ExecCicsStatement`/`ExecImsStatement`
+  invisible to `get_all_statements()` (now `CobolStatement`s); `GO TO`
+  target on the next line silently lost; optional `ON`/`AT` in SIZE ERROR /
+  EXCEPTION / OVERFLOW / AT END / END-OF-PAGE phrases leaking handler
+  bodies; MOVE silently eating foreign tokens; literals spelled like verbs
+  truncating conditions; CALL handlers swallowing the enclosing ELSE /
+  END-IF / END-PERFORM; `,`/`;` separators; XML GENERATE `SUPPRESS`;
+  `EQUAL TO` connective in condition operands; a dozen NIST clause forms.
+* **Added:** 22 statement parsers (Report Writer INITIATE/TERMINATE/
+  SUPPRESS; Communication Module SEND/RECEIVE/ENABLE/DISABLE/PURGE; OS/VS
+  EXHIBIT/EXAMINE/TRANSFORM; ENTER, NOTE, CHAIN; READY/RESET TRACE, SERVICE
+  LABEL/RELOAD, TITLE; COBOL 2002 RAISE/RESUME/VALIDATE) with AST nodes in
+  new `models/statements/report_writer.py`, `communication.py`, `legacy.py`
+  (+ `control.py` / `data.py`). `UNSUPPORTED_VERBS` is down to
+  `EXECUTE`/`GOTO`/`RECOVER`. See [ast-models.md](ast-models.md).
+* **Tests:** `tests/unit/test_extended_verb_parsers.py` (+58) and
+  `tests/regression/test_statement_coverage_audit_2026_09_02.py` (+70,
+  including a 20-program NIST no-drop-warning guard); `test_tier3`/`tier5`/
+  `tier7` and `test_open_findings_high_regressions.py` now use `EXECUTE` as
+  the remaining unsupported-verb example and assert nodes for the verbs
+  that gained parsers; `test_procedure_registry_dispatch_order.py` and
+  `test_swallow_sweep.py` extended for the 22 parsers.
+
 ## 2026-08-28 (Embedded double quotes in re-emitted literals)
 
 User-reported from mockymock's real-world corpus: `mockymock run` on a

@@ -4,10 +4,13 @@ from typing import Any
 
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
+    consume_optional_qualifiers,
+    consume_procedure_qualifier,
     get_parse_context,
     is_procedure_name_token,
     matches_keyword,
     report_parse_error,
+    skip_whitespace,
 )
 
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -60,6 +63,11 @@ class GoStatementParser(IStatementParser):
         """
         start_token = token_stream.consume()  # consume GO keyword
         context = get_parse_context(token_stream)
+        # ``GO TO`` at the end of a line with the target on the next one is
+        # ordinary fixed-format layout; without skipping layout tokens here
+        # (and after TO below) the NEWLINE itself became the target name and
+        # the real target was re-parsed as a phantom paragraph -- silently.
+        skip_whitespace(token_stream)
 
         stmt = GoStatement(
             start_token.location
@@ -83,6 +91,7 @@ class GoStatementParser(IStatementParser):
 
         if next_token.value.upper() == "TO":
             token_stream.consume()  # consume optional TO
+            skip_whitespace(token_stream)
 
         # Parse target paragraph name
         if token_stream.is_empty():
@@ -102,6 +111,10 @@ class GoStatementParser(IStatementParser):
 
         stmt.set_target_paragraph(target_name)
         token_stream.consume()  # consume target name
+        # ``GO TO PAR-3B IN QUAL-SECTION-1`` (NIST NC208A) -- see PERFORM.
+        qualifier = consume_procedure_qualifier(token_stream)
+        if qualifier:
+            stmt.set_metadata("target_qualifier", qualifier)
 
         # Computed GO TO: several targets before DEPENDING ON. Historically
         # only the first target was kept and the rest — including the
@@ -235,5 +248,9 @@ class GoStatementParser(IStatementParser):
 
         var_name = next_token.value
         if var_name and var_name != ".":
-            stmt.set_depending_on_variable(var_name)
             token_stream.consume()
+            if next_token.type == TokenType.IDENTIFIER:
+                # ``DEPENDING ON TBL-IDX (7)`` / ``... ON X OF Y``: fold the
+                # subscript / qualifier chain in rather than stranding it.
+                var_name = consume_optional_qualifiers(token_stream, var_name)
+            stmt.set_depending_on_variable(var_name)

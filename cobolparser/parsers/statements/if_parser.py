@@ -10,10 +10,12 @@ from cobolparser.parsers.statements._conditions import (
     strip_enclosing_parens,
 )
 from cobolparser.parsers.statements._utils import (
+    LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
     matches_keyword,
     report_parse_error,
+    skip_statement_separators,
     skip_whitespace,
     try_parse_nested_statement,
 )
@@ -82,8 +84,11 @@ class IfStatementParser(IStatementParser):
             if token_upper == "THEN":
                 break
 
-            # Stop at statement keywords (implicit THEN)
-            if self._is_statement_keyword(token_upper):
+            # Stop at statement keywords (implicit THEN) -- but a literal
+            # spelled like a verb (``IF X = "IF"``) is condition content.
+            if token.type not in LITERAL_TOKEN_TYPES and self._is_statement_keyword(
+                token_upper
+            ):
                 break
 
             # Stop at ELSE or END-IF
@@ -129,7 +134,7 @@ class IfStatementParser(IStatementParser):
         # Parse THEN branch statements until ELSE, END-IF, or period
         period_found = False
         while not token_stream.is_empty():
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
 
             if token_stream.is_empty():
                 break
@@ -182,7 +187,7 @@ class IfStatementParser(IStatementParser):
         # Parse ELSE branch statements until END-IF or period
         period_found = False
         while not token_stream.is_empty():
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
 
             if token_stream.is_empty():
                 break

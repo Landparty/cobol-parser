@@ -108,6 +108,25 @@ CONTROL_FLOW_BOUNDARIES: frozenset = frozenset(
     }
 )
 
+#: Token types whose value is literal content, never a keyword -- a string
+#: literal spelled like a verb (``"IF"``, ``"STOP"``) must never be mistaken
+#: for a statement boundary by a value-based keyword check.
+LITERAL_TOKEN_TYPES: frozenset = frozenset(
+    {
+        TokenType.STRING_LITERAL,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.LEVEL_NUMBER,
+        TokenType.FIGURATIVE_CONSTANT,
+    }
+)
+
+#: COBOL's optional separators. A comma or semicolon followed by a space is
+#: syntactically equivalent to a space anywhere outside a PICTURE string or
+#: literal (``PERFORM A, GO TO B.`` / ``CALL "X" USING A; ON OVERFLOW ...``);
+#: statement-list loops skip them via :func:`skip_statement_separators`
+#: instead of reporting them as "unparsed tokens".
+SEPARATOR_TOKEN_TYPES: frozenset = frozenset({TokenType.COMMA, TokenType.SEMICOLON})
+
 #: Explicit scope terminators (END-xxx). These can never begin a statement or
 #: act as an operand, so operand/parameter collection loops must stop on them
 #: rather than swallow them (e.g. ``CALL "X" USING WS-AMT END-READ``).
@@ -126,6 +145,7 @@ SCOPE_TERMINATORS: frozenset = frozenset(
         "END-MULTIPLY",
         "END-PERFORM",
         "END-READ",
+        "END-RECEIVE",
         "END-RETURN",
         "END-REWRITE",
         "END-SEARCH",
@@ -322,6 +342,13 @@ def is_statement_boundary(token: Token | None) -> bool:
     misread as a boundary.
     """
     if token is None:
+        return False
+    # A literal can never begin a statement: ``IF X = "IF"``, ``STRING "STOP"
+    # DELIMITED BY SIZE`` and ``DISPLAY "MOVE"`` all carry a verb's spelling
+    # inside quotes, and the lexer hands that spelling back as the literal's
+    # value. Without this guard the value-based checks below misread the
+    # literal as the next statement's verb and truncate the current one.
+    if token.type in LITERAL_TOKEN_TYPES:
         return False
     if token.type in STATEMENT_TOKEN_TYPES:
         return True
@@ -571,6 +598,160 @@ def skip_whitespace(stream: ITokenStream) -> None:
         stream.consume()
 
 
+def skip_statement_separators(stream: ITokenStream) -> None:
+    """Consume layout tokens *and* stray ``,`` / ``;`` separators.
+
+    For use at the top of a statement-list loop (paragraph bodies, IF/ELSE
+    branches, inline PERFORM bodies, handler clauses), where a comma or
+    semicolon between two statements is a plain COBOL separator with no
+    meaning. Not for operand lists -- there the individual parsers decide
+    what a comma separates.
+    """
+    while not stream.is_empty():
+        skip_whitespace(stream)
+        token = stream.peek()
+        if token is None or token.type not in SEPARATOR_TOKEN_TYPES:
+            break
+        stream.consume()
+
+
+def matches_word(
+    stream: ITokenStream, word: str, token_type: Any | None = None
+) -> bool:
+    """Return True if the next token is *word* (case-insensitive).
+
+    Like :func:`matches_keyword`, but safe for verbs the lexer has no
+    dedicated ``TokenType`` for (PURGE, RAISE, RESUME, VALIDATE, TITLE ...):
+    a dedicated *token_type* matches by type, otherwise only an IDENTIFIER
+    whose value is *word* matches -- ``matches_keyword(stream,
+    TokenType.IDENTIFIER, word)`` would accept *any* identifier.
+    """
+    token = peek_token(stream)
+    if not token:
+        return False
+    if token_type is not None and token.type == token_type:
+        return True
+    return token.type == TokenType.IDENTIFIER and token_value_upper(token) == word
+
+
+#: Token types accepted as a plain operand by :func:`collect_operands`.
+_OPERAND_TOKEN_TYPES: frozenset = frozenset(
+    {
+        TokenType.IDENTIFIER,
+        TokenType.STRING_LITERAL,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.LEVEL_NUMBER,
+        TokenType.FIGURATIVE_CONSTANT,
+    }
+)
+
+
+def collect_operands(
+    stream: ITokenStream,
+    *,
+    stop_at: frozenset | set | None = None,
+    max_items: int | None = None,
+    start_column: int | None = None,
+) -> list[str]:
+    """Consume a run of operands (data-names, literals, figurative constants).
+
+    Stops -- without consuming the boundary -- at the sentence period, any
+    statement/scope boundary (:func:`is_statement_boundary`), a value in
+    *stop_at*, a token that cannot be an operand, or (when *start_column* is
+    given) what looks like the next paragraph header after a missing period
+    (the same H9 heuristic the DISPLAY/SET parsers apply). Separator commas
+    and semicolons between operands are skipped. Identifiers have a trailing
+    subscript and/or ``OF``/``IN`` qualifier chain folded in; string
+    literals are re-quoted exactly as DISPLAY's item list does; signed
+    numerics (``-1``) are recomposed.
+    """
+    from cobolparser._literals import quote_literal
+
+    stop_words = {w.upper() for w in (stop_at or ())}
+    operands: list[str] = []
+    while not stream.is_empty():
+        if max_items is not None and len(operands) >= max_items:
+            break
+        skip_whitespace(stream)
+        token = stream.peek()
+        if token is None or token.type == TokenType.PERIOD:
+            break
+        if token.type in SEPARATOR_TOKEN_TYPES:
+            stream.consume()
+            continue
+        signed = consume_signed_numeric(stream)
+        if signed is not None:
+            operands.append(signed)
+            continue
+        if token_value_upper(token) in stop_words:
+            break
+        if token.type not in _OPERAND_TOKEN_TYPES:
+            break
+        if token.type == TokenType.IDENTIFIER:
+            if is_statement_boundary(token):
+                break
+            if (
+                start_column is not None
+                and looks_like_paragraph_boundary(stream)
+                and looks_dedented_relative_to(stream, start_column)
+            ):
+                warn_paragraph_boundary_swallowed(stream)
+                break
+        stream.consume()
+        value = token.value or ""
+        if token.type == TokenType.STRING_LITERAL:
+            value = token.raw_value if token.raw_value else quote_literal(value)
+        elif token.type == TokenType.IDENTIFIER:
+            value = consume_optional_qualifiers(stream, value)
+        operands.append(value)
+    return operands
+
+
+def consume_procedure_qualifier(stream: ITokenStream) -> str | None:
+    """Consume a trailing ``OF section`` / ``IN section`` procedure-name
+    qualifier if one follows; return the section name, else ``None``.
+
+    Only claims the OF/IN when a plain identifier follows it, so a dangling
+    qualifier is left in the stream exactly as :func:`consume_optional_
+    qualifiers` leaves a dangling data-name qualifier.
+    """
+    look, idx = peek_past_noise(stream, 0)
+    if look is None or look.type not in (TokenType.OF, TokenType.IN):
+        return None
+    name, _ = peek_past_noise(stream, idx + 1)
+    if not (name and name.type == TokenType.IDENTIFIER and name.value):
+        return None
+    skip_whitespace(stream)
+    stream.consume()  # OF / IN
+    skip_whitespace(stream)
+    stream.consume()  # section name
+    skip_whitespace(stream)
+    return name.value
+
+
+def bare_end_starts_at_end_clause(stream: ITokenStream) -> bool:
+    """True if the next token is a bare ``END`` opening an ``[AT] END`` clause.
+
+    ``AT`` is optional in READ / RETURN / SEARCH's ``AT END`` phrase. A bare
+    ``END`` is only taken as that clause when it is *not* the start of an
+    ``END PROGRAM`` / ``END DIVISION`` marker, so a period-less READ at the
+    very end of a program cannot swallow the program terminator.
+    """
+    token = stream.peek()
+    if (
+        token is None
+        or token.type != TokenType.IDENTIFIER
+        or token_value_upper(token) != "END"
+    ):
+        return False
+    lookahead, _ = peek_past_noise(stream, 1)
+    return not (
+        lookahead
+        and lookahead.value
+        and lookahead.value.upper() in ("PROGRAM", "DIVISION")
+    )
+
+
 def consume_period(stream: ITokenStream) -> None:
     """Consume a period token if it is the next non-empty token."""
     if not stream.is_empty():
@@ -670,7 +851,7 @@ def collect_clause_stmts(stream: ITokenStream, stop_at: set) -> list:
     """
     stmts: list = []
     while not stream.is_empty():
-        skip_whitespace(stream)
+        skip_statement_separators(stream)
         token = stream.peek()
         if not token:
             break
@@ -705,6 +886,9 @@ def parse_invalid_key_clauses(
     ``stmt.set_not_invalid_key_clause(...)`` when the corresponding clauses
     are present.  *end_keyword* is the scope terminator (e.g. ``"END-DELETE"``).
     """
+    # ``START F ; INVALID KEY`` -- a separator before the clause is plain
+    # punctuation (NIST IX208A/RL205A write it that way).
+    skip_statement_separators(stream)
     # INVALID KEY
     token = stream.peek()
     if token and token.type == TokenType.INVALID:
@@ -1016,7 +1200,11 @@ def parse_arithmetic_operands(
         upper = token.value.upper() if token.value else ""
         if upper in stop_keywords:
             return operands, upper
-        if upper and (upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES):
+        if (
+            upper
+            and token.type not in LITERAL_TOKEN_TYPES
+            and (upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES)
+        ):
             # Don't devour the next statement when this one is malformed.
             return operands, ""
         # A sign-prefixed numeric addend (``ADD -1 TO WS-X`` -- the same
@@ -1049,6 +1237,8 @@ def _looks_like_statement_boundary(token: Token) -> bool:
     """
     if token.type in ARITHMETIC_OPERAND_STOP_TYPES:
         return True
+    if token.type in LITERAL_TOKEN_TYPES:
+        return False
     upper = token.value.upper() if token.value else ""
     return bool(upper) and (
         upper in STATEMENT_KEYWORDS or upper in CONTROL_FLOW_BOUNDARIES
@@ -1281,9 +1471,40 @@ def parse_size_error_clauses(
             continue
 
         token_upper = token.value.upper()
-        if token_upper == "ON":
-            stream.consume()
+        # ``ON`` is optional in every SIZE ERROR phrase (``ADD A TO B SIZE
+        # ERROR ...`` / ``NOT SIZE ERROR ...`` are standard COBOL). Previously
+        # a bare SIZE ERROR was not recognised here at all, so the handler
+        # body escaped to the enclosing paragraph as free-standing statements
+        # with no error and no warning.
+        if token_upper in ("ON", "SIZE"):
+            if token_upper == "ON":
+                stream.consume()
+                next_token = _skip_newlines(stream)
+                if not (
+                    next_token
+                    and next_token.value
+                    and next_token.value.upper() == "SIZE"
+                ):
+                    continue
+            stream.consume()  # SIZE
             next_token = _skip_newlines(stream)
+            if next_token and next_token.value and next_token.value.upper() == "ERROR":
+                stream.consume()
+                stmt.set_on_size_error_clause(_parse_size_error_stmts(stream))
+        elif token_upper == "NOT":
+            # Only claim NOT when it really opens ``NOT [ON] SIZE ERROR``:
+            # an arithmetic statement inside a CALL handler is followed by
+            # the CALL's own ``NOT ON EXCEPTION``, which must be left alone.
+            look, idx = peek_past_noise(stream, 1)
+            if look and look.value and look.value.upper() == "ON":
+                look, _ = peek_past_noise(stream, idx + 1)
+            if not (look and look.value and look.value.upper() == "SIZE"):
+                break
+            stream.consume()  # NOT
+            next_token = _skip_newlines(stream)
+            if next_token and next_token.value and next_token.value.upper() == "ON":
+                stream.consume()
+                next_token = _skip_newlines(stream)
             if next_token and next_token.value and next_token.value.upper() == "SIZE":
                 stream.consume()
                 next_token = _skip_newlines(stream)
@@ -1293,29 +1514,7 @@ def parse_size_error_clauses(
                     and next_token.value.upper() == "ERROR"
                 ):
                     stream.consume()
-                    stmt.set_on_size_error_clause(_parse_size_error_stmts(stream))
-        elif token_upper == "NOT":
-            stream.consume()
-            next_token = _skip_newlines(stream)
-            if next_token and next_token.value and next_token.value.upper() == "ON":
-                stream.consume()
-                next_token = _skip_newlines(stream)
-                if (
-                    next_token
-                    and next_token.value
-                    and next_token.value.upper() == "SIZE"
-                ):
-                    stream.consume()
-                    next_token = _skip_newlines(stream)
-                    if (
-                        next_token
-                        and next_token.value
-                        and next_token.value.upper() == "ERROR"
-                    ):
-                        stream.consume()
-                        stmt.set_not_on_size_error_clause(
-                            _parse_size_error_stmts(stream)
-                        )
+                    stmt.set_not_on_size_error_clause(_parse_size_error_stmts(stream))
         elif end_keyword is not None and token_upper == end_keyword:
             stream.consume()
             skip_whitespace(stream)
@@ -1483,7 +1682,11 @@ def _parse_size_error_stmts(stream: ITokenStream) -> list:
                 stream.consume()
             break
 
-        if token.type == TokenType.NEWLINE or not token.value:
+        if (
+            token.type == TokenType.NEWLINE
+            or token.type in SEPARATOR_TOKEN_TYPES
+            or not token.value
+        ):
             stream.consume()
             continue
 

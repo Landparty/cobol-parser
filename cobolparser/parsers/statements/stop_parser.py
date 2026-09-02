@@ -38,7 +38,11 @@ class StopStatementParser(IStatementParser):
                 if next_token.value.upper() == "RUN":
                     stmt.stop_type = "RUN"
                     token_stream.consume()  # consume RUN
-                elif next_token.type.name in ("STRING_LITERAL", "NUMERIC_LITERAL"):
+                elif next_token.type.name in (
+                    "STRING_LITERAL",
+                    "NUMERIC_LITERAL",
+                    "FIGURATIVE_CONSTANT",  # STOP ZERO / STOP QUOTE (OBNC1M)
+                ):
                     stmt.stop_type = next_token.value
                     token_stream.consume()  # consume literal
 

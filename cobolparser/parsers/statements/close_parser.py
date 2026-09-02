@@ -3,6 +3,7 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    SEPARATOR_TOKEN_TYPES,
     create_statement,
     is_statement_boundary,
     looks_dedented_relative_to,
@@ -44,6 +45,12 @@ class CloseStatementParser(IStatementParser):
                 break
             if token.type == TokenType.PERIOD:
                 break
+            if token.type in SEPARATOR_TOKEN_TYPES:
+                # ``CLOSE F1, F2, F3`` (NIST SQ128A) -- separators between
+                # file names are punctuation, not the end of the list.
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
             if token.type != TokenType.IDENTIFIER:
                 break
             # A following statement's verb that lexes as a plain IDENTIFIER
@@ -101,44 +108,47 @@ class CloseStatementParser(IStatementParser):
                         and token.value.upper() == "WITH"
                     )
                 ):
+                    # WITH is an optional prefix -- ``CLOSE F LOCK`` and
+                    # ``CLOSE F NO REWIND`` are equally standard (NIST
+                    # IX216A / OBSQ3A write both). Consume it and let the next
+                    # iteration pick up the option word itself.
                     token_stream.consume()
                     skip_whitespace(token_stream)
+                elif token and (
+                    token.type == TokenType.NO
+                    or (
+                        token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() == "NO"
+                    )
+                ):
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    # Consume REWIND (lexer maps "REWIND" to TokenType.NO_REWIND)
                     token = token_stream.peek()
-                    if token and (
-                        token.type == TokenType.NO
-                        or (
-                            token.type == TokenType.IDENTIFIER
-                            and token.value
-                            and token.value.upper() == "NO"
-                        )
+                    if token and token.type == TokenType.NO_REWIND:
+                        token_stream.consume()
+                        skip_whitespace(token_stream)
+                    elif (
+                        token
+                        and token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() == "REWIND"
                     ):
                         token_stream.consume()
                         skip_whitespace(token_stream)
-                        # Consume REWIND (lexer maps "REWIND" to TokenType.NO_REWIND)
-                        token = token_stream.peek()
-                        if token and token.type == TokenType.NO_REWIND:
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                        elif (
-                            token
-                            and token.type == TokenType.IDENTIFIER
-                            and token.value
-                            and token.value.upper() == "REWIND"
-                        ):
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                        no_rewind = True
-                    elif token and (
-                        token.type == TokenType.LOCK
-                        or (
-                            token.type == TokenType.IDENTIFIER
-                            and token.value
-                            and token.value.upper() == "LOCK"
-                        )
-                    ):
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                        with_lock = True
+                    no_rewind = True
+                elif token and (
+                    token.type == TokenType.LOCK
+                    or (
+                        token.type == TokenType.IDENTIFIER
+                        and token.value
+                        and token.value.upper() == "LOCK"
+                    )
+                ):
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    with_lock = True
                 else:
                     break
 

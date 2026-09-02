@@ -74,14 +74,15 @@ class TestEntryUsingClauseDoesNotSwallowFollowingStatement:
 
 class TestCallHandlerWarnsOnUnsupportedVerb:
     def test_unsupported_verb_in_on_exception_warns_and_is_dropped(self):
-        # TRANSFORM is a genuinely unsupported (obsolete) verb. INVOKE was
-        # originally used here, but it now has a registered parser
-        # (invoke_parser.py) -- see test_invoke_dispatches_inside_on_exception_handler
-        # below for its coverage of this same handler-body position.
+        # EXECUTE is a verb-shaped reserved word with no statement behind
+        # it. TRANSFORM (and before it INVOKE) used to be the example here;
+        # both now have registered parsers -- see
+        # test_invoke_dispatches_inside_on_exception_handler below and
+        # test_extended_verb_parsers.py.
         result = _parse_proc(
             "           CALL 'SUB' USING WS-X\n"
             "              ON EXCEPTION\n"
-            "                  TRANSFORM WS-Y CHARACTERS FROM 'a' TO 'b'\n"
+            "                  EXECUTE WS-Y\n"
             "                  DISPLAY 'HANDLED'\n"
             "           END-CALL."
         )
@@ -89,7 +90,7 @@ class TestCallHandlerWarnsOnUnsupportedVerb:
         handler_types = [type(s).__name__ for s in (call.on_exception or [])]
         assert handler_types == ["DisplayStatement"]
         assert any(
-            "TRANSFORM" in w and "no parser is registered" in w for w in result.warnings
+            "EXECUTE" in w and "no parser is registered" in w for w in result.warnings
         )
         assert result.errors == []
 

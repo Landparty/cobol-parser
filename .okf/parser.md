@@ -71,7 +71,8 @@ the same reuse hazard `statistics.copy()` above was fixed for.
 
 `warnings` is the "recognized but degraded" channel (2026-07-07): the parser
 populates it when it skips an unsupported verb (no registered statement
-parser — e.g. `INVOKE`, `EXHIBIT`; see
+parser; since the 2026-09-02 statement-coverage audit that is only
+`EXECUTE`/`GOTO`/`RECOVER`, see
 `ProcedureDivisionParser._UNSUPPORTED_VERBS`), when it skips leftover clause
 tokens a statement parser did not understand ("Unparsed tokens" warnings),
 when a compilation unit contains more than one program (see below), and
@@ -107,7 +108,7 @@ CobolParser.parse(source)
        ├─ DataDivisionParser
        └─ ProcedureDivisionParser
             └─ StatementParserRegistry  (first-match dispatch)
-                 └─ 26 statement parsers
+                 └─ 72 statement parsers (every COBOL verb)
 ```
 
 # Core Infrastructure (`cobolparser/core/`)
@@ -136,7 +137,7 @@ CobolParser.parse(source)
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
 | `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names, level-66 RENAMES, data-division EXEC SQL blocks |
 | `procedure.py` | PROCEDURE DIVISION — paragraph/section dispatch loop, ParseContext attachment, AST node; hosts the shared `StatementParserRegistry` cache; supporting logic delegated to the three `procedure_*.py` collaborators below |
-| `procedure_registry.py` | `create_statement_registry()` — registers all 40+ statement parsers in first-match priority order (new statement parsers register here); order invariant pinned by `tests/unit/test_procedure_registry_dispatch_order.py` |
+| `procedure_registry.py` | `create_statement_registry()` — registers all 72 statement parsers in first-match priority order (new statement parsers register here); order invariant pinned by `tests/unit/test_procedure_registry_dispatch_order.py`; every registered parser also needs a fixture in `tests/regression/test_swallow_sweep.py` |
 | `procedure_boundaries.py` | `is_paragraph_or_section_start` / `is_section_marker` / `is_statement_keyword` lookahead predicates |
 | `procedure_recovery.py` | `StatementRecoveryHandler` — unsupported-statement warnings, FAIL_FAST/COLLECT_ALL error recording, stream resynchronization; owns `STRAY_MARKERS` / `UNSUPPORTED_VERBS` (aliased as `ProcedureDivisionParser._STRAY_MARKERS` / `._UNSUPPORTED_VERBS`) |
 
@@ -290,18 +291,22 @@ sibling) and a dedicated anonymous-item case.
 | `arithmetic_parsers.py` | ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE |
 | `call_parser.py` | CALL |
 | `close_parser.py` | CLOSE |
+| `communication_parsers.py` | SEND, RECEIVE, ENABLE, DISABLE, PURGE (COBOL-85 Communication Module; 2026-09-02) |
 | `delete_parser.py` | DELETE |
 | `display_parser.py` | DISPLAY |
 | `entry_parser.py` | ENTRY |
 | `evaluate_parser.py` | EVALUATE |
+| `exception_parsers.py` | RAISE, RESUME, VALIDATE (COBOL 2002; 2026-09-02) |
 | `go_parser.py` | GO TO |
 | `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI |
 | `if_parser.py` | IF |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT |
+| `legacy_verb_parsers.py` | EXHIBIT, EXAMINE, TRANSFORM (OS/VS), ENTER, NOTE (COBOL-74), CHAIN (Micro Focus), READY TRACE / RESET TRACE, SERVICE LABEL / SERVICE RELOAD, TITLE (IBM compiler-directing; 2026-09-02) |
 | `move_parser.py` | MOVE |
 | `open_parser.py` | OPEN |
 | `perform_parser.py` | PERFORM |
 | `read_parser.py` | READ |
+| `report_writer_parsers.py` | INITIATE, TERMINATE, SUPPRESS (Report Writer; GENERATE is in `simple_statement_parsers.py`; 2026-09-02) |
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
@@ -814,6 +819,132 @@ following clauses into `assign_to`). `DECIMAL-POINT IS COMMA` in
 SPECIAL-NAMES emits a warning that the clause is recorded but not honored
 by the lexer (H4). All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
+
+# Statement-coverage audit (2026-09-02)
+
+Question asked of the parser: *can a PROCEDURE DIVISION statement leave the
+AST with neither an error nor a warning, and is every COBOL verb
+supported?* Method: a per-verb probe program for every statement form of
+COBOL-85 / COBOL 2002 / IBM Enterprise COBOL plus the OS/VS and Micro
+Focus verbs, and a sweep of all 540 COBOL files in the repo (NIST suite,
+shamrice, `tests/samples/`) aggregating "Unsupported statement" /
+"Unparsed tokens" warnings (~370 before, 30 after -- the remainder is
+malformed samples, unexpanded `COPY`, and screen-section extensions).
+Pinned by `tests/unit/test_extended_verb_parsers.py` and
+`tests/regression/test_statement_coverage_audit_2026_09_02.py`.
+
+**Silent (no error, no warning) gaps found and fixed:**
+
+* `ExecCicsStatement` / `ExecImsStatement` extended `ASTNode`, not
+  `CobolStatement`, so `CobolProgram.get_all_statements()` -- the walk
+  every analyzer starts from -- never returned a single EXEC CICS / EXEC
+  DLI statement. Now `CobolStatement` subclasses (`statement_type` `"EXEC
+  CICS"` / `"EXEC IMS"`); `node_type` stays `"EXEC_CICS"` / `"EXEC_IMS"`,
+  the `cics_command` / `ims_command` attributes became read-write
+  properties overriding the base class's read-only ones, `to_dict()` is
+  byte-identical. `unused_variables.py`'s separate `traverse_depth_first`
+  sweep is now redundant but harmless.
+* `GO TO` with the target on the next line (`GO TO` / `SEP-WRITE-1.`, NIST
+  NC107A): the NEWLINE token became the target and the real target was
+  re-parsed as a phantom paragraph. `go_parser.py` now skips layout after
+  `GO` and after `TO`.
+* Optional `ON` / `AT` in handler phrases: `ADD ... SIZE ERROR`, `NOT SIZE
+  ERROR`, `CALL ... EXCEPTION` / `OVERFLOW` / `NOT EXCEPTION`, `READ ...
+  END` / `NOT END` (NIST RL110A), `WRITE ... END-OF-PAGE`, `RETURN` /
+  `SEARCH ... END`. The keyword was swallowed as an operand and the handler
+  body escaped to the enclosing paragraph as free-standing statements.
+  `parse_size_error_clauses`, `call_parser.py` (main loop and
+  `_parse_using_clause` stop set), `read_parser.py`, `write_parser.py`,
+  `simple_statement_parsers.py` (RETURN) and `search_parser.py` accept the
+  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`. A bare
+  `END` is only an `AT END` when it does not start `END PROGRAM` /
+  `END DIVISION` (`_utils.bare_end_starts_at_end_clause`).
+  `parse_size_error_clauses` also no longer consumes a `NOT` that does not
+  open `NOT [ON] SIZE ERROR` (an ADD inside a CALL handler used to eat the
+  CALL's own `NOT ON EXCEPTION`, NIST IC222A).
+* `MOVE`'s target loop consumed *any* non-identifier token silently
+  (`RECEIVE ... NO DATA MOVE A TO B WITH DATA ...` lost `WITH DATA` and
+  folded the second handler into the first). It now skips only `,`/`;`
+  and stops on anything else.
+* `ACCEPT ... [ON] EXCEPTION` / `NOT [ON] EXCEPTION` bodies escaped the
+  same way; `IOAcceptStatement.on_exception` / `.not_on_exception` hold
+  them now and `END-ACCEPT` is consumed.
+
+**Warned-but-structural drops fixed:**
+
+* A string literal spelled like a verb (`IF TB-25 EQUAL TO "IF"`, NIST
+  NC126A; `STRING "IF" ...`; `COMPUTE X = FUNCTION LENGTH("IF")`; `WHEN
+  "ELSE"`) was mistaken for the next statement's verb by the value-based
+  keyword checks. `is_statement_boundary`, `_looks_like_statement_boundary`,
+  `parse_arithmetic_operands` and the IF / EVALUATE / SEARCH / RETURN / USE
+  condition-and-operand loops now exempt `LITERAL_TOKEN_TYPES`.
+* A CALL handler body swallowed the enclosing IF's `ELSE` / `END-IF` or
+  PERFORM's `END-PERFORM` (`call_parser._parse_nested_stmts` now stops at
+  `CONTROL_FLOW_BOUNDARIES` / `SCOPE_TERMINATORS`).
+* `,` / `;` statement separators (`PERFORM A, GO TO B.`, `... GO TO X;
+  ELSE ...`, `CALL ... USING A, B; ON OVERFLOW`, `READ F ; AT END`,
+  `START F ; INVALID KEY`, `CLOSE F1, F2`, `SET A; B TO 3`) were "unparsed
+  tokens" and broke IF/ELSE structure. `_utils.skip_statement_separators`
+  (whitespace + `SEPARATOR_TOKEN_TYPES`) now runs at the top of every
+  statement-list loop (paragraph bodies, IF/ELSE, inline PERFORM, EVALUATE
+  WHEN, SEARCH WHEN, `collect_clause_stmts`, size-error / invalid-key /
+  CALL-handler bodies, RETURN clauses) and before the handler clauses of
+  CALL, READ, WRITE and `parse_invalid_key_clauses`; operand lists skip them
+  where COBOL allows.
+* `XML GENERATE ... SUPPRESS WHEN SPACES` ended the statement at
+  `SUPPRESS` (a verb elsewhere) -- `xml_json_parser.py` keeps its own clause
+  words (`SUPPRESS`, `NOT`, `ON`, and `WHEN` once a SUPPRESS was seen).
+* `IF A EQUAL TO B` recorded `right_operand` `"TO B"`; `GREATER [THAN] OR
+  EQUAL [TO]` split into an OR of two conditions. `_conditions.py`'s
+  cleaning pass drops the `TO`/`THAN` connective after a relational word and
+  folds `OR EQUAL` into `GREATER_OR_EQUAL` / `LESS_OR_EQUAL`.
+
+**Clause-level gaps from the NIST sweep (all previously "unparsed
+tokens"):** multi-group `SET SW-1 TO ON SW-2 TO OFF` (`SetStatement.groups`,
+NC174A); `OPEN ... [WITH] NO REWIND` / `REVERSED` / `[WITH] LOCK` and
+`CLOSE ... LOCK` / `NO REWIND` without `WITH` (OBSQ3A, IX216A); `PERFORM
+id TIMES` and `PERFORM P id (sub) TIMES` (NC102A, NC121M); `PERFORM WITH
+TEST AFTER VARYING ...` inline (SM208A) and bare `TEST BEFORE` (NC201A);
+subscripted `VARYING` variable (NC201A); `START ... KEY IS = / > / >= k`
+(IX208A) and `KEY GREATER OR EQUAL TO k` (RL205A); `DISPLAY ELEM OF GRP,
+21` (NC204M); `GO TO ... DEPENDING ON X (7)` (NC102A); `PERFORM P OF
+SECTION` / `GO TO P IN SECTION` / `ALTER P IN S TO ...` (NC208A, OBNC2M --
+qualifier kept in `metadata["target_qualifier"]`, target stays the bare
+name); `READ F WITH LOCK KEY IS k`; `ACCEPT X OF Y` / `ACCEPT T (2)` /
+`ACCEPT cd MESSAGE COUNT` (NC204M, NC109M, CM101M); `CALL ... USING BY
+VALUE 100` / `ADDRESS OF x` / `SUBSCRIPTED-DATA (4)` (IC235A); `STOP ZERO`
+/ `STOP QUOTE` (OBNC1M); `WRITE ... ADVANCING ZERO` (SQ101M); `ALTER a TO
+..., b TO ...` (NC303M); `OPEN INPUT A, B` (SQ206A); `REWRITE r FROM X (2)`
+(SQ116A); a subscripted dynamic `CALL WS-PGM (IDX)` (bare name stays
+`called_program`, full reference in `metadata["called_program_reference"]`).
+CALL handler bodies also stop at the *next* `ON` / `NOT` clause, so `ON
+OVERFLOW ... ON EXCEPTION ...` yields both handlers.
+
+**New statement parsers (22 verbs) and where they live:** see the
+statement-parser table above (`report_writer_parsers.py`,
+`communication_parsers.py`, `legacy_verb_parsers.py`,
+`exception_parsers.py`) and [ast-models.md](ast-models.md). Matching
+notes: `TITLE` (not reserved outside IBM) is only claimed when a string
+literal follows; `VALIDATE` (not reserved by IBM) only when a data-name
+follows, so a paragraph named `VALIDATE.` still parses as a paragraph;
+`READY` / `RESET` only before `TRACE` (RESET also appears in Report Writer
+`SUM ... RESET ON`); `SERVICE` only before `LABEL` / `RELOAD`; `NOTE`
+(COBOL-74 comment statement) runs to the sentence period but stops early at
+a following line that starts with a verb, so a period-less NOTE cannot eat
+the rest of the program. `PURGE` / `RAISE` / `RESUME` / `VALIDATE` / `TITLE`
+have no lexer `TokenType` and are matched by value via `_utils.matches_word`
+(never `matches_keyword(stream, TokenType.IDENTIFIER, ...)`, which would
+claim every identifier). `_utils.collect_operands` is the shared operand
+collector these parsers use (subscripts/qualifiers folded, literals
+re-quoted, separators skipped, statement-boundary and H9 paragraph-boundary
+aware). `END-RECEIVE` joined `SCOPE_TERMINATORS` / `STRAY_MARKERS`.
+
+**Left as-is (documented, not silent):** an unexpanded `COPY` in the
+PROCEDURE DIVISION (use copybook expansion); screen-section DISPLAY/ACCEPT
+extensions (`LINE`/`COLUMN`/`BLANK SCREEN`/`WITH BELL`/`FROM ESCAPE KEY`);
+the deliberately malformed `tests/samples/` files (a second `PROCEDURE
+DIVISION` after a `REPORT SECTION`, an `01` level inside a paragraph, `OPEN
+INVALID`, a `CALCULATE` pseudo-verb).
 
 # Silent-Drop Audit (2026-07-08)
 

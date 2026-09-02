@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
+    SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
     consume_optional_qualifiers,
@@ -191,9 +192,18 @@ class MoveStatementParser(IStatementParser):
                 if target_name:
                     stmt.add_target(target_name)
                 target_count += 1
-            else:
-                # Skip non-identifier tokens (operators, comparisons, etc)
+            elif token.type in SEPARATOR_TOKEN_TYPES:
+                # ``MOVE A TO B, C`` -- a separator between targets.
                 token_stream.consume()
+            else:
+                # Anything else ends the target list. This used to consume
+                # the token silently, which swallowed the enclosing clause's
+                # own keywords (``RECEIVE ... NO DATA MOVE A TO B WITH DATA
+                # ...`` lost ``WITH DATA`` and folded the next handler body
+                # into this one) with no error and no warning. Leaving the
+                # token in the stream lets the caller either claim it as its
+                # clause or report it as unparsed content.
+                break
 
         # A MOVE that reached TO but collected no receiving field (e.g.
         # `MOVE A TO.` or a stream truncated right after TO) is invalid.

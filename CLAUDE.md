@@ -152,7 +152,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 30 statement parser files (see "Statement Parsers" section below)
+- `statements/` -- 34 statement parser files (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -213,19 +213,23 @@ COBOL source (.cbl/.cob)
 | `arithmetic_parsers.py` | ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE |
 | `call_parser.py` | CALL |
 | `close_parser.py` | CLOSE |
+| `communication_parsers.py` | SEND, RECEIVE, ENABLE, DISABLE, PURGE (COBOL-85 Communication Module) |
 | `delete_parser.py` | DELETE |
 | `display_parser.py` | DISPLAY |
 | `entry_parser.py` | ENTRY |
 | `evaluate_parser.py` | EVALUATE |
+| `exception_parsers.py` | RAISE, RESUME, VALIDATE (COBOL 2002) |
 | `go_parser.py` | GO TO |
 | `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI |
 | `if_parser.py` | IF |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT |
 | `invoke_parser.py` | INVOKE |
+| `legacy_verb_parsers.py` | EXHIBIT, EXAMINE, TRANSFORM (OS/VS), ENTER, NOTE (COBOL-74), CHAIN (Micro Focus), READY TRACE / RESET TRACE, SERVICE LABEL / SERVICE RELOAD, TITLE (IBM compiler-directing) |
 | `move_parser.py` | MOVE |
 | `open_parser.py` | OPEN |
 | `perform_parser.py` | PERFORM |
 | `read_parser.py` | READ |
+| `report_writer_parsers.py` | INITIATE, TERMINATE, SUPPRESS (Report Writer; GENERATE lives in `simple_statement_parsers.py`) |
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
@@ -240,6 +244,8 @@ COBOL source (.cbl/.cob)
 
 `_utils.py` (clause collection) and `_conditions.py` (shared condition-expression building for IF/EVALUATE/PERFORM UNTIL) are shared helpers, not verb parsers.
 
+Every COBOL verb now has a registered parser. `procedure_recovery.UNSUPPORTED_VERBS` (the warn-and-discard path) holds only `EXECUTE`, `GOTO`, `RECOVER` -- verb-shaped reserved words with no statement behind them in any dialect. `ExecCicsStatement` / `ExecImsStatement` are `CobolStatement`s (node_type kept as `EXEC_CICS` / `EXEC_IMS`), so `get_all_statements()` returns them like every other statement.
+
 ### AST Statement Models (cobolparser/models/statements/)
 
 | File | Node Classes |
@@ -247,10 +253,13 @@ COBOL source (.cbl/.cob)
 | `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall` |
 | `arithmetic.py` | `ArithmeticStatement`, `AddStatement`, `SubtractStatement`, `MultiplyStatement`, `DivideStatement`, `ComputeStatement` |
 | `call.py` | `CallStatement`, `EntryStatement`, `CallParameter` |
-| `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` |
-| `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement` |
+| `communication.py` | `SendStatement`, `ReceiveStatement`, `EnableStatement`, `DisableStatement`, `PurgeStatement` |
+| `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement`, `RaiseStatement`, `ResumeStatement` |
+| `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement`, `ValidateStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
+| `legacy.py` | `ExhibitStatement`, `ExamineStatement`, `TransformStatement`, `EnterStatement`, `NoteStatement`, `ChainStatement`, `TraceStatement`, `ServiceStatement`, `TitleStatement` |
 | `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `XmlJsonStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
+| `report_writer.py` | `InitiateStatement`, `TerminateStatement`, `SuppressStatement` |
 
 ### Data Flow Detail
 

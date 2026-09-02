@@ -37,6 +37,22 @@ COMPARISON_OPS = {
 # the cleaning pass so the comparison scan below sees them whole.
 _COMPOUND_SYMBOL_OPS = frozenset({">=", "<=", "<>"})
 
+#: Relational words after which a ``TO`` / ``THAN`` connective is dropped.
+_RELATIONAL_WORDS = frozenset(
+    {
+        "EQUAL",
+        "EQUALS",
+        "GREATER",
+        "LESS",
+        "=",
+        ">",
+        "<",
+        "NOT_EQUAL",
+        "GREATER_OR_EQUAL",
+        "LESS_OR_EQUAL",
+    }
+)
+
 # Multi-word NOT-prefixed operators normalised during the cleaning pass.
 _NEGATED_OPS = {
     "NOT EQUAL": "NOT_EQUAL",
@@ -107,6 +123,28 @@ def build_condition_expression(
     i = 0
     while i < len(tokens):
         tok = tokens[i].upper()
+        # ``EQUAL TO`` / ``GREATER THAN`` / ``LESS THAN``: the connective is
+        # noise that otherwise leaks into the right-hand operand text
+        # (``IF A EQUAL TO B`` used to record right_operand ``"TO B"``).
+        if tok in ("TO", "THAN") and cleaned and cleaned[-1] in _RELATIONAL_WORDS:
+            i += 1
+            continue
+        # ``GREATER [THAN] OR EQUAL [TO]`` / ``LESS [THAN] OR EQUAL [TO]`` is
+        # one operator, not an OR of two conditions.
+        if (
+            tok == "OR"
+            and cleaned
+            and cleaned[-1] in ("GREATER", "LESS")
+            and i + 1 < len(tokens)
+            and tokens[i + 1].upper() in ("EQUAL", "EQUALS")
+        ):
+            cleaned[-1] = (
+                "GREATER_OR_EQUAL" if cleaned[-1] == "GREATER" else "LESS_OR_EQUAL"
+            )
+            i += 2
+            if i < len(tokens) and tokens[i].upper() == "TO":
+                i += 1
+            continue
         if tok == "NOT" and i + 1 < len(tokens):
             nxt = tokens[i + 1].upper()
             combined = _NEGATED_OPS.get(f"NOT {nxt}")

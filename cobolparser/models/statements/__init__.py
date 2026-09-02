@@ -38,11 +38,20 @@ from .call import (
     CallStatement,
     EntryStatement,
 )
+from .communication import (
+    DisableStatement,
+    EnableStatement,
+    PurgeStatement,
+    ReceiveStatement,
+    SendStatement,
+)
 from .control import (
     EvaluateStatement,
     GoStatement,
     IfStatement,
     PerformStatement,
+    RaiseStatement,
+    ResumeStatement,
     SearchStatement,
     StopStatement,
     WhenClause,
@@ -55,6 +64,7 @@ from .data import (
     SetStatement,
     StringStatement,
     UnstringStatement,
+    ValidateStatement,
 )
 from .io import (
     IOAcceptStatement,
@@ -66,6 +76,17 @@ from .io import (
     IOStartStatement,
     IOUnlockStatement,
     IOWriteStatement,
+)
+from .legacy import (
+    ChainStatement,
+    EnterStatement,
+    ExamineStatement,
+    ExhibitStatement,
+    NoteStatement,
+    ServiceStatement,
+    TitleStatement,
+    TraceStatement,
+    TransformStatement,
 )
 from .misc import (
     AllocateStatement,
@@ -90,6 +111,11 @@ from .misc import (
     SortStatement,
     UseStatement,
     XmlJsonStatement,
+)
+from .report_writer import (
+    InitiateStatement,
+    SuppressStatement,
+    TerminateStatement,
 )
 
 # Module exports — preserved from original statements.py
@@ -139,6 +165,30 @@ __all__ = [
     "InvokeStatement",
     "AllocateStatement",
     "FreeStatement",
+    # Report Writer
+    "InitiateStatement",
+    "TerminateStatement",
+    "SuppressStatement",
+    # Communication Module
+    "SendStatement",
+    "ReceiveStatement",
+    "EnableStatement",
+    "DisableStatement",
+    "PurgeStatement",
+    # Legacy / compiler-directing
+    "ExhibitStatement",
+    "ExamineStatement",
+    "TransformStatement",
+    "EnterStatement",
+    "NoteStatement",
+    "ChainStatement",
+    "TraceStatement",
+    "ServiceStatement",
+    "TitleStatement",
+    # COBOL 2002
+    "RaiseStatement",
+    "ResumeStatement",
+    "ValidateStatement",
     # Other exports
     "CobolExpression",
     "ArithmeticExpression",

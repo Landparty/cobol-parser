@@ -95,6 +95,8 @@ late to prevent the swallow. See
 ``TestEvaluateSubjectsAndClauseScanDoNotSwallowFollowingContent``.
 """
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.plugins.core import ErrorRecoveryMode
 
@@ -126,28 +128,39 @@ def _statement_types(result):
 # and correctly produce NO warning; see TestInvokeAllocateFreeNoLongerSwallowed
 # below, which mirrors TestCommitRollbackNoLongerSwallowed for them.
 UNSUPPORTED_VERBS = [
-    "SEND",
-    "RECEIVE",
-    "SERVICE",
-    "DISABLE",
-    "ENABLE",
-    "READY",
-    "RESET",
-    "TRANSFORM",
-    "EXHIBIT",
+    # 2026-09-02: every real COBOL verb formerly listed here (SEND, RECEIVE,
+    # SERVICE, DISABLE, ENABLE, READY, RESET, TRANSFORM, EXHIBIT, PURGE,
+    # RAISE, RESUME, CHAIN, ENTER, EXAMINE, INITIATE, NOTE, SUPPRESS,
+    # TERMINATE) now has a registered parser -- see
+    # TestFormerlyUnsupportedVerbsNowDispatch below. Only verb-shaped
+    # reserved words with no statement behind them remain on this path.
     "EXECUTE",
-    "PURGE",
-    "RAISE",
-    "RESUME",
-    "CHAIN",
-    "ENTER",
-    "EXAMINE",
     "GOTO",
-    "INITIATE",
-    "NOTE",
     "RECOVER",
-    "SUPPRESS",
-    "TERMINATE",
+]
+
+# (verb spelled as real syntax, expected statement class) for every verb that
+# used to be on the list above and now dispatches to a node.
+NOW_SUPPORTED_VERBS = [
+    ("SEND WS-C", "SendStatement"),
+    ("RECEIVE WS-C MESSAGE INTO WS-D", "ReceiveStatement"),
+    ("SERVICE RELOAD WS-C", "ServiceStatement"),
+    ("DISABLE INPUT WS-C", "DisableStatement"),
+    ("ENABLE OUTPUT WS-C", "EnableStatement"),
+    ("READY TRACE", "TraceStatement"),
+    ("RESET TRACE", "TraceStatement"),
+    ("TRANSFORM WS-C CHARACTERS FROM 'a' TO 'b'", "TransformStatement"),
+    ("EXHIBIT NAMED WS-C", "ExhibitStatement"),
+    ("PURGE WS-C", "PurgeStatement"),
+    ("RAISE EXCEPTION EC-ALL", "RaiseStatement"),
+    ("RESUME NEXT STATEMENT", "ResumeStatement"),
+    ("CHAIN 'PROG' USING WS-C", "ChainStatement"),
+    ("ENTER COBOL", "EnterStatement"),
+    ("EXAMINE WS-C TALLYING ALL 'A'", "ExamineStatement"),
+    ("INITIATE WS-C", "InitiateStatement"),
+    ("NOTE THIS IS A COMMENT", "NoteStatement"),
+    ("SUPPRESS PRINTING", "SuppressStatement"),
+    ("TERMINATE WS-C", "TerminateStatement"),
 ]
 
 
@@ -156,11 +169,11 @@ class TestUnsupportedVerbNoLongerSwallowedByPeriodLessStatement:
         """Control case: the previously-covered path still works."""
         result = _parse(
             "           MOVE WS-A TO WS-B.\n"
-            "           SEND WS-C.\n"
+            "           EXECUTE WS-C.\n"
             "           STOP RUN."
         )
         assert result.warnings, "period-terminated case should already warn"
-        assert any("SEND" in w for w in result.warnings)
+        assert any("EXECUTE" in w for w in result.warnings)
         move = next(
             s
             for s in result.ast.get_division("PROCEDURE").paragraphs[0].statements
@@ -189,6 +202,27 @@ class TestUnsupportedVerbNoLongerSwallowedByPeriodLessStatement:
                 f"{verb}: MOVE swallowed the following verb's operand: "
                 f"{move.to_dict()['targets']!r}"
             )
+
+
+class TestFormerlyUnsupportedVerbsNowDispatch:
+    """Every verb that used to be warned-and-discarded now produces its own
+    node -- and, just as importantly, a period-less MOVE before it still
+    stops at the verb instead of swallowing it as an extra target."""
+
+    @pytest.mark.parametrize("source,node_type", NOW_SUPPORTED_VERBS)
+    def test_verb_after_period_less_move_dispatches(self, source, node_type):
+        result = _parse(
+            f"           MOVE WS-A TO WS-B\n"
+            f"           {source}\n"
+            f"           STOP RUN."
+        )
+        assert result.success
+        assert result.warnings == [], f"{source}: {result.warnings!r}"
+        statements = result.ast.get_division("PROCEDURE").paragraphs[0].statements
+        types = [type(s).__name__ for s in statements]
+        assert node_type in types, f"{source}: {types!r}"
+        move = next(s for s in statements if type(s).__name__ == "MoveStatement")
+        assert move.to_dict()["targets"] == ["WS-B"]
 
 
 class TestCommitRollbackNoLongerSwallowed:
@@ -284,6 +318,15 @@ class TestInvokeAllocateFreeNoLongerSwallowed:
 # so only a value-based (STATEMENT_KEYWORDS) boundary check can catch them.
 IDENTIFIER_ONLY_VERBS = ["PURGE", "RAISE", "RESUME"]
 
+# 2026-09-02: all three now have registered parsers (communication_parsers.py
+# / exception_parsers.py), so the boundary fix is observed as "the verb gets
+# its own node and the lead statement is unchanged" rather than as a warning.
+IDENTIFIER_ONLY_VERB_NODES = {
+    "PURGE": "PurgeStatement",
+    "RAISE": "RaiseStatement",
+    "RESUME": "ResumeStatement",
+}
+
 # (lead statement, template, expected AST node type name for the lead)
 _IDENTIFIER_LOOP_CASES = [
     ("DISPLAY WS-A", "DisplayStatement"),
@@ -332,14 +375,15 @@ class TestIdentifierTypedVerbNotSwallowedByOpenEndedListLoops:
                     f"           STOP RUN."
                 )
                 assert result.success
-                assert result.warnings, f"{lead} + {verb}: expected a warning, got none"
-                assert any(
-                    verb in w for w in result.warnings
-                ), f"{lead} + {verb}: warnings were {result.warnings!r}"
+                assert result.warnings == [], f"{lead} + {verb}: {result.warnings!r}"
                 types = _statement_types(result)
-                assert types == [expected_type, "StopStatement"], (
+                assert types == [
+                    expected_type,
+                    IDENTIFIER_ONLY_VERB_NODES[verb],
+                    "StopStatement",
+                ], (
                     f"{lead} + {verb}: {verb} was folded into the lead "
-                    f"statement instead of producing its own warning "
+                    f"statement instead of producing its own node "
                     f"(types={types!r})"
                 )
 
@@ -377,12 +421,12 @@ class TestPerformUntilConditionNoLongerSwallowsRest:
                 "           DISPLAY 'X'."
             )
             assert result.success
-            assert result.warnings, f"{verb}: expected a warning, got none"
-            assert any(verb in w for w in result.warnings)
+            assert result.warnings == [], f"{verb}: {result.warnings!r}"
             para = result.ast.get_division("PROCEDURE").paragraphs[0]
             types = [type(stmt).__name__ for stmt in para.statements]
             assert types == [
                 "PerformStatement",
+                IDENTIFIER_ONLY_VERB_NODES[verb],
                 "StopStatement",
             ], f"{verb}: swallowed into the UNTIL condition (types={types!r})"
 
@@ -400,9 +444,12 @@ class TestEvaluateSubjectsAndClauseScanDoNotSwallowFollowingContent:
                 f"           {verb} WS-C\n"
                 "           STOP RUN."
             )
-            assert result.warnings, f"{verb}: expected a warning, got none"
-            assert any(verb in w for w in result.warnings)
-            evaluate = result.ast.get_division("PROCEDURE").paragraphs[0].statements[0]
+            assert result.warnings == [], f"{verb}: {result.warnings!r}"
+            statements = result.ast.get_division("PROCEDURE").paragraphs[0].statements
+            assert IDENTIFIER_ONLY_VERB_NODES[verb] in [
+                type(s).__name__ for s in statements
+            ]
+            evaluate = statements[0]
             assert evaluate.to_dict()["subjects"] == ["WS-X"], (
                 f"{verb}: folded into EVALUATE subjects: "
                 f"{evaluate.to_dict()['subjects']!r}"

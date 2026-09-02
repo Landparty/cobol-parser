@@ -4,6 +4,7 @@ from typing import Any
 
 from cobolparser.parsers.statements._utils import (
     consume_end_keyword_and_period,
+    consume_optional_qualifiers,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
@@ -55,8 +56,13 @@ class RewriteStatementParser(IStatementParser):
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
             ):
-                stmt.set_from(token.value or "")
+                source = token.value or ""
                 token_stream.consume()
+                if token.type == TokenType.IDENTIFIER:
+                    # ``REWRITE rec FROM TABLE-ITEM (2)`` (NIST SQ116A): fold
+                    # a subscript / qualifier chain into the source.
+                    source = consume_optional_qualifiers(token_stream, source)
+                stmt.set_from(source)
                 skip_whitespace(token_stream)
 
         parse_invalid_key_clauses(token_stream, stmt, "END-REWRITE")

@@ -3,13 +3,16 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    bare_end_starts_at_end_clause,
     collect_clause_stmts,
     consume_end_keyword_and_period,
     consume_key_is,
     consume_optional_qualifiers,
     create_statement,
+    is_statement_boundary,
     matches_keyword,
     parse_invalid_key_clauses,
+    skip_statement_separators,
     skip_whitespace,
     try_consume_keyword,
 )
@@ -123,11 +126,33 @@ class ReadStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
                 stmt.set_lock_mode(with_lock=True)
 
-        # Optional AT END clause
+        # KEY IS may also follow the lock phrase (``READ F WITH LOCK KEY IS
+        # K``); the earlier KEY IS check only covers the form before it.
+        skip_whitespace(token_stream)
+        if consume_key_is(token_stream):
+            key_tok = token_stream.peek()
+            if (
+                key_tok
+                and key_tok.type == TokenType.IDENTIFIER
+                and not is_statement_boundary(key_tok)
+            ):
+                token_stream.consume()
+                stmt.set_key(
+                    consume_optional_qualifiers(token_stream, key_tok.value or "")
+                )
+                skip_whitespace(token_stream)
+
+        # Optional [AT] END clause -- AT is optional in standard COBOL, and
+        # NIST RL110A actually writes ``READ F END GO TO ...``; a separator
+        # before the clause (``READ F ; AT END``, SQ203A) is punctuation.
+        skip_statement_separators(token_stream)
         token = token_stream.peek()
-        if token and token.type == TokenType.AT:
-            token_stream.consume()
-            skip_whitespace(token_stream)
+        if (token and token.type == TokenType.AT) or bare_end_starts_at_end_clause(
+            token_stream
+        ):
+            if token and token.type == TokenType.AT:
+                token_stream.consume()
+                skip_whitespace(token_stream)
             # Consume END keyword
             token = token_stream.peek()
             if (
@@ -149,9 +174,13 @@ class ReadStatementParser(IStatementParser):
             token_stream.consume()
             skip_whitespace(token_stream)
             next_tok = token_stream.peek()
-            if next_tok and next_tok.type == TokenType.AT:
-                token_stream.consume()
-                skip_whitespace(token_stream)
+            if (next_tok and next_tok.type == TokenType.AT) or (
+                bare_end_starts_at_end_clause(token_stream)
+            ):
+                # NOT [AT] END -- AT optional here as well
+                if next_tok and next_tok.type == TokenType.AT:
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
                 # Consume END
                 token = token_stream.peek()
                 if (

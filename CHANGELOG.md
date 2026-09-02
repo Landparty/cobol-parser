@@ -9,6 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **parser:** every COBOL verb now has a statement parser. New parsers and
+  AST nodes for Report Writer `INITIATE` / `TERMINATE` / `SUPPRESS`, the
+  COBOL-85 Communication Module `SEND` / `RECEIVE` / `ENABLE` / `DISABLE` /
+  `PURGE`, the OS/VS legacy verbs `EXHIBIT` / `EXAMINE` / `TRANSFORM`,
+  `ENTER`, COBOL-74 `NOTE`, Micro Focus `CHAIN`, the IBM compiler-directing
+  statements `READY TRACE` / `RESET TRACE` / `SERVICE LABEL` / `SERVICE
+  RELOAD` / `TITLE`, and COBOL 2002 `RAISE` / `RESUME` / `VALIDATE`
+  (`cobolparser.parsers.statements.report_writer_parsers` /
+  `communication_parsers` / `legacy_verb_parsers` / `exception_parsers`;
+  nodes in `cobolparser.models.statements.report_writer` / `communication`
+  / `legacy` plus `RaiseStatement`, `ResumeStatement`, `ValidateStatement`).
+  Each used to be discarded with an "unsupported statement" warning; the
+  warn-and-discard path now only covers the non-verbs `EXECUTE`, `GOTO`,
+  `RECOVER`.
+* **models:** `SetStatement.groups` (additional target/value groups of a
+  multi-group `SET`), `IOOpenStatement.no_rewind` / `with_lock` /
+  `reversed_mode`, `IOAcceptStatement.on_exception` / `not_on_exception`;
+  `PerformStatement` / `GoStatement` / `AlterStatement` record a
+  section-qualified target's qualifier in `metadata["target_qualifier"]`;
+  a subscripted dynamic `CALL WS-PGM (IDX)` keeps the bare name in
+  `called_program` and the full reference in
+  `metadata["called_program_reference"]`. All additive to `to_dict()`.
+
+### Fixed
+
+* **parser:** `ExecCicsStatement` and `ExecImsStatement` are now
+  `CobolStatement` subclasses, so `CobolProgram.get_all_statements()`
+  returns EXEC CICS / EXEC DLI statements (they were silently omitted from
+  that walk). `node_type` (`EXEC_CICS` / `EXEC_IMS`) and `to_dict()` are
+  unchanged.
+* **parser:** silent statement drops -- `GO TO` with its target on the next
+  line lost the target; the optional `ON` / `AT` of `SIZE ERROR`,
+  `EXCEPTION`, `OVERFLOW`, `AT END`, `END-OF-PAGE` phrases was not
+  recognised, so the handler body escaped to the enclosing paragraph;
+  `MOVE` silently consumed any non-identifier token after its targets;
+  `ACCEPT ... [ON] EXCEPTION` bodies escaped the same way.
+* **parser:** a string literal spelled like a verb (`IF X = "IF"`,
+  `STRING "IF" ...`, `WHEN "ELSE"`, `FUNCTION LENGTH("IF")`) no longer
+  truncates the condition or operand list; CALL handler bodies stop at the
+  enclosing `ELSE` / `END-IF` / `END-PERFORM`; `,` / `;` statement
+  separators are skipped instead of reported as dropped content; `XML
+  GENERATE ... SUPPRESS WHEN ...` keeps its SUPPRESS clause; `IF A EQUAL
+  TO B` records `right_operand` `B` (not `TO B`) and `GREATER [THAN] OR
+  EQUAL [TO]` is one operator.
+* **parser:** clause forms from the NIST suite that were reported as
+  unparsed: multi-group `SET`, `OPEN`/`CLOSE` `[WITH] NO REWIND` / `LOCK` /
+  `REVERSED`, `PERFORM id TIMES`, `PERFORM WITH TEST AFTER VARYING`, bare
+  `TEST BEFORE`, subscripted `VARYING` variable, `START ... KEY IS = / >=`
+  and `KEY GREATER OR EQUAL`, `DISPLAY` of qualified and 1-2 digit numeric
+  items, `GO TO ... DEPENDING ON` subscripted, `PERFORM` / `GO TO` /
+  `ALTER` section-qualified targets, `READ ... WITH LOCK KEY IS`, `ACCEPT`
+  qualified / subscripted targets and `MESSAGE COUNT`, `CALL ... USING`
+  numeric literals / `ADDRESS OF` / subscripted arguments, `STOP ZERO`,
+  `WRITE ... ADVANCING ZERO`, multi-group `ALTER`, `OPEN INPUT A, B`.
+
 * **cli:** `--source-format {auto,fixed,free}` (default `auto`) on the
   subcommands that parse or lex a program directly — `parse`, `tokenize`,
   `preprocess`, the analyzer subcommands (`analyze`, `dead-code`,

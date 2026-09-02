@@ -36,10 +36,22 @@ from .arithmetic_parsers import (
 )
 from .call_parser import CallStatementParser
 from .close_parser import CloseStatementParser
+from .communication_parsers import (
+    DisableStatementParser,
+    EnableStatementParser,
+    PurgeStatementParser,
+    ReceiveStatementParser,
+    SendStatementParser,
+)
 from .delete_parser import DeleteStatementParser
 from .display_parser import DisplayStatementParser
 from .entry_parser import EntryStatementParser
 from .evaluate_parser import EvaluateStatementParser
+from .exception_parsers import (
+    RaiseStatementParser,
+    ResumeStatementParser,
+    ValidateStatementParser,
+)
 from .go_parser import GoStatementParser
 from .ibm_exec_statements import (
     ExecCicsStatementParser,
@@ -52,10 +64,26 @@ from .initialize_inspect_parsers import (
     InspectStatementParser,
 )
 from .invoke_parser import InvokeStatementParser
+from .legacy_verb_parsers import (
+    ChainStatementParser,
+    EnterStatementParser,
+    ExamineStatementParser,
+    ExhibitStatementParser,
+    NoteStatementParser,
+    ServiceStatementParser,
+    TitleStatementParser,
+    TraceStatementParser,
+    TransformStatementParser,
+)
 from .move_parser import MoveStatementParser
 from .open_parser import OpenStatementParser
 from .perform_parser import PerformStatementParser
 from .read_parser import ReadStatementParser
+from .report_writer_parsers import (
+    InitiateStatementParser,
+    SuppressStatementParser,
+    TerminateStatementParser,
+)
 from .rewrite_parser import RewriteStatementParser
 from .search_parser import SearchStatementParser
 from .set_parser import SetStatementParser
@@ -136,4 +164,28 @@ __all__ = [
     "InvokeStatementParser",
     "AllocateStatementParser",
     "FreeStatementParser",
+    # Report Writer
+    "InitiateStatementParser",
+    "TerminateStatementParser",
+    "SuppressStatementParser",
+    # Communication Module
+    "SendStatementParser",
+    "ReceiveStatementParser",
+    "EnableStatementParser",
+    "DisableStatementParser",
+    "PurgeStatementParser",
+    # Legacy / compiler-directing
+    "ExhibitStatementParser",
+    "ExamineStatementParser",
+    "TransformStatementParser",
+    "EnterStatementParser",
+    "NoteStatementParser",
+    "ChainStatementParser",
+    "TraceStatementParser",
+    "ServiceStatementParser",
+    "TitleStatementParser",
+    # COBOL 2002
+    "RaiseStatementParser",
+    "ResumeStatementParser",
+    "ValidateStatementParser",
 ]

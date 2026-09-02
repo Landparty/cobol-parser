@@ -245,9 +245,34 @@ class SetStatement(CobolStatement):
         self.targets: list[str] = []
         self.value: str | None = None
         self.value_is_address_of: bool = False
+        #: Further ``targets TO/UP/DOWN value`` groups of the same SET
+        #: statement (``SET SW-1 TO ON SW-2 TO OFF``); the first group is
+        #: held in ``targets``/``set_type``/``value`` above.
+        self.groups: list[dict[str, Any]] = []
 
     def set_set_type(self, set_type: str) -> None:
         self.set_type = set_type.upper()
+
+    def add_group(
+        self,
+        targets: list[str],
+        set_type: str | None,
+        value: str | None,
+        is_address_of: bool = False,
+    ) -> None:
+        """Record an additional target/value group of a multi-group SET."""
+        self.groups.append(
+            {
+                "targets": list(targets),
+                "set_type": set_type.upper() if set_type else None,
+                "value": value,
+                "value_is_address_of": is_address_of,
+            }
+        )
+        for target in targets:
+            self._add_unique_operand(target)
+        if value is not None:
+            self._add_unique_operand(value)
 
     def add_target(self, target: str) -> None:
         self.targets.append(target)
@@ -266,6 +291,7 @@ class SetStatement(CobolStatement):
                 "targets": self.targets,
                 "value": self.value,
                 "value_is_address_of": self.value_is_address_of,
+                "groups": [dict(g) for g in self.groups],
             }
         )
         return result
@@ -345,4 +371,23 @@ class InspectStatement(CobolStatement):
         if self.converting_from:
             result["converting_from"] = self.converting_from
             result["converting_to"] = self.converting_to
+        return result
+
+
+class ValidateStatement(CobolStatement):
+    """AST node for the COBOL 2002 ``VALIDATE identifier-1 [identifier-2 ...]``
+    statement (runs the DATA DIVISION VALIDATE-STATUS / CLASS / FORMAT checks
+    of each named item)."""
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("VALIDATE", location)
+        self.targets: list[str] = []
+
+    def add_target(self, target: str) -> None:
+        self.targets.append(target)
+        self._add_unique_operand(target)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result["targets"] = list(self.targets)
         return result

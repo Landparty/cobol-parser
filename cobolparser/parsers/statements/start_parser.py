@@ -74,39 +74,54 @@ class StartStatementParser(IStatementParser):
             # Comparison keywords may arrive as dedicated token types
             # (TokenType.EQUAL, TokenType.TO, ...) or as IDENTIFIERs, so
             # match by upper-cased value only.
+            # Symbolic relational operators (``KEY IS = K`` / ``KEY IS >
+            # K`` / ``>=`` / ``<=``, as NIST IX208A writes them) -- the
+            # lexer emits ``>=`` as two single-character tokens.
+            sym_token = token_stream.peek()
+            sym = (sym_token.value or "") if sym_token else ""
+            if sym in ("=", ">", "<"):
+                token_stream.consume()
+                nxt = token_stream.peek()
+                if sym in (">", "<") and nxt and nxt.value == "=":
+                    token_stream.consume()
+                    sym += "="
+                condition_parts.append(sym)
+                skip_whitespace(token_stream)
+
             val = peek_value_upper(token_stream)
             if val in _COMPARISON_OPS or val in ("THAN", "TO"):
                 condition_parts.append(val)
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                # Parse THAN or TO
+                # Parse THAN or TO (optional: ``KEY GREATER OR EQUAL TO k``
+                # is how NIST RL205A writes it)
                 val = peek_value_upper(token_stream)
                 if val in ("THAN", "TO"):
                     condition_parts.append(val)
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    # Optional OR EQUAL [TO]
-                    if peek_value_upper(token_stream) == "OR":
+                # Optional OR EQUAL [TO]
+                if peek_value_upper(token_stream) == "OR":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    if peek_value_upper(token_stream) in ("EQUAL", "EQUALS"):
+                        condition_parts.append("OR EQUAL")
                         token_stream.consume()
                         skip_whitespace(token_stream)
-                        if peek_value_upper(token_stream) in ("EQUAL", "EQUALS"):
-                            condition_parts.append("OR EQUAL")
+                        # The trailing "TO" (as in "GREATER THAN OR EQUAL
+                        # TO key-name") arrives as a dedicated
+                        # TokenType.TO token, not an IDENTIFIER, so it
+                        # must be matched via peek_value_upper like the
+                        # other comparison keywords above. Left
+                        # unconsumed, it blocks the key-name IDENTIFIER
+                        # check below (which only matches
+                        # TokenType.IDENTIFIER) and everything that
+                        # follows -- key-name, INVALID KEY, NOT INVALID
+                        # KEY -- silently fails to parse.
+                        if peek_value_upper(token_stream) == "TO":
+                            condition_parts.append("TO")
                             token_stream.consume()
                             skip_whitespace(token_stream)
-                            # The trailing "TO" (as in "GREATER THAN OR EQUAL
-                            # TO key-name") arrives as a dedicated
-                            # TokenType.TO token, not an IDENTIFIER, so it
-                            # must be matched via peek_value_upper like the
-                            # other comparison keywords above. Left
-                            # unconsumed, it blocks the key-name IDENTIFIER
-                            # check below (which only matches
-                            # TokenType.IDENTIFIER) and everything that
-                            # follows -- key-name, INVALID KEY, NOT INVALID
-                            # KEY -- silently fails to parse.
-                            if peek_value_upper(token_stream) == "TO":
-                                condition_parts.append("TO")
-                                token_stream.consume()
-                                skip_whitespace(token_stream)
 
             if condition_parts:
                 stmt.set_key_condition(" ".join(condition_parts))

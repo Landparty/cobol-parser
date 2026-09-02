@@ -7,8 +7,13 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOAcceptStatement
 from ._utils import (
+    collect_clause_stmts,
+    consume_end_keyword_and_period,
+    consume_optional_qualifiers,
     is_statement_boundary,
     matches_keyword,
+    peek_past_noise,
+    peek_value_upper,
     skip_whitespace,
     token_location,
 )
@@ -47,9 +52,23 @@ class AcceptStatementParser(IStatementParser):
             and not is_statement_boundary(token)
         ):
             token_stream.consume()
-            stmt.set_target(token.value or "")
+            target = token.value or ""
+            if token.type == TokenType.IDENTIFIER:
+                # ``ACCEPT TAB-ACCEPT (2)`` / ``ACCEPT X OF Y`` -- fold the
+                # subscript / qualifier chain into the target.
+                target = consume_optional_qualifiers(token_stream, target)
+            stmt.set_target(target)
 
         skip_whitespace(token_stream)
+
+        # Communication Module form: ``ACCEPT cd-name MESSAGE COUNT``.
+        if peek_value_upper(token_stream) == "MESSAGE":
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            if peek_value_upper(token_stream) == "COUNT":
+                token_stream.consume()
+                skip_whitespace(token_stream)
+            stmt.set_from("MESSAGE COUNT")
 
         # Optional FROM clause
         token = token_stream.peek()
@@ -163,10 +182,44 @@ class AcceptStatementParser(IStatementParser):
             # consuming (matches the rest of this file's convention).
             break
 
-        # Consume period if present
-        if not token_stream.is_empty():
-            p = token_stream.peek()
-            if p and p.type == TokenType.PERIOD:
-                token_stream.consume()
+        # Optional [ON] EXCEPTION / NOT [ON] EXCEPTION handlers (screen /
+        # COBOL 2002 form). Previously the handler bodies escaped to the
+        # enclosing paragraph as free-standing statements.
+        skip_whitespace(token_stream)
+        self._parse_exception_clauses(token_stream, stmt)
 
+        consume_end_keyword_and_period(token_stream, "END-ACCEPT")
         return stmt
+
+    @staticmethod
+    def _parse_exception_clauses(
+        token_stream: ITokenStream, stmt: IOAcceptStatement
+    ) -> None:
+        """Parse ``[ON] EXCEPTION stmts [NOT [ON] EXCEPTION stmts]``."""
+        for negated in (False, True):
+            skip_whitespace(token_stream)
+            if negated:
+                token = token_stream.peek()
+                if not (token and token.type == TokenType.NOT):
+                    return
+                lookahead, idx = peek_past_noise(token_stream, 1)
+                if lookahead and peek_value_upper(token_stream, idx) == "ON":
+                    lookahead, _ = peek_past_noise(token_stream, idx + 1)
+                if not (lookahead and (lookahead.value or "").upper() == "EXCEPTION"):
+                    return
+                token_stream.consume()  # NOT
+                skip_whitespace(token_stream)
+            if peek_value_upper(token_stream) == "ON":
+                lookahead, _ = peek_past_noise(token_stream, 1)
+                if not (lookahead and (lookahead.value or "").upper() == "EXCEPTION"):
+                    return
+                token_stream.consume()  # ON
+                skip_whitespace(token_stream)
+            if peek_value_upper(token_stream) != "EXCEPTION":
+                return
+            token_stream.consume()  # EXCEPTION
+            clause = collect_clause_stmts(token_stream, {"END-ACCEPT"})
+            if negated:
+                stmt.set_not_on_exception_clause(clause)
+            else:
+                stmt.set_on_exception_clause(clause)
