@@ -3,10 +3,12 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
     matches_keyword,
     report_parse_error,
+    skip_statement_separators,
     try_parse_nested_statement,
 )
 
@@ -69,7 +71,10 @@ class EvaluateStatementParser(IStatementParser):
                     # silently folded whole intervening statements into this
                     # one with zero errors/warnings. Stop and let the missing
                     # WHEN / missing END-EVALUATE errors below report it.
-                    if self._is_statement_keyword(token_val_upper):
+                    if (
+                        token.type not in LITERAL_TOKEN_TYPES
+                        and self._is_statement_keyword(token_val_upper)
+                    ):
                         break
                     token_stream.consume()
                     continue
@@ -220,7 +225,9 @@ class EvaluateStatementParser(IStatementParser):
             # must not swallow a following statement's verb into the
             # subject list -- this hit even fully-supported verbs like
             # STOP RUN, not just unsupported ones.
-            if self._is_statement_keyword(token_val_upper):
+            if token.type not in LITERAL_TOKEN_TYPES and self._is_statement_keyword(
+                token_val_upper
+            ):
                 break
 
             if token_val_upper == "ALSO":
@@ -254,11 +261,14 @@ class EvaluateStatementParser(IStatementParser):
 
             token_val_upper = token.value.upper() if token.value else ""
 
-            # Stop at WHEN, END-EVALUATE, or statement keywords
+            # Stop at WHEN, END-EVALUATE, or statement keywords (a literal
+            # spelled like a verb -- ``WHEN "IF"`` -- is a selector value)
             if token_val_upper in ("WHEN", "END-EVALUATE"):
                 break
 
-            if self._is_statement_keyword(token_val_upper):
+            if token.type not in LITERAL_TOKEN_TYPES and self._is_statement_keyword(
+                token_val_upper
+            ):
                 break
 
             # Handle ALSO separator (move to next selector)
@@ -368,6 +378,7 @@ class EvaluateStatementParser(IStatementParser):
         statements = []
 
         while not token_stream.is_empty():
+            skip_statement_separators(token_stream)
             token = token_stream.peek()
             if not token:
                 break

@@ -18,19 +18,25 @@ from cobolparser.parsers.statements import (
     AlterStatementParser,
     CallStatementParser,
     CancelStatementParser,
+    ChainStatementParser,
     CloseStatementParser,
     CommitStatementParser,
     ComputeStatementParser,
     ContinueStatementParser,
     DeleteStatementParser,
+    DisableStatementParser,
     DisplayStatementParser,
     DivideStatementParser,
     EjectStatementParser,
+    EnableStatementParser,
+    EnterStatementParser,
     EntryStatementParser,
     EvaluateStatementParser,
+    ExamineStatementParser,
     ExecCicsStatementParser,
     ExecImsStatementParser,
     ExecSqlStatementParser,
+    ExhibitStatementParser,
     ExitStatementParser,
     FreeStatementParser,
     GenerateStatementParser,
@@ -38,29 +44,43 @@ from cobolparser.parsers.statements import (
     GoStatementParser,
     IfStatementParser,
     InitializeStatementParser,
+    InitiateStatementParser,
     InspectStatementParser,
     InvokeStatementParser,
     MergeStatementParser,
     MoveStatementParser,
     MultiplyStatementParser,
     NextSentenceStatementParser,
+    NoteStatementParser,
     OpenStatementParser,
     PerformStatementParser,
+    PurgeStatementParser,
+    RaiseStatementParser,
     ReadStatementParser,
+    ReceiveStatementParser,
     ReleaseStatementParser,
+    ResumeStatementParser,
     ReturnStatementParser,
     RewriteStatementParser,
     RollbackStatementParser,
     SearchStatementParser,
+    SendStatementParser,
+    ServiceStatementParser,
     SetStatementParser,
     SkipStatementParser,
     SortStatementParser,
     StartStatementParser,
     StringStatementParser,
     SubtractStatementParser,
+    SuppressStatementParser,
+    TerminateStatementParser,
+    TitleStatementParser,
+    TraceStatementParser,
+    TransformStatementParser,
     UnlockStatementParser,
     UnstringStatementParser,
     UseStatementParser,
+    ValidateStatementParser,
     XmlJsonStatementParser,
 )
 from cobolparser.parsers.statements.stop_parser import StopStatementParser
@@ -152,5 +172,35 @@ def create_statement_registry() -> StatementParserRegistry:
     # Transaction control
     registry.register(CommitStatementParser())
     registry.register(RollbackStatementParser())
+
+    # Report Writer control verbs (GENERATE is registered above)
+    registry.register(InitiateStatementParser())
+    registry.register(TerminateStatementParser())
+    registry.register(SuppressStatementParser())
+
+    # COBOL-85 Communication Module
+    registry.register(SendStatementParser())
+    registry.register(ReceiveStatementParser())
+    registry.register(EnableStatementParser())
+    registry.register(DisableStatementParser())
+    registry.register(PurgeStatementParser())
+
+    # OS/VS legacy verbs, IBM compiler-directing / debugging statements,
+    # COBOL-74 NOTE, Micro Focus CHAIN. TRACE/SERVICE/TITLE match on a
+    # two-word lookahead (READY TRACE, SERVICE LABEL, TITLE "...").
+    registry.register(ExhibitStatementParser())
+    registry.register(ExamineStatementParser())
+    registry.register(TransformStatementParser())
+    registry.register(EnterStatementParser())
+    registry.register(NoteStatementParser())
+    registry.register(ChainStatementParser())
+    registry.register(TraceStatementParser())
+    registry.register(ServiceStatementParser())
+    registry.register(TitleStatementParser())
+
+    # COBOL 2002 exception handling / validation
+    registry.register(RaiseStatementParser())
+    registry.register(ResumeStatementParser())
+    registry.register(ValidateStatementParser())
 
     return registry

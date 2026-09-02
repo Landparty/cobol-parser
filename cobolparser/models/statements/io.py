@@ -326,6 +326,9 @@ class IOOpenStatement(CobolStatement):
         # this dict is the authoritative per-file source of truth.
         self.file_modes: dict[str, str] = {}
         self.with_reposition: bool = False
+        self.no_rewind: bool = False  # [WITH] NO REWIND
+        self.with_lock: bool = False  # [WITH] LOCK
+        self.reversed_mode: bool = False  # OPEN INPUT f REVERSED
         self.reel_unit_control: str | None = None  # Contract field
         self._metadata = {
             "has_reel_unit": False,
@@ -353,6 +356,18 @@ class IOOpenStatement(CobolStatement):
         """Set the REPOSITION flag for VSAM files."""
         self.with_reposition = reposition
 
+    def set_no_rewind(self, no_rewind: bool = True) -> None:
+        """Record a ``[WITH] NO REWIND`` option."""
+        self.no_rewind = no_rewind
+
+    def set_with_lock(self, with_lock: bool = True) -> None:
+        """Record a ``[WITH] LOCK`` option."""
+        self.with_lock = with_lock
+
+    def set_reversed(self, reversed_mode: bool = True) -> None:
+        """Record the ``REVERSED`` option (sequential input read backwards)."""
+        self.reversed_mode = reversed_mode
+
     def set_reel_unit_control(self, control: str) -> None:
         """Set the REEL/UNIT control (contract field)."""
         self.reel_unit_control = control.upper()
@@ -367,6 +382,9 @@ class IOOpenStatement(CobolStatement):
                 "file_names": self.file_names,
                 "file_modes": self.file_modes,
                 "with_reposition": self.with_reposition,
+                "no_rewind": self.no_rewind,
+                "with_lock": self.with_lock,
+                "reversed": self.reversed_mode,
                 "reel_unit_control": self.reel_unit_control,  # Contract field
             }
         )
@@ -458,10 +476,20 @@ class IOAcceptStatement(CobolStatement):
         self.timeout_value: int | None = None
         self.auto_skip: bool = False
         self.upper: bool = False
+        self.on_exception: list[CobolStatement] | None = None
+        self.not_on_exception: list[CobolStatement] | None = None
         self._metadata = {
             "has_environment_name": False,
             "has_position": False,
         }
+
+    def set_on_exception_clause(self, statements: list["CobolStatement"]) -> None:
+        """Set the [ON] EXCEPTION handler body."""
+        self._set_clause("on_exception", statements)
+
+    def set_not_on_exception_clause(self, statements: list["CobolStatement"]) -> None:
+        """Set the NOT [ON] EXCEPTION handler body."""
+        self._set_clause("not_on_exception", statements)
 
     def set_target(self, name: str) -> None:
         """Set the accept target variable."""
@@ -536,6 +564,9 @@ class IOAcceptStatement(CobolStatement):
                 "auto_skip": self.auto_skip,
                 "upper": self.upper,
             }
+        )
+        result.update(
+            self._serialize_clauses("on_exception", "not_on_exception", omit_empty=True)
         )
         return result
 

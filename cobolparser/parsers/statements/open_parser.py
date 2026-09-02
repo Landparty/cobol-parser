@@ -3,6 +3,7 @@
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    SEPARATOR_TOKEN_TYPES,
     create_statement,
     is_statement_boundary,
     looks_dedented_relative_to,
@@ -10,6 +11,7 @@ from cobolparser.parsers.statements._utils import (
     matches_keyword,
     skip_whitespace,
     token_column,
+    token_value_upper,
     try_consume_keyword,
     warn_paragraph_boundary_swallowed,
 )
@@ -33,6 +35,40 @@ class OpenStatementParser(IStatementParser):
 
     def matches(self, token_stream: ITokenStream) -> bool:
         return matches_keyword(token_stream, TokenType.OPEN, "OPEN")
+
+    @staticmethod
+    def _consume_open_option(token_stream: ITokenStream, stmt: IOOpenStatement) -> bool:
+        """Consume one ``[WITH] NO REWIND`` / ``[WITH] LOCK`` / ``REVERSED`` /
+        ``[WITH] REPOSITION`` option if present; True if anything was consumed."""
+        consumed = False
+        word = token_value_upper(token_stream.peek())
+        if word == "WITH":
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            consumed = True
+            word = token_value_upper(token_stream.peek())
+        if word == "NO":
+            token_stream.consume()
+            skip_whitespace(token_stream)
+            if token_value_upper(token_stream.peek()) == "REWIND":
+                token_stream.consume()
+            stmt.set_no_rewind(True)
+            consumed = True
+        elif word == "LOCK":
+            token_stream.consume()
+            stmt.set_with_lock(True)
+            consumed = True
+        elif word == "REVERSED":
+            token_stream.consume()
+            stmt.set_reversed(True)
+            consumed = True
+        elif word == "REPOSITION":
+            token_stream.consume()
+            stmt.set_reposition(True)
+            consumed = True
+        if consumed:
+            skip_whitespace(token_stream)
+        return consumed
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
@@ -66,13 +102,19 @@ class OpenStatementParser(IStatementParser):
                 break
             if token.type == TokenType.PERIOD:
                 break
-            # Stop on WITH keyword (lexer emits TokenType.WITH)
-            if token.type == TokenType.WITH:
-                break
+            if token.type in SEPARATOR_TOKEN_TYPES:
+                # ``OPEN INPUT SQ-FS1, SQ-FS3 OUTPUT SQ-FS4`` (NIST SQ206A)
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
+            # Per-file options -- ``[WITH] NO REWIND``, ``[WITH] LOCK``,
+            # ``REVERSED``, ``[WITH] REPOSITION`` -- consumed here so they
+            # are neither misread as file names (REVERSED was) nor left as
+            # unparsed tokens (NO REWIND was).
+            if self._consume_open_option(token_stream, stmt):
+                continue
             if token.type == TokenType.IDENTIFIER and token.value:
                 val = token.value.upper()
-                if val == "WITH":
-                    break
                 # A subsequent open mode starts a new mode group: consume it,
                 # update current_mode, and keep collecting its file names.
                 if val in _OPEN_MODES or val == "I-O":

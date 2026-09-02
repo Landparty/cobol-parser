@@ -15,6 +15,7 @@ from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import DisplayStatement
 from ._utils import (
+    consume_optional_qualifiers,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
@@ -175,6 +176,9 @@ class DisplayStatementParser(IStatementParser):
                 TokenType.STRING_LITERAL,
                 TokenType.IDENTIFIER,
                 TokenType.NUMERIC_LITERAL,
+                # The lexer classifies a bare 1-2 digit integer (``DISPLAY
+                # 21``) as a LEVEL_NUMBER regardless of context.
+                TokenType.LEVEL_NUMBER,
                 TokenType.FIGURATIVE_CONSTANT,  # SPACE(S), ZERO(S), HIGH-VALUE(S), ... (M1)
             ):
                 item_token = token_stream.consume()
@@ -198,6 +202,14 @@ class DisplayStatementParser(IStatementParser):
                 # below and abort the whole DISPLAY item list.
                 if token.type == TokenType.IDENTIFIER:
                     item_value += self._consume_subscript(token_stream)
+                    # ``DISPLAY ELEM-1 OF GRP-1`` -- fold a qualifier chain
+                    # (and any subscript that follows it) into the item
+                    # rather than stranding ``OF GRP-1`` as unparsed tokens.
+                    qualifier, _ = peek_past_noise(token_stream, 0)
+                    if qualifier and qualifier.type in (TokenType.OF, TokenType.IN):
+                        item_value = consume_optional_qualifiers(
+                            token_stream, item_value
+                        )
 
                 stmt.add_display_item(item_value)
             else:

@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
+    skip_statement_separators,
     skip_whitespace,
     try_consume_keyword,
 )
@@ -123,6 +124,16 @@ class WriteStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
             elif (
                 token
+                and token.type == TokenType.FIGURATIVE_CONSTANT
+                and (token.value or "").upper() in ("ZERO", "ZEROS", "ZEROES")
+            ):
+                # ``WRITE R BEFORE ADVANCING ZERO`` (NIST SQ101M) -- the
+                # figurative constant is a legal integer-0 line count.
+                advancing_count = 0
+                token_stream.consume()
+                skip_whitespace(token_stream)
+            elif (
+                token
                 and token.type == TokenType.IDENTIFIER
                 and token.value
                 and token.value.upper() != "PAGE"
@@ -175,12 +186,15 @@ class WriteStatementParser(IStatementParser):
         # matches TokenType.END_OF_PAGE directly since the lexer gives
         # "END-OF-PAGE"/"EOP" a dedicated token type rather than lexing them
         # as a plain "END" IDENTIFIER the way READ's "AT END" does.
-        skip_whitespace(token_stream)
+        # ``WRITE R BEFORE ADVANCING 1 LINE ; AT EOP`` -- the separator is
+        # plain punctuation; and AT is optional (``WRITE R END-OF-PAGE ...``).
+        skip_statement_separators(token_stream)
         token = token_stream.peek()
-        if token and token.type == TokenType.AT:
-            token_stream.consume()
-            skip_whitespace(token_stream)
-            token = token_stream.peek()
+        if token and token.type in (TokenType.AT, TokenType.END_OF_PAGE):
+            if token.type == TokenType.AT:
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                token = token_stream.peek()
             if token and token.type == TokenType.END_OF_PAGE:
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -195,9 +209,11 @@ class WriteStatementParser(IStatementParser):
             token_stream.consume()
             skip_whitespace(token_stream)
             next_tok = token_stream.peek()
-            if next_tok and next_tok.type == TokenType.AT:
-                token_stream.consume()
-                skip_whitespace(token_stream)
+            if next_tok and next_tok.type in (TokenType.AT, TokenType.END_OF_PAGE):
+                # NOT [AT] END-OF-PAGE
+                if next_tok.type == TokenType.AT:
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
                 token = token_stream.peek()
                 if token and token.type == TokenType.END_OF_PAGE:
                     token_stream.consume()

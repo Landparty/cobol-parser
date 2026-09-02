@@ -223,10 +223,30 @@ AST nodes for EXEC SQL, EXEC CICS, and EXEC IMS DLI blocks captured by
 | `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall` |
 | `arithmetic.py` | `ArithmeticStatement`, `AddStatement`, `SubtractStatement`, `MultiplyStatement`, `DivideStatement`, `ComputeStatement` |
 | `call.py` | `CallStatement`, `EntryStatement`, `CallParameter` |
-| `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` |
-| `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement` |
+| `communication.py` | `SendStatement`, `ReceiveStatement`, `EnableStatement`, `DisableStatement`, `PurgeStatement` (2026-09-02) |
+| `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement`, `RaiseStatement`, `ResumeStatement` |
+| `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement`, `ValidateStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
+| `legacy.py` | `ExhibitStatement`, `ExamineStatement`, `TransformStatement`, `EnterStatement`, `NoteStatement`, `ChainStatement`, `TraceStatement`, `ServiceStatement`, `TitleStatement` (2026-09-02) |
 | `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `NextSentenceStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
+| `report_writer.py` | `InitiateStatement`, `TerminateStatement`, `SuppressStatement` (2026-09-02) |
+
+**Statement-coverage audit nodes (2026-09-02):** the three new modules
+above plus `RaiseStatement`/`ResumeStatement` (`control.py`) and
+`ValidateStatement` (`data.py`) back the 22 verbs that used to be
+warned-and-discarded (see [parser.md](parser.md)'s "Statement-coverage
+audit" section). Also from that audit: `ExecCicsStatement` /
+`ExecImsStatement` (`parsers/statements/ibm_exec_statements.py`) now extend
+`CobolStatement` (`statement_type` `"EXEC CICS"` / `"EXEC IMS"`, `node_type`
+still `"EXEC_CICS"` / `"EXEC_IMS"`, `to_dict()` shape unchanged) so
+`CobolProgram.get_all_statements()` returns them; `SetStatement.groups`
+(additional `targets TO/UP/DOWN value` groups of a multi-group SET, also
+serialized as `"groups"`); `IOOpenStatement.no_rewind` / `.with_lock` /
+`.reversed_mode` (`"no_rewind"` / `"with_lock"` / `"reversed"`);
+`IOAcceptStatement.on_exception` / `.not_on_exception` (serialized only when
+present). `ReceiveStatement`'s `no_data_clause` / `with_data_clause` and
+`IOAcceptStatement`'s handlers register their statements as children, so
+the generic statement walk reaches them.
 
 **`InvokeStatement`/`AllocateStatement`/`FreeStatement` (2026-08-05, `misc.py`):**
 back the new `invoke_parser.py`/`allocate_free_parsers.py` statement parsers

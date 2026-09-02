@@ -26,14 +26,19 @@ from ...models.statements import (
 )
 from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
+    LITERAL_TOKEN_TYPES,
+    SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
+    bare_end_starts_at_end_clause,
     consume_period,
+    consume_procedure_qualifier,
     is_procedure_name_token,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
     peek_past_noise,
+    skip_statement_separators,
     skip_whitespace,
     token_column,
     token_location,
@@ -293,6 +298,11 @@ class AlterStatementParser(IStatementParser):
             if not token or token.type == TokenType.PERIOD:
                 consume_period(token_stream)
                 break
+            if token.type in SEPARATOR_TOKEN_TYPES:
+                # ``ALTER A TO PROCEED TO B, C TO PROCEED TO D`` (NC303M)
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                continue
 
             # Read from-paragraph (an identifier, or an all-digit numeric
             # paragraph name -- idiomatic THRU-style numbering).
@@ -301,6 +311,9 @@ class AlterStatementParser(IStatementParser):
             from_para = token.value or ""
             token_stream.consume()
             skip_whitespace(token_stream)
+            # ``ALTER PARA-5A IN QUAL-SECTION-1 TO ...`` (NIST OBNC2M):
+            # a section-qualified paragraph name -- consume the qualifier.
+            consume_procedure_qualifier(token_stream)
 
             # Expect TO
             nxt = token_stream.peek()
@@ -327,6 +340,7 @@ class AlterStatementParser(IStatementParser):
             token_stream.consume()
             stmt.add_alteration(from_para, to_para)
             skip_whitespace(token_stream)
+            consume_procedure_qualifier(token_stream)
 
         return stmt
 
@@ -473,7 +487,14 @@ class ReturnStatementParser(IStatementParser):
                     not_at_end_stmts = self._parse_clause_stmts(token_stream)
                     if not_at_end_stmts:
                         stmt.set_not_at_end_clause(not_at_end_stmts)
-            elif val in STATEMENT_KEYWORDS:
+            elif bare_end_starts_at_end_clause(token_stream):
+                # ``RETURN F END stmts`` -- AT is optional.
+                token_stream.consume()  # END
+                skip_whitespace(token_stream)
+                at_end_stmts = self._parse_clause_stmts(token_stream)
+                if at_end_stmts:
+                    stmt.set_at_end_clause(at_end_stmts)
+            elif token.type not in LITERAL_TOKEN_TYPES and val in STATEMENT_KEYWORDS:
                 break
             else:
                 token_stream.consume()
@@ -486,7 +507,7 @@ class ReturnStatementParser(IStatementParser):
         """Parse imperative statements in an AT END / NOT AT END clause."""
         stmts: list = []
         while not token_stream.is_empty():
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
             token = token_stream.peek()
             if not token:
                 break
@@ -542,7 +563,9 @@ class UseStatementParser(IStatementParser):
                 token_stream.consume()
                 break
             val = _token_value_upper(token)
-            if val in CONTROL_FLOW_BOUNDARIES or val in STATEMENT_KEYWORDS:
+            if token.type not in LITERAL_TOKEN_TYPES and (
+                val in CONTROL_FLOW_BOUNDARIES or val in STATEMENT_KEYWORDS
+            ):
                 break
             if val in ("EXCEPTION", "ERROR"):
                 stmt.set_use_type(val)

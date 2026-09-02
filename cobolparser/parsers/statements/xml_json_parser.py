@@ -21,6 +21,15 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...models.ast_base import SourceLocation
 from ...models.statements import XmlJsonStatement
 
+#: Clause words of XML/JSON GENERATE/PARSE that also happen to be statement
+#: or control-flow keywords elsewhere (``SUPPRESS`` is the Report Writer verb,
+#: ``WHEN`` closes an EVALUATE arm) -- inside this construct they continue
+#: the clause region and must not end it. ``WHEN`` is only a continuation
+#: after ``SUPPRESS`` (``SUPPRESS WHEN SPACES`` / ``EVERY NUMERIC ... WHEN
+#: ZERO``); elsewhere it still closes an enclosing EVALUATE arm.
+_CLAUSE_CONTINUATION_WORDS = frozenset({"SUPPRESS", "NOT", "ON"})
+_SUPPRESS_CONTINUATION_WORDS = frozenset({"WHEN"})
+
 
 class XmlJsonStatementParser(IStatementParser):
     """Parser for XML GENERATE / XML PARSE / JSON GENERATE / JSON PARSE.
@@ -116,6 +125,7 @@ class XmlJsonStatementParser(IStatementParser):
         terminator = f"END-{verb}"
         clause_parts: list[str] = []
         in_handler = False
+        seen_suppress = False
         while not token_stream.is_empty():
             token = peek_token(token_stream)
             if token is None:
@@ -134,11 +144,21 @@ class XmlJsonStatementParser(IStatementParser):
             # A new statement keyword ends the clause region — unless we are
             # inside an ON/NOT ON EXCEPTION handler, whose imperative
             # statements belong to this construct and are preserved as raw
-            # text rather than dropped.
-            if is_statement_boundary(token) and not in_handler:
+            # text rather than dropped -- or the keyword is one of this
+            # construct's own clause words (SUPPRESS ..., NOT ON EXCEPTION).
+            # ``NOT`` leaves the handler so ``NOT ON EXCEPTION`` after an
+            # ``ON EXCEPTION`` body is not mistaken for that body's content.
+            if upper == "NOT":
+                in_handler = False
+            is_clause_word = upper in _CLAUSE_CONTINUATION_WORDS or (
+                seen_suppress and upper in _SUPPRESS_CONTINUATION_WORDS
+            )
+            if is_statement_boundary(token) and not in_handler and not is_clause_word:
                 break
             if upper == "EXCEPTION":
                 in_handler = True
+            if upper == "SUPPRESS":
+                seen_suppress = True
             clause_parts.append(value)
             token_stream.consume()
 

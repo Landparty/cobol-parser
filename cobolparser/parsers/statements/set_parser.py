@@ -6,6 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import SetStatement
 from ._utils import (
+    SEPARATOR_TOKEN_TYPES,
     consume_optional_qualifiers,
     consume_value_operand,
     is_statement_boundary,
@@ -63,7 +64,52 @@ class SetStatementParser(IStatementParser):
         start_column = token_column(start)
         skip_whitespace(token_stream)
 
-        # Collect targets until TO/UP/DOWN/period
+        targets, ended = self._collect_targets(token_stream, start_column)
+        for target in targets:
+            stmt.add_target(target)
+        if ended:
+            return stmt
+
+        action = self._parse_action(token_stream)
+        if action is not None:
+            set_type, value, is_address_of = action
+            stmt.set_set_type(set_type)
+            if value is not None:
+                stmt.set_value(value, is_address_of=is_address_of)
+
+        # COBOL lets one SET carry several target/value groups: ``SET SW-1
+        # TO ON SW-2 TO OFF`` (NIST NC174A) or ``SET IX-1 TO 1 IX-2 TO 2``.
+        # Previously only the first group was parsed and the rest was
+        # reported as dropped "unparsed tokens".
+        while self._starts_another_group(token_stream):
+            group_targets, ended = self._collect_targets(token_stream, start_column)
+            if ended:
+                stmt.add_group(group_targets, None, None, False)
+                return stmt
+            group_action = self._parse_action(token_stream)
+            if not group_targets and group_action is None:
+                break
+            if group_action is None:
+                stmt.add_group(group_targets, None, None, False)
+            else:
+                set_type, value, is_address_of = group_action
+                stmt.add_group(group_targets, set_type, value, is_address_of)
+
+        skip_whitespace(token_stream)
+        # Consume period
+        if not token_stream.is_empty():
+            p = token_stream.peek()
+            if p and p.type == TokenType.PERIOD:
+                token_stream.consume()
+
+        return stmt
+
+    @staticmethod
+    def _collect_targets(
+        token_stream: ITokenStream, start_column: int | None
+    ) -> tuple[list[str], bool]:
+        """Collect targets up to TO/UP/DOWN. Returns (targets, period_seen)."""
+        targets: list[str] = []
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -71,7 +117,7 @@ class SetStatementParser(IStatementParser):
             val = _val(token)
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
-                return stmt
+                return targets, True
             if val in ("TO", "UP", "DOWN"):
                 break
             # A following statement's verb that lexes as a plain IDENTIFIER
@@ -92,8 +138,9 @@ class SetStatementParser(IStatementParser):
             ):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
-            if token.type == TokenType.COMMA:
-                # A comma between targets (e.g. `SET IX1, IX2 UP BY 1.`) is a
+            if token.type in SEPARATOR_TOKEN_TYPES:
+                # A comma or semicolon between targets (`SET IX1, IX2 UP BY
+                # 1.` / NIST NC245A's `SET INAME1; INAME2 TO 3.`) is a
                 # separator, not a terminator -- skip it and keep collecting
                 # targets, mirroring the MOVE parser's target-list handling.
                 token_stream.consume()
@@ -124,79 +171,116 @@ class SetStatementParser(IStatementParser):
                     # `stmt.add_target(token.value or "")`) -- an empty
                     # target_name is still recorded rather than silently
                     # dropped.
-                    stmt.add_target(
+                    targets.append(
                         consume_optional_qualifiers(token_stream, token.value or "")
                     )
             else:
                 break
             skip_whitespace(token_stream)
+        return targets, False
 
-        # Parse the action: TO, UP BY, DOWN BY
+    @staticmethod
+    def _parse_action(
+        token_stream: ITokenStream,
+    ) -> tuple[str, str | None, bool] | None:
+        """Parse ``TO value`` / ``TO TRUE|FALSE`` / ``TO ADDRESS OF x`` /
+        ``UP BY value`` / ``DOWN BY value``.
+
+        Returns ``(set_type, value, is_address_of)`` or ``None`` when no
+        action keyword is next.
+        """
         token = token_stream.peek()
         if not token:
-            return stmt
+            return None
 
         val = _val(token)
         if val == "TO":
             token_stream.consume()
             skip_whitespace(token_stream)
             v = token_stream.peek()
-            if v:
-                vv = _val(v)
-                if vv == "TRUE":
-                    stmt.set_set_type("TRUE")
-                    token_stream.consume()
-                elif vv == "FALSE":
-                    stmt.set_set_type("FALSE")
-                    token_stream.consume()
-                elif vv == "ADDRESS":
-                    # SET pointer-var TO ADDRESS OF identifier -- ADDRESS OF
-                    # is a prefix on the *value* here (mirrors the target-side
-                    # ADDRESS OF handling in the target-collection loop above).
+            if not v:
+                return ("TO", None, False)
+            vv = _val(v)
+            if vv == "TRUE":
+                token_stream.consume()
+                return ("TRUE", None, False)
+            if vv == "FALSE":
+                token_stream.consume()
+                return ("FALSE", None, False)
+            if vv == "ADDRESS":
+                # SET pointer-var TO ADDRESS OF identifier -- ADDRESS OF
+                # is a prefix on the *value* here (mirrors the target-side
+                # ADDRESS OF handling in the target-collection loop above).
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                of_token = token_stream.peek()
+                if of_token and _val(of_token) == "OF":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    of_token = token_stream.peek()
-                    if of_token and _val(of_token) == "OF":
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                    stmt.set_set_type("TO")
-                    v2 = token_stream.peek()
-                    if v2 and v2.type != TokenType.PERIOD:
-                        stmt.set_value(
-                            _consume_set_value(token_stream),
-                            is_address_of=True,
-                        )
-                elif v.type != TokenType.PERIOD:
-                    stmt.set_set_type("TO")
-                    stmt.set_value(_consume_set_value(token_stream))
-        elif val == "UP":
+                v2 = token_stream.peek()
+                if v2 and v2.type != TokenType.PERIOD:
+                    return ("TO", _consume_set_value(token_stream), True)
+                return ("TO", None, True)
+            if v.type != TokenType.PERIOD:
+                return ("TO", _consume_set_value(token_stream), False)
+            return ("TO", None, False)
+        if val in ("UP", "DOWN"):
             token_stream.consume()
             skip_whitespace(token_stream)
             nxt = token_stream.peek()
             if nxt and _val(nxt) == "BY":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-            stmt.set_set_type("UP_BY")
+            set_type = "UP_BY" if val == "UP" else "DOWN_BY"
             v = token_stream.peek()
             if v and v.type != TokenType.PERIOD:
-                stmt.set_value(_consume_set_value(token_stream))
-        elif val == "DOWN":
-            token_stream.consume()
-            skip_whitespace(token_stream)
-            nxt = token_stream.peek()
-            if nxt and _val(nxt) == "BY":
-                token_stream.consume()
-                skip_whitespace(token_stream)
-            stmt.set_set_type("DOWN_BY")
-            v = token_stream.peek()
-            if v and v.type != TokenType.PERIOD:
-                stmt.set_value(_consume_set_value(token_stream))
+                return (set_type, _consume_set_value(token_stream), False)
+            return (set_type, None, False)
+        return None
 
+    @staticmethod
+    def _starts_another_group(token_stream: ITokenStream) -> bool:
+        """True if the tokens ahead form another ``targets TO/UP/DOWN ...``
+        group: an identifier now, and TO/UP/DOWN before the next period or
+        statement boundary."""
         skip_whitespace(token_stream)
-        # Consume period
-        if not token_stream.is_empty():
-            p = token_stream.peek()
-            if p and p.type == TokenType.PERIOD:
-                token_stream.consume()
-
-        return stmt
+        first = token_stream.peek()
+        if (
+            not first
+            or first.type != TokenType.IDENTIFIER
+            or is_statement_boundary(first)
+            or looks_like_paragraph_boundary(token_stream)
+        ):
+            return False
+        idx = 0
+        while idx < 24:
+            look = token_stream.peek(idx)
+            if look is None:
+                return False
+            if look.type in (
+                TokenType.WHITESPACE,
+                TokenType.NEWLINE,
+                TokenType.COMMENT,
+                TokenType.CONTINUATION,
+                TokenType.COMMA,
+                TokenType.SEMICOLON,
+                TokenType.OF,
+                TokenType.IN,
+                TokenType.LEFT_PAREN,
+                TokenType.RIGHT_PAREN,
+                TokenType.NUMERIC_LITERAL,
+                TokenType.LEVEL_NUMBER,
+            ):
+                idx += 1
+                continue
+            word = _val(look)
+            if word in ("TO", "UP", "DOWN"):
+                return True
+            if look.type == TokenType.PERIOD or (
+                look.type == TokenType.IDENTIFIER and is_statement_boundary(look)
+            ):
+                return False
+            if look.type != TokenType.IDENTIFIER:
+                return False
+            idx += 1
+        return False

@@ -3,14 +3,19 @@
 from typing import Any, cast
 
 from cobolparser.parsers.statements._utils import (
+    CONTROL_FLOW_BOUNDARIES,
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    consume_optional_qualifiers,
     get_parse_context,
     is_statement_boundary,
     matches_keyword,
+    peek_past_noise,
     previous_meaningful_token,
+    skip_statement_separators,
     skip_whitespace,
+    token_value_upper,
 )
 
 from ...core.ast_factory import get_factory
@@ -80,6 +85,16 @@ class CallStatementParser(IStatementParser):
                 program_name = token.value
                 stmt.set_called_program(program_name, is_dynamic=True)
                 token_stream.consume()
+                # ``CALL WS-SERVICE-PGM (WS-IDX) USING ...`` -- a table-driven
+                # dispatch. The bare name stays ``called_program`` (what
+                # DynamicCallAnalyzer resolves); the full subscripted /
+                # qualified reference is kept in metadata rather than being
+                # stranded as unparsed tokens.
+                full_reference = consume_optional_qualifiers(
+                    token_stream, program_name or ""
+                )
+                if full_reference != (program_name or ""):
+                    stmt.set_metadata("called_program_reference", full_reference)
             else:
                 # Unknown token type, report error
                 if parse_ctx:
@@ -97,7 +112,9 @@ class CallStatementParser(IStatementParser):
             # Parse optional USING and RETURNING clauses
 
             while not token_stream.is_empty():
-                skip_whitespace(token_stream)
+                # ``USING A, B; ON OVERFLOW ...`` -- a separator before a
+                # handler clause is plain COBOL punctuation.
+                skip_statement_separators(token_stream)
                 token = token_stream.peek()
 
                 if not token:
@@ -152,6 +169,26 @@ class CallStatementParser(IStatementParser):
                     if token and token.type == TokenType.IDENTIFIER:
                         stmt.set_giving_parameter(token.value)
                         token_stream.consume()
+                elif token_value_upper(token) in ("EXCEPTION", "OVERFLOW"):
+                    # ``ON`` is optional: ``CALL ... EXCEPTION stmts`` and
+                    # ``CALL ... OVERFLOW stmts`` are standard COBOL. Without
+                    # this branch the word was swallowed as a bogus USING
+                    # parameter and the handler body escaped to the enclosing
+                    # paragraph as free-standing statements -- silently.
+                    kind = token_value_upper(token)
+                    token_stream.consume()
+                    if kind == "EXCEPTION":
+                        nested = self._parse_nested_stmts(
+                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
+                        )
+                        stmt.on_exception = nested if nested else None
+                    else:
+                        nested = self._parse_nested_stmts(
+                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
+                        )
+                        stmt.on_overflow = nested if nested else []
+                    for _nested_stmt in nested or []:
+                        stmt.add_child(_nested_stmt)
                 elif token.type == TokenType.ON or (
                     token.type == TokenType.IDENTIFIER
                     and token.value
@@ -165,7 +202,7 @@ class CallStatementParser(IStatementParser):
                         token_stream.consume()  # ON
                         token_stream.consume()  # EXCEPTION
                         nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"NOT", "END-CALL"}
+                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
                         stmt.on_exception = nested if nested else None
                         for _nested_stmt in nested or []:
@@ -174,7 +211,7 @@ class CallStatementParser(IStatementParser):
                         token_stream.consume()  # ON
                         token_stream.consume()  # OVERFLOW
                         nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"END-CALL"}
+                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
                         stmt.on_overflow = nested if nested else []
                         for _nested_stmt in nested or []:
@@ -186,22 +223,21 @@ class CallStatementParser(IStatementParser):
                     and token.value
                     and token.value.upper() == "NOT"
                 ):
-                    # NOT ON EXCEPTION clause
-                    t1 = token_stream.peek(1)
-                    t2 = token_stream.peek(2)
-                    if (
-                        t1
-                        and t1.value
-                        and t1.value.upper() == "ON"
-                        and t2
-                        and t2.value
-                        and t2.value.upper() == "EXCEPTION"
-                    ):
+                    # NOT [ON] EXCEPTION clause (ON is optional here too)
+                    t1, i1 = peek_past_noise(token_stream, 1)
+                    if t1 and token_value_upper(t1) == "ON":
+                        t2, _ = peek_past_noise(token_stream, i1 + 1)
+                    else:
+                        t2 = t1
+                    if t2 and token_value_upper(t2) == "EXCEPTION":
                         token_stream.consume()  # NOT
-                        token_stream.consume()  # ON
+                        skip_whitespace(token_stream)
+                        if token_value_upper(token_stream.peek()) == "ON":
+                            token_stream.consume()  # ON
+                            skip_whitespace(token_stream)
                         token_stream.consume()  # EXCEPTION
                         nested = self._parse_nested_stmts(
-                            token_stream, stop_at={"END-CALL"}
+                            token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
                         stmt.not_on_exception = nested if nested else None
                         for _nested_stmt in nested or []:
@@ -232,12 +268,23 @@ class CallStatementParser(IStatementParser):
         stmts = []
         registry = getattr(token_stream, "_registry", None)
         while not token_stream.is_empty():
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
             token = token_stream.peek()
             if not token:
                 break
             val = token.value.upper() if token.value else ""
-            if val in stop_at or val == ".":
+            # A handler body also ends at the enclosing statement's own
+            # boundary: ``IF c CALL ... NOT ON EXCEPTION MOVE ... ELSE ...``
+            # / ``PERFORM ... CALL ... ON EXCEPTION ... END-PERFORM``.
+            # Previously ELSE/END-IF/END-PERFORM were "unsupported
+            # statements" here and the enclosing IF/PERFORM lost its
+            # structure (the ELSE branch was folded into the handler).
+            if (
+                val in stop_at
+                or val == "."
+                or val in CONTROL_FLOW_BOUNDARIES
+                or val in SCOPE_TERMINATORS
+            ):
                 break
             if registry:
                 parser = registry.find_parser(token_stream)
@@ -288,7 +335,12 @@ class CallStatementParser(IStatementParser):
             if not nxt:
                 break
             nxt_val = nxt.value.upper() if nxt.value else ""
-            if nxt_val in stop_at or nxt_val == "." or is_statement_boundary(nxt):
+            if (
+                nxt_val in stop_at
+                or nxt_val == "."
+                or nxt_val in CONTROL_FLOW_BOUNDARIES
+                or is_statement_boundary(nxt)
+            ):
                 break
             token_stream.consume()
 
@@ -323,7 +375,7 @@ class CallStatementParser(IStatementParser):
             # Check for end of USING clause
             if token.type == TokenType.IDENTIFIER and token.value:
                 val_upper = token.value.upper()
-                if val_upper in ("RETURNING", "GIVING", "ON"):
+                if val_upper in ("RETURNING", "GIVING", "ON", "EXCEPTION", "OVERFLOW"):
                     break
                 # Check for statement keywords
                 if val_upper in STATEMENT_KEYWORDS:
@@ -342,6 +394,8 @@ class CallStatementParser(IStatementParser):
             ) and token.type not in (
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
+                TokenType.NUMERIC_LITERAL,
+                TokenType.LEVEL_NUMBER,
                 TokenType.VALUE,
                 TokenType.OMITTED,
             ):
@@ -374,11 +428,32 @@ class CallStatementParser(IStatementParser):
             if token and token.type in (
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
+                # ``BY VALUE 100`` / ``USING 100.00`` -- a numeric literal is
+                # a legal argument (the lexer classes 1-2 digit integers as
+                # LEVEL_NUMBER regardless of context).
+                TokenType.NUMERIC_LITERAL,
+                TokenType.LEVEL_NUMBER,
                 TokenType.OMITTED,
             ):
                 param_name = token.value if token.value else "OMITTED"
-                stmt.add_using_parameter(param_name, passing_mode)
                 token_stream.consume()
+                if token.type == TokenType.IDENTIFIER:
+                    # ``ADDRESS OF x`` / ``LENGTH OF x`` argument forms, then
+                    # a trailing subscript / OF-IN qualifier chain
+                    # (``USING SUBSCRIPTED-DATA (4)``) -- fold them into the
+                    # parameter rather than stranding them as unparsed tokens.
+                    if param_name.upper() in ("ADDRESS", "LENGTH"):
+                        of_tok, of_idx = peek_past_noise(token_stream, 0)
+                        if of_tok and token_value_upper(of_tok) == "OF":
+                            name_tok, _ = peek_past_noise(token_stream, of_idx + 1)
+                            if name_tok and name_tok.type == TokenType.IDENTIFIER:
+                                skip_whitespace(token_stream)
+                                token_stream.consume()  # OF
+                                skip_whitespace(token_stream)
+                                token_stream.consume()  # identifier
+                                param_name = f"{param_name.upper()} OF {name_tok.value}"
+                    param_name = consume_optional_qualifiers(token_stream, param_name)
+                stmt.add_using_parameter(param_name, passing_mode)
             else:
                 # No parameter found, end of USING clause
                 break

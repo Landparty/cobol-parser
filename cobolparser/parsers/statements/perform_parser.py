@@ -10,12 +10,15 @@ from cobolparser.parsers.statements._conditions import (
 from cobolparser.parsers.statements._utils import (
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    consume_optional_qualifiers,
+    consume_procedure_qualifier,
     consume_value_operand,
     get_parse_context,
     is_statement_boundary,
     matches_keyword,
     peek_past_noise,
     report_parse_error,
+    skip_statement_separators,
     skip_whitespace,
     try_parse_nested_statement,
 )
@@ -114,6 +117,30 @@ def _warn_incomplete_varying_clause(
         logger.warning(message)
 
 
+def _peek_past_optional_subscript(stream: ITokenStream, offset: int) -> Any:
+    """Peek at the first meaningful token at/after *offset*, skipping one
+    parenthesised subscript group if that is what comes first.
+
+    ``PERFORM P TABLE5-NUM (INDEX5) TIMES`` (NIST NC121M): the TIMES lookahead
+    must see past the count's subscript, or the subscripted count is taken
+    for a stray identifier and ``(INDEX5) TIMES`` falls out as unparsed.
+    """
+    token, idx = peek_past_noise(stream, offset)
+    if token is None or token.type != TokenType.LEFT_PAREN:
+        return token
+    depth = 0
+    while token is not None:
+        if token.type == TokenType.LEFT_PAREN:
+            depth += 1
+        elif token.type == TokenType.RIGHT_PAREN:
+            depth -= 1
+            if depth == 0:
+                return peek_past_noise(stream, idx + 1)[0]
+        idx += 1
+        token = stream.peek(idx)
+    return None
+
+
 class PerformStatementParser(IStatementParser):
     """Parser for PERFORM statements using IStatementParser interface."""
 
@@ -178,11 +205,12 @@ class PerformStatementParser(IStatementParser):
         # BEFORE/AFTER may each land on their own continuation line, so a
         # skip_whitespace before every peek is required or the clause is
         # silently left unconsumed (H3-style newline-intolerance bug).
-        if token.type == TokenType.WITH:
+        if token.type in (TokenType.WITH, TokenType.TEST):
             try:
-                token_stream.consume()  # Skip WITH
-                skip_whitespace(token_stream)
-                token = token_stream.peek()
+                if token.type == TokenType.WITH:
+                    token_stream.consume()  # Skip WITH (optional prefix)
+                    skip_whitespace(token_stream)
+                    token = token_stream.peek()
                 if token and token.type == TokenType.TEST:
                     token_stream.consume()  # Skip TEST
                     skip_whitespace(token_stream)
@@ -196,6 +224,13 @@ class PerformStatementParser(IStatementParser):
                 pass
             skip_whitespace(token_stream)
             token = token_stream.peek()
+
+        # ``PERFORM WITH TEST AFTER VARYING ...`` -- the TEST phrase may
+        # precede VARYING in the inline form; previously only UNTIL was
+        # looked for after it and the VARYING clause fell out as unparsed.
+        if token and token.type == TokenType.VARYING:
+            self._parse_varying_clause(token_stream, stmt)
+            return stmt
 
         # Check for UNTIL clause (inline PERFORM UNTIL)
         if token and token.type == TokenType.UNTIL:
@@ -246,6 +281,29 @@ class PerformStatementParser(IStatementParser):
         # Simple PERFORM procedure-name (an identifier, or an all-digit
         # numeric paragraph name -- e.g. PERFORM 1000 THRU 1999)
         if token and _is_procedure_name_token(token):
+            # ``PERFORM counter-name TIMES`` -- an identifier count is as
+            # standard as a literal one; previously the identifier was taken
+            # as a paragraph name and TIMES fell out as an unparsed token.
+            lookahead = peek_past_noise(token_stream, 1)[0]
+            if (
+                token.type == TokenType.IDENTIFIER
+                and lookahead
+                and (
+                    lookahead.type == TokenType.TIMES
+                    or (
+                        lookahead.type == TokenType.IDENTIFIER
+                        and lookahead.value
+                        and lookahead.value.upper() in ("TIMES", "TIME")
+                    )
+                )
+            ):
+                count_name = token.value
+                token_stream.consume()  # the count identifier
+                skip_whitespace(token_stream)
+                token_stream.consume()  # TIMES keyword
+                stmt.set_times_clause(count_name)
+                self._parse_inline_statements(token_stream, stmt)
+                return stmt
             paragraph = token.value
             stmt.set_target_paragraph(paragraph)
             try:
@@ -256,6 +314,15 @@ class PerformStatementParser(IStatementParser):
 
             skip_whitespace(token_stream)
             token = token_stream.peek()
+
+            # ``PERFORM PAR-1A OF QUAL-SECTION-1`` -- a section-qualified
+            # paragraph name (NIST NC208A). The qualifier is recorded as
+            # metadata; the target keeps the bare paragraph name so
+            # flow-graph lookups by name are unchanged.
+            qualifier = consume_procedure_qualifier(token_stream)
+            if qualifier:
+                stmt.set_metadata("target_qualifier", qualifier)
+                token = token_stream.peek()
 
             # Check for THRU clause (THROUGH is a standard COBOL synonym)
             if (
@@ -295,7 +362,7 @@ class PerformStatementParser(IStatementParser):
             # statement's leading token) is left in the stream instead of
             # being silently discarded with no warning (H3).
             if token and token.type == TokenType.IDENTIFIER:
-                lookahead = peek_past_noise(token_stream, 1)[0]
+                lookahead = _peek_past_optional_subscript(token_stream, 1)
                 if lookahead and (
                     lookahead.type == TokenType.TIMES
                     or (
@@ -307,6 +374,9 @@ class PerformStatementParser(IStatementParser):
                     times_value = token.value
                     token_stream.consume()
                     skip_whitespace(token_stream)
+                    # ``PERFORM P TABLE5-NUM (INDEX5) TIMES`` (NIST NC121M):
+                    # fold a subscript / qualifier chain into the count.
+                    times_value = consume_optional_qualifiers(token_stream, times_value)
 
                     # Can be numeric (int) or variable (string)
                     para_times_count: Any
@@ -361,11 +431,12 @@ class PerformStatementParser(IStatementParser):
 
             # Check for WITH TEST clause after paragraph name (WITH TEST
             # BEFORE/AFTER) -- see the newline-tolerance note above.
-            if token and token.type == TokenType.WITH:
+            if token and token.type in (TokenType.WITH, TokenType.TEST):
                 try:
-                    token_stream.consume()  # Skip WITH
-                    skip_whitespace(token_stream)
-                    token = token_stream.peek()
+                    if token.type == TokenType.WITH:
+                        token_stream.consume()  # Skip WITH (optional prefix)
+                        skip_whitespace(token_stream)
+                        token = token_stream.peek()
                     if token and token.type == TokenType.TEST:
                         token_stream.consume()  # Skip TEST
                         skip_whitespace(token_stream)
@@ -492,6 +563,9 @@ class PerformStatementParser(IStatementParser):
         variable_name = token.value
         stream.consume()
         skip_whitespace(stream)
+        # ``VARYING PFM-F4-24-A (S1)`` (NIST NC201A): a subscripted loop
+        # variable is legal; fold the subscript in instead of stranding it.
+        variable_name = consume_optional_qualifiers(stream, variable_name)
 
         # Expect FROM
         token = stream.peek()
@@ -760,7 +834,7 @@ class PerformStatementParser(IStatementParser):
 
             # Parse statements until END-PERFORM or PERIOD
             while not stream.is_empty():
-                skip_whitespace(stream)
+                skip_statement_separators(stream)
                 token = stream.peek()
 
                 if not token:

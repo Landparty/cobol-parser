@@ -6,8 +6,11 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import SearchStatement
 from ._utils import (
+    LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
+    bare_end_starts_at_end_clause,
     matches_keyword,
+    skip_statement_separators,
     skip_whitespace,
     token_location,
     try_parse_nested_statement,
@@ -95,6 +98,13 @@ class SearchStatementParser(IStatementParser):
                     at_end_stmts = self._parse_nested_statements(token_stream)
                     if at_end_stmts:
                         stmt.set_at_end_clause(at_end_stmts)
+            elif bare_end_starts_at_end_clause(token_stream):
+                # ``SEARCH T END stmts WHEN ...`` -- AT is optional.
+                token_stream.consume()  # END
+                skip_whitespace(token_stream)
+                at_end_stmts = self._parse_nested_statements(token_stream)
+                if at_end_stmts:
+                    stmt.set_at_end_clause(at_end_stmts)
             elif val == "WHEN":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -111,7 +121,7 @@ class SearchStatementParser(IStatementParser):
                         "AT",
                     ):
                         break
-                    if tv in STATEMENT_KEYWORDS:
+                    if t.type not in LITERAL_TOKEN_TYPES and tv in STATEMENT_KEYWORDS:
                         break
                     token_stream.consume()
                     cond_parts.append(t.value or "")
@@ -130,7 +140,7 @@ class SearchStatementParser(IStatementParser):
         """Parse nested imperative statements until a WHEN/END-SEARCH/period boundary."""
         stmts: list = []
         while not token_stream.is_empty():
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
             token = token_stream.peek()
             if not token:
                 break

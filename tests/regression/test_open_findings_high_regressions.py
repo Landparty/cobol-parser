@@ -222,13 +222,17 @@ class TestH3PerformTrailingIdentifier:
     def test_missing_period_before_real_verb_not_swallowed(self):
         # PURGE lexes as a plain IDENTIFIER (no dedicated TokenType); it
         # must not be absorbed as a bogus TIMES candidate just because it
-        # follows a PERFORM target with no separating period.
+        # follows a PERFORM target with no separating period. (PURGE has
+        # had a registered parser since 2026-09-02, so the verb now yields
+        # its own PurgeStatement instead of an "unsupported" warning.)
         result = parse_cobol(
             _perform_program("    PERFORM PARA-1\n    PURGE WS-COUNT.\n")
         )
         stmts = _statements(result)
-        assert any(type(s).__name__ == "PerformStatement" for s in stmts)
-        assert any("PURGE" in w for w in result.warnings), result.warnings
+        types = [type(s).__name__ for s in stmts]
+        assert "PerformStatement" in types
+        assert "PurgeStatement" in types, types
+        assert result.warnings == []
 
 
 class TestH4PerformBareExceptLogging:

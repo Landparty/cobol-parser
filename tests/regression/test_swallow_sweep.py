@@ -242,6 +242,49 @@ FIXTURES: dict[str, Fixture] = {
     "FreeStatementParser": Fixture("FreeStatement", "    FREE WS-VAR"),
     "CommitStatementParser": Fixture("CommitStatement", "    COMMIT"),
     "RollbackStatementParser": Fixture("RollbackStatement", "    ROLLBACK WORK"),
+    # Report Writer
+    "InitiateStatementParser": Fixture("InitiateStatement", "    INITIATE WS-VAR"),
+    "TerminateStatementParser": Fixture("TerminateStatement", "    TERMINATE WS-VAR"),
+    "SuppressStatementParser": Fixture("SuppressStatement", "    SUPPRESS PRINTING"),
+    # Communication Module
+    "SendStatementParser": Fixture(
+        "SendStatement", "    SEND WS-VAR FROM WS-VAR2 WITH EMI AFTER ADVANCING 2 LINES"
+    ),
+    # No NO DATA / WITH DATA handler here: like READ's AT END, a period-less
+    # handler body legitimately extends to the next sentence, so the marker
+    # would (correctly) be part of it.
+    "ReceiveStatementParser": Fixture(
+        "ReceiveStatement", "    RECEIVE WS-VAR MESSAGE INTO WS-VAR2"
+    ),
+    "EnableStatementParser": Fixture(
+        "EnableStatement", "    ENABLE INPUT WS-VAR WITH KEY WS-KEY"
+    ),
+    "DisableStatementParser": Fixture("DisableStatement", "    DISABLE OUTPUT WS-VAR"),
+    "PurgeStatementParser": Fixture("PurgeStatement", "    PURGE WS-VAR"),
+    # Legacy / compiler-directing
+    "ExhibitStatementParser": Fixture(
+        "ExhibitStatement", "    EXHIBIT NAMED WS-VAR WS-VAR2"
+    ),
+    "ExamineStatementParser": Fixture(
+        "ExamineStatement", "    EXAMINE WS-VAR TALLYING ALL 'A' REPLACING BY 'B'"
+    ),
+    "TransformStatementParser": Fixture(
+        "TransformStatement", "    TRANSFORM WS-VAR CHARACTERS FROM 'a' TO 'b'"
+    ),
+    "EnterStatementParser": Fixture("EnterStatement", "    ENTER COBOL"),
+    "NoteStatementParser": Fixture("NoteStatement", "    NOTE THIS IS COMMENTARY"),
+    "ChainStatementParser": Fixture(
+        "ChainStatement", "    CHAIN 'NEXTPROG' USING WS-VAR"
+    ),
+    "TraceStatementParser": Fixture("TraceStatement", "    READY TRACE"),
+    "ServiceStatementParser": Fixture("ServiceStatement", "    SERVICE RELOAD WS-VAR"),
+    "TitleStatementParser": Fixture("TitleStatement", "    TITLE 'LISTING'"),
+    # COBOL 2002
+    "RaiseStatementParser": Fixture("RaiseStatement", "    RAISE EXCEPTION EC-ALL"),
+    "ResumeStatementParser": Fixture("ResumeStatement", "    RESUME NEXT STATEMENT"),
+    "ValidateStatementParser": Fixture(
+        "ValidateStatement", "    VALIDATE WS-VAR WS-VAR2"
+    ),
 }
 
 

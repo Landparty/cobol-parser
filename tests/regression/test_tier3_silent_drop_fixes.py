@@ -128,24 +128,29 @@ class TestMultiProgramCompilationUnits:
 class TestUnknownStatementWarning:
     """C2 — unknown verbs must be visible on ParseResult.warnings."""
 
-    def test_transform_is_skipped_with_warning(self):
-        # TRANSFORM is a genuinely unsupported (obsolete) verb. INVOKE was
-        # originally used here, but it now has a registered parser
-        # (invoke_parser.py) and no longer takes this path -- see
-        # test_invoke_allocate_free_statements.py for its coverage.
+    def test_execute_is_skipped_with_warning(self):
+        # EXECUTE is a verb-shaped reserved word with no COBOL statement
+        # behind it, so it is the one remaining example of this path.
+        # TRANSFORM (and before it INVOKE) used to be the example here; both
+        # now have registered parsers -- see test_extended_verb_parsers.py.
         result = _parse_proc(
             "           MOVE 'A' TO WS-A.\n"
-            "           TRANSFORM WS-B CHARACTERS FROM 'a' TO 'b'.\n"
+            "           EXECUTE WS-B.\n"
             "           MOVE 'B' TO WS-A."
         )
-        assert any("TRANSFORM" in w and "skipped" in w for w in result.warnings)
+        assert any("EXECUTE" in w and "skipped" in w for w in result.warnings)
         # surrounding statements survive
         types = _statement_types(result)
         assert types.count("MOVE") == 2
 
-    def test_exhibit_is_skipped_with_warning(self):
-        result = _parse_proc("           EXHIBIT NAMED WS-A.")
-        assert any("EXHIBIT" in w for w in result.warnings)
+    def test_transform_and_exhibit_now_parse_without_warning(self):
+        result = _parse_proc(
+            "           TRANSFORM WS-B CHARACTERS FROM 'a' TO 'b'.\n"
+            "           EXHIBIT NAMED WS-A."
+        )
+        assert result.warnings == []
+        types = _statement_types(result)
+        assert "TRANSFORM" in types and "EXHIBIT" in types
 
     def test_clean_program_has_no_warnings(self):
         result = _parse_proc("           MOVE 'A' TO WS-A.\n           DISPLAY WS-A.")

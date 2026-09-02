@@ -48,6 +48,7 @@ STRAY_MARKERS: frozenset = frozenset(
         "END-RETURN",
         "END-ACCEPT",
         "END-DISPLAY",
+        "END-RECEIVE",
         "END-XML",
         "END-JSON",
     }
@@ -59,32 +60,15 @@ STRAY_MARKERS: frozenset = frozenset(
 # leftover clause content from a partially-parsed statement.
 UNSUPPORTED_VERBS: frozenset = frozenset(
     {
-        # ALLOCATE, FREE, and INVOKE have registered parsers
-        # (allocate_free_parsers.py, invoke_parser.py) and are deliberately
-        # NOT listed here -- they now dispatch through the registry instead
-        # of reaching this warn-and-discard path.
-        "CHAIN",
-        "DISABLE",
-        "ENABLE",
-        "ENTER",
-        "EXAMINE",
+        # Every real COBOL verb now has a registered statement parser (see
+        # procedure_registry.py -- the Report Writer, Communication Module,
+        # OS/VS legacy, IBM compiler-directing and COBOL 2002 verbs were
+        # added 2026-09-02). What remains here are words the lexer reserves
+        # as verb-shaped but that no COBOL dialect defines as a statement:
+        # GOTO (the fused misspelling of GO TO) and two dialect leftovers.
         "EXECUTE",
-        "EXHIBIT",
         "GOTO",
-        "INITIATE",
-        "NOTE",
-        "PURGE",
-        "RAISE",
-        "READY",
-        "RECEIVE",
         "RECOVER",
-        "RESET",
-        "RESUME",
-        "SEND",
-        "SERVICE",
-        "SUPPRESS",
-        "TERMINATE",
-        "TRANSFORM",
     }
 )
 

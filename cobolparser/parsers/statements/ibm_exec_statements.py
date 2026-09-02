@@ -9,6 +9,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import ASTNode, SourceLocation
 from ...models.sql_statements import parse_exec_sql
+from ...models.statements.base import CobolStatement
 from ._utils import collect_exec_sql_text, peek_token
 
 _IMS_CALL_TYPES = frozenset(
@@ -153,17 +154,36 @@ def _parse_ims_arguments(text: str) -> list[str]:
     return arguments
 
 
-class ExecCicsStatement(ASTNode):
-    """AST node for EXEC CICS statements."""
+class ExecCicsStatement(CobolStatement):
+    """AST node for EXEC CICS statements.
+
+    A :class:`CobolStatement` (``statement_type`` ``"EXEC CICS"``) so it is
+    returned by ``CobolProgram.get_all_statements()`` like every other
+    PROCEDURE DIVISION statement -- it used to extend ``ASTNode`` directly,
+    which silently hid every CICS command from that walk (and from any
+    analyzer built on it) with ``errors=0, warnings=0``. ``node_type`` stays
+    ``"EXEC_CICS"`` and ``to_dict()`` keeps its historical shape, so
+    ``find_all_by_type("EXEC_CICS")`` and JSON consumers are unaffected.
+    """
 
     def __init__(self, location: SourceLocation) -> None:
-        super().__init__("EXEC_CICS", location)
-        self.cics_command: str = ""
+        super().__init__("EXEC CICS", location)
+        self.node_type = "EXEC_CICS"
+        self._cics_command: str = ""
         self.cics_text: str = ""
         #: Structured option list: option keyword -> argument text inside the
         #: parentheses, or None for flag options (ERASE, NOHANDLE, ...).
         #: Insertion order matches source order.
         self.options: dict[str, str | None] = {}
+
+    @property
+    def cics_command(self) -> str:
+        """The CICS command verb (SEND, RECEIVE, LINK, ...)."""
+        return self._cics_command
+
+    @cics_command.setter
+    def cics_command(self, value: str) -> None:
+        self._cics_command = value
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -318,18 +338,32 @@ class ExecCicsStatementParser(IStatementParser):
         return stmt
 
 
-class ExecImsStatement(ASTNode):
-    """AST node for EXEC IMS / EXEC DLI statements."""
+class ExecImsStatement(CobolStatement):
+    """AST node for EXEC IMS / EXEC DLI statements.
+
+    A :class:`CobolStatement` for the same reason as
+    :class:`ExecCicsStatement` above; ``node_type`` stays ``"EXEC_IMS"``.
+    """
 
     def __init__(self, location: SourceLocation) -> None:
-        super().__init__("EXEC_IMS", location)
-        self.ims_command: str = ""
+        super().__init__("EXEC IMS", location)
+        self.node_type = "EXEC_IMS"
+        self._ims_command: str = ""
         self.ims_call_type: str = "UNKNOWN"
         self.ims_text: str = ""
         #: Positional arguments following the function code: PCB reference,
         #: I/O area, SSAs, or DLI keyword options with their parenthesized
         #: argument reattached (e.g. ``PCB(1)``, ``SEGMENT(EMPLOYEE)``).
         self.arguments: list[str] = []
+
+    @property
+    def ims_command(self) -> str:
+        """The DL/I function code (GU, GN, ISRT, ...)."""
+        return self._ims_command
+
+    @ims_command.setter
+    def ims_command(self, value: str) -> None:
+        self._ims_command = value
 
     def to_dict(self) -> dict[str, Any]:
         return {

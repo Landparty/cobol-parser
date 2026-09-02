@@ -28,7 +28,10 @@ from cobolparser.core.registry import StatementParserRegistry
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
-from cobolparser.parsers.statements._utils import skip_whitespace
+from cobolparser.parsers.statements._utils import (
+    skip_statement_separators,
+    skip_whitespace,
+)
 
 from .base import BaseDivisionParser
 from .procedure_boundaries import (
@@ -164,8 +167,9 @@ class ProcedureDivisionParser(BaseDivisionParser):
 
         # Parse paragraphs and sections until EOF
         while not token_stream.is_empty():
-            # Skip whitespace/comments at start of each iteration
-            skip_whitespace(token_stream)
+            # Skip whitespace/comments (and stray ``,``/``;`` separators)
+            # at start of each iteration
+            skip_statement_separators(token_stream)
 
             token = token_stream.peek(0)
             if not token:
@@ -372,8 +376,11 @@ class ProcedureDivisionParser(BaseDivisionParser):
         statements: list[dict[str, Any]] = []
 
         while not token_stream.is_empty():
-            # Skip whitespace/comments
-            skip_whitespace(token_stream)
+            # Skip whitespace/comments and the optional ``,``/``;``
+            # separators COBOL allows between statements (``PERFORM A, GO
+            # TO B.``) -- previously each one was reported as dropped
+            # "unparsed tokens".
+            skip_statement_separators(token_stream)
 
             if token_stream.is_empty():
                 break

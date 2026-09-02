@@ -485,7 +485,7 @@ def _consume_optional_rounded(stream: ITokenStream) -> bool:
 #: CONTROL_FLOW_BOUNDARIES), so ``_consume_arithmetic_target``'s IDENTIFIER
 #: check already stops on those without help from this set.
 _ADDITIONAL_TARGET_STOP_KEYWORDS: frozenset[str] = (
-    frozenset({"GIVING", "REMAINDER"})
+    frozenset({"GIVING", "REMAINDER", "SIZE"})
     | STATEMENT_KEYWORDS
     | CONTROL_FLOW_BOUNDARIES
     | SCOPE_TERMINATORS
@@ -535,7 +535,7 @@ def _consume_additional_arithmetic_targets(
 #: (``GIVING id-3 [ROUNDED] [id-4 [ROUNDED]] ...``); REMAINDER (DIVIDE-only)
 #: must stop the list rather than being swallowed as a bogus extra target.
 _ADDITIONAL_GIVING_STOP_KEYWORDS: frozenset[str] = (
-    frozenset({"REMAINDER"})
+    frozenset({"REMAINDER", "SIZE"})
     | STATEMENT_KEYWORDS
     | CONTROL_FLOW_BOUNDARIES
     | SCOPE_TERMINATORS

@@ -475,3 +475,65 @@ class SearchStatement(CobolStatement):
             ]
         result.update(self._serialize_clauses("at_end_clause", omit_empty=True))
         return result
+
+
+class RaiseStatement(CobolStatement):
+    """AST node for the COBOL 2002 ``RAISE`` statement.
+
+    Syntax::
+
+        RAISE EXCEPTION exception-name
+        RAISE identifier
+
+    ``raise_type`` is ``"EXCEPTION"`` for the first form and
+    ``"IDENTIFIER"`` for the second; ``target`` holds the exception-name or
+    the identifier respectively.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("RAISE", location)
+        self.raise_type: str | None = None
+        self.target: str | None = None
+
+    def set_target(self, target: str, *, raise_type: str) -> None:
+        self.target = target
+        self.raise_type = raise_type.upper()
+        if self.raise_type == "IDENTIFIER":
+            self._add_unique_operand(target)
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update({"raise_type": self.raise_type, "target": self.target})
+        return result
+
+
+class ResumeStatement(CobolStatement):
+    """AST node for the COBOL 2002 ``RESUME`` statement (exit a declarative
+    exception handler).
+
+    Syntax::
+
+        RESUME [AT] NEXT STATEMENT
+        RESUME [AT] procedure-name
+
+    ``target`` is the literal string ``"NEXT STATEMENT"`` for the first form,
+    otherwise the procedure name.
+    """
+
+    def __init__(self, location: SourceLocation):
+        super().__init__("RESUME", location)
+        self.target: str | None = None
+
+    @property
+    def resumes_next_statement(self) -> bool:
+        return self.target == "NEXT STATEMENT"
+
+    def to_dict(self) -> dict[str, Any]:
+        result = super().to_dict()
+        result.update(
+            {
+                "target": self.target,
+                "resumes_next_statement": self.resumes_next_statement,
+            }
+        )
+        return result
