@@ -441,9 +441,12 @@ class TestXmlGenerateClauses:
         )
         _clean(result)
         assert _types(_main(result)) == ["XmlJsonStatement"]
-        text = _main(result)[0].clause_text
-        assert text.startswith("SUPPRESS WHEN SPACES")
-        assert "NOT ON EXCEPTION DISPLAY OK" in text
+        node = _main(result)[0]
+        assert node.clause_text == "SUPPRESS WHEN SPACES"
+        # The handler bodies are real statement lists (2026-09-02), not
+        # clause text -- and STOP RUN stayed inside the ON EXCEPTION body.
+        assert [s.statement_type for s in node.on_exception] == ["DISPLAY", "STOP"]
+        assert [s.statement_type for s in node.not_on_exception] == ["DISPLAY"]
 
     def test_shamrice_xml_generate_sample_is_clean(self):
         source = open(

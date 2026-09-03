@@ -35,6 +35,7 @@ from cobolparser.models.sql_statements import ExecSQLStatement
 from .base import BaseDivisionParser, at_division_boundary
 from .data_clauses import _DIVISION_TOKEN_TYPES, DataItemClauseParser
 from .data_file_description import FileDescriptionClauseParser
+from .data_report_description import ReportDescriptionClauseParser
 from .data_special_entries import SpecialEntryParser
 
 # Hoisted out of _parse_section -- these were being rebuilt as set
@@ -52,18 +53,19 @@ _SECTION_KEYWORDS: frozenset[str] = frozenset(
         "IDENTIFICATION",
     }
 )
+# REPORT SECTION joined this set on 2026-09-02: its RD entries and report
+# groups are parsed (see _parse_section's ``section_name == "REPORT"``
+# branches and data_report_description.py) instead of skipped.
 _SECTION_BREAK_HEADERS: frozenset[str] = frozenset(
-    {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"}
+    {"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE", "REPORT"}
 )
-# SCREEN SECTION, REPORT SECTION, and COMMUNICATION SECTION have their own
-# grammars (screen-field clauses, RD/report-group entries, CD entries) that
-# this parser does not model. They must still break any section scan that's
-# currently in progress -- otherwise their content (which also starts with
-# level numbers) is silently absorbed as bogus nested items of whatever
-# section preceded them (usually WORKING-STORAGE). See _skip_section.
-_UNSUPPORTED_SECTION_HEADERS: frozenset[str] = frozenset(
-    {"SCREEN", "REPORT", "COMMUNICATION"}
-)
+# SCREEN SECTION and COMMUNICATION SECTION have their own grammars
+# (screen-field clauses, CD entries) that this parser does not model. They
+# must still break any section scan that's currently in progress --
+# otherwise their content (which also starts with level numbers) is
+# silently absorbed as bogus nested items of whatever section preceded them
+# (usually WORKING-STORAGE). See _skip_section.
+_UNSUPPORTED_SECTION_HEADERS: frozenset[str] = frozenset({"SCREEN", "COMMUNICATION"})
 
 
 class DataDivisionParser(BaseDivisionParser):
@@ -81,6 +83,7 @@ class DataDivisionParser(BaseDivisionParser):
         super().__init__()
         self._clause_parser = DataItemClauseParser(self)
         self._fd_parser = FileDescriptionClauseParser()
+        self._rd_parser = ReportDescriptionClauseParser()
         self._special_entries = SpecialEntryParser()
 
     def parse_division(self, token_stream: ITokenStream) -> dict[str, Any]:
@@ -129,6 +132,10 @@ class DataDivisionParser(BaseDivisionParser):
                 )
             elif token_value == "LINKAGE":
                 sections["linkage"] = self._parse_section(token_stream, "LINKAGE")
+            elif token_value == "REPORT" and self._next_is_section_keyword(
+                token_stream
+            ):
+                sections["report"] = self._parse_section(token_stream, "REPORT")
             elif token_value in _UNSUPPORTED_SECTION_HEADERS and (
                 self._next_is_section_keyword(token_stream)
             ):
@@ -188,6 +195,11 @@ class DataDivisionParser(BaseDivisionParser):
         # downstream tooling (e.g. a boundary inventory) needs to tell the two
         # apart rather than treating every FILE SECTION entry as an FD.
         current_fd_record_type: str | None = None
+        # REPORT SECTION: the RD every following report group belongs to,
+        # and its captured clauses (PAGE LIMIT, CONTROLS, ...).
+        current_rd_name: str | None = None
+        current_rd_clauses: dict[str, Any] = {}
+        report_group = section_name == "REPORT"
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -261,6 +273,22 @@ class DataDivisionParser(BaseDivisionParser):
                 current_fd_clauses = self._parse_fd_clauses(token_stream)
                 continue
 
+            # In REPORT SECTION, an RD entry introduces the report the
+            # following 01-level report groups describe.
+            if (
+                report_group
+                and paren_depth == 0
+                and tok_type == TokenType.IDENTIFIER
+                and value_upper == "RD"
+            ):
+                token_stream.consume()  # RD
+                rd_name_tok = token_stream.peek()
+                if rd_name_tok and rd_name_tok.type == TokenType.IDENTIFIER:
+                    current_rd_name = rd_name_tok.value
+                    token_stream.consume()
+                current_rd_clauses = self._rd_parser.parse_rd_clauses(token_stream)
+                continue
+
             # Parse EXEC SQL blocks that appear in the data division
             # (e.g. DCLGEN-generated DECLARE TABLE or INCLUDE SQLCA)
             is_exec = tok_type == TokenType.EXEC or (
@@ -298,8 +326,18 @@ class DataDivisionParser(BaseDivisionParser):
                     if renames_item:
                         data_items.append(renames_item)
                 else:
-                    data_item = self._parse_data_item(token_stream)
+                    data_item = self._parse_data_item(
+                        token_stream, report_group=report_group
+                    )
                     if data_item:
+                        if report_group and data_item.level == 1:
+                            if current_rd_name is not None:
+                                data_item.set_metadata(
+                                    "rd_report_name", current_rd_name
+                                )
+                            data_item.set_metadata(
+                                "rd_clauses", dict(current_rd_clauses)
+                            )
                         # Tag 01-level FILE SECTION records with their parent FD name
                         if (
                             section_name == "FILE"
@@ -499,9 +537,13 @@ class DataDivisionParser(BaseDivisionParser):
     # so those three in particular must keep their exact names/signatures.
     # ------------------------------------------------------------------
 
-    def _parse_data_item(self, token_stream: ITokenStream) -> CobolDataItem | None:
+    def _parse_data_item(
+        self, token_stream: ITokenStream, report_group: bool = False
+    ) -> CobolDataItem | None:
         """Parse a single data item definition (delegates to DataItemClauseParser)."""
-        return self._clause_parser.parse_data_item(token_stream)
+        return self._clause_parser.parse_data_item(
+            token_stream, report_group=report_group
+        )
 
     def _parse_picture_clause(self, token_stream: ITokenStream) -> str | None:
         """Parse PICTURE clause pattern (delegates to DataItemClauseParser)."""

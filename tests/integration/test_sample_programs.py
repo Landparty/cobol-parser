@@ -221,12 +221,11 @@ class TestAdvancedFeatures:
 
         result = parser.parse_file(str(sample_path))
 
-        # Note: REPORT SECTION is a complex feature that may not be fully supported
-        if result.ast is None:
-            # Parser doesn't support REPORT SECTION yet
-            assert len(result.errors) > 0
-        else:
-            assert result.ast.program_name == "REPORTWR"
+        assert result.ast is not None
+        assert result.ast.program_name == "REPORTWR"
+        report = result.ast.data_division.get_section_by_name("REPORT")
+        assert report is not None
+        assert len(report.data_items) == 8  # REPORT SECTION parsed since 2026-09-02
 
     def test_communication_module(self):
         """Test COMMUNICATION SECTION (legacy feature)."""
@@ -397,7 +396,7 @@ class TestParseStatistics:
         "declaratives_section.cbl",
         "accept_display_operations.cbl",
         # "special_names_config.cbl",  # Skipped: SPECIAL-NAMES advanced features not fully supported
-        # "report_writer.cbl",  # Skipped: REPORT SECTION not fully supported
+        "report_writer.cbl",
         "communication_module.cbl",
         "screen_section_io.cbl",
     ],

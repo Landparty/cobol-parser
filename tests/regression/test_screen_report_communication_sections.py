@@ -13,11 +13,14 @@ SCREEN SECTION ``COLUMN 5`` clause produced a data item literally named
 ``COLUMN`` with a level number equal to the column position.
 
 ``DataDivisionParser`` now recognizes all three headers as section
-boundaries and, since their grammars are not modeled, discards each
-section's body (no spurious data items) while still surfacing it as its own
-named ``CobolSection`` (empty ``data_items``) with a ``has_<name>``
-division-metadata flag -- so downstream consumers can tell the section was
-present without being polluted by misparsed content.
+boundaries. SCREEN and COMMUNICATION, whose grammars are not modeled, have
+their bodies discarded (no spurious data items) while still surfacing as
+their own named ``CobolSection`` (empty ``data_items``) with a
+``has_<name>`` division-metadata flag -- so downstream consumers can tell
+the section was present without being polluted by misparsed content. The
+REPORT SECTION has been parsed for real since 2026-09-02 (RD clauses and
+report groups; see ``tests/unit/test_report_section.py``), so its tests
+below pin the parsed shape and the absence of any warning instead.
 
 Known limitation: a data item declared directly under one of these sections
 (e.g. a record following a COMMUNICATION SECTION ``CD`` entry, or a plain
@@ -158,11 +161,18 @@ class TestReportSectionRecognition:
         ws_names = {d.name for d in sections["WORKING-STORAGE"].data_items}
         assert ws_names == {"WS-ONE", "WS-TWO"}
 
-    def test_report_section_is_its_own_empty_section(self):
+    def test_report_section_is_its_own_parsed_section(self):
+        """Since 2026-09-02 the REPORT SECTION is parsed, not skipped: the
+        RD's clauses and the report groups (anonymous ``01 TYPE IS ...``
+        entries included) land under their own section -- see
+        tests/unit/test_report_section.py for the clause-level pins."""
         result = _parse(REPORT_SECTION)
         sections = _sections_by_name(result)
         assert "REPORT" in sections
-        assert sections["REPORT"].data_items == []
+        (group,) = sections["REPORT"].data_items
+        assert group.get_metadata("rd_report_name") == "SALES-REPORT"
+        assert group.get_metadata("report_clauses") == {"type": "PAGE HEADING"}
+        assert group.get_metadata("rd_clauses")["page_limit"] == 60
 
     def test_has_report_metadata_flag_set(self):
         result = _parse(REPORT_SECTION)
@@ -174,9 +184,9 @@ class TestReportSectionRecognition:
         displays = result.ast.find_all_by_type("DisplayStatement")
         assert len(displays) == 1
 
-    def test_skipping_section_records_a_warning(self):
+    def test_parsed_section_records_no_warning(self):
         result = _parse(REPORT_SECTION)
-        assert any("REPORT SECTION" in w for w in result.warnings)
+        assert result.warnings == []
 
 
 class TestBareReportClauseWordIsNotMisreadAsASectionHeader:
@@ -272,7 +282,11 @@ class TestRealSamplesNoLongerPolluteWorkingStorage:
         sections = _sections_by_name(result)
         # 3 real WORKING-STORAGE 01-level items -- previously ballooned to 29.
         assert len(sections["WORKING-STORAGE"].data_items) == 3
-        assert sections["REPORT"].data_items == []
+        # 8 report groups under RD SALES-REPORT (parsed since 2026-09-02)
+        assert len(sections["REPORT"].data_items) == 8
+        assert {
+            g.get_metadata("rd_report_name") for g in sections["REPORT"].data_items
+        } == {"SALES-REPORT"}
 
     def test_communication_module_sample(self, samples_dir):
         source = (samples_dir / "communication_module.cbl").read_text(encoding="utf-8")

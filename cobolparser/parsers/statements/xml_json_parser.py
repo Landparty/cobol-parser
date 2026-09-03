@@ -4,20 +4,29 @@ Before this parser existed, the leading ``XML``/``JSON`` keyword was silently
 consumed by the unknown-statement skip and the remaining ``GENERATE dest FROM
 src`` mis-parsed as a Report Writer :class:`GenerateStatement` — a wrong node
 with ``errors=0``. This parser captures the construct faithfully: verb,
-action, primary operands, and the raw text of any trailing clauses.
+action, primary operands, the raw text of any trailing clauses, and --
+since 2026-09-02 -- structured ``PROCESSING PROCEDURE`` fields plus real
+``[ON] EXCEPTION`` / ``NOT [ON] EXCEPTION`` handler bodies (previously
+flattened into the clause text, which hid every statement inside them from
+``get_all_statements()`` and from any nested-body walk).
 """
 
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
+    collect_clause_stmts,
+    consume_end_keyword_and_period,
     get_parse_context,
     is_statement_boundary,
+    peek_past_noise,
     peek_token,
+    peek_value_upper,
     report_parse_error,
     skip_whitespace,
 )
 
 from ...core.interfaces import IStatementParser, ITokenStream
+from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import XmlJsonStatement
 
@@ -43,9 +52,13 @@ class XmlJsonStatementParser(IStatementParser):
             [ON EXCEPTION ...] [END-JSON]
         JSON PARSE source INTO receiving [ON EXCEPTION ...] [END-JSON]
 
-    The primary operands are modeled; trailing clauses (including exception
-    handlers) are preserved verbatim in ``clause_text`` so no source content
-    is silently dropped.
+    The primary operands are modeled; trailing clauses are preserved
+    verbatim in ``clause_text`` so no source content is silently dropped.
+    ``PROCESSING PROCEDURE [IS] name [THRU name]`` is additionally captured
+    as ``processing_procedure`` / ``processing_procedure_thru`` (it stays in
+    ``clause_text`` too), and the ``[ON] EXCEPTION`` / ``NOT [ON] EXCEPTION``
+    handler bodies are parsed into ``on_exception`` / ``not_on_exception``
+    statement lists exactly like CALL and ACCEPT do.
     """
 
     _VERBS = ("XML", "JSON")
@@ -118,13 +131,11 @@ class XmlJsonStatementParser(IStatementParser):
                     location,
                 )
 
-        # Preserve everything else up to the sentence period or END-XML/
-        # END-JSON scope terminator. Exception-handler bodies frequently
-        # contain other verbs, so collection only stops at the terminator or
-        # period — the raw text is kept rather than dropped.
+        # Preserve every non-handler clause up to the sentence period, the
+        # END-XML/END-JSON scope terminator, or the first exception handler
+        # (which is parsed structurally below, not kept as text).
         terminator = f"END-{verb}"
         clause_parts: list[str] = []
-        in_handler = False
         seen_suppress = False
         while not token_stream.is_empty():
             token = peek_token(token_stream)
@@ -132,31 +143,26 @@ class XmlJsonStatementParser(IStatementParser):
                 break
             value = token.value or ""
             upper = value.upper()
-            if upper == terminator:
-                token_stream.consume()
-                break
-            if value == ".":
-                # Leave the period for the enclosing sentence logic
+            if upper == terminator or value == ".":
+                # Both are consumed by consume_end_keyword_and_period below.
                 break
             if token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
                 token_stream.consume()
                 continue
-            # A new statement keyword ends the clause region — unless we are
-            # inside an ON/NOT ON EXCEPTION handler, whose imperative
-            # statements belong to this construct and are preserved as raw
-            # text rather than dropped -- or the keyword is one of this
-            # construct's own clause words (SUPPRESS ..., NOT ON EXCEPTION).
-            # ``NOT`` leaves the handler so ``NOT ON EXCEPTION`` after an
-            # ``ON EXCEPTION`` body is not mistaken for that body's content.
-            if upper == "NOT":
-                in_handler = False
+            if self._at_exception_handler(token_stream):
+                break
+            if upper == "PROCESSING" and self._consume_processing_procedure(
+                token_stream, stmt, clause_parts
+            ):
+                continue
+            # A new statement keyword ends the clause region -- unless it is
+            # one of this construct's own clause words (SUPPRESS ..., NOT ON
+            # EXCEPTION is handled above).
             is_clause_word = upper in _CLAUSE_CONTINUATION_WORDS or (
                 seen_suppress and upper in _SUPPRESS_CONTINUATION_WORDS
             )
-            if is_statement_boundary(token) and not in_handler and not is_clause_word:
+            if is_statement_boundary(token) and not is_clause_word:
                 break
-            if upper == "EXCEPTION":
-                in_handler = True
             if upper == "SUPPRESS":
                 seen_suppress = True
             clause_parts.append(value)
@@ -165,12 +171,97 @@ class XmlJsonStatementParser(IStatementParser):
         if clause_parts:
             stmt.set_clause_text(" ".join(clause_parts))
 
-        # Consume trailing period if present
-        tail = peek_token(token_stream)
-        if tail and tail.value == ".":
-            token_stream.consume()
-
+        self._parse_exception_clauses(token_stream, stmt, terminator)
+        consume_end_keyword_and_period(token_stream, terminator)
         return stmt
+
+    @staticmethod
+    def _at_exception_handler(token_stream: ITokenStream) -> bool:
+        """True at ``[ON] EXCEPTION`` or ``NOT [ON] EXCEPTION`` (nothing
+        consumed)."""
+        token, idx = peek_past_noise(token_stream, 0)
+        if token is None:
+            return False
+        if token.type == TokenType.NOT:
+            token, idx = peek_past_noise(token_stream, idx + 1)
+        if token is not None and (token.value or "").upper() == "ON":
+            token, idx = peek_past_noise(token_stream, idx + 1)
+        return token is not None and (token.value or "").upper() == "EXCEPTION"
+
+    @staticmethod
+    def _consume_processing_procedure(
+        token_stream: ITokenStream, stmt: XmlJsonStatement, clause_parts: list[str]
+    ) -> bool:
+        """Consume ``PROCESSING PROCEDURE [IS] name [THRU|THROUGH name]``.
+
+        Records the names on *stmt* and echoes the consumed words into
+        *clause_parts* so ``clause_text`` keeps its historical content.
+        Returns False (consuming nothing) when the stream is not actually
+        at that clause."""
+        nxt, _ = peek_past_noise(token_stream, 1)
+        if nxt is None or (nxt.value or "").upper() != "PROCEDURE":
+            return False
+
+        def take() -> str:
+            skip_whitespace(token_stream)
+            token = token_stream.consume()
+            word = (token.value or "") if token else ""
+            clause_parts.append(word)
+            return word
+
+        take()  # PROCESSING
+        take()  # PROCEDURE
+        if peek_value_upper(token_stream) == "IS":
+            take()
+        skip_whitespace(token_stream)
+        name_token = peek_token(token_stream)
+        if name_token is None or is_statement_boundary(name_token):
+            return True
+        name = take()
+        thru: str | None = None
+        if peek_value_upper(token_stream) in ("THRU", "THROUGH"):
+            take()
+            skip_whitespace(token_stream)
+            thru_token = peek_token(token_stream)
+            if thru_token is not None and not is_statement_boundary(thru_token):
+                thru = take()
+        stmt.set_processing_procedure(name, thru)
+        return True
+
+    @staticmethod
+    def _parse_exception_clauses(
+        token_stream: ITokenStream, stmt: XmlJsonStatement, terminator: str
+    ) -> None:
+        """Parse ``[ON] EXCEPTION stmts [NOT [ON] EXCEPTION stmts]`` -- the
+        same shape ``AcceptStatementParser._parse_exception_clauses``
+        handles, stopping at this construct's own END-XML/END-JSON."""
+        for negated in (False, True):
+            skip_whitespace(token_stream)
+            if negated:
+                token = token_stream.peek()
+                if not (token and token.type == TokenType.NOT):
+                    return
+                lookahead, idx = peek_past_noise(token_stream, 1)
+                if lookahead and peek_value_upper(token_stream, idx) == "ON":
+                    lookahead, _ = peek_past_noise(token_stream, idx + 1)
+                if not (lookahead and (lookahead.value or "").upper() == "EXCEPTION"):
+                    return
+                token_stream.consume()  # NOT
+                skip_whitespace(token_stream)
+            if peek_value_upper(token_stream) == "ON":
+                lookahead, _ = peek_past_noise(token_stream, 1)
+                if not (lookahead and (lookahead.value or "").upper() == "EXCEPTION"):
+                    return
+                token_stream.consume()  # ON
+                skip_whitespace(token_stream)
+            if peek_value_upper(token_stream) != "EXCEPTION":
+                return
+            token_stream.consume()  # EXCEPTION
+            clause = collect_clause_stmts(token_stream, {terminator})
+            if negated:
+                stmt.set_not_on_exception_clause(clause)
+            else:
+                stmt.set_on_exception_clause(clause)
 
 
 __all__ = ["XmlJsonStatementParser"]

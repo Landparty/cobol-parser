@@ -154,6 +154,11 @@ SCOPE_TERMINATORS: frozenset = frozenset(
         "END-SUBTRACT",
         "END-UNSTRING",
         "END-WRITE",
+        # XML/JSON GENERATE/PARSE scope terminators: a statement nested in
+        # one of their ON EXCEPTION bodies must stop at them, not mistake
+        # them for a paragraph header (2026-09-02, handler bodies parsed).
+        "END-XML",
+        "END-JSON",
     }
 )
 

@@ -336,6 +336,15 @@ filtering, `TestExtrasLookupIsMroAware` (pins that the
 not exact type), `to_dict()` serialization, top-level package export, and a
 `collect_declared_items()` unit test.
 
+2026-09-02: +11 in new `tests/unit/test_report_section.py` (REPORT SECTION:
+RD clauses, anonymous/named report groups, TYPE/LINE/NEXT GROUP/COLUMN/
+SOURCE/SUM/GROUP INDICATE/JUSTIFIED, to_dict, missing-RD-period guard,
+FD `REPORT IS` non-header) and +5 in new
+`tests/unit/test_xml_json_structured_clauses.py` (XML PARSE PROCESSING
+PROCEDURE fields, XML/JSON ON EXCEPTION bodies as statements, END-JSON
+inside IF). The 2026-08-13 file's REPORT tests were re-pointed at the parsed
+shape (no warning) and `report_writer.cbl` rejoined `test_sample_programs.py`.
+
 2026-08-13: +23 in new `tests/regression/test_screen_report_communication_sections.py`
 — pins the DATA DIVISION parser's new SCREEN/REPORT/COMMUNICATION SECTION
 header recognition (previously unrecognized headers let their content

@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **parser:** REPORT SECTION is parsed instead of skipped with a warning.
+  `RD report-name` clauses (`CODE`, `CONTROL(S)`, `PAGE LIMIT`, `HEADING`,
+  `FIRST DETAIL`, `LAST DETAIL`, `FOOTING`, `GLOBAL`) are captured by the
+  new `cobolparser.parsers.divisions.data_report_description` module onto
+  every 01-level report group's `metadata["rd_clauses"]` (with the report
+  name in `metadata["rd_report_name"]`); report groups are ordinary
+  `CobolDataItem` trees whose `TYPE` / `LINE` / `NEXT GROUP` / `COLUMN` /
+  `SOURCE` / `SUM ... UPON ... RESET ON` / `GROUP INDICATE` / `PRESENT WHEN`
+  clauses land in `metadata["report_clauses"]`; an entry whose level is
+  followed by a clause word (`01 TYPE IS DETAIL.`) is anonymous. A Report
+  Writer program therefore parses warning-free, which the sibling
+  mocky-mock repo's fail-closed gate requires before it can mock
+  `INITIATE` / `GENERATE` / `TERMINATE`.
+* **models:** `XmlJsonStatement.processing_procedure` /
+  `processing_procedure_thru` (`XML PARSE ... PROCESSING PROCEDURE [IS] p
+  [THRU q]`) and `on_exception` / `not_on_exception` statement lists (the
+  same shape as `CallStatement` / `IOAcceptStatement`), all additive to
+  `to_dict()`.
+
+### Changed
+
+* **parser:** `XmlJsonStatement.clause_text` no longer includes the text of
+  `[ON] EXCEPTION` / `NOT [ON] EXCEPTION` handler bodies -- those are parsed
+  into the new statement lists above (a `CALL` inside `XML PARSE ... ON
+  EXCEPTION` was previously invisible to `get_all_statements()` and to
+  every nested-body walk). The other trailing clauses, `PROCESSING
+  PROCEDURE ...` included, are still preserved verbatim in `clause_text`.
+  `END-XML` / `END-JSON` are recognised as scope terminators by statements
+  nested inside those handlers.
+
 * **parser:** every COBOL verb now has a statement parser. New parsers and
   AST nodes for Report Writer `INITIATE` / `TERMINATE` / `SUPPRESS`, the
   COBOL-85 Communication Module `SEND` / `RECEIVE` / `ENABLE` / `DISABLE` /

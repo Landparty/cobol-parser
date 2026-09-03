@@ -76,8 +76,20 @@ Serialization fidelity notes (2026-07-07):
 * `GoStatement` carries `target_paragraphs` (all computed-GO-TO targets) in
   addition to `target_paragraph` (the first).
 * `XmlJsonStatement` (`models/statements/misc.py`) models XML/JSON
-  GENERATE/PARSE with `verb`, `action`, `primary_operand`, `from_item`, and
-  raw `clause_text`.
+  GENERATE/PARSE with `verb`, `action`, `primary_operand`, `from_item`, raw
+  `clause_text` (non-handler clauses only since 2026-09-02),
+  `processing_procedure` / `processing_procedure_thru` (XML PARSE's implicit
+  PERFORM target and THRU end), and `on_exception` / `not_on_exception`
+  statement lists (the CALL/ACCEPT handler shape; serialized with
+  `omit_empty`).
+* REPORT SECTION (2026-09-02): report groups are ordinary `CobolDataItem`
+  trees under a `CobolSection("REPORT")`. Each 01-level group carries
+  `metadata["rd_report_name"]` and `metadata["rd_clauses"]` (the RD's
+  CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST DETAIL/LAST DETAIL/FOOTING/GLOBAL as
+  a mapping); every entry carries `metadata["report_clauses"]` for its
+  TYPE/LINE/NEXT GROUP/COLUMN/SOURCE/SUM/GROUP INDICATE/PRESENT WHEN
+  clauses. Anonymous entries (`01 TYPE IS DETAIL.`) get the existing
+  `ANONYMOUS-<level>-<line>` name. See [parser.md](parser.md).
 * `IOWriteStatement.advancing_clause` is populated by the WRITE parser
   (`{"type": "AFTER", "value": 2, "unit": "LINES"}`), not just
   `advancing_mode`. `unit` is also `"CHANNEL"` for `ADVANCING PAGE`

@@ -1,0 +1,137 @@
+"""XML/JSON GENERATE/PARSE: structured PROCESSING PROCEDURE fields and real
+[ON] EXCEPTION / NOT [ON] EXCEPTION handler bodies (2026-09-02).
+
+Before this, `XmlJsonStatement` flattened its exception-handler bodies into
+`clause_text`, so a CALL/file-op/EXEC inside `XML PARSE ... ON EXCEPTION`
+never became an AST statement at all -- invisible to `get_all_statements()`
+and to every consumer walking nested clause bodies (mocky-mock's fail-closed
+boundary gate among them). `PROCESSING PROCEDURE` was likewise only text,
+so the implicit PERFORM edge it represents could not be followed.
+"""
+
+from cobolparser import parse_cobol
+from cobolparser.models.statements import (
+    CallStatement,
+    DisplayStatement,
+    XmlJsonStatement,
+)
+
+_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. XMLCL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-DOC              PIC X(200).
+       01  WS-OUT              PIC X(200).
+       01  WS-N                PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+"""
+
+_TAIL = """\
+       HANDLE-XML.
+           CALL "XMLSUB" USING WS-DOC.
+       HANDLE-XML-END.
+           EXIT.
+"""
+
+
+def _main_statements(body: str):
+    result = parse_cobol(_HEADER + body + _TAIL, filename="xmlcl.cbl")
+    assert result.success, result.errors
+    assert not result.warnings, result.warnings
+    return result, result.ast.get_division("PROCEDURE").paragraphs[0].statements
+
+
+def test_processing_procedure_with_thru_is_captured():
+    _, stmts = _main_statements(
+        "           XML PARSE WS-DOC WITH ENCODING 1208\n"
+        "               PROCESSING PROCEDURE IS HANDLE-XML THRU HANDLE-XML-END\n"
+        "           END-XML.\n"
+    )
+    node = stmts[0]
+    assert isinstance(node, XmlJsonStatement)
+    assert node.action == "PARSE"
+    assert node.processing_procedure == "HANDLE-XML"
+    assert node.processing_procedure_thru == "HANDLE-XML-END"
+    # the text is still preserved verbatim for consumers reading clause_text
+    assert node.clause_text == (
+        "WITH ENCODING 1208 PROCESSING PROCEDURE IS HANDLE-XML THRU HANDLE-XML-END"
+    )
+    d = node.to_dict()
+    assert d["processing_procedure"] == "HANDLE-XML"
+    assert d["processing_procedure_thru"] == "HANDLE-XML-END"
+
+
+def test_processing_procedure_without_is_or_thru():
+    _, stmts = _main_statements(
+        "           XML PARSE WS-DOC PROCESSING PROCEDURE HANDLE-XML.\n"
+    )
+    node = stmts[0]
+    assert node.processing_procedure == "HANDLE-XML"
+    assert node.processing_procedure_thru is None
+    assert node.clause_text == "PROCESSING PROCEDURE HANDLE-XML"
+
+
+def test_exception_handler_bodies_are_real_statements():
+    result, stmts = _main_statements(
+        "           XML PARSE WS-DOC PROCESSING PROCEDURE HANDLE-XML\n"
+        "             ON EXCEPTION\n"
+        '               CALL "ERRSUB" USING WS-DOC\n'
+        '               DISPLAY "bad xml"\n'
+        "             NOT ON EXCEPTION\n"
+        '               DISPLAY "ok"\n'
+        "           END-XML.\n"
+        '           DISPLAY "after".\n'
+    )
+    node = stmts[0]
+    assert isinstance(node, XmlJsonStatement)
+    assert [type(s) for s in node.on_exception] == [CallStatement, DisplayStatement]
+    assert node.on_exception[0].called_program == "ERRSUB"
+    assert [type(s) for s in node.not_on_exception] == [DisplayStatement]
+    # the handler bodies did not escape into the paragraph
+    assert isinstance(stmts[1], DisplayStatement)
+    assert len(stmts) == 2
+    # and the nested CALL is visible to the whole-tree walk
+    calls = [s for s in result.ast.get_all_statements() if isinstance(s, CallStatement)]
+    assert {c.called_program for c in calls} == {"ERRSUB", "XMLSUB"}
+    d = node.to_dict()
+    assert [s["statement_type"] for s in d["on_exception"]] == ["CALL", "DISPLAY"]
+    assert [s["statement_type"] for s in d["not_on_exception"]] == ["DISPLAY"]
+
+
+def test_bare_exception_keyword_and_json_forms():
+    _, stmts = _main_statements(
+        "           XML GENERATE WS-OUT FROM WS-N COUNT IN WS-N\n"
+        "               SUPPRESS WHEN SPACES\n"
+        "             EXCEPTION MOVE 1 TO WS-N\n"
+        "           END-XML.\n"
+        "           JSON PARSE WS-DOC INTO WS-N\n"
+        '               ON EXCEPTION DISPLAY "bad json".\n'
+        "           JSON GENERATE WS-OUT FROM WS-N.\n"
+    )
+    xml_gen, json_parse, json_gen = stmts
+    assert xml_gen.clause_text == "COUNT IN WS-N SUPPRESS WHEN SPACES"
+    assert [s.statement_type for s in xml_gen.on_exception] == ["MOVE"]
+    assert json_parse.clause_text == "INTO WS-N"
+    assert [s.statement_type for s in json_parse.on_exception] == ["DISPLAY"]
+    assert json_gen.on_exception is None
+    assert json_gen.not_on_exception is None
+    assert "on_exception" not in json_gen.to_dict()  # omit_empty
+
+
+def test_nested_inside_if_stops_at_end_json():
+    _, stmts = _main_statements(
+        "           IF WS-N = 1\n"
+        "              JSON GENERATE WS-OUT FROM WS-N\n"
+        '                 ON EXCEPTION DISPLAY "bad"\n'
+        "              END-JSON\n"
+        "           END-IF.\n"
+        '           DISPLAY "after".\n'
+    )
+    if_stmt, after = stmts
+    (json_gen,) = if_stmt.then_statements
+    assert isinstance(json_gen, XmlJsonStatement)
+    assert [s.statement_type for s in json_gen.on_exception] == ["DISPLAY"]
+    assert if_stmt.else_statements in (None, [])
+    assert isinstance(after, DisplayStatement)

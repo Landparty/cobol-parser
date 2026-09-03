@@ -175,7 +175,10 @@ class TestXmlJsonStatements:
         assert node.primary_operand == "WS-A"
         assert node.from_item == "WS-B"
         assert "COUNT IN WS-B" in (node.clause_text or "")
-        assert "EXCEPTION" in (node.clause_text or "")
+        # Since 2026-09-02 the handler body is a real statement list, not
+        # clause text (see tests/unit/test_xml_json_structured_clauses.py).
+        assert "EXCEPTION" not in (node.clause_text or "")
+        assert [s.statement_type for s in node.on_exception] == ["DISPLAY"]
 
     def test_json_parse(self):
         result = _parse_proc(
