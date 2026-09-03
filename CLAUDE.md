@@ -150,7 +150,7 @@ COBOL source (.cbl/.cob)
 - `divisions/base.py` -- Base division parser with error recovery
 - `divisions/identification.py` -- IDENTIFICATION DIVISION parser
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
-- `divisions/data.py` -- DATA DIVISION parser
+- `divisions/data.py` -- DATA DIVISION parser (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE / REPORT sections; SCREEN and COMMUNICATION are recognized and skipped with a warning). `data_clauses.py` (data-item clauses incl. REPORT SECTION report-group clauses), `data_file_description.py` (FD/SD clauses), `data_report_description.py` (RD clauses), `data_special_entries.py` (level-88/66, data-division EXEC SQL) are its collaborators
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
 - `statements/` -- 34 statement parser files (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities

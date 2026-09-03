@@ -1,5 +1,30 @@
 # OKF Update Log
 
+## 2026-09-02 (REPORT SECTION parsed; XML/JSON handler bodies and PROCESSING PROCEDURE structured)
+
+Driven by the sibling mocky-mock repo's "every COBOL dependency mockable"
+work: its fail-closed gate refuses any `ParseResult.warnings` entry, so the
+REPORT SECTION "not supported" warning made every Report Writer program
+unmockable, and XML PARSE's text-only handler/PROCESSING PROCEDURE clauses
+hid statements and a flow edge from it.
+
+* **Added:** REPORT SECTION parsing -- `RD` clause capture in new
+  `parsers/divisions/data_report_description.py`, report-group clauses
+  (TYPE/LINE/NEXT GROUP/COLUMN/SOURCE/SUM/GROUP INDICATE/PRESENT WHEN) in
+  `DataItemClauseParser.parse_data_item(report_group=True)`, anonymous
+  `01 TYPE IS ...` entries, `metadata["rd_report_name"]` /
+  `["rd_clauses"]` / `["report_clauses"]`. REPORT left
+  `_UNSUPPORTED_SECTION_HEADERS`; the skip warning is gone. See
+  [parser.md](parser.md), [ast-models.md](ast-models.md).
+* **Added:** `XmlJsonStatement.processing_procedure` /
+  `.processing_procedure_thru`, `.on_exception` / `.not_on_exception`
+  (real statement lists; `clause_text` no longer carries handler text);
+  `END-XML`/`END-JSON` in `SCOPE_TERMINATORS`.
+* **Tests:** `tests/unit/test_report_section.py` (+11),
+  `tests/unit/test_xml_json_structured_clauses.py` (+5); two existing
+  assertions on flattened handler text updated. See [tests.md](tests.md).
+
+
 ## 2026-09-02 (Statement-coverage audit: every COBOL verb parses; silent-drop fixes)
 
 Asked: are there silent gaps or drops of statements, and is every COBOL

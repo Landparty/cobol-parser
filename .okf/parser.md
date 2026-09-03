@@ -135,6 +135,7 @@ CobolParser.parse(source)
 | `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below |
 | `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
+| `data_report_description.py` | `ReportDescriptionClauseParser` — REPORT SECTION `RD` clause capture (CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST-LAST DETAIL/FOOTING/GLOBAL), 2026-09-02 |
 | `data_special_entries.py` | `SpecialEntryParser` — level-88 condition names, level-66 RENAMES, data-division EXEC SQL blocks |
 | `procedure.py` | PROCEDURE DIVISION — paragraph/section dispatch loop, ParseContext attachment, AST node; hosts the shared `StatementParserRegistry` cache; supporting logic delegated to the three `procedure_*.py` collaborators below |
 | `procedure_registry.py` | `create_statement_registry()` — registers all 72 statement parsers in first-match priority order (new statement parsers register here); order invariant pinned by `tests/unit/test_procedure_registry_dispatch_order.py`; every registered parser also needs a fixture in `tests/regression/test_swallow_sweep.py` |
@@ -148,40 +149,78 @@ signatures — the compiled `_data_fast` extension receives the division parser
 as `parser_self` and calls those three back by name. New clause logic goes in
 `DataItemClauseParser`; the wrappers must stay.
 
-**SCREEN/REPORT/COMMUNICATION SECTION recognition (`data.py`, 2026-08-13):**
-`DataDivisionParser` only recognizes FILE, WORKING-STORAGE, LOCAL-STORAGE,
-and LINKAGE as real sections; SCREEN SECTION, REPORT SECTION, and
-COMMUNICATION SECTION have their own grammars (screen-field clauses,
-RD/report-group entries, CD entries) that are not modeled. Their headers are
-still recognized as section *boundaries* (`_SECTION_BREAK_HEADERS` in
-`parse_division`'s dispatch and `_parse_section`'s break check) so an
-in-progress section scan — almost always WORKING-STORAGE — stops there
+**SCREEN/COMMUNICATION SECTION recognition (`data.py`, 2026-08-13) and REPORT SECTION parsing (2026-09-02):**
+`DataDivisionParser` recognizes FILE, WORKING-STORAGE, LOCAL-STORAGE,
+LINKAGE and -- since 2026-09-02 -- REPORT as real sections. SCREEN SECTION
+and COMMUNICATION SECTION have their own grammars (screen-field clauses, CD
+entries) that are not modeled. Their headers are still recognized as
+section *boundaries* (`_SECTION_BREAK_HEADERS` / `_UNSUPPORTED_SECTION_HEADERS`
+in `parse_division`'s dispatch and `_parse_section`'s break check) so an
+in-progress section scan -- almost always WORKING-STORAGE -- stops there
 instead of silently absorbing the header token-by-token and then
 misparsing the following section's own level-numbered content as bogus
 nested data items (a SCREEN SECTION `COLUMN 5` clause previously produced a
 spurious `CobolDataItem` literally named `COLUMN`). `DataDivisionParser._skip_section()`
 consumes the header (`NAME [SECTION] [.]`) and discards the body up to the
-next section/division boundary — the same boundary logic `_parse_section`
-uses — then registers an empty, distinctly-named `CobolSection`
-(`SCREEN`/`REPORT`/`COMMUNICATION`) plus a
-`has_screen`/`has_report`/`has_communication` division-metadata flag, so
-downstream consumers can tell the section was present without seeing
-corrupted WORKING-STORAGE data. Known tradeoff: a data item declared inside
-or directly after one of these sections with no section header of its own
-(e.g. a COMMUNICATION SECTION CD's record, or a bare `01` placed right after
-it) is discarded along with the rest of the unmodeled body — it does not
-survive into WORKING-STORAGE (the old, corrupting behavior) or anywhere
-else. Because that loss would otherwise be silent (`errors=0`),
-`_skip_section` records a `ParseResult.warnings` entry naming the section —
-this repo's established "recognized but degraded" convention (see the
-Silent-Drop Audit entries below) — rather than letting `errors=0,
-warnings=0` imply a complete AST.
+next section/division boundary -- the same boundary logic `_parse_section`
+uses -- then registers an empty, distinctly-named `CobolSection`
+(`SCREEN`/`COMMUNICATION`) plus a `has_screen`/`has_communication`
+division-metadata flag, so downstream consumers can tell the section was
+present without seeing corrupted WORKING-STORAGE data. Known tradeoff: a
+data item declared inside or directly after one of these sections with no
+section header of its own (e.g. a COMMUNICATION SECTION CD's record, or a
+bare `01` placed right after it) is discarded along with the rest of the
+unmodeled body -- it does not survive into WORKING-STORAGE (the old,
+corrupting behavior) or anywhere else. Because that loss would otherwise be
+silent (`errors=0`), `_skip_section` records a `ParseResult.warnings` entry
+naming the section -- this repo's established "recognized but degraded"
+convention (see the Silent-Drop Audit entries below) -- rather than letting
+`errors=0, warnings=0` imply a complete AST.
+
+**REPORT SECTION (2026-09-02, `data.py` + `data_report_description.py` +
+`data_clauses.py`):** parsed for real, warning-free, so a Report Writer
+program is no longer refused by consumers that treat any warning as
+dropped content (mocky-mock's `PARSE_WARNING` gate was the driver). Inside
+`_parse_section("REPORT")`, an `RD report-name` entry is consumed and its
+clauses captured by `ReportDescriptionClauseParser.parse_rd_clauses` --
+`CODE`, `CONTROL(S) [ARE] {FINAL | name ...}`, `PAGE [LIMIT] n [LINES]`,
+`HEADING n`, `FIRST DETAIL n`, `LAST DETAIL n`, `FOOTING n`, `GLOBAL` -- into
+a JSON-serializable mapping (`{"code", "controls", "page_limit", "heading",
+"first_detail", "last_detail", "footing", "is_global", "raw"}`; unclaimed
+tokens go to `raw`). Every following 01-level report group carries that
+mapping as `metadata["rd_clauses"]` and the report name as
+`metadata["rd_report_name"]`. Report groups themselves are ordinary
+`CobolDataItem` trees parsed by `DataItemClauseParser.parse_data_item(...,
+report_group=True)`: an entry whose level is followed by a clause word
+(`01 TYPE IS PAGE HEADING.`, `05 LINE NUMBER IS 1.`, `10 COLUMN 1 PIC X(20)`)
+is anonymous (`ANONYMOUS-<level>-<line>`, the existing convention), and the
+report-group clauses -- `TYPE [IS] ...`, `LINE [NUMBER] [IS] {n | PLUS n |
+NEXT PAGE}...`, `NEXT GROUP [IS] ...`, `COLUMN|COL [NUMBER] [IS] n...`,
+`SOURCE [IS] id`, `SUM id... [UPON id...] [RESET [ON] {id | FINAL}]`, `GROUP
+[INDICATE]`, `PRESENT WHEN cond` -- land in `metadata["report_clauses"]`
+(`type`, `line` (list), `next_group`, `column` (list), `source`, `sum` (list
+of `{operands, upon?, reset_on?}`), `group_indicate`, `present_when`).
+PICTURE / VALUE / JUSTIFIED / BLANK WHEN ZERO / USAGE use the ordinary
+clause branches. The report clause words were added to
+`_PICTURE_TERMINATOR_KEYWORDS` so `PIC ZZ9 SOURCE WS-X` stops the picture
+scan at `SOURCE` (none of them is a valid picture string, so the addition is
+safe everywhere, and the Cython fast path receives the same frozenset). The
+fast path bails back to the pure-Python loop on every report clause word, so
+`_parse_report_clause` is the single implementation. `NEXT` is
+position-shaped only when followed by `PAGE` (`_report_position`) -- `LINE
+PLUS 1 NEXT GROUP NEXT PAGE` must not fold `NEXT GROUP` into the LINE list.
+`parse_rd_clauses` stops at a LEVEL_NUMBER that begins a group
+(`_level_starts_group`) so a missing RD period cannot swallow the first
+group. Pinned by `tests/unit/test_report_section.py`; the 2026-08-13
+regression file's REPORT tests now pin the parsed shape and the absence of
+any warning, and `tests/samples/report_writer.cbl` is back in
+`test_sample_programs.py`'s parametrized list.
 
 `REPORT` (and, less commonly, `COMMUNICATION`/`SCREEN`) doubles as an
 ordinary clause word outside a section header — an FD's `REPORT IS
 report-name.` clause is exactly this
 (`examples/cobol/shamrice/report_test.cbl` line 32). `parse_division`'s
-dispatch only routes to `_skip_section` when the *next* token is literally
+dispatch only routes to `_parse_section("REPORT")` / `_skip_section` when the *next* token is literally
 `SECTION` (`DataDivisionParser._next_is_section_keyword`, the same
 lookahead `_parse_section`'s own break check already used for these three
 headers) — otherwise the bare word falls through to the existing
@@ -2658,3 +2697,5 @@ fixes. Pinned by `tests/regression/test_corpus_residual_findings.py`.
   OF WS-GROUP` stranded `OF WS-GROUP`). Fixed by routing all five through
   `consume_optional_qualifiers` (`write_parser.py`, `read_parser.py`,
   `start_parser.py`).
+
+(see log 2026-09-02 for the XML/JSON structured-clause follow-up)

@@ -78,7 +78,35 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         "BLANK",
         "EXTERNAL",
         "GLOBAL",
+        # Report-group clause words (REPORT SECTION, 2026-09-02): ``PIC ZZ9
+        # SOURCE WS-X`` must stop the picture scan at SOURCE. None of these
+        # is a valid picture string, so they are safe terminators everywhere.
+        "SOURCE",
+        "SUM",
+        "COLUMN",
+        "COL",
+        "LINE",
+        "NEXT",
+        "GROUP",
+        "TYPE",
+        "PRESENT",
     }
+)
+# Clause words that begin a REPORT SECTION report-group clause (only
+# honoured when ``parse_data_item`` runs with ``report_group=True``).
+_REPORT_CLAUSE_STARTS: frozenset[str] = frozenset(
+    {"TYPE", "LINE", "NEXT", "COLUMN", "COL", "SOURCE", "SUM", "GROUP", "PRESENT"}
+)
+# A report-group entry is anonymous (``01 TYPE IS PAGE HEADING.``, ``05 LINE
+# NUMBER IS 1.``, ``10 COLUMN 1 PIC X``) when its level is followed directly
+# by any clause word rather than a data-name.
+_REPORT_ANONYMOUS_STARTS: frozenset[str] = _REPORT_CLAUSE_STARTS | frozenset(
+    {"PIC", "PICTURE", "VALUE", "USAGE", "JUST", "JUSTIFIED", "BLANK", "SIGN"}
+)
+# Words at which a free-text report clause operand list (TYPE ..., SUM ...,
+# PRESENT WHEN ...) ends.
+_REPORT_OPERAND_STOPS: frozenset[str] = _PICTURE_TERMINATOR_KEYWORDS | frozenset(
+    {"PIC", "PICTURE", "OCCURS", "REDEFINES", "UPON", "RESET"}
 )
 _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     {
@@ -162,13 +190,20 @@ class DataItemClauseParser:
         """
         self._parser = parser
 
-    def parse_data_item(self, token_stream: ITokenStream) -> CobolDataItem | None:
+    def parse_data_item(
+        self, token_stream: ITokenStream, report_group: bool = False
+    ) -> CobolDataItem | None:
         """Parse a single data item definition.
 
         Format: level-number data-name [clauses].
 
         Args:
             token_stream: Token stream positioned at level number
+            report_group: True inside a REPORT SECTION -- the entry may be
+                anonymous (``01 TYPE IS DETAIL.``) and the report-group
+                clauses (TYPE, LINE, NEXT GROUP, COLUMN, SOURCE, SUM, GROUP
+                INDICATE, PRESENT WHEN) are parsed into
+                ``metadata["report_clauses"]`` instead of being dropped.
 
         Returns:
             CobolDataItem or None if parsing fails
@@ -189,7 +224,15 @@ class DataItemClauseParser:
         name = None
         token = token_stream.peek()
 
-        if token and token.type == TokenType.IDENTIFIER:
+        if (
+            report_group
+            and token
+            and token.value
+            and token.value.upper() in _REPORT_ANONYMOUS_STARTS
+        ):
+            # ``01 TYPE IS PAGE HEADING.`` -- the clause word is not a name.
+            name = f"ANONYMOUS-{level}-{location.line}"
+        elif token and token.type == TokenType.IDENTIFIER:
             name = token.value
             token_stream.consume()
         elif token and token.value and token.value.upper() == "FILLER":
@@ -459,6 +502,11 @@ class DataItemClauseParser:
                     self._warn_dropped_data_token(token, data_item)
                     token_stream.consume()
 
+            # REPORT SECTION report-group clauses (TYPE, LINE, NEXT GROUP,
+            # COLUMN, SOURCE, SUM, GROUP INDICATE, PRESENT WHEN)
+            elif report_group and value_upper in _REPORT_CLAUSE_STARTS:
+                self._parse_report_clause(token_stream, data_item, value_upper)
+
             # REDEFINES clause
             elif value_upper == "REDEFINES":
                 token_stream.consume()  # Consume REDEFINES keyword
@@ -487,6 +535,120 @@ class DataItemClauseParser:
                 token_stream.consume()
 
         return data_item
+
+    # ------------------------------------------------------------------
+    # REPORT SECTION report-group clauses
+    # ------------------------------------------------------------------
+
+    def _report_clauses(self, data_item: CobolDataItem) -> dict[str, Any]:
+        clauses = data_item.get_metadata("report_clauses")
+        if clauses is None:
+            clauses = {}
+            data_item.set_metadata("report_clauses", clauses)
+        return clauses  # type: ignore[no-any-return]
+
+    def _consume_if(self, token_stream: ITokenStream, *words: str) -> str | None:
+        """Consume the next meaningful token when its upper-cased value is
+        one of *words*; return that value, else None (nothing consumed)."""
+        self._skip_newlines(token_stream)
+        token = token_stream.peek()
+        if token and token.value and token.value.upper() in words:
+            token_stream.consume()
+            return token.value.upper()
+        return None
+
+    def _report_position(self, token_stream: ITokenStream) -> str | None:
+        """``[PLUS] integer`` or ``NEXT PAGE`` -- the operand shape shared by
+        LINE, NEXT GROUP and COLUMN. Returned as text ("1", "PLUS 2",
+        "NEXT PAGE"); None when nothing operand-shaped follows."""
+        self._skip_newlines(token_stream)
+        token = token_stream.peek()
+        if token and (token.value or "").upper() == "NEXT":
+            # ``NEXT PAGE`` is a position; ``NEXT GROUP`` starts its own
+            # clause and must be left for the clause loop.
+            following = self._peek_next_meaningful(token_stream)
+            if not (following and (following.value or "").upper() == "PAGE"):
+                return None
+            token_stream.consume()  # NEXT
+            token_stream.consume()  # PAGE
+            return "NEXT PAGE"
+        plus = self._consume_if(token_stream, "PLUS")
+        self._skip_newlines(token_stream)
+        token = token_stream.peek()
+        if token and token.type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL):
+            token_stream.consume()
+            return f"PLUS {token.value}" if plus else str(token.value)
+        return "PLUS" if plus else None
+
+    def _report_operands(self, token_stream: ITokenStream) -> list[str]:
+        """Free-text operands up to the next clause word, period, level
+        number or division header (TYPE ..., SUM ..., PRESENT WHEN ...)."""
+        words: list[str] = []
+        while not token_stream.is_empty():
+            self._skip_newlines(token_stream)
+            token = token_stream.peek()
+            if token is None or token.type in (
+                TokenType.PERIOD,
+                TokenType.LEVEL_NUMBER,
+            ):
+                break
+            if token.type in _DIVISION_TOKEN_TYPES:
+                break
+            upper = (token.value or "").upper()
+            if upper in _REPORT_CLAUSE_STARTS or upper in _REPORT_OPERAND_STOPS:
+                break
+            words.append(token.value)
+            token_stream.consume()
+        return words
+
+    def _parse_report_clause(
+        self, token_stream: ITokenStream, data_item: CobolDataItem, word: str
+    ) -> None:
+        """Parse one report-group clause starting at *word* (already peeked,
+        not yet consumed) into ``metadata["report_clauses"]``."""
+        clauses = self._report_clauses(data_item)
+        token_stream.consume()  # the clause word
+        if word == "TYPE":
+            self._consume_if(token_stream, "IS")
+            clauses["type"] = " ".join(self._report_operands(token_stream))
+        elif word == "LINE":
+            self._consume_if(token_stream, "NUMBER", "NUMBERS")
+            self._consume_if(token_stream, "IS", "ARE")
+            lines = clauses.setdefault("line", [])
+            position = self._report_position(token_stream)
+            while position is not None:
+                lines.append(position)
+                position = self._report_position(token_stream)
+        elif word == "NEXT":
+            self._consume_if(token_stream, "GROUP")
+            self._consume_if(token_stream, "IS")
+            clauses["next_group"] = self._report_position(token_stream)
+        elif word in ("COLUMN", "COL"):
+            self._consume_if(token_stream, "NUMBER", "NUMBERS")
+            self._consume_if(token_stream, "IS", "ARE")
+            columns = clauses.setdefault("column", [])
+            position = self._report_position(token_stream)
+            while position is not None:
+                columns.append(position)
+                position = self._report_position(token_stream)
+        elif word == "SOURCE":
+            self._consume_if(token_stream, "IS")
+            clauses["source"] = " ".join(self._report_operands(token_stream))
+        elif word == "SUM":
+            operands = self._report_operands(token_stream)
+            entry: dict[str, Any] = {"operands": operands}
+            if self._consume_if(token_stream, "UPON"):
+                entry["upon"] = self._report_operands(token_stream)
+            if self._consume_if(token_stream, "RESET"):
+                self._consume_if(token_stream, "ON")
+                entry["reset_on"] = " ".join(self._report_operands(token_stream))
+            clauses.setdefault("sum", []).append(entry)
+        elif word == "GROUP":
+            self._consume_if(token_stream, "INDICATE")
+            clauses["group_indicate"] = True
+        elif word == "PRESENT":
+            self._consume_if(token_stream, "WHEN")
+            clauses["present_when"] = " ".join(self._report_operands(token_stream))
 
     def _parse_occurs_clause(
         self,

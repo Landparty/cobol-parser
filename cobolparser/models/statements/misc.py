@@ -395,8 +395,23 @@ class XmlJsonStatement(CobolStatement):
         self.primary_operand: str | None = None
         # GENERATE only: the FROM source item
         self.from_item: str | None = None
-        # Raw text of trailing clauses, preserved rather than dropped
+        # Raw text of trailing clauses (COUNT IN, WITH ENCODING, NAMESPACE,
+        # SUPPRESS ..., PROCESSING PROCEDURE ...), preserved rather than
+        # dropped. Exception-handler bodies are NOT part of this text: they
+        # are parsed into `on_exception` / `not_on_exception` below.
         self.clause_text: str | None = None
+        # XML PARSE only: the PROCESSING PROCEDURE paragraph/section the
+        # runtime performs once per XML event, and its optional THRU end.
+        # An implicit PERFORM edge for control-flow analysis (the text is
+        # also kept verbatim in `clause_text`).
+        self.processing_procedure: str | None = None
+        self.processing_procedure_thru: str | None = None
+        # [ON] EXCEPTION / NOT [ON] EXCEPTION imperative bodies, same shape
+        # as CallStatement / IOAcceptStatement. Before 2026-09-02 these were
+        # flattened into `clause_text`, hiding every statement inside them
+        # from get_all_statements() and every nested-body walk.
+        self.on_exception: list[CobolStatement] | None = None
+        self.not_on_exception: list[CobolStatement] | None = None
 
     def set_primary_operand(self, name: str) -> None:
         self.primary_operand = name
@@ -409,6 +424,17 @@ class XmlJsonStatement(CobolStatement):
     def set_clause_text(self, text: str) -> None:
         self.clause_text = text or None
 
+    def set_processing_procedure(self, name: str, thru: str | None = None) -> None:
+        """Record ``PROCESSING PROCEDURE name [THRU thru]`` (XML PARSE)."""
+        self.processing_procedure = name
+        self.processing_procedure_thru = thru
+
+    def set_on_exception_clause(self, statements: list[CobolStatement]) -> None:
+        self._set_clause("on_exception", statements)
+
+    def set_not_on_exception_clause(self, statements: list[CobolStatement]) -> None:
+        self._set_clause("not_on_exception", statements)
+
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         result.update(
@@ -418,7 +444,12 @@ class XmlJsonStatement(CobolStatement):
                 "primary_operand": self.primary_operand,
                 "from_item": self.from_item,
                 "clause_text": self.clause_text,
+                "processing_procedure": self.processing_procedure,
+                "processing_procedure_thru": self.processing_procedure_thru,
             }
+        )
+        result.update(
+            self._serialize_clauses("on_exception", "not_on_exception", omit_empty=True)
         )
         return result
 
