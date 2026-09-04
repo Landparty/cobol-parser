@@ -130,10 +130,51 @@ class TestEnumDomain88:
         assert isinstance(result, Witness)
         assert result.value == "B"
 
-    def test_all_values_excluded_is_unsatisfiable(self):
+    def test_excluding_every_88_value_falls_back_to_the_picture_domain(self):
+        """The level-88 enum is a *preference*, not the field's domain. A
+        `not_in_set` covering every declared 88 value -- exactly what an
+        `EVALUATE TRUE / WHEN <88> ... WHEN OTHER` chain's OTHER arm negates
+        to -- empties the enum, but the field's PICTURE still admits plenty
+        of other values, so a witness outside the enum is the right answer.
+        Reporting Unsatisfiable here (as this used to) made every WHEN OTHER
+        scenario a miss for a branch that is perfectly reachable."""
         spec = _text_spec(size=1, condition_values=("A",))
         result = solve(spec, [_constraint(spec, "not_in_set", ("A",))])
+        assert isinstance(result, Witness)
+        assert result.value != "A"
+
+    def test_enum_still_preferred_when_it_survives_the_exclusion(self):
+        """The fallback must not cost us the *useful* witness in the ordinary
+        case: with one declared value left, that declared value wins over an
+        arbitrary PICTURE-admissible string."""
+        spec = _text_spec(size=1, condition_values=("A", "B"))
+        result = solve(spec, [_constraint(spec, "not_in_set", ("A",))])
+        assert isinstance(result, Witness)
+        assert result.value == "B"
+
+    def test_contradictory_set_constraints_are_still_unsatisfiable(self):
+        """The picture-domain fallback is not a way to launder a genuine
+        contradiction: `in_set ("A")` AND `not_in_set ("A")` has no witness
+        in the enum OR in the PICTURE domain."""
+        spec = _text_spec(size=1, condition_values=("A", "B"))
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "in_set", ("A",)),
+                _constraint(spec, "not_in_set", ("A",)),
+            ],
+        )
         assert isinstance(result, Unsatisfiable)
+
+    def test_numeric_field_enforces_not_in_set_after_fallback(self):
+        """A numeric level-88 field whose enum is emptied falls back to the
+        NUMERIC domain, where `not_in_set` must be enforced as an exclusion
+        -- not silently no-op'd into a witness that violates it."""
+        spec = _numeric_spec(integer_digits=2)
+        spec.condition_values = ["7"]
+        result = solve(spec, [_constraint(spec, "not_in_set", ("7",))])
+        assert isinstance(result, Witness)
+        assert int(result.value) != 7
 
 
 class TestTextDomain:
