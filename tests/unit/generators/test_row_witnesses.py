@@ -5,7 +5,7 @@ rather than of any single record -- "a prior '05' record sharing a key with a
 following '09' record". `witnesses` cannot express that: it pins one value to
 every generated row. Nothing in the planner populates `row_witnesses` yet (the
 correlation analysis that would is designed but unbuilt -- see
-docs/2026-09-04-cross-record-correlation-design.md); these tests pin the
+docs/plans/2026-09-04-cross-record-correlation-design.md); these tests pin the
 plumbing so the pinning path is not the blocker when it is.
 """
 

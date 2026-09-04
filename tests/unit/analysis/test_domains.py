@@ -169,12 +169,36 @@ class TestEnumDomain88:
     def test_numeric_field_enforces_not_in_set_after_fallback(self):
         """A numeric level-88 field whose enum is emptied falls back to the
         NUMERIC domain, where `not_in_set` must be enforced as an exclusion
-        -- not silently no-op'd into a witness that violates it."""
+        -- not silently no-op'd into a witness that violates it.
+
+        The `le 14` bound is load-bearing, not incidental: it puts the
+        domain's deterministic midpoint witness exactly on 7, the excluded
+        value. Without it the midpoint of a bare PIC 9(2) is ~50, which
+        satisfies the assertion whether or not `not_in_set` was enforced --
+        a test that passes for the wrong reason. It did exactly that once,
+        while `_apply_numeric`'s set-op branch sat below the catch-all
+        guard and was unreachable."""
         spec = _numeric_spec(integer_digits=2)
         spec.condition_values = ["7"]
-        result = solve(spec, [_constraint(spec, "not_in_set", ("7",))])
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "le", ("14",)),
+                _constraint(spec, "not_in_set", ("7",)),
+            ],
+        )
         assert isinstance(result, Witness)
         assert int(result.value) != 7
+        assert int(result.value) <= 14
+
+    def test_numeric_in_set_narrows_to_a_member_after_fallback(self):
+        """The other half of the same branch: `in_set` on a numeric fallback
+        domain must narrow to one of the listed values, not no-op."""
+        spec = _numeric_spec(integer_digits=2)
+        spec.condition_values = ["7"]
+        result = solve(spec, [_constraint(spec, "in_set", ("7", "9"))])
+        assert isinstance(result, Witness)
+        assert int(result.value) in (7, 9)
 
 
 class TestTextDomain:

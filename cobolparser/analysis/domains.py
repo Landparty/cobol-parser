@@ -264,14 +264,17 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
             FieldConstraint(c.field, "ne" if c.negated else "eq", ("0",), c.origin),
         )
 
-    if c.op not in ("eq", "ne", "gt", "ge", "lt", "le"):
-        return True  # class_numeric/class_alphabetic: no-op on a numeric domain in v1
-
     # Set ops reach a numeric domain only via the enum-domain fallback in
-    # solve() (a level-88 field whose enum was emptied). They must be enforced
-    # here, not no-op'd through the `return True` tail below: a witness that
-    # silently violates `not_in_set` would be an "exact by construction"
-    # promise the value does not keep.
+    # solve() (a level-88 field whose enum was emptied), and must be enforced
+    # rather than no-op'd: a witness that silently violates `not_in_set` would
+    # be an "exact by construction" promise the value does not keep.
+    #
+    # This block MUST stay above the catch-all guard below, which returns True
+    # for every op outside the relational set -- a set op placed after it is
+    # dead code that no-ops silently. It shipped that way once and the numeric
+    # test was too weak to notice (its midpoint witness happened to miss the
+    # excluded value); `test_numeric_field_enforces_not_in_set_after_fallback`
+    # now bounds the domain so the midpoint lands exactly on it.
     if c.op in ("in_set", "not_in_set"):
         parsed = []
         for raw in c.values:
@@ -295,6 +298,9 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
                 domain.excluded = set()
                 return True
         return False
+
+    if c.op not in ("eq", "ne", "gt", "ge", "lt", "le"):
+        return True  # class_numeric/class_alphabetic: no-op on a numeric domain in v1
 
     try:
         value = Decimal(c.values[0]) if c.values else None

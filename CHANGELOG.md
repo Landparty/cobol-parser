@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same shape as `CallStatement` / `IOAcceptStatement`), all additive to
   `to_dict()`.
 
+* **generators:** `PlannedScenario.row_witnesses` (0-based row index ->
+  `{qualified field name: value}`) pins a witness to one row of a multi-row
+  sequence, overriding the scenario-wide `witnesses` that applies to every
+  row; `_sequence_length` grows the sequence so a pinned row always exists.
+  Groundwork only -- `ScenarioPlanner` populates it nowhere, so every bundle
+  is byte-identical and `BUNDLE_VERSION` is unchanged. It makes expressible a
+  class of branch that was previously *inexpressible*: one reachable only
+  when a prior record correlates with a following one. See
+  `docs/plans/2026-09-04-cross-record-correlation-design.md`.
+
 ### Changed
 
 * **parser:** `XmlJsonStatement.clause_text` no longer includes the text of
@@ -89,20 +99,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `not_in_set` are enforced explicitly on a numeric domain for that fallback
   path rather than no-op'd, so a witness can never silently violate a set op.
   A genuine contradiction is still `Unsatisfiable`.
-
-### Added
-
-* **generators:** `PlannedScenario.row_witnesses` (0-based row index ->
-  `{qualified field name: value}`) pins a witness to one row of a multi-row
-  sequence, overriding the scenario-wide `witnesses` that applies to every
-  row; `_sequence_length` grows the sequence so a pinned row always exists.
-  Groundwork only -- `ScenarioPlanner` populates it nowhere, so every bundle
-  is byte-identical and `BUNDLE_VERSION` is unchanged. It makes expressible a
-  class of branch that was previously *inexpressible*: one reachable only
-  when a prior record correlates with a following one. See
-  `docs/plans/2026-09-04-cross-record-correlation-design.md`.
-
-### Fixed
 
 * **parser:** `ExecCicsStatement` and `ExecImsStatement` are now
   `CobolStatement` subclasses, so `CobolProgram.get_all_statements()`

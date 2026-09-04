@@ -124,7 +124,7 @@ class PlannedScenario:
     #: key with a following '09' record" cannot be expressed by `witnesses`,
     #: which pins one value to every row. Nothing populates this yet -- the
     #: analysis that would recognize such a correlation is not built (see
-    #: docs/2026-09-04-cross-record-correlation-design.md); it exists so the
+    #: docs/plans/2026-09-04-cross-record-correlation-design.md); it exists so the
     #: pinning path is no longer the blocker, and so a caller assembling a
     #: correlated scenario by hand has a supported way to say it.
     row_witnesses: dict[int, dict[str, str]] = field(default_factory=dict)
