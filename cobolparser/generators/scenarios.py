@@ -113,8 +113,21 @@ class PlannedScenario:
     intent: str
     field_constraints: dict[str, list[FieldConstraint]] = field(default_factory=dict)
     #: qualified field name -> its solved witness value, already
-    #: PICTURE-valid (see `domains.solve`).
+    #: PICTURE-valid (see `domains.solve`). Applies to EVERY generated row
+    #: of every boundary that owns the field.
     witnesses: dict[str, str] = field(default_factory=dict)
+    #: 0-based row index -> {qualified field name: witness value}, overriding
+    #: `witnesses` for that ONE row of a multi-row (READ/FETCH) sequence.
+    #:
+    #: Groundwork for branches whose reachability is a property of the
+    #: *sequence*, not of any single record: "a prior '05' record sharing a
+    #: key with a following '09' record" cannot be expressed by `witnesses`,
+    #: which pins one value to every row. Nothing populates this yet -- the
+    #: analysis that would recognize such a correlation is not built (see
+    #: docs/2026-09-04-cross-record-correlation-design.md); it exists so the
+    #: pinning path is no longer the blocker, and so a caller assembling a
+    #: correlated scenario by hand has a supported way to say it.
+    row_witnesses: dict[int, dict[str, str]] = field(default_factory=dict)
     sequence_constraints: list[SequenceConstraint] = field(default_factory=list)
     #: "<CATEGORY>:<KEY>" -> an overriding status value (e.g. FILE STATUS
     #: "23", SQLCODE "-911") for the fixed error-status family.
@@ -130,6 +143,9 @@ class PlannedScenario:
                 for name, constraints in self.field_constraints.items()
             },
             "witnesses": dict(self.witnesses),
+            "row_witnesses": {
+                row: dict(values) for row, values in self.row_witnesses.items()
+            },
             "sequence_constraints": [s.to_dict() for s in self.sequence_constraints],
             "status_overrides": dict(self.status_overrides),
             "arm_keys": list(self.arm_keys),

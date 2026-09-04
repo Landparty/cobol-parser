@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-08-14T23:58:00Z
+timestamp: 2026-09-04T00:00:00Z
 ---
 
 # Overview
@@ -670,7 +670,23 @@ internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 * **Witnesses** — `override.witnesses` is keyed by `FieldSpec.qualified_name`;
   a matching field's generated value is replaced by the witness verbatim
   (already PICTURE-valid from `domains.solve()`), everything else still comes
-  from `ValueFactory.value_for()`.
+  from `ValueFactory.value_for()`. This pins one value to **every** row of a
+  multi-row sequence.
+* **Per-row witnesses** — `override.row_witnesses` (0-based row index →
+  `{qualified name: value}`) overrides `witnesses` for one row only, and
+  `_sequence_length` raises the generated row count so a pinned row always
+  exists (a witness pinned past the end of the sequence would silently do
+  nothing). Groundwork, not yet wired: `ScenarioPlanner` populates it nowhere,
+  so every bundle is byte-identical to before. It exists because the flat
+  `witnesses` dict made a whole class of branch *inexpressible*, not merely
+  underivable — one reachable only when a prior record correlates with a
+  following one ("a prior `'05'` record sharing a key with a following `'09'`
+  record"), which is a property of the sequence rather than of any single
+  record. Reachability in `ScenarioPlanner` is CFG-shaped
+  (`flow_report.unreachable_nodes`), never data-shaped, so such an arm is
+  counted `targeted` and gets a scenario named for it that never reaches it.
+  Design + remaining work:
+  [docs/plans/2026-09-04-cross-record-correlation-design.md](../docs/plans/2026-09-04-cross-record-correlation-design.md).
 * **Sequence length** — `override.sequence_constraints` (matched by
   `(category, key)`) overrides a READ boundary's row count, e.g. the "empty
   input" family's `length=0`. Falls back to `--rows` (READ) / `1` (everything
