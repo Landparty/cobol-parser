@@ -71,7 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with that reason rather than targeted with unreachable data, and an
   enclosing arm the extractor never modeled is recorded in
   `PlannedScenario.path_gaps` (which alone makes the scenario `unverified`)
-  instead of passing silently.
+  instead of passing silently. An enclosing arm split by an `OR` is folded
+  as alternatives rather than a single set -- `_register_variants` records
+  `THEN#1`/`THEN#2`/... and no bare `THEN` for such a condition, so the
+  planner tries each disjunct and keeps the first that stays satisfiable
+  alongside the targeted arm's own conjuncts.
 
 * **parser:** `XmlJsonStatement.clause_text` no longer includes the text of
   `[ON] EXCEPTION` / `NOT [ON] EXCEPTION` handler bodies -- those are parsed

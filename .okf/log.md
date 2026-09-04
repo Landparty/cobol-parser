@@ -3533,3 +3533,30 @@ Measured on the repo's own corpus (shamrice + tests/samples): 115 verified,
 compared to a numeric literal, and enclosing arms with no modeled condition.
 Additive to the bundle (`bundle_version` stays 1); `gen-fixtures` reports on
 stderr, and mockymock renders the reasons as a `*> UNVERIFIED:` comment.
+
+## 2026-09-04 — Review fixes on the path-folding machinery (PR #198)
+
+Three findings from Copilot's review, all verified against the code before
+changing anything, plus one found while verifying them:
+
+- **[generators]** An OR-split enclosing arm was never folded.
+  `_register_variants` registers `THEN#1`/`THEN#2`/... and no bare `THEN`
+  for a condition containing an OR, while `BranchConstraints.enclosing`
+  names the base arm id -- so the join missed every such arm. Replaced
+  `_path_constraints` with `_path_options` (alternatives per enclosing arm)
+  + `_solve_with_path` (try combinations, keep the first that stays
+  satisfiable). Trying rather than fixing on the first disjunct is
+  load-bearing: for `IF A = 100 OR A = 200 / IF A = 200`, the first disjunct
+  makes the set unsatisfiable and would report a reachable arm as missed.
+- **[generators]** `_merge_candidates` dropped a merged-in candidate's
+  `path_gaps` (found while building the repro for the above). That turned an
+  unpinned enclosing arm into a silently `verified` scenario -- the exact
+  false positive the gap list exists to prevent.
+- **[analysis]** SEARCH's `AT END` is a modeled arm (`_extract_search`
+  registers `arms["AT_END"]`) but reached the walk through
+  `_NESTED_STATEMENT_ATTRS` untagged, so a branch nested under it lost its
+  enclosing chain and could read `verified` without its data establishing
+  that the search found nothing. New `_ARM_BEARING_ATTRS` tags it.
+- A test-name typo (`branchs` -> `branches`).
+
+All four pinned by tests in `test_scenario_verification.py`.

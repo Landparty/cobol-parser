@@ -18,6 +18,7 @@ here is arm coverage, not full path coverage.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -236,9 +237,11 @@ class ScenarioPlanner:
                     )
                     continue
 
-                path, path_gaps = _path_constraints(branch, arms_by_key)
+                options, path_gaps = _path_options(branch, arms_by_key)
+                witnesses, unsat_reason, path = _solve_with_path(
+                    options, branch.arms[arm_id]
+                )
                 constraints = path + branch.arms[arm_id]
-                witnesses, unsat_reason = _solve_arm(constraints)
                 if unsat_reason is not None:
                     details.append(
                         ArmOutcome(
@@ -309,12 +312,12 @@ class ScenarioPlanner:
         return ScenarioPlan(scenarios=scenarios, coverage=coverage)
 
 
-def _path_constraints(
+def _path_options(
     branch: BranchConstraints,
     arms_by_key: dict[tuple[str, str], list[FieldConstraint]],
-) -> tuple[list[FieldConstraint], list[str]]:
-    """The conjuncts that must ALSO hold for `branch` to be reached at all,
-    plus a reason for each enclosing arm that contributed none.
+) -> tuple[list[list[list[FieldConstraint]]], list[str]]:
+    """Per enclosing arm, the alternative conjunct sets that reach it, plus
+    a reason for each enclosing arm that offers none.
 
     v1 of this planner took only the targeted arm's own conjuncts and left
     every enclosing condition to whatever the generator happened to produce.
@@ -325,31 +328,89 @@ def _path_constraints(
     the name true by construction where the enclosing arms are modeled, and
     `path_gaps` says so where they are not, rather than staying quiet.
 
+    **Alternatives, not one set, because an OR-split arm is a disjunction.**
+    `_register_variants` registers `THEN#1`/`THEN#2`/... and NO bare `THEN`
+    for a condition containing an OR, while `BranchConstraints.enclosing`
+    names the base arm id -- so a plain `arms_by_key[(branch_id, "THEN")]`
+    lookup misses every such arm and the path silently goes unfolded. Each
+    `#N` variant is one way to satisfy the same arm, so they are returned as
+    alternatives and the caller picks whichever one stays satisfiable
+    alongside the targeted arm's own conjuncts (`_solve_with_path`).
+
     An enclosing arm the constraint report never recorded (an unsupported
-    condition shape, or a nesting whose branch produced no `BranchConstraints`
-    at all) is a gap, not an error: the scenario is still worth generating,
-    it just cannot promise the arm is reached.
+    condition shape, or a nesting whose branch produced no
+    `BranchConstraints` at all) is a gap, not an error: the scenario is
+    still worth generating, it just cannot promise the arm is reached. So
+    is an arm recorded with no conjuncts -- a `SEARCH ... AT END` or an
+    `EVALUATE`'s unsupported `WHEN OTHER`, whose real precondition is not a
+    field constraint at all.
     """
-    accumulated: list[FieldConstraint] = []
+    options: list[list[list[FieldConstraint]]] = []
     gaps: list[str] = []
     for branch_id, arm_id in branch.enclosing:
-        constraints = arms_by_key.get((branch_id, arm_id))
-        if constraints is None:
-            gaps.append(
-                f"enclosing arm {branch_id}/{arm_id} has no modeled "
-                f"constraints, so reaching this arm is not pinned by the "
-                f"generated data"
-            )
+        exact = arms_by_key.get((branch_id, arm_id))
+        if exact:
+            options.append([exact])
             continue
-        if not constraints:
-            gaps.append(
-                f"enclosing arm {branch_id}/{arm_id} was modeled with no "
-                f"conjuncts, so reaching this arm is not pinned by the "
-                f"generated data"
-            )
+        variants = [
+            constraints
+            for key, constraints in arms_by_key.items()
+            if key[0] == branch_id
+            and _base_arm_id(key[1]) == arm_id
+            and key[1] != arm_id
+            and constraints
+        ]
+        if variants:
+            options.append(variants)
             continue
-        accumulated.extend(constraints)
-    return accumulated, gaps
+        gaps.append(
+            f"enclosing arm {branch_id}/{arm_id} "
+            + (
+                "was modeled with no conjuncts"
+                if exact is not None
+                else "has no modeled constraints"
+            )
+            + ", so reaching this arm is not pinned by the generated data"
+        )
+    return options, gaps
+
+
+#: Cap on the enclosing-path combinations tried before giving up. An OR-split
+#: enclosing arm contributes one alternative per disjunct, so a deep chain of
+#: them is a cross product; enclosing depth is small in practice and this only
+#: has to keep a pathological program from stalling the planner.
+_MAX_PATH_COMBINATIONS = 32
+
+
+def _solve_with_path(
+    options: list[list[list[FieldConstraint]]],
+    own: list[FieldConstraint],
+) -> tuple[dict[str, str], str | None, list[FieldConstraint]]:
+    """Solve the targeted arm's conjuncts together with one alternative from
+    each enclosing arm, returning `(witnesses, None, path)` for the first
+    combination that solves.
+
+    Trying combinations rather than fixing on the first disjunct matters:
+    for `IF A = 1 OR A = 2 / IF A = 2`, picking `A = 1` for the enclosing
+    arm makes the whole set unsatisfiable and would report the inner arm as
+    unreachable, when in fact `A = 2` reaches it. The last failure's reason
+    is returned when every combination is unsatisfiable, which is the honest
+    answer for an arm genuinely unreachable under its own path.
+    """
+    reason: str | None = None
+    for index, combination in enumerate(itertools.product(*options)):
+        if index >= _MAX_PATH_COMBINATIONS:
+            break
+        path = [c for alternative in combination for c in alternative]
+        witnesses, reason = _solve_arm(path + own)
+        if reason is None:
+            return witnesses, None, path
+    if reason is None:
+        # No options at all (or the cap cut in before any attempt): solve the
+        # arm on its own, exactly as this planner did before path folding.
+        witnesses, reason = _solve_arm(own)
+        return witnesses, reason, []
+    return {}, reason, []
 
 
 def _solve_arm(
@@ -478,6 +539,14 @@ def _merge_candidates(
             target.witnesses.update(candidate.witnesses)
             target.sequence_constraints.extend(candidate.sequence_constraints)
             target.arm_keys.append(arm_key)
+            # A merged-in candidate brings its own unpinned enclosing arms
+            # with it. Dropping them here would let the merged scenario
+            # report "verified" while one of the arms it now claims is not
+            # in fact pinned by the generated data -- the exact silent
+            # false positive `path_gaps` exists to prevent.
+            for gap in candidate.path_gaps:
+                if gap not in target.path_gaps:
+                    target.path_gaps.append(gap)
             target.intent = f"targets {len(target.arm_keys)} branch arms: {', '.join(target.arm_keys)}"
             outcomes.append(
                 ArmOutcome(arm_key, parent_proc, "merged", merged_into=target.name)

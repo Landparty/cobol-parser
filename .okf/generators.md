@@ -762,10 +762,36 @@ solving, so the witness set pins the whole path. Consequences worth knowing:
   `PlannedScenario.path_gaps` entry instead of silence, and that alone makes
   the scenario `unverified` — the arm may still not be reached, and saying so
   beats an optimistic label.
-* Only IF/EVALUATE/SEARCH arms join the chain. A non-branch nesting (`AT
-  END`, `ON EXCEPTION`, an inline `PERFORM` body) is a path condition in the
-  general sense but is not modeled as a branch arm here, and inventing an id
-  for one would produce a path entry nothing could join to.
+* **An OR-split enclosing arm is a disjunction, and is folded as
+  alternatives** (`_path_options` + `_solve_with_path`, review fix on PR
+  #198). `_register_variants` registers `THEN#1`/`THEN#2`/... and NO bare
+  `THEN` for a condition containing an OR, while `enclosing` names the base
+  arm id -- so a plain `arms_by_key[(branch_id, "THEN")]` lookup misses
+  every such arm and silently leaves the path unfolded. Each `#N` variant is
+  one way to satisfy the same arm, so the planner tries them in order and
+  keeps the first that stays satisfiable alongside the targeted arm's own
+  conjuncts. Fixing on the first disjunct would be wrong, not just
+  suboptimal: for `IF A = 100 OR A = 200 / IF A = 200` it makes the set
+  unsatisfiable and reports the inner arm unreachable when `A = 200` reaches
+  it. `_MAX_PATH_COMBINATIONS` caps the cross product a deep chain of
+  disjunctive arms would otherwise produce.
+* **`_merge_candidates` carries `path_gaps` across a merge.** A merged-in
+  candidate brings its own unpinned enclosing arms with it; dropping them
+  let the merged scenario report `verified` while an arm it now claims was
+  not in fact pinned -- the silent false positive `path_gaps` exists to
+  prevent.
+* IF/EVALUATE/SEARCH arms join the chain, including **SEARCH's `AT END`**
+  (`_ARM_BEARING_ATTRS`): `_extract_search` registers an `arms["AT_END"]`
+  entry, so a statement nested under it does have an enclosing arm to join
+  to, even though the clause reaches the walk through
+  `_NESTED_STATEMENT_ATTRS` rather than a `when_clauses` list. It carries no
+  conjuncts (the real precondition, "the table search found nothing", is not
+  a field constraint), so it lands in `path_gaps` -- which is the point:
+  untagged, a branch inside it looked top-level and could be reported
+  `verified` without its data establishing the search fell through. A
+  genuinely non-branch nesting (`ON EXCEPTION`, an inline `PERFORM` body)
+  still contributes nothing: inventing an id for one would produce a path
+  entry nothing could join to.
 
 ## Expectations: tiers 1-2 (Phase 7)
 

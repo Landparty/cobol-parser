@@ -1172,6 +1172,14 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
             lists.append(("THEN", statement.then_statements))
         if getattr(statement, "else_statements", None):
             lists.append(("ELSE", statement.else_statements))
+    arm_bearing = next(
+        (
+            mapping
+            for cls, mapping in _ARM_BEARING_ATTRS.items()
+            if isinstance(statement, cls)
+        ),
+        {},
+    )
     for attr in _NESTED_STATEMENT_ATTRS:
         if isinstance(statement, IfStatement) and attr in (
             "then_statements",
@@ -1180,7 +1188,7 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
             continue  # already paired with their arm ids above
         value = getattr(statement, attr, None)
         if value:
-            lists.append((None, value))
+            lists.append((arm_bearing.get(attr), value))
     if isinstance(statement, EvaluateStatement):
         for index, when in enumerate(statement.when_clauses, start=1):
             if when.statements:
@@ -1192,6 +1200,19 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
             if when_dict.get("statements"):
                 lists.append((f"WHEN_{index}", when_dict["statements"]))
     return lists
+
+
+#: Nested statement lists that ARE a modeled branch arm despite living on a
+#: `_NESTED_STATEMENT_ATTRS` attribute rather than in a `when_clauses` list.
+#: Only SEARCH's `AT END` qualifies today: `_extract_search` registers an
+#: `arms["AT_END"]` entry for it, so a statement nested under it does have an
+#: enclosing path condition to join to. Without this, that statement's
+#: `enclosing` chain silently omits the SEARCH -- and a scenario for a branch
+#: inside it could be reported "verified" without its data establishing that
+#: the table search found nothing.
+_ARM_BEARING_ATTRS: dict[type, dict[str, str]] = {
+    SearchStatement: {"at_end_clause": "AT_END"}
+}
 
 
 def _walk_statements(procedure_division: CobolDivision) -> Any:
