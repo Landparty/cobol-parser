@@ -21,7 +21,7 @@ from ...parser import parse_cobol
 from ...preprocess import CircularReferenceError, CopybookNotFoundError
 from ...preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import ProgramLayoutError
-from .layout import FieldSpec, flatten_record
+from .layout import FieldSpec, expand_condition_values, flatten_record
 from .options import DataGeneratorOptions
 
 # Canonical section name (as CobolSection.section_name reports it) -> the
@@ -103,6 +103,14 @@ class ProgramLayoutIndex:
         # different records) is an ambiguity: lookups refuse to guess, same
         # policy as resolve()/record_named().
         self._condition_index: dict[str, list[ResolvedField]] = {}
+        #: Level-88 condition name -> that ONE condition name's own expanded
+        #: VALUEs, kept in lockstep with ``_condition_index``. Distinct from
+        #: ``FieldSpec.condition_values``, which is deliberately the *union*
+        #: across every 88 under a field ("any value that could apply to this
+        #: field" -- what the value factory wants). A caller asking what a
+        #: *specific* condition name requires needs this one instead; see
+        #: :meth:`condition_values`.
+        self._condition_values: dict[str, list[list[str]]] = {}
         self._records_by_name: dict[str, list[tuple[str, CobolDataItem]]] = {}
         self._section_records: dict[str, list[CobolDataItem]] = {
             attr: [] for attr in _SECTION_NAMES.values()
@@ -199,6 +207,43 @@ class ProgramLayoutIndex:
     def file_facts(self, file_name: str) -> FileFacts | None:
         """Organizational/physical facts for *file_name*, if it was seen at all."""
         return self._file_facts.get(file_name.upper())
+
+    def condition_values(self, name: str) -> tuple[str, ...] | None:
+        """The VALUEs of the level-88 condition name *name* itself.
+
+        ``None`` when *name* is not a level-88 condition name, or when it is
+        declared under more than one distinct parent field (the same
+        ambiguity policy :meth:`resolve` applies -- refuse to guess).
+
+        Deliberately NOT the same thing as
+        ``resolve(name).spec.condition_values``: that is the *union* of every
+        88 declared under the parent field, which is what a value generator
+        wants ("any value that could apply to this field") but is wrong for
+        any caller asking what *this particular* condition requires. For::
+
+            05  TYPE-P-BAL      PIC X(02).
+                88  TYPE-P-BAL-M    VALUE "05".
+                88  TYPE-P-BAL-F    VALUE "09".
+
+        ``spec.condition_values`` is ``["05", "09"]`` for both names, while
+        this returns ``("05",)`` and ``("09",)`` respectively. Constraint
+        extraction reading the union made every arm of an ``EVALUATE TRUE /
+        WHEN <88>`` chain produce an identical constraint, so every such
+        scenario was seeded with the *first* 88's value and never reached the
+        branch it was named for.
+        """
+        if not name or not name.strip():
+            return None
+        entries = self._condition_index.get(name.strip().upper())
+        if not entries:
+            return None
+        parents = sorted({entry.spec.qualified_name for entry in entries})
+        if len(parents) != 1:
+            return None
+        values = self._condition_values.get(name.strip().upper()) or []
+        if not values:
+            return None
+        return tuple(values[0])
 
     def resolve(self, name: str) -> ResolvedField | None:
         """Resolve a data-name (bare, ``A OF B``, or dotted ``B.A``) to a field.
@@ -369,8 +414,10 @@ class ProgramLayoutIndex:
             if isinstance(child, ConditionNameItem):
                 owners = qualified_index.get(qualified)
                 if owners:
-                    self._condition_index.setdefault(child.name.upper(), []).append(
-                        owners[0]
+                    key = child.name.upper()
+                    self._condition_index.setdefault(key, []).append(owners[0])
+                    self._condition_values.setdefault(key, []).append(
+                        expand_condition_values(child.values)
                     )
             elif isinstance(child, CobolDataItem):
                 self._index_condition_names(child, item_path, qualified_index)

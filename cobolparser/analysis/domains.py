@@ -148,25 +148,37 @@ def solve(
     bound), the first allowed literal in sorted order for text, the first
     remaining enumerated value for a level-88 domain.
     """
+    # A field with level-88s gets the enumerated domain FIRST when any set-op
+    # is in play: for `IF NOT TYPE-P-BAL-M` against 88s "05"/"09" the useful
+    # witness is the other *declared* value, "09", not some arbitrary string
+    # the PICTURE also admits. But the enum is only a preference, never the
+    # field's real domain -- a `not_in_set` covering every declared 88 value
+    # (exactly what an `EVALUATE TRUE / WHEN <88> ... WHEN OTHER` chain's
+    # OTHER arm negates to) empties it, and the answer there is a value
+    # outside the enum, which the PICTURE does admit. So an emptied enum
+    # falls back to the picture-derived domain and re-applies the same
+    # constraints, rather than reporting Unsatisfiable for a branch that is
+    # perfectly satisfiable.
+    enum_first = bool(spec.condition_values) and any(
+        c.op in ("in_set", "not_in_set") for c in constraints
+    )
+    witness: str | None = None
     domain: Domain
-    if any(c.op in ("in_set", "not_in_set") for c in constraints):
+    if enum_first:
         domain = EnumDomain(list(spec.condition_values))
-    elif spec.category in (
-        FieldCategory.NUMERIC,
-        FieldCategory.NUMERIC_EDITED,
-        FieldCategory.FLOAT,
-    ):
-        domain = _initial_numeric_domain(spec)
-    else:
-        domain = TextDomain(allowed=None, forbidden=set(), size=max(1, spec.size))
+        if all(_apply(domain, c) for c in constraints):
+            witness = domain.pick()
 
-    for constraint in constraints:
-        if not _apply(domain, constraint):
-            return Unsatisfiable(
-                f"empty domain after applying {constraint.op} from {constraint.origin}"
-            )
+    if witness is None:
+        domain = _picture_domain(spec)
+        for constraint in constraints:
+            if not _apply(domain, constraint):
+                return Unsatisfiable(
+                    f"empty domain after applying {constraint.op} "
+                    f"from {constraint.origin}"
+                )
+        witness = domain.pick()
 
-    witness = domain.pick()
     if witness is None:
         return Unsatisfiable("no witness available in domain")
 
@@ -192,6 +204,18 @@ def _rendered_numeric_ok(rendered: str, domain: NumericDomain) -> bool:
     if value in domain.excluded:
         return False
     return domain.lo <= value <= domain.hi
+
+
+def _picture_domain(spec: FieldSpec) -> Domain:
+    """The field's real domain, from its PICTURE -- what it can actually hold,
+    independent of any level-88 names declared on it."""
+    if spec.category in (
+        FieldCategory.NUMERIC,
+        FieldCategory.NUMERIC_EDITED,
+        FieldCategory.FLOAT,
+    ):
+        return _initial_numeric_domain(spec)
+    return TextDomain(allowed=None, forbidden=set(), size=max(1, spec.size))
 
 
 def _initial_numeric_domain(spec: FieldSpec) -> NumericDomain:
@@ -239,6 +263,41 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
             domain,
             FieldConstraint(c.field, "ne" if c.negated else "eq", ("0",), c.origin),
         )
+
+    # Set ops reach a numeric domain only via the enum-domain fallback in
+    # solve() (a level-88 field whose enum was emptied), and must be enforced
+    # rather than no-op'd: a witness that silently violates `not_in_set` would
+    # be an "exact by construction" promise the value does not keep.
+    #
+    # This block MUST stay above the catch-all guard below, which returns True
+    # for every op outside the relational set -- a set op placed after it is
+    # dead code that no-ops silently. It shipped that way once and the numeric
+    # test was too weak to notice (its midpoint witness happened to miss the
+    # excluded value); `test_numeric_field_enforces_not_in_set_after_fallback`
+    # now bounds the domain so the midpoint lands exactly on it.
+    if c.op in ("in_set", "not_in_set"):
+        parsed = []
+        for raw in c.values:
+            try:
+                candidate = Decimal(raw)
+            except InvalidOperation:
+                continue
+            if candidate.is_finite():
+                parsed.append(candidate)
+        if not parsed:
+            return True
+        if c.op == "not_in_set":
+            domain.excluded.update(parsed)
+            return domain.lo < domain.hi or domain.lo not in domain.excluded
+        # in_set: an interval cannot express a discrete allow-set, so narrow
+        # to the first admissible member -- sound (it satisfies the set) and
+        # deterministic, at the cost of generality no caller depends on.
+        for candidate in parsed:
+            if domain.lo <= candidate <= domain.hi and candidate not in domain.excluded:
+                domain.lo = domain.hi = candidate
+                domain.excluded = set()
+                return True
+        return False
 
     if c.op not in ("eq", "ne", "gt", "ge", "lt", "le"):
         return True  # class_numeric/class_alphabetic: no-op on a numeric domain in v1

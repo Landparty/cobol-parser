@@ -1,5 +1,39 @@
 # OKF Update Log
 
+## 2026-09-04 (level-88 branch seeding fixed; per-row witness groundwork)
+
+Reported from a real `mockymock generate --with-data` run: scenarios named
+for a branch arm were seeded with data that could not reach it.
+
+* **`analysis/constraints.py`** — a bare level-88 condition-name constraint
+  read `FieldSpec.condition_values`, the *union* of every 88 under the parent
+  field, so `WHEN TYPE-P-BAL-M` and `WHEN TYPE-P-BAL-F` produced identical
+  `in_set ("05", "09")` constraints and the solver picked `"05"` for both.
+  Now scoped through the new `ProgramLayoutIndex.condition_values()`, which
+  keeps each 88's own VALUEs alongside the existing parent mapping. Both
+  lookups stay — they answer different questions, and the value factory still
+  wants the union.
+* **`analysis/constraints.py`** — `WHEN OTHER` was hardcoded to `[]`
+  ("unconstrained") by v1 design. Combined with the value factory drawing an
+  unconstrained level-88 field from its own `condition_values`, the OTHER
+  scenario was *deterministically* unable to reach its own arm. Now negated
+  into one `not_in_set` for the single-shared-field shape, with a recorded
+  reason when the shape needs a disjunction instead.
+* **`analysis/domains.py`** — that negation immediately hit a second wall: a
+  `not_in_set` over every declared 88 value emptied the `EnumDomain` and
+  returned `Unsatisfiable`. The enum is now a preference with a
+  `_picture_domain()` fallback, so `IF NOT TYPE-M` still yields the other
+  declared value while `WHEN OTHER` yields a third value the PICTURE admits.
+  `_apply_numeric` gained explicit `in_set`/`not_in_set` handling so the
+  fallback path cannot produce a witness violating a set op.
+* **`generators/scenarios.py` / `program_fixtures.py`** — added
+  `PlannedScenario.row_witnesses` (per-row pinning). Nothing populates it;
+  it removes the *expressibility* blocker for cross-record correlation, whose
+  remaining analysis is designed in
+  `docs/plans/2026-09-04-cross-record-correlation-design.md`. `FixtureBundle`
+  untouched, `BUNDLE_VERSION` unchanged.
+
+
 ## 2026-09-02 (REPORT SECTION parsed; XML/JSON handler bodies and PROCESSING PROCEDURE structured)
 
 Driven by the sibling mocky-mock repo's "every COBOL dependency mockable"

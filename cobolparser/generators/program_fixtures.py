@@ -56,6 +56,19 @@ def _sub_seed(bundle_seed: int, scenario: str, category: str, key: str) -> int:
     return zlib.crc32(text) ^ bundle_seed
 
 
+def _min_rows_for(override: PlannedScenario) -> int:
+    """How many rows a scenario's own `row_witnesses` require to exist.
+
+    A witness pinned to row 3 does nothing at all if the sequence is only two
+    rows long -- so a per-row pin implies a minimum sequence length. Returns 0
+    when the scenario pins no per-row values, leaving the ordinary length
+    rules untouched.
+    """
+    if not override.row_witnesses:
+        return 0
+    return max(override.row_witnesses) + 1
+
+
 def _call_count_expectation(ref: BoundaryRef, times: int) -> Expectation:
     """Tier 1 (Phase 7): a structural expectation derivable exactly from the
     scenario's own generated sequence -- the scenario *defines* how many
@@ -360,8 +373,14 @@ class ProgramFixtureGenerator:
                     and seq.boundary.key == boundary.ref.key
                     and seq.length is not None
                 ):
-                    return seq.length
-        return default_rows if boundary.ref.category == "READ" else 1
+                    return max(seq.length, _min_rows_for(override))
+        base = default_rows if boundary.ref.category == "READ" else 1
+        if override is not None:
+            # A row a scenario pinned but never generates is a witness that
+            # silently does nothing -- the sequence must be long enough to
+            # actually contain every pinned row index.
+            return max(base, _min_rows_for(override))
+        return base
 
     @staticmethod
     def _value_for(
@@ -370,8 +389,20 @@ class ProgramFixtureGenerator:
         row: int,
         override: PlannedScenario | None,
     ) -> str:
-        if override is not None and spec.qualified_name in override.witnesses:
-            return override.witnesses[spec.qualified_name]
+        """The value for one field in one row: a pinned witness, else generated.
+
+        `row` is 0-based. A `row_witnesses` entry for this exact row wins over
+        the scenario-wide `witnesses`, which pins one value to EVERY row --
+        the distinction matters for any branch whose reachability is a
+        property of the sequence rather than of a single record (see
+        `PlannedScenario.row_witnesses`).
+        """
+        if override is not None:
+            per_row = override.row_witnesses.get(row)
+            if per_row is not None and spec.qualified_name in per_row:
+                return per_row[spec.qualified_name]
+            if spec.qualified_name in override.witnesses:
+                return override.witnesses[spec.qualified_name]
         return factory.value_for(spec, row)
 
     def _build_call_fixture(
