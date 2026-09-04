@@ -3495,3 +3495,41 @@ each surfaced genuine, runtime-reproduced silent drops. Full audit:
   Concepts produced: [lexer](lexer.md), [parser](parser.md),
   [preprocessing](preprocessing.md), [ast-models](ast-models.md),
   [analysis](analysis.md), [cli](cli.md), [tests](tests.md).
+
+## 2026-09-04 — Scenarios verify themselves, and carry their path condition
+
+A scenario's *name* was a claim nothing checked. Two changes, one root cause:
+
+- **[analysis]** `BranchConstraints.enclosing` — every decision point now
+  records the `(branch_id, arm_id)` chain whose arms must all be taken for it
+  to be reached. `_walk_list` threads it down through
+  `_nested_statement_lists`, which pairs each nested statement list with the
+  arm id it sits under; the ids match the keys registered in `arms`, by
+  construction, which is what lets `ScenarioPlanner` join on them. A
+  non-branch nesting (`AT END`, `ON EXCEPTION`, an inline `PERFORM` body)
+  contributes nothing — it is a path condition in the general sense but is
+  not modeled as a branch arm here, and an invented id would join to nothing.
+- **[generators]** `ScenarioPlanner._path_constraints` folds those enclosing
+  conjuncts into a targeted arm's own before solving. This was the biggest
+  single source of scenarios whose data never reached their own arm: on
+  `IF INV-QTY > 500 / IF INV-TYPE = "AB"` the inner arm's scenario pinned
+  `INV-TYPE` and left `INV-QTY` to chance. An arm that becomes unsatisfiable
+  once its path is added is now `missed` with that reason; an enclosing arm
+  that was never modeled becomes a `PlannedScenario.path_gaps` entry rather
+  than silence.
+- **[generators]** New `generators/verification.py` +
+  `Scenario.verification`: after generating, re-read the scenario's OWN rows
+  and re-check every planned conjunct against them. Deliberately independent
+  of the solver — it evaluates against the concrete rendered strings a mock
+  will move into the program, so a solver bug, a rendering bug, and a witness
+  that never reached any fixture all surface as findings. `unknown` is a real
+  answer: `IF WS-INPUT > 0` on a `PIC X(10)` field cannot be decided from a
+  rendered string (IBM COBOL only allows that ordering comparison when the
+  alphanumeric operand is integer-like), and stamping it "verified" would be
+  the same silent optimism this whole change removes.
+
+Measured on the repo's own corpus (shamrice + tests/samples): 115 verified,
+16 unverified across two real finding classes — an ACCEPT-fed text field
+compared to a numeric literal, and enclosing arms with no modeled condition.
+Additive to the bundle (`bundle_version` stays 1); `gen-fixtures` reports on
+stderr, and mockymock renders the reasons as a `*> UNVERIFIED:` comment.

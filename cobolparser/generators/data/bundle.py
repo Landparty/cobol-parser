@@ -140,9 +140,18 @@ class Scenario:
     #: Phase 3's single "happy path" scenario always leaves this empty --
     #: it does not attempt branch coverage; Phase 5 populates it.
     unconstrained: list[str] = field(default_factory=list)
+    #: The self-verification verdict: does this scenario's OWN generated data
+    #: actually satisfy the branch it is named for? `None` for the Phase 3
+    #: happy path, which targets no branch and so has nothing to verify.
+    #: `generators.verification.ScenarioVerification.to_dict()` when set.
+    #:
+    #: Typed as a plain dict so `bundle.py` keeps its "serializable shapes
+    #: only, no analysis imports" posture -- the verifier depends on this
+    #: module, not the other way round.
+    verification: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "name": self.name,
             "intent": self.intent,
             "entry": self.entry,
@@ -150,6 +159,9 @@ class Scenario:
             "expectations": [e.to_dict() for e in self.expectations],
             "unconstrained": list(self.unconstrained),
         }
+        if self.verification is not None:
+            result["verification"] = self.verification
+        return result
 
 
 @dataclass

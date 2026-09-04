@@ -39,6 +39,7 @@ from .data.options import DataGeneratorOptions
 from .data.program_layout import ProgramLayoutIndex
 from .data.values import ValueFactory
 from .scenarios import PlannedScenario, ScenarioPlanner
+from .verification import verify_scenario
 
 _SCENARIO_NAME = "happy path"
 _SCENARIO_MODES = ("happy", "branches", "all")
@@ -199,6 +200,12 @@ class ProgramFixtureGenerator:
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
             scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
+            # Self-verify BEFORE the scenario is written out: re-read the
+            # data this scenario actually emitted and re-check it against the
+            # conditions that motivated it. Without this the scenario's name
+            # is a claim the bundle cannot support, and the only way to check
+            # it was to run the suite under a tracer, per scenario.
+            scenario.verification = verify_scenario(planned, scenario).to_dict()
             scenarios.append(scenario)
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)

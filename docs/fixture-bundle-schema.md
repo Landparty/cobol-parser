@@ -69,6 +69,31 @@ otherwise.
 | `fixtures` | `list[BoundaryFixture]` | Mock in-data for every boundary the scenario touches. |
 | `expectations` | `list[Expectation]` | Assert-on stubs (see below). |
 | `unconstrained` | `list[str]` | Reserved for a future phase; always `[]` today (a happy-path scenario doesn't attempt branch coverage, and Phase 5/6 record misses in `scenario_coverage` instead, not here). |
+| `verification` | `ScenarioVerification` | Present only for a `"branches"`/`"all"` scenario (absent in `mode="happy"`, which targets no branch). See below. |
+
+### `ScenarioVerification`
+
+Does this scenario's OWN generated data actually satisfy the branch it is
+named for? A scenario's name is a claim; before this key existed the only way
+to check it was to run each case under a tracer.
+
+| Key | Type | Notes |
+|---|---|---|
+| `status` | `"verified" \| "unverified"` | `"verified"` iff every constrained field is `satisfied` **and** there are no `gaps`. |
+| `fields` | `list[FieldVerdict]` | One per field the scenario's arm (and its accumulated path condition) constrains. |
+| `gaps` | `list[str]` | Enclosing arms on this scenario's path whose own conditions were never modeled, so reaching the arm is not pinned by the data. |
+
+| `FieldVerdict` key | Type | Notes |
+|---|---|---|
+| `field` | `str` | Qualified field name. |
+| `status` | `"satisfied" \| "violated" \| "absent" \| "unknown"` | `absent` = no fixture generates the field at all, so nothing pins the branch. `unknown` = a conjunct could not be decided from the rendered value — deliberately never reported as `satisfied`. |
+| `detail` | `str` | Human-readable reason. |
+| `rows` | `list[int]` | 0-based indices of the generated rows meeting every conjunct (`satisfied` only). |
+
+The check evaluates constraints against the concrete rendered strings a mock
+will actually move into the program, independently of the solver that chose
+them — so a solver bug, a rendering bug, and a witness that never reached any
+fixture all surface here rather than as a green label.
 
 **Every scenario carries a fixture for every boundary the program touches**,
 not just the ones its targeted branch arm constrains. A `mode="all"` bundle
@@ -397,7 +422,9 @@ with `"1244"` computed from whatever value that scenario's own mocked
 type changed, or a key's meaning changed under an unchanged name. Every
 change so far, including this document's own Phase 6 (`scenario_coverage`),
 has been **additive**: a new key that is `None`/absent-equivalent unless a
-new capability (a new `mode=`, a new CLI flag) is actually used. A consumer
+new capability (a new `mode=`, a new CLI flag) is actually used. The same
+holds for `Scenario.verification` (2026-09-04), which is absent entirely in
+`mode="happy"`. A consumer
 that only reads keys it knows about is unaffected by a bundle produced by a
 newer `cobolparser` gaining one more key. Phase 8 (mockymock integration)
 checks `bundle_version` before consuming a bundle and fails closed on an

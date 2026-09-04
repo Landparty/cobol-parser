@@ -133,6 +133,14 @@ class PlannedScenario:
     #: "23", SQLCODE "-911") for the fixed error-status family.
     status_overrides: dict[str, str] = field(default_factory=dict)
     arm_keys: list[str] = field(default_factory=list)
+    #: Enclosing arms on this scenario's path whose own conditions could NOT
+    #: be folded in (the arm is not in the constraint report at all, or it
+    #: was recorded with no modeled conjuncts). Each entry is a reason
+    #: string. A non-empty list means this scenario pins its own arm but
+    #: leaves part of the path to whatever the generator happened to
+    #: produce -- so the arm may not actually be reached, and saying so
+    #: beats a silently optimistic label.
+    path_gaps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -149,6 +157,7 @@ class PlannedScenario:
             "sequence_constraints": [s.to_dict() for s in self.sequence_constraints],
             "status_overrides": dict(self.status_overrides),
             "arm_keys": list(self.arm_keys),
+            "path_gaps": list(self.path_gaps),
         }
 
 
@@ -188,6 +197,14 @@ class ScenarioPlanner:
             for bn in flow_report.branch_nodes
         }
         unreachable = {name.upper() for name in flow_report.unreachable_nodes}
+        # Every arm's own conjuncts, keyed the way `BranchConstraints.
+        # enclosing` names them, so a nested arm can pick up the conditions
+        # that must hold for it to be REACHED (see `_path_constraints`).
+        arms_by_key: dict[tuple[str, str], list[FieldConstraint]] = {
+            (b.branch_id, arm_id): constraints
+            for b in constraint_report.branches
+            for arm_id, constraints in b.arms.items()
+        }
 
         details: list[ArmOutcome] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
@@ -219,7 +236,8 @@ class ScenarioPlanner:
                     )
                     continue
 
-                constraints = branch.arms[arm_id]
+                path, path_gaps = _path_constraints(branch, arms_by_key)
+                constraints = path + branch.arms[arm_id]
                 witnesses, unsat_reason = _solve_arm(constraints)
                 if unsat_reason is not None:
                     details.append(
@@ -227,7 +245,12 @@ class ScenarioPlanner:
                             arm_key,
                             branch.parent_proc,
                             "missed",
-                            reason=f"unsatisfiable: {unsat_reason}",
+                            reason=(
+                                f"unsatisfiable with its own path condition: "
+                                f"{unsat_reason}"
+                                if path
+                                else f"unsatisfiable: {unsat_reason}"
+                            ),
                         )
                     )
                     continue
@@ -238,12 +261,19 @@ class ScenarioPlanner:
                 by_field: dict[str, list[FieldConstraint]] = {}
                 for c in constraints:
                     by_field.setdefault(c.field.spec.qualified_name, []).append(c)
+                intent = f"targets branch arm {arm_key}"
+                if path:
+                    enclosing_keys = ", ".join(
+                        f"{bid}/{aid}" for bid, aid in branch.enclosing
+                    )
+                    intent += f" (path condition from {enclosing_keys} included)"
                 scenario = PlannedScenario(
                     name=name,
-                    intent=f"targets branch arm {arm_key}",
+                    intent=intent,
                     field_constraints=by_field,
                     witnesses=witnesses,
                     arm_keys=[arm_key],
+                    path_gaps=path_gaps,
                 )
                 sort_key = f"{branch.line or 0:010d}:{branch.column or 0:010d}:{arm_id}"
                 candidates.append((sort_key, scenario))
@@ -277,6 +307,49 @@ class ScenarioPlanner:
             details=details,
         )
         return ScenarioPlan(scenarios=scenarios, coverage=coverage)
+
+
+def _path_constraints(
+    branch: BranchConstraints,
+    arms_by_key: dict[tuple[str, str], list[FieldConstraint]],
+) -> tuple[list[FieldConstraint], list[str]]:
+    """The conjuncts that must ALSO hold for `branch` to be reached at all,
+    plus a reason for each enclosing arm that contributed none.
+
+    v1 of this planner took only the targeted arm's own conjuncts and left
+    every enclosing condition to whatever the generator happened to produce.
+    On a nested `IF A > 500 / IF B = "X"` that means the scenario named for
+    the inner arm pins B and lets A fall wherever chance puts it -- so the
+    scenario's own name is a claim its data does not support, and the only
+    way to find out was to run it under `--trace`. Folding the path in makes
+    the name true by construction where the enclosing arms are modeled, and
+    `path_gaps` says so where they are not, rather than staying quiet.
+
+    An enclosing arm the constraint report never recorded (an unsupported
+    condition shape, or a nesting whose branch produced no `BranchConstraints`
+    at all) is a gap, not an error: the scenario is still worth generating,
+    it just cannot promise the arm is reached.
+    """
+    accumulated: list[FieldConstraint] = []
+    gaps: list[str] = []
+    for branch_id, arm_id in branch.enclosing:
+        constraints = arms_by_key.get((branch_id, arm_id))
+        if constraints is None:
+            gaps.append(
+                f"enclosing arm {branch_id}/{arm_id} has no modeled "
+                f"constraints, so reaching this arm is not pinned by the "
+                f"generated data"
+            )
+            continue
+        if not constraints:
+            gaps.append(
+                f"enclosing arm {branch_id}/{arm_id} was modeled with no "
+                f"conjuncts, so reaching this arm is not pinned by the "
+                f"generated data"
+            )
+            continue
+        accumulated.extend(constraints)
+    return accumulated, gaps
 
 
 def _solve_arm(

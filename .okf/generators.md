@@ -18,6 +18,7 @@ artefact rather than an analysis report.
 | `data/` | Copybook test data generation — modular internal implementation |
 | `program_fixtures.py` | `ProgramFixtureGenerator` — whole-program `FixtureBundle`s (Phase 3/6) |
 | `scenarios.py` | `ScenarioPlanner` — constraints + CFG -> named scenarios (Phase 5) |
+| `verification.py` | `verify_scenario` — does a scenario's own generated data satisfy the branch it is named for? |
 
 **Import architecture: `__init__.py` is lazy (`__getattr__`-based), not
 eager.** `program_fixtures.py` genuinely depends at runtime on
@@ -700,6 +701,71 @@ internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 verbatim, `None` for a `mode="happy"` bundle since that mode never attempts
 branch targeting. Full key-by-key shape:
 [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md).
+
+## Self-verification: `Scenario.verification` (2026-09-04)
+
+A scenario's *name* is a claim. Until this existed, nothing checked it: the
+planner pinned witnesses, the generator emitted rows, and whether those rows
+actually satisfied the branch the scenario was named for could only be found
+out by running each case under a tracer. `generators/verification.py` closes
+that — `verify_scenario(planned, scenario)` re-reads the scenario's OWN
+emitted fixture data and re-checks every planned conjunct against it, and
+`generate_with_scenarios` stores the verdict on `Scenario.verification`
+(`{"status", "fields", "gaps"}`; additive, `bundle_version` stays `1`;
+`None` for a `mode="happy"` scenario, which targets no branch and so has
+nothing to verify).
+
+The check is deliberately **independent of the solver**: it evaluates
+constraints against the concrete rendered strings a mock will actually move
+into the program, so a solver bug, a rendering bug, and a witness that never
+reached any fixture all surface as findings rather than as a green label.
+Per-field verdicts are `satisfied` (some generated row meets every conjunct),
+`violated` (the field is there and no row does), `absent` (no fixture
+generates the field at all, so nothing pins the branch), or `unknown`.
+
+**`unknown` is a real answer, not a failure mode.** A conjunct that cannot be
+decided from a rendered string is never silently "satisfied" — `IF WS-INPUT >
+0` on a `PIC X(10)` field is the routine case (IBM COBOL only allows an
+alphanumeric-to-numeric ordering comparison when the alphanumeric operand is
+integer-like, so answering it lexically would stamp "verified" on a
+comparison nobody can evaluate). Equality survives the mixed case: a value
+that is not a number cannot equal a numeric literal either way.
+
+`cli/parse.py`'s `gen-fixtures` prints an unverified summary on **stderr**
+(stdout stays JSON-only — mockymock's `fixtures` contract), and mockymock's
+`generate --with-data` renders the same reasons as a `*> UNVERIFIED:` comment
+above the affected TESTCASE.
+
+## Path conditions: `BranchConstraints.enclosing` (2026-09-04)
+
+The planner's v1 simplification — "a scenario targets *one* arm and takes
+only that arm's own conjuncts; enclosing branches on the path to it are not
+accumulated" — was the single biggest source of scenarios whose data did not
+reach their own arm. On a nested `IF INV-QTY > 500 / IF INV-TYPE = "AB"`, the
+scenario named for the inner arm pinned `INV-TYPE` and left `INV-QTY`
+wherever the value generator happened to put it, so it usually never entered
+the outer arm at all.
+
+`ConstraintExtractor` now records, on every `BranchConstraints`, the
+`(branch_id, arm_id)` chain whose arms must all be taken for that decision
+point to be reached (`_walk_list` threads it down through
+`_nested_statement_lists`, which pairs each nested statement list with the
+arm id it sits under). `ScenarioPlanner._path_constraints` joins on those
+pairs and folds the enclosing conjuncts into the targeted arm's own before
+solving, so the witness set pins the whole path. Consequences worth knowing:
+
+* An arm that becomes unsatisfiable once its path condition is added (outer
+  `X > 5`, inner `X < 3`) is now correctly `missed` with
+  `"unsatisfiable with its own path condition: ..."` rather than targeted
+  with data that could never reach it.
+* An enclosing arm the constraint report never modeled contributes a
+  `PlannedScenario.path_gaps` entry instead of silence, and that alone makes
+  the scenario `unverified` — the arm may still not be reached, and saying so
+  beats an optimistic label.
+* Only IF/EVALUATE/SEARCH arms join the chain. A non-branch nesting (`AT
+  END`, `ON EXCEPTION`, an inline `PERFORM` body) is a path condition in the
+  general sense but is not modeled as a branch arm here, and inventing an id
+  for one would produce a path entry nothing could join to.
 
 ## Expectations: tiers 1-2 (Phase 7)
 
