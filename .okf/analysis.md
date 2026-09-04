@@ -1155,9 +1155,38 @@ report.unsupported           # program-level gaps (never silently dropped)
 branch = report.branches[0]
 branch.arms                  # dict[str, list[FieldConstraint]]: arm_id ->
                               # conjuncts, e.g. {"THEN": [...], "ELSE": [...]}
+branch.enclosing             # tuple[(branch_id, arm_id), ...]: the arms that
+                              # must ALL be taken for this branch to be
+                              # reached at all -- outermost first
 
 witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
 ```
+
+**`enclosing`: the path condition (2026-09-04).** Every `BranchConstraints`
+records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it
+down through `_nested_statement_lists`, which now pairs each nested statement
+list with the arm id it sits under (`THEN`/`ELSE` for an IF, `WHEN_n`/
+`WHEN_OTHER` for an EVALUATE or SEARCH) -- ids that match the keys registered
+in `arms`, by construction, so `ScenarioPlanner` can join on them. A
+non-branch nesting (`ON EXCEPTION`, an inline `PERFORM` body) contributes no
+entry: it is a path condition in the general sense but is not modeled as a
+branch arm here, and inventing an id for one would produce a path entry
+nothing could ever join to. **SEARCH's `AT END` is the exception**
+(`_ARM_BEARING_ATTRS`): `_extract_search` really does register an
+`arms["AT_END"]` entry, so a statement nested under it has an enclosing arm
+to join to -- even though the clause reaches `_walk_list` through
+`_NESTED_STATEMENT_ATTRS` rather than a `when_clauses` list. Leaving it
+untagged made such a statement look top-level, so a scenario for a branch
+inside it could be reported verified without its data establishing that the
+table search found nothing.
+
+This exists because the planner's v1 simplification -- take only the targeted
+arm's own conjuncts -- was the biggest single source of scenarios whose data
+never reached their own arm. On `IF INV-QTY > 500 / IF INV-TYPE = "AB"`, the
+inner arm's scenario pinned `INV-TYPE` and let `INV-QTY` fall wherever the
+value factory put it, so it usually never entered the outer arm at all, and
+the scenario's name was a claim its data did not support. See
+[generators](generators.md)'s "Path conditions" section for the planner side.
 
 **Extraction sources and op vocabulary** (`FieldConstraint.op`): `eq ne lt le
 gt ge in_set not_in_set class_numeric class_alphabetic figurative`.

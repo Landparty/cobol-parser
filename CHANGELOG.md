@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `Scenario.verification` -- every `"branches"`/`"all"`
+  scenario now carries cobol-parser's own verdict on whether the data it
+  generated actually satisfies the branch it is named for. A scenario's name
+  was previously a claim nothing checked: the only way to find out was to run
+  each case under a tracer. `generators/verification.py`'s
+  `verify_scenario()` re-reads the scenario's OWN emitted fixture rows and
+  re-checks every planned conjunct against them, independently of the solver
+  that chose the values -- so a solver bug, a rendering bug, and a witness
+  that never reached any fixture all surface as findings instead of a green
+  label. Per-field verdicts are `satisfied` / `violated` / `absent` (no
+  fixture generates the field at all, so nothing pins the branch) / `unknown`
+  (a conjunct that cannot be decided from a rendered string is never silently
+  reported as satisfied). `gen-fixtures` prints an unverified summary on
+  stderr (stdout stays JSON-only). Additive: `bundle_version` stays `1` and
+  the key is absent in `mode="happy"`.
+
 * **parser:** REPORT SECTION is parsed instead of skipped with a warning.
   `RD report-name` clauses (`CODE`, `CONTROL(S)`, `PAGE LIMIT`, `HEADING`,
   `FIRST DETAIL`, `LAST DETAIL`, `FOOTING`, `GLOBAL`) are captured by the
@@ -39,6 +55,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/plans/2026-09-04-cross-record-correlation-design.md`.
 
 ### Changed
+
+* **analysis/generators:** scenario planning is now path-sensitive over the
+  syntactic enclosing chain. `BranchConstraints.enclosing` records the
+  `(branch_id, arm_id)` chain whose arms must all be taken for a decision
+  point to be reached, and `ScenarioPlanner` folds those enclosing conjuncts
+  into a targeted arm's own before solving. The v1 simplification -- take
+  only the targeted arm's conjuncts -- was the biggest single source of
+  scenarios whose data never reached their own arm: on a nested
+  `IF INV-QTY > 500 / IF INV-TYPE = "AB"`, the inner arm's scenario pinned
+  `INV-TYPE` and left `INV-QTY` wherever the value factory put it, so it
+  usually never entered the outer arm and the scenario's name was a claim its
+  data did not support. Two visible consequences: an arm that becomes
+  unsatisfiable once its path condition is added is now correctly `missed`
+  with that reason rather than targeted with unreachable data, and an
+  enclosing arm the extractor never modeled is recorded in
+  `PlannedScenario.path_gaps` (which alone makes the scenario `unverified`)
+  instead of passing silently. An enclosing arm split by an `OR` is folded
+  as alternatives rather than a single set -- `_register_variants` records
+  `THEN#1`/`THEN#2`/... and no bare `THEN` for such a condition, so the
+  planner tries each disjunct and keeps the first that stays satisfiable
+  alongside the targeted arm's own conjuncts.
 
 * **parser:** `XmlJsonStatement.clause_text` no longer includes the text of
   `[ON] EXCEPTION` / `NOT [ON] EXCEPTION` handler bodies -- those are parsed

@@ -233,6 +233,18 @@ class BranchConstraints:
     column: int | None = None
     arms: dict[str, list[FieldConstraint]] = field(default_factory=dict)
     unsupported: list[str] = field(default_factory=list)
+    #: The `(branch_id, arm_id)` chain -- outermost first -- whose arms must
+    #: ALL be taken for this decision point to be reached at all. Empty for a
+    #: branch at the top level of its paragraph.
+    #:
+    #: Without it a scenario targeting a nested arm pins only that arm's own
+    #: conjuncts, leaving the enclosing condition to whatever the generator
+    #: happened to produce -- so the scenario's own name can be a lie, which
+    #: is exactly the "labels don't guarantee the data exercises that branch"
+    #: problem. `ScenarioPlanner` joins on these pairs to accumulate the path
+    #: condition; the ids match the arm keys registered in `arms` above, by
+    #: construction (see `_nested_statement_lists`).
+    enclosing: tuple[tuple[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -240,6 +252,7 @@ class BranchConstraints:
             "parent_proc": self.parent_proc,
             "line": self.line,
             "column": self.column,
+            "enclosing": [list(pair) for pair in self.enclosing],
             "arms": {
                 arm: [c.to_dict() for c in constraints]
                 for arm, constraints in self.arms.items()
@@ -287,16 +300,18 @@ class ConstraintExtractor:
         fed_names = _boundary_fed_names(boundary_report)
         eof_flags = _collect_eof_flags(ast)
 
-        for paragraph_name, statement in _walk_statements(procedure):
+        for paragraph_name, statement, enclosing in _walk_statements(procedure):
             if isinstance(statement, IfStatement) and statement.condition is not None:
-                self._extract_if(statement, paragraph_name, index, fed_names, report)
+                self._extract_if(
+                    statement, paragraph_name, index, fed_names, report, enclosing
+                )
             elif isinstance(statement, EvaluateStatement):
                 self._extract_evaluate(
-                    statement, paragraph_name, index, fed_names, report
+                    statement, paragraph_name, index, fed_names, report, enclosing
                 )
             elif isinstance(statement, SearchStatement):
                 self._extract_search(
-                    statement, paragraph_name, index, fed_names, report
+                    statement, paragraph_name, index, fed_names, report, enclosing
                 )
             elif (
                 isinstance(statement, PerformStatement)
@@ -323,6 +338,7 @@ class ConstraintExtractor:
         index: ProgramLayoutIndex,
         fed_names: set[str],
         report: ConstraintReport,
+        enclosing: tuple[tuple[str, str], ...] = (),
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
@@ -354,6 +370,7 @@ class ConstraintExtractor:
                     column=column,
                     arms=arms,
                     unsupported=unsupported,
+                    enclosing=enclosing,
                 )
             )
 
@@ -366,6 +383,7 @@ class ConstraintExtractor:
         index: ProgramLayoutIndex,
         fed_names: set[str],
         report: ConstraintReport,
+        enclosing: tuple[tuple[str, str], ...] = (),
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
@@ -383,6 +401,7 @@ class ConstraintExtractor:
                     column=column,
                     arms=arms,
                     unsupported=unsupported,
+                    enclosing=enclosing,
                 )
             )
             return
@@ -429,6 +448,7 @@ class ConstraintExtractor:
                     column=column,
                     arms=arms,
                     unsupported=unsupported,
+                    enclosing=enclosing,
                 )
             )
 
@@ -441,6 +461,7 @@ class ConstraintExtractor:
         index: ProgramLayoutIndex,
         fed_names: set[str],
         report: ConstraintReport,
+        enclosing: tuple[tuple[str, str], ...] = (),
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
@@ -472,6 +493,7 @@ class ConstraintExtractor:
                     column=column,
                     arms=arms,
                     unsupported=unsupported,
+                    enclosing=enclosing,
                 )
             )
 
@@ -1128,35 +1150,99 @@ def _all_paragraphs(procedure_division: CobolDivision) -> list[CobolParagraph]:
     return paragraphs
 
 
-def _nested_statement_lists(statement: Any) -> list[list[Any]]:
-    lists = [
-        value
-        for attr in _NESTED_STATEMENT_ATTRS
-        if (value := getattr(statement, attr, None))
-    ]
+def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]]:
+    """Every nested statement list, paired with the ARM-ID it sits under when
+    that nesting is a modeled branch arm (`None` otherwise).
+
+    The arm id is what lets `_walk_list` build each statement's enclosing
+    path, so a nested branch's scenario can carry the conditions that must
+    hold for its own arm to be reached at all. The ids match the ones
+    `_extract_if`/`_extract_evaluate`/`_extract_search` register in
+    `BranchConstraints.arms`, since the path is joined back to those arms by
+    `(branch_id, arm_id)`.
+
+    A non-branch nesting (`AT END`, `ON EXCEPTION`, an inline `PERFORM`
+    body) contributes no arm: it IS a path condition in the general sense,
+    but this module does not model those as branch arms, and inventing an
+    id for one would produce a path entry nothing could ever join to.
+    """
+    lists: list[tuple[str | None, list[Any]]] = []
+    if isinstance(statement, IfStatement):
+        if getattr(statement, "then_statements", None):
+            lists.append(("THEN", statement.then_statements))
+        if getattr(statement, "else_statements", None):
+            lists.append(("ELSE", statement.else_statements))
+    arm_bearing = next(
+        (
+            mapping
+            for cls, mapping in _ARM_BEARING_ATTRS.items()
+            if isinstance(statement, cls)
+        ),
+        {},
+    )
+    for attr in _NESTED_STATEMENT_ATTRS:
+        if isinstance(statement, IfStatement) and attr in (
+            "then_statements",
+            "else_statements",
+        ):
+            continue  # already paired with their arm ids above
+        value = getattr(statement, attr, None)
+        if value:
+            lists.append((arm_bearing.get(attr), value))
     if isinstance(statement, EvaluateStatement):
-        for when in statement.when_clauses:
+        for index, when in enumerate(statement.when_clauses, start=1):
             if when.statements:
-                lists.append(when.statements)
+                lists.append((f"WHEN_{index}", when.statements))
         if statement.default_when is not None and statement.default_when.statements:
-            lists.append(statement.default_when.statements)
+            lists.append(("WHEN_OTHER", statement.default_when.statements))
     if isinstance(statement, SearchStatement):
-        for when_dict in statement.when_clauses:
+        for index, when_dict in enumerate(statement.when_clauses, start=1):
             if when_dict.get("statements"):
-                lists.append(when_dict["statements"])
+                lists.append((f"WHEN_{index}", when_dict["statements"]))
     return lists
+
+
+#: Nested statement lists that ARE a modeled branch arm despite living on a
+#: `_NESTED_STATEMENT_ATTRS` attribute rather than in a `when_clauses` list.
+#: Only SEARCH's `AT END` qualifies today: `_extract_search` registers an
+#: `arms["AT_END"]` entry for it, so a statement nested under it does have an
+#: enclosing path condition to join to. Without this, that statement's
+#: `enclosing` chain silently omits the SEARCH -- and a scenario for a branch
+#: inside it could be reported "verified" without its data establishing that
+#: the table search found nothing.
+_ARM_BEARING_ATTRS: dict[type, dict[str, str]] = {
+    SearchStatement: {"at_end_clause": "AT_END"}
+}
 
 
 def _walk_statements(procedure_division: CobolDivision) -> Any:
     for paragraph in _all_paragraphs(procedure_division):
-        yield from _walk_list(paragraph.paragraph_name, paragraph.statements)
+        yield from _walk_list(paragraph.paragraph_name, paragraph.statements, ())
 
 
-def _walk_list(paragraph_name: str, statements: list[Any]) -> Any:
+def _walk_list(
+    paragraph_name: str,
+    statements: list[Any],
+    enclosing: tuple[tuple[str, str], ...],
+) -> Any:
+    """Yield `(paragraph_name, statement, enclosing)`, where `enclosing` is
+    the chain of `(branch_id, arm_id)` pairs -- outermost first -- whose arms
+    must all be taken for `statement` to execute."""
     for statement in statements:
-        yield paragraph_name, statement
-        for nested in _nested_statement_lists(statement):
-            yield from _walk_list(paragraph_name, nested)
+        yield paragraph_name, statement, enclosing
+        is_branch = isinstance(
+            statement, (IfStatement, EvaluateStatement, SearchStatement)
+        )
+        branch_id = (
+            _branch_id(paragraph_name, statement.location) if is_branch else None
+        )
+        for arm_id, nested in _nested_statement_lists(statement):
+            deeper = (
+                enclosing + ((branch_id, arm_id),)
+                if arm_id is not None and branch_id is not None
+                else enclosing
+            )
+            yield from _walk_list(paragraph_name, nested, deeper)
 
 
 def _branch_id(paragraph_name: str | None, location: SourceLocation | None) -> str:

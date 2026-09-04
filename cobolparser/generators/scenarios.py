@@ -18,6 +18,7 @@ here is arm coverage, not full path coverage.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -133,6 +134,14 @@ class PlannedScenario:
     #: "23", SQLCODE "-911") for the fixed error-status family.
     status_overrides: dict[str, str] = field(default_factory=dict)
     arm_keys: list[str] = field(default_factory=list)
+    #: Enclosing arms on this scenario's path whose own conditions could NOT
+    #: be folded in (the arm is not in the constraint report at all, or it
+    #: was recorded with no modeled conjuncts). Each entry is a reason
+    #: string. A non-empty list means this scenario pins its own arm but
+    #: leaves part of the path to whatever the generator happened to
+    #: produce -- so the arm may not actually be reached, and saying so
+    #: beats a silently optimistic label.
+    path_gaps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -149,6 +158,7 @@ class PlannedScenario:
             "sequence_constraints": [s.to_dict() for s in self.sequence_constraints],
             "status_overrides": dict(self.status_overrides),
             "arm_keys": list(self.arm_keys),
+            "path_gaps": list(self.path_gaps),
         }
 
 
@@ -188,6 +198,14 @@ class ScenarioPlanner:
             for bn in flow_report.branch_nodes
         }
         unreachable = {name.upper() for name in flow_report.unreachable_nodes}
+        # Every arm's own conjuncts, keyed the way `BranchConstraints.
+        # enclosing` names them, so a nested arm can pick up the conditions
+        # that must hold for it to be REACHED (see `_path_constraints`).
+        arms_by_key: dict[tuple[str, str], list[FieldConstraint]] = {
+            (b.branch_id, arm_id): constraints
+            for b in constraint_report.branches
+            for arm_id, constraints in b.arms.items()
+        }
 
         details: list[ArmOutcome] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
@@ -219,15 +237,23 @@ class ScenarioPlanner:
                     )
                     continue
 
-                constraints = branch.arms[arm_id]
-                witnesses, unsat_reason = _solve_arm(constraints)
+                options, path_gaps = _path_options(branch, arms_by_key)
+                witnesses, unsat_reason, path = _solve_with_path(
+                    options, branch.arms[arm_id]
+                )
+                constraints = path + branch.arms[arm_id]
                 if unsat_reason is not None:
                     details.append(
                         ArmOutcome(
                             arm_key,
                             branch.parent_proc,
                             "missed",
-                            reason=f"unsatisfiable: {unsat_reason}",
+                            reason=(
+                                f"unsatisfiable with its own path condition: "
+                                f"{unsat_reason}"
+                                if path
+                                else f"unsatisfiable: {unsat_reason}"
+                            ),
                         )
                     )
                     continue
@@ -238,12 +264,19 @@ class ScenarioPlanner:
                 by_field: dict[str, list[FieldConstraint]] = {}
                 for c in constraints:
                     by_field.setdefault(c.field.spec.qualified_name, []).append(c)
+                intent = f"targets branch arm {arm_key}"
+                if path:
+                    enclosing_keys = ", ".join(
+                        f"{bid}/{aid}" for bid, aid in branch.enclosing
+                    )
+                    intent += f" (path condition from {enclosing_keys} included)"
                 scenario = PlannedScenario(
                     name=name,
-                    intent=f"targets branch arm {arm_key}",
+                    intent=intent,
                     field_constraints=by_field,
                     witnesses=witnesses,
                     arm_keys=[arm_key],
+                    path_gaps=path_gaps,
                 )
                 sort_key = f"{branch.line or 0:010d}:{branch.column or 0:010d}:{arm_id}"
                 candidates.append((sort_key, scenario))
@@ -277,6 +310,107 @@ class ScenarioPlanner:
             details=details,
         )
         return ScenarioPlan(scenarios=scenarios, coverage=coverage)
+
+
+def _path_options(
+    branch: BranchConstraints,
+    arms_by_key: dict[tuple[str, str], list[FieldConstraint]],
+) -> tuple[list[list[list[FieldConstraint]]], list[str]]:
+    """Per enclosing arm, the alternative conjunct sets that reach it, plus
+    a reason for each enclosing arm that offers none.
+
+    v1 of this planner took only the targeted arm's own conjuncts and left
+    every enclosing condition to whatever the generator happened to produce.
+    On a nested `IF A > 500 / IF B = "X"` that means the scenario named for
+    the inner arm pins B and lets A fall wherever chance puts it -- so the
+    scenario's own name is a claim its data does not support, and the only
+    way to find out was to run it under `--trace`. Folding the path in makes
+    the name true by construction where the enclosing arms are modeled, and
+    `path_gaps` says so where they are not, rather than staying quiet.
+
+    **Alternatives, not one set, because an OR-split arm is a disjunction.**
+    `_register_variants` registers `THEN#1`/`THEN#2`/... and NO bare `THEN`
+    for a condition containing an OR, while `BranchConstraints.enclosing`
+    names the base arm id -- so a plain `arms_by_key[(branch_id, "THEN")]`
+    lookup misses every such arm and the path silently goes unfolded. Each
+    `#N` variant is one way to satisfy the same arm, so they are returned as
+    alternatives and the caller picks whichever one stays satisfiable
+    alongside the targeted arm's own conjuncts (`_solve_with_path`).
+
+    An enclosing arm the constraint report never recorded (an unsupported
+    condition shape, or a nesting whose branch produced no
+    `BranchConstraints` at all) is a gap, not an error: the scenario is
+    still worth generating, it just cannot promise the arm is reached. So
+    is an arm recorded with no conjuncts -- a `SEARCH ... AT END` or an
+    `EVALUATE`'s unsupported `WHEN OTHER`, whose real precondition is not a
+    field constraint at all.
+    """
+    options: list[list[list[FieldConstraint]]] = []
+    gaps: list[str] = []
+    for branch_id, arm_id in branch.enclosing:
+        exact = arms_by_key.get((branch_id, arm_id))
+        if exact:
+            options.append([exact])
+            continue
+        variants = [
+            constraints
+            for key, constraints in arms_by_key.items()
+            if key[0] == branch_id
+            and _base_arm_id(key[1]) == arm_id
+            and key[1] != arm_id
+            and constraints
+        ]
+        if variants:
+            options.append(variants)
+            continue
+        gaps.append(
+            f"enclosing arm {branch_id}/{arm_id} "
+            + (
+                "was modeled with no conjuncts"
+                if exact is not None
+                else "has no modeled constraints"
+            )
+            + ", so reaching this arm is not pinned by the generated data"
+        )
+    return options, gaps
+
+
+#: Cap on the enclosing-path combinations tried before giving up. An OR-split
+#: enclosing arm contributes one alternative per disjunct, so a deep chain of
+#: them is a cross product; enclosing depth is small in practice and this only
+#: has to keep a pathological program from stalling the planner.
+_MAX_PATH_COMBINATIONS = 32
+
+
+def _solve_with_path(
+    options: list[list[list[FieldConstraint]]],
+    own: list[FieldConstraint],
+) -> tuple[dict[str, str], str | None, list[FieldConstraint]]:
+    """Solve the targeted arm's conjuncts together with one alternative from
+    each enclosing arm, returning `(witnesses, None, path)` for the first
+    combination that solves.
+
+    Trying combinations rather than fixing on the first disjunct matters:
+    for `IF A = 1 OR A = 2 / IF A = 2`, picking `A = 1` for the enclosing
+    arm makes the whole set unsatisfiable and would report the inner arm as
+    unreachable, when in fact `A = 2` reaches it. The last failure's reason
+    is returned when every combination is unsatisfiable, which is the honest
+    answer for an arm genuinely unreachable under its own path.
+    """
+    reason: str | None = None
+    for index, combination in enumerate(itertools.product(*options)):
+        if index >= _MAX_PATH_COMBINATIONS:
+            break
+        path = [c for alternative in combination for c in alternative]
+        witnesses, reason = _solve_arm(path + own)
+        if reason is None:
+            return witnesses, None, path
+    if reason is None:
+        # No options at all (or the cap cut in before any attempt): solve the
+        # arm on its own, exactly as this planner did before path folding.
+        witnesses, reason = _solve_arm(own)
+        return witnesses, reason, []
+    return {}, reason, []
 
 
 def _solve_arm(
@@ -405,6 +539,14 @@ def _merge_candidates(
             target.witnesses.update(candidate.witnesses)
             target.sequence_constraints.extend(candidate.sequence_constraints)
             target.arm_keys.append(arm_key)
+            # A merged-in candidate brings its own unpinned enclosing arms
+            # with it. Dropping them here would let the merged scenario
+            # report "verified" while one of the arms it now claims is not
+            # in fact pinned by the generated data -- the exact silent
+            # false positive `path_gaps` exists to prevent.
+            for gap in candidate.path_gaps:
+                if gap not in target.path_gaps:
+                    target.path_gaps.append(gap)
             target.intent = f"targets {len(target.arm_keys)} branch arms: {', '.join(target.arm_keys)}"
             outcomes.append(
                 ArmOutcome(arm_key, parent_proc, "merged", merged_into=target.name)

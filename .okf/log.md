@@ -3495,3 +3495,68 @@ each surfaced genuine, runtime-reproduced silent drops. Full audit:
   Concepts produced: [lexer](lexer.md), [parser](parser.md),
   [preprocessing](preprocessing.md), [ast-models](ast-models.md),
   [analysis](analysis.md), [cli](cli.md), [tests](tests.md).
+
+## 2026-09-04 — Scenarios verify themselves, and carry their path condition
+
+A scenario's *name* was a claim nothing checked. Two changes, one root cause:
+
+- **[analysis]** `BranchConstraints.enclosing` — every decision point now
+  records the `(branch_id, arm_id)` chain whose arms must all be taken for it
+  to be reached. `_walk_list` threads it down through
+  `_nested_statement_lists`, which pairs each nested statement list with the
+  arm id it sits under; the ids match the keys registered in `arms`, by
+  construction, which is what lets `ScenarioPlanner` join on them. A
+  non-branch nesting (`AT END`, `ON EXCEPTION`, an inline `PERFORM` body)
+  contributes nothing — it is a path condition in the general sense but is
+  not modeled as a branch arm here, and an invented id would join to nothing.
+- **[generators]** `ScenarioPlanner._path_constraints` folds those enclosing
+  conjuncts into a targeted arm's own before solving. This was the biggest
+  single source of scenarios whose data never reached their own arm: on
+  `IF INV-QTY > 500 / IF INV-TYPE = "AB"` the inner arm's scenario pinned
+  `INV-TYPE` and left `INV-QTY` to chance. An arm that becomes unsatisfiable
+  once its path is added is now `missed` with that reason; an enclosing arm
+  that was never modeled becomes a `PlannedScenario.path_gaps` entry rather
+  than silence.
+- **[generators]** New `generators/verification.py` +
+  `Scenario.verification`: after generating, re-read the scenario's OWN rows
+  and re-check every planned conjunct against them. Deliberately independent
+  of the solver — it evaluates against the concrete rendered strings a mock
+  will move into the program, so a solver bug, a rendering bug, and a witness
+  that never reached any fixture all surface as findings. `unknown` is a real
+  answer: `IF WS-INPUT > 0` on a `PIC X(10)` field cannot be decided from a
+  rendered string (IBM COBOL only allows that ordering comparison when the
+  alphanumeric operand is integer-like), and stamping it "verified" would be
+  the same silent optimism this whole change removes.
+
+Measured on the repo's own corpus (shamrice + tests/samples): 115 verified,
+16 unverified across two real finding classes — an ACCEPT-fed text field
+compared to a numeric literal, and enclosing arms with no modeled condition.
+Additive to the bundle (`bundle_version` stays 1); `gen-fixtures` reports on
+stderr, and mockymock renders the reasons as a `*> UNVERIFIED:` comment.
+
+## 2026-09-04 — Review fixes on the path-folding machinery (PR #198)
+
+Three findings from Copilot's review, all verified against the code before
+changing anything, plus one found while verifying them:
+
+- **[generators]** An OR-split enclosing arm was never folded.
+  `_register_variants` registers `THEN#1`/`THEN#2`/... and no bare `THEN`
+  for a condition containing an OR, while `BranchConstraints.enclosing`
+  names the base arm id -- so the join missed every such arm. Replaced
+  `_path_constraints` with `_path_options` (alternatives per enclosing arm)
+  + `_solve_with_path` (try combinations, keep the first that stays
+  satisfiable). Trying rather than fixing on the first disjunct is
+  load-bearing: for `IF A = 100 OR A = 200 / IF A = 200`, the first disjunct
+  makes the set unsatisfiable and would report a reachable arm as missed.
+- **[generators]** `_merge_candidates` dropped a merged-in candidate's
+  `path_gaps` (found while building the repro for the above). That turned an
+  unpinned enclosing arm into a silently `verified` scenario -- the exact
+  false positive the gap list exists to prevent.
+- **[analysis]** SEARCH's `AT END` is a modeled arm (`_extract_search`
+  registers `arms["AT_END"]`) but reached the walk through
+  `_NESTED_STATEMENT_ATTRS` untagged, so a branch nested under it lost its
+  enclosing chain and could read `verified` without its data establishing
+  that the search found nothing. New `_ARM_BEARING_ATTRS` tags it.
+- A test-name typo (`branchs` -> `branches`).
+
+All four pinned by tests in `test_scenario_verification.py`.

@@ -1060,6 +1060,20 @@ def _build_gen_fixtures_parser(
     p.set_defaults(func=_cmd_gen_fixtures)
 
 
+def _verification_reasons(verification: dict[str, Any]) -> list[str]:
+    """Flatten one scenario's verification verdict into printable reasons.
+
+    Reads the serialized dict rather than the `ScenarioVerification` object
+    so this module keeps importing nothing from `generators.verification` --
+    the CLI consumes the same shape a bundle consumer would.
+    """
+    return [
+        f"{entry['field']}: {entry['detail']}"
+        for entry in verification.get("fields", [])
+        if entry.get("status") != "satisfied"
+    ] + list(verification.get("gaps", []))
+
+
 def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
     from ..generators.data.errors import ProgramLayoutError
     from ..generators.program_fixtures import ProgramFixtureGenerator
@@ -1109,6 +1123,27 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         )
     except ProgramLayoutError as exc:
         _fail(str(exc))
+
+    # Self-verification summary on stderr (stdout stays JSON-only -- see
+    # mockymock's `fixtures` contract). A scenario named for a branch arm
+    # whose own generated data does not satisfy that arm is the finding
+    # users previously had to discover by running each case under a tracer,
+    # so it is worth saying out loud even on a successful run.
+    unverified = [
+        scenario
+        for scenario in bundle.scenarios
+        if (scenario.verification or {}).get("status") == "unverified"
+    ]
+    if unverified:
+        print(
+            f"warning: {len(unverified)} of {len(bundle.scenarios)} scenario(s) "
+            f"could not be verified against their own generated data:",
+            file=sys.stderr,
+        )
+        for scenario in unverified:
+            print(f"  {scenario.name}:", file=sys.stderr)
+            for reason in _verification_reasons(scenario.verification or {}):
+                print(f"    - {reason}", file=sys.stderr)
 
     if args.strict and bundle.unresolved:
         print(
