@@ -8,18 +8,24 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
-2026-09-05: `tests/regression/test_data_fast_signature_drift.py` (6 tests)
+2026-09-05: `tests/regression/test_data_fast_signature_drift.py` (8 tests)
 pinning the `_data_fast` signature-drift guard. A compiled extension older
 than its caller (18 parameters vs the 19 `data_clauses.parse_data_item`
 passes -- seen on Python 3.14) used to raise `TypeError` inside every
 data-description entry, which the division loop recovered from by abandoning
 the division: every program with a DATA DIVISION degraded to a near-empty AST.
 The tests cover the import-time probe accepting the real extension, rejecting
-a stale 18-parameter stand-in (warning must name `build_ext`), a full parse
+a stale 18-parameter stand-in (message must name `build_ext`), a full parse
 still yielding all three divisions and both PICTURE clauses on the fallback,
 byte-identical ASTs with and without the fast path, `_DATA_FAST_ARG_COUNT`
 matching the compiled extension's real arity, and a *missing* extension
 staying silent (a normal pure-Python install, not a misconfiguration).
+Two more came out of self-review: `test_import_survives_warnings_as_errors`
+runs a subprocess under `-W error` (the report must go through `logger`, not
+`warnings.warn`, or a stale build breaks `import cobolparser` outright), and
+`test_arg_count_constant_matches_the_real_call_site` parses `data_clauses.py`
+with `ast` to count the literal call's arguments — the constant is a third
+copy of the arity and nothing else pins it to the call it guards.
 The extension-dependent tests `importorskip` `cobolparser._data_fast`.
 
 2026-08-26: `tests/regression/test_tagged_sequence_area_detection.py`
