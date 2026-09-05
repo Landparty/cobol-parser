@@ -8,6 +8,7 @@ data items, PICTURE clauses, OCCURS clauses, and IBM-specific data types.
 import re
 from typing import Any
 
+from .._storage import storage_size
 from .ast_base import ASTNode, SourceLocation
 
 # Pre-compiled regex patterns for PictureClause parsing (avoids re-compilation per instance)
@@ -580,61 +581,92 @@ class CobolDataItem(ASTNode):
         return all_children
 
     def calculate_size(self) -> int:
-        """Calculate the size of this data item in bytes."""
-        # Pointer types are fixed-size and never carry a picture clause.
-        if self.usage in ["POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"]:
-            base_size = 4  # IBM z/OS 31-bit pointer
-            if self.occurs_clause:
-                base_size *= self.occurs_clause.max_times or 1
-            return base_size
+        """Bytes this item occupies, every OCCURS occurrence included.
 
-        if self.is_elementary_item() and self.picture_clause:
-            base_size = self.picture_clause.size or 0
+        Defers to :func:`cobolparser._storage.storage_size` -- the one
+        authority on how many bytes a data item takes, shared with the
+        record-image encoder and with ``layout_offsets`` (which backs the
+        ``data-items`` subcommand), so no elementary item's width can drift
+        between them.  This method used to carry its own copy of that
+        arithmetic and had drifted in six ways: it knew
+        ``COMP``/``COMP-4``/``COMP-3`` but not the
+        ``BINARY``/``COMPUTATIONAL``/``COMPUTATIONAL-3`` spellings of the
+        same usages (so ``PIC S9(9) BINARY`` reported 9 bytes, not 4); it
+        reached its ``COMP-1``/``COMP-2`` branch only for an item that had a
+        PICTURE, which those usages never do (so both reported 0, as did
+        ``USAGE INDEX``); it never spent the extra byte a DISPLAY item with
+        ``SIGN IS SEPARATE`` needs, which the PICTURE's character count does
+        not include; it summed a group's REDEFINES children on top of what
+        they redefine instead of sharing one slot; and it applied an OCCURS
+        multiplier to elementary items only, never to a group.
 
-            # Adjust for USAGE clauses
-            if self.usage in ["COMP-3", "PACKED-DECIMAL"]:
-                # COMP-3 / PACKED-DECIMAL: (digits + 1) / 2 rounded up
-                if self.picture_clause.total_digits:
-                    comp3_size = (self.picture_clause.total_digits + 1) // 2
-                    if (self.picture_clause.total_digits + 1) % 2:
-                        comp3_size += 1
-                    base_size = comp3_size
-            elif self.usage in [
-                "COMP",
-                "COMP-4",
-                "COMP-5",
-                "COMPUTATIONAL-4",
-                "COMPUTATIONAL-5",
-            ]:
-                # Binary: depends on digits
-                if self.picture_clause.total_digits:
-                    if self.picture_clause.total_digits <= 4:
-                        base_size = 2
-                    elif self.picture_clause.total_digits <= 9:
-                        base_size = 4
-                    else:
-                        base_size = 8
-            elif self.usage in ["COMP-1"]:
-                base_size = 4  # Single precision float
-            elif self.usage in ["COMP-2"]:
-                base_size = 8  # Double precision float
+        One divergence from ``layout_offsets`` is deliberate rather than
+        drift, and shared widths do not remove it: under
+        ``OCCURS ... DEPENDING ON`` this reserves the table's **maximum**
+        (matching ``generators.data.layout``/``encoding``, and so the record
+        images ``gen-data`` writes), while ``layout_offsets`` reserves a
+        single occurrence because the real multiplier is not known until
+        run time.  Across the sample and NIST corpora that is the only thing
+        the two disagree about: 18,121 records, 14 differences, every one an
+        ODO table.
+        """
+        return self._occurrence_size() * self._occurs_multiplier()
 
-            # Apply OCCURS clause
-            if self.occurs_clause:
-                occurs_count = self.occurs_clause.max_times or 1
-                base_size *= occurs_count
+    def _occurs_multiplier(self) -> int:
+        """How many occurrences this item's OCCURS clause reserves.
 
-            return base_size
+        ``OCCURS ... DEPENDING ON`` is counted at its maximum, matching how
+        every other layout surface in the package flattens a variable table.
+        """
+        occurs = self.occurs_clause
+        if occurs is None:
+            return 1
+        return occurs.max_times or occurs.min_times or 1
 
-        elif self.is_group_item():
-            # Group item size is sum of children
-            total_size = 0
-            for child in self.children:
-                if isinstance(child, CobolDataItem):
-                    total_size += child.calculate_size()
-            return total_size
+    def _occurrence_size(self) -> int:
+        """Bytes *one* occurrence of this item occupies."""
+        children = self._direct_data_children()
+        if not children:
+            picture = self.picture_clause
+            return storage_size(
+                self.usage,
+                picture_size=picture.size if picture else None,
+                total_digits=picture.total_digits if picture else None,
+                sign_clause=self.sign_clause,
+                is_signed=bool(picture and picture.is_signed),
+            )
 
-        return 0
+        # A group is the sum of its REDEFINES *slots*, not of its children.
+        # COBOL requires a REDEFINES entry to immediately follow the item it
+        # redefines, so a slot is a contiguous run of ``[base, redefiner,
+        # ...]`` sharing one piece of storage; the slot costs the largest
+        # member, and only closing it advances the running total.  Same rule
+        # as ``layout_offsets._layout_siblings``.
+        total = 0
+        slot = 0
+        for child in children:
+            if not child.redefines:
+                total += slot
+                slot = 0
+            slot = max(slot, child.calculate_size())
+        return total + slot
+
+    def _direct_data_children(self) -> list["CobolDataItem"]:
+        """Direct children that are real subordinate storage.
+
+        Level-88 condition names are :class:`ConditionNameItem` and never
+        appear here.  A level-66 RENAMES entry re-groups storage that is
+        already counted, and a level-77 is by definition a standalone record
+        that the parser's level-number nesting can misfile under a preceding
+        group -- counting either would double-count bytes (and, for the 77,
+        would misclassify its parent as a group and discard the parent's own
+        PICTURE).  Matches ``layout_offsets._direct_data_children``.
+        """
+        return [
+            child
+            for child in self.children
+            if isinstance(child, CobolDataItem) and child.level not in (66, 77)
+        ]
 
     def to_dict(self) -> dict[str, Any]:
         """Convert data item to dictionary representation."""

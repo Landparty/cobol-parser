@@ -86,7 +86,7 @@
            05  WS-ALPHA-LOWER      PIC X(10) VALUE 'lowercase'.
            05  WS-ALPHA-UPPER      PIC X(10) VALUE 'UPPERCASE'.
            05  WS-NUMERIC-FIELD    PIC X(10) VALUE '1234567890'.
-           05  WS-MIXED-FIELD      PIC X(20) VALUE 'Mixed123-With/Chars'.
+           05  WS-MIXED-FIELD     PIC X(20) VALUE 'Mixed123-With/Chars'.
            
        01  WS-SYMBOLIC-CHARS.
            05  WS-DEGREE           PIC X VALUE DEGREE-SIGN.

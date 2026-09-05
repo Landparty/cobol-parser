@@ -8,6 +8,34 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-09-05 (repo audit): `tests/test_all_samples.py` collected **zero
+tests**. It held only `run_sample_tests`-style helper functions -- none
+named `test_*` -- even though the project documents it as the file that
+"smoke-tests all sample COBOL programs". Nothing checked `tests/samples/`
+as a corpus at all, and that gap had let real fixture rot through: **32
+lines across 13 sample programs ran past column 72**, the end of Area B in
+fixed-format COBOL -- 30 of them carrying real code or comment text, the
+other two only trailing spaces. `normalize_fixed_format` discards columns 73+ exactly
+as a compiler does, so the truncation was silent -- the parser saw
+`WS-EXCEPTION-MSG` as `WS-EXCEPTION-M`, data items lost their terminating
+period, and `complex_data_structures.cbl` had an unterminated literal that
+failed to parse outright. Those samples feed the wider suite, so thousands
+of tests were asserting against programs that were not the programs on
+disk. All 32 lines are fixed (dedented, wrapped, or -- for comment banners
+-- shortened; no token changed), and `TestSampleCorpus` now pins both the
+cause and the effect: `test_sample_respects_fixed_format_columns` and
+`test_sample_parses_without_errors`, each parametrized over every `*.cbl`
+under `tests/samples/` (48 programs, 96 tests). The column test fails only
+on **non-whitespace** past column 72 and reports the discarded text rather
+than a line length (Copilot review, PR #205): trailing spaces there are
+discarded too, but discarding them changes nothing, and failing on them
+would make the test hostage to whichever editor last touched the file. `EXPECTED_PARSE_ERRORS`
+documents the two samples that are meant to fail --
+`error_recovery_tests.cbl` (purpose-built malformed input) and
+`special_names_config.cbl` (a non-ASCII `¥` currency symbol the lexer
+rejects) -- so anything else reporting an error is a regression, in the
+parser or in the fixture. The runner helpers are kept.
+
 2026-09-05: `tests/regression/test_data_fast_signature_drift.py` (8 tests)
 pinning the `_data_fast` signature-drift guard. A compiled extension older
 than its caller (18 parameters vs the 19 `data_clauses.parse_data_item`

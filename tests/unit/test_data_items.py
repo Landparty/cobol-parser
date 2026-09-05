@@ -1150,3 +1150,141 @@ def test_picture_clause_comprehensive_edge_cases():
     PictureClause("-.", location)  # Empty integer and decimal parts
 
     # These should all parse without errors, potentially with default values
+
+
+class TestCalculateSizeRegressions:
+    """Regression tests for the audit finding that ``calculate_size`` had
+    drifted from :func:`cobolparser._storage.storage_size`, the package's
+    single authority on how many bytes a data item occupies.
+
+    Six separate wrong answers -- the four usage/PICTURE ones, the missing
+    ``SIGN IS SEPARATE`` byte, and the two group-shape ones (REDEFINES and a
+    group's own OCCURS) -- all now fixed by deferring to that one
+    implementation (the same one the record-image encoder and
+    ``layout_offsets`` -- which backs the ``data-items`` subcommand -- use).
+    ``calculate_size`` is reported to consumers as ``calculated_size`` in
+    every data item's ``to_dict()``, and as the record ``size`` of
+    ``gen-data --list-records``, so each of these was a wrong number in a
+    published API.
+    """
+
+    @staticmethod
+    def _item(name, picture=None, usage=None, level=5):
+        location = SourceLocation(1, 1)
+        item = CobolDataItem(name, level, location)
+        if picture is not None:
+            item.set_picture_clause(PictureClause(picture, location))
+        if usage is not None:
+            item.set_usage(usage)
+        return item
+
+    def test_binary_usage_aliases_match_comp(self):
+        """BINARY and COMPUTATIONAL are spellings of COMP, not DISPLAY.
+
+        Only ``COMP``/``COMP-4``/``COMP-5``/``COMPUTATIONAL-4``/
+        ``COMPUTATIONAL-5`` were recognised, so ``PIC S9(9) BINARY``
+        fell through to its PICTURE character count and reported 9.
+        """
+        for usage in ("COMP", "COMP-4", "BINARY", "COMPUTATIONAL"):
+            item = self._item("WS-N", "S9(9)", usage)
+            assert item.calculate_size() == 4, f"{usage} should be a fullword"
+
+    def test_computational_3_matches_comp_3(self):
+        """COMPUTATIONAL-3 is a spelling of COMP-3.
+
+        The packed branch tested only ``COMP-3``/``PACKED-DECIMAL``, so
+        ``COMPUTATIONAL-3`` reported its 9 PICTURE characters, not 5 bytes.
+        """
+        assert self._item("WS-A", "S9(7)V99", "COMPUTATIONAL-3").calculate_size() == 5
+
+    def test_pictureless_usages_have_their_real_width(self):
+        """COMP-1, COMP-2 and INDEX carry no PICTURE and used to report 0.
+
+        The old implementation reached its usage branches only inside an
+        ``is_elementary_item()`` guard, which requires a PICTURE -- so the
+        COMP-1/COMP-2 branch was unreachable for the only items that can
+        ever use it, and INDEX had no branch at all. A zero-width item
+        silently collapses every offset after it in its record.
+        """
+        assert self._item("WS-F", usage="COMP-1").calculate_size() == 4
+        assert self._item("WS-D", usage="COMP-2").calculate_size() == 8
+        assert self._item("WS-I", usage="INDEX").calculate_size() == 4
+
+    def test_redefines_shares_storage_instead_of_adding_to_it(self):
+        """A group is the sum of its REDEFINES slots, not of its children.
+
+        ``05 B REDEFINES A`` occupies the same bytes as A, so a record
+        holding both is 10 bytes, not 20.
+        """
+        group = self._item("REC", level=1)
+        base = self._item("A", "X(10)")
+        redefiner = self._item("B", "9(10)")
+        redefiner.set_redefines("A")
+        group.add_child(base)
+        group.add_child(redefiner)
+
+        assert group.calculate_size() == 10
+
+    def test_group_occurs_multiplies_the_group(self):
+        """A group's own OCCURS multiplier was never applied.
+
+        The multiplication sat inside the elementary branch, so a table of
+        groups reported one occurrence's size: ``05 ROW OCCURS 5`` of a
+        4-byte group came back as 4 bytes rather than 20.
+        """
+        location = SourceLocation(1, 1)
+        table = self._item("TBL", level=1)
+        row = self._item("ROW")
+        occurs = OccursClause(location)
+        occurs.set_fixed_occurs(5)
+        row.set_occurs_clause(occurs)
+        row.add_child(self._item("C", "X(4)", level=10))
+        table.add_child(row)
+
+        assert row.calculate_size() == 20
+        assert table.calculate_size() == 20
+
+    def test_sign_is_separate_costs_a_byte(self):
+        """A DISPLAY ``SIGN IS SEPARATE`` byte is not counted by the PICTURE."""
+        item = self._item("WS-S", "S9(5)")
+        item.sign_clause = "LEADING SEPARATE"
+        assert item.calculate_size() == 6
+
+    def test_matches_layout_offsets_for_the_same_record(self):
+        """The two size authorities must agree on a real parsed record.
+
+        ``compute_record_layout`` backs the ``data-items`` subcommand and
+        already deferred to ``storage_size``; ``calculate_size`` now does
+        too, so a record's reported length cannot depend on which surface
+        the caller happened to ask.
+        """
+        from cobolparser import parse_cobol
+        from cobolparser.generators.data.layout_offsets import compute_record_layout
+
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SIZES.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 REC.
+          05 A-BINARY  PIC S9(9) BINARY.
+          05 A-C3      PIC S9(7)V99 COMPUTATIONAL-3.
+          05 A-IDX     USAGE INDEX.
+          05 A-COMP1   COMP-1.
+          05 A-TEXT    PIC X(10).
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="sizes.cbl")
+        assert result.ast is not None
+        record = next(
+            item
+            for item in result.ast.find_all_by_type("CobolDataItem")
+            if item.name == "REC"
+        )
+        root = next(
+            layout
+            for layout in compute_record_layout(record)
+            if layout.qualified_name == "REC"
+        )
+        assert record.calculate_size() == root.byte_length == 4 + 5 + 4 + 4 + 10

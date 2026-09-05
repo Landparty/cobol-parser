@@ -1,6 +1,6 @@
       *****************************************************************
       * Real-World COBOL Example: Advanced CALL Patterns
-      * Demonstrates: BY REFERENCE, BY VALUE, RETURNING, EXCEPTION handling
+      * Demonstrates: BY REFERENCE, BY VALUE, RETURNING, EXCEPTION
       * Use Case: Complex financial calculations with error handling
       *****************************************************************
        IDENTIFICATION DIVISION.

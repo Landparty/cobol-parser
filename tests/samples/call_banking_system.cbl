@@ -72,7 +72,7 @@
                                       BY REFERENCE WS-AUTH-FLAG
                    ON EXCEPTION
                        MOVE 001 TO WS-ERROR-CODE
-                       MOVE 'Auth service unavailable' TO WS-ERROR-MESSAGE
+                     MOVE 'Auth service unavailable' TO WS-ERROR-MESSAGE
            
            IF WS-AUTH-FLAG = 'Y'
       *        CALL fraud detection - static name
@@ -122,7 +122,7 @@
                ELSE
                    MOVE 'N' TO WS-SUCCESS-FLAG
                    MOVE 006 TO WS-ERROR-CODE
-                   MOVE 'Fraudulent activity detected' TO WS-ERROR-MESSAGE
+                 MOVE 'Fraudulent activity detected' TO WS-ERROR-MESSAGE
                END-IF
            ELSE
                MOVE 'N' TO WS-SUCCESS-FLAG

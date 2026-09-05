@@ -148,7 +148,7 @@
            
       *    Rate roaming charges
            CALL WS-ROAMING-RATING USING BY REFERENCE WS-ROAMING-USAGE
-                                              BY REFERENCE WS-ROAMING-CHARGES
+                                         BY REFERENCE WS-ROAMING-CHARGES
                    ON EXCEPTION
                        MOVE 005 TO WS-ERROR-CODE.
            

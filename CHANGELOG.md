@@ -141,6 +141,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **models:** `CobolDataItem.calculate_size()` reported the wrong byte width
+  for six kinds of data item, and now defers to `storage_size` -- the same
+  single authority `generators/data/{layout,encoding,layout_offsets}.py`
+  already used. `PIC S9(9) BINARY` and `... COMPUTATIONAL` reported 9 bytes
+  instead of 4 and `PIC S9(7)V99 COMPUTATIONAL-3` reported 9 instead of 5
+  (the usage branches knew only the `COMP`/`COMP-4`/`COMP-3` spellings);
+  `COMP-1`, `COMP-2` and `USAGE INDEX` all reported **0** (every usage branch
+  sat behind an `is_elementary_item()` guard, which requires a PICTURE that
+  none of those three carries -- and a zero-width item silently collapses
+  every byte offset after it); a group added its `REDEFINES` children on top
+  of what they redefine instead of sharing one slot (`05 A PIC X(10)` plus
+  `05 B REDEFINES A` came back as 20 bytes, not 10); and a group's own
+  `OCCURS` multiplier was never applied (`05 ROW OCCURS 5 TIMES` of a 4-byte
+  group came back as 4 bytes, not 20). The value is published as
+  `calculated_size` on every data item's `to_dict()` and as the record `size`
+  of `gen-data --list-records`, so each of these was a wrong number in a
+  consumer-visible API. The implementation moved to `cobolparser/_storage.py`
+  (beside `_errors.py`, and dependency-free for the same reason -- importing
+  `generators.data.storage` from a model would close an import cycle);
+  `generators/data/storage.py` is now a re-export shim and its existing
+  importers are unaffected.
+
+* **analysis:** `DeadCodeAnalyzer` reported **no dead code at all** for the
+  most common COBOL program shape -- a `MAIN` paragraph of `PERFORM`s
+  followed by the paragraphs it performs. The fall-through pass credited an
+  implicit edge out of any procedure in `_referenced_names`, which includes
+  `PERFORM`, `PERFORM ... THRU` and SORT/MERGE procedure targets; a `PERFORM`
+  returns to its caller at the end of its range rather than running on into
+  the next paragraph, so every unreferenced paragraph sitting after a
+  performed one was kept alive by an edge that cannot happen at runtime.
+  Fall-through now propagates only out of a *fall-through source* -- the
+  entry point, an `ENTRY` paragraph, a `GO TO`/`ALTER` target, or something
+  already reached by falling in -- tracked separately from plain reference
+  marking. `PERFORM A THRU C` still marks its whole range referenced, and
+  still does not escape past C.
+
+* **tests:** `tests/test_all_samples.py` collected zero tests despite being
+  the documented smoke test for the COBOL sample corpus -- it held only
+  helper functions, none named `test_*`. With nothing checking the corpus,
+  32 lines across 13 sample programs had drifted past column 72, the end of
+  Area B in fixed-format COBOL, 30 of them carrying real code or comment
+  text. Columns 73+ are discarded before lexing
+  exactly as a compiler discards them, so the truncation was silent: the
+  parser saw `WS-EXCEPTION-MSG` as `WS-EXCEPTION-M`, data items lost their
+  terminating period, and `complex_data_structures.cbl` was left with an
+  unterminated literal that failed to parse outright. Those samples are
+  inputs to the wider suite, so a large number of tests were asserting
+  against programs that were not the programs on disk. All 32 lines are
+  fixed without changing a token, and `TestSampleCorpus` now pins both the
+  column rule (failing only on non-whitespace past column 72, and reporting
+  the discarded text) and a clean parse for every sample.
+
+
 * **generators:** `USAGE INDEX` was sized as **zero bytes** in
   `layout_offsets` (it carries no PICTURE, so it fell through to a
   picture-derived width), silently collapsing the byte offset of every item

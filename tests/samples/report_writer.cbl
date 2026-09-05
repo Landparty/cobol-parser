@@ -85,7 +85,7 @@
                    
        01  TYPE IS CONTROL FOOTING IN-SALESPERSON.
            05  LINE NUMBER IS PLUS 1.
-               10  COLUMN 40       PIC X(20) VALUE 'SALESPERSON TOTAL: '.
+              10  COLUMN 40       PIC X(20) VALUE 'SALESPERSON TOTAL: '.
                10  COLUMN 60       PIC ZZZ,ZZ9 
                    SUM IN-QUANTITY
                    RESET ON IN-SALESPERSON.
@@ -166,7 +166,7 @@
            
        01  SUMMARY-HEADING TYPE IS PAGE HEADING.
            05  LINE NUMBER IS 1.
-               10  COLUMN 1        PIC X(30) VALUE 'SALES SUMMARY REPORT'.
+             10  COLUMN 1        PIC X(30) VALUE 'SALES SUMMARY REPORT'.
                
        01  SUMMARY-DETAIL TYPE IS DETAIL.
            05  LINE NUMBER IS PLUS 1.
