@@ -10,8 +10,14 @@ clause dispatch loop; it calls back into the parser's
 ``_parse_picture_clause`` / ``_parse_value_clause`` / ``_parse_usage_clause``
 methods, which the ``DataDivisionParser`` keeps as stable delegating wrappers
 around this class — so the compiled extension's callback surface is unchanged.
+
+That extension is compiled separately from this module and can therefore be
+older than it. ``_data_fast_usable`` probes the compiled helper once at import
+and disables the fast path (with a warning naming the rebuild) when it does not
+match, so a stale binary costs speed rather than correctness.
 """
 
+import warnings
 from typing import Any
 
 from cobolparser._literals import quote_literal
@@ -158,6 +164,39 @@ _WHITESPACE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+# Number of positional arguments ``parse_data_item`` passes to the compiled
+# clause helper. Keep in sync with the call site below; ``_data_fast_usable``
+# checks the compiled extension against it at import time.
+_DATA_FAST_ARG_COUNT = 19
+
+
+def _data_fast_usable(helper: Any) -> bool:
+    """True if the compiled clause helper matches this module's call site.
+
+    ``_data_fast`` is compiled separately from this module, so the two can
+    drift out of step: a stale in-place ``.so``, a cached ``build/`` tree, or
+    an installed wheel built from an older revision all leave a binary whose
+    signature no longer matches the call in :meth:`parse_data_item`. Because
+    that call is unconditional and positional, the drift used to surface as a
+    ``TypeError`` raised from the middle of every data-description entry,
+    which the division loop recorded as a generic error and recovered from by
+    abandoning the division — so a *build* problem degraded every program with
+    a DATA DIVISION to a near-empty AST instead of naming its own cause.
+
+    Probing costs one call: with an empty token list the helper's clause loop
+    never runs, so it returns its ``pos`` argument without reading any other
+    parameter (hence the ``None`` placeholders). That validates arity, which
+    is the drift that actually happens — parameters get appended as the fast
+    path grows. It cannot detect a same-arity extension whose parameters were
+    reordered; nothing cheap can, and that has never been the failure mode.
+    """
+    probe_args = [[], 0] + [None] * (_DATA_FAST_ARG_COUNT - 2)
+    try:
+        return bool(helper(*probe_args) == 0)
+    except Exception:
+        return False
+
+
 # Optional Cython acceleration for the picture-clause inner loop. The
 # pure-Python implementation in ``parse_picture_clause`` below remains
 # the authoritative behaviour; we only delegate when the extension is
@@ -167,11 +206,22 @@ try:
     from cobolparser._data_fast import (  # type: ignore[import-not-found]
         parse_data_item_clauses_fast as _fast_data_item_clauses,
     )
-
-    _HAS_DATA_FAST = True
 except ImportError:
     _fast_data_item_clauses = None
     _HAS_DATA_FAST = False
+else:
+    _HAS_DATA_FAST = _data_fast_usable(_fast_data_item_clauses)
+    if not _HAS_DATA_FAST:
+        _fast_data_item_clauses = None
+        warnings.warn(
+            "cobolparser._data_fast does not match this version of "
+            "cobolparser and has been disabled; parsing falls back to the "
+            "pure-Python path (same results, slower). Rebuild the extension "
+            "with `python setup.py build_ext --inplace`, or reinstall "
+            "cobolparser, to restore it.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 class DataItemClauseParser:
@@ -281,6 +331,10 @@ class DataItemClauseParser:
                 token_stream._pos = new_pos  # type: ignore[attr-defined]
                 # Fall through (no early return): the Python loop below
                 # finishes any clauses the fast helper handed back.
+                #
+                # The argument list above is positional and must stay
+                # _DATA_FAST_ARG_COUNT long; the import-time probe checks the
+                # compiled extension against that count.
 
         # Parse clauses until period or next item
         while not token_stream.is_empty():

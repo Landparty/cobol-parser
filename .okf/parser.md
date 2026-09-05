@@ -149,6 +149,27 @@ signatures — the compiled `_data_fast` extension receives the division parser
 as `parser_self` and calls those three back by name. New clause logic goes in
 `DataItemClauseParser`; the wrappers must stay.
 
+**`_data_fast` signature-drift guard (`data_clauses.py`, 2026-09-05):** the
+callback surface above is only half the contract; the other half is the
+19-argument positional call `parse_data_item` makes into
+`parse_data_item_clauses_fast`. Because the extension is compiled separately
+from its caller, a stale *build* (in-place `.so` older than the tree, cached
+`build/`, an installed wheel shadowing the source) leaves a binary whose arity
+no longer matches. `try/except ImportError` does not catch that: the import
+succeeds and the call raises `TypeError` from the middle of every
+data-description entry, which `parser.py`'s broad `except Exception` recorded
+as a generic line-1 error and recovered from by abandoning the division --
+losing the DATA *and* PROCEDURE divisions. Reported on Python 3.14 against an
+18-parameter build.
+
+`_data_fast_usable()` now probes the compiled helper once at import (empty
+token list -> the clause loop never runs -> it returns `pos` untouched) and, on
+mismatch, sets `_HAS_DATA_FAST = False` with a `RuntimeWarning` naming the
+rebuild. **Adding a parameter to `parse_data_item_clauses_fast` means updating
+`_DATA_FAST_ARG_COUNT` alongside the call site.** Full mechanics in
+[lexer.md](lexer.md) ("Signature-drift guard");
+`tests/regression/test_data_fast_signature_drift.py`.
+
 **SCREEN/COMMUNICATION SECTION recognition (`data.py`, 2026-08-13) and REPORT SECTION parsing (2026-09-02):**
 `DataDivisionParser` recognizes FILE, WORKING-STORAGE, LOCAL-STORAGE,
 LINKAGE and -- since 2026-09-02 -- REPORT as real sections. SCREEN SECTION
