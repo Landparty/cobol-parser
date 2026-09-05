@@ -8,6 +8,54 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-09-05 (part 3): `TestBothMechanismsAtOnce` in the same file, after a
+Copilot review on PR #204 found the "table decides" rule documented but not
+implemented -- a record declaring *both* an ODO table and an FD
+`RECORD VARYING` range had the FD-drawn length cut on top of the ODO
+trimming. The class pins every surface agreeing: no length drawn for such a
+record, `minimum_record_length()` taking the layout's floor rather than the
+FD's, `record_lengths()` still summing to the bytes `to_records()` writes,
+the hex dump reporting the layout's span while still printing the FD clause
+as metadata, and a `data_length` passed *directly* to `encode_record` /
+`row_record_length` being ignored for an ODO layout but still honoured
+without one. `TestOdoLayout` also grew two bounds tests: disjoint ranges for
+one counter collapse to the tightest maximum (over-counting names bytes the
+record does not have), overlapping ones still intersect.
+
+2026-09-05 (part 2): the same file grew `TestFdRecordVarying` and
+`TestExplicitVaryingRange` for the FD `RECORD VARYING` mechanism, which no
+`OCCURS DEPENDING ON` walk can see — the record is flat and the length lives
+in the RDW. The former works mainframestechhelp.com's `EMPVL` example end to
+end (the FD clause picked up with no flag at all, every drawn length inside
+47..80, the cut falling mid-`EMP-COMMENT`, the RDW carrying it, and a seed
+reproducing the lengths); the latter covers
+`DataGeneratorOptions.record_varying` for a copybook that has no FD, its
+clamping to the record's real length, and the degenerate equal-bounds case.
+`tests/unit/cli/test_gen_data_cli.py::TestRecordVaryingFlag` covers the
+`--record-varying` flag, `MIN-MAX` as well as `MIN:MAX`, malformed ranges,
+and that passing it alone resolves to `auto` while an explicit
+`--record-format fixed` still wins. That last point is why
+`TestRecordFormatFlag::test_the_default_is_fixed` now asserts the *resolved*
+format rather than the parsed one: argparse's default had to become `None` to
+stay distinguishable from an explicit `fixed`.
+
+2026-09-05: `tests/unit/generators/data/test_variable_length.py` (56 tests)
+covering fixed- vs variable-length record generation end to end --
+`OdoControl`/`odo_counter_bounds` linking (including a `max_occurs` cap
+narrowing the bounds and a declared `OCCURS 0 TO n` keeping its zero),
+`present_indexes` trimming (the field declared *after* the table has to
+shift up; IBM complex ODO trims each outer occurrence by its own counter),
+generated counters staying inside the table's bounds even under
+`unique_fields`, RDW framing and its 0xFFFF ceiling, the length trio, and
+format-dependent caveats. Its load-bearing invariant is the one tying both
+readings together: a full-count `variable-bare` record is byte-for-byte the
+`fixed` record. `tests/unit/cli/test_gen_data_cli.py::TestRecordFormatFlag`
+(11 tests) covers the `--record-format` flag, walking the written file's RDW
+chain and asserting it lands exactly on EOF. The two additive `FieldSpec`
+keys are pinned in
+`tests/contracts/test_copybook_data_generator_contract.py`'s
+`_FIELD_SPEC_KEYS`; `tests/regression/test_fixturedemo_golden.py`'s golden
+bundle was regenerated for them (no generated value changed).
 2026-09-05 (repo audit): `tests/test_all_samples.py` collected **zero
 tests**. It held only `run_sample_tests`-style helper functions -- none
 named `test_*` -- even though the project documents it as the file that
@@ -751,7 +799,11 @@ triggered from the Actions tab. Run the full suite locally during development
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
   `gen-data --format record|hex` flags, that CSV output is unchanged by any
   of them, and (counting `encode_record` calls) that `--output` encodes the
-  dataset exactly once
+  dataset exactly once. `::TestRecordFormatFlag` covers `--record-format`
+  alongside it
+* `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
+  record length: ODO layout linking, per-row trimming, counter bounds, RDW
+  framing, and the length reporting built on them
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
 * [generators.md](generators.md) — flowchart, copybook → CSV, program layout
   index, and program fixture bundle generator tests

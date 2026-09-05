@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
@@ -26,6 +27,124 @@ class FieldCategory(StrEnum):
     NUMERIC_EDITED = "numeric-edited"
     ALPHANUMERIC_EDITED = "alphanumeric-edited"
     FLOAT = "float"
+
+
+@dataclass(frozen=True)
+class OdoControl:
+    """One ``OCCURS ... DEPENDING ON`` dimension a field sits inside.
+
+    The layout is always flattened at the table's *maximum*, because a
+    ``FieldSpec`` list has to describe every byte the record could occupy.
+    Whether a given occurrence is actually *present* in a given record is a
+    per-row question, answered at encoding time from the counter's own
+    generated value -- which is what makes variable-length output possible
+    without a second flattening pass.
+
+    Attributes:
+        depending_on: The counter data name from the ``DEPENDING ON`` phrase.
+        subscript_index: Position in :attr:`FieldSpec.subscripts` of the
+            dimension this counter controls.  A field is present in a record
+            iff ``subscripts[subscript_index] <= counter`` for every control
+            it carries -- nested ODO tables each contribute one.
+        min_times: Lower bound from ``OCCURS min TO max``.
+        max_times: Upper bound from ``OCCURS min TO max``, already clamped to
+            the occurrences the layout actually expanded (``max_occurs`` and
+            the hard cap can both cut a table short, and a counter naming an
+            occurrence that was never flattened would describe bytes that do
+            not exist).
+    """
+
+    depending_on: str
+    subscript_index: int
+    min_times: int
+    max_times: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the control (used by the CLI's ``--describe`` output)."""
+        return {
+            "depending_on": self.depending_on,
+            "subscript_index": self.subscript_index,
+            "min_times": self.min_times,
+            "max_times": self.max_times,
+        }
+
+
+@dataclass(frozen=True)
+class VaryingLength:
+    """An FD's declared record-length range: how long a record may be.
+
+    The *other* way a COBOL record varies, and the one an ``OCCURS ...
+    DEPENDING ON`` walk cannot see::
+
+        FD  EMPFILE
+            RECORD VARYING FROM 47 TO 80 CHARACTERS
+                   DEPENDING ON EMPREC-LEN
+            RECORDING MODE IS V.
+        01  EMP-RECORD80.
+            ...
+
+    The record layout here is an ordinary fixed one -- no table, nothing
+    subordinate to a counter.  What varies is how many of its bytes each
+    record actually carries; the program sets ``EMPREC-LEN`` before a WRITE
+    and reads it back after a READ, and the length itself travels in the
+    RDW rather than anywhere in the record.  So the length has to be drawn
+    per record at generation time (see
+    :meth:`~.copybook.CopybookDataGenerator.generate_from_record`) and
+    handed to the encoder, which is exactly what ``data_length`` on
+    :func:`.encoding.encode_record` is for.
+
+    ``RECORD CONTAINS 47 TO 80`` declares the same thing without the
+    ``VARYING`` keyword and is treated identically.
+
+    Attributes:
+        minimum: Shortest record the FD permits, in bytes.
+        maximum: Longest, already clamped to the bytes the record layout
+            actually describes -- an FD promising more than its own 01 can
+            hold is a mismatch, reported as a caveat rather than padded.
+        depending_on: The ``DEPENDING ON`` data name, when the clause has
+            one.  Usually a WORKING-STORAGE item rather than part of the
+            record, which is why it is recorded but rarely writable.
+    """
+
+    minimum: int
+    maximum: int
+    depending_on: str | None = None
+
+    @classmethod
+    def from_fd_clauses(
+        cls, clauses: dict[str, Any] | None, *, record_size: int
+    ) -> VaryingLength | None:
+        """Read an FD's ``RECORD`` clause, or ``None`` if it declares no range.
+
+        *record_size* clamps :attr:`maximum`; see its note above.
+        """
+        block = (clauses or {}).get("record") or {}
+        low, high = block.get("min"), block.get("max")
+        if low is None or high is None or low == high:
+            return None
+        return cls.build(int(low), int(high), block.get("depending_on"), record_size)
+
+    @classmethod
+    def build(
+        cls,
+        minimum: int,
+        maximum: int,
+        depending_on: str | None,
+        record_size: int,
+    ) -> VaryingLength | None:
+        """A range clamped into what the layout can actually produce."""
+        low, high = sorted((max(0, minimum), max(0, maximum)))
+        if record_size > 0:
+            low, high = min(low, record_size), min(high, record_size)
+        return cls(low, high, depending_on) if high > low else None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the range (used by the CLI's ``--describe`` output)."""
+        return {
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "depending_on": self.depending_on,
+        }
 
 
 @dataclass
@@ -61,9 +180,21 @@ class FieldSpec:
         synchronized: Whether the item carries ``SYNCHRONIZED``.  Recorded
             rather than acted on -- see :func:`.encoding.encoding_caveats`.
         occurs_depending_on: The controlling data name when this field sits
-            inside an ``OCCURS ... DEPENDING ON`` table (the field's own or
-            any ancestor's), else ``None``.  The table is always flattened
-            at its maximum, so this marks where that assumption was made.
+            inside an ``OCCURS ... DEPENDING ON`` table (the outermost one,
+            when several nest), else ``None``.  The table is always
+            flattened at its maximum, so this marks where that assumption
+            was made.
+        odo_controls: Every ``OCCURS ... DEPENDING ON`` dimension this field
+            sits inside, outermost first -- the machine-readable form of
+            :attr:`occurs_depending_on`, and what
+            :func:`.encoding.encode_record` consults to decide whether this
+            occurrence belongs in a variable-length record.
+        odo_counter_bounds: ``(min, max)`` occurrence counts this field
+            *controls*, when it is itself the counter named by some table's
+            ``DEPENDING ON`` phrase.  ``None`` for every other field.  Set on
+            the counter rather than derived at generation time so
+            :class:`~.values.ValueFactory` can draw a count the table can
+            actually hold instead of any value the PICTURE permits.
     """
 
     name: str
@@ -85,6 +216,8 @@ class FieldSpec:
     sign_clause: str | None = None
     synchronized: bool = False
     occurs_depending_on: str | None = None
+    odo_controls: tuple[OdoControl, ...] = ()
+    odo_counter_bounds: tuple[int, int] | None = None
 
     @property
     def storage_size(self) -> int:
@@ -130,6 +263,10 @@ class FieldSpec:
             "sign_clause": self.sign_clause,
             "synchronized": self.synchronized,
             "occurs_depending_on": self.occurs_depending_on,
+            "odo_controls": [c.to_dict() for c in self.odo_controls],
+            "odo_counter_bounds": (
+                list(self.odo_counter_bounds) if self.odo_counter_bounds else None
+            ),
         }
 
 
@@ -285,7 +422,8 @@ def flatten_record(
     """
     opts = options or DataGeneratorOptions()
     specs: list[FieldSpec] = []
-    _flatten_into(record, (), (), None, None, opts, specs)
+    _flatten_into(record, (), (), None, (), opts, specs)
+    _link_odo_counters(specs)
     _assign_columns(specs, opts)
     return specs
 
@@ -295,7 +433,7 @@ def _flatten_into(
     path: tuple[str, ...],
     subscripts: tuple[int, ...],
     redefines: str | None,
-    depending_on: str | None,
+    odo_controls: tuple[OdoControl, ...],
     opts: DataGeneratorOptions,
     out: list[FieldSpec],
 ) -> None:
@@ -313,14 +451,38 @@ def _flatten_into(
 
     # An OCCURS ... DEPENDING ON anywhere up the chain marks everything
     # beneath it: the table is flattened at its maximum, and the field needs
-    # to carry where that assumption came from.
+    # to carry where that assumption came from -- and, for variable-length
+    # output, which of its subscripts the counter governs.
     occurs = item.occurs_clause
-    inherited_depending_on = depending_on or (
-        occurs.depending_on if occurs is not None else None
-    )
+    indexes = _occurrence_indexes(item, opts)
+    inherited_controls = odo_controls
+    if occurs is not None and occurs.depending_on:
+        inherited_controls = (
+            *odo_controls,
+            OdoControl(
+                depending_on=occurs.depending_on,
+                # The dimension this table adds sits at the end of the
+                # subscript tuple its children will carry, which is exactly
+                # the current tuple's length.
+                subscript_index=len(subscripts),
+                min_times=max(
+                    0,
+                    min(
+                        # `or 1` would read a declared `OCCURS 0 TO n` as 1.
+                        1 if occurs.min_times is None else occurs.min_times,
+                        len(indexes),
+                    ),
+                ),
+                # Not occurs.max_times: max_occurs and the hard cap can both
+                # stop the flattening short, and a counter allowed to name
+                # occurrence 50 of a table flattened to 10 would describe
+                # bytes no FieldSpec covers.
+                max_times=len(indexes),
+            ),
+        )
 
     item_path = (*path, item.name)
-    for index in _occurrence_indexes(item, opts):
+    for index in indexes:
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
         if children:
@@ -330,7 +492,7 @@ def _flatten_into(
                     item_path,
                     occ,
                     inherited_redefines,
-                    inherited_depending_on,
+                    inherited_controls,
                     opts,
                     out,
                 )
@@ -362,7 +524,10 @@ def _flatten_into(
                 is_filler=item.is_filler,
                 sign_clause=item.sign_clause,
                 synchronized=item.synchronized,
-                occurs_depending_on=inherited_depending_on,
+                occurs_depending_on=(
+                    inherited_controls[0].depending_on if inherited_controls else None
+                ),
+                odo_controls=inherited_controls,
             )
         )
 
@@ -416,3 +581,169 @@ def _assign_columns(specs: list[FieldSpec], opts: DataGeneratorOptions) -> None:
             suffix += 1
         used.add(column)
         spec.column = column
+
+
+# ---------------------------------------------------------------------------
+# OCCURS DEPENDING ON: from a flattened layout to one row's real occurrences
+# ---------------------------------------------------------------------------
+
+
+def _link_odo_counters(specs: list[FieldSpec]) -> None:
+    """Stamp :attr:`FieldSpec.odo_counter_bounds` onto each table's counter.
+
+    Run once per flattening, over the finished list, because a counter is
+    normally declared *before* the table that depends on it -- its spec
+    already exists by the time the ``DEPENDING ON`` phrase is seen, so the
+    bounds cannot be attached during the walk itself.
+
+    A counter governing two tables at once (legal, if odd) gets the
+    intersection of their bounds, so the one value it holds names a real
+    occurrence in both.  When the two do not overlap -- one table holding
+    1-3, another 5-8 -- the tightest *maximum* wins, not the largest
+    minimum: a count below a table's minimum still addresses occurrences
+    that exist, while one above its maximum names bytes the record does
+    not have.
+    """
+    bounds: dict[str, tuple[int, int]] = {}
+    for spec in specs:
+        for control in spec.odo_controls:
+            key = control.depending_on.upper()
+            existing = bounds.get(key)
+            if existing is None:
+                bounds[key] = (control.min_times, control.max_times)
+                continue
+            low = max(existing[0], control.min_times)
+            high = min(existing[1], control.max_times)
+            if low > high:
+                # Disjoint ranges (one table holds 1-3, another 5-8). Falling
+                # back to the larger *minimum* would name occurrence 5 of a
+                # 3-occurrence table -- the over-counting direction, which is
+                # the one that describes bytes the record does not have.
+                # Collapse to the tightest maximum instead: under-counting
+                # still addresses occurrences that exist.
+                low = high
+            bounds[key] = (low, high)
+
+    if not bounds:
+        return
+    for spec in specs:
+        found = bounds.get(spec.name.upper())
+        if found is not None:
+            spec.odo_counter_bounds = found
+
+
+def odo_counter_cells(specs: list[FieldSpec], row: list[str]) -> dict[str, str]:
+    """The raw generated cell of every field that controls an ODO table.
+
+    Keyed by upper-cased data name, which is how a ``DEPENDING ON`` phrase
+    names its counter.  A layout with no ODO table returns an empty dict, and
+    every caller below short-circuits on that -- so a fixed-length copybook
+    pays nothing for this machinery.
+
+    A counter that is itself inside a table has one cell per occurrence and
+    they collapse here; :func:`present_indexes` resolves those by position
+    instead, and only falls back to this map.
+    """
+    return {
+        spec.name.upper(): cell
+        for spec, cell in zip(specs, row, strict=True)
+        if spec.odo_counter_bounds is not None
+    }
+
+
+def occurrence_count(control: OdoControl, cells: dict[str, str]) -> int:
+    """How many occurrences of *control*'s table one row actually holds.
+
+    The counter's own generated value, clamped into the table's bounds.  A
+    counter that is missing from the record (declared outside it, which COBOL
+    permits), blank (``blank_rate``), or non-numeric falls back to the
+    maximum: reserving the whole table is the one answer that never claims
+    bytes the layout does not describe.
+    """
+    raw = (cells.get(control.depending_on.upper()) or "").strip()
+    if not raw:
+        return control.max_times
+    try:
+        count = int(Decimal(raw))
+    except (InvalidOperation, ValueError):
+        return control.max_times
+    return max(control.min_times, min(control.max_times, count))
+
+
+def _counter_positions(
+    specs: list[FieldSpec],
+) -> dict[tuple[str, tuple[int, ...]], int]:
+    """Where each ODO counter sits in *specs*, keyed by name and subscripts.
+
+    The subscripts matter for IBM's *complex ODO* -- a ``DEPENDING ON`` table
+    nested inside an ordinary ``OCCURS``, where the counter is subscripted
+    too and each outer occurrence carries its own count.  Keying by name
+    alone would collapse those into one, and every outer occurrence would be
+    trimmed to the last one's count.
+    """
+    return {
+        (spec.name.upper(), spec.subscripts): index
+        for index, spec in enumerate(specs)
+        if spec.odo_counter_bounds is not None
+    }
+
+
+def present_indexes(specs: list[FieldSpec], row: list[str]) -> list[int]:
+    """Positions in *specs* whose bytes a record built from *row* contains.
+
+    Every field, in order, except the occurrences of an ``OCCURS ...
+    DEPENDING ON`` table beyond the count that row's counter holds.  For a
+    layout without ODO -- and for every row of one whose counters all sit at
+    their maximum -- this is simply every position, which is why fixed-length
+    output can share the same code path.
+
+    Dropping a trailing occurrence and concatenating what remains is exactly
+    what a real variable-length record looks like: anything declared *after*
+    the table shifts up into the space the absent occurrences would have
+    taken, which falls out of preserving order here.
+    """
+    if not any(spec.odo_controls for spec in specs):
+        return list(range(len(specs)))
+    cells = odo_counter_cells(specs, row)
+    positions = _counter_positions(specs)
+    counts: dict[tuple[str, tuple[int, ...]], int] = {}
+    kept: list[int] = []
+    for index, spec in enumerate(specs):
+        present = True
+        for control in spec.odo_controls:
+            name = control.depending_on.upper()
+            if control.subscript_index >= len(spec.subscripts):
+                # Defensive: a control always names a dimension the field's
+                # own subscripts carry, since both are built in the same walk.
+                continue
+            # The counter governing *this* occurrence shares the field's
+            # enclosing subscripts -- () for the ordinary case, and the outer
+            # table's index under complex ODO.
+            outer = spec.subscripts[: control.subscript_index]
+            key = (name, outer)
+            if key not in counts:
+                at = positions.get(key)
+                counts[key] = occurrence_count(
+                    control, {name: row[at]} if at is not None else cells
+                )
+            if spec.subscripts[control.subscript_index] > counts[key]:
+                present = False
+                break
+        if present:
+            kept.append(index)
+    return kept
+
+
+def unresolved_odo_counters(specs: list[FieldSpec]) -> list[str]:
+    """Counter names a table depends on that the layout does not contain.
+
+    A ``DEPENDING ON`` item may live outside the record it sizes -- in
+    WORKING-STORAGE, or in a record this copybook does not define.  Nothing
+    can be generated for it, so its table is written at full length; this
+    reports which ones, so that is stated rather than assumed.
+    """
+    named = {
+        control.depending_on.upper() for spec in specs for control in spec.odo_controls
+    }
+    present = {spec.name.upper() for spec in specs}
+    return sorted(named - present)

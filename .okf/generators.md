@@ -303,8 +303,8 @@ into focused, reusable modules:
   **Task 6: ambiguity propagates across nesting levels, not just within one sibling list.** Task 5's `is_ambiguous` flag was local to each `_layout_siblings()` call — an OCCURS ... DEPENDING ON table nested *inside* a group only made that group's own children ambiguous; the group's own sibling in the *parent* list still got a concrete, wrong offset. `_layout_siblings()`/`_layout_item()` now both return `tuple[int, bool]` (`footprint, trailing_ambiguous`) instead of a bare `int`: a group's nested `_layout_siblings()` call reports whether *it* ended ambiguous, `_layout_item()` passes that straight through for group items (elementary items always report `False` here — their own direct `occurs.depending_on` is already handled by the caller's existing check), and the calling `_layout_siblings()` folds a `True` nested signal into its own `is_ambiguous`, exactly like a direct ODO child would. Propagates through arbitrarily many nesting levels for free (each level only needs its own direct child's signal) — confirmed with a two-level nesting test, not just by inspection. `compute_record_layout()`'s public contract (the `LayoutItem` list and every field on it) is unchanged; only the two private helpers' internal return shape changed. Root cause of the two brief-derived tests initially failing during development: unrelated to this propagation gap — fixed-format COBOL only recognizes columns 8-72 as the code area, and the brief's literal one-line `OCCURS 1 TO 10 TIMES DEPENDING ON WS-COUNT.` fixture at that indentation pushed `ON WS-COUNT.` past column 72, where the lexer silently drops it with no error, so the ODO parsed as a fixed `OCCURS 10` with `depending_on = None`. Test fixtures now wrap `DEPENDING ON <var>` onto a continuation line to stay inside the code area.
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints. `USAGE INDEX`/`POINTER` short-circuit to `"0"` *without drawing from the RNG* — they are storage, not data, and reach the factory PICTURE-less, where they used to fall through to the numeric path's 9-digit default and emit a random number that looked like data. Not drawing is what keeps a copybook with no such field byte-identical for a given seed.
 - **`storage.py`** — a re-export shim (2026-09-05) for **`cobolparser/_storage.py`**, which the implementation moved to so `cobolparser.models.data_items.CobolDataItem.calculate_size` could defer to it as well: this package's `__init__` eagerly imports `program_layout`, which imports `cobolparser.models`, so a model importing this module directly would close an import cycle. `_storage.py` sits beside `_errors.py` and, like it, has zero internal dependencies. Every existing importer of `storage.py` is unchanged. It remains the package's single authority on **how many bytes a data item occupies**: `storage_size()`, `binary_byte_length()`, `packed_byte_length()`, and the `USAGE` frozensets everything else classifies against. Zero dependencies beyond the stdlib, deliberately — `layout.py`, `layout_offsets.py` and `encoding.py` all import it, which is what stops a record image's field widths from drifting apart from the offsets `data-items` reports. Two cases the older per-module copies of the arithmetic got wrong and this fixes for every caller at once: `USAGE INDEX` (no PICTURE, so it was sized as **zero bytes**, silently collapsing every offset after it) and a DISPLAY item with `SIGN IS SEPARATE` (a byte the PICTURE's character count does not include).
-- **`encoding.py`** — record-image encoding: the display value from `values.py` rendered into the bytes a COBOL program would actually read. See "Record images" below.
-- **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods, plus the record-image trio `to_records()` / `write_records()` / `to_hex_dump()` and `record_length()`.
+- **`encoding.py`** — record-image encoding: the display value from `values.py` rendered into the bytes a COBOL program would actually read, at fixed or variable record length. See "Record images" and "Fixed- and variable-length records" below.
+- **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods, plus the record-image trio `to_records()` / `write_records()` / `to_hex_dump()` and the length quartet `record_length()` / `minimum_record_length()` / `record_lengths(opts)` / `is_variable_length`.
 - **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
 - **`__init__.py`** — Package exports of the above plus re-exports for backwards compatibility.
 
@@ -325,23 +325,48 @@ parse_copybook_records(source, *, filename=...) -> list[CobolDataItem]
 flatten_record(record, options=None)            -> list[FieldSpec]
 
 GeneratedDataset:  .record_name .fields .rows .seed .header
+                   .varying (VaryingLength | None)
+                   .declared_lengths (list[int] | None)
                    .to_csv(*, line_terminator="\n")
                    .write_csv(path, *, line_terminator="\n")
                    .to_dicts() .to_dict()
-                   .record_length()
+                   .record_length()           # max / fixed-length LRECL
+                   .minimum_record_length()   # every ODO table at its minimum
+                   .record_lengths(opts=None) -> list[int]   # one per row
+                   .is_variable_length        # bool: any ODO table at all
                    .to_records(opts=None) -> bytes
                    .write_records(path, opts=None)
                    .to_hex_dump(opts=None) -> str
 EncodingOptions:   .charset (Charset.ASCII|EBCDIC)
                    .endian (Endian.AUTO|BIG|LITTLE|NATIVE)
                    .record_separator (bytes)
+                   .record_format (RecordFormat.FIXED|VARIABLE
+                                   |VARIABLE_BARE|AUTO)
                    .space .resolved_endian
+                   .resolved_format(specs, *, varying=False)
+RecordFormat:      StrEnum — fixed | variable | variable-bare | auto
+                   .is_variable
+encode_rdw(body_length) -> bytes        # RDW_SIZE == 4, MAX_VARIABLE_RECORD
+encode_record(specs, row, opts, *, data_length=None)
+record_length(specs) / minimum_record_length(specs)
+row_record_length(specs, row, opts=None, *, data_length=None)
+present_indexes(specs, row) -> list[int]
+occurrence_count(control, cells) -> int
+unresolved_odo_counters(specs) -> list[str]
 RecordEncodingError(CopybookLayoutError)
 FieldSpec:         .name .path .column .level .picture .usage .category
                    .size .integer_digits .decimal_digits .is_signed
                    .value_clause .condition_values .subscripts .redefines
                    .sign_clause .synchronized .occurs_depending_on
+                   .odo_controls .odo_counter_bounds
                    .qualified_name .storage_size .to_dict()
+OdoControl:        .depending_on .subscript_index .min_times .max_times
+VaryingLength:     .minimum .maximum .depending_on
+                   .from_fd_clauses(clauses, *, record_size)
+                   .build(minimum, maximum, depending_on, record_size)
+DataGeneratorOptions:
+                   .record_varying ((min, max) | None) — for a copybook
+                   with no FD to read the range from
 FieldCategory:     StrEnum — alphanumeric | alphabetic | national | numeric
                    | numeric-edited | alphanumeric-edited | float
 CopybookLayoutError(ValueError)
@@ -568,8 +593,11 @@ header):
   than one documented gap.
 * **`COMP-1`/`COMP-2` are IEEE 754, not z/OS hexadecimal floating point.**
   Matches GnuCOBOL and Enterprise COBOL under `FLOAT(IEEE)`.
-* **`OCCURS ... DEPENDING ON` is written at its maximum**, same as
-  everywhere else in this package.
+* **`OCCURS ... DEPENDING ON` is written at its maximum** under
+  `RecordFormat.FIXED` — which is not a gap but what RECFM=F means. Under
+  the variable formats the caveat is not emitted at all, because the
+  occurrences past the counter's own value are genuinely dropped. See
+  "Fixed- and variable-length records" below.
 
 One more thing worth knowing before diffing generated bytes against a
 compiler-written record: GnuCOBOL converts a decimal `COMP-2` literal through
@@ -582,6 +610,177 @@ which is exactly where a copybook is being looked at when someone wants to
 know what its `COMP-3` field really holds. One line per field: offset,
 length, name, PICTURE, USAGE, display value, and the bytes. A layout mistake
 shows up as a shifted offset rather than as unexplained garbage further down.
+
+Under a variable-length format the dump also carries the RDW on a row of its
+own (`(RDW)`, offset `000000`, length 4), each record's own length in its
+`--- record N of M: L bytes ---` header, and a `record length: MIN to MAX`
+range instead of a single number. The RDW row is not decoration: without it
+every field offset in the dump would sit four bytes below where it really
+is in the file.
+
+
+## Fixed- and variable-length records (`RecordFormat`)
+
+A copybook says how long a record *can* be. It does not say whether the file
+holding it is **RECFM=F/FB** (every record the layout's full length) or
+**RECFM=V/VB** (each record only as long as that record's own data makes it).
+Before this existed, only the fixed reading was generatable — a copybook with
+an ODO table got a caveat on stderr saying the table was written at its
+maximum and that a real record would be shorter.
+
+**Two independent mechanisms make a record vary**, and a program may use
+either:
+
+1. **`OCCURS ... DEPENDING ON`** inside the record — a table whose occurrence
+   count is carried by a counter field. The record's length follows from the
+   layout, so it can be derived. Handled by `layout.OdoControl` /
+   `present_indexes()`, below.
+2. **`FD ... RECORD VARYING FROM min TO max DEPENDING ON item`** on the file —
+   the record layout is an ordinary fixed one and *nothing in it* says how
+   long any given record is. The length travels in the RDW; the program sets
+   the `DEPENDING ON` item before a WRITE and reads it back after a READ.
+   Handled by `layout.VaryingLength`, below.
+
+The second is the one an ODO walk cannot see, and it is common: a flat
+`01 EMP-RECORD80` under `RECORD VARYING FROM 47 TO 80` is the canonical
+shape.
+
+`EncodingOptions.record_format` picks between them; `gen-data
+--record-format fixed|variable|variable-bare|auto` is the CLI on top of it.
+
+| Value | Records | Framing |
+|-------|---------|---------|
+| `fixed` (default) | full length: every occurrence written, no length cut | none |
+| `variable` | only the occurrences the row's counter names, cut to its declared length | 4-byte RDW per record |
+| `variable-bare` | same trimmed records | none — the consumer already knows where each ends |
+| `auto` | `variable` if the record varies by *either* mechanism, else `fixed` | follows the resolved value |
+
+**`fixed` is the default, deliberately.** A record that cannot vary encodes
+to byte-identical output under every format bar the RDW, so the default only
+matters for the records that *can* — and there, silently changing what
+`--format record` has always written would be worse than making the caller
+ask for it. `auto` is the opt-in to "do what the source implies". The one
+exception: `--record-varying` is itself a statement that records are not
+fixed, so passing it alone reaches `auto` rather than writing the
+fixed-length file the caller just said this is not; an explicit
+`--record-format fixed` still wins over it.
+
+**The RDW** (`encode_rdw`) is `LL LL 00 00`: a big-endian 16-bit total length
+**including the four RDW bytes**, then two reserved zero bytes. Big-endian
+regardless of `--endian` and of the charset — it is physical file structure
+written by the access method, not data written by the program. A record
+whose total would exceed `MAX_VARIABLE_RECORD` (0xFFFF) raises
+`RecordEncodingError` rather than truncating the length silently: a record
+that long needs RECFM=VS (spanned), which is not generated.
+
+**How trimming works, end to end** — three pieces, none of which re-flattens
+the layout:
+
+1. **`layout.OdoControl`** on every `FieldSpec` inside an ODO table
+   (`spec.odo_controls`, outermost first): the counter's name, *which
+   subscript position* it governs, and the `OCCURS min TO max` bounds. The
+   subscript position is the tuple length at the moment the table is entered,
+   so nested ODO tables each contribute one control and the general case
+   falls out for free. `max_times` is the number of occurrences actually
+   flattened, not the declared maximum — `max_occurs` and the hard cap can
+   both stop the walk short, and a counter allowed to name occurrence 50 of a
+   table flattened to 10 would describe bytes no `FieldSpec` covers.
+2. **`spec.odo_counter_bounds`** on the *counter* field, stamped by a
+   post-pass (`_link_odo_counters`) because a counter is normally declared
+   *before* the table that depends on it — its spec already exists by the
+   time the `DEPENDING ON` phrase is seen. `ValueFactory` draws the counter
+   from those bounds rather than from the PICTURE's range, so a `PIC 9(4)`
+   counter for a table of at most 50 can no longer generate 8 731. Drawing
+   across the range (rather than generating freely and clamping) is also what
+   makes a variable-length file actually *vary*: clamping would pin nearly
+   every row to the maximum. A declared `VALUE`/level-88 still wins when it
+   names a count the table can hold, and is overridden when it does not.
+3. **`layout.present_indexes(specs, row)`** — the positions whose bytes that
+   row's record contains, in order. The counter governing a given occurrence
+   is resolved by *position*, not just by name: it is the counter spec
+   sharing that field's enclosing subscripts. That is what makes IBM's
+   **complex ODO** (a `DEPENDING ON` table nested inside an ordinary
+   `OCCURS`, so each outer occurrence carries its own count) come out right
+   rather than trimming every outer occurrence to the last one's count.
+   Dropping an occurrence and concatenating
+   what remains is exactly what a real variable-length record looks like:
+   anything declared *after* the table shifts up into the space the absent
+   occurrences would have taken, which falls out of preserving order rather
+   than needing its own arithmetic. A layout with no ODO table short-circuits
+   to "every position", so fixed-length copybooks pay nothing for any of this.
+
+**Lengths.** `record_length(specs)` is unchanged — every occurrence present,
+which is the fixed-length answer *and* the LRECL a RECFM=V dataset is defined
+with. `minimum_record_length(specs)` is the same with every table at its
+declared minimum, and `row_record_length(specs, row, opts)` is one row's,
+computed from the layout rather than by encoding it. `GeneratedDataset`
+exposes all three plus `record_lengths(opts)` and `is_variable_length`.
+`gen-data --format record` prints the resulting range to stderr, because raw
+bytes have no header to state their own LRECL in and a record image whose
+length nobody states is a file nobody can read back.
+
+### FD `RECORD VARYING` (`layout.VaryingLength`)
+
+```cobol
+FD  EMPFILE
+    RECORD VARYING FROM 47 TO 80 CHARACTERS
+           DEPENDING ON EMPREC-LEN
+    RECORDING MODE IS V.
+01  EMP-RECORD80.
+    05  EMP-ID       PIC X(6).
+    ...
+    05  EMP-COMMENT  PIC X(33).
+```
+
+Nothing here is subordinate to a counter — `EMPREC-LEN` is a WORKING-STORAGE
+item, not part of the record — so `odo_controls` is empty for every field and
+`present_indexes()` keeps them all. What varies is how many of the record's
+bytes each *record* carries.
+
+* **Where the range comes from.** `VaryingLength.from_fd_clauses()` reads the
+  FD's `record` clause, which `data_file_description.py` already parses into
+  `{varying, min, max, depending_on}` and attaches to the 01 as `fd_clauses`
+  metadata. So `gen-data` on a **whole program** picks it up with no flag. A
+  bare **copybook** has no FD; `DataGeneratorOptions.record_varying` (CLI
+  `--record-varying MIN:MAX`) supplies it, and overrides the FD when both
+  exist. `RECORD CONTAINS 47 TO 80` declares the same thing without the
+  `VARYING` keyword and parses identically.
+* **`maximum` is clamped to the record's own byte length.** An FD promising
+  more than its 01 can hold cannot be honoured by padding — those bytes were
+  never declared — so the range is cut to what exists.
+* **The length is drawn per row at *generation* time**, uniformly across the
+  range, from the same seeded RNG the values came from, and stored on
+  `GeneratedDataset.declared_lengths`. Drawing it there rather than in the
+  encoder is what keeps `encode_record` a pure function and makes a seed
+  reproduce record *lengths* as exactly as it reproduces their contents. The
+  draws happen *after* the rows, so a record with no range draws nothing and
+  generates byte-identical output to before this existed.
+* **`encode_record(..., data_length=N)`** cuts the body to N bytes — mid-field
+  if that is where the length falls, which is exactly what a program reading
+  `EMP-RECORD80(1:EMPREC-LEN)` sees. Passing it also settles
+  `RecordFormat.AUTO`, since a declared length is by definition a record that
+  varies. `--format hex` shows the fields past the cut as
+  `(past record length)` rather than dropping them, so the cut is visible.
+* **The `DEPENDING ON` item is filled in when it *is* in the record.** Usually
+  it isn't. When a copybook does put it there, leaving the generated value
+  would contradict the record's own length.
+* **Both mechanisms at once**: the table decides, the FD range is not applied
+  on top of it, and a caveat says so. Enforced in *two* places, because a
+  caveat that the code contradicts is worse than no caveat: the generator
+  draws no length for such a record (so `declared_lengths` is `None` and every
+  downstream surface agrees for free), and `_effective_data_length()` drops a
+  `data_length` a direct caller passes anyway. `minimum_record_length()`
+  likewise only prefers the FD floor when a length was actually drawn — a
+  Copilot review on PR #204 caught all three of those disagreeing.
+
+### Odds and ends
+
+**The counter may live outside the record** — in WORKING-STORAGE, or in a
+record this copybook does not define. Nothing generated can set it, so its
+table is written at full length and `unresolved_odo_counters(specs)` names
+it in the caveats. Same for a counter cell left blank by `blank_rate` or
+holding a non-numeric value: reserving the whole table is the one answer that
+never claims bytes the layout does not describe.
 
 
 # Program Layout Index (`data/program_layout.py`)
@@ -1102,7 +1301,9 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
   value constraints, option validation, dataset surface
 * `tests/unit/cli/test_gen_data_cli.py` — `gen-data` flags, JSON modes, errors;
   `TestRecordImageFormats` covers `--format record|hex`, `--charset`,
-  `--record-separator`, and that CSV output is unchanged by any of them
+  `--record-separator`, and that CSV output is unchanged by any of them;
+  `TestRecordFormatFlag` covers `--record-format`, walking the written
+  file's RDW chain and asserting it lands exactly on EOF
 * `tests/unit/generators/data/test_storage.py` — the byte-width table, incl.
   the two regressions (`USAGE INDEX` sized as zero, `SIGN IS SEPARATE`
   under-reported by one)
@@ -1111,6 +1312,18 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
   dump. **Its module docstring holds the GnuCOBOL probe program and its raw
   output** — the ground truth every expected byte string here comes from.
   Re-run that probe before changing an encoding
+* `tests/unit/generators/data/test_variable_length.py` — the whole
+  fixed-vs-variable story in one file, both mechanisms:
+  `TestFdRecordVarying` works the mainframestechhelp.com `EMPVL` example end
+  to end (FD clause picked up with no flag, lengths inside the declared
+  range, the cut falling mid-field, the RDW carrying it);
+  `TestExplicitVaryingRange` covers `record_varying`; plus
+  `OdoControl`/`odo_counter_bounds`
+  linking, `present_indexes` trimming (including the field *after* the table
+  shifting up), counter generation staying inside the table's bounds, RDW
+  framing, the length trio, format-dependent caveats, and the invariant that
+  ties the two readings together — a full-count variable record is
+  byte-for-byte the fixed record
 * `tests/integration/test_copybook_csv_generation.py` — parametrized over the
   sample copybooks and the NIST `.CPY` corpus; asserts no copybook crashes the
   generator and that generated cells are assignable to their fields

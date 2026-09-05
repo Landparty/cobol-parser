@@ -1,5 +1,124 @@
 # OKF Update Log
 
+## 2026-09-05 (variable-length files, part 2: FD RECORD VARYING)
+
+Follow-up to the same request, after being pointed at
+mainframestechhelp.com's "reading a VL PS file sequentially" example. Part 1
+below handled `OCCURS ... DEPENDING ON`; that example uses the *other*
+mechanism, and it is the more common one:
+
+```cobol
+FD  EMPFILE
+    RECORD VARYING FROM 47 TO 80 CHARACTERS
+           DEPENDING ON EMPREC-LEN
+    RECORDING MODE IS V.
+01  EMP-RECORD80.   *> a flat record. No table. Nothing to trim.
+```
+
+`EMPREC-LEN` is a WORKING-STORAGE item, so **nothing in the record says how
+long the record is** -- the length travels in the RDW. An ODO walk sees a
+fixed 80-byte record and cannot do better.
+
+* **`layout.VaryingLength`** — the FD's declared range.
+  `from_fd_clauses()` reads what `data_file_description.py` *already*
+  parsed into `fd_clauses["record"]` (`{varying, min, max, depending_on}`)
+  and attaches to the 01 as metadata. Nothing consumed it before this; the
+  parsing side needed no change at all. `RECORD CONTAINS 47 TO 80` is the
+  same declaration without the keyword and parses identically.
+* **The length is drawn at *generation* time, not at encode time.** One per
+  row, uniform across the range, from the same seeded RNG the values came
+  from — so a seed reproduces record *lengths* as exactly as it reproduces
+  their contents, and `encode_record` stays a pure function. The draws
+  happen *after* the value rows, so a record with no range draws nothing and
+  its bytes are unchanged.
+* **`encode_record(..., data_length=N)`** cuts the body to N bytes, mid-field
+  if that is where it falls — which is exactly what a program reading
+  `EMP-RECORD80(1:EMPREC-LEN)` sees. `--format hex` marks the fields past the
+  cut as `(past record length)` rather than dropping them.
+* **A whole program needs no flag; a copybook needs one.** The FD only exists
+  in a program, and `gen-data` accepts both. `--record-varying MIN:MAX`
+  (`DataGeneratorOptions.record_varying`) covers the copybook case and
+  overrides the FD when both are present.
+* **`--record-format`'s argparse default became `None`**, resolved to `fixed`
+  later. Without that, an explicit `--record-format fixed` was
+  indistinguishable from the default, so `--record-varying` could not imply
+  `auto` without trampling a caller who really did want fixed.
+* **`maximum` is clamped to the record's own length.** An FD promising more
+  than its 01 can hold cannot be honoured by padding — those bytes were never
+  declared.
+* **Both mechanisms at once**: the table decides, the FD range is not applied
+  on top, and a caveat says so. A Copilot review on PR #204 caught that the
+  code did *not* actually do this -- `encode_record` cut the ODO-trimmed body
+  to the FD-drawn length anyway, `row_record_length` and `hex_dump` reported
+  as if it had, and `minimum_record_length()` preferred the FD floor. Fixed at
+  the source (the generator draws no length for a record a table already
+  sizes, so `declared_lengths` is `None` and everything downstream agrees for
+  free) *and* defensively in `_effective_data_length()`, for a direct caller
+  who passes both. The same review found `_link_odo_counters` collapsing
+  disjoint bounds to the larger *minimum* -- the over-counting direction its
+  own docstring calls unsafe -- where the tightest maximum was meant.
+
+See "FD `RECORD VARYING`" in [generators.md](generators.md);
+`tests/unit/generators/data/test_variable_length.py::TestFdRecordVarying`
+works the linked example end to end.
+
+## 2026-09-05 (variable-length record files: OCCURS DEPENDING ON honoured, RDW written)
+
+Asked to generate mock data for **both variable- and fixed-length files**.
+Fixed-length was all that existed: a copybook with an `OCCURS ... DEPENDING
+ON` table got its table written at the maximum and a caveat on stderr saying
+a real record would be shorter. That caveat was the feature request.
+
+* **`RecordFormat` (`generators/data/encoding.py`)** — `fixed` (RECFM=F/FB,
+  the default and byte-identical to what the previous release wrote),
+  `variable` (RECFM=V/VB: only the occurrences the row's own counter names,
+  behind a 4-byte RDW), `variable-bare` (the same trimmed records with no
+  RDW), `auto` (variable iff the layout has an ODO table). On
+  `EncodingOptions.record_format`, resolved by `resolved_format(specs)` —
+  the same shape `Endian.AUTO`/`resolved_endian` already had. CLI:
+  `gen-data --record-format`.
+* **The RDW is part of the format, not a separate switch.** `LL LL 00 00`,
+  big-endian, length *including the four RDW bytes*, whatever `--endian` and
+  `--charset` say — it is written by the access method, not by the program.
+  Without it a stream of differently-sized records has no way to say where
+  one ends, so offering trimming without framing as the default would
+  produce an unreadable file. `> 0xFFFF` raises rather than truncating the
+  length field: that record needs RECFM=VS, which is not generated.
+* **Three pieces make trimming work, none of them a second flattening pass.**
+  `FieldSpec.odo_controls` (a `layout.OdoControl` per ODO dimension: the
+  counter, *which subscript position* it governs, and the bounds — so nested
+  tables fall out for free); `FieldSpec.odo_counter_bounds` on the counter,
+  stamped by a post-pass because a counter is declared *before* the table
+  that depends on it; and `layout.present_indexes(specs, row)`, whose
+  order-preserving filter is what makes a field declared *after* the table
+  shift up into the space the absent occurrences would have taken.
+* **A real bug found on the way in: the generated counter was never bounded
+  by the table.** A `PIC 9(4)` counter for `OCCURS 1 TO 50` could generate
+  8 731 — a record no program could read, in the fixed-length output that
+  already shipped. `ValueFactory` now draws the counter from the table's own
+  `OCCURS min TO max`. Drawing across that range rather than generating
+  freely and clamping is also what makes a variable file *vary*: clamping
+  would pin nearly every row to the maximum. A declared `VALUE`/level-88
+  still wins when it names a count the table can hold.
+* **`max_times` is what was flattened, not what was declared.** `max_occurs`
+  and the hard occurrence cap can both stop the walk short, and a counter
+  allowed to name occurrence 50 of a table flattened to 10 would describe
+  bytes no `FieldSpec` covers.
+* **Lengths are now stated, not left to be inferred.**
+  `minimum_record_length()`, `row_record_length()`,
+  `GeneratedDataset.record_lengths()` / `.is_variable_length`; `--format
+  record` prints the range to stderr (raw bytes have no header to carry an
+  LRECL) and `--format hex` puts the RDW on a row of its own so field
+  offsets stay true.
+* **Additive schema change**, no `bundle_version` bump: `FieldSpec.to_dict()`
+  gained `odo_controls` and `odo_counter_bounds`. `examples/fixtures/
+  FIXTUREDEMO.bundle.json` was regenerated for the two new keys (no
+  generated value changed — FIXTUREDEMO has no ODO table); **the copy in the
+  sibling mocky-mock repo needs the same refresh.**
+
+See "Fixed- and variable-length records" in [generators.md](generators.md);
+`tests/unit/generators/data/test_variable_length.py`,
+`tests/unit/cli/test_gen_data_cli.py::TestRecordFormatFlag`.
 ## 2026-09-05 (repo audit: two silent wrong-answer bugs, one rotten corpus)
 
 A deep audit of the repo, starting from a green suite (9,015 passing) and

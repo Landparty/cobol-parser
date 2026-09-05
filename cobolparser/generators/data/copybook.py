@@ -11,8 +11,9 @@ from ...models.program import CobolProgram
 from ...parser import parse_cobol
 from ...plugins.core import ErrorRecoveryMode
 from .dataset import GeneratedDataset
+from .encoding import record_length
 from .errors import CopybookLayoutError
-from .layout import flatten_record
+from .layout import FieldSpec, VaryingLength, flatten_record
 from .options import DataGeneratorOptions
 from .values import ValueFactory
 
@@ -240,12 +241,96 @@ class CopybookDataGenerator:
             [factory.value_for(spec, row) for spec in fields]
             for row in range(self.options.rows)
         ]
+        # After the rows, deliberately: a copybook that declares no varying
+        # range draws nothing here, and so generates byte-identical output to
+        # a version of this package that had never heard of one.
+        varying = self._varying_for(record, fields)
+        lengths = self._draw_lengths(varying, fields, rng)
+        if lengths is not None:
+            self._write_length_field(fields, rows, lengths, varying, factory)
         return GeneratedDataset(
             record_name=record.name,
             fields=fields,
             rows=rows,
             seed=seed,
+            varying=varying,
+            declared_lengths=lengths,
         )
+
+    # -- variable record length ---------------------------------------------
+
+    def _varying_for(
+        self, record: CobolDataItem, fields: list[FieldSpec]
+    ) -> VaryingLength | None:
+        """The record-length range in force, or ``None`` for a fixed record.
+
+        An explicit :attr:`DataGeneratorOptions.record_varying` wins -- it is
+        the only way to say so for a bare copybook, which has no FD to read.
+        Otherwise the record's own ``FD ... RECORD VARYING FROM min TO max``
+        clause is used, which is present whenever the source parsed was a
+        whole program rather than a copybook fragment.
+        """
+        size = record_length(fields)
+        declared = self.options.record_varying
+        if declared is not None:
+            return VaryingLength.build(declared[0], declared[1], None, size)
+        return VaryingLength.from_fd_clauses(
+            record.get_metadata("fd_clauses"), record_size=size
+        )
+
+    def _draw_lengths(
+        self,
+        varying: VaryingLength | None,
+        fields: list[FieldSpec],
+        rng: random.Random,
+    ) -> list[int] | None:
+        """One record length per row, drawn uniformly across the range.
+
+        Uniform rather than weighted: the FD states the range and nothing
+        else, so every length in it is equally a real record.  Drawn here,
+        from the same seeded RNG the values came from, so a seed reproduces
+        the record *lengths* as exactly as it reproduces their contents --
+        which it could not if the encoder drew them at write time.
+
+        Nothing is drawn when the record also has an ``OCCURS ... DEPENDING
+        ON`` table.  Both mechanisms can be declared at once, but only one
+        can decide, and the table does: its count is real data saying how
+        many occurrences this record holds, while the FD range only bounds
+        the length.  A drawn length would cut the table-trimmed body at an
+        unrelated offset, and ``declared_lengths`` would report a number
+        nothing honoured.
+        """
+        if varying is None or any(spec.odo_controls for spec in fields):
+            return None
+        return [
+            rng.randint(varying.minimum, varying.maximum)
+            for _ in range(self.options.rows)
+        ]
+
+    @staticmethod
+    def _write_length_field(
+        fields: list[FieldSpec],
+        rows: list[list[str]],
+        lengths: list[int],
+        varying: VaryingLength | None,
+        factory: ValueFactory,
+    ) -> None:
+        """Put each row's own length in the ``DEPENDING ON`` field, if it has one.
+
+        Usually it has none: the length item of a ``RECORD VARYING`` clause is
+        normally a WORKING-STORAGE counter the program sets before a WRITE and
+        the runtime fills in after a READ -- it travels in the RDW, not in the
+        record.  When a copybook *does* put it in the record, leaving the
+        generated value there would contradict the record's own length.
+        """
+        if varying is None or not varying.depending_on:
+            return
+        wanted = varying.depending_on.upper()
+        for index, spec in enumerate(fields):
+            if spec.name.upper() != wanted:
+                continue
+            for row, length in zip(rows, lengths, strict=True):
+                row[index] = factory.render(spec, str(length))
 
     # -- helpers ------------------------------------------------------------
 

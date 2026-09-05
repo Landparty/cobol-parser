@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from .encoding import EncodingOptions, encode_record, hex_dump
+from .encoding import minimum_record_length as _minimum_record_length
 from .encoding import record_length as _record_length
-from .layout import FieldSpec
+from .encoding import row_record_length as _row_record_length
+from .layout import FieldSpec, VaryingLength
 
 # Line terminator shared by every CSV output path. Deliberately "\n" rather
 # than the csv module's RFC 4180 "\r\n": both GeneratedDataset.to_csv and
@@ -28,12 +30,23 @@ class GeneratedDataset:
         fields: Column specifications, in record order.
         rows: Generated rows, each a list of cells aligned to ``fields``.
         seed: The seed actually used -- pass it back to reproduce this run.
+        varying: The FD's ``RECORD VARYING FROM min TO max`` range, when the
+            record declares one (or when the caller supplied one via
+            ``DataGeneratorOptions.record_varying``).  ``None`` means the
+            record's length is decided by the layout alone.
+        declared_lengths: One record length per row, drawn from
+            :attr:`varying` at generation time, or ``None`` when there is no
+            range.  Applied only by the variable-length record formats;
+            ``RecordFormat.FIXED`` writes full-length records whatever this
+            says, because that is what asking for RECFM=F means.
     """
 
     record_name: str
     fields: list[FieldSpec]
     rows: list[list[str]]
     seed: int
+    varying: VaryingLength | None = None
+    declared_lengths: list[int] | None = None
 
     @property
     def header(self) -> list[str]:
@@ -74,12 +87,66 @@ class GeneratedDataset:
     def record_length(self) -> int:
         """Byte length of one record image of this layout.
 
+        Every ``OCCURS`` occurrence present: the fixed-length record length,
+        and the maximum (the ``LRECL``) for a variable-length file.
+
         Only meaningful when the dataset was generated with
         :meth:`~.options.DataGeneratorOptions.for_record_image` options --
         otherwise FILLER and capped OCCURS leave holes, and this reports the
         length of a record that no program would recognise.
         """
         return _record_length(self.fields)
+
+    def minimum_record_length(self) -> int:
+        """Byte length of the shortest record this dataset can produce.
+
+        Every ``OCCURS ... DEPENDING ON`` table at its declared minimum, or
+        the FD's own ``RECORD VARYING`` floor when that is what decides the
+        length.  Equal to :meth:`record_length` when neither applies -- which
+        is the machine-readable way of saying the record is fixed-length.
+
+        The FD floor is used only when :attr:`declared_lengths` was actually
+        drawn, i.e. when no table decides instead.  Reporting it for a record
+        whose table decides would contradict :meth:`record_lengths` and
+        :meth:`to_records`, which correctly ignore the FD range there.
+        """
+        if self.varying is not None and self.declared_lengths is not None:
+            return self.varying.minimum
+        return _minimum_record_length(self.fields)
+
+    @property
+    def is_variable_length(self) -> bool:
+        """Whether this record's length can differ from row to row at all.
+
+        True when some field sits inside an ``OCCURS ... DEPENDING ON``
+        table, and true when the FD declares a ``RECORD VARYING`` range --
+        the two independent ways a COBOL record varies.  A dataset for which
+        this is False encodes identically under every
+        :class:`~.encoding.RecordFormat` bar the RDW.
+        """
+        return self.varying is not None or any(
+            spec.odo_controls for spec in self.fields
+        )
+
+    def _length_for(self, index: int) -> int | None:
+        """The declared byte length of row *index*, if it has one."""
+        if self.declared_lengths is None:
+            return None
+        return self.declared_lengths[index]
+
+    def record_lengths(self, opts: EncodingOptions | None = None) -> list[int]:
+        """Byte length of each row's record image, in row order.
+
+        Computed from the layout rather than by encoding, so asking what a
+        large dataset's records weigh does not cost building all of them.
+        """
+        options = opts or EncodingOptions()
+        return [
+            _row_record_length(
+                self.fields, row, options, data_length=self._length_for(index)
+            )
+            for index, row in enumerate(self.rows)
+        ]
 
     def to_records(self, opts: EncodingOptions | None = None) -> bytes:
         """Render every row as its real COBOL record image.
@@ -92,8 +159,11 @@ class GeneratedDataset:
         """
         options = opts or EncodingOptions()
         return b"".join(
-            encode_record(self.fields, row, options) + options.record_separator
-            for row in self.rows
+            encode_record(
+                self.fields, row, options, data_length=self._length_for(index)
+            )
+            + options.record_separator
+            for index, row in enumerate(self.rows)
         )
 
     def write_records(
@@ -121,6 +191,8 @@ class GeneratedDataset:
             self.rows,
             opts or EncodingOptions(),
             record_name=self.record_name,
+            data_lengths=self.declared_lengths,
+            varying=self.varying,
         )
 
     def to_dicts(self) -> list[dict[str, str]]:

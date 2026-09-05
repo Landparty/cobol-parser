@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `gen-data` now also honours the *other* way a COBOL record
+  varies: `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the
+  record layout is an ordinary flat one and nothing in it says how long any
+  given record is (the length travels in the RDW; the program sets the
+  `DEPENDING ON` item before a WRITE and reads it back after a READ). Given a
+  **whole COBOL program** the clause is read off the record with no flag at
+  all -- `data_file_description.py` already parsed it, nothing consumed it.
+  Given a bare **copybook**, which carries no FD, `--record-varying MIN:MAX`
+  (`DataGeneratorOptions.record_varying`) supplies the range and overrides the
+  FD when both exist; passing it alone reaches `--record-format auto`, since
+  it is itself a statement that records are not fixed. One length per row is
+  drawn uniformly across the range at *generation* time, from the same seeded
+  RNG the values came from, so a seed reproduces record lengths as exactly as
+  it reproduces their contents -- and so `encode_record` stays pure. The cut
+  can fall mid-field, which is exactly what a program reading `REC(1:LEN)`
+  sees; `--format hex` marks the fields past it as `(past record length)`
+  rather than dropping them. `RECORD CONTAINS 47 TO 80` declares the same
+  thing without the `VARYING` keyword and is treated identically. New API:
+  `VaryingLength`, `DataGeneratorOptions.record_varying`,
+  `GeneratedDataset.varying` / `.declared_lengths`, `data_length=` on
+  `encode_record()` / `row_record_length()`, and `varying=` on
+  `EncodingOptions.resolved_format()` / `encoding_caveats()` / `hex_dump()`.
+  When a record has *both* a DEPENDING ON table and an FD range, the table
+  decides and a caveat says so -- enforced both at generation (no length is
+  drawn for such a record) and in the encoder (`data_length` passed directly
+  is dropped), so the caveat is true on every surface rather than only on the
+  generated path.
+
+* **generators:** `gen-data --record-format fixed|variable|variable-bare|auto`
+  generates **variable-length record files**, not just fixed-length ones. A
+  copybook with an `OCCURS ... DEPENDING ON` table describes a record whose
+  length varies with its counter; until now that table was always written at
+  its maximum (RECFM=F), with a caveat on stderr saying a real record would
+  be shorter. `variable` writes only the occurrences each record's own
+  counter names, behind the 4-byte RDW (`LL LL 00 00`, big-endian, length
+  inclusive) that RECFM=V/VB uses to delimit records; `variable-bare` writes
+  the same trimmed records unframed; `auto` picks `variable` exactly when the
+  layout has a DEPENDING ON table. `fixed` stays the default, so a copybook
+  that cannot vary writes byte-identical output to before. The resulting
+  LRECL (or range) is reported -- on stderr for `--format record`, in the
+  header for `--format hex`, which also gains a `(RDW)` row per record so
+  field offsets stay true. New API: `RecordFormat`,
+  `EncodingOptions.record_format` / `.resolved_format()`, `encode_rdw()`,
+  `minimum_record_length()`, `row_record_length()`,
+  `GeneratedDataset.minimum_record_length()` / `.record_lengths()` /
+  `.is_variable_length`, and `layout.OdoControl` / `present_indexes()` /
+  `occurrence_count()` / `unresolved_odo_counters()`.
+
+* **generators:** `FieldSpec` gained `odo_controls` (every `OCCURS ...
+  DEPENDING ON` dimension a field sits inside -- the counter, which subscript
+  position it governs, and the bounds) and `odo_counter_bounds` (the counts a
+  field *controls*, when it is itself a counter). Both are additive keys in
+  `to_dict()` and therefore in the fixture bundle, so `bundle_version` stays
+  `1` -- see `docs/fixture-bundle-schema.md`.
+  `examples/fixtures/FIXTUREDEMO.bundle.json` was regenerated for the two new
+  keys; no generated value changed.
+
 * **generators:** `gen-data --format record|hex` emits the **real record
   image** for a copybook -- the bytes a COBOL program would actually read,
   rather than the display text every existing output path produces.
@@ -141,6 +198,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **generators:** a generated `OCCURS ... DEPENDING ON` counter is now drawn
+  from the table's own `OCCURS min TO max` bounds instead of from its
+  PICTURE's full range. A `PIC 9(4)` counter for a table of at most 50 could
+  previously generate a value like 8 731 -- a record no COBOL program could
+  read, in the fixed-length output too. A declared `VALUE` or level-88 value
+  still wins when it names a count the table can hold, and is overridden when
+  it does not. This changes the generated values (and so the bytes) for any
+  copybook containing a DEPENDING ON table, at a given seed.
 * **models:** `CobolDataItem.calculate_size()` reported the wrong byte width
   for six kinds of data item, and now defers to `storage_size` -- the same
   single authority `generators/data/{layout,encoding,layout_offsets}.py`

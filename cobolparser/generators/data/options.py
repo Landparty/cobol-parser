@@ -32,6 +32,12 @@ class DataGeneratorOptions:
         unique_fields: Field names whose column must hold distinct values.
         blank_rate: Fraction of cells (0.0-1.0) left blank, for exercising
             missing-data paths.
+        record_varying: ``(min, max)`` byte length range for the generated
+            records, as an FD's ``RECORD VARYING FROM min TO max`` would
+            declare.  Only needed for a bare copybook, which carries no FD:
+            when the source is a whole program the clause is read off the
+            record itself.  ``None`` (the default) means "take whatever the
+            source says", which for a copybook is a fixed-length record.
     """
 
     rows: int = 10
@@ -46,6 +52,7 @@ class DataGeneratorOptions:
     header_style: str = "short"
     unique_fields: tuple[str, ...] = ()
     blank_rate: float = 0.0
+    record_varying: tuple[int, int] | None = None
 
     def for_record_image(self) -> DataGeneratorOptions:
         """A copy of these options that describes every byte of the record.
@@ -76,3 +83,9 @@ class DataGeneratorOptions:
             raise ValueError("blank_rate must be between 0.0 and 1.0")
         if self.max_occurs is not None and self.max_occurs < 1:
             raise ValueError("max_occurs must be at least 1")
+        if self.record_varying is not None:
+            low, high = self.record_varying
+            if low < 0 or high < 0:
+                raise ValueError("record_varying lengths must be non-negative")
+            if low > high:
+                raise ValueError("record_varying min must not exceed max")

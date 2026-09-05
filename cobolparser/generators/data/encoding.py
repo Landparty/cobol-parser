@@ -33,8 +33,12 @@ Deliberate limits, all of them loud rather than silent (see
 * **COMP-1/COMP-2 are IEEE 754**, not z/OS hexadecimal floating point.
   That matches GnuCOBOL and Enterprise COBOL under ``FLOAT(IEEE)``; an HFP
   dataset needs a conversion this module does not do.
-* **OCCURS DEPENDING ON** reserves its maximum, matching how the layout is
-  flattened everywhere else in this package.
+* **OCCURS DEPENDING ON** reserves its maximum under
+  :attr:`RecordFormat.FIXED`, matching how the layout is flattened
+  everywhere else in this package.  Under the variable-length formats the
+  occurrences past the counter's own value are dropped instead, which is
+  the whole difference between a RECFM=F and a RECFM=V image of the same
+  copybook -- see :class:`RecordFormat`.
 """
 
 from __future__ import annotations
@@ -46,7 +50,13 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 
 from .errors import CopybookLayoutError
-from .layout import FieldCategory, FieldSpec
+from .layout import (
+    FieldCategory,
+    FieldSpec,
+    VaryingLength,
+    present_indexes,
+    unresolved_odo_counters,
+)
 from .storage import (
     BINARY_NATIVE_USAGES,
     BINARY_USAGES,
@@ -127,6 +137,78 @@ _PACKED_NEGATIVE = "D"
 _PACKED_UNSIGNED = "F"
 
 
+class RecordFormat(StrEnum):
+    """How the records of a generated file are sized and framed.
+
+    COBOL files come in two shapes, and a copybook alone does not say which
+    one a program expects:
+
+    ``FIXED``
+        RECFM=F/FB.  Every record is the same length -- the layout's full
+        length -- and an ``OCCURS ... DEPENDING ON`` table reserves all of
+        its occurrences whether or not the counter says they are used.  The
+        default, and the only shape this package emitted before variable
+        records existed.
+    ``VARIABLE``
+        RECFM=V/VB.  Each record holds only the occurrences its own counter
+        names, and carries a 4-byte **RDW** (record descriptor word) saying
+        how long it is: a big-endian 16-bit total length *including the RDW
+        itself*, then two reserved zero bytes.  Without that prefix a reader
+        handed a stream of differently-sized records has no way to find the
+        next one, which is why the RDW is part of the format rather than a
+        separate switch.
+    ``VARIABLE_BARE``
+        The same trimmed records with no RDW, for a consumer that already
+        knows where each record ends -- typically because
+        :attr:`EncodingOptions.record_separator` delimits them, or because
+        the records are being read one at a time rather than from a stream.
+    ``AUTO``
+        ``VARIABLE`` when the layout contains an ``OCCURS ... DEPENDING ON``
+        table, ``FIXED`` otherwise.  A copybook whose length genuinely varies
+        is the one case where the fixed image is a guess, so this picks the
+        shape the layout itself implies.  Resolved by
+        :meth:`EncodingOptions.resolved_format`.
+    """
+
+    AUTO = "auto"
+    FIXED = "fixed"
+    VARIABLE = "variable"
+    VARIABLE_BARE = "variable-bare"
+
+    @property
+    def is_variable(self) -> bool:
+        """True for the two trimmed formats.  ``AUTO`` is False -- resolve it
+        against a layout first."""
+        return self in (RecordFormat.VARIABLE, RecordFormat.VARIABLE_BARE)
+
+
+#: Bytes an RDW occupies in front of a RECFM=V record.
+RDW_SIZE = 4
+#: Largest value the RDW's 16-bit length field can express, and therefore the
+#: longest record (RDW included) a RECFM=V dataset can hold.
+MAX_VARIABLE_RECORD = 0xFFFF
+
+
+def encode_rdw(body_length: int) -> bytes:
+    """The record descriptor word for a record of *body_length* data bytes.
+
+    ``LL LL 00 00``: the total length *including* these four bytes, as a
+    big-endian halfword, then two reserved bytes that z/OS requires to be
+    zero on a non-spanned record.  Big-endian regardless of
+    :attr:`EncodingOptions.endian` and of the charset -- the RDW is physical
+    file structure written by the access method, not data written by the
+    program, so it does not follow the record's own conventions.
+    """
+    total = body_length + RDW_SIZE
+    if total > MAX_VARIABLE_RECORD:
+        raise RecordEncodingError(
+            f"record of {body_length} bytes exceeds the {MAX_VARIABLE_RECORD}-byte "
+            "limit an RDW can describe; a record this long needs RECFM=VS "
+            "(spanned), which is not generated"
+        )
+    return total.to_bytes(2, "big") + b"\x00\x00"
+
+
 @dataclass(frozen=True)
 class EncodingOptions:
     """How to render a record's bytes.
@@ -142,11 +224,17 @@ class EncodingOptions:
             default) is a true fixed-length record file, as RECFM=F expects;
             ``b"\\n"`` makes a DISPLAY-only record image readable in a text
             editor, at the cost of no longer being a faithful RECFM=F image.
+        record_format: Fixed- or variable-length records; see
+            :class:`RecordFormat`.  Defaults to ``FIXED``, so a copybook with
+            no ``OCCURS ... DEPENDING ON`` table -- which is every copybook
+            whose length cannot vary -- encodes to exactly the bytes it
+            always did.
     """
 
     charset: Charset = Charset.ASCII
     endian: Endian = Endian.AUTO
     record_separator: bytes = b""
+    record_format: RecordFormat = RecordFormat.FIXED
 
     @property
     def space(self) -> int:
@@ -167,6 +255,26 @@ class EncodingOptions:
         if self.endian is Endian.AUTO:
             return Endian.BIG if self.charset is Charset.EBCDIC else host
         return self.endian
+
+    def resolved_format(
+        self, specs: list[FieldSpec], *, varying: bool = False
+    ) -> RecordFormat:
+        """:attr:`record_format` with ``AUTO`` decided against *specs*.
+
+        Always one of the three concrete formats, so every encoding path can
+        branch on the answer without re-deriving it -- the same contract
+        :attr:`resolved_endian` provides for byte order.
+
+        *varying* reports the other reason a record's length is not fixed:
+        an FD ``RECORD VARYING`` range, which lives outside the layout and
+        so cannot be seen in *specs*.  Callers holding a
+        :class:`~.layout.VaryingLength` pass ``True``.
+        """
+        if self.record_format is not RecordFormat.AUTO:
+            return self.record_format
+        if varying or any(spec.odo_controls for spec in specs):
+            return RecordFormat.VARIABLE
+        return RecordFormat.FIXED
 
 
 def _normalized_usage(spec: FieldSpec) -> str:
@@ -189,6 +297,28 @@ def _is_sign_separate(spec: FieldSpec) -> bool:
 
 def _is_sign_leading(spec: FieldSpec) -> bool:
     return "LEADING" in (spec.sign_clause or "").upper()
+
+
+def _effective_data_length(
+    specs: list[FieldSpec], data_length: int | None
+) -> int | None:
+    """*data_length*, unless an ``OCCURS DEPENDING ON`` table already decides.
+
+    The two ways a record's length varies can both be declared at once, and
+    then only one of them can win: the table does, because its count is real
+    data that says how many occurrences this record holds, while an FD range
+    only bounds the length. Cutting the table-trimmed body to an FD-drawn
+    length on top would slice a table mid-occurrence at an unrelated offset.
+
+    :meth:`~.copybook.CopybookDataGenerator.generate_from_record` already
+    declines to draw a length for such a record, so nothing in this package
+    passes both; this enforces it for a direct caller too, which is what
+    keeps :func:`encoding_caveats`' promise ("the table decides") true
+    everywhere rather than only on the generated path.
+    """
+    if data_length is None or any(spec.odo_controls for spec in specs):
+        return None
+    return data_length
 
 
 def field_storage_size(spec: FieldSpec) -> int:
@@ -376,6 +506,8 @@ def encode_record(
     specs: list[FieldSpec],
     row: list[str],
     opts: EncodingOptions,
+    *,
+    data_length: int | None = None,
 ) -> bytes:
     """Concatenate one generated row into its record image.
 
@@ -383,22 +515,109 @@ def encode_record(
     excluded, every OCCURS occurrence expanded -- which is what
     :meth:`~.copybook.CopybookDataGenerator` builds when asked for record
     output.  A layout missing FILLER would silently produce short records.
+
+    Under :attr:`RecordFormat.FIXED` every field in *specs* contributes its
+    bytes, so the result is the same length for every row.  Under either
+    variable format only the occurrences this row's ``OCCURS ... DEPENDING
+    ON`` counters actually name are written (see
+    :func:`~.layout.present_indexes`), and ``VARIABLE`` prefixes the RDW that
+    tells a reader where the record ends.
+
+    *data_length* is the other source of a short record: an FD
+    ``RECORD VARYING FROM min TO max`` range, under which the layout is an
+    ordinary fixed one and each record simply carries fewer of its bytes.
+    The body is cut to that many bytes -- mid-field if that is where the
+    length falls, which is exactly what a program reading
+    ``REC(1:LEN)`` sees.  Passing it also settles
+    :attr:`RecordFormat.AUTO`, since a declared length is by definition a
+    record that varies.  The length is drawn per row at *generation* time
+    (:meth:`~.copybook.CopybookDataGenerator.generate_from_record`) rather
+    than here, so this function stays deterministic and RNG-free.
     """
     if len(specs) != len(row):
         raise RecordEncodingError(
             f"row has {len(row)} cells but the layout has {len(specs)} fields"
         )
-    return b"".join(
-        encode_field(spec, cell, opts) for spec, cell in zip(specs, row, strict=True)
-    )
+    fmt = opts.resolved_format(specs, varying=data_length is not None)
+    declared = _effective_data_length(specs, data_length)
+    if fmt is RecordFormat.FIXED:
+        body = b"".join(
+            encode_field(spec, cell, opts)
+            for spec, cell in zip(specs, row, strict=True)
+        )
+    else:
+        body = b"".join(
+            encode_field(specs[index], row[index], opts)
+            for index in present_indexes(specs, row)
+        )
+        if declared is not None:
+            body = body[:declared]
+    return encode_rdw(len(body)) + body if fmt is RecordFormat.VARIABLE else body
 
 
 def record_length(specs: list[FieldSpec]) -> int:
-    """Byte length of the record *specs* describes."""
+    """Byte length of the record *specs* describes, every occurrence present.
+
+    The fixed-length answer, and the *maximum* for a variable-length file --
+    which is the number RECFM=V's ``LRECL`` is set from, so it stays the
+    headline length either way.  For what one particular row occupies, see
+    :func:`row_record_length`.
+    """
     return sum(field_storage_size(spec) for spec in specs)
 
 
-def encoding_caveats(specs: list[FieldSpec]) -> list[str]:
+def minimum_record_length(specs: list[FieldSpec]) -> int:
+    """Byte length of the shortest record *specs* can produce.
+
+    Every ``OCCURS ... DEPENDING ON`` table at its declared minimum; equal to
+    :func:`record_length` for a layout without one.  Together the two bound
+    the ``LRECL`` range a variable-length dataset needs.
+    """
+    kept = 0
+    for spec in specs:
+        if any(
+            spec.subscripts[control.subscript_index] > control.min_times
+            for control in spec.odo_controls
+            if control.subscript_index < len(spec.subscripts)
+        ):
+            continue
+        kept += field_storage_size(spec)
+    return kept
+
+
+def row_record_length(
+    specs: list[FieldSpec],
+    row: list[str],
+    opts: EncodingOptions | None = None,
+    *,
+    data_length: int | None = None,
+) -> int:
+    """Byte length one generated *row* occupies, RDW included when framed.
+
+    Cheaper than measuring ``len(encode_record(...))`` -- it sums the widths
+    the layout already knows rather than building the bytes -- and used
+    wherever a length is wanted for reporting rather than for writing.
+    *data_length* means the same thing it does on :func:`encode_record`.
+    """
+    options = opts or EncodingOptions()
+    fmt = options.resolved_format(specs, varying=data_length is not None)
+    if fmt is RecordFormat.FIXED:
+        return record_length(specs)
+    body = sum(
+        field_storage_size(specs[index]) for index in present_indexes(specs, row)
+    )
+    declared = _effective_data_length(specs, data_length)
+    if declared is not None:
+        body = min(body, declared)
+    return body + RDW_SIZE if fmt is RecordFormat.VARIABLE else body
+
+
+def encoding_caveats(
+    specs: list[FieldSpec],
+    opts: EncodingOptions | None = None,
+    *,
+    varying: VaryingLength | None = None,
+) -> list[str]:
     """Every reason a record image built from *specs* may not match what a
     real compiler lays out.
 
@@ -406,6 +625,12 @@ def encoding_caveats(specs: list[FieldSpec]) -> list[str]:
     answer, and a caller that surfaces these (the CLI prints them to stderr,
     the hex dump inlines them) leaves the user better off than one that
     refuses.  Empty means the layout is fully modelled.
+
+    *opts* decides which ``OCCURS DEPENDING ON`` caveat applies -- reserving
+    the maximum is a limitation of a fixed-length image but the definition of
+    a variable-length one -- and defaults to the fixed-length reading, so a
+    caller that does not care about record format keeps the answer it always
+    got.
     """
     caveats: list[str] = []
     synchronized = sorted({spec.qualified_name for spec in specs if spec.synchronized})
@@ -427,15 +652,40 @@ def encoding_caveats(specs: list[FieldSpec]) -> list[str]:
             "COMP-1/COMP-2 are encoded as IEEE 754, not z/OS hexadecimal "
             f"floating point: {', '.join(floats)}"
         )
+    fmt = (opts or EncodingOptions()).resolved_format(
+        specs, varying=varying is not None
+    )
+    if varying is not None and any(spec.odo_controls for spec in specs):
+        caveats.append(
+            "this record has both an OCCURS DEPENDING ON table and an FD "
+            "RECORD VARYING range; the table decides each record's length, "
+            "and the FD range is not applied on top of it"
+        )
+    if varying is not None and not fmt.is_variable:
+        caveats.append(
+            f"a record-length range of {varying.minimum} to {varying.maximum} "
+            "is declared, but fixed-length output was asked for, so every "
+            "record is written at full length"
+        )
     depending = sorted(
         {spec.qualified_name for spec in specs if spec.occurs_depending_on is not None}
     )
-    if depending:
+    if depending and not fmt.is_variable:
         caveats.append(
-            "OCCURS DEPENDING ON tables are written at their maximum length; "
-            "a real record would be shorter when the depending-on item is "
-            f"less than that maximum: {', '.join(depending)}"
+            "OCCURS DEPENDING ON tables are written at their maximum length, "
+            "as RECFM=F requires; a real variable-length record would be "
+            "shorter when the depending-on item is less than that maximum -- "
+            "RecordFormat.VARIABLE (--record-format variable) writes that "
+            f"instead: {', '.join(depending)}"
         )
+    if fmt.is_variable:
+        orphans = unresolved_odo_counters(specs)
+        if orphans:
+            caveats.append(
+                "these OCCURS DEPENDING ON counters are not part of the record, "
+                "so nothing generated can set them and their tables are written "
+                f"at full length: {', '.join(orphans)}"
+            )
     return caveats
 
 
@@ -481,12 +731,33 @@ def _dump_field_lines(
     return lines
 
 
+def _dump_absent_lines(spec: FieldSpec, offset: int) -> list[str]:
+    """A field the record's declared length stops short of."""
+    return [
+        f"{offset:06X}     0  {spec.column[:24]:<24} "
+        f"{(spec.picture or '')[:14]:<14} {_normalized_usage(spec):<9} "
+        f"{'(past record length)':<18} "
+    ]
+
+
+def _dump_rdw_lines(rdw: bytes, opts: EncodingOptions) -> list[str]:
+    """The RDW's own row in the hex dump, shaped like a field's."""
+    head = (
+        f"{0:06X}  {len(rdw):>4}  {'(RDW)':<24} "
+        f"{'':<14} {'':<9} {int.from_bytes(rdw[:2], 'big'):<18} "
+    )
+    hex_part = " ".join(f"{b:02X}" for b in rdw)
+    return [f"{head}{hex_part:<{_DUMP_BYTES_PER_LINE * 3}} |{_printable(rdw, opts)}|"]
+
+
 def hex_dump(
     specs: list[FieldSpec],
     rows: list[list[str]],
     opts: EncodingOptions,
     *,
     record_name: str = "",
+    data_lengths: list[int] | None = None,
+    varying: VaryingLength | None = None,
 ) -> str:
     """Render *rows* as an annotated, field-by-field hex dump.
 
@@ -500,14 +771,43 @@ def hex_dump(
     swallowed: a dump that silently ignored ``SYNCHRONIZED`` would be
     confidently wrong about every offset after the aligned item.
     """
+    fmt = opts.resolved_format(specs, varying=varying is not None)
     length = record_length(specs)
+    framing = RDW_SIZE if fmt is RecordFormat.VARIABLE else 0
     out: list[str] = [
         f"* record layout: {record_name or '(unnamed)'}",
-        f"* record length: {length} bytes",
-        f"* charset: {opts.charset.value}   "
-        f"comp-5/float byte order: {opts.resolved_endian.value}",
+        f"* record format: {fmt.value}"
+        + (" (RECFM=F/FB)" if fmt is RecordFormat.FIXED else " (RECFM=V/VB)")
+        + ("" if fmt is not RecordFormat.VARIABLE_BARE else ", no RDW"),
     ]
-    for caveat in encoding_caveats(specs):
+    # The FD range describes this record's length only while it is the thing
+    # deciding it. When a table decides, the layout's own bounds are the
+    # honest span; the FD clause is still printed below, as metadata.
+    fd_decides = varying is not None and not any(spec.odo_controls for spec in specs)
+    if fmt.is_variable:
+        low = (
+            varying.minimum if fd_decides and varying else minimum_record_length(specs)
+        )
+        high = varying.maximum if fd_decides and varying else length
+        out.append(
+            f"* record length: {low + framing} to {high + framing} bytes"
+            + (" (RDW included)" if framing else "")
+        )
+    else:
+        out.append(f"* record length: {length} bytes")
+    if varying is not None:
+        depending = (
+            f" DEPENDING ON {varying.depending_on}" if varying.depending_on else ""
+        )
+        out.append(
+            f"* FD RECORD VARYING FROM {varying.minimum} TO "
+            f"{varying.maximum}{depending}"
+        )
+    out.append(
+        f"* charset: {opts.charset.value}   "
+        f"comp-5/float byte order: {opts.resolved_endian.value}"
+    )
+    for caveat in encoding_caveats(specs, opts, varying=varying):
         out.append(f"* caveat: {caveat}")
     out.append(
         "*"
@@ -516,10 +816,40 @@ def hex_dump(
     )
 
     for index, row in enumerate(rows, start=1):
-        out.append(f"\n* --- record {index} of {len(rows)} ---")
+        positions = (
+            list(range(len(specs)))
+            if fmt is RecordFormat.FIXED
+            else present_indexes(specs, row)
+        )
+        body = sum(field_storage_size(specs[i]) for i in positions)
+        declared = _effective_data_length(
+            specs, data_lengths[index - 1] if data_lengths else None
+        )
+        if declared is not None and fmt.is_variable:
+            body = min(body, declared)
+        out.append(f"\n* --- record {index} of {len(rows)}: {body + framing} bytes ---")
         offset = 0
-        for spec, cell in zip(specs, row, strict=True):
+        if framing:
+            # The RDW is not a field, but it is bytes in the file, and a dump
+            # that started at offset 0 with the first field would put every
+            # subsequent offset four bytes below where it really sits.
+            rdw = encode_rdw(body)
+            out.extend(_dump_rdw_lines(rdw, opts))
+            offset = len(rdw)
+        written = 0
+        for position in positions:
+            spec = specs[position]
+            cell = row[position]
             raw = encode_field(spec, cell, opts)
+            if declared is not None and fmt.is_variable:
+                if written >= declared:
+                    # Past the record's declared length: these fields are
+                    # simply not in the file.  Shown as absent rather than
+                    # omitted, so a reader can see where the cut fell.
+                    out.extend(_dump_absent_lines(spec, offset))
+                    continue
+                raw = raw[: declared - written]
+            written += len(raw)
             out.extend(_dump_field_lines(spec, cell, offset, raw, opts))
             offset += len(raw)
     return "\n".join(out) + "\n"
