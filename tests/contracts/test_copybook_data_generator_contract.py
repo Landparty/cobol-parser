@@ -43,6 +43,13 @@ _FIELD_SPEC_KEYS = {
     "condition_values",
     "subscripts",
     "redefines",
+    # Added alongside record-image output (`gen-data --format record/hex`).
+    # Additive only: every key above kept its name and meaning, which is what
+    # lets mockymock's bundle loader read a v1 bundle unchanged.
+    "storage_size",
+    "sign_clause",
+    "synchronized",
+    "occurs_depending_on",
 }
 
 _DATASET_KEYS = {"record_name", "seed", "row_count", "fields", "rows"}
@@ -130,6 +137,13 @@ class TestFieldSpecContract:
     def test_to_dict_keys_are_stable(self):
         spec = _dataset().fields[0]
         assert set(spec.to_dict()) == _FIELD_SPEC_KEYS
+
+    def test_storage_size_is_the_real_byte_width_not_the_picture_width(self):
+        # The distinction the record-image work turned on: `size` counts
+        # PICTURE character positions, `storage_size` counts bytes, and for
+        # COMP-3 they differ.
+        spec = _dataset().fields[0]
+        assert isinstance(spec.to_dict()["storage_size"], int)
 
     def test_category_serialises_as_a_string(self):
         payload = _dataset().fields[0].to_dict()

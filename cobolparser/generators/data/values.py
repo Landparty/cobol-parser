@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
 from .options import DataGeneratorOptions
+from .storage import POINTER_USAGES
 
 # Figurative constants: the standard COBOL literal values
 _FIGURATIVE_CONSTANTS: dict[str, str] = {
@@ -181,6 +182,9 @@ _MAX_RANDOM_TEXT = 32
 # Word-split regex for parsing field names into semantic tokens
 _WORD_SPLIT_RE = re.compile(r"[-_]+")
 
+#: Usages that name storage rather than data.  See :meth:`ValueFactory._make`.
+_NON_DATA_USAGES = POINTER_USAGES | {"INDEX"}
+
 
 def _name_tokens(name: str) -> set[str]:
     """Extract semantic tokens from a COBOL field name."""
@@ -242,6 +246,15 @@ class ValueFactory:
             if fixed is not None:
                 return fixed
 
+        if (spec.usage or "").upper() in _NON_DATA_USAGES:
+            # An INDEX is a compiler-managed occurrence number and a POINTER
+            # is an address: neither is content a record can meaningfully
+            # carry, and both reach here PICTURE-less, which used to make
+            # them fall through to the numeric path's 9-digit default and
+            # emit a random number that looked like data.  Zero, and no RNG
+            # draw -- so a copybook without one of these generates exactly
+            # what it always did for a given seed.
+            return "0"
         if spec.category is FieldCategory.FLOAT:
             return self._float_value(spec)
         if spec.category in (

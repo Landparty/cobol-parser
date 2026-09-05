@@ -692,7 +692,7 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
 2. **typecheck** — `mypy cobolparser/` (Python 3.13)
 3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (install + Cython extension build only, no tests)
 
-The full `pytest tests/ -v` suite (~8,075 tests) is **not** run automatically —
+The full `pytest tests/ -v` suite (~9,010 tests) is **not** run automatically —
 too slow for every push/PR. It's wired as a `test` job gated to
 `if: github.event_name == 'workflow_dispatch'`, so it only runs when manually
 triggered from the Actions tab. Run the full suite locally during development

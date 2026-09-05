@@ -20,6 +20,7 @@ from typing import Any
 from ...models.data_items import CobolDataItem, ConditionNameItem
 from ...models.program import CobolProgram, CobolSection
 from .layout import expand_condition_values
+from .storage import storage_size
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
 
@@ -99,30 +100,23 @@ def _find_misnested_level_77_items(item: CobolDataItem) -> list[CobolDataItem]:
 def _elementary_byte_length(item: CobolDataItem) -> int:
     """One occurrence's real storage byte length.
 
-    Mirrors ``CobolDataItem.calculate_size()``'s USAGE rules exactly --
-    that method is correct for elementary items (COMP-3/COMP/COMP-1/COMP-2
-    sizing); this module only needs its own walk because
-    ``calculate_size()``'s *group*-item branch never applies a group's own
-    OCCURS multiplier (see Task 5 below).
+    Delegates to :func:`.storage.storage_size`, which is the package's one
+    authority on the question -- a record image built by :mod:`.encoding`
+    and the offsets reported here are then arithmetic on the same widths,
+    and cannot disagree.  Two cases this module used to get wrong on its
+    own, both now fixed by that shared implementation: ``USAGE INDEX`` (no
+    PICTURE, so it was sized as zero bytes and silently collapsed every
+    following offset) and DISPLAY ``SIGN IS SEPARATE`` (a byte the PICTURE
+    does not count).
     """
-    if item.usage in ("POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"):
-        return 4
     picture = item.picture_clause
-    base_size = (picture.size or 0) if picture else 0
-    usage = (item.usage or "DISPLAY").upper()
-    if usage in ("COMP-3", "PACKED-DECIMAL"):
-        digits = picture.total_digits if picture else None
-        if digits:
-            base_size = (digits + 1) // 2 + ((digits + 1) % 2)
-    elif usage in ("COMP", "COMP-4", "COMP-5", "COMPUTATIONAL-4", "COMPUTATIONAL-5"):
-        digits = picture.total_digits if picture else None
-        if digits:
-            base_size = 2 if digits <= 4 else 4 if digits <= 9 else 8
-    elif usage == "COMP-1":
-        base_size = 4
-    elif usage == "COMP-2":
-        base_size = 8
-    return base_size
+    return storage_size(
+        item.usage,
+        picture_size=picture.size if picture else None,
+        total_digits=picture.total_digits if picture else None,
+        sign_clause=item.sign_clause,
+        is_signed=bool(picture and picture.is_signed),
+    )
 
 
 def _occurs_dict(item: CobolDataItem) -> dict[str, int] | None:

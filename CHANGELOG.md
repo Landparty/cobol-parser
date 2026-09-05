@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `gen-data --format record|hex` emits the **real record
+  image** for a copybook -- the bytes a COBOL program would actually read,
+  rather than the display text every existing output path produces.
+  `COMP-3`/`PACKED-DECIMAL` packs into BCD nibbles with a `C`/`D`/`F` sign
+  nibble, `COMP`/`COMP-4`/`BINARY` writes big-endian two's complement,
+  `COMP-5` writes host byte order (that is what "native binary" means),
+  `COMP-1`/`COMP-2` write IEEE 754 binary32/binary64, signed DISPLAY gets an
+  overpunch or a real `SIGN IS SEPARATE` byte, and `INDEX`/`POINTER` get
+  binary zeros. `--charset ebcdic` encodes DISPLAY bytes as cp037 and
+  switches the sign convention with it; `--endian` (default `auto`, which
+  reads the charset as intent) pins `COMP-5` and float byte order;
+  `--record-separator newline` trades RECFM=F fidelity for readability.
+  `--format hex` is the same image annotated field by field -- offset,
+  length, name, PICTURE, USAGE, value, bytes -- which is the form that
+  survives being opened in an editor. Every encoding was verified against
+  GnuCOBOL by compiling a probe program and reading back its raw storage;
+  the probe and its output are reproduced in the new
+  `tests/unit/generators/data/test_encoding.py`. New API:
+  `GeneratedDataset.to_records()` / `.write_records()` / `.to_hex_dump()` /
+  `.record_length()`, `EncodingOptions`, `Charset`, `Endian`,
+  `RecordEncodingError`, and `DataGeneratorOptions.for_record_image()`.
+
+* **generators:** `FieldSpec` gained `storage_size` (the bytes an item really
+  occupies, as opposed to `size`, which counts PICTURE character positions --
+  they differ for every non-DISPLAY `USAGE`), plus `sign_clause`,
+  `synchronized`, and `occurs_depending_on`. All four are additive keys in
+  `to_dict()` and therefore in the fixture bundle, so `bundle_version` stays
+  `1` and mockymock's loader reads an unchanged v1 bundle -- see
+  `docs/fixture-bundle-schema.md`.
+
 * **generators:** `Scenario.verification` -- every `"branches"`/`"all"`
   scenario now carries cobol-parser's own verdict on whether the data it
   generated actually satisfies the branch it is named for. A scenario's name
@@ -110,6 +140,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `metadata["called_program_reference"]`. All additive to `to_dict()`.
 
 ### Fixed
+
+* **generators:** `USAGE INDEX` was sized as **zero bytes** in
+  `layout_offsets` (it carries no PICTURE, so it fell through to a
+  picture-derived width), silently collapsing the byte offset of every item
+  after it in the record -- visible in `cobol-parser data-items` and in
+  anything built on it. A DISPLAY item with `SIGN IS SEPARATE` was likewise
+  under-reported by one byte. Both are fixed by the new
+  `generators/data/storage.py`, which is now the single authority on storage
+  width for the whole package: `layout.py`, `layout_offsets.py`, and the new
+  `encoding.py` all defer to it, so a record image's field widths cannot
+  drift apart from the offsets `data-items` reports.
+
+* **generators:** `gen-data` emitted a random 9-digit number for a
+  `USAGE INDEX` or `USAGE POINTER` field, which looked like data but is an
+  occurrence number and an address respectively. They now generate `"0"`,
+  without drawing from the RNG -- so a copybook containing neither still
+  produces byte-identical output for a given seed.
 
 * **analysis:** a level-88 bare condition-name constraint is now scoped to
   *that* condition name's own VALUEs, via the new

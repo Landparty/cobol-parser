@@ -907,9 +907,57 @@ def _build_gen_data_parser(
         metavar="RATE",
         help="Fraction of cells (0.0-1.0) to leave blank (default: 0.0)",
     )
+    p.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["csv", "json", "record", "hex"],
+        default="csv",
+        help=(
+            "csv (default) / json display values; record writes the real "
+            "COBOL record image (COMP-3 packed, COMP big-endian binary, "
+            "signed DISPLAY overpunched); hex is that image annotated "
+            "field by field"
+        ),
+    )
+    p.add_argument(
+        "--charset",
+        choices=["ascii", "ebcdic"],
+        default="ascii",
+        help="Encoding of DISPLAY bytes for --format record/hex (default: ascii)",
+    )
+    p.add_argument(
+        "--endian",
+        choices=["auto", "big", "little", "native"],
+        default="auto",
+        help=(
+            "Byte order for COMP-5 and COMP-1/COMP-2 (default: auto -- "
+            "big-endian for --charset ebcdic, host order otherwise). "
+            "COMP/COMP-4 are always big-endian"
+        ),
+    )
+    p.add_argument(
+        "--record-separator",
+        choices=["none", "newline"],
+        default="none",
+        help=(
+            "Bytes between records for --format record (default: none, a "
+            "true fixed-length RECFM=F image)"
+        ),
+    )
     _add_compact_arg(p)
     _add_output_arg(p)
     p.set_defaults(func=_cmd_gen_data)
+
+
+def _encoding_options(args: argparse.Namespace) -> Any:
+    """Build the EncodingOptions the record-image formats are rendered with."""
+    from ..generators.data.encoding import Charset, EncodingOptions, Endian
+
+    return EncodingOptions(
+        charset=Charset(args.charset),
+        endian=Endian(args.endian),
+        record_separator=b"\n" if args.record_separator == "newline" else b"",
+    )
 
 
 def _cmd_gen_data(args: argparse.Namespace) -> None:
@@ -940,6 +988,8 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         )
         return
 
+    wants_record_image = args.output_format in ("record", "hex")
+
     try:
         options = DataGeneratorOptions(
             rows=args.rows,
@@ -958,6 +1008,21 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
     except ValueError as exc:
         _fail(str(exc))
 
+    if wants_record_image:
+        # A record image has to account for every byte, which the
+        # column-shaped defaults deliberately do not -- see
+        # DataGeneratorOptions.for_record_image. Overriding silently would
+        # make --include-filler/--max-occurs look ignored, so say so.
+        adjusted = options.for_record_image()
+        if adjusted != options:
+            print(
+                f"note: --format {args.output_format} lays out every byte of "
+                "the record, so FILLER is included, REDEFINES excluded, and "
+                "every OCCURS occurrence expanded",
+                file=sys.stderr,
+            )
+        options = adjusted
+
     try:
         dataset = CopybookDataGenerator(options).generate_from_source(
             source, filename=args.file, record=args.record
@@ -965,15 +1030,48 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
     except CopybookLayoutError as exc:
         _fail(str(exc))
 
-    if args.describe:
+    output_path = getattr(args, "output", None)
+
+    if args.describe or args.output_format == "json":
         _json_out(
             {"source_file": args.file, **dataset.to_dict()},
             args.compact,
-            getattr(args, "output", None),
+            output_path,
         )
         return
 
-    output_path = getattr(args, "output", None)
+    if args.output_format == "hex":
+        text = dataset.to_hex_dump(_encoding_options(args))
+        if output_path:
+            try:
+                with open(output_path, "w", encoding="utf-8") as handle:
+                    handle.write(text)
+            except OSError as e:
+                _fail(f"Cannot write output file: {e}")
+        else:
+            print(text, end="")
+        return
+
+    if args.output_format == "record":
+        try:
+            raw = dataset.to_records(_encoding_options(args))
+        except CopybookLayoutError as exc:
+            _fail(str(exc))
+        for caveat in _record_caveats(dataset):
+            print(f"note: {caveat}", file=sys.stderr)
+        if output_path:
+            try:
+                dataset.write_records(output_path, _encoding_options(args))
+            except OSError as e:
+                _fail(f"Cannot write output file: {e}")
+        else:
+            # Raw record bytes are binary by nature (a COMP field routinely
+            # contains 0x0A); go through the buffer so nothing re-encodes or
+            # newline-translates them on the way out.
+            sys.stdout.buffer.write(raw)
+            sys.stdout.buffer.flush()
+        return
+
     if output_path:
         # Write through the csv module so embedded newlines round-trip.
         try:
@@ -982,6 +1080,13 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
             _fail(f"Cannot write output file: {e}")
     else:
         print(dataset.to_csv(), end="")
+
+
+def _record_caveats(dataset: Any) -> list[str]:
+    """Reasons a written record image may not match a real compiler's."""
+    from ..generators.data.encoding import encoding_caveats
+
+    return encoding_caveats(dataset.fields)
 
 
 def _build_gen_fixtures_parser(
