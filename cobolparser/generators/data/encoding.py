@@ -299,6 +299,28 @@ def _is_sign_leading(spec: FieldSpec) -> bool:
     return "LEADING" in (spec.sign_clause or "").upper()
 
 
+def _effective_data_length(
+    specs: list[FieldSpec], data_length: int | None
+) -> int | None:
+    """*data_length*, unless an ``OCCURS DEPENDING ON`` table already decides.
+
+    The two ways a record's length varies can both be declared at once, and
+    then only one of them can win: the table does, because its count is real
+    data that says how many occurrences this record holds, while an FD range
+    only bounds the length. Cutting the table-trimmed body to an FD-drawn
+    length on top would slice a table mid-occurrence at an unrelated offset.
+
+    :meth:`~.copybook.CopybookDataGenerator.generate_from_record` already
+    declines to draw a length for such a record, so nothing in this package
+    passes both; this enforces it for a direct caller too, which is what
+    keeps :func:`encoding_caveats`' promise ("the table decides") true
+    everywhere rather than only on the generated path.
+    """
+    if data_length is None or any(spec.odo_controls for spec in specs):
+        return None
+    return data_length
+
+
 def field_storage_size(spec: FieldSpec) -> int:
     """:attr:`FieldSpec.storage_size`, as a function for symmetry with the
     other module-level helpers here."""
@@ -517,6 +539,7 @@ def encode_record(
             f"row has {len(row)} cells but the layout has {len(specs)} fields"
         )
     fmt = opts.resolved_format(specs, varying=data_length is not None)
+    declared = _effective_data_length(specs, data_length)
     if fmt is RecordFormat.FIXED:
         body = b"".join(
             encode_field(spec, cell, opts)
@@ -527,8 +550,8 @@ def encode_record(
             encode_field(specs[index], row[index], opts)
             for index in present_indexes(specs, row)
         )
-        if data_length is not None:
-            body = body[:data_length]
+        if declared is not None:
+            body = body[:declared]
     return encode_rdw(len(body)) + body if fmt is RecordFormat.VARIABLE else body
 
 
@@ -583,8 +606,9 @@ def row_record_length(
     body = sum(
         field_storage_size(specs[index]) for index in present_indexes(specs, row)
     )
-    if data_length is not None:
-        body = min(body, data_length)
+    declared = _effective_data_length(specs, data_length)
+    if declared is not None:
+        body = min(body, declared)
     return body + RDW_SIZE if fmt is RecordFormat.VARIABLE else body
 
 
@@ -756,9 +780,15 @@ def hex_dump(
         + (" (RECFM=F/FB)" if fmt is RecordFormat.FIXED else " (RECFM=V/VB)")
         + ("" if fmt is not RecordFormat.VARIABLE_BARE else ", no RDW"),
     ]
+    # The FD range describes this record's length only while it is the thing
+    # deciding it. When a table decides, the layout's own bounds are the
+    # honest span; the FD clause is still printed below, as metadata.
+    fd_decides = varying is not None and not any(spec.odo_controls for spec in specs)
     if fmt.is_variable:
-        low = varying.minimum if varying else minimum_record_length(specs)
-        high = varying.maximum if varying else length
+        low = (
+            varying.minimum if fd_decides and varying else minimum_record_length(specs)
+        )
+        high = varying.maximum if fd_decides and varying else length
         out.append(
             f"* record length: {low + framing} to {high + framing} bytes"
             + (" (RDW included)" if framing else "")
@@ -792,7 +822,9 @@ def hex_dump(
             else present_indexes(specs, row)
         )
         body = sum(field_storage_size(specs[i]) for i in positions)
-        declared = data_lengths[index - 1] if data_lengths else None
+        declared = _effective_data_length(
+            specs, data_lengths[index - 1] if data_lengths else None
+        )
         if declared is not None and fmt.is_variable:
             body = min(body, declared)
         out.append(f"\n* --- record {index} of {len(rows)}: {body + framing} bytes ---")

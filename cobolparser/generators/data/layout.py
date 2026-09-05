@@ -598,9 +598,11 @@ def _link_odo_counters(specs: list[FieldSpec]) -> None:
 
     A counter governing two tables at once (legal, if odd) gets the
     intersection of their bounds, so the one value it holds names a real
-    occurrence in both.  When the two do not overlap the lower bound wins:
-    a count below a table's minimum still addresses bytes that exist, while
-    one above its maximum does not.
+    occurrence in both.  When the two do not overlap -- one table holding
+    1-3, another 5-8 -- the tightest *maximum* wins, not the largest
+    minimum: a count below a table's minimum still addresses occurrences
+    that exist, while one above its maximum names bytes the record does
+    not have.
     """
     bounds: dict[str, tuple[int, int]] = {}
     for spec in specs:
@@ -612,7 +614,15 @@ def _link_odo_counters(specs: list[FieldSpec]) -> None:
                 continue
             low = max(existing[0], control.min_times)
             high = min(existing[1], control.max_times)
-            bounds[key] = (low, max(low, high))
+            if low > high:
+                # Disjoint ranges (one table holds 1-3, another 5-8). Falling
+                # back to the larger *minimum* would name occurrence 5 of a
+                # 3-occurrence table -- the over-counting direction, which is
+                # the one that describes bytes the record does not have.
+                # Collapse to the tightest maximum instead: under-counting
+                # still addresses occurrences that exist.
+                low = high
+            bounds[key] = (low, high)
 
     if not bounds:
         return

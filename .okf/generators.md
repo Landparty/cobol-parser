@@ -765,7 +765,13 @@ bytes each *record* carries.
   it isn't. When a copybook does put it there, leaving the generated value
   would contradict the record's own length.
 * **Both mechanisms at once**: the table decides, the FD range is not applied
-  on top of it, and a caveat says so.
+  on top of it, and a caveat says so. Enforced in *two* places, because a
+  caveat that the code contradicts is worse than no caveat: the generator
+  draws no length for such a record (so `declared_lengths` is `None` and every
+  downstream surface agrees for free), and `_effective_data_length()` drops a
+  `data_length` a direct caller passes anyway. `minimum_record_length()`
+  likewise only prefers the FD floor when a length was actually drawn — a
+  Copilot review on PR #204 caught all three of those disagreeing.
 
 ### Odds and ends
 

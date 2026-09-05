@@ -8,6 +8,20 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-09-05 (part 3): `TestBothMechanismsAtOnce` in the same file, after a
+Copilot review on PR #204 found the "table decides" rule documented but not
+implemented -- a record declaring *both* an ODO table and an FD
+`RECORD VARYING` range had the FD-drawn length cut on top of the ODO
+trimming. The class pins every surface agreeing: no length drawn for such a
+record, `minimum_record_length()` taking the layout's floor rather than the
+FD's, `record_lengths()` still summing to the bytes `to_records()` writes,
+the hex dump reporting the layout's span while still printing the FD clause
+as metadata, and a `data_length` passed *directly* to `encode_record` /
+`row_record_length` being ignored for an ODO layout but still honoured
+without one. `TestOdoLayout` also grew two bounds tests: disjoint ranges for
+one counter collapse to the tightest maximum (over-counting names bytes the
+record does not have), overlapping ones still intersect.
+
 2026-09-05 (part 2): the same file grew `TestFdRecordVarying` and
 `TestExplicitVaryingRange` for the FD `RECORD VARYING` mechanism, which no
 `OCCURS DEPENDING ON` walk can see — the record is flat and the length lives

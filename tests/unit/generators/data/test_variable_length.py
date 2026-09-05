@@ -277,10 +277,81 @@ class TestExplicitVaryingRange:
 
 
 class TestBothMechanismsAtOnce:
-    def test_the_table_decides_and_the_caveat_says_so(self):
+    """A record can declare both, and then only one of them can decide.
+
+    The table does: its count is real data saying how many occurrences this
+    record holds, while an FD range only bounds the length. Cutting the
+    table-trimmed body to an FD-drawn length on top would slice a table
+    mid-occurrence at an unrelated offset. Every surface has to agree on
+    that, or the caveat is a lie -- which is what these pin.
+    """
+
+    @staticmethod
+    def both():
+        """A dataset whose record has an ODO table *and* an FD range."""
+        record = parse_copybook_records(ORDER_COPYBOOK)[0]
+        record.set_metadata(
+            "fd_clauses",
+            {
+                "record": {
+                    "varying": True,
+                    "min": 5,
+                    "max": 20,
+                    "depending_on": "ORD-LINE-COUNT",
+                }
+            },
+        )
+        options = DataGeneratorOptions(rows=6, seed=3).for_record_image()
+        return CopybookDataGenerator(options).generate_from_record(record)
+
+    def test_the_caveat_says_the_table_decides(self):
         specs = specs_for(ORDER_COPYBOOK)
         caveats = encoding_caveats(specs, VARIABLE, varying=VaryingLength(10, 20))
         assert any("the table decides each record's length" in c for c in caveats)
+
+    def test_no_length_is_drawn_for_a_record_a_table_already_sizes(self):
+        dataset = self.both()
+        assert dataset.varying is not None  # still recorded, for the caveat
+        assert dataset.declared_lengths is None
+
+    def test_the_minimum_comes_from_the_table_not_the_fd_floor(self):
+        dataset = self.both()
+        assert dataset.minimum_record_length() == minimum_record_length(dataset.fields)
+        assert dataset.minimum_record_length() != dataset.varying.minimum
+
+    def test_reported_lengths_still_match_the_bytes_written(self):
+        dataset = self.both()
+        for opts in (VARIABLE, BARE, FIXED):
+            assert sum(dataset.record_lengths(opts)) == len(dataset.to_records(opts))
+
+    def test_a_data_length_passed_directly_is_ignored_for_an_odo_layout(self):
+        # Defence in depth: the generator never passes both, but a direct
+        # caller could, and the caveat's promise has to hold there too.
+        specs = specs_for(ORDER_COPYBOOK)
+        row = order_row("02")
+        assert encode_record(specs, row, BARE, data_length=3) == encode_record(
+            specs, row, BARE
+        )
+        assert row_record_length(specs, row, BARE, data_length=3) == row_record_length(
+            specs, row, BARE
+        )
+
+    def test_a_data_length_is_still_honoured_without_a_table(self):
+        specs = specs_for(FIXED_COPYBOOK)
+        row = ["C00001", "ACME"]
+        assert len(encode_record(specs, row, BARE, data_length=9)) == 9
+
+    def test_the_hex_dump_reports_the_layouts_span_not_the_fd_range(self):
+        dataset = self.both()
+        header = dataset.to_hex_dump(VARIABLE).splitlines()[2]
+        low = minimum_record_length(dataset.fields) + RDW_SIZE
+        high = record_length(dataset.fields) + RDW_SIZE
+        assert f"record length: {low} to {high} bytes" in header
+        # The FD clause is still shown, as metadata rather than as the span.
+        assert any(
+            "FD RECORD VARYING FROM 5 TO 20" in line
+            for line in dataset.to_hex_dump(VARIABLE).splitlines()
+        )
 
 
 class TestOdoLayout:
@@ -310,6 +381,38 @@ class TestOdoLayout:
         copybook = ORDER_COPYBOOK.replace("OCCURS 1 TO 4", "OCCURS 0 TO 4")
         specs = {s.column: s for s in specs_for(copybook)}
         assert specs["ORD-LINE-COUNT"].odo_counter_bounds == (0, 4)
+
+    def test_disjoint_bounds_collapse_to_the_tightest_maximum(self):
+        # One counter, two tables that cannot both be satisfied: A holds at
+        # most 3, B needs at least 5. Taking the larger *minimum* would name
+        # occurrence 5 of a 3-occurrence table -- the over-counting direction,
+        # which is the one that describes bytes the record does not have.
+        copybook = """
+       01  R.
+           05  N PIC 9.
+           05  A OCCURS 1 TO 3 TIMES
+                       DEPENDING ON N.
+               10 AV PIC X.
+           05  B OCCURS 5 TO 8 TIMES
+                       DEPENDING ON N.
+               10 BV PIC X.
+"""
+        specs = {s.column: s for s in specs_for(copybook)}
+        assert specs["N"].odo_counter_bounds == (3, 3)
+
+    def test_overlapping_bounds_still_intersect(self):
+        copybook = """
+       01  R.
+           05  N PIC 9.
+           05  A OCCURS 1 TO 6 TIMES
+                       DEPENDING ON N.
+               10 AV PIC X.
+           05  B OCCURS 3 TO 9 TIMES
+                       DEPENDING ON N.
+               10 BV PIC X.
+"""
+        specs = {s.column: s for s in specs_for(copybook)}
+        assert specs["N"].odo_counter_bounds == (3, 6)
 
     def test_max_occurs_clamps_the_bounds_to_what_was_flattened(self):
         # A counter allowed to name occurrence 4 of a table flattened to 2

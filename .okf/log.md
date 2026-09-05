@@ -47,7 +47,16 @@ fixed 80-byte record and cannot do better.
   than its 01 can hold cannot be honoured by padding — those bytes were never
   declared.
 * **Both mechanisms at once**: the table decides, the FD range is not applied
-  on top, and a caveat says so.
+  on top, and a caveat says so. A Copilot review on PR #204 caught that the
+  code did *not* actually do this -- `encode_record` cut the ODO-trimmed body
+  to the FD-drawn length anyway, `row_record_length` and `hex_dump` reported
+  as if it had, and `minimum_record_length()` preferred the FD floor. Fixed at
+  the source (the generator draws no length for a record a table already
+  sizes, so `declared_lengths` is `None` and everything downstream agrees for
+  free) *and* defensively in `_effective_data_length()`, for a direct caller
+  who passes both. The same review found `_link_odo_counters` collapsing
+  disjoint bounds to the larger *minimum* -- the over-counting direction its
+  own docstring calls unsafe -- where the tightest maximum was meant.
 
 See "FD `RECORD VARYING`" in [generators.md](generators.md);
 `tests/unit/generators/data/test_variable_length.py::TestFdRecordVarying`

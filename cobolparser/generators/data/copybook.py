@@ -245,7 +245,7 @@ class CopybookDataGenerator:
         # range draws nothing here, and so generates byte-identical output to
         # a version of this package that had never heard of one.
         varying = self._varying_for(record, fields)
-        lengths = self._draw_lengths(varying, rng)
+        lengths = self._draw_lengths(varying, fields, rng)
         if lengths is not None:
             self._write_length_field(fields, rows, lengths, varying, factory)
         return GeneratedDataset(
@@ -279,7 +279,10 @@ class CopybookDataGenerator:
         )
 
     def _draw_lengths(
-        self, varying: VaryingLength | None, rng: random.Random
+        self,
+        varying: VaryingLength | None,
+        fields: list[FieldSpec],
+        rng: random.Random,
     ) -> list[int] | None:
         """One record length per row, drawn uniformly across the range.
 
@@ -288,8 +291,16 @@ class CopybookDataGenerator:
         from the same seeded RNG the values came from, so a seed reproduces
         the record *lengths* as exactly as it reproduces their contents --
         which it could not if the encoder drew them at write time.
+
+        Nothing is drawn when the record also has an ``OCCURS ... DEPENDING
+        ON`` table.  Both mechanisms can be declared at once, but only one
+        can decide, and the table does: its count is real data saying how
+        many occurrences this record holds, while the FD range only bounds
+        the length.  A drawn length would cut the table-trimmed body at an
+        unrelated offset, and ``declared_lengths`` would report a number
+        nothing honoured.
         """
-        if varying is None:
+        if varying is None or any(spec.odo_controls for spec in fields):
             return None
         return [
             rng.randint(varying.minimum, varying.maximum)

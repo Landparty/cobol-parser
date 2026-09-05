@@ -101,11 +101,16 @@ class GeneratedDataset:
         """Byte length of the shortest record this dataset can produce.
 
         Every ``OCCURS ... DEPENDING ON`` table at its declared minimum, or
-        the FD's own ``RECORD VARYING`` floor when the record has one.  Equal
-        to :meth:`record_length` when neither applies -- which is the
-        machine-readable way of saying the record is fixed-length.
+        the FD's own ``RECORD VARYING`` floor when that is what decides the
+        length.  Equal to :meth:`record_length` when neither applies -- which
+        is the machine-readable way of saying the record is fixed-length.
+
+        The FD floor is used only when :attr:`declared_lengths` was actually
+        drawn, i.e. when no table decides instead.  Reporting it for a record
+        whose table decides would contradict :meth:`record_lengths` and
+        :meth:`to_records`, which correctly ignore the FD range there.
         """
-        if self.varying is not None:
+        if self.varying is not None and self.declared_lengths is not None:
             return self.varying.minimum
         return _minimum_record_length(self.fields)
 

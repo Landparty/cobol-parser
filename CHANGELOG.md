@@ -32,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `encode_record()` / `row_record_length()`, and `varying=` on
   `EncodingOptions.resolved_format()` / `encoding_caveats()` / `hex_dump()`.
   When a record has *both* a DEPENDING ON table and an FD range, the table
-  decides and a caveat says so.
+  decides and a caveat says so -- enforced both at generation (no length is
+  drawn for such a record) and in the encoder (`data_length` passed directly
+  is dropped), so the caveat is true on every surface rather than only on the
+  generated path.
 
 * **generators:** `gen-data --record-format fixed|variable|variable-bare|auto`
   generates **variable-length record files**, not just fixed-length ones. A
