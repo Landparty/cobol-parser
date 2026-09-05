@@ -181,7 +181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the documented smoke test for the COBOL sample corpus -- it held only
   helper functions, none named `test_*`. With nothing checking the corpus,
   32 lines across 13 sample programs had drifted past column 72, the end of
-  Area B in fixed-format COBOL. Columns 73+ are discarded before lexing
+  Area B in fixed-format COBOL, 30 of them carrying real code or comment
+  text. Columns 73+ are discarded before lexing
   exactly as a compiler discards them, so the truncation was silent: the
   parser saw `WS-EXCEPTION-MSG` as `WS-EXCEPTION-M`, data items lost their
   terminating period, and `complex_data_structures.cbl` was left with an
@@ -189,7 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inputs to the wider suite, so a large number of tests were asserting
   against programs that were not the programs on disk. All 32 lines are
   fixed without changing a token, and `TestSampleCorpus` now pins both the
-  column rule and a clean parse for every sample.
+  column rule (failing only on non-whitespace past column 72, and reporting
+  the discarded text) and a clean parse for every sample.
 
 
 * **generators:** `USAGE INDEX` was sized as **zero bytes** in

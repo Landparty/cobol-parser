@@ -8,7 +8,8 @@ this file even though the project documents it as the thing that
 
 That gap let a whole class of fixture rot through: 32 lines across 13
 sample programs ran past column 72, the end of Area B in fixed-format
-COBOL. The preprocessor drops those columns exactly as a real compiler
+COBOL -- 30 of them carrying real code or comment text, the other two only
+trailing spaces. The preprocessor drops those columns exactly as a real compiler
 does, so the parser silently saw truncated identifiers
 (``WS-EXCEPTION-MSG`` arriving as ``WS-EXCEPTION-M``), data items missing
 their terminating period, and -- in one case -- an unterminated literal
@@ -54,22 +55,27 @@ class TestSampleCorpus:
 
     @pytest.mark.parametrize("sample", _sample_programs(), ids=lambda p: p.name)
     def test_sample_respects_fixed_format_columns(self, sample: Path) -> None:
-        """No sample line may extend past column 72.
+        """No sample line may carry *content* past column 72.
 
         Anything there is silently discarded as the identification area, so
         a line that overflows does not fail loudly -- it quietly changes the
         program the rest of the suite is testing against.
+
+        Only non-whitespace counts. Trailing spaces past column 72 are
+        discarded too, but discarding them changes nothing, and failing on
+        them would make this test hostage to whichever editor last touched
+        the file.
         """
-        overflowing = [
-            (number, len(line))
+        offenders = [
+            (number, line[LAST_CODE_COLUMN:].rstrip())
             for number, line in enumerate(
                 sample.read_text(encoding="utf-8", errors="replace").splitlines(), 1
             )
-            if len(line) > LAST_CODE_COLUMN
+            if line[LAST_CODE_COLUMN:].strip()
         ]
-        assert not overflowing, (
-            f"{sample.name}: lines past column {LAST_CODE_COLUMN} "
-            f"(line, length): {overflowing}"
+        assert not offenders, (
+            f"{sample.name}: content past column {LAST_CODE_COLUMN}, which the "
+            f"preprocessor discards before lexing (line, discarded text): {offenders}"
         )
 
     @pytest.mark.parametrize("sample", _sample_programs(), ids=lambda p: p.name)

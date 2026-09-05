@@ -1,14 +1,23 @@
 """How many bytes a COBOL data item actually occupies.
 
-Split out from both :mod:`.layout` (which knows a field's PICTURE and
-category) and :mod:`.encoding` (which turns a value into those bytes) so the
-two cannot drift: a record image whose field widths disagreed with the
-offsets ``data-items`` reports would be wrong in a way neither module could
-detect on its own.  :mod:`.layout_offsets` defers here too, so every surface
-in the package answers this question the same way.
+Split out from both :mod:`cobolparser.generators.data.layout` (which knows a
+field's PICTURE and category) and :mod:`cobolparser.generators.data.encoding`
+(which turns a value into those bytes) so the two cannot drift: a record image
+whose field widths disagreed with the offsets ``data-items`` reports would be
+wrong in a way neither module could detect on its own.
+:mod:`cobolparser.generators.data.layout_offsets` defers here too, as does
+:meth:`cobolparser.models.data_items.CobolDataItem.calculate_size`, so every
+surface answers this question the same way.
 
-Zero dependencies beyond the standard library, deliberately -- it is
-imported by modules on both sides of the layout/encoding split.
+Lives at the package root, beside :mod:`cobolparser._errors`, and for the same
+reason: ``cobolparser.generators.data.__init__`` eagerly imports
+``program_layout``, which imports ``cobolparser.models``, so a model importing
+this from under ``generators.data`` would close an import cycle.
+``cobolparser.generators.data.storage`` re-exports everything here, so the
+importers that predate the move are unaffected.
+
+Zero dependencies beyond the standard library, deliberately -- it is imported
+by modules on both sides of the layout/encoding split, and by the models.
 """
 
 from __future__ import annotations

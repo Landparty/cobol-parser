@@ -5,14 +5,15 @@
 A deep audit of the repo, starting from a green suite (9,015 passing) and
 looking for what the tests were not asking. Three findings, all fixed.
 
-* **`CobolDataItem.calculate_size()` had drifted from `storage_size` in five
+* **`CobolDataItem.calculate_size()` had drifted from `storage_size` in six
   ways** and now defers to it. `BINARY`/`COMPUTATIONAL` reported 9 bytes
   instead of 4, `COMPUTATIONAL-3` 9 instead of 5, `COMP-1`/`COMP-2`/`INDEX`
   **0** (their usage branches sat behind an `is_elementary_item()` guard that
   requires a PICTURE, which none of them has), a group added its REDEFINES
   children instead of sharing their storage, and a group's own OCCURS
-  multiplier was never applied. Published as `calculated_size` on every data
-  item's `to_dict()` and as `gen-data --list-records`' record `size`. See
+  multiplier was never applied, and a DISPLAY `SIGN IS SEPARATE` item never
+  got its extra byte. Published as `calculated_size` on every data item's
+  `to_dict()` and as `gen-data --list-records`' record `size`. See
   [ast-models.md](ast-models.md).
 * **`DeadCodeAnalyzer` reported no dead code at all for the most common COBOL
   program shape.** The 2026-08-11 fall-through fix gated on

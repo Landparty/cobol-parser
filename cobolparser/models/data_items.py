@@ -586,16 +586,29 @@ class CobolDataItem(ASTNode):
         Defers to :func:`cobolparser._storage.storage_size` -- the one
         authority on how many bytes a data item takes, shared with the
         record-image encoder and with ``layout_offsets`` (which backs the
-        ``data-items`` subcommand), so the three cannot drift apart.  This
-        method used to carry its own copy of that arithmetic and had
-        drifted in five ways: it knew ``COMP``/``COMP-4``/``COMP-3`` but not
-        the ``BINARY``/``COMPUTATIONAL``/``COMPUTATIONAL-3`` spellings of the
+        ``data-items`` subcommand), so no elementary item's width can drift
+        between them.  This method used to carry its own copy of that
+        arithmetic and had drifted in six ways: it knew
+        ``COMP``/``COMP-4``/``COMP-3`` but not the
+        ``BINARY``/``COMPUTATIONAL``/``COMPUTATIONAL-3`` spellings of the
         same usages (so ``PIC S9(9) BINARY`` reported 9 bytes, not 4); it
         reached its ``COMP-1``/``COMP-2`` branch only for an item that had a
         PICTURE, which those usages never do (so both reported 0, as did
-        ``USAGE INDEX``); it summed a group's REDEFINES children on top of
-        what they redefine instead of sharing one slot; and it applied an
-        OCCURS multiplier to elementary items only, never to a group.
+        ``USAGE INDEX``); it never spent the extra byte a DISPLAY item with
+        ``SIGN IS SEPARATE`` needs, which the PICTURE's character count does
+        not include; it summed a group's REDEFINES children on top of what
+        they redefine instead of sharing one slot; and it applied an OCCURS
+        multiplier to elementary items only, never to a group.
+
+        One divergence from ``layout_offsets`` is deliberate rather than
+        drift, and shared widths do not remove it: under
+        ``OCCURS ... DEPENDING ON`` this reserves the table's **maximum**
+        (matching ``generators.data.layout``/``encoding``, and so the record
+        images ``gen-data`` writes), while ``layout_offsets`` reserves a
+        single occurrence because the real multiplier is not known until
+        run time.  Across the sample and NIST corpora that is the only thing
+        the two disagree about: 18,121 records, 14 differences, every one an
+        ODO table.
         """
         return self._occurrence_size() * self._occurs_multiplier()
 

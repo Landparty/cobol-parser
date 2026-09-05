@@ -203,7 +203,7 @@ and as the record `size` of `gen-data --list-records`.
 
 It now defers to `cobolparser._storage.storage_size` — the same single
 authority `generators/data/{layout,encoding,layout_offsets}.py` use. It used
-to carry its own copy of that arithmetic and had drifted in **five** ways,
+to carry its own copy of that arithmetic and had drifted in **six** ways,
 all wrong numbers in a published API:
 
 | Input | Old | Correct |
@@ -214,6 +214,7 @@ all wrong numbers in a published API:
 | `USAGE INDEX` | 0 | 4 |
 | group with `05 B REDEFINES A PIC X(10)` | 20 | 10 |
 | `05 ROW OCCURS 5` of a 4-byte group | 4 | 20 |
+| `PIC S9(5)` with `SIGN IS LEADING SEPARATE` | 5 | 6 |
 
 Causes, in order: the usage branches listed `COMP`/`COMP-4`/`COMP-3` but not
 the `BINARY`/`COMPUTATIONAL`/`COMPUTATIONAL-3` spellings of the same
@@ -222,8 +223,10 @@ usages; every usage branch sat behind an `is_elementary_item()` guard, which
 only items that can ever use it (and `INDEX` had no branch at all — a
 zero-width item silently collapses every offset after it); the group branch
 summed all children, so a REDEFINES entry was added to what it redefines
-rather than sharing its storage; and the OCCURS multiplier was applied only
-in the elementary branch, never to a group.
+rather than sharing its storage; the OCCURS multiplier was applied only
+in the elementary branch, never to a group; and a DISPLAY item with
+`SIGN IS SEPARATE` never got the extra byte its PICTURE character count
+does not include.
 
 `_occurrence_size()` / `_occurs_multiplier()` / `_direct_data_children()` are
 the new helpers. Group layout follows `layout_offsets._layout_siblings`'

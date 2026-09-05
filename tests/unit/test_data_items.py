@@ -1157,7 +1157,9 @@ class TestCalculateSizeRegressions:
     drifted from :func:`cobolparser._storage.storage_size`, the package's
     single authority on how many bytes a data item occupies.
 
-    Five separate wrong answers, all now fixed by deferring to that one
+    Six separate wrong answers -- the four usage/PICTURE ones, the missing
+    ``SIGN IS SEPARATE`` byte, and the two group-shape ones (REDEFINES and a
+    group's own OCCURS) -- all now fixed by deferring to that one
     implementation (the same one the record-image encoder and
     ``layout_offsets`` -- which backs the ``data-items`` subcommand -- use).
     ``calculate_size`` is reported to consumers as ``calculated_size`` in
