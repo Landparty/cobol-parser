@@ -3753,17 +3753,43 @@ divisions and reporting only an argument count.
 
 Fix: `_data_fast_usable()` probes the compiled helper once at import with an
 empty token list (the clause loop never runs, so it returns `pos` without
-reading any other parameter). On mismatch the fast path is disabled and a
-`RuntimeWarning` names the rebuild; a missing extension stays silent, since
+reading any other parameter). On mismatch the fast path is disabled and
+`logger.warning` names the rebuild; a missing extension stays silent, since
 that is a normal pure-Python install. Verified against a real compiled
 extension, and fast-path vs fallback ASTs compared byte-for-byte across the
 94-file sample + shamrice corpus (zero mismatches).
+
+Two self-review findings, both fixed before merge:
+
+- The report was first written with `warnings.warn`, which at import time
+  turns a stale build into an `import cobolparser` failure under `-W error`
+  (reproduced) — inverting the guard's purpose. Now `logger.warning`.
+- `_DATA_FAST_ARG_COUNT` is a third copy of the arity, and nothing checked it
+  against the *literal call site* — only against the compiled extension. Bump
+  the constant and the `.pyx` while missing the call and the probe passes
+  while the real call raises. A second test now counts the call's arguments
+  from `data_clauses.py`'s AST.
 
 Not changed: `parser.py`'s division-level recovery still turns an unexpected
 exception into a generic line-1 error and drops the division. That is the
 reason this bug read as "empty AST" rather than "stale extension", but
 narrowing it touches `COLLECT_ALL` semantics for every division parser and is
 its own change.
+
+Also not changed: `_lexer_fast` and `_preprocess_fast` keep the bare
+`try/except ImportError`. Same two-halves structure, materially different
+blast radius — verified, not assumed. Drift there does *not* "fail loudly"
+(an earlier draft of this entry said so, wrongly): the `TypeError` is caught
+by `parser.py`'s top-level safety net at `_parse_core` and becomes
+`ParseError("Parser error: ...")` with `ast=None`. The difference that
+matters is that every parse then returns `ast is None` / `success False` —
+a total, unmissable failure — where `_data_fast` returned a *partially
+populated* AST (IDENTIFICATION present, program name set) that a caller
+reading `result.ast` would consume as real. `normalize_fixed_format`'s
+non-`lines` parameters are also keyword-only, so appending one is backward
+compatible by construction. Probing the lexer subclass would mean
+constructing a lexer and calling internals, which is not the cheap one-call
+check `_data_fast` allows.
 
 See "Signature-drift guard" in [lexer.md](lexer.md);
 `tests/regression/test_data_fast_signature_drift.py`.

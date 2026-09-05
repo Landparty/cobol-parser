@@ -14,9 +14,14 @@ Observed on Python 3.14 against a helper compiled with 18 parameters while the
 caller passed 19.
 """
 
+import ast
 import contextlib
 import importlib
+import logging
+import pathlib
+import subprocess
 import sys
+import textwrap
 import types
 import warnings
 
@@ -26,6 +31,7 @@ from cobolparser import CobolParser
 from cobolparser.parsers.divisions import data_clauses
 
 MODULE = "cobolparser.parsers.divisions.data_clauses"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 PROGRAM = (
     "       IDENTIFICATION DIVISION.\n"
@@ -100,15 +106,78 @@ def test_probe_accepts_the_real_extension():
     assert data_clauses._HAS_DATA_FAST
 
 
-def test_stale_extension_is_rejected_and_reported():
-    with _data_fast_replaced_by(_stale_extension()) as (reloaded, caught):
-        assert reloaded._HAS_DATA_FAST is False
-        assert reloaded._fast_data_item_clauses is None
+def test_stale_extension_is_rejected_and_reported(caplog):
+    with caplog.at_level(logging.WARNING, logger=MODULE):
+        with _data_fast_replaced_by(_stale_extension()) as (reloaded, caught):
+            assert reloaded._HAS_DATA_FAST is False
+            assert reloaded._fast_data_item_clauses is None
 
-        messages = [str(w.message) for w in caught if w.category is RuntimeWarning]
-        assert any("_data_fast" in m and "disabled" in m for m in messages), messages
-        # The warning has to name the fix, not just the symptom.
-        assert any("build_ext" in m for m in messages), messages
+            messages = [r.getMessage() for r in caplog.records]
+            assert any(
+                "_data_fast" in m and "disabled" in m for m in messages
+            ), messages
+            # The message has to name the fix, not just the symptom.
+            assert any("build_ext" in m for m in messages), messages
+
+    # Reported through logging, never `warnings.warn`: this fires at import,
+    # and a warning here becomes an `import cobolparser` failure under
+    # `-W error` -- worse than the degraded parse the guard exists to prevent.
+    assert [w for w in caught if w.category is RuntimeWarning] == []
+
+
+def test_import_survives_warnings_as_errors():
+    """A stale extension must not break `import cobolparser` under -W error."""
+    program = textwrap.dedent("""
+        import sys, types
+        stale = types.ModuleType("cobolparser._data_fast")
+        stale.parse_data_item_clauses_fast = (
+            lambda a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+            a11, a12, a13, a14, a15, a16, a17, a18: 0
+        )
+        sys.modules["cobolparser._data_fast"] = stale
+        import cobolparser
+        from cobolparser.parsers.divisions import data_clauses
+        assert data_clauses._HAS_DATA_FAST is False
+        print("OK")
+        """)
+    result = subprocess.run(
+        [sys.executable, "-W", "error", "-c", program],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK" in result.stdout
+
+
+def test_arg_count_constant_matches_the_real_call_site():
+    """The probe is only honest if the constant tracks the actual call.
+
+    ``_data_fast_usable`` checks the constant against the compiled extension,
+    and another test checks the same pair -- but nothing ties either to the
+    literal argument list in ``parse_data_item``. Bump the constant and the
+    ``.pyx`` while missing the call site and the probe still passes, while the
+    real call raises ``TypeError``: the original bug, now unguarded *and*
+    unreported. Count the call's arguments straight out of the source.
+    """
+    source = pathlib.Path(data_clauses.__file__).read_text()
+    tree = ast.parse(source)
+
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_fast_data_item_clauses"
+    ]
+    assert len(calls) == 1, f"expected exactly one fast-path call, found {len(calls)}"
+
+    call = calls[0]
+    assert not call.keywords, "the fast-path call must stay positional"
+    assert not any(
+        isinstance(a, ast.Starred) for a in call.args
+    ), "a starred argument would make the call's arity unknowable here"
+    assert len(call.args) == data_clauses._DATA_FAST_ARG_COUNT
 
 
 def test_stale_extension_still_parses_the_data_division():

@@ -17,7 +17,7 @@ and disables the fast path (with a warning naming the rebuild) when it does not
 match, so a stale binary costs speed rather than correctness.
 """
 
-import warnings
+import logging
 from typing import Any
 
 from cobolparser._literals import quote_literal
@@ -25,6 +25,8 @@ from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, OccursClause, PictureClause
+
+logger = logging.getLogger(__name__)
 
 # Constants for COMP/COMPUTATIONAL usage keywords and token types.
 # These appear in multiple parsing methods; keeping them in one place avoids
@@ -213,14 +215,17 @@ else:
     _HAS_DATA_FAST = _data_fast_usable(_fast_data_item_clauses)
     if not _HAS_DATA_FAST:
         _fast_data_item_clauses = None
-        warnings.warn(
+        # Logged, not ``warnings.warn``-ed. This runs at module import, and
+        # under ``-W error`` / ``PYTHONWARNINGS=error`` / a pytest
+        # ``filterwarnings = error`` a warning here would turn a stale build
+        # into an ``import cobolparser`` failure -- the exact inversion of
+        # this guard's purpose, and strictly worse than the bug it fixes.
+        logger.warning(
             "cobolparser._data_fast does not match this version of "
             "cobolparser and has been disabled; parsing falls back to the "
             "pure-Python path (same results, slower). Rebuild the extension "
             "with `python setup.py build_ext --inplace`, or reinstall "
-            "cobolparser, to restore it.",
-            RuntimeWarning,
-            stacklevel=2,
+            "cobolparser, to restore it."
         )
 
 
