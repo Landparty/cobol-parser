@@ -102,16 +102,27 @@ argument count. Observed on Python 3.14 against an 18-parameter build.
 import: with an empty token list the clause loop never runs, so the helper
 returns its `pos` argument without reading any other parameter (hence `None`
 placeholders for the rest). On mismatch the fast path is disabled
-(`_HAS_DATA_FAST = False`, helper set to `None`) and a `RuntimeWarning` names
-the rebuild. A *missing* extension stays silent — that is a normal
-pure-Python install, not a misconfiguration.
+(`_HAS_DATA_FAST = False`, helper set to `None`) and `logger.warning` names the
+rebuild. A *missing* extension stays silent — that is a normal pure-Python
+install, not a misconfiguration.
+
+**Why `logger.warning` and not `warnings.warn`:** this runs at module import,
+so under `-W error` / `PYTHONWARNINGS=error` / a downstream pytest
+`filterwarnings = error` a warning would turn a stale build into an
+`import cobolparser` failure — inverting the guard's own purpose and leaving
+those users strictly worse off than the bug it fixes. Pinned by
+`test_import_survives_warnings_as_errors`.
 
 Arity is the drift that actually happens (parameters get appended as the fast
 path grows); a same-arity extension with reordered parameters is not detected,
 and nothing cheap would. When adding a parameter to
 `parse_data_item_clauses_fast`, update `_DATA_FAST_ARG_COUNT` alongside the
-call site — `tests/regression/test_data_fast_signature_drift.py` asserts the
-constant matches the compiled extension's real arity.
+call site. `_DATA_FAST_ARG_COUNT` is a *third* copy of the arity (after the
+`.pyx` and the literal call), so two tests pin it from both sides: one against
+the compiled extension's real signature, one parsing `data_clauses.py`'s AST to
+count the literal call's arguments. Without the second, bumping the constant
+and the `.pyx` while missing the call site leaves the probe passing and the
+real call raising `TypeError` — the original bug, unguarded and unreported.
 
 The checked-in `.c` files were verified in sync with their `.pyx` sources on
 2026-09-05 (regenerated and compared argument tables), so this guard protects

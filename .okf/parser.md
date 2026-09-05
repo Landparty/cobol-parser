@@ -164,8 +164,9 @@ losing the DATA *and* PROCEDURE divisions. Reported on Python 3.14 against an
 
 `_data_fast_usable()` now probes the compiled helper once at import (empty
 token list -> the clause loop never runs -> it returns `pos` untouched) and, on
-mismatch, sets `_HAS_DATA_FAST = False` with a `RuntimeWarning` naming the
-rebuild. **Adding a parameter to `parse_data_item_clauses_fast` means updating
+mismatch, sets `_HAS_DATA_FAST = False` and names the rebuild via
+`logger.warning` (never `warnings.warn` — at import time that would break
+`import cobolparser` under `-W error`). **Adding a parameter to `parse_data_item_clauses_fast` means updating
 `_DATA_FAST_ARG_COUNT` alongside the call site.** Full mechanics in
 [lexer.md](lexer.md) ("Signature-drift guard");
 `tests/regression/test_data_fast_signature_drift.py`.
