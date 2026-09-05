@@ -31,7 +31,11 @@ Design notes
   (useful when the redefinition is the layout you actually care about).
 * **OCCURS are expanded** into one column per occurrence, named with the
   COBOL subscript convention (``ITEM-CODE(1)``, ``ITEM-CODE(2)``, ...).
-  ``OCCURS ... DEPENDING ON`` uses the maximum bound.
+  ``OCCURS ... DEPENDING ON`` is *flattened* at the maximum bound -- a CSV
+  column list has to cover every occurrence a record could hold -- with the
+  generated counter kept inside the table's own bounds, so it always names a
+  real occurrence.  Which occurrences a *record image* actually contains is
+  a per-row question; see "Fixed and variable length" below.
 * **Edited pictures** (``-ZZ,ZZ9.99``) contribute their *logical* numeric
   value, not the edited display form.  A CSV is consumed by tooling that
   wants the value; the edit mask is a presentation concern of the COBOL
@@ -56,6 +60,29 @@ for the annotated, editor-readable form)::
 :mod:`.storage` owns the byte widths this depends on and :mod:`.encoding`
 the byte values, including a documented list of what is *not* modelled
 (:func:`.encoding.encoding_caveats`).
+
+Fixed and variable length
+-------------------------
+
+A copybook says how long a record *can* be, not whether the file holding it
+is RECFM=F/FB (every record the layout's full length) or RECFM=V/VB (each
+record only as long as its own ``OCCURS ... DEPENDING ON`` counter makes
+it).  :class:`~.encoding.RecordFormat` on
+:class:`~.encoding.EncodingOptions` says which to write::
+
+    from cobolparser.generators.data import EncodingOptions, RecordFormat
+
+    dataset.write_records(
+        "ORDER.VB", EncodingOptions(record_format=RecordFormat.VARIABLE)
+    )
+
+``FIXED`` is the default, so a copybook without such a table -- which is
+every copybook whose length cannot vary -- writes exactly the bytes it always
+did.  ``VARIABLE`` drops the occurrences past each row's counter and frames
+every record with the 4-byte RDW that lets a reader find the next one;
+``VARIABLE_BARE`` drops the framing; ``AUTO`` picks from the layout.
+:meth:`GeneratedDataset.record_lengths` reports what each row weighs and
+:meth:`~GeneratedDataset.minimum_record_length` the floor.
 """
 
 from __future__ import annotations
@@ -71,18 +98,32 @@ from .bundle import (
 from .copybook import CopybookDataGenerator, parse_copybook_records
 from .dataset import GeneratedDataset
 from .encoding import (
+    MAX_VARIABLE_RECORD,
+    RDW_SIZE,
     Charset,
     EncodingOptions,
     Endian,
     RecordEncodingError,
+    RecordFormat,
     encode_field,
+    encode_rdw,
     encode_record,
     encoding_caveats,
     hex_dump,
+    minimum_record_length,
     record_length,
+    row_record_length,
 )
 from .errors import CopybookLayoutError, ProgramLayoutError
-from .layout import FieldCategory, FieldSpec, flatten_record
+from .layout import (
+    FieldCategory,
+    FieldSpec,
+    OdoControl,
+    flatten_record,
+    occurrence_count,
+    present_indexes,
+    unresolved_odo_counters,
+)
 from .options import DataGeneratorOptions
 from .program_layout import FileFacts, ProgramLayoutIndex, ResolvedField
 from .storage import binary_byte_length, packed_byte_length, storage_size
@@ -104,20 +145,30 @@ __all__ = [
     "FileFacts",
     "FixtureBundle",
     "GeneratedDataset",
+    "MAX_VARIABLE_RECORD",
+    "OdoControl",
     "ProgramLayoutError",
     "ProgramLayoutIndex",
+    "RDW_SIZE",
     "RecordEncodingError",
+    "RecordFormat",
     "ResolvedField",
     "Scenario",
     "ValueFactory",
     "binary_byte_length",
     "encode_field",
+    "encode_rdw",
     "encode_record",
     "encoding_caveats",
     "flatten_record",
     "hex_dump",
+    "minimum_record_length",
+    "occurrence_count",
     "packed_byte_length",
     "parse_copybook_records",
+    "present_indexes",
     "record_length",
+    "row_record_length",
     "storage_size",
+    "unresolved_odo_counters",
 ]

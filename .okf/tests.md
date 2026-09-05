@@ -8,6 +8,24 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-09-05: `tests/unit/generators/data/test_variable_length.py` (56 tests)
+covering fixed- vs variable-length record generation end to end --
+`OdoControl`/`odo_counter_bounds` linking (including a `max_occurs` cap
+narrowing the bounds and a declared `OCCURS 0 TO n` keeping its zero),
+`present_indexes` trimming (the field declared *after* the table has to
+shift up; IBM complex ODO trims each outer occurrence by its own counter),
+generated counters staying inside the table's bounds even under
+`unique_fields`, RDW framing and its 0xFFFF ceiling, the length trio, and
+format-dependent caveats. Its load-bearing invariant is the one tying both
+readings together: a full-count `variable-bare` record is byte-for-byte the
+`fixed` record. `tests/unit/cli/test_gen_data_cli.py::TestRecordFormatFlag`
+(11 tests) covers the `--record-format` flag, walking the written file's RDW
+chain and asserting it lands exactly on EOF. The two additive `FieldSpec`
+keys are pinned in
+`tests/contracts/test_copybook_data_generator_contract.py`'s
+`_FIELD_SPEC_KEYS`; `tests/regression/test_fixturedemo_golden.py`'s golden
+bundle was regenerated for them (no generated value changed).
+
 2026-09-05: `tests/regression/test_data_fast_signature_drift.py` (6 tests)
 pinning the `_data_fast` signature-drift guard. A compiled extension older
 than its caller (18 parameters vs the 19 `data_clauses.parse_data_item`
@@ -717,7 +735,11 @@ triggered from the Actions tab. Run the full suite locally during development
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
   `gen-data --format record|hex` flags, that CSV output is unchanged by any
   of them, and (counting `encode_record` calls) that `--output` encodes the
-  dataset exactly once
+  dataset exactly once. `::TestRecordFormatFlag` covers `--record-format`
+  alongside it
+* `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
+  record length: ODO layout linking, per-row trimming, counter bounds, RDW
+  framing, and the length reporting built on them
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
 * [generators.md](generators.md) — flowchart, copybook → CSV, program layout
   index, and program fixture bundle generator tests

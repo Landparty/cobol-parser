@@ -138,7 +138,8 @@ value engine directly, no parallel type:
 name, column, qualified_name, level, picture, usage, category,
 size, storage_size, integer_digits, decimal_digits, is_signed,
 value_clause, condition_values, subscripts, redefines,
-sign_clause, synchronized, occurs_depending_on
+sign_clause, synchronized, occurs_depending_on,
+odo_controls, odo_counter_bounds
 ```
 
 `category` is one of `alphanumeric | alphabetic | national | numeric |
@@ -157,9 +158,25 @@ CSV-shaped and `storage_size` for anything that lays out or writes a record.
 exceeds its `size`, because the sign gets a byte the PICTURE does not count.
 **`synchronized`** and **`occurs_depending_on`** are recorded rather than
 acted on — they mark the two places a record layout makes an assumption
-(alignment slack is not modelled; an ODO table is laid out at its maximum).
+(alignment slack is not modelled; an ODO table is *laid out* at its maximum,
+which is what these `FieldSpec`s always describe).
 
-These four keys were **added**, not changed: every key that existed before
+**`odo_controls`** is the machine-readable form of `occurs_depending_on`:
+one object per `OCCURS ... DEPENDING ON` dimension the field sits inside,
+outermost first, each `{depending_on, subscript_index, min_times,
+max_times}`. `subscript_index` is the position in this field's `subscripts`
+that the counter governs, so a reader can decide whether a given occurrence
+is present in a given record: it is, iff `subscripts[subscript_index] <=`
+the counter's value. `max_times` is the number of occurrences actually
+flattened, which a `max_occurs` cap can make smaller than the declared
+maximum. `[]` for a field outside any such table.
+
+**`odo_counter_bounds`** is `[min, max]` on a field that *is* some table's
+`DEPENDING ON` counter, and `null` on every other field. It is what bounds
+the generated count, so a `PIC 9(4)` counter for a table of at most 50 never
+holds 8 731.
+
+These six keys were **added**, not changed: every key that existed before
 kept its name and meaning, which is why they did not require a
 `bundle_version` bump. A reader written against the earlier shape keeps
 working; see "Versioning and compatibility policy" below.
@@ -304,7 +321,8 @@ bundle-level keys:
             "is_signed": false, "value_clause": null, "condition_values": [],
             "subscripts": [], "redefines": null,
             "sign_clause": null, "synchronized": false,
-            "occurs_depending_on": null
+            "occurs_depending_on": null,
+            "odo_controls": [], "odo_counter_bounds": null
           }],
           "sequence": [{"ORDER-QTY": "50"}, {"ORDER-QTY": "50"}, "... x10"],
           "terminal": {"WS-ORDER-STATUS": "10"},

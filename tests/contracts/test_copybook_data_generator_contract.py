@@ -50,6 +50,12 @@ _FIELD_SPEC_KEYS = {
     "sign_clause",
     "synchronized",
     "occurs_depending_on",
+    # Added alongside variable-length record output (`gen-data
+    # --record-format variable`). Additive on the same terms: they refine
+    # what `occurs_depending_on` already flagged into the machine-readable
+    # form the encoder trims records with, and every key above is untouched.
+    "odo_controls",
+    "odo_counter_bounds",
 }
 
 _DATASET_KEYS = {"record_name", "seed", "row_count", "fields", "rows"}

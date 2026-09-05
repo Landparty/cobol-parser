@@ -218,8 +218,13 @@ class ValueFactory:
         if self._opts.blank_rate and self._rng.random() < self._opts.blank_rate:
             return ""
 
-        needs_unique = spec.name.upper() in self._unique or (
-            spec.column.upper() in self._unique
+        # An OCCURS DEPENDING ON counter is exempt from unique_fields: its
+        # value has to stay inside the table's bounds, so a request for more
+        # distinct values than the table has occurrences is unsatisfiable,
+        # and the _sequential fallback below would answer it with a count
+        # naming occurrences the record does not contain.
+        needs_unique = spec.odo_counter_bounds is None and (
+            spec.name.upper() in self._unique or spec.column.upper() in self._unique
         )
         if not needs_unique:
             return self._make(spec, row)
@@ -239,12 +244,11 @@ class ValueFactory:
     # -- dispatch -----------------------------------------------------------
 
     def _make(self, spec: FieldSpec, row: int) -> str:
-        if self._opts.use_condition_values and spec.condition_values:
-            return self._fit_domain_value(self._rng.choice(spec.condition_values), spec)
-        if self._opts.respect_values and spec.value_clause:
-            fixed = self._from_value_clause(spec)
-            if fixed is not None:
-                return fixed
+        if spec.odo_counter_bounds is not None:
+            return self._odo_counter_value(spec)
+        declared = self._declared_value(spec)
+        if declared is not None:
+            return declared
 
         if (spec.usage or "").upper() in _NON_DATA_USAGES:
             # An INDEX is a compiler-managed occurrence number and a POINTER
@@ -263,6 +267,46 @@ class ValueFactory:
         ):
             return self._numeric_value(spec, row)
         return self._text_value(spec, row)
+
+    def _declared_value(self, spec: FieldSpec) -> str | None:
+        """The value the copybook itself declares for *spec*, if any.
+
+        A level-88 domain first, then a VALUE clause -- the two ways a
+        copybook states what this field may hold.  ``None`` means it states
+        nothing and the field is generated from its PICTURE.
+        """
+        if self._opts.use_condition_values and spec.condition_values:
+            return self._fit_domain_value(self._rng.choice(spec.condition_values), spec)
+        if self._opts.respect_values and spec.value_clause:
+            return self._from_value_clause(spec)
+        return None
+
+    def _odo_counter_value(self, spec: FieldSpec) -> str:
+        """A count for an ``OCCURS ... DEPENDING ON`` counter field.
+
+        Drawn from the table's own ``OCCURS min TO max`` bounds rather than
+        from the PICTURE's range, because the count is not free data: it
+        decides how many occurrences the record contains, and a ``PIC 9(4)``
+        counter holding 8 731 for a table of at most 50 describes a record
+        no program could read.  Drawing across the whole range (rather than
+        generating freely and clamping) is also what makes a variable-length
+        file *vary*: clamping would pin almost every row to the maximum.
+
+        A declared VALUE or level-88 still wins when it names a count the
+        table can hold -- that is the copybook stating its own intent.  One
+        that does not is overridden rather than honoured; the record's
+        integrity outranks a literal the layout contradicts.
+        """
+        low, high = spec.odo_counter_bounds or (1, 1)
+        declared = self._declared_value(spec)
+        if declared is not None:
+            try:
+                stated = int(Decimal(declared.strip() or "0"))
+            except (InvalidOperation, ValueError):
+                stated = None
+            if stated is not None and low <= stated <= high:
+                return declared
+        return self._fit_domain_value(str(self._rng.randint(low, high)), spec)
 
     def _from_value_clause(self, spec: FieldSpec) -> str | None:
         """Resolve a VALUE clause into a constant, or ``None`` to ignore it."""

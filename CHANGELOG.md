@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `gen-data --record-format fixed|variable|variable-bare|auto`
+  generates **variable-length record files**, not just fixed-length ones. A
+  copybook with an `OCCURS ... DEPENDING ON` table describes a record whose
+  length varies with its counter; until now that table was always written at
+  its maximum (RECFM=F), with a caveat on stderr saying a real record would
+  be shorter. `variable` writes only the occurrences each record's own
+  counter names, behind the 4-byte RDW (`LL LL 00 00`, big-endian, length
+  inclusive) that RECFM=V/VB uses to delimit records; `variable-bare` writes
+  the same trimmed records unframed; `auto` picks `variable` exactly when the
+  layout has a DEPENDING ON table. `fixed` stays the default, so a copybook
+  that cannot vary writes byte-identical output to before. The resulting
+  LRECL (or range) is reported -- on stderr for `--format record`, in the
+  header for `--format hex`, which also gains a `(RDW)` row per record so
+  field offsets stay true. New API: `RecordFormat`,
+  `EncodingOptions.record_format` / `.resolved_format()`, `encode_rdw()`,
+  `minimum_record_length()`, `row_record_length()`,
+  `GeneratedDataset.minimum_record_length()` / `.record_lengths()` /
+  `.is_variable_length`, and `layout.OdoControl` / `present_indexes()` /
+  `occurrence_count()` / `unresolved_odo_counters()`.
+
+* **generators:** `FieldSpec` gained `odo_controls` (every `OCCURS ...
+  DEPENDING ON` dimension a field sits inside -- the counter, which subscript
+  position it governs, and the bounds) and `odo_counter_bounds` (the counts a
+  field *controls*, when it is itself a counter). Both are additive keys in
+  `to_dict()` and therefore in the fixture bundle, so `bundle_version` stays
+  `1` -- see `docs/fixture-bundle-schema.md`.
+  `examples/fixtures/FIXTUREDEMO.bundle.json` was regenerated for the two new
+  keys; no generated value changed.
+
 * **generators:** `gen-data --format record|hex` emits the **real record
   image** for a copybook -- the bytes a COBOL program would actually read,
   rather than the display text every existing output path produces.
@@ -140,6 +169,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `metadata["called_program_reference"]`. All additive to `to_dict()`.
 
 ### Fixed
+
+* **generators:** a generated `OCCURS ... DEPENDING ON` counter is now drawn
+  from the table's own `OCCURS min TO max` bounds instead of from its
+  PICTURE's full range. A `PIC 9(4)` counter for a table of at most 50 could
+  previously generate a value like 8 731 -- a record no COBOL program could
+  read, in the fixed-length output too. A declared `VALUE` or level-88 value
+  still wins when it names a count the table can hold, and is overridden when
+  it does not. This changes the generated values (and so the bytes) for any
+  copybook containing a DEPENDING ON table, at a given seed.
 
 * **generators:** `USAGE INDEX` was sized as **zero bytes** in
   `layout_offsets` (it carries no PICTURE, so it fell through to a

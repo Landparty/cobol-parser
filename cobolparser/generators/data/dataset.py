@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from .encoding import EncodingOptions, encode_record, hex_dump
+from .encoding import minimum_record_length as _minimum_record_length
 from .encoding import record_length as _record_length
+from .encoding import row_record_length as _row_record_length
 from .layout import FieldSpec
 
 # Line terminator shared by every CSV output path. Deliberately "\n" rather
@@ -74,12 +76,44 @@ class GeneratedDataset:
     def record_length(self) -> int:
         """Byte length of one record image of this layout.
 
+        Every ``OCCURS`` occurrence present: the fixed-length record length,
+        and the maximum (the ``LRECL``) for a variable-length file.
+
         Only meaningful when the dataset was generated with
         :meth:`~.options.DataGeneratorOptions.for_record_image` options --
         otherwise FILLER and capped OCCURS leave holes, and this reports the
         length of a record that no program would recognise.
         """
         return _record_length(self.fields)
+
+    def minimum_record_length(self) -> int:
+        """Byte length of the shortest record this layout can produce.
+
+        Every ``OCCURS ... DEPENDING ON`` table at its declared minimum;
+        equal to :meth:`record_length` when the layout holds no such table --
+        which is the machine-readable way of saying the layout is
+        fixed-length.
+        """
+        return _minimum_record_length(self.fields)
+
+    @property
+    def is_variable_length(self) -> bool:
+        """Whether this layout's records can differ in length at all.
+
+        True exactly when some field sits inside an ``OCCURS ... DEPENDING
+        ON`` table.  A dataset for which this is False encodes identically
+        under every :class:`~.encoding.RecordFormat` bar the RDW.
+        """
+        return any(spec.odo_controls for spec in self.fields)
+
+    def record_lengths(self, opts: EncodingOptions | None = None) -> list[int]:
+        """Byte length of each row's record image, in row order.
+
+        Computed from the layout rather than by encoding, so asking what a
+        large dataset's records weigh does not cost building all of them.
+        """
+        options = opts or EncodingOptions()
+        return [_row_record_length(self.fields, row, options) for row in self.rows]
 
     def to_records(self, opts: EncodingOptions | None = None) -> bytes:
         """Render every row as its real COBOL record image.

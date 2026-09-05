@@ -401,3 +401,150 @@ class TestRecordImageFormats:
         )
         assert len(calls) == 3
         assert out.stat().st_size == 39
+
+
+# A copybook whose record length genuinely varies: the counter, the table it
+# sizes, and a field after the table that has to shift up when occurrences
+# are dropped.
+ODOBOOK = """       01  ORDER-REC.
+           05  ORD-ID            PIC X(4).
+           05  ORD-LINE-COUNT    PIC 9(2).
+           05  ORD-LINES OCCURS 1 TO 4 TIMES
+                         DEPENDING ON ORD-LINE-COUNT.
+               10  ORD-SKU       PIC X(3).
+           05  ORD-TOTAL         PIC 9(5).
+"""
+
+
+@pytest.fixture
+def odo_copybook(tmp_path) -> str:
+    path = tmp_path / "ORDER.cpy"
+    path.write_text(ODOBOOK, encoding="utf-8")
+    return str(path)
+
+
+def _gen_records(copybook: str, out: Path, *extra: str) -> bytes:
+    _run_argv(
+        [
+            "gen-data",
+            copybook,
+            "-n",
+            "6",
+            "--seed",
+            "7",
+            "--format",
+            "record",
+            *extra,
+            "-o",
+            str(out),
+        ]
+    )
+    return out.read_bytes()
+
+
+class TestRecordFormatFlag:
+    """``--record-format``: RECFM=F/FB against RECFM=V/VB."""
+
+    def test_the_default_is_fixed(self):
+        args = _build_parser().parse_args(["gen-data", TXNDATA])
+        assert args.record_format == "fixed"
+
+    def test_every_choice_parses(self):
+        for choice in ("fixed", "variable", "variable-bare", "auto"):
+            args = _build_parser().parse_args(
+                ["gen-data", TXNDATA, "--record-format", choice]
+            )
+            assert args.record_format == choice
+
+    def test_fixed_writes_one_length_for_every_record(self, odo_copybook, tmp_path):
+        # 4 + 2 + 4*3 + 5 = 23 bytes, six times.
+        raw = _gen_records(odo_copybook, tmp_path / "f.bin")
+        assert len(raw) == 6 * 23
+
+    def test_variable_records_are_shorter_and_differ_in_length(
+        self, odo_copybook, tmp_path
+    ):
+        fixed = _gen_records(odo_copybook, tmp_path / "f.bin")
+        variable = _gen_records(
+            odo_copybook, tmp_path / "v.bin", "--record-format", "variable"
+        )
+        assert len(variable) < len(fixed)
+        # Walk the RDW chain: it has to land exactly on the end of the file,
+        # which is the whole point of writing one.
+        offset, lengths = 0, []
+        while offset < len(variable):
+            total = int.from_bytes(variable[offset : offset + 2], "big")
+            assert variable[offset + 2 : offset + 4] == b"\x00\x00"
+            lengths.append(total)
+            offset += total
+        assert offset == len(variable)
+        assert len(lengths) == 6
+        assert len(set(lengths)) > 1
+
+    def test_variable_bare_drops_the_rdw_but_keeps_the_trimming(
+        self, odo_copybook, tmp_path
+    ):
+        variable = _gen_records(
+            odo_copybook, tmp_path / "v.bin", "--record-format", "variable"
+        )
+        bare = _gen_records(
+            odo_copybook, tmp_path / "b.bin", "--record-format", "variable-bare"
+        )
+        assert len(bare) == len(variable) - 6 * 4
+
+    def test_auto_follows_the_layout(self, odo_copybook, comp_copybook, tmp_path):
+        auto = _gen_records(odo_copybook, tmp_path / "a.bin", "--record-format", "auto")
+        variable = _gen_records(
+            odo_copybook, tmp_path / "v.bin", "--record-format", "variable"
+        )
+        assert auto == variable
+        # No DEPENDING ON table anywhere in COMPREC, so auto stays fixed.
+        assert _gen_records(
+            comp_copybook, tmp_path / "c1.bin", "--record-format", "auto"
+        ) == (_gen_records(comp_copybook, tmp_path / "c2.bin"))
+
+    def test_fixed_output_is_unchanged_by_the_flag_existing(
+        self, comp_copybook, tmp_path
+    ):
+        """A copybook that cannot vary encodes to the same bytes it always
+        did -- the compatibility guarantee the ``fixed`` default exists for."""
+        plain = _gen_records(comp_copybook, tmp_path / "p.bin")
+        flagged = _gen_records(
+            comp_copybook, tmp_path / "q.bin", "--record-format", "fixed"
+        )
+        assert plain == flagged
+
+    def test_the_record_length_range_is_reported_on_stderr(
+        self, odo_copybook, tmp_path, capsys
+    ):
+        _gen_records(odo_copybook, tmp_path / "v.bin", "--record-format", "variable")
+        err = capsys.readouterr().err
+        assert "variable record length:" in err
+        assert "RDW included" in err
+
+    def test_fixed_output_still_warns_that_the_table_is_at_its_maximum(
+        self, odo_copybook, tmp_path, capsys
+    ):
+        _gen_records(odo_copybook, tmp_path / "f.bin")
+        err = capsys.readouterr().err
+        assert "maximum length" in err
+        assert "--record-format variable" in err
+
+    def test_the_hex_dump_shows_the_rdw(self, odo_copybook, capsys):
+        _run_argv(
+            [
+                "gen-data",
+                odo_copybook,
+                "-n",
+                "2",
+                "--seed",
+                "7",
+                "--format",
+                "hex",
+                "--record-format",
+                "variable",
+            ]
+        )
+        out = capsys.readouterr().out
+        assert "record format: variable (RECFM=V/VB)" in out
+        assert "(RDW)" in out

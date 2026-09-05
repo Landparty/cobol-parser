@@ -166,6 +166,7 @@ cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] \
     [--max-occurs N] [--no-semantic] [--ignore-values] [--unique FIELD] \
     [--blank-rate RATE] [--format csv|json|record|hex] \
     [--charset ascii|ebcdic] [--endian auto|big|little|native] \
+    [--record-format fixed|variable|variable-bare|auto] \
     [--record-separator none|newline] [--compact] [--output FILE]
 ```
 
@@ -211,6 +212,8 @@ encoding table and its verified-against-GnuCOBOL provenance.
 * `--endian` (default `auto`) applies to `COMP-5` and `COMP-1`/`COMP-2` only
   — `COMP`/`COMP-4` are always big-endian. `auto` reads the charset as
   intent: big-endian for `ebcdic` (z/OS-bound), host order otherwise.
+* `--record-format` picks fixed- or variable-length records — see the next
+  section.
 * `--record-separator newline` appends `\n` per record for readability;
   the default `none` is a true fixed-length RECFM=F image.
 * Both formats force the byte-complete layout (`DataGeneratorOptions
@@ -218,9 +221,40 @@ encoding table and its verified-against-GnuCOBOL provenance.
   expanded) and print a note to stderr saying so, since otherwise
   `--include-filler`/`--max-occurs` would look silently ignored.
 * Anything not modelled (`SYNCHRONIZED` alignment, IEEE-vs-hex float,
-  `OCCURS DEPENDING ON` written at maximum) is printed to stderr for
-  `--format record` and inlined in the header for `--format hex` — never
-  swallowed.
+  `OCCURS DEPENDING ON` written at maximum under `--record-format fixed`) is
+  printed to stderr for `--format record` and inlined in the header for
+  `--format hex` — never swallowed.
+
+### `--record-format`: fixed- vs variable-length files
+
+A copybook says how long a record *can* be, not whether the file holding it
+is RECFM=F/FB or RECFM=V/VB. This flag says which one to write; it applies
+to `--format record|hex` only (CSV and JSON have no notion of record length).
+
+| Value | Records | Framing |
+|-------|---------|---------|
+| `fixed` (default) | every `OCCURS ... DEPENDING ON` occurrence written, one length for the whole file | none |
+| `variable` | only the occurrences each record's own counter names | 4-byte RDW per record |
+| `variable-bare` | the same trimmed records | none |
+| `auto` | `variable` if the layout has a DEPENDING ON table, else `fixed` | follows the resolved value |
+
+* **`fixed` is the default so existing output does not move.** A copybook
+  without a DEPENDING ON table writes identical bytes under every value bar
+  the RDW, so the choice only matters where records genuinely can vary.
+* **The RDW** is `LL LL 00 00` — a big-endian 16-bit length *including the
+  four RDW bytes*, then two reserved zero bytes — regardless of `--charset`
+  and `--endian`. A record whose total would exceed 65 535 bytes errors out
+  rather than writing a wrapped length; that needs RECFM=VS (spanned), which
+  is not generated.
+* **The counter is generated inside the table's own bounds**, so `OCCURS 1 TO
+  50 DEPENDING ON WS-N` never emits a `WS-N` of 8 731 — under `fixed` too.
+* **The resulting LRECL (or LRECL range) is printed to stderr** for
+  `--format record`, because raw bytes carry no header to state it in.
+  `--format hex` puts it in its own header, along with a `(RDW)` row per
+  record so field offsets stay true.
+* A DEPENDING ON counter that is **not part of the record** (declared in
+  WORKING-STORAGE, say) is named on stderr and its table written at full
+  length — nothing generated can set it.
 
 ## Gen-Fixtures
 

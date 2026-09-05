@@ -1,5 +1,63 @@
 # OKF Update Log
 
+## 2026-09-05 (variable-length record files: OCCURS DEPENDING ON honoured, RDW written)
+
+Asked to generate mock data for **both variable- and fixed-length files**.
+Fixed-length was all that existed: a copybook with an `OCCURS ... DEPENDING
+ON` table got its table written at the maximum and a caveat on stderr saying
+a real record would be shorter. That caveat was the feature request.
+
+* **`RecordFormat` (`generators/data/encoding.py`)** — `fixed` (RECFM=F/FB,
+  the default and byte-identical to what the previous release wrote),
+  `variable` (RECFM=V/VB: only the occurrences the row's own counter names,
+  behind a 4-byte RDW), `variable-bare` (the same trimmed records with no
+  RDW), `auto` (variable iff the layout has an ODO table). On
+  `EncodingOptions.record_format`, resolved by `resolved_format(specs)` —
+  the same shape `Endian.AUTO`/`resolved_endian` already had. CLI:
+  `gen-data --record-format`.
+* **The RDW is part of the format, not a separate switch.** `LL LL 00 00`,
+  big-endian, length *including the four RDW bytes*, whatever `--endian` and
+  `--charset` say — it is written by the access method, not by the program.
+  Without it a stream of differently-sized records has no way to say where
+  one ends, so offering trimming without framing as the default would
+  produce an unreadable file. `> 0xFFFF` raises rather than truncating the
+  length field: that record needs RECFM=VS, which is not generated.
+* **Three pieces make trimming work, none of them a second flattening pass.**
+  `FieldSpec.odo_controls` (a `layout.OdoControl` per ODO dimension: the
+  counter, *which subscript position* it governs, and the bounds — so nested
+  tables fall out for free); `FieldSpec.odo_counter_bounds` on the counter,
+  stamped by a post-pass because a counter is declared *before* the table
+  that depends on it; and `layout.present_indexes(specs, row)`, whose
+  order-preserving filter is what makes a field declared *after* the table
+  shift up into the space the absent occurrences would have taken.
+* **A real bug found on the way in: the generated counter was never bounded
+  by the table.** A `PIC 9(4)` counter for `OCCURS 1 TO 50` could generate
+  8 731 — a record no program could read, in the fixed-length output that
+  already shipped. `ValueFactory` now draws the counter from the table's own
+  `OCCURS min TO max`. Drawing across that range rather than generating
+  freely and clamping is also what makes a variable file *vary*: clamping
+  would pin nearly every row to the maximum. A declared `VALUE`/level-88
+  still wins when it names a count the table can hold.
+* **`max_times` is what was flattened, not what was declared.** `max_occurs`
+  and the hard occurrence cap can both stop the walk short, and a counter
+  allowed to name occurrence 50 of a table flattened to 10 would describe
+  bytes no `FieldSpec` covers.
+* **Lengths are now stated, not left to be inferred.**
+  `minimum_record_length()`, `row_record_length()`,
+  `GeneratedDataset.record_lengths()` / `.is_variable_length`; `--format
+  record` prints the range to stderr (raw bytes have no header to carry an
+  LRECL) and `--format hex` puts the RDW on a row of its own so field
+  offsets stay true.
+* **Additive schema change**, no `bundle_version` bump: `FieldSpec.to_dict()`
+  gained `odo_controls` and `odo_counter_bounds`. `examples/fixtures/
+  FIXTUREDEMO.bundle.json` was regenerated for the two new keys (no
+  generated value changed — FIXTUREDEMO has no ODO table); **the copy in the
+  sibling mocky-mock repo needs the same refresh.**
+
+See "Fixed- and variable-length records" in [generators.md](generators.md);
+`tests/unit/generators/data/test_variable_length.py`,
+`tests/unit/cli/test_gen_data_cli.py::TestRecordFormatFlag`.
+
 ## 2026-09-05 (record images: COMP-3/COMP-5/COMP-1/2 written as real bytes)
 
 Asked whether the copybook mocking feature — `mockymock.generateData`

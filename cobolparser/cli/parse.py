@@ -936,6 +936,20 @@ def _build_gen_data_parser(
         ),
     )
     p.add_argument(
+        "--record-format",
+        choices=["fixed", "variable", "variable-bare", "auto"],
+        default="fixed",
+        help=(
+            "Record length for --format record/hex: fixed (default) writes "
+            "every record at the layout's full length, as RECFM=F/FB expects; "
+            "variable writes only the OCCURS DEPENDING ON occurrences each "
+            "record's own counter names, behind the 4-byte RDW that RECFM=V/VB "
+            "uses to delimit them; variable-bare is the same records without "
+            "the RDW; auto picks variable when the layout has a DEPENDING ON "
+            "table and fixed otherwise"
+        ),
+    )
+    p.add_argument(
         "--record-separator",
         choices=["none", "newline"],
         default="none",
@@ -951,12 +965,18 @@ def _build_gen_data_parser(
 
 def _encoding_options(args: argparse.Namespace) -> Any:
     """Build the EncodingOptions the record-image formats are rendered with."""
-    from ..generators.data.encoding import Charset, EncodingOptions, Endian
+    from ..generators.data.encoding import (
+        Charset,
+        EncodingOptions,
+        Endian,
+        RecordFormat,
+    )
 
     return EncodingOptions(
         charset=Charset(args.charset),
         endian=Endian(args.endian),
         record_separator=b"\n" if args.record_separator == "newline" else b"",
+        record_format=RecordFormat(getattr(args, "record_format", "fixed")),
     )
 
 
@@ -1057,12 +1077,15 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         # Encoding here and then calling dataset.write_records() would encode
         # the whole dataset a second time -- twice the CPU, and both copies
         # resident at once, which is a real ceiling on a large --rows.
+        encoding = _encoding_options(args)
         try:
-            raw = dataset.to_records(_encoding_options(args))
+            raw = dataset.to_records(encoding)
         except CopybookLayoutError as exc:
             _fail(str(exc))
-        for caveat in _record_caveats(dataset):
+        for caveat in _record_caveats(dataset, encoding):
             print(f"note: {caveat}", file=sys.stderr)
+        for note in _record_length_notes(dataset, encoding):
+            print(f"note: {note}", file=sys.stderr)
         if output_path:
             # Binary mode is not incidental: a COMP field routinely contains
             # 0x0A, which a text-mode write would translate on Windows.
@@ -1088,11 +1111,33 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         print(dataset.to_csv(), end="")
 
 
-def _record_caveats(dataset: Any) -> list[str]:
+def _record_caveats(dataset: Any, opts: Any) -> list[str]:
     """Reasons a written record image may not match a real compiler's."""
     from ..generators.data.encoding import encoding_caveats
 
-    return encoding_caveats(dataset.fields)
+    return encoding_caveats(dataset.fields, opts)
+
+
+def _record_length_notes(dataset: Any, opts: Any) -> list[str]:
+    """The LRECL a reader of ``--format record`` output has to be told.
+
+    ``--format hex`` prints this in its own header; the raw bytes have no
+    header to print it in, and a record image whose length nobody states is
+    a file nobody can read back.
+    """
+    from ..generators.data.encoding import RecordFormat
+
+    lengths = dataset.record_lengths(opts)
+    if not lengths:
+        return []
+    fmt = opts.resolved_format(dataset.fields)
+    framed = " (RDW included)" if fmt is RecordFormat.VARIABLE else ""
+    low, high = min(lengths), max(lengths)
+    span = f"{high}" if low == high else f"{low} to {high}"
+    return [
+        f"{fmt.value} record length: {span} bytes across "
+        f"{len(lengths)} records{framed}"
+    ]
 
 
 def _build_gen_fixtures_parser(
