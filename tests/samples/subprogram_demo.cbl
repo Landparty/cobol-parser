@@ -1,4 +1,4 @@
-      *****************************************************************  
+      *****************************************************************
       * IBM Enterprise COBOL Sample - Subprogram Demonstration
       * Demonstrates: CALL statement, USING clause, parameter passing
       * Features: Modular programming, BY REFERENCE/VALUE
@@ -98,7 +98,7 @@
        
       *****************************************************************
       * Calculator Subprogram
-      *****************************************************************  
+      *****************************************************************
        IDENTIFICATION DIVISION.
        PROGRAM-ID. CALCULATOR.
        

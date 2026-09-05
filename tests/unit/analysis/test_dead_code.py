@@ -1603,3 +1603,140 @@ class TestDefensiveEdgeCases:
         prog.procedure_division.paragraphs[0].statements.append(stmt)
         report = DeadCodeAnalyzer().analyze(prog)
         assert not report.has_dead_code
+
+
+class TestFallThroughOnlyEscapesReachableRuns:
+    """Regression tests for the audit finding that fall-through was credited
+    out of *any* referenced procedure, PERFORM targets included.
+
+    A PERFORM returns to its caller at the end of its range -- it does not
+    run on into the next paragraph. Treating it as if it did gave every
+    paragraph after a performed one a fall-through edge that cannot happen
+    at runtime, and since the canonical COBOL program is a MAIN paragraph
+    of PERFORMs followed by the paragraphs it performs, the analyzer
+    reported *no dead code at all* for the shape it is most often pointed
+    at.
+    """
+
+    def test_canonical_perform_structured_program_reports_its_dead_paragraphs(
+        self,
+    ) -> None:
+        """The audit's repro: MAIN performs three paragraphs, two others are
+        never referenced by anything."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TYPICAL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 A PIC 9.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           PERFORM 1000-INIT.
+           PERFORM 2000-PROCESS.
+           PERFORM 3000-TERM.
+           STOP RUN.
+       1000-INIT.
+           MOVE 1 TO A.
+       2000-PROCESS.
+           MOVE 2 TO A.
+       3000-TERM.
+           MOVE 3 TO A.
+       9998-ALSO-DEAD.
+           MOVE 8 TO A.
+       9999-NEVER-CALLED.
+           MOVE 9 TO A.
+"""
+        result = parse_cobol(source, filename="typical.cbl")
+        assert result.ast is not None
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        assert sorted(item.name for item in report.dead_items) == [
+            "9998-ALSO-DEAD",
+            "9999-NEVER-CALLED",
+        ]
+
+    def test_perform_target_does_not_revive_the_paragraph_after_it(self) -> None:
+        """The minimal case: PERFORM P-USED returns at P-USED's end, so
+        P-ORPHAN is not reached by falling out of it."""
+        prog = _make_program(
+            [
+                ("MAIN-P", [_perform("P-USED"), _stop_run()]),
+                ("P-USED", [_continue()]),
+                ("P-ORPHAN", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert [item.name for item in report.dead_items] == ["P-ORPHAN"]
+
+    def test_goto_target_does_still_fall_through(self) -> None:
+        """A GO TO lands in its target and carries on from there, so the
+        paragraph after the target IS reachable -- unlike a PERFORM."""
+        prog = _make_program(
+            [
+                ("MAIN-P", [_goto("P-B")]),
+                ("P-A", [_continue()]),
+                ("P-B", [_continue()]),
+                ("P-C", [_stop_run()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert [item.name for item in report.dead_items] == ["P-A"]
+
+    def test_entry_paragraph_falls_through(self) -> None:
+        """An ENTRY paragraph is an external entry point: a CALL starts
+        execution there and runs on into what follows."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WITHENTRY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 A PIC 9.
+       PROCEDURE DIVISION.
+       MAIN-P.
+           STOP RUN.
+       ALT-ENTRY.
+           ENTRY 'ALTENT'.
+           MOVE 1 TO A.
+       AFTER-ENTRY.
+           MOVE 2 TO A.
+           GOBACK.
+"""
+        result = parse_cobol(source, filename="withentry.cbl")
+        assert result.ast is not None
+
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        assert [item.name for item in report.dead_items] == []
+
+    def test_straight_line_fall_through_still_works(self) -> None:
+        """The behaviour fall-through was added for is unchanged: with no
+        PERFORM or GO TO anywhere, every paragraph runs."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STRAIGHTLINE.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY 'IN MAIN'.
+       PARA-TWO.
+           DISPLAY 'IN TWO'.
+       PARA-THREE.
+           DISPLAY 'IN THREE'
+           STOP RUN.
+"""
+        result = parse_cobol(source, filename="straightline.cbl")
+        assert result.ast is not None
+        assert not DeadCodeAnalyzer().analyze(result.ast).has_dead_code
+
+    def test_perform_thru_range_is_still_fully_referenced(self) -> None:
+        """PERFORM A THRU C marks the whole range, but must not escape past
+        C: ORPHAN sits after the range and nothing reaches it."""
+        prog = _make_program(
+            [
+                ("MAIN-P", [_perform("STEP-A", thru="STEP-C"), _stop_run()]),
+                ("STEP-A", [_continue()]),
+                ("STEP-B", [_continue()]),
+                ("STEP-C", [_continue()]),
+                ("ORPHAN", [_continue()]),
+            ]
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert [item.name for item in report.dead_items] == ["ORPHAN"]

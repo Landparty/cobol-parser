@@ -162,4 +162,5 @@
            
            COMPUTE WS-DISPLAY-PERCENT =
                (WS-FULL-BENEFITS / WS-EMP-COUNT) * 100
-           DISPLAY 'Full Benefits Participation: ' WS-DISPLAY-PERCENT '%'.
+           DISPLAY 'Full Benefits Participation: '
+               WS-DISPLAY-PERCENT '%'.

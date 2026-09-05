@@ -1,6 +1,6 @@
       *****************************************************************
       * Real-World COBOL Example: Inventory Management System
-      * Demonstrates: Multiple CALL statements, nested calls, error handling
+      * Demonstrates: Multiple CALL statements, nested calls, errors
       * Use Case: Complex inventory processing with database operations
       *****************************************************************
        IDENTIFICATION DIVISION.

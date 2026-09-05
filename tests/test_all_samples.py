@@ -1,11 +1,96 @@
-"""
-Test runner script for all COBOL sample tests.
-Run with: python -m pytest tests/test_all_samples.py -v
+"""Smoke tests over every COBOL sample program, plus a manual test runner.
+
+The module used to hold only the ``run_sample_tests``-style helpers below.
+None of them is named ``test_*``, so pytest collected **zero** tests from
+this file even though the project documents it as the thing that
+"smoke-tests all sample COBOL programs" -- nothing checked the corpus in
+``tests/samples/`` as a corpus at all.
+
+That gap let a whole class of fixture rot through: 32 lines across 13
+sample programs ran past column 72, the end of Area B in fixed-format
+COBOL -- 30 of them carrying real code or comment text, the other two only
+trailing spaces. The preprocessor drops those columns exactly as a real compiler
+does, so the parser silently saw truncated identifiers
+(``WS-EXCEPTION-MSG`` arriving as ``WS-EXCEPTION-M``), data items missing
+their terminating period, and -- in one case -- an unterminated literal
+that failed to parse outright. Every one of those samples is an input to
+the wider suite, so thousands of tests were asserting against programs
+that were not the programs on disk.
+
+:class:`TestSampleCorpus` closes that gap: the column check catches the
+cause, the parse check catches the effect.
 """
 
 import sys
+from pathlib import Path
 
 import pytest
+
+from cobolparser import parse_cobol
+
+SAMPLES_DIR = Path(__file__).parent / "samples"
+
+#: Samples that are *expected* to produce parse errors, with the reason.
+#: Anything else reporting an error is a regression, in the parser or in
+#: the fixture.
+EXPECTED_PARSE_ERRORS = {
+    # Purpose-built malformed input for the error-recovery tests.
+    "error_recovery_tests.cbl",
+    # Uses a non-ASCII currency symbol in a PICTURE. The lexer rejects the
+    # character; see the audit note in the repository's open findings.
+    "special_names_config.cbl",
+}
+
+#: Last column of Area B. Columns 73-80 are the identification area and are
+#: discarded by ``normalize_fixed_format`` before the lexer runs.
+LAST_CODE_COLUMN = 72
+
+
+def _sample_programs() -> list[Path]:
+    return sorted(SAMPLES_DIR.rglob("*.cbl"))
+
+
+class TestSampleCorpus:
+    """Corpus-wide invariants for the COBOL samples in ``tests/samples/``."""
+
+    @pytest.mark.parametrize("sample", _sample_programs(), ids=lambda p: p.name)
+    def test_sample_respects_fixed_format_columns(self, sample: Path) -> None:
+        """No sample line may carry *content* past column 72.
+
+        Anything there is silently discarded as the identification area, so
+        a line that overflows does not fail loudly -- it quietly changes the
+        program the rest of the suite is testing against.
+
+        Only non-whitespace counts. Trailing spaces past column 72 are
+        discarded too, but discarding them changes nothing, and failing on
+        them would make this test hostage to whichever editor last touched
+        the file.
+        """
+        offenders = [
+            (number, line[LAST_CODE_COLUMN:].rstrip())
+            for number, line in enumerate(
+                sample.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+            )
+            if line[LAST_CODE_COLUMN:].strip()
+        ]
+        assert not offenders, (
+            f"{sample.name}: content past column {LAST_CODE_COLUMN}, which the "
+            f"preprocessor discards before lexing (line, discarded text): {offenders}"
+        )
+
+    @pytest.mark.parametrize("sample", _sample_programs(), ids=lambda p: p.name)
+    def test_sample_parses_without_errors(self, sample: Path) -> None:
+        """Every sample parses to an AST, with no errors unless expected."""
+        result = parse_cobol(
+            sample.read_text(encoding="utf-8", errors="replace"),
+            filename=str(sample),
+        )
+        if sample.name in EXPECTED_PARSE_ERRORS:
+            pytest.skip(f"{sample.name} is a known-bad fixture by design")
+        assert result.ast is not None, f"{sample.name} produced no AST"
+        assert not result.errors, f"{sample.name}: " + "; ".join(
+            str(e) for e in result.errors[:5]
+        )
 
 
 def run_sample_tests():
