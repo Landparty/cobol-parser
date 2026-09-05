@@ -69,7 +69,7 @@ Three optional extension modules live alongside the pure-Python sources:
 |--------|------------------------------|---------------------|
 | `cobolparser/_lexer_fast.pyx` | `cobolparser/lexer.py` (`_CobolLexerPure`) | `check_division_header`, `read_word_from_text`, `tokenize_program_text`, `_try_single_line_string`, `read_number_from_text`, `tokenize` |
 | `cobolparser/_preprocess_fast.pyx` | `cobolparser/preprocess/__init__.py` | `normalize_fixed_format` |
-| `cobolparser/_data_fast.pyx` | `cobolparser/parsers/divisions/data.py` | `parse_picture_clause_fast`, `parse_data_item_clauses_fast` |
+| `cobolparser/_data_fast.pyx` | `cobolparser/parsers/divisions/data_clauses.py` | `parse_picture_clause_fast`, `parse_data_item_clauses_fast` |
 
 **Activation** — each module is imported via a guarded `try/except ImportError`
 at the bottom of its host Python file; the pure-Python path is used silently
@@ -84,7 +84,38 @@ except ImportError:
 ```
 
 The same pattern applies in `preprocess/__init__.py` (for `normalize_fixed_format`)
-and `parsers/divisions/data.py` (for `parse_data_item_clauses_fast`).
+and `parsers/divisions/data_clauses.py` (for `parse_data_item_clauses_fast`).
+
+**Signature-drift guard (`_data_fast`, added 2026-09-05):** `ImportError` is not
+the only way the fast path can be wrong. The extension is compiled separately
+from its caller, so the binary can be *older* than the Python module that calls
+it — a stale in-place `.so`, a cached `build/` tree, or an installed wheel
+shadowing the source tree. `data_clauses.parse_data_item` calls
+`parse_data_item_clauses_fast` with `_DATA_FAST_ARG_COUNT` (19) positional
+arguments and no guard, so that drift raised a `TypeError` from the middle of
+*every* data-description entry; the division loop recorded it as a generic
+error and recovered by abandoning the division, so a build problem degraded
+every program with a DATA DIVISION to a near-empty AST whose only clue was an
+argument count. Observed on Python 3.14 against an 18-parameter build.
+
+`data_clauses._data_fast_usable()` now probes the compiled helper once at
+import: with an empty token list the clause loop never runs, so the helper
+returns its `pos` argument without reading any other parameter (hence `None`
+placeholders for the rest). On mismatch the fast path is disabled
+(`_HAS_DATA_FAST = False`, helper set to `None`) and a `RuntimeWarning` names
+the rebuild. A *missing* extension stays silent — that is a normal
+pure-Python install, not a misconfiguration.
+
+Arity is the drift that actually happens (parameters get appended as the fast
+path grows); a same-arity extension with reordered parameters is not detected,
+and nothing cheap would. When adding a parameter to
+`parse_data_item_clauses_fast`, update `_DATA_FAST_ARG_COUNT` alongside the
+call site — `tests/regression/test_data_fast_signature_drift.py` asserts the
+constant matches the compiled extension's real arity.
+
+The checked-in `.c` files were verified in sync with their `.pyx` sources on
+2026-09-05 (regenerated and compared argument tables), so this guard protects
+against stale *builds*, not against a stale checked-in `.c`.
 
 **Performance** — approximately **~3× lexer throughput** over pure Python
 (documented in `setup.py`). Preprocessor and DATA DIVISION gains are comparable

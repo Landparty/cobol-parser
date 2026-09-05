@@ -3560,3 +3560,41 @@ changing anything, plus one found while verifying them:
 - A test-name typo (`branchs` -> `branches`).
 
 All four pinned by tests in `test_scenario_verification.py`.
+
+## 2026-09-05 — A stale `_data_fast` build no longer costs the DATA DIVISION
+
+Reported on Python 3.14: a compiled `_data_fast` accepting 18 arguments where
+`data_clauses.parse_data_item` passes 19, so every COBOL file with a DATA
+DIVISION failed to parse, degrading to a near-empty AST.
+
+Root cause is drift between two separately compiled halves, not a bad `.c`:
+the checked-in `_data_fast.c` was verified in sync with `_data_fast.pyx`
+(regenerated, argument tables compared — same for `_lexer_fast` and
+`_preprocess_fast`), so the 18-parameter binary can only have come from a
+stale *build* — an in-place `.so` older than the tree, a cached `build/`, or
+an installed wheel shadowing the source.
+
+What made a build problem into a parse problem: the fast-path call site was
+unconditional and positional, guarded only by `try/except ImportError` at
+import. A present-but-mismatched extension sails past that guard and raises
+`TypeError` from the middle of every data-description entry; `parser.py`'s
+broad `except Exception` recorded it as a generic error at line 1 column 1 and
+recovered by abandoning the division — losing the DATA *and* PROCEDURE
+divisions and reporting only an argument count.
+
+Fix: `_data_fast_usable()` probes the compiled helper once at import with an
+empty token list (the clause loop never runs, so it returns `pos` without
+reading any other parameter). On mismatch the fast path is disabled and a
+`RuntimeWarning` names the rebuild; a missing extension stays silent, since
+that is a normal pure-Python install. Verified against a real compiled
+extension, and fast-path vs fallback ASTs compared byte-for-byte across the
+94-file sample + shamrice corpus (zero mismatches).
+
+Not changed: `parser.py`'s division-level recovery still turns an unexpected
+exception into a generic line-1 error and drops the division. That is the
+reason this bug read as "empty AST" rather than "stale extension", but
+narrowing it touches `COLLECT_ALL` semantics for every division parser and is
+its own change.
+
+See "Signature-drift guard" in [lexer.md](lexer.md);
+`tests/regression/test_data_fast_signature_drift.py`.
