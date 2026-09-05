@@ -1,5 +1,63 @@
 # OKF Update Log
 
+## 2026-09-05 (record images: COMP-3/COMP-5/COMP-1/2 written as real bytes)
+
+Asked whether the copybook mocking feature — `mockymock.generateData`
+("Generate Data from Copybook") in the VS Code extension, which shells out
+to `gen-data` — could support `COMP-3`/`COMP-5` and friends. It already
+*generated values* for them; what it could not do was emit them as the bytes
+a program actually reads, and its reported `size` was the PICTURE's
+character count rather than the storage width.
+
+* **`generators/data/storage.py` (new)** — the package's single authority on
+  how many bytes a data item occupies. Extracted rather than added because
+  the arithmetic already existed twice (in `layout_offsets` and implicitly in
+  `CobolDataItem.calculate_size`) and both copies were wrong in the same two
+  places. `layout.py`, `layout_offsets.py` and `encoding.py` all defer to it
+  now, so a record image's field widths cannot drift from the offsets
+  `data-items` reports.
+* **Two real sizing bugs fixed for every caller at once.** `USAGE INDEX`
+  carries no PICTURE and was therefore sized as **zero bytes**, silently
+  collapsing the byte offset of every item after it in the record. A DISPLAY
+  item with `SIGN IS SEPARATE` was under-reported by one byte.
+* **`generators/data/encoding.py` (new)** — display value → storage bytes.
+  `EncodingOptions`, `encode_field`/`encode_record`, `hex_dump`, and
+  `encoding_caveats`. Reached via `GeneratedDataset.to_records()` /
+  `.write_records()` / `.to_hex_dump()` and `gen-data --format record|hex`.
+* **Every encoding is verified against a compiler, not against a manual.**
+  GnuCOBOL was installed, a probe program declaring one item per storage
+  class was compiled, and its raw WORKING-STORAGE bytes read back; the probe
+  and its output are reproduced in
+  `tests/unit/generators/data/test_encoding.py`'s module docstring. This is
+  what caught the version of this work that shipped `COMP-5` and both float
+  usages as big-endian: they are **host order** — "native binary" is the
+  whole point of `COMP-5` — while `COMP`/`COMP-4` really are always
+  big-endian. A full round trip (generate a record file → read it from a
+  compiled COBOL program → DISPLAY every field) reproduces the CSV exactly,
+  for both a COMP-heavy copybook and a realistic one with FILLER, OCCURS,
+  a level-88, `SIGN IS SEPARATE`, and signed zoned decimal.
+* **`DataGeneratorOptions.for_record_image()`** — the CSV-shaped defaults
+  (FILLER skipped, OCCURS capped) would each put a *hole* in a record image
+  that still looked plausible, so the record formats force the byte-complete
+  layout and print a note to stderr rather than letting `--include-filler` /
+  `--max-occurs` look silently ignored.
+* **Deliberately not built.** `SYNCHRONIZED` alignment: modelling slack bytes
+  would give the repo two contradictory offset models, since
+  `layout_offsets` is unaligned throughout — reported as a caveat instead.
+  z/OS hexadecimal floating point: `COMP-1`/`COMP-2` are IEEE 754, also
+  reported. A third zoned-sign convention (EBCDIC signs transcoded to ASCII
+  as `{ABC`/`}JKL`): no compiler here to verify it against, and both real
+  destinations are already covered by the charset-derived pair. `COMP-5`
+  values are still generated within their PICTURE's digit count rather than
+  its full binary range — widening it would churn every existing seed's
+  output and produce literals that `TRUNC(STD)` would truncate in
+  mockymock's own `MOVE`-based splice.
+* **`FieldSpec` gained `storage_size`, `sign_clause`, `synchronized`,
+  `occurs_depending_on`** — additive keys, so `bundle_version` stays `1`.
+  `examples/fixtures/FIXTUREDEMO.bundle.json` was regenerated (verified
+  purely additive: identical once the four new keys are stripped) and
+  re-copied to mocky-mock, whose golden `.cut` test reads it.
+
 ## 2026-09-04 (level-88 branch seeding fixed; per-row witness groundwork)
 
 Reported from a real `mockymock generate --with-data` run: scenarios named

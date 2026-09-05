@@ -164,7 +164,9 @@ cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] \
     [--list-records] [--describe] [--header-style short|path] \
     [--include-filler] [--include-redefines] [--no-expand-occurs] \
     [--max-occurs N] [--no-semantic] [--ignore-values] [--unique FIELD] \
-    [--blank-rate RATE] [--compact] [--output FILE]
+    [--blank-rate RATE] [--format csv|json|record|hex] \
+    [--charset ascii|ebcdic] [--endian auto|big|little|native] \
+    [--record-separator none|newline] [--compact] [--output FILE]
 ```
 
 Generates synthetic CSV test data from a copybook record layout — see
@@ -181,6 +183,44 @@ writes through the `csv` module so quoted cells round-trip.
 * `--record NAME` picks among multiple level-01 records (default: the first).
   An unknown name errors and lists what is available.
 * Layout errors (`CopybookLayoutError`) exit 1 with the message on stderr.
+
+### `--format record` / `--format hex`: real record bytes
+
+`csv` (default) and `json` emit **display** values — `72436.21` regardless of
+whether the field is `PIC 9(7)V99` or `PIC S9(7)V99 COMP-3`. The other two
+emit the **record image**: the bytes a COBOL program would actually read,
+with `COMP-3` packed into nibbles, `COMP`/`COMP-4` as big-endian binary,
+`COMP-5` and the floats in host order, and signed DISPLAY overpunched. See
+[generators.md](generators.md)'s "Record images" section for the full
+encoding table and its verified-against-GnuCOBOL provenance.
+
+* `record` writes raw bytes — through `sys.stdout.buffer` on stdout and in
+  binary mode to `--output`, since a `COMP` field routinely contains `0x0A`
+  and a text-mode write would corrupt it. The image is encoded **once** and
+  the same bytes go to whichever destination applies; the `--output` branch
+  deliberately does *not* call `GeneratedDataset.write_records()`, which
+  would encode the whole dataset a second time and hold both copies at once
+  (a real ceiling on a large `--rows`, and a review finding on PR #200).
+  `write_records()` itself is unchanged and still right for a caller that
+  has not already encoded. `hex` is the same image annotated
+  field by field (offset, length, name, PICTURE, USAGE, value, bytes), which
+  is the form that survives being opened in an editor.
+* `--charset ebcdic` encodes every DISPLAY byte as cp037 and switches the
+  zoned-sign convention to EBCDIC zones; the sign convention is **not** a
+  separate flag, it follows the charset.
+* `--endian` (default `auto`) applies to `COMP-5` and `COMP-1`/`COMP-2` only
+  — `COMP`/`COMP-4` are always big-endian. `auto` reads the charset as
+  intent: big-endian for `ebcdic` (z/OS-bound), host order otherwise.
+* `--record-separator newline` appends `\n` per record for readability;
+  the default `none` is a true fixed-length RECFM=F image.
+* Both formats force the byte-complete layout (`DataGeneratorOptions
+  .for_record_image()`: FILLER in, REDEFINES out, every OCCURS occurrence
+  expanded) and print a note to stderr saying so, since otherwise
+  `--include-filler`/`--max-occurs` would look silently ignored.
+* Anything not modelled (`SYNCHRONIZED` alignment, IEEE-vs-hex float,
+  `OCCURS DEPENDING ON` written at maximum) is printed to stderr for
+  `--format record` and inlined in the header for `--format hex` — never
+  swallowed.
 
 ## Gen-Fixtures
 

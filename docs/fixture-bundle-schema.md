@@ -136,12 +136,33 @@ value engine directly, no parallel type:
 
 ```
 name, column, qualified_name, level, picture, usage, category,
-size, integer_digits, decimal_digits, is_signed,
-value_clause, condition_values, subscripts, redefines
+size, storage_size, integer_digits, decimal_digits, is_signed,
+value_clause, condition_values, subscripts, redefines,
+sign_clause, synchronized, occurs_depending_on
 ```
 
 `category` is one of `alphanumeric | alphabetic | national | numeric |
 numeric-edited | alphanumeric-edited | float`.
+
+**`size` vs `storage_size`.** `size` counts PICTURE *character positions* —
+what a display rendering of the field is wide. `storage_size` counts the
+*bytes* the item really occupies, which for a non-DISPLAY `USAGE` is a
+different number: `PIC S9(7)V99 COMP-3` has `size: 9` and `storage_size: 5`,
+`PIC S9(4) COMP` has `size: 4` and `storage_size: 2`, and `USAGE INDEX` has
+no PICTURE at all but still occupies a fullword. Read `size` for anything
+CSV-shaped and `storage_size` for anything that lays out or writes a record.
+
+**`sign_clause`** is the raw `SIGN IS` clause (`"LEADING SEPARATE"`) or
+`null`; `SEPARATE` is the one case where a DISPLAY field's `storage_size`
+exceeds its `size`, because the sign gets a byte the PICTURE does not count.
+**`synchronized`** and **`occurs_depending_on`** are recorded rather than
+acted on — they mark the two places a record layout makes an assumption
+(alignment slack is not modelled; an ODO table is laid out at its maximum).
+
+These four keys were **added**, not changed: every key that existed before
+kept its name and meaning, which is why they did not require a
+`bundle_version` bump. A reader written against the earlier shape keeps
+working; see "Versioning and compatibility policy" below.
 
 ## `Expectation`
 
@@ -278,9 +299,12 @@ bundle-level keys:
             "name": "ORDER-QTY", "column": "ORDER-QTY",
             "qualified_name": "ORDER-RECORD.ORDER-QTY", "level": 5,
             "picture": "9(3)", "usage": "DISPLAY", "category": "numeric",
-            "size": 3, "integer_digits": 3, "decimal_digits": 0,
+            "size": 3, "storage_size": 3,
+            "integer_digits": 3, "decimal_digits": 0,
             "is_signed": false, "value_clause": null, "condition_values": [],
-            "subscripts": [], "redefines": null
+            "subscripts": [], "redefines": null,
+            "sign_clause": null, "synchronized": false,
+            "occurs_depending_on": null
           }],
           "sequence": [{"ORDER-QTY": "50"}, {"ORDER-QTY": "50"}, "... x10"],
           "terminal": {"WS-ORDER-STATUS": "10"},

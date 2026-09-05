@@ -301,8 +301,10 @@ into focused, reusable modules:
   previously-unhandled one.
 
   **Task 6: ambiguity propagates across nesting levels, not just within one sibling list.** Task 5's `is_ambiguous` flag was local to each `_layout_siblings()` call — an OCCURS ... DEPENDING ON table nested *inside* a group only made that group's own children ambiguous; the group's own sibling in the *parent* list still got a concrete, wrong offset. `_layout_siblings()`/`_layout_item()` now both return `tuple[int, bool]` (`footprint, trailing_ambiguous`) instead of a bare `int`: a group's nested `_layout_siblings()` call reports whether *it* ended ambiguous, `_layout_item()` passes that straight through for group items (elementary items always report `False` here — their own direct `occurs.depending_on` is already handled by the caller's existing check), and the calling `_layout_siblings()` folds a `True` nested signal into its own `is_ambiguous`, exactly like a direct ODO child would. Propagates through arbitrarily many nesting levels for free (each level only needs its own direct child's signal) — confirmed with a two-level nesting test, not just by inspection. `compute_record_layout()`'s public contract (the `LayoutItem` list and every field on it) is unchanged; only the two private helpers' internal return shape changed. Root cause of the two brief-derived tests initially failing during development: unrelated to this propagation gap — fixed-format COBOL only recognizes columns 8-72 as the code area, and the brief's literal one-line `OCCURS 1 TO 10 TIMES DEPENDING ON WS-COUNT.` fixture at that indentation pushed `ON WS-COUNT.` past column 72, where the lexer silently drops it with no error, so the ODO parsed as a fixed `OCCURS 10` with `depending_on = None`. Test fixtures now wrap `DEPENDING ON <var>` onto a continuation line to stay inside the code area.
-- **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints.
-- **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods.
+- **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints. `USAGE INDEX`/`POINTER` short-circuit to `"0"` *without drawing from the RNG* — they are storage, not data, and reach the factory PICTURE-less, where they used to fall through to the numeric path's 9-digit default and emit a random number that looked like data. Not drawing is what keeps a copybook with no such field byte-identical for a given seed.
+- **`storage.py`** — the package's single authority on **how many bytes a data item occupies**: `storage_size()`, `binary_byte_length()`, `packed_byte_length()`, and the `USAGE` frozensets everything else classifies against. Zero dependencies beyond the stdlib, deliberately — `layout.py`, `layout_offsets.py` and `encoding.py` all import it, which is what stops a record image's field widths from drifting apart from the offsets `data-items` reports. Two cases the older per-module copies of the arithmetic got wrong and this fixes for every caller at once: `USAGE INDEX` (no PICTURE, so it was sized as **zero bytes**, silently collapsing every offset after it) and a DISPLAY item with `SIGN IS SEPARATE` (a byte the PICTURE's character count does not include).
+- **`encoding.py`** — record-image encoding: the display value from `values.py` rendered into the bytes a COBOL program would actually read. See "Record images" below.
+- **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods, plus the record-image trio `to_records()` / `write_records()` / `to_hex_dump()` and `record_length()`.
 - **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
 - **`__init__.py`** — Package exports of the above plus re-exports for backwards compatibility.
 
@@ -326,10 +328,20 @@ GeneratedDataset:  .record_name .fields .rows .seed .header
                    .to_csv(*, line_terminator="\n")
                    .write_csv(path, *, line_terminator="\n")
                    .to_dicts() .to_dict()
+                   .record_length()
+                   .to_records(opts=None) -> bytes
+                   .write_records(path, opts=None)
+                   .to_hex_dump(opts=None) -> str
+EncodingOptions:   .charset (Charset.ASCII|EBCDIC)
+                   .endian (Endian.AUTO|BIG|LITTLE|NATIVE)
+                   .record_separator (bytes)
+                   .space .resolved_endian
+RecordEncodingError(CopybookLayoutError)
 FieldSpec:         .name .path .column .level .picture .usage .category
                    .size .integer_digits .decimal_digits .is_signed
                    .value_clause .condition_values .subscripts .redefines
-                   .qualified_name .to_dict()
+                   .sign_clause .synchronized .occurs_depending_on
+                   .qualified_name .storage_size .to_dict()
 FieldCategory:     StrEnum — alphanumeric | alphabetic | national | numeric
                    | numeric-edited | alphanumeric-edited | float
 CopybookLayoutError(ValueError)
@@ -490,6 +502,87 @@ after the fact (surfaced by `gen-data --describe`).
 **`unique_fields`** retries a field up to 32 times for a distinct value, then
 falls back to a deterministic counter — a narrow field (`PIC 9`, ten possible
 values) asked for 40 unique rows must terminate, not spin.
+
+## Record images (`data/encoding.py` + `data/storage.py`)
+
+Everything above this point works in **display form** — a CSV cell holds
+`72436.21` whether the field behind it is `PIC 9(7)V99` or
+`PIC S9(7)V99 COMP-3`. That is the right currency for a CSV, and for
+mockymock (whose splicer emits `MOVE <literal> TO <field>` and lets the
+compiler pack it). It is the wrong currency for a **record image**: the
+actual bytes a program would `READ`, or a dataset uploaded to z/OS.
+
+`GeneratedDataset.to_records()` / `.write_records()` / `.to_hex_dump()`
+produce that image; `gen-data --format record|hex` is the CLI on top of it
+(see [cli.md](cli.md)).
+
+**The layout has to change first.** The CSV-shaped defaults are deliberately
+lossy — FILLER skipped, OCCURS capped — and both would put a *hole* in a
+record image that still looked plausible. `DataGeneratorOptions
+.for_record_image()` returns the byte-complete variant (FILLER in, REDEFINES
+out, every occurrence expanded, no cap); the CLI applies it for
+`--format record|hex` and prints a note to stderr so the overridden flags
+don't look ignored. FILLER encodes as spaces/zeros regardless of its
+generated cell — an empty cell falls through every encoder as exactly that,
+so no encoder needs to know about FILLER.
+
+**Encodings, all verified against GnuCOBOL** by compiling a probe program
+and reading back `LENGTH OF` plus the raw group bytes (the probe and its
+output are reproduced in `tests/unit/generators/data/test_encoding.py`'s
+module docstring — that suite is the regression guard):
+
+| Storage | Bytes |
+|---------|-------|
+| DISPLAY alphanumeric / edited | left-justified, space-padded, truncated; charset's space byte |
+| DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
+| `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
+| `COMP` / `COMP-4` / `BINARY` | two's complement, **always big-endian** |
+| `COMP-5` | two's complement, **host byte order** — that is what "native binary" means |
+| `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
+| `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
+
+**Overpunch conventions follow the charset**, not a separate knob: EBCDIC
+zones the sign into the `C`/`D` nibbles (`-12345` → `F1F2F3F4D5`), ASCII sets
+`0x40` in the signed digit's zone (`-12345` → `1234u`), which is what
+GnuCOBOL writes *and* reads. The third convention in the wild — EBCDIC signs
+transcoded to ASCII as `{ABC`/`}JKL` — is deliberately **not** offered:
+there is no compiler available to verify an implementation of it against,
+and both real destinations (a z/OS dataset, the local GnuCOBOL runtime) are
+already covered.
+
+**Byte order defaults to `Endian.AUTO`**, which reads the charset as a
+statement of intent: an EBCDIC record is bound for z/OS and gets big-endian;
+an ASCII one is bound for the local runtime and gets host order. `NATIVE`
+forces host order, `BIG`/`LITTLE` pin it. `resolved_endian` is always one of
+`BIG`/`LITTLE`, and every output path reports which was used rather than
+leaving the reader to infer it.
+
+**Known limits, reported not hidden** (`encoding_caveats(specs)` returns
+them; the CLI prints them to stderr and the hex dump inlines them in its
+header):
+
+* **`SYNCHRONIZED` is not modelled.** Slack bytes before an aligned `COMP`
+  item would shift every following offset, and this package's offset model
+  (`layout_offsets.compute_record_layout`, which backs `data-items`) is
+  unaligned throughout. Two contradictory offset models in one repo is worse
+  than one documented gap.
+* **`COMP-1`/`COMP-2` are IEEE 754, not z/OS hexadecimal floating point.**
+  Matches GnuCOBOL and Enterprise COBOL under `FLOAT(IEEE)`.
+* **`OCCURS ... DEPENDING ON` is written at its maximum**, same as
+  everywhere else in this package.
+
+One more thing worth knowing before diffing generated bytes against a
+compiler-written record: GnuCOBOL converts a decimal `COMP-2` literal through
+its own decimal intermediate and can land **one ULP** off the correctly
+rounded double. `-8840.0215` is a worked example — the encoder here writes
+the true nearest double, and is the more accurate of the two.
+
+**`--format hex`** is the form that survives being opened in a text editor,
+which is exactly where a copybook is being looked at when someone wants to
+know what its `COMP-3` field really holds. One line per field: offset,
+length, name, PICTURE, USAGE, display value, and the bytes. A layout mistake
+shows up as a shifted offset rather than as unexplained garbage further down.
+
 
 # Program Layout Index (`data/program_layout.py`)
 
@@ -1007,7 +1100,17 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
 
 * `tests/unit/test_copybook_data_generator.py` — flattening, categories,
   value constraints, option validation, dataset surface
-* `tests/unit/cli/test_gen_data_cli.py` — `gen-data` flags, JSON modes, errors
+* `tests/unit/cli/test_gen_data_cli.py` — `gen-data` flags, JSON modes, errors;
+  `TestRecordImageFormats` covers `--format record|hex`, `--charset`,
+  `--record-separator`, and that CSV output is unchanged by any of them
+* `tests/unit/generators/data/test_storage.py` — the byte-width table, incl.
+  the two regressions (`USAGE INDEX` sized as zero, `SIGN IS SEPARATE`
+  under-reported by one)
+* `tests/unit/generators/data/test_encoding.py` — every storage class's
+  bytes, record assembly at predicted offsets, the caveat list, and the hex
+  dump. **Its module docstring holds the GnuCOBOL probe program and its raw
+  output** — the ground truth every expected byte string here comes from.
+  Re-run that probe before changing an encoding
 * `tests/integration/test_copybook_csv_generation.py` — parametrized over the
   sample copybooks and the NIST `.CPY` corpus; asserts no copybook crashes the
   generator and that generated cells are assignable to their fields

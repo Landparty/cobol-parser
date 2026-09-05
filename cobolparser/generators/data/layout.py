@@ -13,6 +13,7 @@ from ...models.data_items import (
     PictureClause,
 )
 from .options import DataGeneratorOptions
+from .storage import storage_size
 
 
 class FieldCategory(StrEnum):
@@ -54,6 +55,15 @@ class FieldSpec:
         subscripts: OCCURS subscript path, empty for non-table fields.
         redefines: Name of the item this field's group redefines, if any.
         is_filler: Whether the item is FILLER.
+        sign_clause: Raw ``SIGN IS`` clause (``"LEADING SEPARATE"``), if any.
+            ``SEPARATE`` is the reason :attr:`storage_size` can exceed
+            :attr:`size`: the sign gets a byte the PICTURE does not count.
+        synchronized: Whether the item carries ``SYNCHRONIZED``.  Recorded
+            rather than acted on -- see :func:`.encoding.encoding_caveats`.
+        occurs_depending_on: The controlling data name when this field sits
+            inside an ``OCCURS ... DEPENDING ON`` table (the field's own or
+            any ancestor's), else ``None``.  The table is always flattened
+            at its maximum, so this marks where that assumption was made.
     """
 
     name: str
@@ -72,6 +82,26 @@ class FieldSpec:
     subscripts: tuple[int, ...] = ()
     redefines: str | None = None
     is_filler: bool = False
+    sign_clause: str | None = None
+    synchronized: bool = False
+    occurs_depending_on: str | None = None
+
+    @property
+    def storage_size(self) -> int:
+        """Bytes one occurrence of this field really occupies.
+
+        Distinct from :attr:`size`, which counts PICTURE *character
+        positions*: a ``PIC S9(7)V99 COMP-3`` field has ``size == 9`` and
+        ``storage_size == 5``.  Everything that lays out or encodes a record
+        wants this one; only CSV-shaped output wants ``size``.
+        """
+        return storage_size(
+            self.usage,
+            picture_size=self.size,
+            total_digits=self.integer_digits + self.decimal_digits,
+            sign_clause=self.sign_clause,
+            is_signed=self.is_signed,
+        )
 
     @property
     def qualified_name(self) -> str:
@@ -89,6 +119,7 @@ class FieldSpec:
             "usage": self.usage,
             "category": self.category.value,
             "size": self.size,
+            "storage_size": self.storage_size,
             "integer_digits": self.integer_digits,
             "decimal_digits": self.decimal_digits,
             "is_signed": self.is_signed,
@@ -96,6 +127,9 @@ class FieldSpec:
             "condition_values": list(self.condition_values),
             "subscripts": list(self.subscripts),
             "redefines": self.redefines,
+            "sign_clause": self.sign_clause,
+            "synchronized": self.synchronized,
+            "occurs_depending_on": self.occurs_depending_on,
         }
 
 
@@ -251,7 +285,7 @@ def flatten_record(
     """
     opts = options or DataGeneratorOptions()
     specs: list[FieldSpec] = []
-    _flatten_into(record, (), (), None, opts, specs)
+    _flatten_into(record, (), (), None, None, opts, specs)
     _assign_columns(specs, opts)
     return specs
 
@@ -261,6 +295,7 @@ def _flatten_into(
     path: tuple[str, ...],
     subscripts: tuple[int, ...],
     redefines: str | None,
+    depending_on: str | None,
     opts: DataGeneratorOptions,
     out: list[FieldSpec],
 ) -> None:
@@ -276,13 +311,29 @@ def _flatten_into(
     if item.level in (66, 88):
         return
 
+    # An OCCURS ... DEPENDING ON anywhere up the chain marks everything
+    # beneath it: the table is flattened at its maximum, and the field needs
+    # to carry where that assumption came from.
+    occurs = item.occurs_clause
+    inherited_depending_on = depending_on or (
+        occurs.depending_on if occurs is not None else None
+    )
+
     item_path = (*path, item.name)
     for index in _occurrence_indexes(item, opts):
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
         if children:
             for child in children:
-                _flatten_into(child, item_path, occ, inherited_redefines, opts, out)
+                _flatten_into(
+                    child,
+                    item_path,
+                    occ,
+                    inherited_redefines,
+                    inherited_depending_on,
+                    opts,
+                    out,
+                )
             continue
 
         picture = item.picture_clause
@@ -309,6 +360,9 @@ def _flatten_into(
                 subscripts=occ,
                 redefines=inherited_redefines,
                 is_filler=item.is_filler,
+                sign_clause=item.sign_clause,
+                synchronized=item.synchronized,
+                occurs_depending_on=inherited_depending_on,
             )
         )
 

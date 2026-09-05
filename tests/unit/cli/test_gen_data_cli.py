@@ -21,6 +21,19 @@ def _run(monkeypatch, *argv: str) -> None:
     main()
 
 
+def _run_argv(argv: list[str]) -> None:
+    """Invoke the CLI without monkeypatching, for tests that need several
+    invocations in one test body."""
+    import sys
+
+    saved = sys.argv
+    sys.argv = ["cobol-parser", *argv]
+    try:
+        main()
+    finally:
+        sys.argv = saved
+
+
 def _csv_out(capsys) -> list[list[str]]:
     return list(csv.reader(io.StringIO(capsys.readouterr().out)))
 
@@ -205,3 +218,186 @@ class TestGenDataErrors:
             _run(monkeypatch, str(empty))
         assert exc.value.code == 1
         assert "no level-01 record" in capsys.readouterr().err
+
+
+COMPBOOK = """       01  COMP-REC.
+           05  CR-ID     PIC X(4).
+           05  CR-QTY    PIC S9(4) COMP.
+           05  CR-AMT    PIC S9(5)V99 COMP-3.
+           05  CR-ADJ    PIC S9(3).
+"""
+
+
+@pytest.fixture
+def comp_copybook(tmp_path) -> str:
+    path = tmp_path / "COMPREC.cpy"
+    path.write_text(COMPBOOK, encoding="utf-8")
+    return str(path)
+
+
+class TestRecordImageFormats:
+    """``--format record`` / ``--format hex``: the bytes a program reads.
+
+    The values asserted here are the same ones ``tests/unit/generators/data/
+    test_encoding.py`` pins against a compiled GnuCOBOL probe; this layer
+    only checks that the CLI reaches them and routes the output correctly.
+    """
+
+    def test_format_defaults_to_csv(self):
+        args = _build_parser().parse_args(["gen-data", TXNDATA])
+        assert args.output_format == "csv"
+        assert args.charset == "ascii"
+        assert args.endian == "auto"
+        assert args.record_separator == "none"
+
+    def test_record_output_is_written_as_binary(self, comp_copybook, tmp_path):
+        out = tmp_path / "recs.bin"
+        _run_argv(
+            [
+                "gen-data",
+                comp_copybook,
+                "-n",
+                "2",
+                "--seed",
+                "5",
+                "--format",
+                "record",
+                "-o",
+                str(out),
+            ]
+        )
+        # 4 + 2 + 4 + 3 = 13 bytes per record, two records.
+        assert out.stat().st_size == 26
+
+    def test_record_output_is_not_the_display_text(self, comp_copybook, tmp_path):
+        out = tmp_path / "recs.bin"
+        _run_argv(
+            [
+                "gen-data",
+                comp_copybook,
+                "-n",
+                "1",
+                "--seed",
+                "5",
+                "--format",
+                "record",
+                "-o",
+                str(out),
+            ]
+        )
+        raw = out.read_bytes()
+        # CR-AMT is PIC S9(5)V99 COMP-3: seven digits packed into bytes 6-9,
+        # with the sign in the low nibble of the last of them -- nothing a
+        # CSV cell for this field could ever look like.
+        assert raw[9] & 0x0F in (0x0C, 0x0D)
+
+    def test_record_separator_newline_lengthens_each_record(
+        self, comp_copybook, tmp_path
+    ):
+        out = tmp_path / "recs.bin"
+        _run_argv(
+            [
+                "gen-data",
+                comp_copybook,
+                "-n",
+                "2",
+                "--seed",
+                "5",
+                "--format",
+                "record",
+                "--record-separator",
+                "newline",
+                "-o",
+                str(out),
+            ]
+        )
+        assert out.stat().st_size == 28
+
+    def test_ebcdic_charset_changes_the_display_bytes(self, comp_copybook, tmp_path):
+        ascii_out = tmp_path / "a.bin"
+        ebcdic_out = tmp_path / "e.bin"
+        for path, charset in ((ascii_out, "ascii"), (ebcdic_out, "ebcdic")):
+            _run_argv(
+                [
+                    "gen-data",
+                    comp_copybook,
+                    "-n",
+                    "1",
+                    "--seed",
+                    "5",
+                    "--format",
+                    "record",
+                    "--charset",
+                    charset,
+                    "-o",
+                    str(path),
+                ]
+            )
+        assert ascii_out.read_bytes()[:4] != ebcdic_out.read_bytes()[:4]
+        # 'C' is 0x43 in ASCII and 0xC3 in EBCDIC.
+        assert ebcdic_out.read_bytes()[0] == 0xC3
+
+    def test_hex_format_is_text_with_offsets_and_field_names(
+        self, comp_copybook, capsys
+    ):
+        _run_argv(
+            ["gen-data", comp_copybook, "-n", "1", "--seed", "5", "--format", "hex"]
+        )
+        out = capsys.readouterr().out
+        assert "* record length: 13 bytes" in out
+        assert "CR-AMT" in out
+        assert "000000" in out
+
+    def test_json_format_matches_describe(self, comp_copybook, capsys):
+        _run_argv(
+            ["gen-data", comp_copybook, "-n", "1", "--seed", "5", "--format", "json"]
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["record_name"] == "COMP-REC"
+        assert payload["fields"][1]["storage_size"] == 2
+
+    def test_record_formats_report_the_layout_override(self, comp_copybook, capsys):
+        _run_argv(
+            ["gen-data", comp_copybook, "-n", "1", "--seed", "5", "--format", "hex"]
+        )
+        assert "FILLER is included" in capsys.readouterr().err
+
+    def test_csv_output_is_unchanged_by_the_new_flags(self, comp_copybook, capsys):
+        _run_argv(["gen-data", comp_copybook, "-n", "2", "--seed", "5"])
+        rows = list(csv.reader(io.StringIO(capsys.readouterr().out)))
+        assert rows[0] == ["CR-ID", "CR-QTY", "CR-AMT", "CR-ADJ"]
+        assert len(rows) == 3
+
+    def test_output_file_encodes_the_dataset_exactly_once(
+        self, comp_copybook, tmp_path, monkeypatch
+    ):
+        """Regression: the ``--output`` path used to call ``to_records()`` and
+        then ``write_records()``, encoding every row twice and holding both
+        copies at once -- the practical ceiling on a large ``--rows``."""
+        from cobolparser.generators.data import dataset as dataset_module
+
+        calls = []
+        real = dataset_module.encode_record
+
+        def counting(specs, row, opts):
+            calls.append(row)
+            return real(specs, row, opts)
+
+        monkeypatch.setattr(dataset_module, "encode_record", counting)
+        out = tmp_path / "recs.bin"
+        _run_argv(
+            [
+                "gen-data",
+                comp_copybook,
+                "-n",
+                "3",
+                "--seed",
+                "5",
+                "--format",
+                "record",
+                "-o",
+                str(out),
+            ]
+        )
+        assert len(calls) == 3
+        assert out.stat().st_size == 39

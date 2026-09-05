@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass
@@ -46,6 +46,26 @@ class DataGeneratorOptions:
     header_style: str = "short"
     unique_fields: tuple[str, ...] = ()
     blank_rate: float = 0.0
+
+    def for_record_image(self) -> DataGeneratorOptions:
+        """A copy of these options that describes every byte of the record.
+
+        The CSV-shaped defaults are deliberately lossy -- FILLER skipped
+        because it names nothing a consumer can use, OCCURS capped so a big
+        table does not swamp the columns.  A *record image* cannot afford
+        either: a skipped FILLER is a hole in the record and a capped table
+        truncates it, and both would go unnoticed because the bytes that
+        remain still look plausible.  So: FILLER in, REDEFINES out (a
+        redefinition aliases bytes the original already covers, and writing
+        both would put two values in one place), every occurrence expanded.
+        """
+        return replace(
+            self,
+            include_filler=True,
+            include_redefines=False,
+            expand_occurs=True,
+            max_occurs=None,
+        )
 
     def __post_init__(self) -> None:
         if self.rows < 0:

@@ -62,7 +62,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (90% minimum enforced; ~8,475 tests across 320+ files)
+# Run all tests with coverage (90% minimum enforced; ~9,010 tests across 320+ files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -91,7 +91,7 @@ cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|fre
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
-cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [-o out.csv]
+cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [--format csv|json|record|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-separator none|newline] [-o out.csv]
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
@@ -192,7 +192,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec, flatten_record), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions, incl. `for_record_image()`), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec incl. `storage_size`, flatten_record), `storage.py` (`storage_size()` / `binary_byte_length()` / `packed_byte_length()` -- the package's single authority on how many bytes a data item occupies; `layout.py`, `layout_offsets.py` and `encoding.py` all defer to it so record images and `data-items` offsets cannot drift apart), `encoding.py` (record-image encoding: COMP-3 packed nibbles, COMP/COMP-4 big-endian binary, COMP-5 and COMP-1/2 in host order, zoned/overpunched signed DISPLAY, ASCII or EBCDIC cp037; `EncodingOptions`, `encode_record()`, `hex_dump()`, `encoding_caveats()` -- every encoding verified against GnuCOBOL, see `.okf/generators.md`), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset, incl. `to_records()` / `write_records()` / `to_hex_dump()`), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
 - `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3/6/7 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle`. `generate`/`generate_from_file` produce one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. `generate_with_scenarios`/`generate_with_scenarios_from_file` (Phase 6) additionally accept `mode="branches"|"all"`, routing through Phase 5's `ScenarioPlanner` and pinning each `PlannedScenario`'s witnesses/sequence-lengths/status-overrides into an otherwise normally-generated fixture set; `mode="happy"` delegates to `generate()` unchanged (byte-identical). Every scenario's `expectations` also carries tier 1 (`Expectation(kind="call_count", ...)`, derived exactly from that scenario's own generated sequence length) and tier 2 (`Expectation(kind="field_equals", ...)`, from `analysis.const_fold.ConstantFolder` seeded with the scenario's own single-invocation mocked inputs) -- Phase 7. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`, `.okf/analysis.md`, and `docs/fixture-bundle-schema.md`
 - `scenarios.py` -- `ScenarioPlanner` (Phase 5 of the `gen-fixtures` initiative): turns a Phase 4 `ConstraintReport` and `ProgramFlowAnalyzer`'s CFG into a set of named `PlannedScenario`s -- one (or a merge of several) per reachable, satisfiable branch arm, plus fixed families (empty-input/error-status/boundary-values) for `mode="all"` -- with exact arm-coverage accounting (`ScenarioCoverage`: targeted + merged + missed == total, every miss carrying a reason). Wired into the `gen-fixtures` CLI as of Phase 6 via `program_fixtures.py`'s `generate_with_scenarios`. See `.okf/generators.md`. Arm reachability here is CFG-shaped (`flow_report.unreachable_nodes`), never data-shaped, so an arm reachable only via a *correlation between records* gets a scenario named for it that never reaches it; `PlannedScenario.row_witnesses` is the (unpopulated) groundwork for expressing those -- see `docs/plans/2026-09-04-cross-record-correlation-design.md`
 
@@ -344,6 +344,13 @@ dataset.write_csv("out.csv")
 dataset.fields                 # list[FieldSpec] — the resolved layout
 dataset.seed                   # replay this run with DataGeneratorOptions(seed=...)
 
+# The same layout as real record bytes (COMP-3 packed, COMP big-endian, ...)
+from cobolparser.generators import Charset, EncodingOptions
+image_opts = DataGeneratorOptions(rows=100, seed=7).for_record_image()
+dataset = CopybookDataGenerator(image_opts).generate_from_file("CUSTOMER.cpy")
+dataset.write_records("CUSTOMER.BIN", EncodingOptions(charset=Charset.EBCDIC))
+dataset.to_hex_dump()          # the same image, annotated field by field
+
 # Whole-program layout index (Phase 1 of program-scoped test-data generation)
 from cobolparser.generators import ProgramLayoutIndex
 index = ProgramLayoutIndex.from_file("INVUPDT.cbl")   # or .build(ast)
@@ -444,7 +451,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~8,075 tests across 320 files in 5 directories:
+~9,010 tests across 320+ files in 5 directories:
 
 ```
 tests/
