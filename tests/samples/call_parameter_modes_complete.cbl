@@ -57,7 +57,8 @@
                                     BY REFERENCE WS-WORK-ALPHA.
            
       *    CALL with BY REFERENCE and ADDRESS OF
-           CALL 'POINTER-REFERENCE' USING BY REFERENCE ADDRESS OF WS-INPUT-DATA.
+           CALL 'POINTER-REFERENCE' USING BY REFERENCE
+               ADDRESS OF WS-INPUT-DATA.
            
        BY-VALUE-EXAMPLES.
       *    CALL with all BY VALUE parameters

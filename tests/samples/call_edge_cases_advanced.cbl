@@ -131,7 +131,7 @@
            MOVE 'LEVEL-2-PROCESSOR' TO WS-CHILD-PROG
            MOVE 'LEVEL-3-PROCESSOR' TO WS-GRANDCHILD-PROG
            
-      *    Call level 1, which internally calls level 2, which calls level 3
+      *    Call level 1, which calls level 2, which calls level 3
            CALL WS-PARENT-PROG USING BY REFERENCE WS-AMOUNT
                                          WS-RESULT
            

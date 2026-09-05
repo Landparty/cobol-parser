@@ -83,11 +83,22 @@ class DeadCodeAnalyzer:
     - GO TO target / GO TO targets DEPENDING ON
     - SORT/MERGE INPUT/OUTPUT PROCEDURE
     - ALTER ... TO PROCEED TO ...
-    - Implicit fall-through: the paragraph immediately preceding it in
-      source order does not end in a hard terminator (STOP RUN, GOBACK,
-      EXIT PROGRAM) or an unconditional (non-DEPENDING) GO TO as its own
-      last top-level statement -- the default shape of a straight-line
-      COBOL program with no explicit control transfer between paragraphs.
+    - Implicit fall-through: control runs off the end of the procedure
+      immediately preceding it in source order -- the default shape of a
+      straight-line COBOL program with no explicit control transfer
+      between paragraphs.
+
+    Fall-through only propagates out of a procedure that control can
+    *arrive at and keep running from*: the entry point, an ENTRY paragraph,
+    a GO TO / ALTER target, or something already reached by fall-through.
+    A ``PERFORM`` target is deliberately not such a procedure -- a PERFORM
+    returns to its caller at the end of its range instead of running on
+    into the next paragraph -- and neither is a SORT/MERGE INPUT or OUTPUT
+    procedure. Crediting those with fall-through is what made the analyzer
+    report *no* dead code at all for the most common COBOL program shape,
+    a ``MAIN`` paragraph of ``PERFORM``s followed by the paragraphs it
+    performs: every unreferenced paragraph after the first performed one
+    was kept alive by a fall-through edge that cannot happen at runtime.
 
     The first procedure in the PROCEDURE DIVISION is always considered
     referenced as the program entry point. A paragraph that contains an
@@ -121,6 +132,11 @@ class DeadCodeAnalyzer:
         # termination checks. Sections have no entry here -- a bare SECTION
         # header has no statements of its own and never blocks fall-through.
         self._paragraph_nodes: dict[str, CobolParagraph] = {}
+        # Procedures control can arrive at and then *keep running from*, so
+        # that reaching the end of one falls into the next in source order.
+        # A strict subset of ``_referenced_names``: see the class docstring
+        # for why a PERFORM/SORT-procedure target is excluded.
+        self._fallthrough_sources: set[str] = set()
 
     def analyze(self, ast: CobolProgram) -> DeadCodeReport:
         """Analyze a COBOL program for dead code.
@@ -137,6 +153,7 @@ class DeadCodeAnalyzer:
         self._section_paragraphs = {}
         self._paragraph_section = {}
         self._paragraph_nodes = {}
+        self._fallthrough_sources = set()
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -150,6 +167,7 @@ class DeadCodeAnalyzer:
         # procedure is reachable) rather than after.
         if self._ordered_procedures:
             self._referenced_names.add(self._ordered_procedures[0])
+            self._fallthrough_sources.add(self._ordered_procedures[0])
 
         self._collect_fallthrough_refs()
 
@@ -299,7 +317,7 @@ class DeadCodeAnalyzer:
         # filtering operands would collapse a target that happens to share
         # its name with the DEPENDING ON variable.
         for target in stmt.target_paragraphs:
-            self._add_ref(target)
+            self._add_jump_ref(target)
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
@@ -331,7 +349,7 @@ class DeadCodeAnalyzer:
         is not itself a reference to that paragraph.
         """
         for alteration in stmt.alterations:
-            self._add_ref(alteration["to_paragraph"])
+            self._add_jump_ref(alteration["to_paragraph"])
 
     def _collect_entry_refs(self, stmt: EntryStatement) -> None:
         """Mark the paragraph containing an ENTRY statement as referenced.
@@ -349,7 +367,7 @@ class DeadCodeAnalyzer:
             return
         para_name = stmt.section_name
         if para_name:
-            self._add_ref(para_name)
+            self._add_jump_ref(para_name)
 
     def _collect_fallthrough_refs(self) -> None:
         """Mark a procedure as referenced when the one immediately before it
@@ -362,20 +380,24 @@ class DeadCodeAnalyzer:
         its own and never blocks fall-through into its (or the next
         procedure's) content.
 
-        Gated on ``current`` already being in ``_referenced_names`` (which
-        this same left-to-right pass keeps extending) rather than crediting
-        every non-terminating procedure unconditionally: otherwise a chain
-        of procedures that are all themselves unreached would still credit
-        each other purely for standing next to one another, masking real
-        dead code. Must run after the entry point is marked referenced, and
-        a single forward pass suffices since fall-through only ever
-        propagates in source order.
+        Gated on ``current`` being a *fall-through source* -- a procedure
+        control can arrive at and keep running from (the entry point, an
+        ENTRY paragraph, a GO TO/ALTER target, or something this same
+        left-to-right pass already reached by fall-through). Not on plain
+        ``_referenced_names`` membership: that also holds PERFORM and
+        SORT/MERGE procedure targets, whose range *returns* to the caller
+        at its end rather than running on, so crediting them here invents a
+        runtime edge that does not exist and hides every dead paragraph
+        that happens to sit after a performed one. Must run after the entry
+        point is seeded, and a single forward pass suffices since
+        fall-through only ever propagates in source order.
         """
         for i in range(len(self._ordered_procedures) - 1):
             current = self._ordered_procedures[i]
             next_proc = self._ordered_procedures[i + 1]
-            if current in self._referenced_names and not self._terminates(current):
+            if current in self._fallthrough_sources and not self._terminates(current):
                 self._add_ref(next_proc)
+                self._fallthrough_sources.add(next_proc)
 
     def _terminates(self, name: str) -> bool:
         """Check whether procedure *name* unconditionally transfers control
@@ -429,6 +451,19 @@ class DeadCodeAnalyzer:
         """Add a procedure name as referenced."""
         if name:
             self._referenced_names.add(name.upper())
+
+    def _add_jump_ref(self, name: str | None) -> None:
+        """Add a procedure reached by a transfer that does *not* return.
+
+        A GO TO (or an ALTERed one), and an ENTRY paragraph reached by an
+        external ``CALL``, all land in the procedure and carry on from
+        there -- so reaching its end falls into the next procedure in
+        source order. That makes the target a fall-through source as well
+        as a reference, unlike a PERFORM target.
+        """
+        if name:
+            self._add_ref(name)
+            self._fallthrough_sources.add(name.upper())
 
     def _mark_thru_range(self, start: str | None, end: str | None) -> None:
         """Mark all procedures between start and end (inclusive) as referenced.

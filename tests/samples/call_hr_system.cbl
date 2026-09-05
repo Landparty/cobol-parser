@@ -102,9 +102,9 @@
                                          BY REFERENCE WS-HEALTH-PLAN
                                                        WS-DENTAL-PLAN
                                                        WS-VISION-PLAN
-                                                       WS-RETIREMENT-PLAN
-                                                       WS-EMPLOYEE-CONTRIB
-                                                       WS-EMPLOYER-CONTRIB
+                                                      WS-RETIREMENT-PLAN
+                                                     WS-EMPLOYEE-CONTRIB
+                                                     WS-EMPLOYER-CONTRIB
                    RETURNING WS-PROCESSED-FLAG
                    ON EXCEPTION
                        MOVE 'Y' TO WS-ERROR-FLAG

@@ -31,9 +31,9 @@
       *    Main menu screen
        01  MAIN-MENU-SCREEN.
            05  BLANK SCREEN.
-           05  LINE 1  COLUMN 1    VALUE '============================='.
-           05  LINE 2  COLUMN 1    VALUE '     EMPLOYEE MAINTENANCE    '.
-           05  LINE 3  COLUMN 1    VALUE '============================='.
+           05  LINE 1  COLUMN 1   VALUE '============================='.
+           05  LINE 2  COLUMN 1   VALUE '     EMPLOYEE MAINTENANCE    '.
+           05  LINE 3  COLUMN 1   VALUE '============================='.
            05  LINE 5  COLUMN 5    VALUE '1. Add Employee'.
            05  LINE 6  COLUMN 5    VALUE '2. Update Employee'.
            05  LINE 7  COLUMN 5    VALUE '3. Delete Employee'.

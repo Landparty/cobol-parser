@@ -194,6 +194,57 @@ it, so a malformed `OCCURS` with no count can no longer swallow the next
 item's own level number as a fabricated table size. See
 [parser.md](parser.md).
 
+## `calculate_size()` — byte width (2026-09-05 rewrite, repo audit)
+
+`CobolDataItem.calculate_size()` reports the bytes an item occupies, every
+OCCURS occurrence included. It is published as `calculated_size` on every
+data item's `to_dict()` (so it reaches the backend adapter in the AST JSON)
+and as the record `size` of `gen-data --list-records`.
+
+It now defers to `cobolparser._storage.storage_size` — the same single
+authority `generators/data/{layout,encoding,layout_offsets}.py` use. It used
+to carry its own copy of that arithmetic and had drifted in **five** ways,
+all wrong numbers in a published API:
+
+| Input | Old | Correct |
+|-------|-----|---------|
+| `PIC S9(9) BINARY` / `COMPUTATIONAL` | 9 | 4 |
+| `PIC S9(7)V99 COMPUTATIONAL-3` | 9 | 5 |
+| `COMP-1` / `COMP-2` (no PICTURE) | 0 | 4 / 8 |
+| `USAGE INDEX` | 0 | 4 |
+| group with `05 B REDEFINES A PIC X(10)` | 20 | 10 |
+| `05 ROW OCCURS 5` of a 4-byte group | 4 | 20 |
+
+Causes, in order: the usage branches listed `COMP`/`COMP-4`/`COMP-3` but not
+the `BINARY`/`COMPUTATIONAL`/`COMPUTATIONAL-3` spellings of the same
+usages; every usage branch sat behind an `is_elementary_item()` guard, which
+*requires* a PICTURE, so the `COMP-1`/`COMP-2` branch was unreachable for the
+only items that can ever use it (and `INDEX` had no branch at all — a
+zero-width item silently collapses every offset after it); the group branch
+summed all children, so a REDEFINES entry was added to what it redefines
+rather than sharing its storage; and the OCCURS multiplier was applied only
+in the elementary branch, never to a group.
+
+`_occurrence_size()` / `_occurs_multiplier()` / `_direct_data_children()` are
+the new helpers. Group layout follows `layout_offsets._layout_siblings`'
+**slot** rule (a contiguous run of `[base, redefiner, …]` costs its largest
+member); level-66 and level-77 children are excluded for the same reasons
+that module excludes them.
+
+`_storage.py` sits at the package root, next to `_errors.py` and for the same
+reason: `cobolparser.generators.data.__init__` eagerly imports
+`program_layout`, which imports `cobolparser.models`, so a model importing
+`generators.data.storage` directly would close an import cycle.
+`generators/data/storage.py` is now a re-export shim, so its existing
+importers are untouched.
+
+**One deliberate residual difference from `layout_offsets`:** under
+`OCCURS ... DEPENDING ON`, `calculate_size` reserves the **maximum**
+(matching `layout.py`/`encoding.py`, and so the record images `gen-data`
+writes), while `layout_offsets` reserves **one occurrence** (multiplier
+unknown at compile time). Verified across the sample + NIST corpus: 18,121
+records, 14 differences, every one of them an ODO table.
+
 Two shapes here regularly surprise consumers (both confirmed against source
 2026-08-02, and both compensated for in
 [generators.md](generators.md)'s data generator):

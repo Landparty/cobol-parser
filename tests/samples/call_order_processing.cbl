@@ -94,7 +94,7 @@
                                         BY REFERENCE WS-VALIDATION-OK
                    ON EXCEPTION
                        MOVE 001 TO WS-EXCEPTION-CODE
-                       MOVE 'Validation service error' TO WS-EXCEPTION-MSG
+                     MOVE 'Validation service error' TO WS-EXCEPTION-MSG
                        MOVE 'Y' TO WS-ROLLBACK-FLAG
            
            IF WS-VALIDATION-OK = 'N' OR WS-ROLLBACK-FLAG = 'Y'
@@ -114,7 +114,7 @@
                                       BY REFERENCE WS-INVENTORY-OK
                    ON EXCEPTION
                        MOVE 002 TO WS-EXCEPTION-CODE
-                       MOVE 'Inventory service error' TO WS-EXCEPTION-MSG
+                      MOVE 'Inventory service error' TO WS-EXCEPTION-MSG
                        MOVE 'Y' TO WS-ROLLBACK-FLAG
                    NOT ON EXCEPTION
                        IF WS-INVENTORY-OK = 'N'
@@ -140,7 +140,7 @@
                    RETURNING WS-TOTAL-AMOUNT
                    ON EXCEPTION
                        MOVE 003 TO WS-EXCEPTION-CODE
-                       MOVE 'Pricing calculation error' TO WS-EXCEPTION-MSG
+                    MOVE 'Pricing calculation error' TO WS-EXCEPTION-MSG
                        MOVE 'Y' TO WS-ROLLBACK-FLAG.
            
        PROCESS-PAYMENT.
@@ -153,7 +153,7 @@
                                       BY REFERENCE WS-PAYMENT-OK
                    ON EXCEPTION
                        MOVE 004 TO WS-EXCEPTION-CODE
-                       MOVE 'Payment processing error' TO WS-EXCEPTION-MSG
+                     MOVE 'Payment processing error' TO WS-EXCEPTION-MSG
                        MOVE 'Y' TO WS-ROLLBACK-FLAG
                    NOT ON EXCEPTION
                        IF WS-PAYMENT-OK = 'N'
@@ -182,7 +182,7 @@
                    RETURNING WS-SHIPMENT-ID
                    ON EXCEPTION
                        MOVE 005 TO WS-EXCEPTION-CODE
-                       MOVE 'Fulfillment service error' TO WS-EXCEPTION-MSG
+                    MOVE 'Fulfillment service error' TO WS-EXCEPTION-MSG
                        MOVE 'Y' TO WS-ROLLBACK-FLAG.
            
            IF WS-FULFILLMENT-OK = 'Y'

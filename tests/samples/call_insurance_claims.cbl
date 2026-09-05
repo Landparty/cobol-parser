@@ -220,9 +220,9 @@
            
       *    CALL notification service
            CALL WS-NOTIFICATION-SVC USING BY VALUE WS-CLAIMANT-NAME
-                                           BY REFERENCE WS-CLAIMANT-EMAIL
-                                                        WS-CLAIMANT-PHONE
-                                                        WS-APPROVED-AMOUNT
+                                          BY REFERENCE WS-CLAIMANT-EMAIL
+                                                       WS-CLAIMANT-PHONE
+                                                      WS-APPROVED-AMOUNT
                    ON EXCEPTION
                        DISPLAY 'Notification failed'.
            

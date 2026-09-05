@@ -213,7 +213,7 @@
                    IF WS-VIP-FLAG = 'Y'
                        CALL 'VIP-SUCCESS-HANDLER' USING WS-CUSTOMER-ID
                    ELSE
-                       CALL 'REGULAR-SUCCESS-HANDLER' USING WS-CUSTOMER-ID
+                     CALL 'REGULAR-SUCCESS-HANDLER' USING WS-CUSTOMER-ID
                    END-IF
                WHEN OTHER
                    CALL 'ERROR-HANDLER' USING WS-STATUS-CODE
@@ -237,9 +237,9 @@
                IF WS-COUNTER > 2
                    EVALUATE WS-PRIORITY-LEVEL
                        WHEN 1
-                           CALL 'COMPLEX-NESTED-PROCESS' USING WS-COUNTER
-                                                               WS-PRIORITY-LEVEL
-                                                               WS-ORDER-ID
+                          CALL 'COMPLEX-NESTED-PROCESS' USING WS-COUNTER
+                                                       WS-PRIORITY-LEVEL
+                                                             WS-ORDER-ID
                    END-EVALUATE
                END-IF
            END-PERFORM.

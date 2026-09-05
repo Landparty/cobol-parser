@@ -80,6 +80,46 @@ independently per this module's existing flat reference-marking
 architecture rather than sharing code with `program_flow`. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestFallThroughReferences`.
 
+**...and then over-corrected: fall-through escaped a PERFORM target too
+(2026-09-05 fix, repo audit).** The gate above was membership in
+`_referenced_names`, which also holds PERFORM, `PERFORM ... THRU`, and
+SORT/MERGE INPUT/OUTPUT procedure targets. A PERFORM *returns to its
+caller* at the end of its range — it does not run on into the next
+paragraph — so crediting one with fall-through invents a runtime edge that
+cannot happen, and it fires on the single most common COBOL program shape:
+a `MAIN` paragraph of `PERFORM`s followed by the paragraphs it performs.
+Every unreferenced paragraph after the first performed one was kept alive
+by that phantom edge, so the analyzer reported **no dead code at all** for
+the shape it is most often pointed at (`0000-MAIN` performing
+`1000-INIT`/`2000-PROCESS`/`3000-TERM`, with `9999-NEVER-CALLED` after
+them, came back clean). Every pre-existing test missed it because each one
+puts a `STOP RUN` in the paragraph before the orphan specifically so
+fall-through would not mask it — the workaround, not the fix.
+
+Fixed by splitting the two notions apart. `_fallthrough_sources` is a new,
+strictly smaller set than `_referenced_names`: procedures control can
+arrive at *and keep running from*. It is seeded with the entry point and
+extended by `_add_jump_ref` (a new sibling of `_add_ref`) from GO TO
+targets, `ALTER ... TO PROCEED TO` targets, and ENTRY paragraphs — all
+transfers that land in a procedure and carry on — and then by
+`_collect_fallthrough_refs` itself as it propagates left to right, so a
+paragraph reached by falling in is itself a fall-through source. PERFORM
+and SORT/MERGE procedure targets are deliberately absent: they stay in
+`_referenced_names` (so they are never reported dead) without licensing an
+edge out of their own end. `_mark_thru_range` still marks a whole
+`PERFORM A THRU C` range referenced, and C still does not escape. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestFallThroughOnlyEscapesReachableRuns`.
+
+**Known related over-approximation, deliberately not changed.**
+`ProgramFlowAnalyzer`'s `graph.build_fall_through_edges` still emits a
+`FALL_THROUGH` edge between *any* two adjacent non-terminating procedures,
+PERFORM targets included, so `flow_report.unreachable_nodes` under-reports
+in the same way. That is a CFG-shape question with a much wider blast
+radius (flowcharts, `ScenarioPlanner` arm reachability,
+`TechnicalDebtAnalyzer`'s unreachable-node smell) and was left alone; the
+two modules therefore no longer agree on reachability by design, not by
+accident.
+
 **`_terminates` only checked the last top-level statement — caught by
 Copilot review on the PR.** A hard terminator or unconditional `GO TO`
 earlier in a paragraph (not its last statement) still unconditionally
