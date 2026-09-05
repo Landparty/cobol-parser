@@ -1957,6 +1957,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [1.9.0](https://github.com/Landparty/cobol-parser/compare/v1.8.4...v1.9.0) (2026-09-04)
+
+
+### Features
+
+* **generators:** make a scenario verify that its own data reaches the branch it names ([b66e836](https://github.com/Landparty/cobol-parser/commit/b66e8362099b87ee830db916d6e5087bb282cd41))
+* **generators:** per-row witness pinning for cross-record correlation ([f8a9662](https://github.com/Landparty/cobol-parser/commit/f8a9662b2091eb1dd83a755c7da85f5061d1e2c2))
+* **generators:** scenarios verify that their own data reaches the branch they name ([d8a25e4](https://github.com/Landparty/cobol-parser/commit/d8a25e4eb54ef0414e6880908b4760976d6b7c06))
+* **parser:** parse REPORT SECTION; structured XML/JSON handler and PROCESSING PROCEDURE clauses ([d06a372](https://github.com/Landparty/cobol-parser/commit/d06a37267a2c59e73ad0798e4444e30f62f5b17e))
+* **parser:** support every COBOL verb and close silent statement drops ([ebd055d](https://github.com/Landparty/cobol-parser/commit/ebd055d6c5d7eb01627c2dda2d4e582bb99ceb84))
+
+
+### Bug Fixes
+
+* **analysis:** make numeric set-op enforcement reachable in _apply_numeric ([cc98c95](https://github.com/Landparty/cobol-parser/commit/cc98c959da92c656b334cb4ceed8a64ada8385eb))
+* **analysis:** seed level-88 branch scenarios with the arm's own values ([17e7f33](https://github.com/Landparty/cobol-parser/commit/17e7f33eca8cc7deaa6855c4512e5fe1d0075e8f))
+* **generators:** fold disjunctive enclosing arms, and stop losing path gaps ([256bb14](https://github.com/Landparty/cobol-parser/commit/256bb1411ca65b82c4aca85be244da6f1007c43e))
+
 ## [1.8.4](https://github.com/Landparty/cobol-parser/compare/v1.8.3...v1.8.4) (2026-09-01)
 
 
