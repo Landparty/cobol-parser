@@ -196,7 +196,13 @@ encoding table and its verified-against-GnuCOBOL provenance.
 
 * `record` writes raw bytes — through `sys.stdout.buffer` on stdout and in
   binary mode to `--output`, since a `COMP` field routinely contains `0x0A`
-  and a text-mode write would corrupt it. `hex` is the same image annotated
+  and a text-mode write would corrupt it. The image is encoded **once** and
+  the same bytes go to whichever destination applies; the `--output` branch
+  deliberately does *not* call `GeneratedDataset.write_records()`, which
+  would encode the whole dataset a second time and hold both copies at once
+  (a real ceiling on a large `--rows`, and a review finding on PR #200).
+  `write_records()` itself is unchanged and still right for a caller that
+  has not already encoded. `hex` is the same image annotated
   field by field (offset, length, name, PICTURE, USAGE, value, bytes), which
   is the form that survives being opened in an editor.
 * `--charset ebcdic` encodes every DISPLAY byte as cp037 and switches the

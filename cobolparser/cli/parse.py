@@ -1053,6 +1053,10 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         return
 
     if args.output_format == "record":
+        # Encode once and reuse the bytes for whichever destination follows.
+        # Encoding here and then calling dataset.write_records() would encode
+        # the whole dataset a second time -- twice the CPU, and both copies
+        # resident at once, which is a real ceiling on a large --rows.
         try:
             raw = dataset.to_records(_encoding_options(args))
         except CopybookLayoutError as exc:
@@ -1060,14 +1064,16 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         for caveat in _record_caveats(dataset):
             print(f"note: {caveat}", file=sys.stderr)
         if output_path:
+            # Binary mode is not incidental: a COMP field routinely contains
+            # 0x0A, which a text-mode write would translate on Windows.
             try:
-                dataset.write_records(output_path, _encoding_options(args))
+                with open(output_path, "wb") as handle:
+                    handle.write(raw)
             except OSError as e:
                 _fail(f"Cannot write output file: {e}")
         else:
-            # Raw record bytes are binary by nature (a COMP field routinely
-            # contains 0x0A); go through the buffer so nothing re-encodes or
-            # newline-translates them on the way out.
+            # Same reason, on the way to stdout: go through the buffer so
+            # nothing re-encodes or newline-translates the bytes.
             sys.stdout.buffer.write(raw)
             sys.stdout.buffer.flush()
         return

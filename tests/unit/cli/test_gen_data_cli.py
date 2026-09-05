@@ -367,3 +367,37 @@ class TestRecordImageFormats:
         rows = list(csv.reader(io.StringIO(capsys.readouterr().out)))
         assert rows[0] == ["CR-ID", "CR-QTY", "CR-AMT", "CR-ADJ"]
         assert len(rows) == 3
+
+    def test_output_file_encodes_the_dataset_exactly_once(
+        self, comp_copybook, tmp_path, monkeypatch
+    ):
+        """Regression: the ``--output`` path used to call ``to_records()`` and
+        then ``write_records()``, encoding every row twice and holding both
+        copies at once -- the practical ceiling on a large ``--rows``."""
+        from cobolparser.generators.data import dataset as dataset_module
+
+        calls = []
+        real = dataset_module.encode_record
+
+        def counting(specs, row, opts):
+            calls.append(row)
+            return real(specs, row, opts)
+
+        monkeypatch.setattr(dataset_module, "encode_record", counting)
+        out = tmp_path / "recs.bin"
+        _run_argv(
+            [
+                "gen-data",
+                comp_copybook,
+                "-n",
+                "3",
+                "--seed",
+                "5",
+                "--format",
+                "record",
+                "-o",
+                str(out),
+            ]
+        )
+        assert len(calls) == 3
+        assert out.stat().st_size == 39

@@ -700,6 +700,10 @@ triggered from the Actions tab. Run the full suite locally during development
 
 # See Also
 
+* `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
+  `gen-data --format record|hex` flags, that CSV output is unchanged by any
+  of them, and (counting `encode_record` calls) that `--output` encodes the
+  dataset exactly once
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
 * [generators.md](generators.md) — flowchart, copybook → CSV, program layout
   index, and program fixture bundle generator tests
