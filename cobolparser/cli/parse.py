@@ -938,7 +938,11 @@ def _build_gen_data_parser(
     p.add_argument(
         "--record-format",
         choices=["fixed", "variable", "variable-bare", "auto"],
-        default="fixed",
+        # Not "fixed": the default has to stay distinguishable from an
+        # explicit --record-format fixed, so that --record-varying (which is
+        # a statement that records are *not* fixed) can default to auto
+        # without overriding a caller who really did ask for fixed.
+        default=None,
         help=(
             "Record length for --format record/hex: fixed (default) writes "
             "every record at the layout's full length, as RECFM=F/FB expects; "
@@ -947,6 +951,18 @@ def _build_gen_data_parser(
             "uses to delimit them; variable-bare is the same records without "
             "the RDW; auto picks variable when the layout has a DEPENDING ON "
             "table and fixed otherwise"
+        ),
+    )
+    p.add_argument(
+        "--record-varying",
+        default=None,
+        metavar="MIN:MAX",
+        help=(
+            "Record length range, as an FD's RECORD VARYING FROM MIN TO MAX "
+            "declares. Only needed for a bare copybook, which carries no FD: "
+            "given a whole COBOL program, the clause is read off the record "
+            "itself. Implies a variable record format unless --record-format "
+            "says otherwise"
         ),
     )
     p.add_argument(
@@ -972,11 +988,17 @@ def _encoding_options(args: argparse.Namespace) -> Any:
         RecordFormat,
     )
 
+    chosen = getattr(args, "record_format", None)
+    if chosen is None:
+        # Asking for a length range is itself saying the records vary, so
+        # --record-varying alone reaches auto rather than silently writing
+        # the fixed-length file the caller just said this is not.
+        chosen = "auto" if getattr(args, "record_varying", None) else "fixed"
     return EncodingOptions(
         charset=Charset(args.charset),
         endian=Endian(args.endian),
         record_separator=b"\n" if args.record_separator == "newline" else b"",
-        record_format=RecordFormat(getattr(args, "record_format", "fixed")),
+        record_format=RecordFormat(chosen),
     )
 
 
@@ -1024,6 +1046,7 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
             header_style=args.header_style,
             unique_fields=tuple(args.unique),
             blank_rate=args.blank_rate,
+            record_varying=_parse_record_varying(args.record_varying),
         )
     except ValueError as exc:
         _fail(str(exc))
@@ -1111,11 +1134,25 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         print(dataset.to_csv(), end="")
 
 
+def _parse_record_varying(raw: str | None) -> tuple[int, int] | None:
+    """Parse ``--record-varying MIN:MAX`` into a length range.
+
+    ``MIN-MAX`` is accepted too, since that is how the range reads in an FD
+    (``FROM 47 TO 80``) and a hyphen is the likelier typo of the two.
+    """
+    if raw is None:
+        return None
+    parts = raw.replace("-", ":").split(":")
+    if len(parts) != 2 or not all(part.strip().isdigit() for part in parts):
+        _fail(f"--record-varying expects MIN:MAX (two integers), got {raw!r}")
+    return (int(parts[0]), int(parts[1]))
+
+
 def _record_caveats(dataset: Any, opts: Any) -> list[str]:
     """Reasons a written record image may not match a real compiler's."""
     from ..generators.data.encoding import encoding_caveats
 
-    return encoding_caveats(dataset.fields, opts)
+    return encoding_caveats(dataset.fields, opts, varying=dataset.varying)
 
 
 def _record_length_notes(dataset: Any, opts: Any) -> list[str]:
@@ -1130,14 +1167,26 @@ def _record_length_notes(dataset: Any, opts: Any) -> list[str]:
     lengths = dataset.record_lengths(opts)
     if not lengths:
         return []
-    fmt = opts.resolved_format(dataset.fields)
+    fmt = opts.resolved_format(dataset.fields, varying=dataset.varying is not None)
     framed = " (RDW included)" if fmt is RecordFormat.VARIABLE else ""
     low, high = min(lengths), max(lengths)
     span = f"{high}" if low == high else f"{low} to {high}"
-    return [
+    notes = [
         f"{fmt.value} record length: {span} bytes across "
         f"{len(lengths)} records{framed}"
     ]
+    varying = dataset.varying
+    if varying is not None and fmt.is_variable:
+        # What this file *happens* to contain is not what the dataset holding
+        # it has to be allocated for: LRECL comes from the declared maximum,
+        # which a short run of --rows may never actually hit.
+        rdw = 4 if fmt is RecordFormat.VARIABLE else 0
+        notes.append(
+            f"declared RECORD VARYING FROM {varying.minimum} TO "
+            f"{varying.maximum}, so LRECL is {varying.maximum + rdw}"
+            + (" (max record + RDW)" if rdw else "")
+        )
+    return notes
 
 
 def _build_gen_fixtures_parser(

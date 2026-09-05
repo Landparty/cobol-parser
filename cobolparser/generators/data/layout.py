@@ -69,6 +69,84 @@ class OdoControl:
         }
 
 
+@dataclass(frozen=True)
+class VaryingLength:
+    """An FD's declared record-length range: how long a record may be.
+
+    The *other* way a COBOL record varies, and the one an ``OCCURS ...
+    DEPENDING ON`` walk cannot see::
+
+        FD  EMPFILE
+            RECORD VARYING FROM 47 TO 80 CHARACTERS
+                   DEPENDING ON EMPREC-LEN
+            RECORDING MODE IS V.
+        01  EMP-RECORD80.
+            ...
+
+    The record layout here is an ordinary fixed one -- no table, nothing
+    subordinate to a counter.  What varies is how many of its bytes each
+    record actually carries; the program sets ``EMPREC-LEN`` before a WRITE
+    and reads it back after a READ, and the length itself travels in the
+    RDW rather than anywhere in the record.  So the length has to be drawn
+    per record at generation time (see
+    :meth:`~.copybook.CopybookDataGenerator.generate_from_record`) and
+    handed to the encoder, which is exactly what ``data_length`` on
+    :func:`.encoding.encode_record` is for.
+
+    ``RECORD CONTAINS 47 TO 80`` declares the same thing without the
+    ``VARYING`` keyword and is treated identically.
+
+    Attributes:
+        minimum: Shortest record the FD permits, in bytes.
+        maximum: Longest, already clamped to the bytes the record layout
+            actually describes -- an FD promising more than its own 01 can
+            hold is a mismatch, reported as a caveat rather than padded.
+        depending_on: The ``DEPENDING ON`` data name, when the clause has
+            one.  Usually a WORKING-STORAGE item rather than part of the
+            record, which is why it is recorded but rarely writable.
+    """
+
+    minimum: int
+    maximum: int
+    depending_on: str | None = None
+
+    @classmethod
+    def from_fd_clauses(
+        cls, clauses: dict[str, Any] | None, *, record_size: int
+    ) -> VaryingLength | None:
+        """Read an FD's ``RECORD`` clause, or ``None`` if it declares no range.
+
+        *record_size* clamps :attr:`maximum`; see its note above.
+        """
+        block = (clauses or {}).get("record") or {}
+        low, high = block.get("min"), block.get("max")
+        if low is None or high is None or low == high:
+            return None
+        return cls.build(int(low), int(high), block.get("depending_on"), record_size)
+
+    @classmethod
+    def build(
+        cls,
+        minimum: int,
+        maximum: int,
+        depending_on: str | None,
+        record_size: int,
+    ) -> VaryingLength | None:
+        """A range clamped into what the layout can actually produce."""
+        low, high = sorted((max(0, minimum), max(0, maximum)))
+        if record_size > 0:
+            low, high = min(low, record_size), min(high, record_size)
+        return cls(low, high, depending_on) if high > low else None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the range (used by the CLI's ``--describe`` output)."""
+        return {
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "depending_on": self.depending_on,
+        }
+
+
 @dataclass
 class FieldSpec:
     """One generated CSV column: an elementary field of the record.

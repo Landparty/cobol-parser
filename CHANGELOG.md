@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators:** `gen-data` now also honours the *other* way a COBOL record
+  varies: `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the
+  record layout is an ordinary flat one and nothing in it says how long any
+  given record is (the length travels in the RDW; the program sets the
+  `DEPENDING ON` item before a WRITE and reads it back after a READ). Given a
+  **whole COBOL program** the clause is read off the record with no flag at
+  all -- `data_file_description.py` already parsed it, nothing consumed it.
+  Given a bare **copybook**, which carries no FD, `--record-varying MIN:MAX`
+  (`DataGeneratorOptions.record_varying`) supplies the range and overrides the
+  FD when both exist; passing it alone reaches `--record-format auto`, since
+  it is itself a statement that records are not fixed. One length per row is
+  drawn uniformly across the range at *generation* time, from the same seeded
+  RNG the values came from, so a seed reproduces record lengths as exactly as
+  it reproduces their contents -- and so `encode_record` stays pure. The cut
+  can fall mid-field, which is exactly what a program reading `REC(1:LEN)`
+  sees; `--format hex` marks the fields past it as `(past record length)`
+  rather than dropping them. `RECORD CONTAINS 47 TO 80` declares the same
+  thing without the `VARYING` keyword and is treated identically. New API:
+  `VaryingLength`, `DataGeneratorOptions.record_varying`,
+  `GeneratedDataset.varying` / `.declared_lengths`, `data_length=` on
+  `encode_record()` / `row_record_length()`, and `varying=` on
+  `EncodingOptions.resolved_format()` / `encoding_caveats()` / `hex_dump()`.
+  When a record has *both* a DEPENDING ON table and an FD range, the table
+  decides and a caveat says so.
+
 * **generators:** `gen-data --record-format fixed|variable|variable-bare|auto`
   generates **variable-length record files**, not just fixed-length ones. A
   copybook with an `OCCURS ... DEPENDING ON` table describes a record whose

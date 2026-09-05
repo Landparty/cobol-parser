@@ -167,6 +167,7 @@ cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] \
     [--blank-rate RATE] [--format csv|json|record|hex] \
     [--charset ascii|ebcdic] [--endian auto|big|little|native] \
     [--record-format fixed|variable|variable-bare|auto] \
+    [--record-varying MIN:MAX] \
     [--record-separator none|newline] [--compact] [--output FILE]
 ```
 
@@ -236,11 +237,27 @@ to `--format record|hex` only (CSV and JSON have no notion of record length).
 | `fixed` (default) | every `OCCURS ... DEPENDING ON` occurrence written, one length for the whole file | none |
 | `variable` | only the occurrences each record's own counter names | 4-byte RDW per record |
 | `variable-bare` | the same trimmed records | none |
-| `auto` | `variable` if the layout has a DEPENDING ON table, else `fixed` | follows the resolved value |
+| `auto` | `variable` if the record varies at all, else `fixed` | follows the resolved value |
 
-* **`fixed` is the default so existing output does not move.** A copybook
-  without a DEPENDING ON table writes identical bytes under every value bar
-  the RDW, so the choice only matters where records genuinely can vary.
+* **`fixed` is the default so existing output does not move.** A record that
+  cannot vary writes identical bytes under every value bar the RDW, so the
+  choice only matters where records genuinely can vary. `--record-varying` is
+  the exception: it *says* records vary, so passing it alone reaches `auto`
+  rather than writing a fixed file; an explicit `--record-format fixed` still
+  wins.
+
+**Two ways a record varies**, and `gen-data` handles both:
+
+1. `OCCURS ... DEPENDING ON` in the record — the count of occurrences decides
+   the length, and the counter is generated inside the table's bounds.
+2. `FD ... RECORD VARYING FROM min TO max DEPENDING ON item` on the file —
+   the record layout is flat and the length is simply how many of its bytes
+   each record carries. Given a **whole COBOL program**, the FD clause is read
+   off the record with no flag at all. Given a bare **copybook**, which has no
+   FD, `--record-varying MIN:MAX` supplies the range (`MIN-MAX` is accepted
+   too, since that is how it reads in the FD). The cut can fall mid-field —
+   which is exactly what a program reading `REC(1:LEN)` sees — and
+   `--format hex` marks the fields past it as `(past record length)`.
 * **The RDW** is `LL LL 00 00` — a big-endian 16-bit length *including the
   four RDW bytes*, then two reserved zero bytes — regardless of `--charset`
   and `--endian`. A record whose total would exceed 65 535 bytes errors out
@@ -249,7 +266,10 @@ to `--format record|hex` only (CSV and JSON have no notion of record length).
 * **The counter is generated inside the table's own bounds**, so `OCCURS 1 TO
   50 DEPENDING ON WS-N` never emits a `WS-N` of 8 731 — under `fixed` too.
 * **The resulting LRECL (or LRECL range) is printed to stderr** for
-  `--format record`, because raw bytes carry no header to state it in.
+  `--format record`, because raw bytes carry no header to state it in. When a
+  range is declared, the *declared* LRECL is printed alongside the span the
+  generated file happens to contain — a short `--rows` may never hit the
+  maximum, but the dataset still has to be allocated for it.
   `--format hex` puts it in its own header, along with a `(RDW)` row per
   record so field offsets stay true.
 * A DEPENDING ON counter that is **not part of the record** (declared in

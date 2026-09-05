@@ -30,6 +30,7 @@ from cobolparser.generators.data.encoding import (
     row_record_length,
 )
 from cobolparser.generators.data.layout import (
+    VaryingLength,
     flatten_record,
     occurrence_count,
     present_indexes,
@@ -71,6 +72,215 @@ def specs_for(copybook: str):
 def order_row(count: str) -> list[str]:
     """One ORDER-REC row whose counter says *count*, all four SKUs filled."""
     return ["ORD1", count, "AAA", "BBB", "CCC", "DDD", "00042"]
+
+
+# The worked example from mainframestechhelp.com's "reading a VL PS file
+# sequentially" tutorial, which is where this second mechanism came from: the
+# record layout is an ordinary fixed one -- no table, nothing subordinate to a
+# counter -- and what varies is how many of its bytes each record carries.
+# EMPREC-LEN lives in WORKING-STORAGE, so the length is nowhere in the record;
+# it travels in the RDW.
+EMPVL_PROGRAM = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EMPVL.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT EMPFILE ASSIGN TO INPUT01
+               ORGANIZATION IS SEQUENTIAL
+               ACCESS MODE  IS SEQUENTIAL
+               FILE STATUS  IS WS-FS1.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  EMPFILE
+           RECORD VARYING FROM 47 TO 80 CHARACTERS
+                  DEPENDING ON EMPREC-LEN
+           RECORDING MODE IS V.
+       01  EMP-RECORD80.
+           05  EMP-ID          PIC X(6).
+           05  EMP-NAME        PIC X(25).
+           05  EMP-DEPT        PIC X(10).
+           05  EMP-SALARY      PIC 9(6).
+           05  EMP-COMMENT     PIC X(33).
+       WORKING-STORAGE SECTION.
+       01  WS-FS1              PIC XX.
+       01  EMPREC-LEN          PIC S9(4) COMP.
+       PROCEDURE DIVISION.
+           CONTINUE.
+"""
+
+
+def empvl(**options):
+    """A dataset for the EMPVL program's FD-varying record."""
+    opts = DataGeneratorOptions(**{"rows": 6, "seed": 7, **options})
+    return CopybookDataGenerator(opts.for_record_image()).generate_from_source(
+        EMPVL_PROGRAM, filename="EMPVL.cbl"
+    )
+
+
+class TestFdRecordVarying:
+    """`FD ... RECORD VARYING FROM min TO max` with no ODO table anywhere.
+
+    The second, independent way a COBOL record's length varies -- and the one
+    an OCCURS DEPENDING ON walk cannot see, because the declaration is on the
+    FD rather than in the record.
+    """
+
+    def test_the_fd_clause_is_read_off_the_record(self):
+        dataset = empvl()
+        assert dataset.varying == VaryingLength(47, 80, "EMPREC-LEN")
+
+    def test_a_record_with_no_table_still_counts_as_variable(self):
+        dataset = empvl()
+        assert not any(spec.odo_controls for spec in dataset.fields)
+        assert dataset.is_variable_length
+
+    def test_every_record_lands_inside_the_declared_range(self):
+        dataset = empvl(rows=40)
+        assert all(47 <= length <= 80 for length in dataset.declared_lengths)
+
+    def test_the_lengths_actually_vary(self):
+        assert len(set(empvl(rows=40).declared_lengths)) > 1
+
+    def test_the_written_record_is_cut_to_its_declared_length(self):
+        dataset = empvl()
+        raw = dataset.to_records(BARE)
+        offset = 0
+        for length in dataset.declared_lengths:
+            assert raw[offset : offset + length]
+            offset += length
+        assert offset == len(raw)
+
+    def test_the_cut_can_fall_mid_field(self):
+        # EMP-COMMENT starts at byte 47, so any declared length below 80
+        # ends part-way through it -- which is exactly what a program reading
+        # EMP-RECORD80(1:EMPREC-LEN) sees.
+        dataset = empvl(rows=40)
+        assert any(47 < length < 80 for length in dataset.declared_lengths)
+
+    def test_the_rdw_carries_the_declared_length(self):
+        dataset = empvl()
+        raw = dataset.to_records(VARIABLE)
+        offset = 0
+        for length in dataset.declared_lengths:
+            assert int.from_bytes(raw[offset : offset + 2], "big") == length + RDW_SIZE
+            offset += length + RDW_SIZE
+        assert offset == len(raw)
+
+    def test_auto_picks_variable_for_an_fd_varying_record(self):
+        dataset = empvl()
+        assert (
+            AUTO.resolved_format(dataset.fields, varying=True) is RecordFormat.VARIABLE
+        )
+
+    def test_fixed_writes_full_length_records_and_says_so(self):
+        dataset = empvl()
+        raw = dataset.to_records(FIXED)
+        assert len(raw) == 6 * record_length(dataset.fields)
+        caveats = encoding_caveats(dataset.fields, FIXED, varying=dataset.varying)
+        assert any("fixed-length output was asked for" in c for c in caveats)
+
+    def test_the_minimum_comes_from_the_fd_not_the_layout(self):
+        dataset = empvl()
+        assert dataset.minimum_record_length() == 47
+        assert dataset.record_length() == 80
+
+    def test_reported_lengths_match_the_bytes_written(self):
+        dataset = empvl()
+        for opts in (VARIABLE, BARE, FIXED):
+            reported = dataset.record_lengths(opts)
+            raw = dataset.to_records(opts)
+            assert sum(reported) == len(raw)
+
+    def test_the_same_seed_reproduces_the_lengths_too(self):
+        assert empvl().declared_lengths == empvl().declared_lengths
+
+    def test_record_contains_min_to_max_is_the_same_declaration(self):
+        # RECORD CONTAINS 47 TO 80 says the same thing without the VARYING
+        # keyword, and the parser records it identically.
+        source = EMPVL_PROGRAM.replace(
+            "RECORD VARYING FROM 47 TO 80 CHARACTERS\n"
+            "                  DEPENDING ON EMPREC-LEN",
+            "RECORD CONTAINS 47 TO 80 CHARACTERS",
+        )
+        opts = DataGeneratorOptions(rows=4, seed=7).for_record_image()
+        dataset = CopybookDataGenerator(opts).generate_from_source(
+            source, filename="EMPVL.cbl"
+        )
+        assert dataset.varying == VaryingLength(47, 80, None)
+
+
+class TestExplicitVaryingRange:
+    """`DataGeneratorOptions.record_varying`, for a copybook with no FD."""
+
+    def test_an_explicit_range_makes_a_plain_copybook_vary(self):
+        options = DataGeneratorOptions(
+            rows=20, seed=3, record_varying=(10, 16)
+        ).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
+        assert dataset.varying == VaryingLength(10, 16, None)
+        assert all(10 <= n <= 16 for n in dataset.declared_lengths)
+
+    def test_it_overrides_the_fd_when_both_are_present(self):
+        dataset = empvl(record_varying=(50, 52))
+        assert dataset.varying == VaryingLength(50, 52, None)
+        assert all(50 <= n <= 52 for n in dataset.declared_lengths)
+
+    def test_a_range_beyond_the_record_is_clamped_to_it(self):
+        # CUST-REC is 16 bytes; an FD promising 40 cannot be honoured by
+        # padding, because the bytes were never declared.
+        options = DataGeneratorOptions(
+            rows=5, seed=3, record_varying=(4, 40)
+        ).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
+        assert dataset.varying == VaryingLength(4, 16, None)
+
+    def test_a_degenerate_range_is_not_a_varying_record(self):
+        options = DataGeneratorOptions(
+            rows=5, seed=3, record_varying=(16, 16)
+        ).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
+        assert dataset.varying is None
+        assert dataset.declared_lengths is None
+
+    @pytest.mark.parametrize("bad", [(-1, 5), (9, 4)])
+    def test_a_nonsense_range_is_refused(self, bad):
+        with pytest.raises(ValueError):
+            DataGeneratorOptions(record_varying=bad)
+
+    def test_the_depending_on_field_is_filled_in_when_it_is_in_the_record(self):
+        # Normally the length item is a WORKING-STORAGE counter, so there is
+        # nothing to write; when a copybook does put it in the record,
+        # leaving the generated value would contradict the record's own
+        # length.
+        source = """
+       01  MSG-REC.
+           05  MSG-LEN         PIC 9(3).
+           05  MSG-TEXT        PIC X(40).
+"""
+        record = parse_copybook_records(source)[0]
+        record.set_metadata(
+            "fd_clauses",
+            {
+                "record": {
+                    "varying": True,
+                    "min": 10,
+                    "max": 30,
+                    "depending_on": "MSG-LEN",
+                }
+            },
+        )
+        options = DataGeneratorOptions(rows=8, seed=4).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_record(record)
+        column = dataset.header.index("MSG-LEN")
+        assert [int(row[column]) for row in dataset.rows] == dataset.declared_lengths
+
+
+class TestBothMechanismsAtOnce:
+    def test_the_table_decides_and_the_caveat_says_so(self):
+        specs = specs_for(ORDER_COPYBOOK)
+        caveats = encoding_caveats(specs, VARIABLE, varying=VaryingLength(10, 20))
+        assert any("the table decides each record's length" in c for c in caveats)
 
 
 class TestOdoLayout:

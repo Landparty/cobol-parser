@@ -1,5 +1,58 @@
 # OKF Update Log
 
+## 2026-09-05 (variable-length files, part 2: FD RECORD VARYING)
+
+Follow-up to the same request, after being pointed at
+mainframestechhelp.com's "reading a VL PS file sequentially" example. Part 1
+below handled `OCCURS ... DEPENDING ON`; that example uses the *other*
+mechanism, and it is the more common one:
+
+```cobol
+FD  EMPFILE
+    RECORD VARYING FROM 47 TO 80 CHARACTERS
+           DEPENDING ON EMPREC-LEN
+    RECORDING MODE IS V.
+01  EMP-RECORD80.   *> a flat record. No table. Nothing to trim.
+```
+
+`EMPREC-LEN` is a WORKING-STORAGE item, so **nothing in the record says how
+long the record is** -- the length travels in the RDW. An ODO walk sees a
+fixed 80-byte record and cannot do better.
+
+* **`layout.VaryingLength`** — the FD's declared range.
+  `from_fd_clauses()` reads what `data_file_description.py` *already*
+  parsed into `fd_clauses["record"]` (`{varying, min, max, depending_on}`)
+  and attaches to the 01 as metadata. Nothing consumed it before this; the
+  parsing side needed no change at all. `RECORD CONTAINS 47 TO 80` is the
+  same declaration without the keyword and parses identically.
+* **The length is drawn at *generation* time, not at encode time.** One per
+  row, uniform across the range, from the same seeded RNG the values came
+  from — so a seed reproduces record *lengths* as exactly as it reproduces
+  their contents, and `encode_record` stays a pure function. The draws
+  happen *after* the value rows, so a record with no range draws nothing and
+  its bytes are unchanged.
+* **`encode_record(..., data_length=N)`** cuts the body to N bytes, mid-field
+  if that is where it falls — which is exactly what a program reading
+  `EMP-RECORD80(1:EMPREC-LEN)` sees. `--format hex` marks the fields past the
+  cut as `(past record length)` rather than dropping them.
+* **A whole program needs no flag; a copybook needs one.** The FD only exists
+  in a program, and `gen-data` accepts both. `--record-varying MIN:MAX`
+  (`DataGeneratorOptions.record_varying`) covers the copybook case and
+  overrides the FD when both are present.
+* **`--record-format`'s argparse default became `None`**, resolved to `fixed`
+  later. Without that, an explicit `--record-format fixed` was
+  indistinguishable from the default, so `--record-varying` could not imply
+  `auto` without trampling a caller who really did want fixed.
+* **`maximum` is clamped to the record's own length.** An FD promising more
+  than its 01 can hold cannot be honoured by padding — those bytes were never
+  declared.
+* **Both mechanisms at once**: the table decides, the FD range is not applied
+  on top, and a caveat says so.
+
+See "FD `RECORD VARYING`" in [generators.md](generators.md);
+`tests/unit/generators/data/test_variable_length.py::TestFdRecordVarying`
+works the linked example end to end.
+
 ## 2026-09-05 (variable-length record files: OCCURS DEPENDING ON honoured, RDW written)
 
 Asked to generate mock data for **both variable- and fixed-length files**.

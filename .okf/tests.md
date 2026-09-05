@@ -8,6 +8,23 @@ timestamp: 2026-08-17T00:00:00Z
 
 # Overview
 
+2026-09-05 (part 2): the same file grew `TestFdRecordVarying` and
+`TestExplicitVaryingRange` for the FD `RECORD VARYING` mechanism, which no
+`OCCURS DEPENDING ON` walk can see — the record is flat and the length lives
+in the RDW. The former works mainframestechhelp.com's `EMPVL` example end to
+end (the FD clause picked up with no flag at all, every drawn length inside
+47..80, the cut falling mid-`EMP-COMMENT`, the RDW carrying it, and a seed
+reproducing the lengths); the latter covers
+`DataGeneratorOptions.record_varying` for a copybook that has no FD, its
+clamping to the record's real length, and the degenerate equal-bounds case.
+`tests/unit/cli/test_gen_data_cli.py::TestRecordVaryingFlag` covers the
+`--record-varying` flag, `MIN-MAX` as well as `MIN:MAX`, malformed ranges,
+and that passing it alone resolves to `auto` while an explicit
+`--record-format fixed` still wins. That last point is why
+`TestRecordFormatFlag::test_the_default_is_fixed` now asserts the *resolved*
+format rather than the parsed one: argparse's default had to become `None` to
+stay distinguishable from an explicit `fixed`.
+
 2026-09-05: `tests/unit/generators/data/test_variable_length.py` (56 tests)
 covering fixed- vs variable-length record generation end to end --
 `OdoControl`/`odo_counter_bounds` linking (including a `max_occurs` cap
