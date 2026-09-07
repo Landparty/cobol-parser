@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 20 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
+description: 21 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
 timestamp: 2026-09-04T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 20 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 21 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -33,6 +33,7 @@ from cobolparser import (
     ComplexityAnalyzer,
     RedundancyAnalyzer,
     TechnicalDebtAnalyzer,
+    LintAnalyzer,
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 ```
@@ -825,6 +826,71 @@ surfaces via its `unreachable`/`no-escape recursion cycle` reasons instead;
 confirmed empirically, not assumed, while writing this module's own tests.
 
 CLI: `cobol-parser health <file.cbl>` (see cli.md).
+
+## LintAnalyzer (`lint.py`, 2026-09-07)
+
+```python
+report: LintReport = LintAnalyzer().analyze(ast, flow_report=None, copybook_item_names=None)
+# LintAnalyzer(rules=None) -- default every rule in RULES; an unknown id raises ValueError
+# report.findings: list[LintFinding]  (rule/severity/message/location/symbol/kind)
+# report.rules_run / .failed_rules / .caveats
+# report.error_count / .warning_count / .info_count / .counts_by_rule() / .worst_severity()
+```
+
+The aggregate view for the two callers who want "what is wrong with this
+program" rather than one analyzer's answer: a CI gate and an editor. Runs the
+selected rules over **one** already-parsed AST and flattens their differently
+shaped reports into a single stream of `LintFinding`, ordered by source
+position. Re-implements no analysis — each rule is a thin mapping from an
+existing analyzer's report, so a fix in (say) `move_type_checker.py` reaches
+lint output with no change here.
+
+**Rule ids are the analyzer subcommand names** (`dead-code`,
+`unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
+`recursion-check`, `complexity`) rather than a second private vocabulary, so
+`lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
+analyzer. A rule selection is deduplicated and normalized to `RULES` order, so
+flag ordering cannot change the report.
+
+**Severity is per finding, not per rule.** An analyzer that grades itself
+keeps its grading: MOVE's ERROR/WARNING kinds map to error/warning,
+recursion's HIGH/MEDIUM (HIGH = a cycle with no escape route, i.e. an infinite
+loop) to error/warning, complexity's rating to warning (HIGH) / info
+(MODERATE), with LOW producing no finding at all. The rest carry a fixed
+severity: dead code and I/O `FILE_LEFT_OPEN` warn; every other I/O kind and
+every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. An unused item is a
+warning when the program declares it and only info when it came from a
+copybook (`copybook_item_names`) — a copybook describes a whole record and no
+one program uses every field of it. The `_SEVERITY_*` tables in the module are
+the whole of that policy.
+
+**`LintFinding.symbol`** is the *name* the finding is about (paragraph, data
+item, file, called program), not a source excerpt. It is what lets a consumer
+whose line numbers have shifted — an editor holding the unexpanded file while
+the analyzers ran over copybook-expanded text — re-anchor by searching for the
+declaration instead of trusting `location` blindly. `kind` preserves the
+underlying analyzer's own category (`READ_BEFORE_OPEN`, `WORKING-STORAGE`,
+`HIGH`, ...) so a consumer can filter more finely than by rule without parsing
+`message`.
+
+**A quiet report is not automatically a clean program**, and the report says
+so structurally rather than in prose: `caveats` carries what an analyzer could
+not check (MOVE operands whose data category never resolved, most often an
+unresolved COPY), and `failed_rules` records a rule that raised — it costs
+only its own findings, never the other six. A consumer gating on `findings`
+alone must still surface both lists.
+
+Two rules (`recursion-check`, `complexity`) need the CFG; `LintAnalyzer`
+builds it at most once per `analyze()` call and accepts a precomputed
+`flow_report`. Findings identical in every visible field collapse to one
+(`_deduplicate`) — `IOSequenceAnalyzer` legitimately reports one READ-before-
+OPEN once per control flow path reaching it, which is two facts about the
+graph but one thing to fix, and two identical squiggles in an editor. That
+collapsing is this aggregate view's choice; the analyzers themselves are
+unchanged.
+
+CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
+`--min-severity`, and `--fail-on` (exit 3).
 
 ## IOLogger
 

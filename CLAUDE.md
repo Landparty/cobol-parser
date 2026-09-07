@@ -24,7 +24,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` |
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
-| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, etc.) | `.okf/analysis.md` |
+| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, etc.) | `.okf/analysis.md` |
 | Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
 | `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
 | CLI subcommands and flags | `.okf/cli.md` |
@@ -93,6 +93,7 @@ cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [--format csv|json|record|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-varying MIN:MAX] [--record-separator none|newline] [-o out.csv]
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
+cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR]
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser unused-variables <file.cbl> [--copybook-path DIR] [--exclude-copybook-variables]
@@ -166,7 +167,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 21 static analysis modules:
+**`cobolparser/analysis/`** -- 22 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -187,6 +188,7 @@ COBOL source (.cbl/.cob)
 - `technical_debt.py` -- `TechnicalDebtAnalyzer` composite 0-100 technical-debt score (A-F grade) combining complexity, redundancy, control-flow smells (GO TO density, ALTER usage, no-escape recursion cycles, unreachable nodes), and size, as a `DebtWeights`-weighted, fully explainable rollup with a `top_offenders` list. Backs the `health` CLI subcommand. See `.okf/analysis.md`
 - `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
 - `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
+- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`); severity is per finding where the underlying analyzer grades itself. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
 - `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE is poisoned unconditionally since the AST does not record BY vs INTO; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field still knowable at a DISPLAY/WRITE. See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
@@ -333,6 +335,14 @@ from cobolparser import (
     CRUDMatrixGenerator,        # matrix.entries, .to_csv(), .to_json()
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
+
+# One pass, every rule, one severity-graded list of findings
+from cobolparser import LintAnalyzer
+report = LintAnalyzer().analyze(parse_result.ast)          # or LintAnalyzer(["dead-code"])
+report.findings            # list[LintFinding]: rule/severity/message/location/symbol/kind
+report.caveats             # what could not be checked (an unresolved COPY, ...)
+report.failed_rules        # rules that raised; the rest still ran
+report.worst_severity()    # "error" | "warning" | "info" | None -- backs `lint --fail-on`
 
 # Synthetic CSV test data from a copybook record layout
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
