@@ -17,7 +17,7 @@ import pytest
 from cobolparser.cli.parse import _SUBCOMMANDS, _build_parser, main
 
 
-def _run(*argv: str) -> dict:
+def _run(*argv: str) -> None:
     with patch("sys.argv", ["cobol-parser", "le-info", *argv]):
         main()
 

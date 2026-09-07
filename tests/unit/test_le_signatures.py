@@ -105,12 +105,19 @@ class TestServiceSignatureAPI:
     def test_call_example_names_every_operand(self) -> None:
         sig = le_service_signature("CEEGTST")
         assert sig is not None
-        assert sig.call_example() == ('CALL "CEEGTST" USING heap_id, size, address, fc')
+        assert sig.call_example() == (
+            'CALL "CEEGTST" USING heap_id, size, address, [fc]'
+        )
+
+    def test_call_example_leaves_a_wholly_required_service_unbracketed(self) -> None:
+        sig = le_service_signature("CEE3ABD")
+        assert sig is not None
+        assert "[" not in sig.call_example()
 
     def test_repeating_operand_is_marked_in_the_example(self) -> None:
         sig = le_service_signature("CEETDLI")
         assert sig is not None
-        assert sig.call_example().endswith("ssa...")
+        assert sig.call_example().endswith("[ssa...]")
 
     def test_vstring_parameters_carry_a_declaration_snippet(self) -> None:
         sig = le_service_signature("CEEDAYS")
@@ -124,6 +131,27 @@ class TestServiceSignatureAPI:
         first = sig.to_dict()["parameters"][0]
         assert first["type"]["declaration"] == "PIC S9(9) COMP"
         assert first["type"]["byte_length"] == 4
+
+
+class TestCallExampleConventions:
+    """An omissible operand is bracketed the same way in both halves.
+
+    The extension renders `call_example` verbatim, so a service that showed
+    `fc` unbracketed would be telling the reader it has to be there --
+    contradicting the very column of the table that says it may be omitted.
+    """
+
+    @pytest.mark.parametrize("name", _SERVICES)
+    def test_service_brackets_exactly_its_optional_operands(self, name: str) -> None:
+        sig = LE_SERVICE_SIGNATURES[name]
+        expected = sum(1 for p in sig.parameters if p.optional)
+        assert sig.call_example().count("[") == expected
+
+    @pytest.mark.parametrize("name", _FUNCTIONS)
+    def test_function_brackets_exactly_its_optional_arguments(self, name: str) -> None:
+        sig = INTRINSIC_FUNCTION_SIGNATURES[name]
+        expected = sum(1 for a in sig.arguments if a.optional)
+        assert sig.call_example().count("[") == expected
 
 
 class TestIntrinsicSignatures:

@@ -381,6 +381,7 @@ class IBMEnterpriseCobol:
         # Heap Storage services
         "CEEGTST",  # Get heap storage
         "CEEFRST",  # Free heap storage
+        "CEECZST",  # Reallocate (change the size of) heap storage
         "CEEFRMST",  # Free heap storage
         "CEECREH",  # Create heap
         "CEEDSHP",  # Destroy heap
@@ -422,7 +423,6 @@ class IBMEnterpriseCobol:
         # String conversion services
         "CEESG",  # Convert string
         "CEESQ",  # Convert string length
-        "CEECZST",  # Convert string with terminator
         # IMS LE interface (also a LE service)
         "CEETDLI",  # IMS DL/I call through Language Environment
     }

@@ -236,11 +236,18 @@ class LEServiceSignature:
         return tuple(p for p in self.parameters if not p.optional)
 
     def call_example(self) -> str:
-        """A ``CALL`` statement in the service's own parameter names."""
-        operands = ", ".join(
-            f"{p.name}..." if p.repeats else p.name for p in self.parameters
-        )
-        return f'CALL "{self.name}" USING {operands}'
+        """A ``CALL`` statement in the service's own parameter names.
+
+        An omissible operand is bracketed, the same way
+        :meth:`IntrinsicSignature.call_example` brackets an optional
+        argument -- a consumer that renders this line verbatim would
+        otherwise show `fc` as though it had to be there.
+        """
+        parts = []
+        for param in self.parameters:
+            text = f"{param.name}..." if param.repeats else param.name
+            parts.append(f"[{text}]" if param.optional else text)
+        return f'CALL "{self.name}" USING {", ".join(parts)}'
 
     def to_dict(self) -> dict[str, Any]:
         return {
