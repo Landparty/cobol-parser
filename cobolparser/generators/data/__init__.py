@@ -95,8 +95,18 @@ from .bundle import (
     FixtureBundle,
     Scenario,
 )
-from .copybook import CopybookDataGenerator, parse_copybook_records
+from .copybook import CopybookDataGenerator, parse_copybook_records, select_record
 from .dataset import GeneratedDataset
+from .decoding import (
+    DecodedField,
+    DecodedRecord,
+    DecodeResult,
+    RecordDecoder,
+    RecordDecodingError,
+    decode_field,
+    decode_record,
+    decoded_hex_dump,
+)
 from .encoding import (
     MAX_VARIABLE_RECORD,
     RDW_SIZE,
@@ -129,6 +139,7 @@ from .options import DataGeneratorOptions
 from .program_layout import FileFacts, ProgramLayoutIndex, ResolvedField
 from .storage import binary_byte_length, packed_byte_length, storage_size
 from .values import ValueFactory
+from .views import PlacedField, RecordView, RecordViews, build_record_views
 
 __all__ = [
     "BUNDLE_VERSION",
@@ -138,6 +149,9 @@ __all__ = [
     "CopybookLayoutError",
     "CoverageSummary",
     "DataGeneratorOptions",
+    "DecodeResult",
+    "DecodedField",
+    "DecodedRecord",
     "EncodingOptions",
     "Endian",
     "Expectation",
@@ -148,16 +162,25 @@ __all__ = [
     "GeneratedDataset",
     "MAX_VARIABLE_RECORD",
     "OdoControl",
+    "PlacedField",
     "ProgramLayoutError",
     "ProgramLayoutIndex",
     "RDW_SIZE",
+    "RecordDecoder",
+    "RecordDecodingError",
     "RecordEncodingError",
     "RecordFormat",
+    "RecordView",
+    "RecordViews",
     "ResolvedField",
     "Scenario",
     "ValueFactory",
     "VaryingLength",
     "binary_byte_length",
+    "build_record_views",
+    "decode_field",
+    "decode_record",
+    "decoded_hex_dump",
     "encode_field",
     "encode_rdw",
     "encode_record",
@@ -171,6 +194,7 @@ __all__ = [
     "present_indexes",
     "record_length",
     "row_record_length",
+    "select_record",
     "storage_size",
     "unresolved_odo_counters",
 ]

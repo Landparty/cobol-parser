@@ -174,6 +174,34 @@ def _synthesise_record(items: list[CobolDataItem], filename: str) -> CobolDataIt
     return root
 
 
+def select_record(
+    records: list[CobolDataItem],
+    record: str | None,
+    filename: str = "<copybook>",
+) -> CobolDataItem:
+    """Pick the record called *record*, or the first one when it is ``None``.
+
+    Module-level because both halves of the package need it and they need it
+    to agree: generating data from ``--record CUST-REC`` and *decoding* a
+    file through ``--record CUST-REC`` must land on the same 01, or a
+    round-trip through the record image silently changes layout.
+
+    Raises:
+        CopybookLayoutError: if the named record is not one of *records*,
+            listing the ones that are.
+    """
+    if record is None:
+        return records[0]
+    wanted = record.upper()
+    for item in records:
+        if item.name.upper() == wanted:
+            return item
+    available = ", ".join(item.name for item in records)
+    raise CopybookLayoutError(
+        f"{filename}: record '{record}' not found (available: {available})"
+    )
+
+
 class CopybookDataGenerator:
     """Generates synthetic CSV test data from a COBOL copybook layout.
 
@@ -340,13 +368,6 @@ class CopybookDataGenerator:
         record: str | None,
         filename: str,
     ) -> CobolDataItem:
-        if record is None:
-            return records[0]
-        wanted = record.upper()
-        for item in records:
-            if item.name.upper() == wanted:
-                return item
-        available = ", ".join(item.name for item in records)
-        raise CopybookLayoutError(
-            f"{filename}: record '{record}' not found (available: {available})"
-        )
+        """Kept as a method for callers that already had it; see
+        :func:`select_record`, which is the implementation."""
+        return select_record(records, record, filename)

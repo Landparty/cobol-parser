@@ -414,15 +414,38 @@ def _digit_counts(picture: PictureClause | None) -> tuple[int, int]:
 def flatten_record(
     record: CobolDataItem,
     options: DataGeneratorOptions | None = None,
+    *,
+    ignore_root_redefines: bool = False,
 ) -> list[FieldSpec]:
     """Flatten *record* into the ordered list of columns to generate.
 
     Walks the record depth-first, descending through group items and emitting
     one :class:`FieldSpec` per elementary item (per occurrence, for tables).
+
+    *ignore_root_redefines* asks for the fields of a record that *itself*
+    carries ``REDEFINES``.  Ordinarily such a record flattens to nothing --
+    a redefinition aliases bytes another item already covers, so generating
+    both would put two values in one place.  A caller that has deliberately
+    chosen the redefinition as the layout to work through (the record
+    *decoder*, which reads one set of bytes through one overlay at a time)
+    wants those fields anyway.  Only the root's own clause is exempted:
+    ``REDEFINES`` nested inside the subtree still excludes its fields, so
+    the result stays a contiguous byte map whose widths sum to the
+    subtree's footprint.
     """
     opts = options or DataGeneratorOptions()
     specs: list[FieldSpec] = []
-    _flatten_into(record, (), (), None, (), opts, specs)
+    _flatten_into(
+        record,
+        (),
+        (),
+        None,
+        (),
+        opts,
+        specs,
+        redefines_label=record.redefines if ignore_root_redefines else None,
+        ignore_own_redefines=ignore_root_redefines,
+    )
     _link_odo_counters(specs)
     _assign_columns(specs, opts)
     return specs
@@ -436,10 +459,27 @@ def _flatten_into(
     odo_controls: tuple[OdoControl, ...],
     opts: DataGeneratorOptions,
     out: list[FieldSpec],
+    *,
+    redefines_label: str | None = None,
+    ignore_own_redefines: bool = False,
 ) -> None:
-    """Recursive worker for :func:`flatten_record`."""
+    """Recursive worker for :func:`flatten_record`.
+
+    *ignore_own_redefines* drops *this* item's own ``REDEFINES`` from the
+    exclusion test -- passed only for the root, under
+    :func:`flatten_record`'s ``ignore_root_redefines``.  It is not inherited:
+    the recursive calls below leave it at its default, so a redefinition
+    nested inside the subtree is excluded as usual and the walk still
+    describes a contiguous run of bytes.
+
+    *redefines_label* is the clause that exemption skipped.  It reaches every
+    spec's :attr:`FieldSpec.redefines`, so a field still says which
+    redefinition it belongs to, without gating the walk.
+    """
     # A REDEFINES anywhere up the chain taints every field beneath it.
-    inherited_redefines = redefines or item.redefines
+    inherited_redefines = (
+        redefines if ignore_own_redefines else redefines or item.redefines
+    )
     if inherited_redefines and not opts.include_redefines:
         return
     if item.is_filler and not opts.include_filler:
@@ -495,6 +535,7 @@ def _flatten_into(
                     inherited_controls,
                     opts,
                     out,
+                    redefines_label=redefines_label,
                 )
             continue
 
@@ -520,7 +561,7 @@ def _flatten_into(
                 value_clause=item.value_clause,
                 condition_values=_condition_values(item),
                 subscripts=occ,
-                redefines=inherited_redefines,
+                redefines=inherited_redefines or redefines_label,
                 is_filler=item.is_filler,
                 sign_clause=item.sign_clause,
                 synchronized=item.synchronized,
