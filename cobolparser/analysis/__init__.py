@@ -289,11 +289,27 @@ def __getattr__(name: str) -> object:
             "OffenderProcedure": OffenderProcedure,
         }
         return _map[name]
+    if name in ("LintAnalyzer", "LintReport", "LintFinding"):
+        # RULES/SEVERITIES are deliberately not re-exported here: this
+        # __getattr__ hands back classes, and the two rule/severity
+        # vocabularies are tuples of strings. Import them from
+        # cobolparser.analysis.lint directly.
+        from .lint import LintAnalyzer, LintFinding, LintReport
+
+        _map = {
+            "LintAnalyzer": LintAnalyzer,
+            "LintReport": LintReport,
+            "LintFinding": LintFinding,
+        }
+        return _map[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "CRUDFlags",
+    "LintAnalyzer",
+    "LintReport",
+    "LintFinding",
     "CRUDMatrix",
     "CRUDMatrixGenerator",
     "FileEntry",

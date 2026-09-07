@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis/cli:** `cobol-parser lint` runs several analyzers over a **single**
+  parse and reports everything they found as one severity-graded list --
+  previously "what is wrong with this program?" meant seven subcommands, seven
+  re-parses of the same file, and seven different JSON shapes to merge. New
+  `LintAnalyzer` / `LintReport` / `LintFinding` (`cobolparser.analysis.lint`,
+  exported from the top-level package) re-implement no analysis: each rule is a
+  mapping from an existing analyzer's report, and rule ids are the analyzer
+  subcommand names themselves (`dead-code`, `unused-variables`,
+  `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`,
+  `complexity`). Severity is graded per finding, keeping the underlying
+  analyzer's own judgement where it has one (MOVE ERROR/WARNING, recursion
+  HIGH/MEDIUM, complexity rating). `--format text` emits one
+  `file:line:column: severity [rule] message` line per finding -- the prefix an
+  editor or build log already parses -- and `--fail-on error|warning|info`
+  exits **3** when a finding at or above that severity was reported, kept
+  distinct from exit 1 ("the run failed") so a CI gate can tell the two apart.
+  `--rule` and `--min-severity` narrow the run and the output. The report also
+  carries `caveats` (what could not be checked, e.g. MOVE operands left
+  unresolved by a missing copybook) and `failed_rules` (a rule that raised
+  costs only its own findings), so a quiet report is never mistaken for a
+  clean program.
+
 * **generators:** `gen-data` now also honours the *other* way a COBOL record
   varies: `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the
   record layout is an ordinary flat one and nothing in it says how long any

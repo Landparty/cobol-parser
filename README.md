@@ -51,6 +51,39 @@ CLI:
 cobol-parser parse program.cbl
 cobol-parser analyze program.cbl      # dynamic call analysis
 cobol-parser dead-code program.cbl    # unreferenced paragraphs
+cobol-parser lint program.cbl         # every analyzer at once, as one list
+```
+
+### Lint a program
+
+`lint` runs several analyzers over a single parse and reports everything they
+found as one severity-graded list, instead of one subcommand (and one
+re-parse) per concern:
+
+```bash
+cobol-parser lint program.cbl --format text
+```
+
+```text
+program.cbl:6:1: warning [unused-variables] WORKING-STORAGE item WS-NEVER-USED (level 01) is never referenced in the PROCEDURE DIVISION
+program.cbl:12:5: error [move-type-check] Illegal MOVE: cannot move NUMERIC item 'WS-COUNTER' to ALPHABETIC item 'WS-ALPHA'
+program.cbl:17:1: warning [dead-code] paragraph ORPHAN-PARA is never referenced
+3 finding(s): 1 error, 2 warning, 0 info (7 rule(s) ran)
+```
+
+`--rule` narrows the run (rule ids are the analyzer subcommand names),
+`--min-severity` narrows the output, and `--fail-on error` exits 3 when
+anything at that severity was reported — a CI gate that stays distinct from
+exit 1, which still means the run itself failed. `--format json` (the
+default) additionally reports which rules ran, which raised, and what could
+not be checked, so a quiet report is never mistaken for a clean program.
+
+```python
+from cobolparser import LintAnalyzer, parse_cobol
+
+report = LintAnalyzer().analyze(parse_cobol(source, filename="prog.cbl").ast)
+for finding in report.findings:
+    print(finding.rule, finding.severity, finding.message)
 ```
 
 ### Generate test data from a copybook

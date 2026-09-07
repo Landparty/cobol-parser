@@ -1,5 +1,62 @@
 # OKF Update Log
 
+## 2026-09-07 — `lint`: every analyzer in one pass, as one list
+
+Request: "more features to help devs". The gap this closes is not a missing
+analysis — it is that answering "what is wrong with this program" meant
+running seven subcommands, each re-parsing the same file in its own CPython
+process, then learning seven different JSON shapes to merge into one list.
+Both consumers who want that list (a CI gate, an editor's diagnostics) were
+paying for it.
+
+`cobolparser/analysis/lint.py` — `LintAnalyzer` — runs the selected rules over
+**one** already-parsed AST and flattens their reports into a single stream of
+`LintFinding` (`rule`, `severity`, `message`, `location`, `symbol`, `kind`),
+ordered by source position. No analysis is re-implemented: every rule is a
+mapping from an existing analyzer's report, so a fix in one of them reaches
+lint output with no change here. Rule ids are the analyzer *subcommand names*
+rather than a second vocabulary.
+
+Three decisions worth keeping:
+
+- **Severity is per finding.** Analyzers that already grade themselves keep
+  their grading (MOVE ERROR/WARNING, recursion HIGH/MEDIUM, complexity
+  rating); the rest carry a fixed severity per rule. The `_SEVERITY_*` tables
+  are the whole policy, so changing a judgement is a one-line edit rather than
+  a hunt through mapping code.
+- **A quiet report is not a clean program.** `caveats` carries what an
+  analyzer could not check (MOVE operands whose category never resolved — the
+  `unresolved_count` that already existed and had no aggregate home), and
+  `failed_rules` records a rule that raised, costing only its own findings.
+  Both are structural, not prose, so a consumer cannot render "no problems"
+  for a file that was largely unexamined without ignoring a field.
+- **Exit code 3 for findings, not 1.** `--fail-on error|warning|info` gates
+  CI. `1` already means "the run failed" across this CLI (and `2` is taken
+  twice over: "recovered-but-errored parse" for `parse`, and argparse's own
+  usage error for a rejected flag on any subcommand); reusing `1` would make
+  a gate unable to tell a program with problems from a lint that never ran.
+  `--fail-on` defaults to `never`, so findings alone never change the exit
+  code. All four codes verified by running them, not assumed: missing file
+  `1`, unknown `--rule` `2`, `--fail-on` hit `3`, otherwise `0`.
+
+Also: findings identical in every visible field collapse to one.
+`IOSequenceAnalyzer` reports one READ-before-OPEN once per control flow path
+that reaches it (verified on `tests/samples/employee_processing.cbl`: the same
+line, twice) — two facts about the graph, one thing to fix, and two identical
+squiggles in an editor. Collapsed here, in the aggregate view, rather than
+pushed down into the analyzer, whose per-path report is correct for its own
+consumers.
+
+`--copybook-path` does double duty: it expands COPY members so MOVE operands
+resolve, *and* it lets lint grade a copybook-sourced unused item as info
+rather than warning, reusing the unexpanded-parse set difference
+`unused-variables` already uses for the same question.
+
+New: `cobol-parser lint` (`--rule`, `--min-severity`, `--fail-on`,
+`--format json|text`), `LintAnalyzer` / `LintReport` / `LintFinding` exported
+from the top-level package. See [analysis.md](analysis.md) and [cli.md](cli.md);
+`tests/unit/analysis/test_lint.py`, `tests/unit/cli/test_lint_subcommand.py`.
+
 ## 2026-09-05 (variable-length files, part 2: FD RECORD VARYING)
 
 Follow-up to the same request, after being pointed at

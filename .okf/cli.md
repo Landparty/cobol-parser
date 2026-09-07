@@ -434,6 +434,51 @@ escape recursion cycle, ...) that put them there. Embeds the underlying
 `complexity` directly for that. Registered the same way as
 `recursion-check`.
 
+## Lint
+
+```bash
+cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] \
+    [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR]
+```
+
+Runs `LintAnalyzer` (see `.okf/analysis.md`) — several analyzers over **one**
+parse — and reports every finding as a single severity-graded list, instead of
+one subcommand (and one re-parse) per concern.
+
+`--rule` (repeatable) selects rules; the ids are deliberately the analyzer
+subcommand names themselves: `dead-code`, `unused-variables`,
+`move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`,
+`complexity`. Argparse `choices` rejects an unknown id, so a typo can never
+read as "that rule found nothing". Ordering and duplicates in the flags do not
+affect the report — the selection is normalized to the canonical rule order.
+
+`--min-severity` (default `info`, i.e. everything) drops lower-severity
+findings *after* the rules run, so the summary counts always describe what was
+actually shown.
+
+`--format json` (default) emits the standard identification header plus
+`findings` / `rules_run` / `failed_rules` / `caveats` / `summary`. `--format
+text` emits one `file:line:column: severity [rule] message` line per finding —
+the prefix an editor's or build log's error parser already understands —
+followed by `note:` lines for caveats and failed rules, then a summary line.
+A finding with no location (a recursion cycle spans procedures) prints as
+`file: severity ...`; the column is omitted rather than faked as 0.
+
+**Exit codes.** `0` ran to completion (findings alone never change it); `1`
+the file could not be read or parsed, or its output could not be written
+(`_fail`); `2` argparse rejected the arguments — an unknown `--rule` or flag,
+which argparse exits on itself before `_cmd_lint` ever runs (pinned by
+`test_lint_subcommand.py::test_unknown_rule_is_rejected_by_argparse`); `3`
+`--fail-on` was given and a finding at or above that severity was reported.
+`3` rather than the conventional `1` on purpose: a CI gate must be able to
+tell "this program has problems" from "lint never ran", and `1`/`2` already
+mean something else across this CLI (see *Exit codes* above).
+
+`--copybook-path` does double duty here: it expands COPY members so MOVE
+operands resolve *and* it lets lint tell a copybook-sourced unused item (info)
+from one the program declares itself (warning), via the same unexpanded-parse
+set difference `unused-variables` uses.
+
 ## Batch
 
 ```bash

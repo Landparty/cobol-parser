@@ -21,6 +21,7 @@ _SUBCOMMANDS = frozenset(
         "gen-data",
         "gen-fixtures",
         "analyze",
+        "lint",
         "dead-code",
         "unused-variables",
         "program-flow",
@@ -1788,6 +1789,187 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
     _emit_report(output, args, ast=ast)
 
 
+# -- Subcommand: lint ---------------------------------------------------------
+
+
+def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
+    from ..analysis.lint import RULES, SEVERITIES
+
+    p = subparsers.add_parser(
+        "lint",
+        help="Run several analyzers in one pass and report every finding as one list",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser lint program.cbl\n"
+            "  cobol-parser lint program.cbl --format text --min-severity warning\n"
+            "  cobol-parser lint program.cbl --rule dead-code --rule move-type-check\n"
+            "  cobol-parser lint program.cbl --copybook-path ./copybooks --fail-on error\n"
+            "\nExit codes:\n"
+            "  0  ran to completion (findings may still have been reported)\n"
+            "  1  the file could not be read or parsed, or its output could not\n"
+            "     be written\n"
+            "  2  the arguments were rejected (argparse's own usage error)\n"
+            "  3  --fail-on was given and a finding at or above it was reported"
+        ),
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_source_format_args(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    _add_profiling_args(p)
+    p.add_argument(
+        "--rule",
+        action="append",
+        dest="rules",
+        choices=list(RULES),
+        metavar="RULE",
+        help=(
+            "Run only this rule (repeatable). Rule ids are the analyzer "
+            "subcommand names: " + ", ".join(RULES) + ". Default: all of them."
+        ),
+    )
+    p.add_argument(
+        "--min-severity",
+        choices=list(SEVERITIES),
+        default="info",
+        help=(
+            "Drop findings below this severity from the output (default: "
+            "info, i.e. keep everything). Filtering happens after the rules "
+            "run, so the summary counts describe what is shown."
+        ),
+    )
+    p.add_argument(
+        "--fail-on",
+        choices=[*SEVERITIES, "never"],
+        default="never",
+        help=(
+            "Exit 3 when a finding at or above this severity was reported, "
+            "for use as a CI gate (default: never -- findings alone never "
+            "change the exit code). Exit 1 still means the run itself "
+            "failed, so the two are never confused."
+        ),
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help=(
+            "json (default) emits the full LintReport; text emits one "
+            "grep-friendly 'file:line:column: severity [rule] message' line "
+            "per finding plus a summary."
+        ),
+    )
+    p.set_defaults(func=_cmd_lint)
+
+
+def _lint_text_report(report: Any, source_file: str) -> str:
+    """Render a :class:`LintReport` as compiler-style diagnostic lines.
+
+    Deliberately the same ``file:line:column: severity`` prefix an editor's
+    or a build log's error parser already understands, so lint output is
+    clickable where JSON is not. Findings with no location (a recursion
+    cycle spans procedures rather than sitting on one line) print as
+    ``file: severity ...`` -- the column is omitted rather than faked as 0,
+    which a parser would render as a real position at the top of the file.
+    """
+    lines: list[str] = []
+    for finding in report.findings:
+        if finding.location is not None:
+            prefix = f"{source_file}:{finding.location.line}:{finding.location.column}:"
+        else:
+            prefix = f"{source_file}:"
+        lines.append(f"{prefix} {finding.severity} [{finding.rule}] {finding.message}")
+    for caveat in report.caveats:
+        lines.append(f"{source_file}: note: {caveat}")
+    for failure in report.failed_rules:
+        lines.append(
+            f"{source_file}: note: rule {failure['rule']} did not run ({failure['error']})"
+        )
+    lines.append(
+        f"{len(report.findings)} finding(s): {report.error_count} error, "
+        f"{report.warning_count} warning, {report.info_count} info "
+        f"({len(report.rules_run)} rule(s) ran)"
+    )
+    return "\n".join(lines)
+
+
+def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | None:
+    """Names that reached *ast* through an expanded COPY, or None if unknown.
+
+    Same set-difference provenance trick as ``_cmd_unused_variables`` (see
+    ``_parse_without_copybook_expansion``), and for the same reason: it is
+    what lets lint grade an unused copybook field as info rather than
+    warning. Without --copybook-path there is nothing to diff against, so
+    the answer is "unknown" -- which the analyzer reads as "none came from a
+    copybook", the same as it does for the unused-variables subcommand.
+    """
+    from ..analysis.unused_variables import collect_declared_items
+
+    if not getattr(args, "copybook_path", []):
+        return None
+    unexpanded_result = _parse_without_copybook_expansion(args)
+    if unexpanded_result.ast is None:
+        print(
+            f"warning: {args.file} could not be parsed without copybook "
+            "expansion; copybook-origin detection disabled",
+            file=sys.stderr,
+        )
+        return None
+    local_names = {
+        item.name.upper() for item in collect_declared_items(unexpanded_result.ast)
+    }
+    expanded_names = {item.name.upper() for item in collect_declared_items(ast)}
+    return expanded_names - local_names
+
+
+def _severity_at_least(severity: str, threshold: str) -> bool:
+    """True when *severity* is as severe as *threshold*, or more so."""
+    from ..analysis.lint import SEVERITIES
+
+    return SEVERITIES.index(severity) <= SEVERITIES.index(threshold)
+
+
+def _cmd_lint(args: argparse.Namespace) -> None:
+    from ..analysis.lint import LintAnalyzer, filter_by_severity
+
+    ast, prof = _parse_or_fail(args)
+
+    try:
+        analyzer = LintAnalyzer(getattr(args, "rules", None))
+    except (
+        ValueError
+    ) as e:  # unreachable via argparse choices; direct callers can hit it
+        _fail(str(e))
+
+    report = analyzer.analyze(
+        ast, copybook_item_names=_lint_copybook_item_names(args, ast)
+    )
+    report.findings = filter_by_severity(report.findings, args.min_severity)
+
+    if args.output_format == "text":
+        _text_out(_lint_text_report(report, args.file), getattr(args, "output", None))
+    else:
+        _emit_report(report.to_dict(), args, prof, ast)
+
+    for failure in report.failed_rules:
+        print(
+            f"warning: lint rule {failure['rule']} did not run: {failure['error']}",
+            file=sys.stderr,
+        )
+
+    fail_on = getattr(args, "fail_on", "never")
+    if fail_on != "never":
+        worst = report.worst_severity()
+        if worst is not None and _severity_at_least(worst, fail_on):
+            sys.exit(3)
+
+
 # -- Subcommand: data-items ----------------------------------------------------
 
 
@@ -2003,6 +2185,7 @@ def _build_parser() -> argparse.ArgumentParser:
         _cmd_ims_dli,
         examples="  cobol-parser ims-dli program.cbl",
     )
+    _build_lint_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
         "data-items",
