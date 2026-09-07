@@ -923,7 +923,11 @@ class RecordDecoder:
             )
 
         if fmt is RecordFormat.FIXED:
-            length = self.record_length or view.length
+            # framing_length, not view.length: an overlay wider than what it
+            # redefines grows the record, and cutting at the base length
+            # would walk the file at the wrong stride. Identical for every
+            # conforming layout -- see RecordViews.framing_length.
+            length = self.record_length or self.views.framing_length
             if length <= 0:
                 raise RecordDecodingError(
                     f"{view.name}: the layout is zero bytes long, so a "

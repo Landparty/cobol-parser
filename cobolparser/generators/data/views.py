@@ -157,6 +157,24 @@ class RecordViews:
         return [self.base, *self.overlays]
 
     @property
+    def framing_length(self) -> int:
+        """Bytes one record of this layout occupies in a fixed-length file.
+
+        :attr:`base`'s own length in every conforming case, and the number a
+        decoder must cut records at.  They differ only for a ``REDEFINES``
+        entry *wider* than what it redefines: standard COBOL forbids that
+        below level 01 and IBM rejects it, but compilers that accept it grow
+        the record to the widest member, and a decoder framing on the base
+        length alone would then walk the file at the wrong stride and shred
+        every record after the first.  Taking the maximum costs nothing when
+        the layout is legal (no overlay can exceed the base) and is the only
+        answer that reads such a file at all.  :attr:`caveats` says when this
+        is in play; :mod:`.layout_offsets` reserves the same widest-member
+        slot for ``data-items``.
+        """
+        return max([self.base.length, *(view.end for view in self.overlays)])
+
+    @property
     def names(self) -> list[str]:
         """Every view name, in the same order as :attr:`views`."""
         return [view.name for view in self.views]
@@ -204,11 +222,19 @@ def build_record_views(
     it.
     """
     opts = (options or DataGeneratorOptions()).for_record_image()
+    base_specs = flatten_record(record, opts, ignore_root_redefines=True)
     base = RecordView(
         name=record.name,
         redefines=None,
         offset=0,
-        fields=_place(flatten_record(record, opts, ignore_root_redefines=True), 0),
+        fields=_place(base_specs, 0),
+        # A DEPENDING ON table anywhere in the record puts every field after
+        # it at an offset only that record's own counter decides. The base
+        # view used to be built with this defaulted to False -- the flag
+        # existed but only overlays could ever carry it -- so `--list-views`
+        # reported a maximum-length guess as a fact, where `data-items`
+        # reports byte_offset: null for the very same field.
+        offset_ambiguous=any(spec.odo_controls for spec in base_specs),
     )
     overlays: list[RecordView] = []
     caveats: list[str] = []
@@ -227,6 +253,23 @@ def build_record_views(
             "length is per-record data, so their offsets hold for a record "
             "whose tables are full and may be too high otherwise: "
             + ", ".join(view.name for view in overlays if view.offset_ambiguous)
+        )
+    if base.offset_ambiguous:
+        caveats.append(
+            "this record has an OCCURS ... DEPENDING ON table, so every "
+            "offset reported after it assumes a record whose tables are "
+            "full; a decoded record's own offsets come from its counters"
+        )
+    oversized = [view for view in overlays if view.end > base.length]
+    if oversized:
+        caveats.append(
+            "these REDEFINES entries are wider than the item they redefine, "
+            "which COBOL does not permit below level 01: the record is read "
+            "as the widest of them ("
+            + str(max(view.end for view in oversized))
+            + f" bytes, not {base.length}), and offsets after the "
+            "redefined item are the base layout's own: "
+            + ", ".join(view.name for view in oversized)
         )
     return RecordViews(
         record_name=record.name, base=base, overlays=overlays, caveats=caveats

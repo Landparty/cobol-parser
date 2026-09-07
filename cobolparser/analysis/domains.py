@@ -114,15 +114,44 @@ class TextDomain:
     allowed: set[str] | None  # None = "any value of size <= size"
     forbidden: set[str]
     size: int
+    #: Class conditions narrowing what characters the value may be made of.
+    #: ``None`` means the class was never tested; ``True``/``False`` mean the
+    #: value must / must not be of that class.  An alphanumeric field can
+    #: hold digits, so ``IF WS-TXT IS NUMERIC`` over a ``PIC X`` item is
+    #: satisfiable and gets a digit string -- it used to get ``XXXXXXXX``,
+    #: which satisfies neither arm while being reported as satisfying both.
+    require_numeric: bool | None = None
+    require_alphabetic: bool | None = None
+
+    def _matches_classes(self, candidate: str) -> bool:
+        stripped = candidate.strip()
+        if self.require_numeric is not None:
+            is_numeric = bool(stripped) and stripped.isdigit()
+            if is_numeric is not self.require_numeric:
+                return False
+        if self.require_alphabetic is not None:
+            is_alpha = bool(stripped) and all(
+                ch.isalpha() or ch == " " for ch in stripped
+            )
+            if is_alpha is not self.require_alphabetic:
+                return False
+        return True
 
     def pick(self) -> str | None:
         if self.allowed is not None:
-            remaining = sorted(self.allowed - self.forbidden)
-            return remaining[0] if remaining else None
+            for candidate in sorted(self.allowed - self.forbidden):
+                if self._matches_classes(candidate):
+                    return candidate
+            return None
         n = max(1, min(self.size, 8))
-        for letter in "XYZABCDEFGH":
-            candidate = letter * n
-            if candidate not in self.forbidden:
+        # Digits first when the field must be numeric, letters otherwise --
+        # then the other alphabet as a fallback, so a `forbidden` entry
+        # covering every candidate of one shape can still be escaped.
+        alphabets = "0123456789" if self.require_numeric else "XYZABCDEFGH"
+        fallback = "XYZABCDEFGH" if self.require_numeric else "0123456789"
+        for char in itertools.chain(alphabets, fallback):
+            candidate = char * n
+            if candidate not in self.forbidden and self._matches_classes(candidate):
                 return candidate
         return None
 
@@ -166,15 +195,16 @@ def solve(
     domain: Domain
     if enum_first:
         domain = EnumDomain(list(spec.condition_values))
-        if all(_apply(domain, c) for c in constraints):
+        if all(_apply(domain, c) is None for c in constraints):
             witness = domain.pick()
 
     if witness is None:
         domain = _picture_domain(spec)
         for constraint in constraints:
-            if not _apply(domain, constraint):
+            reason = _apply(domain, constraint)
+            if reason is not None:
                 return Unsatisfiable(
-                    f"empty domain after applying {constraint.op} "
+                    f"{reason} after applying {constraint.op} "
                     f"from {constraint.origin}"
                 )
         witness = domain.pick()
@@ -184,6 +214,13 @@ def solve(
 
     factory = ValueFactory(random.Random(0), DataGeneratorOptions())
     rendered = factory.render(spec, str(witness))
+    if isinstance(domain, TextDomain) and not domain._matches_classes(rendered):
+        # Same defensive role as the numeric check below: rendering pads and
+        # justifies, and a witness whose RENDERED form no longer satisfies the
+        # class test it was picked for must not escape as one that does.
+        return Unsatisfiable(
+            f"rendered witness {rendered!r} no longer satisfies the class test"
+        )
     if isinstance(domain, NumericDomain) and not _rendered_numeric_ok(rendered, domain):
         # Defensive: grid-based picking should make this unreachable, but a
         # witness whose RENDERED form violates the constraint set must never
@@ -234,11 +271,19 @@ def _epsilon(decimals: int) -> Decimal:
     return Decimal(1).scaleb(-decimals) if decimals > 0 else Decimal(1)
 
 
-def _apply(domain: Domain, c: FieldConstraint) -> bool:
+#: Why a domain rejected a constraint, when the reason is simply "nothing is
+#: left that satisfies it". Distinguished from the text domain's own reasons,
+#: which name an op the domain cannot model at all -- a different finding for
+#: whoever reads it off `ScenarioCoverage`.
+_EMPTY = "empty domain"
+
+
+def _apply(domain: Domain, c: FieldConstraint) -> str | None:
+    """Narrow *domain* by *c*. ``None`` on success, else why it failed."""
     if isinstance(domain, EnumDomain):
-        return _apply_enum(domain, c)
+        return None if _apply_enum(domain, c) else _EMPTY
     if isinstance(domain, NumericDomain):
-        return _apply_numeric(domain, c)
+        return None if _apply_numeric(domain, c) else _EMPTY
     return _apply_text(domain, c)
 
 
@@ -339,21 +384,42 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
     return True
 
 
-def _apply_text(domain: TextDomain, c: FieldConstraint) -> bool:
+def _apply_text(domain: TextDomain, c: FieldConstraint) -> str | None:
     if c.op in ("eq", "in_set") or (c.op == "figurative" and not c.negated):
         values = _text_values(c)
         domain.allowed = values if domain.allowed is None else (domain.allowed & values)
-        return bool(domain.allowed)
+        return None if domain.allowed else _EMPTY
     if c.op in ("ne", "not_in_set") or (c.op == "figurative" and c.negated):
         values = _text_values(c)
         domain.forbidden |= values
         if domain.allowed is not None:
             domain.allowed -= domain.forbidden
-            return bool(domain.allowed)
-        return True
-    # class_numeric/class_alphabetic and relational ops on text: not
-    # meaningfully enforceable on a bare allow/deny set in v1 -- no-op.
-    return True
+            return None if domain.allowed else _EMPTY
+        return None
+
+    # Class conditions ARE enforceable here -- an alphanumeric field can hold
+    # digits or letters, and which one it holds is exactly what the branch
+    # turns on. Contradicting an earlier test of the same class empties the
+    # domain rather than quietly overwriting it.
+    if c.op in ("class_numeric", "class_alphabetic"):
+        wanted = not c.negated
+        attr = "require_numeric" if c.op == "class_numeric" else "require_alphabetic"
+        current = getattr(domain, attr)
+        if current is not None and current is not wanted:
+            return _EMPTY
+        setattr(domain, attr, wanted)
+        # A field required to be both numeric and alphabetic is unsatisfiable
+        # -- say so here rather than letting pick() fail with a vaguer reason.
+        if domain.require_numeric and domain.require_alphabetic:
+            return _EMPTY
+        return None
+
+    # Ordering over a text domain is the one thing a bare allow/deny set
+    # genuinely cannot express. Reporting it as satisfied used to hand back a
+    # witness that did not satisfy it -- and, for the negated arm of the same
+    # branch, the identical witness. Unsatisfiable is the honest answer: the
+    # arm lands in ScenarioCoverage as missed, carrying this reason.
+    return f"{c.op} on an alphanumeric domain is not modeled in v1"
 
 
 def _text_values(c: FieldConstraint) -> set[str]:

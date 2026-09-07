@@ -193,18 +193,42 @@ def satisfies(constraint: FieldConstraint, value: str) -> bool | None:
 def _values_for(field_name: str, fixtures: list[BoundaryFixture]) -> list[str]:
     """Every generated value of `field_name` across a scenario's fixtures,
     in row order. Empty when no fixture carries the field at all -- which is
-    itself the finding, not a missing input."""
-    values: list[str] = []
-    for fixture in fixtures:
-        columns = [
-            spec.column
+    itself the finding, not a missing input.
+
+    `field_name` is a qualified name (`PlannedScenario.field_constraints` is
+    keyed by `spec.qualified_name`), so a qualified match is the answer
+    whenever one exists. The bare-name fallback below exists for layouts
+    whose specs carry no qualification, but it is only taken when the bare
+    name is unambiguous across the whole scenario: two boundaries with a
+    same-named field in different records would otherwise let an unrelated
+    record's value satisfy this field's conjuncts, and a false "satisfied"
+    is the one verdict this module must never produce. An ambiguous name
+    yields no values, which reads as "absent" -- unverified, the safe way to
+    be wrong.
+    """
+    qualified = [
+        (fixture, spec.column)
+        for fixture in fixtures
+        for spec in fixture.layout
+        if spec.qualified_name == field_name
+    ]
+    matches = qualified
+    if not matches:
+        bare = [
+            (fixture, spec.column)
+            for fixture in fixtures
             for spec in fixture.layout
-            if spec.qualified_name == field_name or spec.name == field_name
+            if spec.name == field_name
         ]
+        if len({column for _, column in bare}) != 1 or len(bare) != 1:
+            return []
+        matches = bare
+
+    values: list[str] = []
+    for fixture, column in matches:
         for row in fixture.sequence:
-            for column in columns:
-                if column in row:
-                    values.append(row[column])
+            if column in row:
+                values.append(row[column])
     return values
 
 

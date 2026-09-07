@@ -284,6 +284,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `ConstraintExtractor` no longer treats a **non-literal
+  comparison operand as a literal value**. `IF WS-IN = WS-E (IDX)` became
+  `WS-IN eq 'WS-E ( IDX )'` -- a constraint on the operand's own source text,
+  which the program never expressed. The layout index cannot resolve a
+  subscripted reference, so the extractor fell through to its "the right side
+  is a literal" branch; the sibling case where *both* operands resolve was
+  already refused. Consequences, all silent: nothing landed in `unsupported`,
+  `ScenarioCoverage` counted the arm **targeted**, and because the negated arm
+  reduced to "any value != that text", `generators/verification.py` stamped it
+  **`verified`** -- it re-checks the same fabricated constraint, so it is
+  downstream of the defect rather than independent of it. Operands are now
+  whitelisted (quoted or numeric), and everything else is reported as
+  unsupported, putting the arm in coverage as `missed` with a reason. The same
+  hole in the `EVALUATE` selector path is closed too: the lexer unquotes a
+  selector before it reaches the extractor, so `WHEN "AB"` and `WHEN WS-OTHER`
+  arrive indistinguishable, and whether the value names a real data item is
+  now the discriminator. `SEARCH WHEN` / `EVALUATE TRUE` selector *text* is
+  already unquoted by the lexer, so it keeps a looser test (a bare word may be
+  a literal; a subscript or expression may not). Found by a repo audit; see
+  `reports/audit-2026-09-07.md` (H1) and
+  `tests/regression/test_audit_2026_09_07.py`.
+
+* **analysis:** `domains.solve()` no longer returns a **witness that does not
+  satisfy the constraint it was solved for**. `_apply_text` ended in
+  `return True` for every op it did not model, which reads as "domain still
+  satisfiable", so `solve()` went on to pick a value: `IF WS-TXT IS NUMERIC`
+  over a `PIC X(10)` field returned `'XXXXXXXX'` -- for the `THEN` arm, which
+  it fails, *and* for the `ELSE` arm, which it passes. Two scenarios that the
+  field's value is the only thing distinguishing got byte-identical data.
+  Class conditions are now modelled properly (an alphanumeric field can hold
+  digits, so `THEN` gets a digit string and `ELSE` letters), and ordering ops
+  on a text domain -- which an allow/deny set genuinely cannot express --
+  return `Unsatisfiable` with a reason that reaches `ScenarioCoverage`. A
+  rendered witness is re-checked against the class test before it escapes,
+  mirroring the existing numeric guard. See `reports/audit-2026-09-07.md`
+  (H2).
+
+* **analysis:** `UnusedVariableAnalyzer` no longer reports four kinds of
+  *referenced* data item as unused -- false positives on correct code, in both
+  the `unused-variables` subcommand and the `unused-variables` lint rule:
+  * `STRING` / `UNSTRING ... DELIMITED BY <identifier>`: both statements keep
+    the delimiter in a `delimiters` list that never reaches `.operands`, so a
+    delimiter held in a variable looked unreferenced.
+  * `CALL 'SUB' USING <group>`: the group is consumed field by field by code
+    this analyzer cannot see, so its children are used. Propagation ran child
+    -> parent only. Deliberately scoped to CALL arguments: `MOVE SPACES TO
+    WS-GRP` really does leave `WS-CHILD` never individually referenced, and
+    that finding is kept.
+  * REPORT SECTION `SOURCE` / `SUM` / `CONTROL`: a Report Writer program names
+    these fields in its report groups, never in its PROCEDURE DIVISION, so
+    scanning only the PROCEDURE DIVISION reported *every field of every such
+    program* dead. Those clauses became parseable in #196; the analyzer had
+    not caught up. See `reports/audit-2026-09-07.md` (M1).
+
+* **analysis:** `ConstraintReport.unsupported` now carries branch-level gaps
+  as well as program-level ones. It is documented -- in `CLAUDE.md`, in the
+  module docstring and in the public examples -- as the place gaps are never
+  silently dropped, but anything a *branch* could not model lived only on
+  `BranchConstraints.unsupported`, so a caller following the documented API
+  saw a clean list for a program with unmodelled branches. Entries stay on
+  their branch too, and duplicates are collapsed. (M2)
+
+* **generators:** `RecordDecoder` frames fixed-length records at
+  `RecordViews.framing_length` rather than the base view's own length. A
+  `REDEFINES` entry wider than what it redefines -- which COBOL forbids below
+  level 01 but compilers accept, growing the record -- left the decoder
+  cutting at the base length and shredding every record after the first;
+  `data-items` already reserved the widest slot member, so the two disagreed
+  in a case both modules' docstrings claim they cannot. `build_record_views`
+  now says so in `RecordViews.caveats`. In the same area, a record with an
+  `OCCURS ... DEPENDING ON` table now sets `offset_ambiguous` on the **base**
+  view: the flag existed but only overlays could ever carry it, so
+  `decode --list-views` reported a maximum-length guess as a fact for exactly
+  the fields `data-items` reports as `byte_offset: null`. (M4)
+
+* **ci:** the test suite now runs on every PR. `build` installed `.[dev,fast]`
+  -- pytest included -- and never invoked it, so 9,400 tests and the
+  `--cov-fail-under=90` floor were unenforced on every push and PR alike
+  (`.okf/tests.md` described a `test` job gated on `workflow_dispatch`; no
+  such job was ever in `ci.yml`). pytest runs in `build` after `build_ext`,
+  so CI exercises the Cython extensions it was building and never running a
+  line through, and a new `coverage` job enforces the 90% floor on a
+  pure-Python install -- coverage.py cannot see into a compiled extension, so
+  the same suite reports 54.32% with them built and 91.76% without. (M3)
+
+* **generators:** `verification._values_for` no longer lets an unrelated
+  boundary's same-named field satisfy a scenario's verdict. It matched on
+  bare `spec.name` across every fixture and pooled the values; a qualified
+  match now wins, and the bare-name fallback is taken only when the name is
+  unambiguous across the whole scenario. The failure direction was a false
+  `satisfied`, which is the one verdict this module exists not to produce.
+
 * **generators:** a generated `OCCURS ... DEPENDING ON` counter is now drawn
   from the table's own `OCCURS min TO max` bounds instead of from its
   PICTURE's full range. A `PIC 9(4)` counter for a table of at most 50 could
