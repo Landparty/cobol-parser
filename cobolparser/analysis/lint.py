@@ -151,10 +151,11 @@ class LintFinding:
             "symbol": self.symbol,
             "kind": self.kind,
         }
-        # Emitted only when it is known, so a consumer can tell "this finding
-        # is on line 42 of THIS file" from "nobody mapped it" -- rather than
-        # having to treat a defaulted echo of `location` as an answer.
-        if self.origin_file is not None or self.origin_line is not None:
+        # Emitted only when BOTH halves are known, so a consumer can tell
+        # "this finding is on line 42 of THIS file" from "nobody mapped it"
+        # -- rather than having to treat a defaulted echo of `location`, or a
+        # half-filled `{"file": null, "line": 12}`, as an answer.
+        if self.origin_file is not None and self.origin_line is not None:
             result["origin"] = {"file": self.origin_file, "line": self.origin_line}
         return result
 

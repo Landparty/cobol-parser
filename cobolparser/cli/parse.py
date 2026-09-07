@@ -2267,6 +2267,12 @@ def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | 
     warning. Without --copybook-path there is nothing to diff against, so
     the answer is "unknown" -- which the analyzer reads as "none came from a
     copybook", the same as it does for the unused-variables subcommand.
+
+    Both sides of the diff cover EVERY program unit, because lint does:
+    ``collect_declared_items`` is program-scoped, so diffing the outermost
+    unit alone would leave a contained program's copybook fields out of the
+    set and grade them as the program's own -- warning instead of info --
+    for exactly the multi-program file this covers in the first place.
     """
     from ..analysis.unused_variables import collect_declared_items
 
@@ -2280,11 +2286,24 @@ def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | 
             file=sys.stderr,
         )
         return None
-    local_names = {
-        item.name.upper() for item in collect_declared_items(unexpanded_result.ast)
-    }
-    expanded_names = {item.name.upper() for item in collect_declared_items(ast)}
-    return expanded_names - local_names
+
+    def declared_across_units(program: Any) -> set[str]:
+        return {
+            item.name.upper()
+            for unit in program.program_units()
+            for item in collect_declared_items(unit)
+        }
+
+    # Both sides must cover the same scope. `ast` is already narrowed when
+    # --program named a unit, so narrow the unexpanded parse the same way --
+    # otherwise another unit's own declaration of the same name would
+    # subtract from this one's copybook set.
+    local_root = unexpanded_result.ast
+    wanted = getattr(args, "program", None)
+    if wanted:
+        local_root = local_root.find_program_unit(wanted) or local_root
+
+    return declared_across_units(ast) - declared_across_units(local_root)
 
 
 def _severity_at_least(severity: str, threshold: str) -> bool:

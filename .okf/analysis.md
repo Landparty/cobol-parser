@@ -1859,7 +1859,8 @@ contained unit directly still lints just that unit, which is what the CLI's
 
 **A finding now says where it really is.** `LintFinding` gained
 `origin_file` / `origin_line`, serialized as `"origin": {"file", "line"}` and
-emitted only when known. `apply_source_map(report, source_map)` fills them
+emitted only when BOTH are known (a half-filled `{"file": null, "line": 12}`
+would read as an answer to a consumer checking for the key). `apply_source_map(report, source_map)` fills them
 from `ParseResult.expansion_source_map` (see
 [preprocessing.md](preprocessing.md)): analyzer locations count lines in the
 copybook-*expanded* text, so a finding after an expanded `COPY` is nowhere

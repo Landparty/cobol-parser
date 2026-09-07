@@ -287,6 +287,19 @@ class TestApplySourceMap:
 
         assert report.findings[0].origin_line is None
 
+    def test_a_half_known_origin_is_not_serialized(self):
+        # A partial origin (file but no line, or the reverse) would read as an
+        # answer to a consumer checking for the key; nobody produces one
+        # today, and the serialization must not start if anybody does.
+        finding = LintFinding(
+            rule="dead-code",
+            severity="warning",
+            message="unreferenced",
+            origin_file="CUSTOMER.cpy",
+        )
+
+        assert "origin" not in finding.to_dict()
+
     def test_a_finding_with_no_location_is_skipped(self):
         report = LintReport(
             findings=[

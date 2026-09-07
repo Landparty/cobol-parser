@@ -530,6 +530,16 @@ inlined member therefore names the *copybook*, not the program. Findings the
 map cannot place, and runs with no expansion at all, carry no `origin` key
 rather than a guess.
 
+**Copybook provenance covers every unit too.** `_lint_copybook_item_names`
+diffs declared DATA DIVISION names between an expanded and an unexpanded
+parse, and `collect_declared_items` is program-scoped -- so once lint covered
+every unit, diffing the outermost alone left a contained program's copybook
+fields out of the set and graded them `warning` instead of `info`. Both sides
+now walk `program_units()`, and both are narrowed the same way when
+`--program` selects one (otherwise another unit's own declaration of the same
+name subtracts from this one's copybook set). Pinned by
+`tests/regression/test_nested_program_units.py::TestCopybookProvenanceCoversEveryUnit`.
+
 **Program units.** Unlike every other analyzer subcommand, `lint` covers
 *every* program unit in the file by default — a contained program left
 unexamined would read as a clean one. `--program NAME` narrows it to one (see

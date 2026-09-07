@@ -184,3 +184,69 @@ class TestProgramSelectionCLI:
 
         assert "WS-INNER-UNUSED" in symbols
         assert "WS-OUTER-UNUSED" not in symbols
+
+
+class TestCopybookProvenanceCoversEveryUnit:
+    """A contained program's copybook fields must grade as copybook fields.
+
+    `lint` grades an unused DATA DIVISION item as *info* when it came from an
+    expanded COPY and *warning* when the program declares it itself, by
+    diffing the declared names of an expanded parse against an unexpanded
+    one. That diff is program-scoped; once lint covered every unit, computing
+    it for the outermost unit alone left a contained program's copybook
+    fields out of the set, so they graded as the program's own.
+    """
+
+    COPYBOOK = """      * shared layout
+       01  SHARED-REC.
+           05  SHARED-UNUSED   PIC X(10).
+"""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTERP.
+       PROCEDURE DIVISION.
+       OUTER-MAIN.
+           CALL "INNERP".
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNERP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY SHARED.
+       01  WS-INNER-OWN     PIC X.
+       PROCEDURE DIVISION.
+       INNER-MAIN.
+           GOBACK.
+       END PROGRAM INNERP.
+       END PROGRAM OUTERP.
+"""
+
+    @pytest.fixture
+    def library(self, tmp_path):
+        (tmp_path / "SHARED.cpy").write_text(self.COPYBOOK)
+        (tmp_path / "NESTED.cbl").write_text(self.SOURCE)
+        return tmp_path
+
+    def test_a_contained_program_copybook_field_grades_as_info(self, capsys, library):
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "lint",
+                str(library / "NESTED.cbl"),
+                "--copybook-path",
+                str(library),
+                "--compact",
+            ],
+        ):
+            main()
+        data = json.loads(capsys.readouterr().out)
+        by_symbol = {
+            f["symbol"]: f for f in data["findings"] if f["rule"] == "unused-variables"
+        }
+
+        # The copybook's own field: info. The contained program's own
+        # declaration: warning. Both belong to the CONTAINED unit, which is
+        # the whole point.
+        assert by_symbol["SHARED-UNUSED"]["severity"] == "info"
+        assert by_symbol["WS-INNER-OWN"]["severity"] == "warning"
