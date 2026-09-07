@@ -805,6 +805,17 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
    extensions built, **91.76%** without. Gating inside `build` would fail on
    the build step rather than on the code.
 
+**Timing assertions and coverage.** `tests/performance/test_factory_performance.py`
+guards its two absolute nodes/sec floors with `requires_untraced`
+(`sys.gettrace() is not None`). Under coverage.py's tracer the suite takes
+950 s instead of 94 s, and `test_factory_throughput` measured 64,243
+nodes/sec against its 100,000 floor on a CI runner that clears it
+comfortably uninstrumented — the number describes the tracer, not the
+factory. The `build` matrix runs the file uninstrumented on all three
+Pythons, so the guard is not in force there; only the `coverage` job skips
+them. The ratio-based overhead assertion is unaffected. Surfaced the moment
+the suite was first wired into CI.
+
 The full suite (~9,400 tests) **does** run on every PR, as of the
 2026-09-07 audit. It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
