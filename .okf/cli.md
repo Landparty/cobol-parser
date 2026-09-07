@@ -582,6 +582,32 @@ cobol-parser language-env <file.cbl>
 
 Runs `LanguageEnvironmentAnalyzer` and reports IBM LE function/service usage.
 
+## LE-Info
+
+```bash
+cobol-parser le-info                    # the whole catalogue
+cobol-parser le-info CEEDAYS            # one LE callable service
+cobol-parser le-info NUMVAL-C           # one intrinsic function
+cobol-parser le-info --kind service     # every catalogued service
+cobol-parser le-info CEEGMT --compact -o le.json
+```
+
+The only subcommand that reads **no source file**: it dumps
+`cobolparser/dialects/le_signatures.py`'s call-signature catalogue, which is
+static dialect knowledge rather than analysis. Backs the COBOL Analyzer VS
+Code extension's LE hover ("what does this CALL need?"), so its JSON shape is
+pinned by `catalog_version`.
+
+Output has no `source_file` / `program_id` identification header (there is no
+source). With no name: `{catalog_version, reference, services[],
+services_without_signature[], functions[]}`. With one or more names:
+`{catalog_version, reference, entries[]}`, in the order asked.
+
+A name the dialect recognises but the catalogue cannot describe comes back
+with `"parameters": null` and a note saying so — distinguishable from an
+unknown name, which exits 1. `--kind service|function|all` restricts both
+forms.
+
 ## IMS-DLI
 
 ```bash

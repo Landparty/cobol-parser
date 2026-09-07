@@ -1,4 +1,18 @@
-# cobolparser — Open Findings (as of 2026-08-12, post-bug-review)
+# cobolparser — Open Findings (as of 2026-09-07, post-audit)
+
+> **Status of `reports/audit-2026-09-07.md`:** every finding in that pass is
+> **fixed at HEAD** — the two HIGH fabricated-answer bugs (a non-literal
+> comparison operand used as a literal; `domains.solve()` returning witnesses
+> for constraints it did not model), the four `unused-variables` false
+> positives, the `ConstraintReport.unsupported` rollup, the two
+> `views.py` / `layout_offsets.py` disagreements, and the test suite finally
+> running in CI. Pinned by `tests/regression/test_audit_2026_09_07.py`; design
+> notes in `.okf/log.md`'s 2026-09-07 entry. One of that report's LOW items
+> was **withdrawn as wrong** during the fix pass (the `COMPUTE` "unbalanced
+> parentheses" diagnostic is correct; the reproduction generated a
+> 124-character line that `normalize_fixed_format` rightly truncated at
+> column 72).
+
 
 > **Status of `reports/audit-2026-08-12-followup.md`:** all of that pass's
 > headline items are **fixed at HEAD** (commit `b495f26`, merged via
@@ -36,6 +50,34 @@ dedicated regression coverage (`TestH6PathResolverContainment` in
 Cython-extension build is no longer implicit — the `build` job in
 `.github/workflows/ci.yml` runs `python setup.py build_ext --inplace`
 explicitly on every push/PR.
+
+---
+
+## Coverage must be measured on a pure-Python build (operational note)
+
+Not a defect -- recorded because it was briefly mistaken for one during the
+2026-09-07 audit, and the mistake is easy to repeat.
+
+coverage.py cannot see into a compiled Cython extension. Once
+`setup.py build_ext --inplace` has run, the pure-Python bodies those
+extensions shadow read as unexecuted, and the reported total collapses.
+Measured on the same suite, same commit:
+
+| build | reported total | `--cov-fail-under=90` |
+|---|---|---|
+| `build_ext --inplace` run | 54.32% | fails |
+| `COBOLPARSER_SKIP_EXT=1` | **91.76%** | passes |
+
+So `ci.yml` splits them: `build` runs the suite `--no-cov` on the 3.11/3.12/
+3.13 matrix *after* `build_ext` (that job exists to exercise the extensions),
+and a separate `coverage` job installs pure-Python and enforces the floor.
+The same reasoning already sat in `pyproject.toml`'s cibuildwheel
+`test-command` comment.
+
+The trap: comparing a coverage number taken with extensions built against one
+taken without looks like data loss -- a subset appearing to out-cover its own
+superset -- and invites a hunt for a phantom bug in the tooling. Check which
+build produced each number first.
 
 ---
 
@@ -133,12 +175,15 @@ this was measured (2026-07-09) and have not been re-measured since.
 
 ## Test / tooling gaps
 
-- **12 permanently-skipped copybook-expansion tests**:
-  `tests/unit/test_copybook_expansion.py` (3, lines 296/300/308),
-  `tests/contracts/test_copybook_expansion_contracts.py` (5, lines
-  226/230/234/242/246), `tests/integration/test_copybook_expansion_integration.py`
-  (4, lines 180/184/650/654) — all `pytest.skip("Implementation pending -
-  Phase 6/7")`. Count confirmed current as of 2026-08-10.
+- ~~**12 permanently-skipped copybook-expansion tests**~~ — **stale, dropped
+  2026-09-07.** The `pytest.skip("Implementation pending - Phase 6/7")`
+  string no longer appears anywhere under `tests/`; the suite reports 3
+  skips, all from elsewhere. The entry had been carried forward unverified
+  since 2026-08-10.
+- ~~**The test suite runs nowhere in CI**~~ — **fixed 2026-09-07.** pytest now
+  runs in `ci.yml`'s `build` job on every PR, after `build_ext` so it
+  exercises the Cython extensions; a dedicated `coverage` job enforces the
+  90% floor on the pure-Python build. See `reports/audit-2026-09-07.md` (M3).
 - Branch-coverage holes are tracked under M17 above.
 
 

@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 23 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
+description: 24 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
 timestamp: 2026-09-04T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 23 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 24 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -1010,6 +1010,44 @@ that are quoted literals — `DISPLAY 'FUNCTION KEYS ARE DISABLED'` used to
 report a fictitious intrinsic function `KEYS` and set
 `uses_intrinsic_functions` true. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`.
+
+### Call signatures (`dialects/le_signatures.py`)
+
+The analyzer answers "is this an LE service?"; `le_signatures.py` answers the
+next question — **what does the CALL need?**
+
+```python
+from cobolparser.dialects.le_signatures import (
+    le_service_signature, intrinsic_signature,
+    LE_SERVICE_SIGNATURES, INTRINSIC_FUNCTION_SIGNATURES,
+    services_without_signature, catalog_to_dict,
+)
+
+sig = le_service_signature("CEEDAYS")     # case-insensitive; None when unknown
+sig.parameters                            # tuple[LEParameter]: name, direction
+                                          # (input/output/input-output), type_id,
+                                          # description, optional, repeats
+sig.required_parameters                   # the ones that may not be omitted
+sig.call_example()                        # 'CALL "CEEDAYS" USING ...'
+p.data_type                               # LEDataType: declaration, byte_length,
+                                          # snippet (VSTRING / feedback code)
+intrinsic_signature("NUMVAL-C").returns   # "numeric"
+```
+
+**Coverage is partial and says so.** `services_without_signature()` lists the
+LE services `IBM_LE_CALLABLE_SERVICES` recognises but this module cannot
+describe exactly — so a consumer can say "known service, signature not
+catalogued" rather than guess a parameter list or show nothing. The intrinsic
+half *is* complete, pinned by
+`tests/unit/test_le_signatures.py::TestIntrinsicSignatures::test_every_ibm_intrinsic_has_a_signature`.
+
+`IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
+(merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
+one-line metadata and the signatures cannot drift. Categories are cross-checked
+against `IBM_LE_SERVICE_CATEGORIES` per service by the same test module.
+
+Exposed to non-Python consumers as `cobol-parser le-info` (see `.okf/cli.md`),
+which is what the VS Code extension's LE hover reads.
 
 ## CRUDMatrixGenerator
 

@@ -36,6 +36,7 @@ _SUBCOMMANDS = frozenset(
         "language-env",
         "ims-dli",
         "data-items",
+        "le-info",
     }
 )
 
@@ -2354,6 +2355,118 @@ def _cmd_data_items(args: argparse.Namespace) -> None:
     _emit_report(output, args, prof, ast)
 
 
+# -- Subcommand: le-info ------------------------------------------------------
+
+
+def _build_le_info_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "le-info",
+        help=(
+            "Show the call signature of IBM Language Environment services and "
+            "COBOL intrinsic functions"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser le-info                # the whole catalogue\n"
+            "  cobol-parser le-info CEEDAYS        # one service\n"
+            "  cobol-parser le-info NUMVAL-C       # one intrinsic function\n"
+            "  cobol-parser le-info --kind service # every catalogued service\n"
+        ),
+    )
+    p.add_argument(
+        "name",
+        nargs="*",
+        help=(
+            "Service or function name to describe (case-insensitive). "
+            "Omit for the whole catalogue."
+        ),
+    )
+    p.add_argument(
+        "--kind",
+        choices=["service", "function", "all"],
+        default="all",
+        help=(
+            "Restrict the answer to LE callable services or to intrinsic "
+            "functions (default: all)"
+        ),
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_le_info)
+
+
+def _cmd_le_info(args: argparse.Namespace) -> None:
+    """Emit the LE/intrinsic call-signature catalogue as JSON.
+
+    Unlike every other subcommand this one reads no source file -- it is the
+    static knowledge behind an editor tooltip ("what does this CALL need?"),
+    which is why it is a catalogue dump rather than an analysis. The output
+    therefore carries no ``source_file`` identification header.
+    """
+    from ..dialects.le_signatures import (
+        catalog_to_dict,
+        intrinsic_signature,
+        le_service_signature,
+        services_without_signature,
+    )
+
+    catalog = catalog_to_dict()
+
+    if not args.name:
+        output: dict[str, Any] = {
+            "catalog_version": catalog["catalog_version"],
+            "reference": catalog["reference"],
+        }
+        if args.kind in ("service", "all"):
+            output["services"] = catalog["services"]
+            output["services_without_signature"] = catalog["services_without_signature"]
+        if args.kind in ("function", "all"):
+            output["functions"] = catalog["functions"]
+        _json_out(output, args.compact, args.output)
+        return
+
+    uncatalogued = {entry["name"]: entry for entry in services_without_signature()}
+    entries: list[dict[str, Any]] = []
+    for raw_name in args.name:
+        name = raw_name.strip().upper()
+        service = le_service_signature(name) if args.kind != "function" else None
+        function = intrinsic_signature(name) if args.kind != "service" else None
+        if service is not None:
+            entries.append(service.to_dict())
+        elif function is not None:
+            entries.append(function.to_dict())
+        elif args.kind != "function" and name in uncatalogued:
+            # Known to the dialect, but no signature to report. Said out loud
+            # rather than dropped: "we don't have this one" and "that is not
+            # an LE service" are different answers.
+            entries.append(
+                {
+                    "name": name,
+                    "kind": "service",
+                    "category": uncatalogued[name]["category"],
+                    "summary": None,
+                    "parameters": None,
+                    "notes": ["No call signature is catalogued for this service."],
+                }
+            )
+        else:
+            _fail(
+                f"Unknown name: {raw_name!r}. Run `cobol-parser le-info` with "
+                f"no arguments to list everything the catalogue knows."
+            )
+
+    _json_out(
+        {
+            "catalog_version": catalog["catalog_version"],
+            "reference": catalog["reference"],
+            "entries": entries,
+        },
+        args.compact,
+        args.output,
+    )
+
+
 # -- Path resolution ---------------------------------------------------------
 
 
@@ -2577,6 +2690,7 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
         examples="  cobol-parser data-items program.cbl",
     )
+    _build_le_info_parser(subparsers)
 
     return parser
 
