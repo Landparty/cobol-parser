@@ -819,3 +819,69 @@ unaffected -- the sequence-area gate keeps a data name like
 directive. Multi-line PROCESS/CBL continuation is out of scope (not
 reproduced in the corpus). Pinned by `TestFlushLeftCompilerDirective` in
 `tests/regression/test_expansion_width_and_tags.py`.
+
+# Source map and comment preservation (2026-09-07)
+
+Two additions to `expand_copybooks`, both about output that has to be read by
+something other than the lexer.
+
+## `preserve_source_locations` finally means something
+
+The flag existed from the start and returned an always-empty dict:
+`_expand_source_recursive`'s location branch was a literal `pass` with a note
+that "line mapping is approximate or requires new logic". Every consumer
+therefore had to *guess* where a line reported against the expanded text
+belonged in the file on disk — the VS Code extension re-anchored lint findings
+by searching the file for the name each finding was about, which works only
+because most rules report something unreferenced, and cannot work at all for a
+finding inside an inlined member (that name is not in that file).
+
+`expand_copybooks` now carries a `LineOrigin` (`(file, 1-based line)`) per
+expanded line through every step that can move one:
+
+| Step | Effect on lines | How the map survives it |
+|------|-----------------|-------------------------|
+| `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
+| `normalize_continuation_lines` | merges N records into 1 | new `line_origins` out-parameter records the input line each output line started on |
+| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line |
+| the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | every wrapped piece inherits the origin of the line it came from |
+
+`ExpansionContext.content_origins` stores origins beside each cached content
+entry (`cache_put(key, value, origins)` / `cache_get_origins`), so a diamond
+dependency's *cache hit* contributes the same map a miss would — evicted
+together with the content entry it belongs to. `_fit_origins` is the defensive
+clamp: a map that ever drifted must mis-attribute nothing and raise nothing.
+
+`expand_copybooks(..., source_file=...)` names the main program in the map
+(default `"<main>"`); `parse_cobol_with_expansion` passes the real filename
+and always requests the map, exposing it as
+**`ParseResult.expansion_source_map`** — `None` when nothing was expanded,
+which is exactly the case where expanded and on-disk line numbers are the
+same thing. `analysis.lint.apply_source_map` stamps it onto every finding
+(`origin_file` / `origin_line`), and the `lint` CLI applies it automatically
+whenever `--copybook-path` was given.
+
+Known residual, unchanged: the `+1` phantom line per `COPY` documented under
+"Line-Number Preservation" is still there, and shows up in the map as one
+extra line attributed to the copybook's own last line + 1.
+
+## `preserve_comments` (`expand --keep-comments`)
+
+Expansion blanks every comment line before it starts, and has to: the COPY
+scanner works on the program-text stream, and a `COPY` written inside a
+comment must not be expanded. That leaves a *listing* with comment line
+numbers and no comment text — throwing away most of what a reader wants.
+
+`preserve_comments=True` puts the original text back afterwards, using the
+same map: `_restore_comment_lines` replaces a line only when it is blank in
+the expansion AND its origin really is a comment line in its origin file, so
+the pass cannot rewrite code. `_origin_sources` reads each member back through
+`_cached_read_file` with the expansion's own encoding settings (no extra disk
+I/O in the normal case, and never a differently-decoded string); a file that
+has become unreadable is skipped rather than failing the expansion. Comment
+restoration happens after every substitution and never changes the line count,
+so `test_a_copy_inside_a_comment_is_still_not_expanded` holds: the comment text
+comes back, the member does not.
+
+Both pinned by `tests/regression/test_expansion_source_map_and_comments.py`
+and, at the CLI level, `tests/unit/cli/test_expand_source_map_cli.py`.

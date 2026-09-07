@@ -1836,3 +1836,39 @@ and `DynamicCallAnalyzer`'s MOVE source/target keying (a bare `CALL
 WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
 keying data items by bare name needs it too. Pinned by
 `tests/regression/test_folded_reference_analyzers.py`.
+
+# Lint: program units and finding origins (2026-09-07)
+
+Two changes to `LintAnalyzer`, both about a report that was quietly narrower
+than it looked.
+
+**Every program unit is linted, not just the outermost.** A source file can
+hold several `PROGRAM-ID`s (stacked, or nested inside the enclosing program's
+PROCEDURE DIVISION); the parse returns the outermost with the rest on
+`CobolProgram.contained_programs`. Every rule here is program-scoped, so
+running them on the outer program alone left a contained program *entirely
+unexamined* while the report read as clean. `analyze()` now iterates
+`ast.program_units()` and merges: `_analyze_unit` runs the rule set over one
+unit into a shared `LintReport`, `rules_run` and `failed_rules` carry one
+entry per rule however many units it ran on (the reader needs to know the
+concern went unexamined, not the arithmetic), caveats are deduplicated, and
+the sort + dedup happen once at the end. A caller-supplied `flow_report`
+describes the outermost unit only; the others build their own. Passing a
+contained unit directly still lints just that unit, which is what the CLI's
+`--program` does.
+
+**A finding now says where it really is.** `LintFinding` gained
+`origin_file` / `origin_line`, serialized as `"origin": {"file", "line"}` and
+emitted only when BOTH are known (a half-filled `{"file": null, "line": 12}`
+would read as an answer to a consumer checking for the key). `apply_source_map(report, source_map)` fills them
+from `ParseResult.expansion_source_map` (see
+[preprocessing.md](preprocessing.md)): analyzer locations count lines in the
+copybook-*expanded* text, so a finding after an expanded `COPY` is nowhere
+near that line on disk and one *inside* an inlined member is not in that file
+at all. A `None` map (nothing expanded) and a line the map does not cover both
+leave the finding untouched rather than claiming a line nobody vouched for.
+The `lint` CLI applies it whenever `--copybook-path` was given, and its `text`
+format prints the origin's own `file:line:column:` prefix so the output stays
+clickable after expansion. Pinned by
+`tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
+and `tests/regression/test_nested_program_units.py`.

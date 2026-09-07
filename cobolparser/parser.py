@@ -65,6 +65,13 @@ class ParseResult:
     errors: list[ParseError]
     warnings: list[str]
     statistics: ParseStatistics
+    #: Expanded-line -> ``(origin file, origin line)``, set only by
+    #: ``parse_cobol_with_expansion``. Every location on this result (and on
+    #: every analyzer report derived from it) counts lines in the
+    #: copybook-EXPANDED text; this is what maps one back onto the file a
+    #: human edits. ``None`` when no expansion ran, in which case the two
+    #: numbering schemes are the same thing.
+    expansion_source_map: dict[int, tuple[str, int]] | None = None
 
     @property
     def success(self) -> bool:

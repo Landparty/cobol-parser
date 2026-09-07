@@ -28,6 +28,7 @@ from . import (
 from .copy_statement_parser import (
     CopyStatementLexer,
     apply_replacing_clauses,
+    is_comment_line,
     normalize_continuation_lines,
     remove_comment_lines,
     strip_sequence_area,
@@ -669,6 +670,114 @@ def _fit_fixed_format_width(line: str) -> list[str]:
     return out
 
 
+# --- Source map -------------------------------------------------------------
+#
+# Every step between the program on disk and the expanded text either
+# preserves line numbers (comment blanking, sequence-area strip), merges lines
+# (continuation joining), inserts them (the COPY splice) or splits one into
+# several (the re-pad's width wrap). A ``LineOrigin`` per expanded line rides
+# through all four, so a consumer handed the expansion can move a line number
+# reported against it back onto the file a human actually edits -- previously
+# impossible, which is why every downstream tool re-anchored findings by
+# searching for the name they were about.
+#
+# It is computed unconditionally (one tuple per line, negligible beside the
+# expansion itself) and surfaced only when the caller passes
+# ``preserve_source_locations=True``.
+
+LineOrigin = tuple[str, int]
+
+
+def _identity_origins(source_file: str, text: str) -> list[LineOrigin]:
+    """One origin per line of *text*, each naming its own line in *source_file*."""
+    return [(source_file, n) for n in range(1, text.count("\n") + 2)]
+
+
+def _fit_origins(
+    origins: list[LineOrigin], line_count: int, fallback: LineOrigin
+) -> list[LineOrigin]:
+    """Force *origins* to exactly *line_count* entries.
+
+    Defensive: every producer below keeps the two in step, but a map that has
+    drifted must not be able to mis-attribute a line (or raise). Extra entries
+    are dropped; missing ones repeat the last known origin, or *fallback* when
+    there is none.
+    """
+    if len(origins) == line_count:
+        return origins
+    if len(origins) > line_count:
+        return origins[:line_count]
+    tail = origins[-1] if origins else fallback
+    return origins + [tail] * (line_count - len(origins))
+
+
+def _restore_comment_lines(
+    lines: list[str],
+    origins: list[LineOrigin],
+    sources: dict[str, list[str]],
+) -> list[str]:
+    """Put each blanked comment line's original text back, in place.
+
+    Expansion blanks every comment line before it starts, and it has to: the
+    COPY scanner works on the program-text stream, and a ``COPY`` written
+    inside a comment must not be expanded. The line survives as spaces, so
+    numbering holds -- but the text is gone, which for a *listing* (as opposed
+    to input for the lexer) throws away exactly what a reader most wants to
+    keep.
+
+    The source map is what makes putting it back possible: each output line
+    names the file and line it came from, so the original text can be read
+    back out of that file. Only a line that is now blank AND whose origin
+    really is a comment line is restored, so nothing this pass does can
+    change a line of code.
+    """
+    restored: list[str] = []
+    # strict=False deliberately: _fit_origins keeps the two in step, and a
+    # map that somehow drifted must lose a comment, not raise mid-expansion.
+    for line, origin in zip(lines, origins, strict=False):
+        if line.strip():
+            restored.append(line)
+            continue
+        origin_lines = sources.get(origin[0])
+        if origin_lines is None or not 0 < origin[1] <= len(origin_lines):
+            restored.append(line)
+            continue
+        original = origin_lines[origin[1] - 1]
+        restored.append(original if is_comment_line(original) else line)
+    return restored
+
+
+def _origin_sources(
+    source_file: str,
+    source_code: str,
+    included_copybooks: list[str],
+    search_config: CopybookSearchPath,
+    warnings: list[str],
+) -> dict[str, list[str]]:
+    """Every file the source map can name, as its own lines.
+
+    The copybooks come back through the same content cache the expansion just
+    read them from, so this costs no disk I/O in the normal case, and reads
+    them exactly as the expansion did (same encoding detection, same errors
+    policy) -- a comment restored from a differently-decoded read would be a
+    different string. A file that has become unreadable since is skipped: a
+    listing missing one member's comments beats an expansion that fails.
+    """
+    sources: dict[str, list[str]] = {source_file: source_code.split("\n")}
+    for path in included_copybooks:
+        try:
+            content = _cached_read_file(
+                path,
+                encoding_override=search_config.encoding,
+                warnings=warnings,
+                encoding_errors=search_config.encoding_errors,
+            )
+        except (OSError, EncodingError):
+            continue
+        sources[path] = content.split("\n")
+    return sources
+
+
 def expand_copybooks(
     source_code: str,
     copybook_paths: list[str],
@@ -683,6 +792,8 @@ def expand_copybooks(
     path_resolver: "PathResolver | None" = None,
     encoding: str | None = None,
     encoding_errors: str = "replace",
+    source_file: str = "<main>",
+    preserve_comments: bool = False,
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
@@ -705,6 +816,16 @@ def expand_copybooks(
         encoding: Optional explicit encoding for all copybook files (skips
             auto-detection; e.g. 'cp1047' or 'cp500' for a specific EBCDIC
             variant). When None (default), encoding is auto-detected per file.
+        source_file: Name recorded for the main program's own lines in the
+            source map (default "<main>"). Pass the real path when the caller
+            has one, so a mapped line names a file a reader can open.
+        preserve_comments: Put each comment line's original text back into the
+            expanded output (default False). Expansion always blanks comments
+            first -- a ``COPY`` written inside one must not be expanded -- and
+            without this the listing keeps their line numbers but not their
+            text. Restoration happens after every substitution, so it changes
+            no line of code; it is for output meant to be *read*, and the
+            parse pipeline (which drops comments again) is unaffected.
         encoding_errors: Decode strictness for copybook files — "replace"
             (default, backward compatible) substitutes undecodable bytes with
             U+FFFD and records a lossy-decode warning in
@@ -762,7 +883,7 @@ def expand_copybooks(
 
     # Create expansion context
     context = ExpansionContext(
-        current_file="<main>",
+        current_file=source_file,
         expansion_stack=[],
         current_depth=0,
         defined_symbols=dict(defined_symbols) if defined_symbols else {},
@@ -782,9 +903,9 @@ def expand_copybooks(
     included_copybooks: list[str] = []
 
     # Perform recursive expansion
-    expanded_source, max_depth, is_normalized = _expand_source_recursive(
+    expanded_source, max_depth, is_normalized, origins = _expand_source_recursive(
         source_code,
-        "<main>",
+        source_file,
         path_resolver,
         context,
         preserve_source_locations,
@@ -808,11 +929,16 @@ def expand_copybooks(
     # to ensure it is valid fixed-format COBOL for the parser/compiler.
     # If is_normalized is False, it means no changes were made (passthrough), so we return as-is.
     final_source = expanded_source
+    line_origins = _fit_origins(origins, len(expanded_lines), (source_file, 1))
     if is_normalized:
         final_lines: list[str] = []
-        for line in expanded_lines:
+        final_origins: list[LineOrigin] = []
+        # Length-matched by _fit_origins just above; see _restore_comment_lines
+        # for why this stays non-strict.
+        for line, origin in zip(expanded_lines, line_origins, strict=False):
             if not line:
                 final_lines.append(line)
+                final_origins.append(origin)
                 continue
             # Prepend 6 spaces for sequence area. A REPLACING clause
             # that lengthens its replaced text (e.g. ==:LKPCB:== BY
@@ -827,8 +953,26 @@ def expand_copybooks(
             padded = " " * 6 + line
             if len(padded) <= _CODE_AREA_WIDTH:
                 final_lines.append(padded)
+                final_origins.append(origin)
             else:
-                final_lines.extend(_fit_fixed_format_width(padded))
+                # A wrap turns one line into several; every piece came from the
+                # same place, so they share its origin.
+                wrapped = _fit_fixed_format_width(padded)
+                final_lines.extend(wrapped)
+                final_origins.extend([origin] * len(wrapped))
+        line_origins = final_origins
+        if preserve_comments:
+            final_lines = _restore_comment_lines(
+                final_lines,
+                line_origins,
+                _origin_sources(
+                    source_file,
+                    source_code,
+                    included_copybooks,
+                    search_config,
+                    stats.warnings,
+                ),
+            )
         final_source = "\n".join(final_lines)
         if expanded_source.endswith("\n"):
             final_source += "\n"
@@ -836,6 +980,14 @@ def expand_copybooks(
         # keep the documented "total lines in the expanded output" invariant
         # true against the source actually returned.
         stats.total_lines = len(final_lines)
+
+    # `source_maps` is the context's own accumulator; filling it from the
+    # per-line origins is what finally makes `preserve_source_locations` mean
+    # something -- until now the flag returned an always-empty dict.
+    if preserve_source_locations:
+        context.source_maps = {
+            index + 1: origin for index, origin in enumerate(line_origins)
+        }
 
     return CopybookExpansion(
         expanded_source=final_source,
@@ -858,7 +1010,7 @@ def _expand_source_recursive(
     process_conditionals: bool = False,
     stats: ExpansionStatistics | None = None,
     already_stripped: bool = False,
-) -> tuple[str, int, bool]:
+) -> tuple[str, int, bool, list[LineOrigin]]:
     """
     Recursively expand COPY statements in source code.
 
@@ -882,8 +1034,10 @@ def _expand_source_recursive(
             already-normalized text.
 
     Returns:
-        Tuple of (expanded_source, max_depth_reached, is_normalized)
+        Tuple of (expanded_source, max_depth_reached, is_normalized, origins)
         is_normalized indicates if the returned source has had sequence numbers stripped.
+        origins holds one ``(file, original line)`` pair per line of
+        expanded_source -- see the ``LineOrigin`` note above.
 
 
     Raises:
@@ -908,16 +1062,23 @@ def _expand_source_recursive(
     # the caller (the copybook-content branch below) already did this, since
     # re-running strip_sequence_area on already-stripped text would eat 6
     # more real characters off the front of every line.
+    #
+    # `merged_from` collects, per normalized line, the physical line of
+    # *source_code* it started on -- the one step here that changes the line
+    # count, and so the one the source map cannot infer afterwards. The
+    # comment-blanking and sequence-area strips above it are line-preserving
+    # by construction (both blank in place), so nothing else has to be tracked.
+    merged_from: list[int] = []
     if already_stripped:
         normalized_source = normalize_continuation_lines(
-            source_code, indicator_position=0
+            source_code, indicator_position=0, line_origins=merged_from
         )
     else:
         source_no_comments = remove_comment_lines(source_code)
         source_stripped = strip_sequence_area(source_no_comments)
         # We must merge continuation lines to find statements split across lines
         normalized_source = normalize_continuation_lines(
-            source_stripped, indicator_position=0
+            source_stripped, indicator_position=0, line_origins=merged_from
         )
 
     # Extract COPY statements using the robust lexer on normalized source
@@ -933,7 +1094,12 @@ def _expand_source_recursive(
     # is_normalized mirrors already_stripped here: if the caller already
     # stripped this content, it stays normalized even on this passthrough.
     if not copy_statements:
-        return source_code, context.current_depth, already_stripped
+        return (
+            source_code,
+            context.current_depth,
+            already_stripped,
+            _identity_origins(source_file, source_code),
+        )
 
     # Push current file onto stack
 
@@ -943,6 +1109,11 @@ def _expand_source_recursive(
     # Process COPY statements in reverse order to maintain positions
     # We use the NORMALIZED source as the base for expansion because we need valid indices
     expanded_source = normalized_source
+    origins: list[LineOrigin] = _fit_origins(
+        [(source_file, n) for n in merged_from],
+        normalized_source.count("\n") + 1,
+        (source_file, 1),
+    )
     for statement in reversed(copy_statements):
         # Find copybook file
         copybook_path = path_resolver.resolve(
@@ -958,6 +1129,9 @@ def _expand_source_recursive(
         expanded_copybook = context.cache_get(full_cache_key)
         if expanded_copybook is not None:
             nested_depth = context.current_depth + 1
+            copybook_origins = context.cache_get_origins(
+                full_cache_key
+            ) or _identity_origins(copybook_path, expanded_copybook)
             # A cache hit still inserts real content into the expansion
             # (diamond dependency: same member COPYd multiple times) -- it
             # must count toward total_bytes the same as a miss does, or
@@ -1060,7 +1234,7 @@ def _expand_source_recursive(
             context.current_depth += 1
             context.current_file = copybook_path
 
-            expanded_copybook, nested_depth, nested_normalized = (
+            expanded_copybook, nested_depth, nested_normalized, copybook_origins = (
                 _expand_source_recursive(
                     copybook_content,
                     copybook_path,
@@ -1082,15 +1256,28 @@ def _expand_source_recursive(
             if not nested_normalized:
                 nested_no_comments = remove_comment_lines(expanded_copybook)
                 nested_stripped = strip_sequence_area(nested_no_comments)
+                nested_merged_from: list[int] = []
                 expanded_copybook = normalize_continuation_lines(
-                    nested_stripped, indicator_position=0
+                    nested_stripped,
+                    indicator_position=0,
+                    line_origins=nested_merged_from,
                 )
+                # This branch merges lines, so the origins from the recursion
+                # no longer line up one-to-one; re-index them through the merge.
+                copybook_origins = [
+                    (
+                        copybook_origins[n - 1]
+                        if 0 < n <= len(copybook_origins)
+                        else (copybook_path, n)
+                    )
+                    for n in nested_merged_from
+                ]
 
             context.current_depth -= 1
             context.current_file = source_file
 
             # Cache the fully expanded result using LRU-aware method
-            context.cache_put(full_cache_key, expanded_copybook)
+            context.cache_put(full_cache_key, expanded_copybook, copybook_origins)
 
         max_depth = max(max_depth, nested_depth)
 
@@ -1102,12 +1289,27 @@ def _expand_source_recursive(
         statement_start = statement.start_index
         statement_end = statement.end_index
 
-        # Track source locations if requested
-        if preserve_locations and statement.source_location:
-            _, line_num, _ = statement.source_location
-            # Note: With normalized source, line mapping is approximate or requires new logic
-            # For now we skip or approximate logic if needed (disabled by default in expander)
-            pass
+        # Splice the source map exactly as the text is spliced. The COPY
+        # statement occupies the lines [start_line, end_line] of the text as it
+        # stands now (a COPY with a REPLACING clause legally spans several);
+        # the copybook's own lines replace them. The first spliced line is
+        # credited to the *parent* only when the parent had real text before
+        # the COPY on that line (`COPY X.` on a line of its own, the normal
+        # case, credits it to the copybook); the last one always keeps the
+        # copybook's origin, since a statement's own remainder after the COPY
+        # is what continues on it.
+        start_line = expanded_source.count("\n", 0, statement_start)
+        end_line = expanded_source.count("\n", 0, statement_end)
+        head_start = expanded_source.rfind("\n", 0, statement_start) + 1
+        head_has_text = bool(expanded_source[head_start:statement_start].strip())
+
+        copybook_line_count = expanded_copybook.count("\n") + 1
+        spliced = _fit_origins(
+            list(copybook_origins), copybook_line_count, (copybook_path, 1)
+        )
+        if head_has_text and start_line < len(origins):
+            spliced[0] = origins[start_line]
+        origins = origins[:start_line] + spliced + origins[end_line + 1 :]
 
         expanded_source = (
             expanded_source[:statement_start]
@@ -1120,7 +1322,12 @@ def _expand_source_recursive(
     context.stack_pop()
 
     # Return normalized source (we don't pad here to avoid double-padding during recursion)
-    return expanded_source, max_depth, True
+    return (
+        expanded_source,
+        max_depth,
+        True,
+        _fit_origins(origins, expanded_source.count("\n") + 1, (source_file, 1)),
+    )
 
 
 __all__ = [
@@ -1185,9 +1392,13 @@ def parse_cobol_with_expansion(
         source_code=source_code,
         copybook_paths=copybook_paths,
         max_nesting_depth=max_nesting_depth,
-        preserve_source_locations=False,  # Parser will track its own locations
+        # The parser tracks its own locations, but they count lines in the
+        # EXPANDED text -- so the map is what any consumer needs to put a
+        # finding back on the line a human edits. Carried on the ParseResult.
+        preserve_source_locations=True,
         process_conditionals=process_conditionals,
         defined_symbols=defined_symbols,
+        source_file=filename,
     )
 
     # Parse the expanded source
@@ -1207,5 +1418,10 @@ def parse_cobol_with_expansion(
     for warning in expansion_warnings:
         if warning not in result_obj.warnings:
             result_obj.warnings.append(warning)
+
+    # getattr, not attribute access: callers monkeypatch `expand_copybooks`
+    # with stand-ins that carry only the fields they care about, and a map
+    # that is merely absent must not take the whole parse down.
+    result_obj.expansion_source_map = getattr(expansion, "source_location_map", None)
 
     return parse_result

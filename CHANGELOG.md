@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **preprocess/cli:** copybook expansion now reports **where every expanded
+  line came from**. `expand_copybooks(preserve_source_locations=True)` builds
+  a real `source_location_map` -- one `(file, original line)` per expanded
+  line -- instead of the always-empty dict the flag returned before, carrying
+  the origin through continuation merging (which removes lines), the COPY
+  splice (which inserts them) and the re-pad's width wrap (which splits one
+  into several). Exposed as `ParseResult.expansion_source_map` from
+  `parse_cobol_with_expansion`, and as `cobol-parser expand --source-map`.
+  A cached (diamond-dependency) member carries its origins with it, so the
+  fast path and the slow path produce the same map.
+* **analysis/cli:** `lint` findings say where they really are.
+  `LintFinding` gained `origin_file` / `origin_line` (serialized as
+  `"origin": {"file", "line"}`), filled by `lint.apply_source_map()` from the
+  expander's map whenever `--copybook-path` was given -- so a finding inside
+  an inlined member names the *copybook* and its line, and `--format text`
+  stays clickable after expansion instead of pointing at whatever sits at
+  that line number of the program. Findings the map cannot place carry no
+  `origin` key rather than a guess.
+* **preprocess/cli:** `cobol-parser expand --keep-comments` keeps every
+  comment line's original text in the listing, in the program and in each
+  inlined member. Expansion still blanks comments before it expands anything
+  (a `COPY` written inside a comment must not be expanded); the text is
+  restored afterwards through the same source map, only where the line is
+  blank in the expansion and its origin really is a comment -- so no line of
+  code and no line number changes.
+* **models/analysis/cli:** program units in a multi-`PROGRAM-ID` file are
+  reachable at last. `CobolProgram.program_units()` /
+  `find_program_unit()` list and look them up; `--program NAME` on every
+  analyzer subcommand (and `lint`) selects which unit a report covers,
+  defaulting to the outermost as before; a report on such a file also carries
+  `program_units` in its identification header, so it can say what it did not
+  cover. **`LintAnalyzer` now lints every unit** rather than the outermost
+  only -- a contained program left unexamined used to read as a clean one.
+  Single-program output is unchanged, key for key.
+
 * **dialects/cli:** a **call-signature catalogue for IBM Language Environment
   services and COBOL intrinsic functions**, and `cobol-parser le-info` to read
   it. The question it answers is the one a developer has in front of a

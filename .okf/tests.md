@@ -819,6 +819,27 @@ floor is enforced. `-n auto` keeps each near two minutes; `-p no:randomly`
 keeps a failure reproducible from the log. Run it locally during development
 too (see commands above).
 
+
+# Source map, comments and program units (2026-09-07)
+
+* `tests/regression/test_expansion_source_map_and_comments.py` — the
+  expander's per-line source map (identity without a COPY, across a splice,
+  through a continuation merge, into a nested member, on a cache hit, and out
+  through `parse_cobol_with_expansion`), `lint.apply_source_map`, and
+  `preserve_comments` (restored in program and copybook, no line moved, a
+  `COPY` inside a comment still not expanded), plus the serialization rule
+  that a half-known origin is emitted as no origin at all.
+* `tests/regression/test_nested_program_units.py` — `program_units()` /
+  `find_program_unit()`, `LintAnalyzer` covering every unit, and the CLI's
+  `--program` selection including its "unknown name lists what is there"
+  failure. `TestCopybookProvenanceCoversEveryUnit` pins the consequence that
+  came with per-unit linting: a copybook field unused in a *contained*
+  program grades `info`, not `warning` (see [cli.md](cli.md)).
+* `tests/unit/cli/test_expand_source_map_cli.py` — the same surface at the
+  command line: `expand --source-map` / `--keep-comments`, and lint findings
+  carrying the copybook they are really in (this is what the VS Code
+  extension consumes).
+
 # See Also
 
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
