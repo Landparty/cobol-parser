@@ -109,6 +109,7 @@ cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>
 cobol-parser language-env <file.cbl>
+cobol-parser le-info [NAME...] [--kind service|function|all] [--compact] [-o out.json]
 cobol-parser ims-dli <file.cbl>
 cobol-parser data-items <file.cbl>
 ```
@@ -169,6 +170,8 @@ COBOL source (.cbl/.cob)
 **`cobolparser/plugins/core.py`** -- Configuration: `ErrorRecoveryMode` (FAIL_FAST / COLLECT_ALL), `DialectType`, `MemoryConfiguration`, `SerializationConfig`, `ParseStatistics`, `PluginManager`.
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
+
+**`cobolparser/dialects/le_signatures.py`** -- Call signatures for IBM Language Environment callable services and COBOL intrinsic functions: per operand, its direction, its exact COBOL declaration, whether it may be omitted, and whether it repeats. Coverage of the LE services is partial *and reported* (`services_without_signature()`), so "no signature catalogued" is never mistaken for "not an LE service"; the intrinsic half is complete and pinned by a test. `IBM_LE_SERVICE_INFO` is derived from it. Backs the `le-info` CLI subcommand and the COBOL Analyzer extension's LE hover. See `.okf/analysis.md`
 
 **`cobolparser/analysis/`** -- 24 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
@@ -339,6 +342,17 @@ from cobolparser import (
     CRUDMatrixGenerator,        # matrix.entries, .to_csv(), .to_json()
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
+
+# What a CEE service (or an intrinsic FUNCTION) needs at the call site
+from cobolparser.dialects.le_signatures import le_service_signature, intrinsic_signature
+
+sig = le_service_signature("CEEDAYS")      # None when the name has no signature
+sig.call_example()          # 'CALL "CEEDAYS" USING input_char_date, ...'
+sig.required_parameters     # the operands that may not be omitted
+sig.parameters[0].direction # "input" | "output" | "input/output"
+sig.parameters[0].data_type.declaration      # 'halfword length + PIC X(n) text'
+sig.parameters[0].data_type.snippet          # a full WORKING-STORAGE entry
+intrinsic_signature("NUMVAL-C").returns      # "numeric"
 
 # One pass, every rule, one severity-graded list of findings
 from cobolparser import LintAnalyzer
