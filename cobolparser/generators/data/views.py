@@ -171,6 +171,11 @@ class RecordViews:
         answer that reads such a file at all.  :attr:`caveats` says when this
         is in play; :mod:`.layout_offsets` reserves the same widest-member
         slot for ``data-items``.
+
+        :meth:`to_dict` (and therefore ``decode --list-views``) reports this
+        alongside ``record_length`` rather than in place of it, so a consumer
+        reading the serialized form frames records on the same number
+        :class:`~.decoding.RecordDecoder` does.
         """
         return max([self.base.length, *(view.end for view in self.overlays)])
 
@@ -199,10 +204,22 @@ class RecordViews:
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise every view (used by ``decode --list-views``)."""
+        """Serialise every view (used by ``decode --list-views``).
+
+        Carries **both** lengths, and they are not always the same number.
+        ``record_length`` is the base view's own span -- the record as
+        declared.  ``framing_length`` is the stride a fixed-length file is
+        actually cut at, which is larger exactly when an overlay is wider
+        than what it redefines (see :attr:`framing_length`).  Reporting only
+        the first would leave a consumer framing records on a number the
+        decoder itself does not use, which is the very mismatch
+        :attr:`framing_length` exists to remove; :attr:`caveats` names the
+        offending overlays whenever the two differ.
+        """
         return {
             "record_name": self.record_name,
             "record_length": self.base.length,
+            "framing_length": self.framing_length,
             "views": [view.to_dict() for view in self.views],
             "caveats": list(self.caveats),
         }

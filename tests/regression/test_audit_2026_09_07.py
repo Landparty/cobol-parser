@@ -448,6 +448,38 @@ class TestM4LayoutAgreement:
         assert views.base.offset_ambiguous is True
         assert any("OCCURS ... DEPENDING ON" in c for c in views.caveats)
 
+    def test_the_serialized_form_carries_the_framing_stride(self):
+        """`to_dict()` backs `decode --list-views`. It used to report only
+        `record_length` (the base view's span), so for the one layout
+        `framing_length` exists for, a consumer reading the serialized form
+        framed records on a number the decoder itself does not use -- the
+        same mismatch, one surface over. Copilot review on #208."""
+        views = build_record_views(
+            _record(_DATA_HEADER + """\
+       01  R.
+           05 A PIC X(4).
+           05 A-R REDEFINES A PIC X(8).
+           05 B PIC X(2).
+"""),
+            DataGeneratorOptions(),
+        )
+        payload = views.to_dict()
+        assert payload["record_length"] == 6
+        assert payload["framing_length"] == 8 == views.framing_length
+        assert payload["caveats"], "the divergence must be named, not just numbered"
+
+    def test_the_two_lengths_agree_for_a_conforming_layout(self):
+        views = build_record_views(
+            _record(_DATA_HEADER + """\
+       01  R.
+           05 A PIC X(4).
+           05 B PIC X(2).
+"""),
+            DataGeneratorOptions(),
+        )
+        payload = views.to_dict()
+        assert payload["framing_length"] == payload["record_length"] == 6
+
     def test_a_fixed_layout_is_not_flagged_ambiguous(self):
         views = build_record_views(
             _record(_DATA_HEADER + """\

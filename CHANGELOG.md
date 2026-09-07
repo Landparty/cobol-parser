@@ -369,6 +369,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pure-Python install -- coverage.py cannot see into a compiled extension, so
   the same suite reports 54.32% with them built and 91.76% without. (M3)
 
+* **generators:** `RecordViews.to_dict()` (and therefore
+  `decode --list-views`) now reports `framing_length` alongside
+  `record_length`. It carried only the base view's span, so for the one
+  layout `framing_length` exists for -- a `REDEFINES` wider than what it
+  redefines -- a consumer reading the serialized form framed records on a
+  number the decoder itself does not use. The same mismatch the property was
+  added to remove, one surface over. Found by Copilot review on #208.
+
 * **generators:** `verification._values_for` no longer lets an unrelated
   boundary's same-named field satisfy a scenario's verdict. It matched on
   bare `spec.name` across every fixture and pooled the values; a qualified
