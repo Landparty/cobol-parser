@@ -12,6 +12,7 @@ from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, PictureClause
 from ..models.statements import CobolStatement
 from ..plugins.core import DialectType
+from .le_signatures import LE_SERVICE_SIGNATURES
 
 
 class IBMDataType(Enum):
@@ -355,8 +356,18 @@ class IBMEnterpriseCobol:
     # IBM Language Environment (LE) callable services (CEE* functions)
     IBM_LE_CALLABLE_SERVICES = {
         # Date and Time services
-        "CEEDATM",  # Convert Lilian date to character date/time
+        "CEEDATM",  # Convert Lilian seconds to character timestamp
         "CEEDATE",  # Convert Lilian date to character date
+        "CEEDAYS",  # Convert character date to Lilian date
+        "CEECBLDY",  # Convert character date to COBOL integer date
+        "CEEUTC",  # Get current Coordinated Universal Time (CEEGMT alias)
+        "CEEISEC",  # Convert integer date/time components to Lilian seconds
+        "CEESECI",  # Convert Lilian seconds to integer date/time components
+        "CEEQCEN",  # Query the century window
+        "CEESCEN",  # Set the century window
+        "CEEFMDA",  # Get the default date picture string
+        "CEEFMDT",  # Get the default date and time picture string
+        "CEEFMTM",  # Get the default time picture string
         "CEETIME",  # Get current time
         "CEEGMT",  # Get current Greenwich Mean Time
         "CEELOCT",  # Get current local time
@@ -369,6 +380,7 @@ class IBMEnterpriseCobol:
         "CEEFMTVF",  # Format date/time using variable-length format
         # Heap Storage services
         "CEEGTST",  # Get heap storage
+        "CEEFRST",  # Free heap storage
         "CEEFRMST",  # Free heap storage
         "CEECREH",  # Create heap
         "CEEDSHP",  # Destroy heap
@@ -377,6 +389,10 @@ class IBMEnterpriseCobol:
         "CEEZLNG",  # Get string length
         # Condition and Error Handling services
         "CEEHDLR",  # Register a condition handler
+        "CEEHDLU",  # Unregister a condition handler
+        "CEEMOUT",  # Dispatch a message string
+        "CEE3DMP",  # Generate a Language Environment dump
+        "CEE3ABD",  # Terminate the enclave with an abend
         "CEETREC",  # Remove a condition handler
         "CEEHOOK",  # Set hook
         "CEEMRCR",  # Move condition record
@@ -393,6 +409,9 @@ class IBMEnterpriseCobol:
         "CEEGMEM",  # Get member name
         "CEEGLS",  # Get language sensitive string length
         # Runtime services
+        "CEE3PRM",  # Query the runtime parameter string
+        "CEE3GRC",  # Get the enclave return code
+        "CEE3SRC",  # Set the enclave return code
         "CEETERM",  # Terminate the run unit
         "CEEBINIT",  # Initialize Language Environment
         "CEEPCMD",  # Perform command
@@ -408,52 +427,25 @@ class IBMEnterpriseCobol:
         "CEETDLI",  # IMS DL/I call through Language Environment
     }
 
-    # Metadata for the most commonly used LE callable services
-    IBM_LE_SERVICE_INFO: dict[str, dict] = {
-        "CEEDATM": {
-            "category": "datetime",
-            "description": "Convert Lilian date to character date and time",
-            "parameters": ["seconds", "picture-string", "output-string", "fc"],
-        },
-        "CEEGMT": {
-            "category": "datetime",
-            "description": "Get current Greenwich Mean Time",
-            "parameters": ["seconds", "fc"],
-        },
-        "CEELOCT": {
-            "category": "datetime",
-            "description": "Get current local time",
-            "parameters": ["seconds", "gregorian-date", "fc"],
-        },
-        "CEESECS": {
-            "category": "datetime",
-            "description": "Convert date/time to Lilian seconds",
-            "parameters": ["input-string", "picture-string", "seconds", "fc"],
-        },
+    # Metadata for the most commonly used LE callable services.
+    #
+    # Derived from `le_signatures.LE_SERVICE_SIGNATURES` for every service
+    # that module can describe exactly, so the two cannot drift; the entries
+    # below are the leftovers, for services this dialect recognises but has
+    # no catalogued call signature for. `parameters` here is a bare list of
+    # operand names -- a consumer that needs the direction, the picture and
+    # whether an operand may be omitted should read the signature catalogue
+    # instead (or `cobol-parser le-info`).
+    _UNCATALOGUED_LE_SERVICE_INFO: dict[str, dict] = {
         "CEEFMTDT": {
             "category": "datetime",
             "description": "Format date/time",
             "parameters": ["seconds", "picture-string", "output-string", "fc"],
         },
-        "CEEDYWK": {
-            "category": "datetime",
-            "description": "Calculate day of week from Lilian date",
-            "parameters": ["lilian-date", "day-of-week", "fc"],
-        },
-        "CEEGTST": {
-            "category": "storage",
-            "description": "Get heap storage",
-            "parameters": ["heap-id", "size", "pointer", "fc"],
-        },
         "CEEFRMST": {
             "category": "storage",
             "description": "Free heap storage",
             "parameters": ["pointer", "fc"],
-        },
-        "CEEHDLR": {
-            "category": "condition",
-            "description": "Register a condition handler",
-            "parameters": ["handler-routine", "token", "fc"],
         },
         "CEETREC": {
             "category": "condition",
@@ -465,10 +457,17 @@ class IBMEnterpriseCobol:
             "description": "Terminate the run unit",
             "parameters": ["termination-code"],
         },
-        "CEETDLI": {
-            "category": "ims",
-            "description": "IMS DL/I call through Language Environment",
-            "parameters": ["func-code", "pcb", "io-area", "ssa..."],
+    }
+
+    IBM_LE_SERVICE_INFO: dict[str, dict] = {
+        **_UNCATALOGUED_LE_SERVICE_INFO,
+        **{
+            name: {
+                "category": sig.category,
+                "description": sig.summary,
+                "parameters": [p.name for p in sig.parameters],
+            }
+            for name, sig in LE_SERVICE_SIGNATURES.items()
         },
     }
 
@@ -476,6 +475,16 @@ class IBMEnterpriseCobol:
     # This is the single source of truth used by LanguageEnvironmentAnalyzer.
     IBM_LE_SERVICE_CATEGORIES: dict[str, str] = {
         "CEEDATM": "datetime",
+        "CEEDAYS": "datetime",
+        "CEECBLDY": "datetime",
+        "CEEUTC": "datetime",
+        "CEEISEC": "datetime",
+        "CEESECI": "datetime",
+        "CEEQCEN": "datetime",
+        "CEESCEN": "datetime",
+        "CEEFMDA": "datetime",
+        "CEEFMDT": "datetime",
+        "CEEFMTM": "datetime",
         "CEEDATE": "datetime",
         "CEETIME": "datetime",
         "CEEGMT": "datetime",
@@ -488,6 +497,8 @@ class IBMEnterpriseCobol:
         "CEEGMTCO": "datetime",
         "CEEFMTVF": "datetime",
         "CEEGTST": "storage",
+        "CEEFRST": "storage",
+        "CEECZST": "storage",
         "CEEFRMST": "storage",
         "CEECREH": "storage",
         "CEEDSHP": "storage",
@@ -498,8 +509,10 @@ class IBMEnterpriseCobol:
         "CEEGLS": "string",
         "CEESG": "string",
         "CEESQ": "string",
-        "CEECZST": "string",
         "CEEHDLR": "condition",
+        "CEEHDLU": "condition",
+        "CEE3DMP": "condition",
+        "CEE3ABD": "condition",
         "CEETREC": "condition",
         "CEEHOOK": "condition",
         "CEEMRCR": "condition",
@@ -514,6 +527,10 @@ class IBMEnterpriseCobol:
         "CEEGPIL": "environment",
         "CEEGMEM": "environment",
         "CEETERM": "runtime",
+        "CEEMOUT": "runtime",
+        "CEE3PRM": "runtime",
+        "CEE3GRC": "runtime",
+        "CEE3SRC": "runtime",
         "CEEBINIT": "runtime",
         "CEEPCMD": "runtime",
         "CEEMSG": "runtime",
