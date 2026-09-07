@@ -31,10 +31,13 @@ Three decisions worth keeping:
   Both are structural, not prose, so a consumer cannot render "no problems"
   for a file that was largely unexamined without ignoring a field.
 - **Exit code 3 for findings, not 1.** `--fail-on error|warning|info` gates
-  CI. `1` already means "the run failed" and `2` "recovered-but-errored
-  parse" across this CLI; reusing `1` would make a gate unable to tell a
-  program with problems from a lint that never ran. `--fail-on` defaults to
-  `never`, so findings alone never change the exit code.
+  CI. `1` already means "the run failed" across this CLI (and `2` is taken
+  twice over: "recovered-but-errored parse" for `parse`, and argparse's own
+  usage error for a rejected flag on any subcommand); reusing `1` would make
+  a gate unable to tell a program with problems from a lint that never ran.
+  `--fail-on` defaults to `never`, so findings alone never change the exit
+  code. All four codes verified by running them, not assumed: missing file
+  `1`, unknown `--rule` `2`, `--fail-on` hit `3`, otherwise `0`.
 
 Also: findings identical in every visible field collapse to one.
 `IOSequenceAnalyzer` reports one READ-before-OPEN once per control flow path

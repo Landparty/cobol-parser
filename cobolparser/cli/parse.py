@@ -1807,7 +1807,9 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
             "  cobol-parser lint program.cbl --copybook-path ./copybooks --fail-on error\n"
             "\nExit codes:\n"
             "  0  ran to completion (findings may still have been reported)\n"
-            "  1  the file could not be parsed, or the arguments were rejected\n"
+            "  1  the file could not be read or parsed, or its output could not\n"
+            "     be written\n"
+            "  2  the arguments were rejected (argparse's own usage error)\n"
             "  3  --fail-on was given and a finding at or above it was reported"
         ),
     )
