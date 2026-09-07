@@ -799,6 +799,24 @@ too slow for every push/PR. It's wired as a `test` job gated to
 triggered from the Actions tab. Run the full suite locally during development
 (see commands above).
 
+
+# Source map, comments and program units (2026-09-07)
+
+* `tests/regression/test_expansion_source_map_and_comments.py` — the
+  expander's per-line source map (identity without a COPY, across a splice,
+  through a continuation merge, into a nested member, on a cache hit, and out
+  through `parse_cobol_with_expansion`), `lint.apply_source_map`, and
+  `preserve_comments` (restored in program and copybook, no line moved, a
+  `COPY` inside a comment still not expanded).
+* `tests/regression/test_nested_program_units.py` — `program_units()` /
+  `find_program_unit()`, `LintAnalyzer` covering every unit, and the CLI's
+  `--program` selection including its "unknown name lists what is there"
+  failure.
+* `tests/unit/cli/test_expand_source_map_cli.py` — the same surface at the
+  command line: `expand --source-map` / `--keep-comments`, and lint findings
+  carrying the copybook they are really in (this is what the VS Code
+  extension consumes).
+
 # See Also
 
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the

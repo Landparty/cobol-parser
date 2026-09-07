@@ -1,5 +1,66 @@
 # OKF Update Log
 
+## 2026-09-07 — where a line came from, and which program it belongs to
+
+Request (from the VS Code extension's own limitation list): make the four
+things the extension had to document as "we cannot do this" actually work.
+Two of them are here.
+
+### The expander's source map (`.okf/preprocessing.md`)
+
+`preserve_source_locations` had been a stub since it was written — the branch
+that would have built the map was a literal `pass`. Everything downstream
+guessed instead: the extension re-anchored each lint finding by searching the
+file for the name it was about, which works only because most rules report
+something *unreferenced*, and cannot work at all for a finding inside an
+inlined member.
+
+Building the map turned out to be entirely about the four steps that move a
+line — comment blanking and the sequence strip (neither does), continuation
+joining (merges), the COPY splice (inserts), the width wrap (splits) — and
+tracking an origin through each. Two decisions worth keeping:
+
+**The cache had to carry origins too.** `content_cache` serves a member COPYd
+twice from the first expansion; without `content_origins` beside it, the
+second copy would have had no map, so the cheap path and the slow path would
+have produced different answers. They are evicted together.
+
+**A drifted map must mis-attribute nothing.** `_fit_origins` clamps the list
+to the line count at every boundary. Every producer keeps them in step, but
+"the map is one short" must never become "this finding is on the wrong line",
+which is precisely the failure mode the map exists to end.
+
+### Comments in the listing (`--keep-comments`)
+
+Expansion blanks comments because a `COPY` inside one must not be expanded.
+That is right for the lexer and wrong for a listing. The map made the fix
+trivial and safe: restore a line's text only when the line is blank in the
+expansion AND its origin is a comment line in its origin file, so the pass
+cannot touch code, cannot move a line, and cannot resurrect a commented-out
+COPY.
+
+### Program units (`.okf/ast-models.md`, `.okf/analysis.md`, `.okf/cli.md`)
+
+`contained_programs` has existed for a long time; nothing used it. Every
+analyzer is program-scoped, so a multi-program file was analyzed as its
+outermost program with no way to reach the others and nothing saying so — a
+contained program came back clean because it was never looked at.
+
+`program_units()` / `find_program_unit()` are the list and the lookup;
+`--program NAME` selects on the CLI; `program_units` appears in the
+identification header only when there is more than one, so single-program
+output is byte-for-byte unchanged. **`lint` is the deliberate exception**: it
+lints every unit by default, because lint is the file's diagnostics and a
+skipped program reads as a clean one. Its per-rule bookkeeping had to change
+with it — one `rules_run` / `failed_rules` entry per rule however many units
+it ran on, since the reader needs to know a concern went unexamined, not how
+many times the same exception was raised.
+
+Verified end to end against the VS Code extension's live CLI contract suite
+(`src/integration/cliContract.test.ts`), which exercises `--keep-comments`,
+`--source-map`, lint origins and `--program` through the extension's own
+argument builders and output parsers.
+
 ## 2026-09-07 — the decoder direction, and DCLGEN cross-checking
 
 Request: the "data and records" gap — this package could *encode* a record

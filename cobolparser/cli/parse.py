@@ -146,6 +146,21 @@ def _add_copybook_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_program_arg(
+    parser: argparse.ArgumentParser, default_note: str = "the outermost"
+) -> None:
+    parser.add_argument(
+        "--program",
+        default=None,
+        metavar="NAME",
+        help=(
+            "PROGRAM-ID to analyze in a file holding several program units "
+            f"(default: {default_note}). The full list is reported as "
+            "program_units."
+        ),
+    )
+
+
 def _add_define_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--define",
@@ -247,6 +262,14 @@ def _identification(
     ident: dict[str, Any] = {"source_file": args.file}
     if ast is not None:
         ident["program_id"] = ast.program_name or None
+    # Recorded by _parse_result_or_fail off the WHOLE parse, so it still lists
+    # every unit in the file after --program narrowed `ast` to one of them.
+    # Present only when the file holds more than one program, so the output of
+    # the ordinary one-program file is unchanged: the key appearing at all
+    # means "several programs here, and this report covers program_id".
+    units = getattr(args, "program_units", None)
+    if units:
+        ident["program_units"] = list(units)
     return ident
 
 
@@ -427,6 +450,17 @@ def _parse_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
     On parse failure (``result.ast is None``) this calls ``_fail`` (which exits)
     with the standard "Parse failed for <file>" message.
     """
+    result, prof = _parse_result_or_fail(args)
+    return result.ast, prof
+
+
+def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
+    """The same guard, keeping the whole ``ParseResult``.
+
+    A command that needs more off the result than its AST -- lint wants
+    ``expansion_source_map``, so it can report where a finding is in the file
+    on disk rather than in the expanded text -- calls this instead.
+    """
     result, prof = _do_parse(args)
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -439,7 +473,37 @@ def _parse_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
             "analysis may be incomplete",
             file=sys.stderr,
         )
-    return result.ast, prof
+    _select_program_unit(args, result)
+    return result, prof
+
+
+def _select_program_unit(args: argparse.Namespace, result: Any) -> None:
+    """Narrow ``result.ast`` to the program unit ``--program`` names.
+
+    A source file may hold several ``PROGRAM-ID``s (stacked or nested program
+    units); the parse returns the outermost with the rest on
+    ``contained_programs``. Every analyzer is program-scoped, so a report has
+    to be about one unit -- the outermost by default, which is what these
+    subcommands have always reported, or the one ``--program`` names.
+
+    The whole file's unit names are recorded on *args* either way, so the
+    emitted report can say which programs it did NOT cover.
+    """
+    ast = result.ast
+    if ast is None:
+        return
+    units = ast.program_units()
+    if len(units) > 1:
+        args.program_units = [u.program_name or None for u in units]
+
+    wanted = getattr(args, "program", None)
+    if not wanted:
+        return
+    selected = ast.find_program_unit(wanted)
+    if selected is None:
+        available = ", ".join(u.program_name or "<unnamed>" for u in units)
+        _fail(f"No program unit named {wanted!r} in {args.file} (found: {available})")
+    result.ast = selected
 
 
 def _cmd_parse(args: argparse.Namespace) -> None:
@@ -779,12 +843,31 @@ def _build_expand_parser(
         help="Expand COPY statements (copybooks)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Example:\n" "  cobol-parser expand program.cbl --copybook-path ./copybooks"
+            "Example:\n"
+            "  cobol-parser expand program.cbl --copybook-path ./copybooks\n"
+            "  cobol-parser expand program.cbl --copybook-path ./cpy --source-map"
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_copybook_args(p)
     _add_compact_arg(p)
+    p.add_argument(
+        "--keep-comments",
+        action="store_true",
+        help=(
+            "Keep comment lines' original text in the expanded listing "
+            "(they are blanked by default, since a COPY inside a comment "
+            "must not be expanded)"
+        ),
+    )
+    p.add_argument(
+        "--source-map",
+        action="store_true",
+        help=(
+            "Include source_location_map: one entry per expanded line, naming "
+            "the file and line it came from"
+        ),
+    )
     p.add_argument(
         "--max-depth",
         type=int,
@@ -818,6 +901,9 @@ def _cmd_expand(args: argparse.Namespace) -> None:
         max_nesting_depth=args.max_depth,
         process_conditionals=bool(defines),
         defined_symbols=defines,
+        preserve_source_locations=getattr(args, "source_map", False),
+        source_file=args.file,
+        preserve_comments=getattr(args, "keep_comments", False),
     )
 
     _json_out(
@@ -1670,6 +1756,7 @@ def _build_analyzer_parser(
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
+    _add_program_arg(p)
     _add_define_args(p)
     _add_output_arg(p)
     if profiling:
@@ -2079,6 +2166,10 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
+    # Lint is the one command that covers every unit by default: it is the
+    # file's diagnostics, and a contained program left unexamined would read
+    # as a clean one.
+    _add_program_arg(p, default_note="every unit in the file")
     _add_define_args(p)
     _add_output_arg(p)
     _add_profiling_args(p)
@@ -2140,7 +2231,14 @@ def _lint_text_report(report: Any, source_file: str) -> str:
     """
     lines: list[str] = []
     for finding in report.findings:
-        if finding.location is not None:
+        # A mapped finding prints the file and line it is really on -- inside
+        # an inlined copybook, that is not this file at all -- so the prefix
+        # stays clickable after expansion instead of pointing at whatever
+        # happens to sit at that line number of the program.
+        if finding.origin_file is not None and finding.origin_line is not None:
+            column = finding.location.column if finding.location is not None else 0
+            prefix = f"{finding.origin_file}:{finding.origin_line}:{column}:"
+        elif finding.location is not None:
             prefix = f"{source_file}:{finding.location.line}:{finding.location.column}:"
         else:
             prefix = f"{source_file}:"
@@ -2196,9 +2294,10 @@ def _severity_at_least(severity: str, threshold: str) -> bool:
 
 
 def _cmd_lint(args: argparse.Namespace) -> None:
-    from ..analysis.lint import LintAnalyzer, filter_by_severity
+    from ..analysis.lint import LintAnalyzer, apply_source_map, filter_by_severity
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
     try:
         analyzer = LintAnalyzer(getattr(args, "rules", None))
@@ -2210,6 +2309,10 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     report = analyzer.analyze(
         ast, copybook_item_names=_lint_copybook_item_names(args, ast)
     )
+    # With --copybook-path the analyzers ran over expanded text, so every
+    # location counts expanded lines. The expander's own map turns each one
+    # back into the file and line a reader can open.
+    apply_source_map(report, getattr(result, "expansion_source_map", None))
     report.findings = filter_by_severity(report.findings, args.min_severity)
 
     if args.output_format == "text":
