@@ -327,6 +327,7 @@ class ConstraintExtractor:
                     boundary_report,
                     report,
                 )
+        _roll_up_branch_gaps(report)
         return report
 
     # -- IF ---------------------------------------------------------------
@@ -569,6 +570,32 @@ class ConstraintExtractor:
             if not any(marker in reason for marker in out_of_scope_markers)
         ]
         report.unsupported.extend(genuine_gaps)
+
+
+def _roll_up_branch_gaps(report: ConstraintReport) -> None:
+    """Copy every branch-level gap into the report-level ``unsupported`` list.
+
+    :attr:`ConstraintReport.unsupported` is documented -- here, in
+    ``CLAUDE.md`` and in the public examples -- as the place gaps are never
+    silently dropped.  It used to hold only the gaps appended to it directly
+    (the PERFORM UNTIL paths), while everything a *branch* could not model
+    lived on :attr:`BranchConstraints.unsupported` and nowhere else.  A
+    caller following the documented API therefore saw a clean list for a
+    program with unmodelled branches, which is the one thing this field
+    exists to prevent.
+
+    Branch entries stay on their branch as well: a caller that wants to know
+    *which* decision point a gap belongs to still needs them there.  Ordering
+    is source order (branches are appended as they are walked) after whatever
+    was reported program-level, and duplicates are collapsed so a reason
+    reported by several arms of one branch is listed once.
+    """
+    seen = set(report.unsupported)
+    for branch in report.branches:
+        for reason in branch.unsupported:
+            if reason not in seen:
+                seen.add(reason)
+                report.unsupported.append(reason)
 
 
 # -- expression-tree walk (IF / PERFORM UNTIL) --------------------------------
@@ -871,6 +898,8 @@ def _build_relational_constraint(
     fed_names: set[str],
     origin: str,
     unsupported: list[str],
+    *,
+    quoted_operands: bool = True,
 ) -> FieldConstraint | None:
     if not left_text:
         unsupported.append(f"{origin}: comparison missing left operand")
@@ -919,6 +948,20 @@ def _build_relational_constraint(
         return FieldConstraint(
             field_ref, "figurative", (figurative,), origin, negated=(op == "ne")
         )
+
+    if not _is_literal_operand(value_text, quoted=quoted_operands):
+        # A data item, a subscripted table element, an expression -- something
+        # whose value only the running program knows. Treating the operand's
+        # source text as the compared-against value fabricates a constraint
+        # nothing can satisfy, and (worse) leaves the arm counted as targeted
+        # with no gap recorded. Report it the same way a comparison between
+        # two *resolvable* fields is reported above: this is the same case,
+        # differing only in whether the layout index happened to resolve it.
+        unsupported.append(
+            f"{origin}: comparison against a non-literal operand not supported "
+            f"in v1: {field_ref.spec.qualified_name} {op} {value_text!r}"
+        )
+        return None
 
     return FieldConstraint(
         field_ref, op, (_strip_quotes(value_text),), origin, negated=False
@@ -995,13 +1038,33 @@ def _extract_evaluate_selector(
         )
         return None
 
+    # The lexer strips quotes before a selector dict is built, so `WHEN "AB"`
+    # and `WHEN WS-OTHER` arrive here indistinguishable by value alone. The
+    # only discriminator left is whether the value names a real data item:
+    # if it resolves, it is an identifier and the comparison is against a
+    # value only the running program knows -- the same fabrication
+    # `_build_relational_constraint` refuses. A string literal that happens
+    # to equal a data name is reported unsupported rather than modelled;
+    # that is the rare case, and it errs toward the visible answer.
     if sel_type == "Literal":
-        return [
-            FieldConstraint(resolved, "eq", (str(sel.get("value", "")),), origin, False)
-        ]
+        value = str(sel.get("value", ""))
+        if index.resolve(value) is not None:
+            unsupported.append(
+                f"{origin}: WHEN selector names a data item rather than a "
+                f"literal, which is not supported in v1: {value}"
+            )
+            return None
+        return [FieldConstraint(resolved, "eq", (value,), origin, False)]
     if sel_type == "Range":
         start = str(sel.get("start", ""))
         end = str(sel.get("end", ""))
+        named = [bound for bound in (start, end) if index.resolve(bound) is not None]
+        if named:
+            unsupported.append(
+                f"{origin}: WHEN range bound names a data item rather than a "
+                f"literal, which is not supported in v1: {', '.join(named)}"
+            )
+            return None
         return [
             FieldConstraint(resolved, "ge", (start,), origin, False),
             FieldConstraint(resolved, "le", (end,), origin, False),
@@ -1041,6 +1104,9 @@ def _parse_relational_text(
                 fed_names,
                 origin,
                 unsupported,
+                # SEARCH WHEN / EVALUATE TRUE selector text arrives already
+                # unquoted from the lexer -- see _is_literal_operand.
+                quoted_operands=False,
             )
 
     if _BARE_IDENTIFIER_RE.match(text):
@@ -1086,6 +1152,53 @@ def _strip_quotes(text: str) -> str:
     if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
         return t[1:-1]
     return t
+
+
+#: A numeric literal as the operand text actually reaches us.  The sign is
+#: its own token upstream, so ``-45`` arrives as ``- 45`` -- the whitespace
+#: is not optional politeness, it is the shape of the input.
+_NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\s*\d+(?:\.\d+)?$")
+
+
+def _is_literal_operand(text: str, *, quoted: bool = True) -> bool:
+    """Whether *text* is a literal rather than a reference to a data item.
+
+    The one thing standing between a comparison and a fabricated constraint.
+    Everything that is not a literal here -- a bare data name, a subscripted
+    table reference like ``WS-E ( IDX )``, an arithmetic expression -- names a
+    *value the program computes*, which this extractor has no way to know.
+    Using such text as though it were the compared-against value produces a
+    constraint the program never expressed: a witness solved against it can
+    never reach the branch, and the arm is nonetheless counted as targeted.
+
+    *quoted* says whether the caller's operand text still carries its quotes,
+    because that decides how much can be told about it:
+
+    * ``True`` -- an ``IF``'s :class:`ConditionalExpression` operand, which
+      reaches us as written (``'AB'``, ``123``, ``- 45``).  The test is a
+      whitelist: quoted, or numeric.  A literal form not on it is reported as
+      unsupported -- a visible, fixable gap rather than a silent value.
+    * ``False`` -- ``SEARCH WHEN`` and ``EVALUATE TRUE`` selector *text*,
+      which the lexer has already unquoted, so ``'Z'`` and a bare ``Z``
+      are no longer distinguishable and a whitelist would reject every
+      string literal in those constructs.  Only what cannot be a literal at
+      all is rejected there: parentheses or internal whitespace, i.e. a
+      subscript or an expression.  A bare word stays admissible, and the
+      caller has already ruled out the ones that resolve to real data items.
+
+    ``ALL 'X'`` is excluded either way, on purpose: it is a literal, but it
+    denotes the character repeated to the receiving field's width, and
+    modelling it as the one-character value ``X`` would be its own quiet
+    wrong answer.
+    """
+    t = text.strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
+        return True
+    if _NUMERIC_LITERAL_RE.match(t):
+        return True
+    if quoted:
+        return False
+    return not ("(" in t or ")" in t or any(ch.isspace() for ch in t))
 
 
 # -- PERFORM UNTIL / EOF-flag pattern -----------------------------------------

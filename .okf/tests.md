@@ -791,13 +791,33 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
 
 1. **lint** — `ruff check .` + `black --check .` (Python 3.13)
 2. **typecheck** — `mypy cobolparser/` (Python 3.13)
-3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (install + Cython extension build only, no tests)
+3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace`
+   + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix:
+   Python 3.11, 3.12, 3.13 (install, Cython extension build, and the full
+   suite). PRs and `workflow_dispatch` only — a push to `main` runs lint and
+   typecheck alone.
+4. **coverage** — `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` +
+   `python -m pytest tests/ -q -p no:randomly -n auto` on Python 3.13. Where
+   the 90% floor is actually enforced, and why it is a job of its own:
+   coverage.py cannot see into a compiled Cython extension, so once
+   `build_ext` has run the pure-Python bodies it shadows read as unexecuted.
+   Same suite, same commit, measured 2026-09-07: **54.32%** with the
+   extensions built, **91.76%** without. Gating inside `build` would fail on
+   the build step rather than on the code.
 
-The full `pytest tests/ -v` suite (~9,385 tests) is **not** run automatically —
-too slow for every push/PR. It's wired as a `test` job gated to
-`if: github.event_name == 'workflow_dispatch'`, so it only runs when manually
-triggered from the Actions tab. Run the full suite locally during development
-(see commands above).
+The full suite (~9,400 tests) **does** run on every PR, as of the
+2026-09-07 audit. It previously ran nowhere: this file used to describe a
+`test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
+such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
+floor went unenforced on every push and PR alike.
+
+It now runs twice, for two different reasons. In `build`, after `build_ext`,
+so CI exercises the Cython extensions rather than the pure-Python fallback
+(which it built and never ran a line through) — `--no-cov` there, per the
+coverage note above. In `coverage`, on a pure-Python install, where the 90%
+floor is enforced. `-n auto` keeps each near two minutes; `-p no:randomly`
+keeps a failure reproducible from the log. Run it locally during development
+too (see commands above).
 
 # See Also
 

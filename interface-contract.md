@@ -229,6 +229,25 @@ bundle.to_json()   # str  -- printed verbatim as `mockymock fixtures`'s entire s
 
 | `Scenario` key `"verification"` (2026-09-04) | additive, present only for a `"branches"`/`"all"` scenario: cobol-parser's own verdict on whether that scenario's generated data actually satisfies the branch it is named for. mocky-mock reads it defensively (`Scenario.verification` defaults to `None`) and renders an `unverified` verdict as a `*> UNVERIFIED:` comment above the generated TESTCASE. A bundle produced before this key existed is still a valid v1 bundle. |
 
+**No bump for the 2026-09-07 audit fixes, and why.** That pass changed which
+arms a bundle reports as `targeted` vs `missed`, and removed scenarios for
+arms whose constraints turned out not to be modellable at all (see
+`reports/audit-2026-09-07.md`, H1/H2). No key was added, removed, retyped, or
+given a new meaning: `targeted` still means "a scenario pins this arm",
+`missed` still means "it does not, and here is why". What changed is that
+both are now *true* — arms were previously reported targeted on the strength
+of a constraint fabricated from an operand's source text, and scenarios were
+emitted carrying witnesses that did not satisfy their own branch. A consumer
+gated on `bundle_version == 1` parses these bundles exactly as before, so the
+gate correctly does not fire.
+
+What a consumer *will* notice: a program using the affected constructs (a
+comparison against a subscripted table element, `IF <PIC X field> IS
+NUMERIC`, an ordering comparison on an alphanumeric field) yields fewer
+scenarios and a lower `targeted` count than it did before. That is the
+corrected number, not a regression — the previous count included arms nothing
+reached.
+
 **Versioning contract this surface must honor:** any change to
 `generate_with_scenarios_from_file`'s signature, a key removed or
 retyped from `FixtureBundle`/`Scenario`/`BoundaryFixture`/`Expectation`, or

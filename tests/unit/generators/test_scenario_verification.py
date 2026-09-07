@@ -141,10 +141,18 @@ class TestSelfVerification:
         assert [s.verification for s in bundle.scenarios] == [None]
 
     def test_an_undecidable_comparison_is_reported_not_assumed_good(self):
-        """`IF WS-INPUT > 0` on a `PIC X` field: the solver has no numeric
-        domain to work in and the generated text cannot be ordered against a
-        numeric literal at all. "I could not check this" and "this is fine"
-        are different answers, and the bundle says which one it means."""
+        """`IF WS-INPUT > 0` on a `PIC X` field: ordering an alphanumeric
+        domain against a numeric literal is not something the allow/deny set
+        can express, so no witness for it can exist.
+
+        The arm is therefore reported as *missed*, with the reason, rather
+        than turned into a scenario. It used to become a scenario whose data
+        was picked as though the constraint were satisfiable -- `_apply_text`
+        returned "still satisfiable" for every relational op -- leaving a
+        fixture named for a branch it does not reach. A named scenario is a
+        claim; "I could not model this" has to be a coverage miss, not a
+        scenario carrying a caveat.
+        """
         source = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. UNVER.
@@ -160,11 +168,18 @@ class TestSelfVerification:
            END-IF.
 """
         bundle = _bundle(source)
-        assert bundle.scenarios
-        for scenario in bundle.scenarios:
-            assert scenario.verification["status"] == "unverified"
-            statuses = {v["status"] for v in scenario.verification["fields"]}
-            assert statuses == {"unknown"}
+        assert bundle.scenarios == []
+        coverage = bundle.scenario_coverage
+        assert coverage["targeted"] == 0
+        assert coverage["missed"] == coverage["total_arms"] > 0
+        # Every miss names why, and the reason is the modelling gap itself --
+        # not a generic "no witness".
+        reasons = [detail["reason"] for detail in coverage["details"]]
+        assert reasons and all(reason for reason in reasons)
+        assert any(
+            "gt on an alphanumeric domain is not modeled" in reason
+            for reason in reasons
+        )
 
     def test_verification_is_serialized_into_the_bundle_json(self):
         import json

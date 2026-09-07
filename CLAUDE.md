@@ -62,7 +62,8 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (90% minimum enforced; ~9,385 tests across 320+ files)
+# Run all tests with coverage (90% minimum; ~9,400 tests across 356 files).
+# Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -169,7 +170,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 23 static analysis modules:
+**`cobolparser/analysis/`** -- 24 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -511,7 +512,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~9,385 tests across 320+ files in 5 directories:
+~9,400 tests across 356 files in 5 directories:
 
 ```
 tests/
@@ -552,7 +553,11 @@ tests/
 
 ### Coverage Requirement
 
-90% line coverage is enforced by pytest (`--cov-fail-under=90`). Branch coverage is enabled. When running only a subset of tests, expect this check to fail -- that is normal.
+90% line coverage is enforced by `--cov-fail-under=90` in `pyproject.toml`'s `addopts`, and branch coverage is enabled. Full-suite total as of 2026-09-07: **91.76%**.
+
+**Measure it on a pure-Python build.** coverage.py cannot see into a compiled Cython extension, so once `build_ext --inplace` has run, the pure-Python bodies those extensions shadow read as unexecuted: the same suite reports 54.32% with the extensions built and 91.76% without. CI splits the two accordingly — the `build` matrix runs the suite `--no-cov` after `build_ext` (its job is to exercise the extensions), and a separate `coverage` job installs with `COBOLPARSER_SKIP_EXT=1` and enforces the floor. Locally, use `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` before trusting a coverage number.
+
+When running only a subset of tests, expect the check to fail -- that is normal and unrelated.
 
 ## CI/CD
 
@@ -560,9 +565,10 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main` (and manua
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, pinned versions matching `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, pinned version)
-3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` on matrix: Python 3.11, 3.12, 3.13 (verifies install and the Cython extension build; runs only on PRs/dispatch, not on push to `main`; no tests)
+3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix: Python 3.11, 3.12, 3.13 (verifies install, the Cython extension build, and the full suite against those extensions; runs only on PRs/dispatch, not on push to `main`)
+4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` + the full suite on Python 3.13, enforcing `--cov-fail-under=90` (PRs/dispatch only)
 
-There is no CI job that runs the pytest suite -- it does not run automatically on push or PR at all (not even gated behind `workflow_dispatch`). Run it locally during development (`python -m pytest tests/ -v`).
+The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather than the pure-Python fallback -- with `--no-cov`, because coverage.py cannot see into a compiled extension (54.32% with them built vs 91.76% without). The `coverage` job is where `--cov-fail-under=90` is enforced, on a pure-Python install. A push to `main` runs lint and typecheck only. Run the suite locally during development too (`python -m pytest tests/ -v`).
 
 ## Release & Distribution
 

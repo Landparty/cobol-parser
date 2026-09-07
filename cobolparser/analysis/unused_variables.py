@@ -29,6 +29,7 @@ from ..models.statements.base import (
     FunctionCall,
     LogicalExpression,
 )
+from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
     IfStatement,
@@ -46,13 +47,17 @@ from ..models.statements.misc import MergeStatement, SortStatement
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
 # parsers/divisions/data.py) -- the same convention LinkageChecker and
 # CRUDMatrixGenerator rely on.
-# TODO(known limitation): SCREEN SECTION / REPORT SECTION / COMMUNICATION
-# SECTION items (screen fields, report groups, CD entries) are entirely
-# invisible to this analyzer. Adding those names to this frozenset alone
-# would be a no-op: the DATA DIVISION parser's _skip_section
-# (parsers/divisions/data.py) discards those sections' content into
-# always-empty section nodes, so the parser must first retain their data
-# items before this set could expose them.
+# REPORT SECTION is deliberately absent: its report groups are not
+# candidates for "unused" (nothing outside the report names them), but the
+# data items they READ are -- see `_report_section_references`, which mines
+# SOURCE/SUM/CONTROL out of the report-group metadata so a Report Writer
+# program's fields are not all reported unused.
+# TODO(known limitation): SCREEN SECTION / COMMUNICATION SECTION items
+# (screen fields, CD entries) are still entirely invisible to this analyzer.
+# Adding those names to this frozenset alone would be a no-op: the DATA
+# DIVISION parser's _skip_section (parsers/divisions/data.py) discards those
+# sections' content into always-empty section nodes, so the parser must
+# first retain their data items before this set could expose them.
 _DATA_SECTION_NAMES = frozenset({"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"})
 
 # Words that can appear as, or inside, an operand's text but are never
@@ -123,6 +128,19 @@ _STR_ATTR_EXTRAS: dict[type, tuple[str, ...]] = {
     StringStatement: ("into_target", "pointer_variable"),
     InspectStatement: ("converting_from", "converting_to"),
     SearchStatement: ("table_name", "varying_variable"),
+}
+
+# Statement attributes holding a plain list of operand strings that never
+# reach `.operands`. `DELIMITED BY <identifier>` is a real reference -- it
+# is the *value* the runtime splits or joins on -- and both STRING and
+# UNSTRING keep it here rather than in the operand bag, so a delimiter held
+# in a variable used to be reported unused. (UNSTRING's per-target
+# `delimiter_var` is a different clause, already covered by
+# `_DICT_LIST_EXTRAS` below.) A literal delimiter is quoted text and
+# `_extract_identifiers` drops it.
+_STR_LIST_EXTRAS: dict[type, tuple[str, ...]] = {
+    UnstringStatement: ("delimiters",),
+    StringStatement: ("delimiters",),
 }
 
 # Statement attributes holding a list of dicts with identifier-bearing
@@ -266,6 +284,14 @@ def _extract_identifiers(operand: Any) -> set[str]:
             continue
         tokens.add(upper)
     return tokens
+
+
+def _mark_subtree_used(item: CobolDataItem, group_used: dict[int, bool]) -> None:
+    """Mark *item* and everything beneath it used, structurally."""
+    group_used[id(item)] = True
+    for child in item.children:
+        if isinstance(child, CobolDataItem):
+            _mark_subtree_used(child, group_used)
 
 
 def _names_from_value(value: object) -> set[str]:
@@ -449,6 +475,19 @@ class UnusedVariableAnalyzer:
         for item in declared_items:
             is_used(item)
 
+        # A group passed whole to another program is consumed field by field
+        # by code this analyzer cannot see, so every item beneath it is used.
+        # Propagation elsewhere runs child -> parent only, which is right for
+        # `MOVE 'X' TO WS-CHILD` (the group is touched because a field was)
+        # but leaves `CALL 'SUB' USING WS-GRP` reporting every field of
+        # WS-GRP unused. Deliberately limited to CALL arguments rather than
+        # any group reference: `MOVE SPACES TO WS-GRP` really does leave its
+        # fields never individually referenced, which is a finding worth
+        # keeping.
+        for name in self._call_argument_names(ast):
+            for item in by_name.get(name, []):
+                _mark_subtree_used(item, group_used)
+
         # REDEFINES: when the redefining item is used, its target shares
         # the same physical storage and counts as used too. Iterated to a
         # fixpoint for REDEFINES chains (A REDEFINES B REDEFINES C).
@@ -503,6 +542,22 @@ class UnusedVariableAnalyzer:
     # PROCEDURE DIVISION reference collection
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _call_argument_names(ast: CobolProgram) -> set[str]:
+        """Every data name handed to a ``CALL ... USING``, upper-cased.
+
+        Every passing mode counts: BY REFERENCE hands over the storage, and
+        BY CONTENT / BY VALUE both read it to make the copy.
+        """
+        names: set[str] = set()
+        for stmt in ast.get_all_statements():
+            if not isinstance(stmt, CallStatement):
+                continue
+            for parameter in stmt.using_parameters:
+                if parameter.name:
+                    names.add(parameter.name.strip().upper())
+        return names
+
     def _collect_referenced_names(self, ast: CobolProgram) -> set[str]:
         """Collect every identifier referenced anywhere in the PROCEDURE
         DIVISION: each statement's own ``.operands`` bag plus the
@@ -522,6 +577,10 @@ class UnusedVariableAnalyzer:
             for klass in type(stmt).__mro__:
                 for attr in _STR_ATTR_EXTRAS.get(klass, ()):
                     names |= _extract_identifiers(getattr(stmt, attr, None))
+
+                for attr in _STR_LIST_EXTRAS.get(klass, ()):
+                    for value in getattr(stmt, attr, None) or []:
+                        names |= _extract_identifiers(value)
 
                 for attr, keys in _DICT_LIST_EXTRAS.get(klass, ()):
                     for entry in getattr(stmt, attr, None) or []:
@@ -659,14 +718,17 @@ class UnusedVariableAnalyzer:
 
     def _collect_data_division_references(self, ast: CobolProgram) -> set[str]:
         """Collect references that live entirely inside the DATA DIVISION:
-        OCCURS ... DEPENDING ON variables and level-66 RENAMES targets.
-        REDEFINES is handled separately in ``analyze()`` since it needs
-        item-level (not just name-level) propagation.
+        OCCURS ... DEPENDING ON variables, level-66 RENAMES targets, and the
+        REPORT SECTION clauses that name a data item.  REDEFINES is handled
+        separately in ``analyze()`` since it needs item-level (not just
+        name-level) propagation.
         """
         names: set[str] = set()
         data_div = ast.data_division
         if data_div is None:
             return names
+
+        names |= self._report_section_references(data_div)
 
         for section in data_div.sections:
             if not isinstance(section, CobolSection):
@@ -687,6 +749,41 @@ class UnusedVariableAnalyzer:
                         getattr(child, "renames_through", None)
                     )
 
+        return names
+
+    @staticmethod
+    def _report_section_references(data_div: Any) -> set[str]:
+        """Data names a REPORT SECTION reads, from its report-group clauses.
+
+        A Report Writer program never mentions these fields in its PROCEDURE
+        DIVISION at all -- ``INITIATE``/``GENERATE``/``TERMINATE`` drive the
+        report, and the report groups themselves say which data items to
+        print, total and break on.  Scanning only the PROCEDURE DIVISION
+        therefore reported every one of them unused, which is every field of
+        every Report Writer program.
+
+        The clauses that name a data item, per ``data_report_description.py``
+        and ``data_clauses.py``, which park them on the item's metadata:
+        ``SOURCE`` (print this field), ``SUM`` (total these fields), and the
+        RD's own ``CONTROL``/``CONTROLS`` (break on this field).
+        """
+        names: set[str] = set()
+        for section in data_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            if (section.section_name or "").upper() != "REPORT":
+                continue
+            for item in section.data_items:
+                for node in [item, *item.get_all_children()]:
+                    metadata = getattr(node, "metadata", None) or {}
+                    clauses = metadata.get("report_clauses") or {}
+                    names |= _extract_identifiers(clauses.get("source"))
+                    for entry in clauses.get("sum") or []:
+                        for operand in (entry or {}).get("operands") or []:
+                            names |= _extract_identifiers(operand)
+                    rd_clauses = metadata.get("rd_clauses") or {}
+                    for control in rd_clauses.get("controls") or []:
+                        names |= _extract_identifiers(control)
         return names
 
     @staticmethod

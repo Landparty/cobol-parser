@@ -50,3 +50,34 @@ jobs:
       - run: pip install setuptools
       - run: pip install -e ".[dev,fast]"
       - run: python setup.py build_ext --inplace
+      # The suite runs here, after build_ext, so it exercises the Cython
+      # extensions rather than the pure-Python fallback -- CI used to build
+      # them and never run a line through them. `-p no:randomly` keeps a
+      # failure reproducible from the log; `-n auto` keeps the job near two
+      # minutes.
+      #
+      # --no-cov here, and the floor enforced in the `coverage` job below
+      # instead: coverage.py cannot see into a compiled Cython extension, so
+      # once build_ext has run the pure-Python bodies it shadows read as
+      # unexecuted. Measured 2026-09-07 on the same suite: 54.32% with the
+      # extensions built, 91.76% without. Gating here would fail on the build
+      # step rather than on the code. Same reasoning as the cibuildwheel
+      # test-command's --no-cov in pyproject.toml.
+      - run: python -m pytest tests/ -q -p no:randomly -n auto --no-cov
+
+  # Where the 90% floor is actually enforced: one pure-Python build, so
+  # coverage.py can see every line the extensions would otherwise hide.
+  # COBOLPARSER_SKIP_EXT=1 skips the C build entirely (see setup.py).
+  coverage:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install setuptools
+      - run: COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
+      # --cov-fail-under=90 comes from pyproject.toml's addopts.
+      - run: python -m pytest tests/ -q -p no:randomly -n auto

@@ -655,7 +655,8 @@ So `build_record_views(record, options) -> RecordViews`:
 | `RecordViews.overlays` | one `RecordView` per `REDEFINES` item anywhere in the tree, in source order, each rooted at the offset of the item it redefines |
 | `RecordViews.get(name)` | by full name (`CUST-REC.ADDR-OVERSEAS`) or the redefining item's own short name (`ADDR-OVERSEAS`), case-insensitively — a user reading the copybook has the short one in front of them |
 | `RecordView.fields` | `list[PlacedField]` = `(spec, offset)`, contiguous: `placed[n].offset + placed[n].length == placed[n+1].offset` |
-| `RecordView.offset_ambiguous` | this view sits inside or after an `OCCURS ... DEPENDING ON` table, so its static offset holds only for a full-length record |
+| `RecordView.offset_ambiguous` | this view sits inside or after an `OCCURS ... DEPENDING ON` table, so its static offset holds only for a full-length record. Set on the **base** view too as of 2026-09-07 — it used to default False there, so `--list-views` presented a maximum-length guess as a fact for the fields `data-items` reports as `byte_offset: null` |
+| `RecordViews.framing_length` | the stride a fixed-length file is actually cut at: `max(base.length, widest overlay end)`. Equal to `base.length` for every conforming layout, and larger only for a `REDEFINES` wider than what it redefines — which COBOL forbids below level 01 but compilers accept, growing the record. `RecordDecoder` frames on this; framing on `base.length` shredded every record after the first. `to_dict()` reports **both** numbers (2026-09-07, Copilot review on #208: reporting only `record_length` left a consumer framing on a number the decoder does not use) |
 
 `options` are normalised through `for_record_image()` inside
 `build_record_views`, so passing CSV-shaped generation options cannot

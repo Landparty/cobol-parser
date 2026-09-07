@@ -1,5 +1,153 @@
 # OKF Update Log
 
+## 2026-09-07 — repo audit: two fabricated-answer bugs, four lint false positives
+
+Request: "audit the repo, identify potential bugs or gaps", then "fix all of
+the issues". Method was empirical — differential harnesses over the sample and
+NIST corpora, round-trip property checks against the encoder/decoder's own
+stated invariants, and a standalone reproduction for every finding. Findings
+that could not be reproduced from a self-contained program were dropped, and
+one was **withdrawn after the fix pass** (see the last section). Full report:
+`reports/audit-2026-09-07.md`; regressions in
+`tests/regression/test_audit_2026_09_07.py`.
+
+### The shape both HIGH bugs share
+
+Neither was a crash or a wrong number. Both were a component answering a
+question it could not answer, in the affirmative, silently — and the
+downstream machinery built to catch exactly that being unable to, because it
+was fed the same fabrication.
+
+**H1, `analysis/constraints.py`.** `_build_relational_constraint` refuses
+`IF WS-IN = WS-LIMIT` when both operands resolve through the layout index.
+When the right operand is a *subscripted* reference the index cannot resolve
+— `WS-E (IDX)` — it fell through to the "right side is a literal" branch and
+used the operand's own source text as the value: `WS-IN eq 'WS-E ( IDX )'`.
+The hole was immediately next to a door already closed.
+
+What made it worth a HIGH rather than a note is what happened downstream.
+Nothing landed in `unsupported`. `ScenarioCoverage` counted the arm
+**targeted**. And the negated arm reduced to "any value != that text", which
+every generated value satisfies — so `generators/verification.py`, the module
+whose whole purpose is to make a scenario's name a verdict rather than a
+label, returned **`verified`**. It re-checks the planned constraints against
+the emitted data; when the constraint itself is the fabrication, it is
+downstream of the defect, not independent of it. Worth remembering when
+reading that module's promises: it catches solver and rendering bugs, not
+extraction bugs.
+
+Fix: operands are whitelisted (quoted or numeric) rather than accepted by
+default. The `EVALUATE` selector path had the same hole by a different route
+— the lexer unquotes a selector before the extractor sees it, so `WHEN "AB"`
+and `WHEN WS-OTHER` arrive identical, and "does this value name a real data
+item" is the only discriminator left. `SEARCH WHEN` / `EVALUATE TRUE`
+selector *text* is likewise pre-unquoted, so it keeps a deliberately looser
+test (a bare word may be a literal; something with parens or spaces may not).
+That two-mode split is not fussiness: a single strict test rejected every
+string literal in those constructs, which one existing test caught.
+
+**H2, `analysis/domains.py`.** `_apply_text` ended in `return True` for every
+op it did not model. `True` means "domain still satisfiable", so `solve()`
+went on to `pick()` and returned a witness. `IF WS-TXT IS NUMERIC` over a
+`PIC X(10)` field returned `'XXXXXXXX'` — for the `THEN` arm, which it fails,
+and for the `ELSE` arm, which it passes. Two scenarios distinguished by
+exactly that field got byte-identical data.
+
+Fix splits by what is actually true. Class conditions **are** enforceable on
+an alphanumeric field (it can hold digits), so `TextDomain` grew
+`require_numeric` / `require_alphabetic` and picks accordingly. Ordering ops
+genuinely are not expressible on an allow/deny set, so they now return
+`Unsatisfiable` carrying a reason that reaches `ScenarioCoverage.details`.
+`_apply` returns `str | None` instead of `bool` so that reason survives the
+trip. Note the deliberate consequence: an arm that used to produce a scenario
+now produces a coverage miss. That is the point — a named scenario is a
+claim, and "I could not model this" has to be a miss, not a scenario with a
+caveat. One existing test pinned the old behavior and was rewritten to pin
+the new one, which is a real behavior change and is called out as such.
+
+### `analysis/unused_variables.py` — four false positives
+
+A lint rule's false positive costs more than a missed finding, and all four
+were on ordinary code: `STRING`/`UNSTRING ... DELIMITED BY <identifier>`
+(both keep the delimiter in a `delimiters` list that never reaches
+`.operands`), a group passed whole to `CALL ... USING` (propagation ran child
+-> parent only), and REPORT SECTION `SOURCE`/`SUM`/`CONTROL`.
+
+The REPORT SECTION one is the instructive one: those clauses became parseable
+in #196, and a Report Writer program names its fields *only* in report
+groups, never in the PROCEDURE DIVISION — so the analyzer reported every
+field of every such program dead. The module's own TODO said REPORT SECTION
+content was discarded by the parser, which had stopped being true. A stale
+"known limitation" comment is how a fixed upstream gap stays broken
+downstream.
+
+The CALL fix is deliberately narrow — CALL arguments only, not every group
+reference. `MOVE SPACES TO WS-GRP` really does leave `WS-CHILD` never
+individually referenced, and silencing that would have bought quiet rather
+than accuracy. Pinned by a test that asserts the finding is *kept*.
+
+### `generators/data/views.py` — two disagreements with `layout_offsets.py`
+
+Both modules' docstrings claim they cannot drift. Two cases where they did:
+
+A `REDEFINES` entry wider than what it redefines. `data-items` reserves the
+widest slot member; the base view sums only non-redefining fields. COBOL
+forbids this below level 01, but compilers accept it and real copybooks
+contain it — and `RecordView.length` is what `RecordDecoder` cuts
+fixed-length records at, so the file got framed at the wrong stride and every
+record after the first was garbage. Added `RecordViews.framing_length`
+(`max(base.length, widest overlay end)` — identical for every conforming
+layout) and a caveat. Deliberately did *not* rework `_place` into full slot
+semantics: that means a second walk duplicating `flatten_record`'s OCCURS
+expansion, which is precisely the drift the module exists to prevent, for a
+construct no conforming compiler accepts.
+
+`offset_ambiguous` after an `OCCURS ... DEPENDING ON` table. The flag existed
+and only overlays could ever carry it — the base view was constructed with it
+defaulted — so `--list-views` presented a maximum-length guess as a fact for
+exactly the fields `data-items` reports as `byte_offset: null`.
+
+### CI ran no tests at all
+
+The largest process gap, and the cheapest fix. `build` installed `.[dev,fast]`
+— pytest included — and never invoked it. 9,396 tests and a
+`--cov-fail-under=90` floor went unenforced on every push and PR. `.okf/tests.md`
+described a `test` job gated on `workflow_dispatch`; no such job was ever in
+`ci.yml`.
+
+pytest now runs in `build`, **after** `build_ext`, so CI exercises the Cython
+extensions rather than the pure-Python fallback it was building and never
+running a line through — plus a separate `coverage` job on a pure-Python
+install, which is where the 90% floor is enforced.
+
+That split is not fussiness, and the reason cost an hour: coverage.py cannot
+see into a compiled Cython extension, so once `build_ext` has run, the
+pure-Python bodies those extensions shadow read as unexecuted. Same suite,
+same commit: **54.32%** with extensions built, **91.76%** without. Putting
+the gate in `build` would fail on the build step rather than on the code.
+
+Worth recording how that nearly became a phantom finding. Comparing a
+coverage number taken *without* extensions (a 1,096-test subset, 59.74%)
+against one taken *with* them (the full suite, 54.33%) looks like a subset
+out-covering its own superset — arithmetically impossible, and it reads as
+data loss in the tooling. It was written up as an open finding, complete
+with a ruled-out list, before the pure-Python full run came back at 91.76%
+and showed the two numbers had never been comparable. The lesson is narrow
+and worth keeping: check which build produced a coverage number before
+reasoning from it. `reports/open-findings.md` carries this as an operational
+note rather than a defect.
+
+### One finding withdrawn
+
+The audit's LOW list claimed `COMPUTE A = (1 + 2)` without a terminating
+period reports "unbalanced parentheses". It does not. The reproduction
+generated a 124-character source line, and `normalize_fixed_format` correctly
+truncates fixed-format source at column 72 — cutting the closing parens off,
+so the expression really was unbalanced and the diagnostic was right. The
+defect was in the audit harness. Recorded rather than quietly deleted,
+because an audit finding that turns out to be wrong is worth the same
+scrutiny as one that turns out to be right.
+
 ## 2026-09-07 — the decoder direction, and DCLGEN cross-checking
 
 Request: the "data and records" gap — this package could *encode* a record
