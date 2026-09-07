@@ -62,7 +62,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (90% minimum enforced; ~9,010 tests across 320+ files)
+# Run all tests with coverage (90% minimum enforced; ~9,385 tests across 320+ files)
 python -m pytest tests/ -v
 
 # Run a single test file or test
@@ -92,8 +92,10 @@ cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [--format csv|json|record|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-varying MIN:MAX] [--record-separator none|newline] [-o out.csv]
+cobol-parser decode <data-file> --copybook <file.cpy> [--record NAME] [--view NAME] [--list-views] [--format csv|json|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [--max-records N] [--skip N] [--strict] [-o out]
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR]
+cobol-parser dclgen-check <file.cbl>
 cobol-parser analyze <file.cbl>
 cobol-parser dead-code <file.cbl>
 cobol-parser unused-variables <file.cbl> [--copybook-path DIR] [--exclude-copybook-variables]
@@ -167,7 +169,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/ibm_enterprise.py`** -- `IBMEnterpriseCobol` dialect: COMP-3, EXEC SQL/CICS/IMS DLI, IBM intrinsic functions.
 
-**`cobolparser/analysis/`** -- 22 static analysis modules:
+**`cobolparser/analysis/`** -- 23 static analysis modules:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -177,6 +179,7 @@ COBOL source (.cbl/.cob)
 - `dead_code.py` -- Unreferenced paragraph/section detection
 - `unused_variables.py` -- `UnusedVariableAnalyzer` detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE) never referenced in PROCEDURE DIVISION, including group items, level-88 condition names, REDEFINES propagation, and OCCURS ... DEPENDING ON. Backs the `unused-variables` CLI subcommand
 - `host_var_resolver.py` -- SQL host variable resolution
+- `dclgen_check.py` -- `DclgenChecker` cross-checks every EXEC SQL `:host-var` against the DCLGEN `DECLARE TABLE` column of its name (matching `CUST_ID` to `CUST-ID` the way DCLGEN itself does), grading category / scale / precision / length / usage / sign / missing-null-indicator mismatches -- the ones a DB2 precompiler accepts and a runtime quietly acts on. Backs the `dclgen-check` CLI subcommand and the `dclgen-check` lint rule. Reports what it could *not* check per host variable, so a quiet report is never mistaken for a checked one. See `.okf/analysis.md`
 - `ims_segment_analyzer.py` -- IMS DLI segment analysis
 - `language_env_analyzer.py` -- IBM Language Environment detection
 - `linkage_checker.py` -- LINKAGE SECTION validation
@@ -188,13 +191,13 @@ COBOL source (.cbl/.cob)
 - `technical_debt.py` -- `TechnicalDebtAnalyzer` composite 0-100 technical-debt score (A-F grade) combining complexity, redundancy, control-flow smells (GO TO density, ALTER usage, no-escape recursion cycles, unreachable nodes), and size, as a `DebtWeights`-weighted, fully explainable rollup with a `top_offenders` list. Backs the `health` CLI subcommand. See `.okf/analysis.md`
 - `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
 - `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
-- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`); severity is per finding where the underlying analyzer grades itself. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
+- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`); severity is per finding where the underlying analyzer grades itself. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
 - `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE is poisoned unconditionally since the AST does not record BY vs INTO; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field still knowable at a DISPLAY/WRITE. See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions, incl. `for_record_image()`), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec incl. `storage_size`, flatten_record), `storage.py` (`storage_size()` / `binary_byte_length()` / `packed_byte_length()` -- the package's single authority on how many bytes a data item occupies; `layout.py`, `layout_offsets.py` and `encoding.py` all defer to it so record images and `data-items` offsets cannot drift apart), `encoding.py` (record-image encoding: COMP-3 packed nibbles, COMP/COMP-4 big-endian binary, COMP-5 and COMP-1/2 in host order, zoned/overpunched signed DISPLAY, ASCII or EBCDIC cp037; `EncodingOptions`, `encode_record()`, `hex_dump()`, `encoding_caveats()` -- every encoding verified against GnuCOBOL, see `.okf/generators.md`. Also owns **fixed vs. variable record length**: `RecordFormat` (`fixed` = RECFM=F/FB, the default; `variable` = RECFM=V/VB with a 4-byte RDW; `variable-bare`; `auto`), `encode_rdw()`, `minimum_record_length()`, `row_record_length()`. Under a variable format only the `OCCURS ... DEPENDING ON` occurrences a row's own counter names are written -- `layout.py`'s `OdoControl` / `present_indexes()` decide which those are, and `ValueFactory` draws the counter from the table's own bounds so it always names a real occurrence. The *other* way a record varies -- `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the layout is flat and nothing in the record says how long it is -- is `layout.py`'s `VaryingLength`: the range is read off the FD when the source is a whole program (or from `DataGeneratorOptions.record_varying` for a bare copybook), one length per row is drawn at generation time from the seeded RNG, and `encode_record(..., data_length=N)` cuts the body to it), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset, incl. `to_records()` / `write_records()` / `to_hex_dump()`), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions, incl. `for_record_image()`), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec incl. `storage_size`, flatten_record), `storage.py` (`storage_size()` / `binary_byte_length()` / `packed_byte_length()` -- the package's single authority on how many bytes a data item occupies; `layout.py`, `layout_offsets.py` and `encoding.py` all defer to it so record images and `data-items` offsets cannot drift apart), `encoding.py` (record-image encoding: COMP-3 packed nibbles, COMP/COMP-4 big-endian binary, COMP-5 and COMP-1/2 in host order, zoned/overpunched signed DISPLAY, ASCII or EBCDIC cp037; `EncodingOptions`, `encode_record()`, `hex_dump()`, `encoding_caveats()` -- every encoding verified against GnuCOBOL, see `.okf/generators.md`. Also owns **fixed vs. variable record length**: `RecordFormat` (`fixed` = RECFM=F/FB, the default; `variable` = RECFM=V/VB with a 4-byte RDW; `variable-bare`; `auto`), `encode_rdw()`, `minimum_record_length()`, `row_record_length()`. Under a variable format only the `OCCURS ... DEPENDING ON` occurrences a row's own counter names are written -- `layout.py`'s `OdoControl` / `present_indexes()` decide which those are, and `ValueFactory` draws the counter from the table's own bounds so it always names a real occurrence. The *other* way a record varies -- `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the layout is flat and nothing in the record says how long it is -- is `layout.py`'s `VaryingLength`: the range is read off the FD when the source is a whole program (or from `DataGeneratorOptions.record_varying` for a bare copybook), one length per row is drawn at generation time from the seeded RNG, and `encode_record(..., data_length=N)` cuts the body to it), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset, incl. `to_records()` / `write_records()` / `to_hex_dump()`), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `views.py` (`build_record_views()` -- the offset-annotated byte map a decoder reads a record through, with one `RecordView` per `REDEFINES` so an overlay can be switched without re-parsing the copybook; offsets are a running sum of the same widths `encode_record()` concatenates, so a decoded offset and an encoded byte position cannot drift), `decoding.py` (the inverse of `encoding.py`: `RecordDecoder`, `decode_field()`/`decode_record()`, `DecodedField`/`DecodedRecord`/`DecodeResult`, `decoded_hex_dump()` -- reads a real record image / EBCDIC flat file back through a copybook, `decode(encode(row)) == row`, with bad bytes reported per field rather than silently zeroed; backs the `decode` CLI subcommand), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
 - `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3/6/7 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle`. `generate`/`generate_from_file` produce one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. `generate_with_scenarios`/`generate_with_scenarios_from_file` (Phase 6) additionally accept `mode="branches"|"all"`, routing through Phase 5's `ScenarioPlanner` and pinning each `PlannedScenario`'s witnesses/sequence-lengths/status-overrides into an otherwise normally-generated fixture set; `mode="happy"` delegates to `generate()` unchanged (byte-identical). Every scenario's `expectations` also carries tier 1 (`Expectation(kind="call_count", ...)`, derived exactly from that scenario's own generated sequence length) and tier 2 (`Expectation(kind="field_equals", ...)`, from `analysis.const_fold.ConstantFolder` seeded with the scenario's own single-invocation mocked inputs) -- Phase 7. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`, `.okf/analysis.md`, and `docs/fixture-bundle-schema.md`
 - `scenarios.py` -- `ScenarioPlanner` (Phase 5 of the `gen-fixtures` initiative): turns a Phase 4 `ConstraintReport` and `ProgramFlowAnalyzer`'s CFG into a set of named `PlannedScenario`s -- one (or a merge of several) per reachable, satisfiable branch arm, plus fixed families (empty-input/error-status/boundary-values) for `mode="all"` -- with exact arm-coverage accounting (`ScenarioCoverage`: targeted + merged + missed == total, every miss carrying a reason). Wired into the `gen-fixtures` CLI as of Phase 6 via `program_fixtures.py`'s `generate_with_scenarios`. See `.okf/generators.md`. Arm reachability here is CFG-shaped (`flow_report.unreachable_nodes`), never data-shaped, so an arm reachable only via a *correlation between records* gets a scenario named for it that never reaches it; `PlannedScenario.row_witnesses` is the (unpopulated) groundwork for expressing those -- see `docs/plans/2026-09-04-cross-record-correlation-design.md`
 
@@ -344,6 +347,32 @@ report.caveats             # what could not be checked (an unresolved COPY, ...)
 report.failed_rules        # rules that raised; the rest still ran
 report.worst_severity()    # "error" | "warning" | "info" | None -- backs `lint --fail-on`
 
+# Reading a real record image back: the inverse of the encoder above
+from cobolparser.generators import RecordDecoder, build_record_views
+
+decoder = RecordDecoder.from_copybook_file("CUSTOMER.cpy")
+result = decoder.decode_file(
+    "CUSTOMER.DAT", opts=EncodingOptions(charset=Charset.EBCDIC)
+)
+result.to_csv()                # the same table gen-data would have written
+result.records[0].values()     # {"CUST-ID": "339564", ...}
+result.records[0].fields[2]    # DecodedField: offset/length/hex/value/error
+result.error_count             # fields whose bytes are not what the PIC says
+result.trailing                # bytes that are not a whole record
+
+# REDEFINES: one run of bytes, several meanings -- switch overlay, same bytes
+result.views                   # ["CUST-REC", "CUST-REC.ADDR-OVERSEAS"]
+decoder.decode_file("CUSTOMER.DAT", view="ADDR-OVERSEAS")
+build_record_views(record).base.fields   # [PlacedField(spec, offset), ...]
+
+# DCLGEN <-> host variable type checking
+from cobolparser import DclgenChecker
+
+report = DclgenChecker().check(parse_result.ast)
+report.violations          # kind: category/scale/precision/length/usage/
+                            # sign/null-indicator, each with expected vs actual
+report.unchecked           # host variables no DECLARE TABLE could speak for
+
 # Synthetic CSV test data from a copybook record layout
 from cobolparser.generators import CopybookDataGenerator, DataGeneratorOptions
 dataset = CopybookDataGenerator(
@@ -482,7 +511,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~9,010 tests across 320+ files in 5 directories:
+~9,385 tests across 320+ files in 5 directories:
 
 ```
 tests/

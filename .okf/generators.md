@@ -304,6 +304,8 @@ into focused, reusable modules:
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints. `USAGE INDEX`/`POINTER` short-circuit to `"0"` *without drawing from the RNG* — they are storage, not data, and reach the factory PICTURE-less, where they used to fall through to the numeric path's 9-digit default and emit a random number that looked like data. Not drawing is what keeps a copybook with no such field byte-identical for a given seed.
 - **`storage.py`** — a re-export shim (2026-09-05) for **`cobolparser/_storage.py`**, which the implementation moved to so `cobolparser.models.data_items.CobolDataItem.calculate_size` could defer to it as well: this package's `__init__` eagerly imports `program_layout`, which imports `cobolparser.models`, so a model importing this module directly would close an import cycle. `_storage.py` sits beside `_errors.py` and, like it, has zero internal dependencies. Every existing importer of `storage.py` is unchanged. It remains the package's single authority on **how many bytes a data item occupies**: `storage_size()`, `binary_byte_length()`, `packed_byte_length()`, and the `USAGE` frozensets everything else classifies against. Zero dependencies beyond the stdlib, deliberately — `layout.py`, `layout_offsets.py` and `encoding.py` all import it, which is what stops a record image's field widths from drifting apart from the offsets `data-items` reports. Two cases the older per-module copies of the arithmetic got wrong and this fixes for every caller at once: `USAGE INDEX` (no PICTURE, so it was sized as **zero bytes**, silently collapsing every offset after it) and a DISPLAY item with `SIGN IS SEPARATE` (a byte the PICTURE's character count does not include).
 - **`encoding.py`** — record-image encoding: the display value from `values.py` rendered into the bytes a COBOL program would actually read, at fixed or variable record length. See "Record images" and "Fixed- and variable-length records" below.
+- **`views.py`** — `PlacedField` / `RecordView` / `RecordViews` / `build_record_views()`: the offset-annotated byte map the *decoder* reads a record through. See "Record views and decoding" below.
+- **`decoding.py`** — the inverse of `encoding.py`: `RecordDecoder`, `decode_field()`, `decode_record()`, `DecodedField` / `DecodedRecord` / `DecodeResult`, `decoded_hex_dump()`. Backs the `decode` CLI subcommand. See "Record views and decoding" below.
 - **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods, plus the record-image trio `to_records()` / `write_records()` / `to_hex_dump()` and the length quartet `record_length()` / `minimum_record_length()` / `record_lengths(opts)` / `is_variable_length`.
 - **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
 - **`__init__.py`** — Package exports of the above plus re-exports for backwards compatibility.
@@ -617,6 +619,166 @@ own (`(RDW)`, offset `000000`, length 4), each record's own length in its
 range instead of a single number. The RDW row is not decoration: without it
 every field offset in the dump would sit four bytes below where it really
 is in the file.
+
+
+## Record views and decoding (`data/views.py` + `data/decoding.py`, 2026-09-07)
+
+The other direction: **bytes somebody else wrote, plus a copybook, back into
+a table.** "Open this VSAM extract / EBCDIC flat file with this copybook and
+show me the records" — the inverse of `encoding.py`, and the half people
+actually have a file for. Backs `cobol-parser decode`.
+
+### Why a *view* exists at all
+
+Everywhere else a layout is a flat `list[FieldSpec]` whose widths,
+concatenated, are the record. That is all an encoder needs, because it is
+writing the bytes and therefore knows where it is. A decoder needs two more
+things:
+
+* **Where each field starts.** A running sum of `FieldSpec.storage_size` —
+  the same arithmetic `encode_record()` performs implicitly when it
+  concatenates. Computing offsets from the same widths is *the* invariant
+  here: a decoded offset and an encoded byte position cannot drift, because
+  neither has its own copy of the arithmetic. `test_views.py`'s
+  `test_base_offsets_match_the_encoded_record` checks that against real
+  encoded bytes rather than a second hand-written offset table.
+* **Which layout the bytes are being read through.** `REDEFINES` means one
+  run of bytes has several meanings and only the program knows which applies
+  to the record in front of you. A generator can duck that (it picks one and
+  writes it — `include_redefines=False`); a decoder cannot.
+
+So `build_record_views(record, options) -> RecordViews`:
+
+| | |
+|---|---|
+| `RecordViews.base` | the record as declared, redefinitions excluded. Its `length` is the record's own length — the LRECL of a fixed-length file |
+| `RecordViews.overlays` | one `RecordView` per `REDEFINES` item anywhere in the tree, in source order, each rooted at the offset of the item it redefines |
+| `RecordViews.get(name)` | by full name (`CUST-REC.ADDR-OVERSEAS`) or the redefining item's own short name (`ADDR-OVERSEAS`), case-insensitively — a user reading the copybook has the short one in front of them |
+| `RecordView.fields` | `list[PlacedField]` = `(spec, offset)`, contiguous: `placed[n].offset + placed[n].length == placed[n+1].offset` |
+| `RecordView.offset_ambiguous` | this view sits inside or after an `OCCURS ... DEPENDING ON` table, so its static offset holds only for a full-length record |
+
+`options` are normalised through `for_record_image()` inside
+`build_record_views`, so passing CSV-shaped generation options cannot
+silently produce a byte map with holes in it.
+
+**`flatten_record(..., ignore_root_redefines=True)`** (new keyword) is what
+makes an overlay flattenable: ordinarily a record that itself carries
+`REDEFINES` flattens to *nothing*, which is right for generation and useless
+for decoding. Only the root's own clause is exempted — a `REDEFINES` nested
+inside the subtree still excludes its fields, so a view stays a contiguous
+run of bytes. Internally: `_flatten_into(..., ignore_own_redefines=True,
+redefines_label=...)`, neither of which is inherited by the recursive calls;
+`redefines_label` still reaches every spec's `FieldSpec.redefines` so a field
+says which redefinition it belongs to.
+
+The overlay scan (`_scan_overlays`) mirrors `layout_offsets._layout_siblings`'
+slot bookkeeping (a run of mutually-redefining siblings shares one slot; the
+slot's footprint is its widest member) but emits placed `FieldSpec`s and
+recurses *into* redefining children, so a redefinition of a redefinition gets
+its own view. Each member's footprint comes from `_footprint()` =
+`sum(storage_size for flatten_record(child, ...))`, i.e. the same widths
+again rather than a parallel size model.
+
+### Decoding
+
+`RecordDecoder(views, opts, record_length=None)`, or
+`.from_copybook_source()` / `.from_copybook_file()` / `.from_record()`.
+`decode_bytes(data, view=..., max_records=..., skip=...) -> DecodeResult`;
+`decode_file(path, ...)` is the same in binary mode (a COMP field routinely
+contains 0x0A, which a text-mode read would translate).
+
+Per storage class, each the exact inverse of `encoding.py`'s encoder and
+dispatched on the same `USAGE`-then-category ladder:
+
+| Storage | Read back as |
+|---|---|
+| DISPLAY text | the charset's characters (ASCII decoded as **latin-1**, so a byte the encoder could not have written is still shown), trailing spaces/NULs stripped |
+| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE` |
+| `COMP-3` | two BCD nibbles per byte, sign in the final low nibble |
+| `COMP`/`COMP-4`/`COMP-5` | two's-complement, big-endian except COMP-5 which follows `EncodingOptions.endian` |
+| `COMP-1`/`COMP-2` | IEEE 754, rendered to 7 / 15 significant digits |
+| `INDEX`/`POINTER` | **hex** (`0x00000007`) — a compiler-managed occurrence number and an address mean nothing in a file another run wrote |
+
+**Numbers render exactly as `ValueFactory._format_number` renders them** (no
+leading zeros, the field's own `decimal_digits` places, a leading `-` only on
+a non-zero negative) — `_render_number()` exists solely to keep that
+equality, which is what makes `decode(encode(row)) == row` a property the
+suite can assert rather than a hope. Two columns are exempt **by
+construction**: a float comes back in shortest form (`2675.6950` reads as
+`2675.695`), and `FILLER` comes back empty because `encode_field()`
+deliberately writes spaces there rather than the generated cell.
+
+**Sign conventions are read more widely than they are written.** The encoder
+writes one convention per charset; real files carry several, so `_zoned_digit`
+accepts every EBCDIC sign nibble (`A`/`C`/`E`/`F` positive, `B`/`D`
+negative), GnuCOBOL's ASCII zone (0x70), *and* the `{ABC…`/`}JKL…`
+overpunches an EBCDIC file picks up when a transfer transcodes it. That last
+one is deliberately never *written* by `encoding.py` (no compiler here to
+verify it against) but a decoder that choked on it would be useless on half
+the files in the wild. A sign is only honoured **in the position the encoder
+would have put one** — a `D` zone mid-field is a corrupt digit, not a
+negative number, and calling it a sign would flip a value that is merely
+unreadable.
+
+**Bad bytes are reported, not zeroed.** `DecodedField.error` names the
+problem and the value is best-effort; `DecodedRecord.errors` and
+`DecodeResult.error_count` roll them up. A copybook applied to the wrong file
+shows up as a wall of these, which is the single most useful thing the
+module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
+
+### Framing, and the two things that decide it
+
+* **Framing always uses the `base` view**, whichever view the caller reads
+  through: where a record ends is a property of the *file*, not of the
+  overlay somebody chose. A 200-byte record read through a 20-byte
+  redefinition is still 200 bytes; framing on the overlay would walk the
+  file at the wrong stride.
+* **`trim_tables` is decided by the record format, not by the counter.**
+  Under `RecordFormat.FIXED` an ODO table reserves all of its occurrences
+  whatever the counter says, so trimming would skip bytes that *are* in the
+  record and mis-align every field after the table. `decode_bytes` resolves
+  the format once from the base view and passes `trim_tables=fmt.is_variable`
+  to `decode_record`. (This was a real bug caught by the round-trip test:
+  fixed-format records decoded with trimming on produced silent garbage from
+  the table onward.)
+
+| Format | How the next record is found |
+|---|---|
+| `FIXED` | `record_length` override, else `base.length` |
+| `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
+| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. With a `record_separator` set, split on that instead |
+
+`EncodingOptions.record_separator` is consumed after each record when it is
+actually there. Fields past the end of a short record come back
+`present=False` (the column stays, so a table has the same shape for every
+row); a record cut mid-field comes back `truncated=True`, decoded from what
+was there. Bytes left after the last whole record are `DecodeResult.trailing`
+— never dropped silently, because a tail that is not a whole record almost
+always means the record length is wrong. `max_records`/`skip` page a large
+file, and a run stopped by `max_records` reports `trailing == b""` rather
+than calling the rest of the file a broken tail.
+
+### Output shapes
+
+* `DecodeResult.to_csv()` — the exact inverse of `GeneratedDataset.to_csv()`:
+  same column names, same value rendering, same `"\n"` terminator. The CLI
+  test asserts `gen-data | decode` reproduces the generated CSV byte for byte.
+* `DecodeResult.to_dict()` — every field's `offset`, `length`, `hex`,
+  `present`, `truncated`, `error`. This is what a UI hex pane binds to.
+* `decoded_hex_dump(result, opts)` — the same shape `encoding.hex_dump()`
+  produces for a generated record, built from bytes somebody else wrote:
+  every line ties an offset and a length to the field that owns those bytes
+  and to the value read out of them, with `! field: error` lines under the
+  bad ones.
+
+### `select_record()` (`data/copybook.py`)
+
+`CopybookDataGenerator._select_record` moved to a module-level
+`select_record(records, record, filename)` and the method now delegates to
+it. Both halves of the package need it and they need it to *agree*:
+generating from `--record CUST-REC` and decoding through `--record CUST-REC`
+must land on the same 01, or a round trip through the record image silently
+changes layout.
 
 
 ## Fixed- and variable-length records (`RecordFormat`)

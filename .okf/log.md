@@ -1,5 +1,99 @@
 # OKF Update Log
 
+## 2026-09-07 — the decoder direction, and DCLGEN cross-checking
+
+Request: the "data and records" gap — this package could *encode* a record
+image and could not read one back, which is backwards from what anyone
+actually has. People have a file: a VSAM extract, an EBCDIC flat file, a tape
+image someone FTP'd off z/OS. None of them self-describing; all of them keyed
+only by the copybook compiled against them. Plus the DCLGEN check that was
+sitting one function call away from already-parsed data on both sides.
+
+### `generators/data/decoding.py` + `generators/data/views.py`
+
+The inverse of `encoding.py`, backing `cobol-parser decode`. Four decisions
+worth keeping:
+
+**Offsets come from the encoder's own arithmetic, not a second model.** A
+`RecordView`'s field offsets are a running sum of `FieldSpec.storage_size` —
+exactly what `encode_record()` does implicitly when it concatenates. Any
+other derivation could drift; this one cannot, and
+`test_base_offsets_match_the_encoded_record` checks it against real encoded
+bytes rather than a hand-written offset table.
+
+**REDEFINES became a first-class *view* rather than a flag.** A generator can
+duck the question (it picks one reading and writes it); a decoder cannot,
+because only the program knows which meaning applies to the record in front
+of you. So `build_record_views()` returns the base layout plus one
+`RecordView` per redefinition, each rooted at the offset of the item it
+redefines, and switching overlay is a re-read of the same bytes rather than a
+re-parse of the copybook. `flatten_record(..., ignore_root_redefines=True)`
+is what makes an overlay flattenable at all; only the *root's* own clause is
+exempted, so a nested REDEFINES still excludes its fields and a view stays a
+contiguous run of bytes.
+
+**Framing is a property of the file; trimming is a property of the format.**
+Two bugs found in development, both by the round-trip test rather than by
+inspection:
+* Framing off the *chosen* view walks the file at the wrong stride — a
+  200-byte record read through a 20-byte redefinition is still 200 bytes.
+  Framing now always uses the base view.
+* Applying `OCCURS DEPENDING ON` trimming under `RecordFormat.FIXED`
+  produces silent garbage from the table onward: RECFM=F reserves every
+  occurrence whatever the counter says, so trimming skips bytes that *are*
+  in the record. `decode_bytes` resolves the format once and passes
+  `trim_tables=fmt.is_variable`.
+
+**Read more conventions than you write; report what you cannot read.** The
+encoder writes one sign convention per charset because there was one compiler
+to verify against. The decoder accepts every EBCDIC sign nibble, GnuCOBOL's
+ASCII zone, *and* the `{ABC`/`}JKL` overpunches a transcoded EBCDIC file
+carries — a decoder that choked on those would be useless on half the files
+in the wild. But a sign is only honoured in the position the encoder would
+have put one: a `D` zone mid-field is a corrupt digit, not a negative number,
+and calling it a sign would flip a value that is merely unreadable. Bytes
+that are not what the PICTURE says get `DecodedField.error` and a best-effort
+value, never a silent zero — a copybook applied to the wrong file then shows
+up as a wall of errors, which is the single most useful thing the module can
+tell you.
+
+The round trip is the load-bearing test: `encoding.py`'s expected bytes are
+ground truth from GnuCOBOL, so a decoder that reproduces the generated CSV
+from those bytes is verified against a real compiler at one remove. Two
+columns are exempt by construction and the docstring says why (a float comes
+back in shortest form; `FILLER` comes back empty because the encoder
+deliberately discards it).
+
+### `analysis/dclgen_check.py`
+
+`DclgenChecker` — every `:host-var` graded against the DCLGEN `DECLARE TABLE`
+column of its name, backing `cobol-parser dclgen-check` and lint's
+`dclgen-check` rule. It resolves nothing itself: `HostVariableResolver`
+already pairs a host variable with its DATA DIVISION item, and
+`DeclareTableStatement.columns` already carries the DB2 side with
+`db2_type_to_cobol_pic()` applied, so the checker only says whether a pair
+agrees — and a fix to the type mapping fixes the check too.
+
+**The name normalization is the whole feature.** DB2 columns are underscored
+(`CUST_ID`); the host variables DCLGEN generates are hyphenated (`CUST-ID`),
+because `_` is not a COBOL data-name character. The first draft reused
+`HostVariableResolver`'s own verbatim column index and reported that *no*
+column matched *any* host variable — i.e. it checked nothing while looking
+like it had, on a program with five real mismatches in it. Fixed with
+`_normalize()` in the checker rather than by changing the resolver's
+semantics under its other consumers, and pinned by
+`test_an_underscored_column_is_matched_to_its_hyphenated_host_variable`.
+
+Severity is graded by what the mismatch costs at runtime, not by how easy it
+is to detect: a dropped decimal place (`DECIMAL(9,2)` into `PIC S9(7)V9`) is
+an error because every row is silently rescaled with no status code; an
+over-long host variable is *info* because it only wastes space. A `category`
+finding stands alone — every later check would be comparing digits against
+characters, so four confusing restatements are suppressed. What the checker
+cannot compare it says so about per variable (`report.unchecked`: no
+DECLARE TABLE, a VARCHAR group binding, an opaque type), so a quiet report is
+never mistaken for a checked one.
+
 ## 2026-09-07 — `lint`: every analyzer in one pass, as one list
 
 Request: "more features to help devs". The gap this closes is not a missing

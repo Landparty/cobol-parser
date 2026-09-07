@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 22 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
+description: 23 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
 timestamp: 2026-09-04T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 22 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 23 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -847,7 +847,8 @@ lint output with no change here.
 
 **Rule ids are the analyzer subcommand names** (`dead-code`,
 `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
-`recursion-check`, `complexity`) rather than a second private vocabulary, so
+`recursion-check`, `complexity`, `dclgen-check`) rather than a second private
+vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
 analyzer. A rule selection is deduplicated and normalized to `RULES` order, so
 flag ordering cannot change the report.
@@ -1092,6 +1093,83 @@ resolved = HostVariableResolver().resolve(ast)   # note: .resolve(), not .analyz
 
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
 definitions.
+
+**Name matching is verbatim.** `_column_index` keys DCLGEN columns by their
+own upper-cased name, so `CUST_ID` and the host variable `CUST-ID` DCLGEN
+generates for it do *not* pair up here. `DclgenChecker` (below) does that
+normalization itself rather than changing this resolver's semantics under its
+other consumers.
+
+## DclgenChecker (`dclgen_check.py`, 2026-09-07)
+
+```python
+from cobolparser.analysis import DclgenChecker
+report: DclgenReport = DclgenChecker().check(ast)   # note: .check(), not .analyze()
+# report.violations: list[DclgenViolation]  (kind/severity/host_variable/column/table/
+#                                            expected_picture/expected_usage/
+#                                            actual_picture/actual_usage/location)
+# report.checked / .unchecked / .tables / .ambiguous_columns
+# report.has_violations / .worst_severity() / .to_dict()
+```
+
+Cross-checks every `:host-var` against the DCLGEN `DECLARE TABLE` column of
+its name. Backs `cobol-parser dclgen-check` and the `dclgen-check` lint rule.
+
+**Why it is nearly free:** both halves are already parsed.
+`HostVariableResolver` pairs a host variable with its DATA DIVISION item;
+`DeclareTableStatement.columns` carries the DB2 side with
+`db2_type_to_cobol_pic()` / `db2_type_to_cobol_usage()` already applied. The
+checker resolves nothing itself — it only says whether a pair agrees — so a
+fix to the type mapping fixes the check too.
+
+**The name normalization is load-bearing.** DB2 columns are underscored
+(`CUST_ID`); the host variables DCLGEN generates are hyphenated (`CUST-ID`),
+because `_` is not a COBOL data-name character. `_normalize()` (`_` -> `-`,
+upper-cased) is applied to both sides via `_column_index()`. Without it the
+checker reports that no column matches *any* host variable — i.e. it checks
+nothing while looking like it had. That was the first bug found in
+development, and `test_an_underscored_column_is_matched_to_its_hyphenated_host_variable`
+pins it.
+
+| kind | severity | what it costs at runtime |
+|------|----------|--------------------------|
+| `category` | error | CHAR column into a numeric item (or the reverse); the binding does not mean what it says |
+| `scale` | error | `DECIMAL(9,2)` into `PIC S9(7)V9` — the cents are silently rounded away on every fetch, and no status code says so |
+| `precision` | error | too few integer digits; SQLCODE -304, but only once a row actually exceeds it |
+| `length` | error / info | `CHAR(30)` into `PIC X(20)` truncates every fetch (error); the reverse only wastes space (info) |
+| `usage` | warning | DISPLAY where DCLGEN generates COMP-3; DB2 converts every row rather than moving it |
+| `sign` | warning | unsigned host variable; a negative value arrives as its absolute value |
+| `null-indicator` | warning | nullable column with no indicator variable; SQLCODE -305 the first time the column is actually null |
+
+**A `category` finding stands alone.** Every later check would be comparing
+digits against characters, so `_compare` returns immediately after one rather
+than dragging four confusing restatements along with it.
+
+**Indicator pairing is program-wide, and read off the statement text.**
+`ExecSQLStatement` keeps the indicator *names* but not which variable each
+belongs to, so `_INDICATOR_RE` re-scans `sql_text` for both forms
+(`:VAR:IND` and `:VAR INDICATOR :IND`). The whitespace between name and
+separator is matched **once, before the alternation** — putting it inside the
+`INDICATOR` branch leaves that branch with no space left to match, which is
+exactly the bug the first draft had. Program-wide rather than per-statement:
+a variable given an indicator on its FETCH and not on its SELECT INTO is a
+different (and much rarer) bug than never having one, and flagging the second
+statement would bury the finding that matters.
+
+**What it declines to check, and says so.** `report.unchecked` is
+`name: reason` for every host variable that could not be compared — no
+DECLARE TABLE names a column of that name, the program has no DECLARE TABLE
+at all, `VARCHAR`/`CLOB` (which bind to a *group* item: a length halfword
+plus the text, so one elementary PICTURE is the wrong thing to compare), or
+a type with no COBOL PICTURE (`BLOB`, `XML`, ...). A clean report is never
+mistaken for a checked one. `ambiguous_columns` names a column two tables
+both declare; the first declaration wins the comparison, matching
+`HostVariableResolver`'s own rule, and the collision is stated rather than
+assumed away.
+
+The lint rule folds `unchecked` and `ambiguous_columns` into
+`LintReport.caveats` (one line with a count, not one finding per variable)
+rather than emitting findings for them.
 
 ## BoundaryInventoryAnalyzer
 
@@ -1675,6 +1753,7 @@ programs without sections is unchanged. Pinned by
 | `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
 | `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
 | `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
+| `dclgen_check.py` | `DclgenChecker` — DCLGEN `DECLARE TABLE` vs. host-variable types |
 | `unused_variables.py` | `UnusedVariableAnalyzer` |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` |
 | `complexity.py` | `ComplexityAnalyzer` |

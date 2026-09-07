@@ -20,6 +20,8 @@ _SUBCOMMANDS = frozenset(
         "expand",
         "gen-data",
         "gen-fixtures",
+        "decode",
+        "dclgen-check",
         "analyze",
         "lint",
         "dead-code",
@@ -277,6 +279,23 @@ def _text_out(text: str, output_path: str | None = None) -> None:
             _fail(f"Cannot write output file: {e}")
     else:
         print(text)
+
+
+def _verbatim_out(text: str, output_path: str | None = None) -> None:
+    """Write *text* to *output_path* or stdout with nothing added.
+
+    Unlike :func:`_text_out`, which appends a newline: CSV and hex-dump
+    output already ends in one, and a second would make ``> out.csv`` and
+    ``-o out.csv`` produce different bytes for the same run.
+    """
+    if output_path:
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as e:
+            _fail(f"Cannot write output file: {e}")
+    else:
+        print(text, end="")
 
 
 # -- Subcommand: parse -------------------------------------------------------
@@ -1190,6 +1209,233 @@ def _record_length_notes(dataset: Any, opts: Any) -> list[str]:
     return notes
 
 
+def _build_decode_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "decode",
+        help="Decode a record image / EBCDIC flat file through a copybook layout",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser decode CUSTOMER.DAT --copybook CUSTOMER.cpy "
+            "--charset ebcdic\n"
+            "  cobol-parser decode ORDER.VB --copybook ORDER.cpy "
+            "--record-format variable --format hex\n"
+            "  cobol-parser decode CUSTOMER.DAT --copybook CUSTOMER.cpy "
+            "--list-views\n"
+            "  cobol-parser decode CUSTOMER.DAT --copybook CUSTOMER.cpy "
+            "--view ADDR-OVERSEAS --max-records 20"
+        ),
+    )
+    p.add_argument("file", help="Path to the data file (record images)")
+    p.add_argument(
+        "--copybook",
+        "-c",
+        required=True,
+        metavar="FILE",
+        help="Copybook (or COBOL program) whose record layout describes the data",
+    )
+    p.add_argument(
+        "--record",
+        default=None,
+        metavar="NAME",
+        help="Level-01 record in the copybook to decode through (default: the first)",
+    )
+    p.add_argument(
+        "--view",
+        default=None,
+        metavar="NAME",
+        help=(
+            "REDEFINES overlay to read the bytes through, by its own name or "
+            "its qualified path (default: the record as declared)"
+        ),
+    )
+    p.add_argument(
+        "--list-views",
+        action="store_true",
+        help=(
+            "List the record's layout and every REDEFINES overlay of it, with "
+            "byte offsets, and exit without reading the data file"
+        ),
+    )
+    p.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["csv", "json", "hex"],
+        default="csv",
+        help=(
+            "csv (default) is one row per record; json adds every field's "
+            "offset, length and raw bytes; hex is a byte pane whose lines are "
+            "the field boundaries"
+        ),
+    )
+    p.add_argument(
+        "--charset",
+        choices=["ascii", "ebcdic"],
+        default="ascii",
+        help="Encoding of the file's DISPLAY bytes (default: ascii)",
+    )
+    p.add_argument(
+        "--endian",
+        choices=["auto", "big", "little", "native"],
+        default="auto",
+        help=(
+            "Byte order for COMP-5 and COMP-1/COMP-2 (default: auto -- "
+            "big-endian for --charset ebcdic, host order otherwise). "
+            "COMP/COMP-4 are always big-endian"
+        ),
+    )
+    p.add_argument(
+        "--record-format",
+        choices=["fixed", "variable", "variable-bare", "auto"],
+        default=None,
+        help=(
+            "How the file frames its records: fixed (default) cuts every "
+            "record at the layout's length, as RECFM=F/FB writes them; "
+            "variable reads the 4-byte RDW in front of each record, as "
+            "RECFM=V/VB writes it; variable-bare has no RDW and is framed by "
+            "the layout's own OCCURS DEPENDING ON counters; auto picks "
+            "variable when the layout has a DEPENDING ON table"
+        ),
+    )
+    p.add_argument(
+        "--record-length",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "LRECL to cut fixed-length records at, when the file's records "
+            "are longer than the copybook describes (trailing slack, or a "
+            "copybook covering only a prefix)"
+        ),
+    )
+    p.add_argument(
+        "--record-separator",
+        choices=["none", "newline"],
+        default="none",
+        help="Bytes separating records in the file (default: none)",
+    )
+    p.add_argument(
+        "--max-records",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Decode at most N records (default: all of them)",
+    )
+    p.add_argument(
+        "--skip",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Skip the first N records before decoding (default: 0)",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Exit 1 when any field failed to decode or the file had trailing "
+            "bytes -- the copybook probably does not match the data"
+        ),
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_decode)
+
+
+def _decode_encoding_options(args: argparse.Namespace) -> Any:
+    """The EncodingOptions a data file is read back through."""
+    from ..generators.data.encoding import (
+        Charset,
+        EncodingOptions,
+        Endian,
+        RecordFormat,
+    )
+
+    return EncodingOptions(
+        charset=Charset(args.charset),
+        endian=Endian(args.endian),
+        record_separator=b"\n" if args.record_separator == "newline" else b"",
+        record_format=RecordFormat(args.record_format or "fixed"),
+    )
+
+
+def _cmd_decode(args: argparse.Namespace) -> None:
+    from ..generators.data.decoding import (
+        RecordDecoder,
+        RecordDecodingError,
+        decoded_hex_dump,
+    )
+    from ..generators.data.errors import CopybookLayoutError
+
+    encoding = _decode_encoding_options(args)
+    try:
+        decoder = RecordDecoder.from_copybook_file(
+            args.copybook,
+            record=args.record,
+            opts=encoding,
+            record_length=args.record_length,
+        )
+    except CopybookLayoutError as exc:
+        _fail(str(exc))
+    except OSError as exc:
+        _fail(f"Cannot read copybook: {exc}")
+
+    output_path = getattr(args, "output", None)
+
+    if args.list_views:
+        _json_out(
+            {"copybook": args.copybook, **decoder.views.to_dict()},
+            args.compact,
+            output_path,
+        )
+        return
+
+    try:
+        result = decoder.decode_file(
+            args.file,
+            view=args.view,
+            max_records=args.max_records,
+            skip=args.skip,
+        )
+    except RecordDecodingError as exc:
+        _fail(str(exc))
+    except OSError as exc:
+        _fail(f"Cannot read data file: {exc}")
+
+    for caveat in result.caveats:
+        print(f"note: {caveat}", file=sys.stderr)
+    if result.trailing:
+        # Never silent: a tail that is not a whole record almost always means
+        # the record length is wrong, and a table of plausible rows above it
+        # is exactly how that goes unnoticed.
+        print(
+            f"warning: {len(result.trailing)} trailing bytes are not a whole "
+            f"record -- check --record-length / --record-format",
+            file=sys.stderr,
+        )
+    if result.error_count:
+        print(
+            f"warning: {result.error_count} field(s) did not decode cleanly "
+            "-- run with --format json or hex to see which",
+            file=sys.stderr,
+        )
+
+    if args.output_format == "json":
+        _json_out(
+            {"data_file": args.file, "copybook": args.copybook, **result.to_dict()},
+            args.compact,
+            output_path,
+        )
+    elif args.output_format == "hex":
+        _verbatim_out(decoded_hex_dump(result, encoding), output_path)
+    else:
+        _verbatim_out(result.to_csv(), output_path)
+
+    if args.strict and (result.error_count or result.trailing):
+        sys.exit(1)
+
+
 def _build_gen_fixtures_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
@@ -1973,6 +2219,14 @@ def _cmd_lint(args: argparse.Namespace) -> None:
 # -- Subcommand: data-items ----------------------------------------------------
 
 
+def _cmd_dclgen_check(args: argparse.Namespace) -> None:
+    from ..analysis.dclgen_check import DclgenChecker
+
+    ast, prof = _parse_or_fail(args)
+    report = DclgenChecker().check(ast)
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
 def _cmd_data_items(args: argparse.Namespace) -> None:
     from ..generators.data.layout_offsets import compute_program_data_items
 
@@ -2105,6 +2359,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_preprocess_parser(subparsers)
     _build_expand_parser(subparsers)
     _build_gen_data_parser(subparsers)
+    _build_decode_parser(subparsers)
     _build_gen_fixtures_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
@@ -2184,6 +2439,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "Extract IMS DLI segment references from CBLTDLI/AIBTDLI/CEETDLI calls",
         _cmd_ims_dli,
         examples="  cobol-parser ims-dli program.cbl",
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "dclgen-check",
+        "Cross-check EXEC SQL host variables against the DCLGEN DECLARE TABLE "
+        "columns they bind to (type, scale, precision, length, sign, null "
+        "indicator)",
+        _cmd_dclgen_check,
+        profiling=True,
+        examples="  cobol-parser dclgen-check program.cbl",
     )
     _build_lint_parser(subparsers)
     _build_analyzer_parser(

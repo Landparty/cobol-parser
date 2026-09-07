@@ -448,7 +448,7 @@ one subcommand (and one re-parse) per concern.
 `--rule` (repeatable) selects rules; the ids are deliberately the analyzer
 subcommand names themselves: `dead-code`, `unused-variables`,
 `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`,
-`complexity`. Argparse `choices` rejects an unknown id, so a typo can never
+`complexity`, `dclgen-check`. Argparse `choices` rejects an unknown id, so a typo can never
 read as "that rule found nothing". Ordering and duplicates in the flags do not
 affect the report — the selection is normalized to the canonical rule order.
 
@@ -549,6 +549,67 @@ Registered the same way as `dead-code`/`io-sequence` (via
 `_build_analyzer_parser(..., profiling=True)`), so it also accepts the
 shared profiling flags. Added 2026-08-14 (Task 9 of the data-item-layout
 plan) as the final wiring step for Tasks 1-8's `layout_offsets.py` module.
+
+## Decode
+
+```bash
+cobol-parser decode <data-file> --copybook <FILE.cpy> \
+    [--record NAME] [--view NAME] [--list-views] \
+    [--format csv|json|hex] [--charset ascii|ebcdic] \
+    [--endian auto|big|little|native] \
+    [--record-format fixed|variable|variable-bare|auto] \
+    [--record-length N] [--record-separator none|newline] \
+    [--max-records N] [--skip N] [--strict] [--compact] [-o OUT]
+```
+
+The inverse of `gen-data --format record`: **bytes somebody else wrote, plus
+a copybook, back into a table.** A VSAM extract, an EBCDIC flat file, a tape
+image — none of them self-describing, all of them keyed only by the copybook
+compiled against them. Implementation:
+`generators/data/decoding.py` + `generators/data/views.py`, documented in
+[generators.md](generators.md)'s "Record views and decoding".
+
+* Two required inputs, in the order they read: the **data file** is
+  positional, the **copybook** is `--copybook`. `--record` picks the 01 when
+  the copybook holds several, through the same `select_record()` `gen-data`
+  uses, so both halves land on the same layout.
+* **`--view`** reads the same bytes through a `REDEFINES` overlay, by the
+  redefining item's own short name (`ADDR-OVERSEAS`) or its qualified path
+  (`CUST-REC.ADDR-OVERSEAS`). **`--list-views`** prints the layout and every
+  overlay with byte offsets and exits *without touching the data file* —
+  which is also how you find out what `--view` will accept.
+* **`--format`**: `csv` (default) is one row per record, byte-identical to
+  what `gen-data` would have written for the same layout; `json` adds every
+  field's offset, length, raw hex, `present`/`truncated`/`error`; `hex` is a
+  byte pane whose lines are the field boundaries, with `! field: error` under
+  the bad ones.
+* **`--charset`/`--endian`/`--record-format`/`--record-separator`** mean
+  exactly what they mean on `gen-data`, and are the same `EncodingOptions`.
+  `--record-length` is decode-only: an LRECL to cut fixed-length records at
+  when the file's records are longer than the copybook describes (trailing
+  slack, or a copybook covering only a prefix).
+* **`--max-records`/`--skip`** page a large file. A run stopped by
+  `--max-records` does *not* report the rest of the file as trailing bytes.
+* **stderr is never silent about a mismatch**: every caveat, a count of
+  fields that did not decode cleanly, and any trailing bytes that are not a
+  whole record (which nearly always means the record length is wrong).
+  **`--strict`** turns either of the last two into exit 1 — the CI form of
+  "does this copybook actually describe this file?".
+
+## Dclgen-Check
+
+```bash
+cobol-parser dclgen-check <file.cbl> [--profile ...]
+```
+
+Runs `DclgenChecker().check(ast)` (see [analysis.md](analysis.md)) and
+reports `{"violation_count", "checked_count", "unchecked_count",
+"worst_severity", "tables", "violations", "checked", "unchecked",
+"ambiguous_columns"}` — every `:host-var` graded against the DCLGEN
+`DECLARE TABLE` column of its name, for scale, precision, length, category,
+usage, sign, and missing null indicators. Registered via
+`_build_analyzer_parser(..., profiling=True)` like the other analyzer
+subcommands, and also available as the `dclgen-check` rule of `lint`.
 
 # See Also
 

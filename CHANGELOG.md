@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **generators/cli:** `cobol-parser decode` reads a **record image file back
+  through a copybook** -- the inverse of `gen-data --format record`, and the
+  half people actually have a file for. A VSAM extract, an EBCDIC flat file,
+  a tape image someone FTP'd off z/OS: bytes with no self-description
+  whatsoever, whose only key is the copybook that was compiled against them.
+  Point the two at each other and you get a table.
+  * New `cobolparser/generators/data/decoding.py`: `RecordDecoder`
+    (`from_copybook_file`/`from_copybook_source`/`from_record`,
+    `decode_bytes`/`decode_file`), `decode_field()` / `decode_record()`,
+    `DecodedField` / `DecodedRecord` / `DecodeResult`, `decoded_hex_dump()`.
+    Reads COMP-3 packed nibbles, COMP/COMP-4 big-endian binary, COMP-5 and
+    the floats in the configured order, and zoned DISPLAY with the sign
+    overpunched or `SIGN IS SEPARATE`, each through the same
+    `storage.storage_size()` width the encoder used -- so
+    `decode(encode(row)) == row`, checked against the generator cell for cell
+    and CSV for CSV.
+  * New `cobolparser/generators/data/views.py`: `build_record_views()`,
+    `RecordViews` / `RecordView` / `PlacedField` -- the offset-annotated byte
+    map, with **one view per `REDEFINES`** so an overlay can be switched
+    without re-parsing the copybook (`decode --view`, `decode --list-views`).
+    Offsets are a running sum of the same field widths `encode_record()`
+    concatenates, so a decoded offset and an encoded byte position cannot
+    drift apart.
+  * Sign conventions are read more widely than they are written: every EBCDIC
+    sign nibble (`A`/`C`/`E`/`F` positive, `B`/`D` negative), GnuCOBOL's
+    ASCII zone, and the `{ABC`/`}JKL` overpunches an EBCDIC file picks up
+    when a transfer transcodes it to ASCII.
+  * Bytes that are not what the PICTURE says are **reported, not zeroed**
+    (`DecodedField.error`, `DecodeResult.error_count`), as are trailing bytes
+    that are not a whole record. `decode --strict` turns either into exit 1 --
+    the CI form of "does this copybook actually describe this file?".
+  * `--format hex` is a byte pane whose lines are the field boundaries;
+    `--format json` carries every field's offset, length and raw bytes;
+    `--max-records`/`--skip` page a large file; `--record-length` handles a
+    file whose records carry trailing slack.
+* **analysis/cli:** `cobol-parser dclgen-check` cross-checks every EXEC SQL
+  host variable against the DCLGEN `DECLARE TABLE` column it binds to, and
+  the same check is available as the `dclgen-check` rule of `lint`. New
+  `cobolparser/analysis/dclgen_check.py` (`DclgenChecker`, `DclgenReport`,
+  `DclgenViolation`), exported from `cobolparser` and
+  `cobolparser.analysis`. Catches the mismatches a DB2 precompiler accepts
+  and a runtime quietly acts on: a `DECIMAL(9,2)` column fetched into
+  `PIC S9(7)V9` (the cents silently rounded away on every row), a `CHAR(30)`
+  column truncated into `PIC X(20)`, too few integer digits for the column's
+  range (SQLCODE -304, but only once a row exceeds it), a character column
+  bound to a numeric item, an unsigned host variable for a signed column, and
+  a nullable column fetched with no indicator variable (SQLCODE -305). What
+  it cannot check it says so about, per variable, so a quiet report is never
+  mistaken for a checked one.
+
+
 * **analysis/cli:** `cobol-parser lint` runs several analyzers over a **single**
   parse and reports everything they found as one severity-graded list --
   previously "what is wrong with this program?" meant seven subcommands, seven
@@ -165,6 +216,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **generators:** `flatten_record()` takes `ignore_root_redefines=` (default
+  `False`, so nothing existing changes). A record that itself carries
+  `REDEFINES` ordinarily flattens to nothing -- right for generation, useless
+  for decoding, where a redefinition is exactly the layout being asked for.
+  Only the root's own clause is exempted; a `REDEFINES` nested inside the
+  subtree is still excluded, so the result stays a contiguous run of bytes.
+* **generators:** `CopybookDataGenerator._select_record` is now the
+  module-level `select_record()` in `generators/data/copybook.py` (the method
+  delegates to it and is unchanged for existing callers). Both halves of the
+  package need it and they need it to agree: generating from
+  `--record CUST-REC` and decoding through `--record CUST-REC` must land on
+  the same 01, or a round trip through the record image silently changes
+  layout.
 * **analysis/generators:** scenario planning is now path-sensitive over the
   syntactic enclosing chain. `BranchConstraints.enclosing` records the
   `(branch_id, arm_id)` chain whose arms must all be taken for a decision

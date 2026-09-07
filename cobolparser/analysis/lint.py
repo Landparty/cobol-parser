@@ -66,6 +66,7 @@ RULES: tuple[str, ...] = (
     "linkage-check",
     "recursion-check",
     "complexity",
+    "dclgen-check",
 )
 
 _RULE_ORDER: dict[str, int] = {name: order for order, name in enumerate(RULES)}
@@ -350,6 +351,7 @@ class LintAnalyzer:
                 ast, self._flow(ast, flow_report)
             ),
             "complexity": lambda: self._complexity(ast, self._flow(ast, flow_report)),
+            "dclgen-check": lambda: self._dclgen_check(ast, report),
         }
 
         for rule in self._rules:
@@ -543,3 +545,34 @@ class LintAnalyzer:
                 )
             )
         return findings
+
+    def _dclgen_check(self, ast: CobolProgram, report: LintReport) -> list[LintFinding]:
+        from .dclgen_check import DclgenChecker
+
+        result = DclgenChecker().check(ast)
+        # A host variable no DECLARE TABLE speaks for is not a clean one: the
+        # DCLGEN block may simply not have been COPY'd into this compile.
+        # Said once, with a count, rather than as a finding per variable.
+        if result.unchecked:
+            report.caveats.append(
+                f"dclgen-check: {len(result.unchecked)} host variable(s) could "
+                "not be checked against a DECLARE TABLE column -- run "
+                "`cobol-parser dclgen-check` for the reason per variable"
+            )
+        for column, tables in sorted(result.ambiguous_columns.items()):
+            report.caveats.append(
+                f"dclgen-check: column {column} is declared by "
+                f"{', '.join(sorted(tables))}; host variables of that name "
+                "were checked against the first"
+            )
+        return [
+            LintFinding(
+                rule="dclgen-check",
+                severity=violation.severity,
+                message=violation.message,
+                location=violation.location,
+                symbol=violation.host_variable,
+                kind=violation.kind,
+            )
+            for violation in result.violations
+        ]

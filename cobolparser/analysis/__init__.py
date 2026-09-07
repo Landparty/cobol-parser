@@ -289,6 +289,15 @@ def __getattr__(name: str) -> object:
             "OffenderProcedure": OffenderProcedure,
         }
         return _map[name]
+    if name in ("DclgenChecker", "DclgenReport", "DclgenViolation"):
+        from .dclgen_check import DclgenChecker, DclgenReport, DclgenViolation
+
+        _map = {
+            "DclgenChecker": DclgenChecker,
+            "DclgenReport": DclgenReport,
+            "DclgenViolation": DclgenViolation,
+        }
+        return _map[name]
     if name in ("LintAnalyzer", "LintReport", "LintFinding"):
         # RULES/SEVERITIES are deliberately not re-exported here: this
         # __getattr__ hands back classes, and the two rule/severity
@@ -307,6 +316,9 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "CRUDFlags",
+    "DclgenChecker",
+    "DclgenReport",
+    "DclgenViolation",
     "LintAnalyzer",
     "LintReport",
     "LintFinding",
