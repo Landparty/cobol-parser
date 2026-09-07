@@ -553,7 +553,7 @@ plan) as the final wiring step for Tasks 1-8's `layout_offsets.py` module.
 ## Decode
 
 ```bash
-cobol-parser decode <data-file> --copybook <FILE.cpy> \
+cobol-parser decode [data-file] --copybook <FILE.cpy> \
     [--record NAME] [--view NAME] [--list-views] \
     [--format csv|json|hex] [--charset ascii|ebcdic] \
     [--endian auto|big|little|native] \
@@ -569,14 +569,16 @@ compiled against them. Implementation:
 `generators/data/decoding.py` + `generators/data/views.py`, documented in
 [generators.md](generators.md)'s "Record views and decoding".
 
-* Two required inputs, in the order they read: the **data file** is
-  positional, the **copybook** is `--copybook`. `--record` picks the 01 when
+* Two inputs, in the order they read: the **data file** is positional, the
+  **copybook** is `--copybook`. The data file is optional only with
+  `--list-views`, which reads nothing but the copybook; without it, omitting
+  the data file is an error rather than an empty decode. `--record` picks the 01 when
   the copybook holds several, through the same `select_record()` `gen-data`
   uses, so both halves land on the same layout.
 * **`--view`** reads the same bytes through a `REDEFINES` overlay, by the
   redefining item's own short name (`ADDR-OVERSEAS`) or its qualified path
   (`CUST-REC.ADDR-OVERSEAS`). **`--list-views`** prints the layout and every
-  overlay with byte offsets and exits *without touching the data file* —
+  overlay with byte offsets and exits *without needing a data file at all* —
   which is also how you find out what `--view` will accept.
 * **`--format`**: `csv` (default) is one row per record, byte-identical to
   what `gen-data` would have written for the same layout; `json` adds every

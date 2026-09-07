@@ -1228,7 +1228,15 @@ def _build_decode_parser(
             "--view ADDR-OVERSEAS --max-records 20"
         ),
     )
-    p.add_argument("file", help="Path to the data file (record images)")
+    p.add_argument(
+        "file",
+        nargs="?",
+        default=None,
+        help=(
+            "Path to the data file (record images). Optional with "
+            "--list-views, which only reads the copybook"
+        ),
+    )
     p.add_argument(
         "--copybook",
         "-c",
@@ -1384,12 +1392,18 @@ def _cmd_decode(args: argparse.Namespace) -> None:
     output_path = getattr(args, "output", None)
 
     if args.list_views:
+        # The layout alone, with no data file needed: this is what an editor
+        # asks for to draw a record map, and what a user runs to find out
+        # what --view will accept.
         _json_out(
             {"copybook": args.copybook, **decoder.views.to_dict()},
             args.compact,
             output_path,
         )
         return
+
+    if args.file is None:
+        _fail("decode needs a data file (or --list-views, which does not)")
 
     try:
         result = decoder.decode_file(

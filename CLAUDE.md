@@ -92,7 +92,7 @@ cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [--format csv|json|record|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-varying MIN:MAX] [--record-separator none|newline] [-o out.csv]
-cobol-parser decode <data-file> --copybook <file.cpy> [--record NAME] [--view NAME] [--list-views] [--format csv|json|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [--max-records N] [--skip N] [--strict] [-o out]
+cobol-parser decode [data-file] --copybook <file.cpy> [--record NAME] [--view NAME] [--list-views] [--format csv|json|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [--max-records N] [--skip N] [--strict] [-o out]
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR]
 cobol-parser dclgen-check <file.cbl>

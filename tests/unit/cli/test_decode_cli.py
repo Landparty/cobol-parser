@@ -118,18 +118,12 @@ def test_decode_switches_redefines_overlay(sample, capsys):
 
 
 def test_list_views_reports_offsets_without_reading_the_data(tmp_path, capsys):
+    """No data file at all -- this is what an editor asks for to draw a
+    record map, and what a user runs to find out what --view accepts."""
     copybook = tmp_path / "CUST.cpy"
     copybook.write_text(COPYBOOK, encoding="utf-8")
     capsys.readouterr()
-    _run(
-        [
-            "decode",
-            str(tmp_path / "does-not-exist.DAT"),
-            "--copybook",
-            str(copybook),
-            "--list-views",
-        ]
-    )
+    _run(["decode", "--copybook", str(copybook), "--list-views"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["record_name"] == "CUST-REC"
     assert [v["name"] for v in payload["views"]] == [
@@ -246,6 +240,15 @@ def test_strict_exits_non_zero_on_a_mismatched_file(sample, capsys, tmp_path):
             ]
         )
     assert excinfo.value.code == 1
+
+
+def test_decoding_without_a_data_file_fails_cleanly(tmp_path, capsys):
+    copybook = tmp_path / "CUST.cpy"
+    copybook.write_text(COPYBOOK, encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        _run(["decode", "--copybook", str(copybook)])
+    assert excinfo.value.code == 1
+    assert "needs a data file" in capsys.readouterr().err
 
 
 def test_an_unreadable_copybook_fails_cleanly(tmp_path, capsys):
