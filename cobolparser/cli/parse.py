@@ -44,6 +44,7 @@ _SUBCOMMANDS = frozenset(
         "codebase-graph",
         "copybook-impact",
         "sql-cics-check",
+        "jcl",
     }
 )
 
@@ -2679,6 +2680,102 @@ def _cmd_sql_cics_check(args: argparse.Namespace) -> None:
     _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: jcl ----------------------------------------------------------
+
+
+def _build_jcl_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "jcl",
+        help="Parse z/OS JCL: which program each step runs, and which dataset "
+        "each DD name is bound to",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser jcl JOB.jcl\n"
+            "  cobol-parser jcl JOB.jcl --dd-map\n"
+            "  cobol-parser jcl JOB.jcl --bindings\n"
+            "  cobol-parser jcl JOB.jcl --program INVUPDT\n"
+            "  cobol-parser jcl JOB.jcl --strict"
+        ),
+    )
+    p.add_argument("file", help="Path to the JCL file")
+    p.add_argument(
+        "--dd-map",
+        action="store_true",
+        help="Emit only the DD name -> datasets mapping, which is what a "
+        "COBOL SELECT ... ASSIGN TO ddname resolves through",
+    )
+    p.add_argument(
+        "--bindings",
+        action="store_true",
+        help="Emit one row per DD binding (ddname, dataset, step, job, DISP, "
+        "RECFM, LRECL) instead of the job structure",
+    )
+    p.add_argument(
+        "--program",
+        metavar="NAME",
+        help="Report only the steps that run this program",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 3 when any card could not be parsed (a CI gate, kept "
+        "distinct from exit 1, which still means the run itself failed)",
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_jcl)
+
+
+def _cmd_jcl(args: argparse.Namespace) -> None:
+    """Parse a JCL file.
+
+    The only subcommand that reads a language other than COBOL, so it shares
+    none of the COBOL parse flags -- there is no dialect, no source format
+    and no copybook path to honour. What it exists for is the join: a COBOL
+    ``SELECT INV-FILE ASSIGN TO INVFILE`` names a DD, and only the JCL says
+    which dataset that DD is.
+    """
+    from ..jcl import parse_jcl, resolve_dd_bindings
+
+    source = _read_source(args.file)
+    result = parse_jcl(source, filename=args.file)
+
+    payload: dict[str, Any]
+    if args.bindings:
+        bindings = resolve_dd_bindings(result)
+        if args.program:
+            wanted = {s.name for s in result.steps_running(args.program)}
+            bindings = [b for b in bindings if b.step in wanted]
+        payload = {"bindings": [b.to_dict() for b in bindings]}
+    elif args.dd_map:
+        payload = {"dd_map": result.dd_map()}
+    elif args.program:
+        payload = {
+            "program": args.program,
+            "steps": [s.to_dict() for s in result.steps_running(args.program)],
+        }
+    else:
+        payload = result.to_dict()
+
+    # Errors and unresolved travel with every view, not just the default
+    # one: a --dd-map that silently omitted the cards it could not read
+    # would be the exact failure mode this repo's reports exist to avoid.
+    payload.setdefault(
+        "errors", [{"line": e["line"], "message": e["message"]} for e in result.errors]
+    )
+    payload.setdefault("unresolved", list(result.unresolved))
+
+    _json_out(
+        {"source_file": args.file, **payload},
+        args.compact,
+        getattr(args, "output", None),
+    )
+
+    if args.strict and result.errors:
+        sys.exit(3)
+
+
 def _build_le_info_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "le-info",
@@ -3046,6 +3143,7 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
         examples="  cobol-parser sql-cics-check program.cbl",
     )
+    _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
 
     return parser
