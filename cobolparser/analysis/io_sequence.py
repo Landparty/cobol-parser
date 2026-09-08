@@ -267,6 +267,7 @@ class IOSequenceAnalyzer:
                 return ("goto", stmt.target_paragraph.upper())
             if self._is_program_end(stmt):
                 self._process_statement(stmt)
+                self._terminate_program(getattr(stmt, "location", None))
                 self._terminated = True
                 return ("stop", None)
             self._process_statement(stmt)
@@ -363,30 +364,43 @@ class IOSequenceAnalyzer:
             self._check_open(node.file_name or "", "DELETE", loc)
         elif isinstance(node, IOStartStatement):
             self._check_open(node.file_name or "", "START", loc)
-        elif isinstance(node, GobackStatement) or (
-            isinstance(node, StopStatement) and node.stop_type == "RUN"
-        ):
-            # Treat as end-of-program for leak detection (violations added later
-            # by analyze() for remaining open files, but we clear here so
-            # subsequent statements don't also trigger them). Only STOP RUN
-            # terminates the program -- STOP 'literal' merely pauses pending
-            # operator action and execution then continues, so it must not
-            # reset the open-file state (same distinction dead_code.py's and
-            # program_flow/scanner.py's _is_terminator draw).
-            for file_name in sorted(self._open_files):
-                self._violations.append(
-                    IOSequenceViolation(
-                        kind=IOViolationKind.FILE_LEFT_OPEN,
-                        file_name=file_name,
-                        location=loc,
-                        message=(
-                            f"File '{file_name}' is still open when program "
-                            "terminates (STOP RUN / GOBACK)"
-                        ),
-                    )
+        # GOBACK / STOP RUN are intentionally NOT handled here. _dispatch()
+        # is reached for every nested statement (including ones inside an
+        # IF/EVALUATE branch) via _process_statement's child recursion, but
+        # a GOBACK/STOP RUN nested in a conditional branch is not guaranteed
+        # to execute. Since conditional branches are not forked (see class
+        # docstring), clearing open-file state here would wipe it out for
+        # paths that don't take that branch too -- e.g. the common
+        # `IF NOT WS-FILE-OK STOP RUN END-IF` guard idiom right after an
+        # OPEN would make every later READ/WRITE of that file look
+        # unopened. Only a GOBACK/STOP RUN reached as a paragraph's own
+        # top-level statement is unconditional; that case is handled by
+        # _terminate_program(), called from _run_paragraph.
+
+    def _terminate_program(self, loc: SourceLocation | None) -> None:
+        """Record FILE_LEFT_OPEN for still-open files and clear I/O state.
+
+        Called only when a GOBACK / STOP RUN is a paragraph's own top-level
+        statement (see ``_is_program_end``) -- i.e. unconditionally reached.
+        Only STOP RUN terminates the program -- STOP 'literal' merely pauses
+        pending operator action and execution then continues, so it must not
+        reset the open-file state (same distinction dead_code.py's and
+        program_flow/scanner.py's _is_terminator draw).
+        """
+        for file_name in sorted(self._open_files):
+            self._violations.append(
+                IOSequenceViolation(
+                    kind=IOViolationKind.FILE_LEFT_OPEN,
+                    file_name=file_name,
+                    location=loc,
+                    message=(
+                        f"File '{file_name}' is still open when program "
+                        "terminates (STOP RUN / GOBACK)"
+                    ),
                 )
-            self._open_files.clear()
-            self._closed_files.clear()
+            )
+        self._open_files.clear()
+        self._closed_files.clear()
 
     def _handle_open(self, node: IOOpenStatement, loc: SourceLocation | None) -> None:
         """Process an OPEN statement."""

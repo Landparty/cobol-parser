@@ -1281,6 +1281,23 @@ def _expand_source_recursive(
 
         max_depth = max(max_depth, nested_depth)
 
+        # `expanded_copybook` (fresh or cached) still carries the copybook's
+        # own trailing "\n" -- the terminator of its last real line, not a
+        # blank line of content. The splice below inserts it into a span
+        # that already ends in the COPY statement's own line terminator
+        # (`expanded_source[statement_end:]` starts right after the
+        # statement, keeping the newline that closed its line), so leaving
+        # both in doubles that boundary: one phantom blank physical line per
+        # COPY statement, compounding with nesting. It also over-counts
+        # `copybook_line_count` below by one, which pads the spliced-in
+        # origins to match -- so the fix has to happen before that count is
+        # taken, not just in the text splice. Stripping exactly one trailing
+        # newline here (never more, so a copybook with a genuine blank final
+        # line keeps it) lets `expanded_source[statement_end:]` supply the
+        # single boundary the un-expanded source already had.
+        if expanded_copybook.endswith("\n"):
+            expanded_copybook = expanded_copybook[:-1]
+
         # Replace COPY statement with expanded content
         # Find statement in source
         # Replace COPY statement with expanded content

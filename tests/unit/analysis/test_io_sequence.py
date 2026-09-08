@@ -26,7 +26,7 @@ from cobolparser.analysis.io_sequence import (
 )
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolProgram
-from cobolparser.models.statements.control import StopStatement
+from cobolparser.models.statements.control import IfStatement, StopStatement
 from cobolparser.models.statements.io import (
     IOCloseStatement,
     IODeleteStatement,
@@ -113,6 +113,15 @@ def _stop() -> StopStatement:
 
 def _goback() -> GobackStatement:
     return GobackStatement(_LOC)
+
+
+def _if(*, then=(), otherwise=()) -> IfStatement:
+    stmt = IfStatement(_LOC)
+    for s in then:
+        stmt.add_then_statement(s)
+    for s in otherwise:
+        stmt.add_else_statement(s)
+    return stmt
 
 
 def _analyze(*statements) -> IOSequenceReport:
@@ -266,6 +275,96 @@ class TestFileLeftOpen:
         file_names = {v.file_name.upper() for v in left_open}
         assert "FILE-A" in file_names
         assert "FILE-B" in file_names
+
+
+# ---------------------------------------------------------------------------
+# Conditional GOBACK / STOP RUN must not be treated as unconditional
+# ---------------------------------------------------------------------------
+
+
+class TestConditionalTerminator:
+    """A GOBACK/STOP RUN nested inside an IF branch is not guaranteed to
+    execute. Since conditional branches are not forked (the analyzer shares
+    one state across both paths — see the class docstring), treating it as
+    unconditional program termination wipes open-file state for the path
+    that doesn't take that branch too. This is exactly the common
+    `IF NOT WS-FILE-OK ... STOP RUN END-IF` guard idiom right after an OPEN.
+    """
+
+    def test_read_after_conditional_stop_run_guard_not_flagged(self):
+        report = _analyze(
+            _open("PARMFILE"),
+            _if(then=[_stop()]),
+            _read("PARMFILE"),
+            _close("PARMFILE"),
+        )
+        assert not report.has_violations
+
+    def test_read_after_conditional_goback_guard_not_flagged(self):
+        report = _analyze(
+            _open("PARMFILE"),
+            _if(then=[_goback()]),
+            _read("PARMFILE"),
+            _close("PARMFILE"),
+        )
+        assert not report.has_violations
+
+    def test_conditional_stop_run_does_not_falsely_close_file(self):
+        # Before the fix, the conditional STOP RUN cleared _closed_files too,
+        # so the later legitimate CLOSE looked like CLOSE_NOT_OPEN.
+        report = _analyze(
+            _open("PARMFILE"),
+            _if(then=[_stop()]),
+            _close("PARMFILE"),
+        )
+        assert not report.has_violations
+
+    def test_top_level_stop_run_still_flags_file_left_open(self):
+        # Regression guard: the fix must not lose real FILE_LEFT_OPEN
+        # detection for a STOP RUN that IS a paragraph's own top-level
+        # (unconditional) statement.
+        report = _analyze(_open("MY-FILE"), _stop())
+        kinds = [v.kind for v in report.violations]
+        assert IOViolationKind.FILE_LEFT_OPEN in kinds
+
+    def test_top_level_goback_still_flags_file_left_open(self):
+        report = _analyze(_open("MY-FILE"), _goback())
+        kinds = [v.kind for v in report.violations]
+        assert IOViolationKind.FILE_LEFT_OPEN in kinds
+
+    def test_read_after_guarded_stop_run_via_full_source(self):
+        """End-to-end reproduction of the false positive against the real
+        parser: OPEN, then an IF-guarded STOP RUN error handler, then a
+        READ of the same file the guard would have aborted on failure."""
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT MY-FILE ASSIGN TO 'MYFILE.DAT'
+               FILE STATUS IS WS-FILE-STATUS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD MY-FILE.
+       01 MY-REC PIC X(80).
+       WORKING-STORAGE SECTION.
+       01 WS-FILE-STATUS PIC X(02).
+           88 WS-FILE-OK VALUE '00'.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           OPEN INPUT MY-FILE
+           IF NOT WS-FILE-OK
+               STOP RUN
+           END-IF
+           READ MY-FILE
+           CLOSE MY-FILE
+           STOP RUN.
+"""
+        result = parse_cobol(src)
+        assert result.ast is not None
+        report = IOSequenceAnalyzer().analyze(result.ast)
+        assert report.has_violations is False
 
 
 # ---------------------------------------------------------------------------
