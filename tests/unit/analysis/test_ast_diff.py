@@ -18,13 +18,13 @@ from cobolparser.analysis.ast_diff import (
     ProgramDiffer,
 )
 from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.data_items import RenamesItem
 from cobolparser.models.program import (
     CobolDivision,
     CobolParagraph,
     CobolProgram,
     CobolSection,
 )
-from cobolparser.models.data_items import RenamesItem
 from cobolparser.models.statements.base import CobolStatement
 from cobolparser.parser import parse_cobol
 
@@ -1348,9 +1348,7 @@ _READ_PROGRAM = """\
 
 
 def test_read_at_end_handler_change_is_tagged_with_its_clause():
-    report = _diff(
-        _READ_PROGRAM.format(value="Y"), _READ_PROGRAM.format(value="Z")
-    )
+    report = _diff(_READ_PROGRAM.format(value="Y"), _READ_PROGRAM.format(value="Z"))
 
     changes = _of_kind(report, "move-source-changed")
     assert len(changes) == 1
@@ -1551,9 +1549,7 @@ def test_optional_clause_change_renders_as_yes_no():
        MAIN-PARA.
            STOP RUN.
 """
-    report = _diff(
-        template.format(optional=""), template.format(optional="OPTIONAL ")
-    )
+    report = _diff(template.format(optional=""), template.format(optional="OPTIONAL "))
 
     changes = _of_kind(report, "file-optional-changed")
     assert len(changes) == 1

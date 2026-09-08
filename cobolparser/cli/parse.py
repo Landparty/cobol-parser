@@ -43,6 +43,7 @@ _SUBCOMMANDS = frozenset(
         "diff",
         "codebase-graph",
         "copybook-impact",
+        "sql-cics-check",
     }
 )
 
@@ -2665,6 +2666,19 @@ def _cmd_copybook_impact(args: argparse.Namespace) -> None:
     _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
 
 
+# -- Subcommand: sql-cics-check -----------------------------------------------
+
+
+def _cmd_sql_cics_check(args: argparse.Namespace) -> None:
+    from ..analysis.sql_cics_lint import SqlCicsAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = SqlCicsAnalyzer().analyze(ast)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
 def _build_le_info_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "le-info",
@@ -3022,6 +3036,16 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_diff_parser(subparsers)
     _build_codebase_graph_parser(subparsers)
     _build_copybook_impact_parser(subparsers)
+    _build_analyzer_parser(
+        subparsers,
+        "sql-cics-check",
+        "Lint embedded SQL and CICS: unchecked SQLCODE, dynamic SQL built by "
+        "concatenation, hardcoded credentials, CICS commands with no RESP or "
+        "HANDLE CONDITION",
+        _cmd_sql_cics_check,
+        profiling=True,
+        examples="  cobol-parser sql-cics-check program.cbl",
+    )
     _build_le_info_parser(subparsers)
 
     return parser
