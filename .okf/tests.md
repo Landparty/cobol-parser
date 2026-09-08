@@ -805,6 +805,17 @@ GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
    extensions built, **91.76%** without. Gating inside `build` would fail on
    the build step rather than on the code.
 
+**Timing assertions and coverage.** `tests/performance/test_factory_performance.py`
+guards its two absolute nodes/sec floors with `requires_untraced`
+(`sys.gettrace() is not None`). Under coverage.py's tracer the suite takes
+950 s instead of 94 s, and `test_factory_throughput` measured 64,243
+nodes/sec against its 100,000 floor on a CI runner that clears it
+comfortably uninstrumented — the number describes the tracer, not the
+factory. The `build` matrix runs the file uninstrumented on all three
+Pythons, so the guard is not in force there; only the `coverage` job skips
+them. The ratio-based overhead assertion is unaffected. Surfaced the moment
+the suite was first wired into CI.
+
 The full suite (~9,400 tests) **does** run on every PR, as of the
 2026-09-07 audit. It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
@@ -818,6 +829,27 @@ coverage note above. In `coverage`, on a pure-Python install, where the 90%
 floor is enforced. `-n auto` keeps each near two minutes; `-p no:randomly`
 keeps a failure reproducible from the log. Run it locally during development
 too (see commands above).
+
+
+# Source map, comments and program units (2026-09-07)
+
+* `tests/regression/test_expansion_source_map_and_comments.py` — the
+  expander's per-line source map (identity without a COPY, across a splice,
+  through a continuation merge, into a nested member, on a cache hit, and out
+  through `parse_cobol_with_expansion`), `lint.apply_source_map`, and
+  `preserve_comments` (restored in program and copybook, no line moved, a
+  `COPY` inside a comment still not expanded), plus the serialization rule
+  that a half-known origin is emitted as no origin at all.
+* `tests/regression/test_nested_program_units.py` — `program_units()` /
+  `find_program_unit()`, `LintAnalyzer` covering every unit, and the CLI's
+  `--program` selection including its "unknown name lists what is there"
+  failure. `TestCopybookProvenanceCoversEveryUnit` pins the consequence that
+  came with per-unit linting: a copybook field unused in a *contained*
+  program grades `info`, not `warning` (see [cli.md](cli.md)).
+* `tests/unit/cli/test_expand_source_map_cli.py` — the same surface at the
+  command line: `expand --source-map` / `--keep-comments`, and lint findings
+  carrying the copybook they are really in (this is what the VS Code
+  extension consumes).
 
 # See Also
 

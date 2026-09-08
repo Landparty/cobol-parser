@@ -49,7 +49,11 @@ _COMPILER_DIRECTIVE_RE = re.compile(r"^(?:PROCESS|CBL)(?:[ \t].*)?$", re.IGNOREC
 # de-ambiguated; use CopyStatementLexer instead.
 
 
-def normalize_continuation_lines(source: str, indicator_position: int = 6) -> str:
+def normalize_continuation_lines(
+    source: str,
+    indicator_position: int = 6,
+    line_origins: list[int] | None = None,
+) -> str:
     """
     Normalize COBOL fixed-format continuation lines for COPY statement detection.
 
@@ -67,6 +71,14 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
         source: COBOL source code (may contain continuation lines)
         indicator_position: Position of the indicator column (default 6 for original,
                            0 for source that has had columns 1-6 stripped)
+        line_origins: Optional out-parameter. When given, receives one entry per
+                     *output* line: the 1-based number of the input line that
+                     started it. Merging a continuation record appends nothing,
+                     so ``len(line_origins)`` equals the output line count and
+                     a caller can map a merged line back to where it began.
+                     This is what lets ``expand_copybooks`` build a real
+                     expanded-line -> (file, original line) map across a step
+                     that changes the line count.
 
     Returns:
         Source with continuation lines merged
@@ -83,6 +95,7 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
     text_start = indicator_position + 1
 
     for _i, line in enumerate(lines):
+        line_number = _i + 1
         # Check if this is a continuation line (indicator is '-')
         if len(line) > indicator_position and line[indicator_position] == "-":
             # This is a continuation line
@@ -122,8 +135,12 @@ def normalize_continuation_lines(source: str, indicator_position: int = 6) -> st
             else:
                 # Orphan continuation line - just add the text part
                 result.append(line[text_start:] if len(line) > text_start else "")
+                if line_origins is not None:
+                    line_origins.append(line_number)
         else:
             result.append(line)
+            if line_origins is not None:
+                line_origins.append(line_number)
 
     return "\n".join(result)
 

@@ -267,6 +267,30 @@ class CobolProgram(ASTNode):
         # Invalidate S1 statement cache — a new division may add statements.
         self._cached_all_statements = None
 
+    def program_units(self) -> list["CobolProgram"]:
+        """This program and every program contained in it, outermost first.
+
+        A source file holding several ``PROGRAM-ID``s parses into one outer
+        program with the rest hanging off ``contained_programs``. Every
+        analyzer here is *program*-scoped by definition -- a paragraph in the
+        contained program is not reachable from the outer one, and grading it
+        against the outer one's references would call live code dead -- so
+        analyzing a multi-program file means running the analyzer once per
+        unit. This is that list, in the order the units appear in the source.
+        """
+        units: list[CobolProgram] = [self]
+        for contained in self.contained_programs:
+            units.extend(contained.program_units())
+        return units
+
+    def find_program_unit(self, name: str) -> "CobolProgram | None":
+        """The unit whose PROGRAM-ID is *name*, case-insensitively."""
+        wanted = name.strip().upper()
+        for unit in self.program_units():
+            if (unit.program_name or "").upper() == wanted:
+                return unit
+        return None
+
     def add_contained_program(self, program: "CobolProgram") -> None:
         """Attach an additional program unit from the same compilation unit."""
         self.add_child(program)

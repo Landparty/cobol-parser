@@ -36,6 +36,7 @@ _SUBCOMMANDS = frozenset(
         "language-env",
         "ims-dli",
         "data-items",
+        "le-info",
     }
 )
 
@@ -146,6 +147,21 @@ def _add_copybook_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_program_arg(
+    parser: argparse.ArgumentParser, default_note: str = "the outermost"
+) -> None:
+    parser.add_argument(
+        "--program",
+        default=None,
+        metavar="NAME",
+        help=(
+            "PROGRAM-ID to analyze in a file holding several program units "
+            f"(default: {default_note}). The full list is reported as "
+            "program_units."
+        ),
+    )
+
+
 def _add_define_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--define",
@@ -247,6 +263,14 @@ def _identification(
     ident: dict[str, Any] = {"source_file": args.file}
     if ast is not None:
         ident["program_id"] = ast.program_name or None
+    # Recorded by _parse_result_or_fail off the WHOLE parse, so it still lists
+    # every unit in the file after --program narrowed `ast` to one of them.
+    # Present only when the file holds more than one program, so the output of
+    # the ordinary one-program file is unchanged: the key appearing at all
+    # means "several programs here, and this report covers program_id".
+    units = getattr(args, "program_units", None)
+    if units:
+        ident["program_units"] = list(units)
     return ident
 
 
@@ -427,6 +451,17 @@ def _parse_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
     On parse failure (``result.ast is None``) this calls ``_fail`` (which exits)
     with the standard "Parse failed for <file>" message.
     """
+    result, prof = _parse_result_or_fail(args)
+    return result.ast, prof
+
+
+def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
+    """The same guard, keeping the whole ``ParseResult``.
+
+    A command that needs more off the result than its AST -- lint wants
+    ``expansion_source_map``, so it can report where a finding is in the file
+    on disk rather than in the expanded text -- calls this instead.
+    """
     result, prof = _do_parse(args)
     if result.ast is None:
         error_lines = [str(e) for e in result.errors]
@@ -439,7 +474,37 @@ def _parse_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
             "analysis may be incomplete",
             file=sys.stderr,
         )
-    return result.ast, prof
+    _select_program_unit(args, result)
+    return result, prof
+
+
+def _select_program_unit(args: argparse.Namespace, result: Any) -> None:
+    """Narrow ``result.ast`` to the program unit ``--program`` names.
+
+    A source file may hold several ``PROGRAM-ID``s (stacked or nested program
+    units); the parse returns the outermost with the rest on
+    ``contained_programs``. Every analyzer is program-scoped, so a report has
+    to be about one unit -- the outermost by default, which is what these
+    subcommands have always reported, or the one ``--program`` names.
+
+    The whole file's unit names are recorded on *args* either way, so the
+    emitted report can say which programs it did NOT cover.
+    """
+    ast = result.ast
+    if ast is None:
+        return
+    units = ast.program_units()
+    if len(units) > 1:
+        args.program_units = [u.program_name or None for u in units]
+
+    wanted = getattr(args, "program", None)
+    if not wanted:
+        return
+    selected = ast.find_program_unit(wanted)
+    if selected is None:
+        available = ", ".join(u.program_name or "<unnamed>" for u in units)
+        _fail(f"No program unit named {wanted!r} in {args.file} (found: {available})")
+    result.ast = selected
 
 
 def _cmd_parse(args: argparse.Namespace) -> None:
@@ -779,12 +844,31 @@ def _build_expand_parser(
         help="Expand COPY statements (copybooks)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Example:\n" "  cobol-parser expand program.cbl --copybook-path ./copybooks"
+            "Example:\n"
+            "  cobol-parser expand program.cbl --copybook-path ./copybooks\n"
+            "  cobol-parser expand program.cbl --copybook-path ./cpy --source-map"
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
     _add_copybook_args(p)
     _add_compact_arg(p)
+    p.add_argument(
+        "--keep-comments",
+        action="store_true",
+        help=(
+            "Keep comment lines' original text in the expanded listing "
+            "(they are blanked by default, since a COPY inside a comment "
+            "must not be expanded)"
+        ),
+    )
+    p.add_argument(
+        "--source-map",
+        action="store_true",
+        help=(
+            "Include source_location_map: one entry per expanded line, naming "
+            "the file and line it came from"
+        ),
+    )
     p.add_argument(
         "--max-depth",
         type=int,
@@ -818,6 +902,9 @@ def _cmd_expand(args: argparse.Namespace) -> None:
         max_nesting_depth=args.max_depth,
         process_conditionals=bool(defines),
         defined_symbols=defines,
+        preserve_source_locations=getattr(args, "source_map", False),
+        source_file=args.file,
+        preserve_comments=getattr(args, "keep_comments", False),
     )
 
     _json_out(
@@ -1670,6 +1757,7 @@ def _build_analyzer_parser(
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
+    _add_program_arg(p)
     _add_define_args(p)
     _add_output_arg(p)
     if profiling:
@@ -2079,6 +2167,10 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
+    # Lint is the one command that covers every unit by default: it is the
+    # file's diagnostics, and a contained program left unexamined would read
+    # as a clean one.
+    _add_program_arg(p, default_note="every unit in the file")
     _add_define_args(p)
     _add_output_arg(p)
     _add_profiling_args(p)
@@ -2140,7 +2232,14 @@ def _lint_text_report(report: Any, source_file: str) -> str:
     """
     lines: list[str] = []
     for finding in report.findings:
-        if finding.location is not None:
+        # A mapped finding prints the file and line it is really on -- inside
+        # an inlined copybook, that is not this file at all -- so the prefix
+        # stays clickable after expansion instead of pointing at whatever
+        # happens to sit at that line number of the program.
+        if finding.origin_file is not None and finding.origin_line is not None:
+            column = finding.location.column if finding.location is not None else 0
+            prefix = f"{finding.origin_file}:{finding.origin_line}:{column}:"
+        elif finding.location is not None:
             prefix = f"{source_file}:{finding.location.line}:{finding.location.column}:"
         else:
             prefix = f"{source_file}:"
@@ -2168,6 +2267,12 @@ def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | 
     warning. Without --copybook-path there is nothing to diff against, so
     the answer is "unknown" -- which the analyzer reads as "none came from a
     copybook", the same as it does for the unused-variables subcommand.
+
+    Both sides of the diff cover EVERY program unit, because lint does:
+    ``collect_declared_items`` is program-scoped, so diffing the outermost
+    unit alone would leave a contained program's copybook fields out of the
+    set and grade them as the program's own -- warning instead of info --
+    for exactly the multi-program file this covers in the first place.
     """
     from ..analysis.unused_variables import collect_declared_items
 
@@ -2181,11 +2286,24 @@ def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | 
             file=sys.stderr,
         )
         return None
-    local_names = {
-        item.name.upper() for item in collect_declared_items(unexpanded_result.ast)
-    }
-    expanded_names = {item.name.upper() for item in collect_declared_items(ast)}
-    return expanded_names - local_names
+
+    def declared_across_units(program: Any) -> set[str]:
+        return {
+            item.name.upper()
+            for unit in program.program_units()
+            for item in collect_declared_items(unit)
+        }
+
+    # Both sides must cover the same scope. `ast` is already narrowed when
+    # --program named a unit, so narrow the unexpanded parse the same way --
+    # otherwise another unit's own declaration of the same name would
+    # subtract from this one's copybook set.
+    local_root = unexpanded_result.ast
+    wanted = getattr(args, "program", None)
+    if wanted:
+        local_root = local_root.find_program_unit(wanted) or local_root
+
+    return declared_across_units(ast) - declared_across_units(local_root)
 
 
 def _severity_at_least(severity: str, threshold: str) -> bool:
@@ -2196,9 +2314,10 @@ def _severity_at_least(severity: str, threshold: str) -> bool:
 
 
 def _cmd_lint(args: argparse.Namespace) -> None:
-    from ..analysis.lint import LintAnalyzer, filter_by_severity
+    from ..analysis.lint import LintAnalyzer, apply_source_map, filter_by_severity
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
     try:
         analyzer = LintAnalyzer(getattr(args, "rules", None))
@@ -2210,6 +2329,10 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     report = analyzer.analyze(
         ast, copybook_item_names=_lint_copybook_item_names(args, ast)
     )
+    # With --copybook-path the analyzers ran over expanded text, so every
+    # location counts expanded lines. The expander's own map turns each one
+    # back into the file and line a reader can open.
+    apply_source_map(report, getattr(result, "expansion_source_map", None))
     report.findings = filter_by_severity(report.findings, args.min_severity)
 
     if args.output_format == "text":
@@ -2249,6 +2372,118 @@ def _cmd_data_items(args: argparse.Namespace) -> None:
     output = compute_program_data_items(ast)
 
     _emit_report(output, args, prof, ast)
+
+
+# -- Subcommand: le-info ------------------------------------------------------
+
+
+def _build_le_info_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "le-info",
+        help=(
+            "Show the call signature of IBM Language Environment services and "
+            "COBOL intrinsic functions"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser le-info                # the whole catalogue\n"
+            "  cobol-parser le-info CEEDAYS        # one service\n"
+            "  cobol-parser le-info NUMVAL-C       # one intrinsic function\n"
+            "  cobol-parser le-info --kind service # every catalogued service\n"
+        ),
+    )
+    p.add_argument(
+        "name",
+        nargs="*",
+        help=(
+            "Service or function name to describe (case-insensitive). "
+            "Omit for the whole catalogue."
+        ),
+    )
+    p.add_argument(
+        "--kind",
+        choices=["service", "function", "all"],
+        default="all",
+        help=(
+            "Restrict the answer to LE callable services or to intrinsic "
+            "functions (default: all)"
+        ),
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_le_info)
+
+
+def _cmd_le_info(args: argparse.Namespace) -> None:
+    """Emit the LE/intrinsic call-signature catalogue as JSON.
+
+    Unlike every other subcommand this one reads no source file -- it is the
+    static knowledge behind an editor tooltip ("what does this CALL need?"),
+    which is why it is a catalogue dump rather than an analysis. The output
+    therefore carries no ``source_file`` identification header.
+    """
+    from ..dialects.le_signatures import (
+        catalog_to_dict,
+        intrinsic_signature,
+        le_service_signature,
+        services_without_signature,
+    )
+
+    catalog = catalog_to_dict()
+
+    if not args.name:
+        output: dict[str, Any] = {
+            "catalog_version": catalog["catalog_version"],
+            "reference": catalog["reference"],
+        }
+        if args.kind in ("service", "all"):
+            output["services"] = catalog["services"]
+            output["services_without_signature"] = catalog["services_without_signature"]
+        if args.kind in ("function", "all"):
+            output["functions"] = catalog["functions"]
+        _json_out(output, args.compact, args.output)
+        return
+
+    uncatalogued = {entry["name"]: entry for entry in services_without_signature()}
+    entries: list[dict[str, Any]] = []
+    for raw_name in args.name:
+        name = raw_name.strip().upper()
+        service = le_service_signature(name) if args.kind != "function" else None
+        function = intrinsic_signature(name) if args.kind != "service" else None
+        if service is not None:
+            entries.append(service.to_dict())
+        elif function is not None:
+            entries.append(function.to_dict())
+        elif args.kind != "function" and name in uncatalogued:
+            # Known to the dialect, but no signature to report. Said out loud
+            # rather than dropped: "we don't have this one" and "that is not
+            # an LE service" are different answers.
+            entries.append(
+                {
+                    "name": name,
+                    "kind": "service",
+                    "category": uncatalogued[name]["category"],
+                    "summary": None,
+                    "parameters": None,
+                    "notes": ["No call signature is catalogued for this service."],
+                }
+            )
+        else:
+            _fail(
+                f"Unknown name: {raw_name!r}. Run `cobol-parser le-info` with "
+                f"no arguments to list everything the catalogue knows."
+            )
+
+    _json_out(
+        {
+            "catalog_version": catalog["catalog_version"],
+            "reference": catalog["reference"],
+            "entries": entries,
+        },
+        args.compact,
+        args.output,
+    )
 
 
 # -- Path resolution ---------------------------------------------------------
@@ -2474,6 +2709,7 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
         examples="  cobol-parser data-items program.cbl",
     )
+    _build_le_info_parser(subparsers)
 
     return parser
 

@@ -128,6 +128,14 @@ class LintFinding:
     message: str
     location: SourceLocation | None = None
     symbol: str | None = None
+    # Where :attr:`location` really is, when the analyzed text was
+    # copybook-expanded: the file on disk and the line in it. Set by
+    # :func:`apply_source_map` from the expander's own per-line map, so a
+    # consumer no longer has to guess by searching for :attr:`symbol`.
+    # ``None`` means no expansion ran (``location`` is already on-disk truth)
+    # or the map had nothing for that line.
+    origin_file: str | None = None
+    origin_line: int | None = None
     # The underlying analyzer's own category for this finding, when it has
     # one (IOViolationKind.READ_BEFORE_OPEN, RecursionRisk.severity, ...).
     # Preserved so a consumer can filter more finely than by rule without
@@ -135,7 +143,7 @@ class LintFinding:
     kind: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "rule": self.rule,
             "severity": self.severity,
             "message": self.message,
@@ -143,6 +151,13 @@ class LintFinding:
             "symbol": self.symbol,
             "kind": self.kind,
         }
+        # Emitted only when BOTH halves are known, so a consumer can tell
+        # "this finding is on line 42 of THIS file" from "nobody mapped it"
+        # -- rather than having to treat a defaulted echo of `location`, or a
+        # half-filled `{"file": null, "line": 12}`, as an answer.
+        if self.origin_file is not None and self.origin_line is not None:
+            result["origin"] = {"file": self.origin_file, "line": self.origin_line}
+        return result
 
 
 @dataclass
@@ -277,6 +292,38 @@ def filter_by_severity(
     return [f for f in findings if _SEVERITY_RANK[f.severity] <= limit]
 
 
+def apply_source_map(
+    report: LintReport, source_map: dict[int, tuple[str, int]] | None
+) -> LintReport:
+    """Stamp every located finding with the file and line it really came from.
+
+    Analyzer locations count lines in whatever text was parsed. When that text
+    is the copybook-*expanded* source, a finding after an expanded ``COPY``
+    sits well below the line the same code occupies in the file on disk, and
+    a finding inside an inlined member does not belong to that file at all.
+    ``source_map`` -- the expander's own per-line record, carried on
+    ``ParseResult.expansion_source_map`` -- answers both exactly, replacing
+    the search-for-the-symbol guesswork every consumer had to do instead.
+
+    A ``None`` map (nothing was expanded) leaves the report untouched: the
+    locations are already on-disk truth. So does a line the map does not
+    cover; the finding keeps ``origin_file``/``origin_line`` unset rather than
+    claiming a line nobody vouched for.
+
+    The report is modified in place and returned, for chaining.
+    """
+    if not source_map:
+        return report
+    for finding in report.findings:
+        if finding.location is None:
+            continue
+        origin = source_map.get(finding.location.line)
+        if origin is None:
+            continue
+        finding.origin_file, finding.origin_line = origin
+    return report
+
+
 class LintAnalyzer:
     """Runs several analyzers over one AST and flattens them into findings.
 
@@ -332,6 +379,13 @@ class LintAnalyzer:
                 own -- never the reverse, so a missing set can only
                 over-report, not hide anything.
 
+        A source file with several ``PROGRAM-ID``s parses into one outer
+        program carrying the rest as ``contained_programs``; every rule here
+        is program-scoped, so each unit is linted on its own and the findings
+        are merged. Linting only the outermost unit -- what this did before --
+        left a contained program entirely unexamined while reporting a clean
+        file.
+
         Returns:
             A :class:`LintReport`. A rule that raises is recorded in
             ``failed_rules`` and costs only its own findings -- the point of
@@ -339,6 +393,33 @@ class LintAnalyzer:
             tripping over an exotic program should not blank the other six.
         """
         report = LintReport()
+        units = ast.program_units()
+        for index, unit in enumerate(units):
+            # A caller-supplied flow report describes the outermost unit only;
+            # the others build their own.
+            self._analyze_unit(
+                unit,
+                report,
+                flow_report=flow_report if index == 0 else None,
+                copybook_item_names=copybook_item_names,
+            )
+
+        report.findings.sort(key=_sort_key)
+        report.findings = _deduplicate(report.findings)
+        # Two units that hit the same limit ("a COPY could not be resolved")
+        # produce the same caveat text twice; say it once.
+        report.caveats = list(dict.fromkeys(report.caveats))
+        return report
+
+    def _analyze_unit(
+        self,
+        ast: CobolProgram,
+        report: LintReport,
+        *,
+        flow_report: ProgramFlowReport | None,
+        copybook_item_names: set[str] | None,
+    ) -> None:
+        """Run every selected rule over one program unit, into *report*."""
         collectors: dict[str, Callable[[], list[LintFinding]]] = {
             "dead-code": lambda: self._dead_code(ast),
             "unused-variables": lambda: self._unused_variables(
@@ -358,15 +439,16 @@ class LintAnalyzer:
             try:
                 report.findings.extend(collectors[rule]())
             except Exception as exc:  # noqa: BLE001 - reported, not swallowed
-                report.failed_rules.append(
-                    {"rule": rule, "error": f"{type(exc).__name__}: {exc}"}
-                )
+                # One entry per rule however many units it failed on: the
+                # reader needs to know the concern went unexamined, not how
+                # many times the same exception was raised.
+                if not any(f["rule"] == rule for f in report.failed_rules):
+                    report.failed_rules.append(
+                        {"rule": rule, "error": f"{type(exc).__name__}: {exc}"}
+                    )
                 continue
-            report.rules_run.append(rule)
-
-        report.findings.sort(key=_sort_key)
-        report.findings = _deduplicate(report.findings)
-        return report
+            if rule not in report.rules_run:
+                report.rules_run.append(rule)
 
     # -- Shared control flow graph --------------------------------------------
 

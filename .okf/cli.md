@@ -30,7 +30,10 @@ pinned by `tests/unit/cli/test_output_identification.py`):
 * **JSON documents** start with `"source_file"` (the input path as given on
   the command line). Subcommands that parse the source also emit
   `"program_id"` (the PROGRAM-ID, or `null` if the program has none) as the
-  second key. Analyzer reports get both via `_emit_report(..., ast=ast)`.
+  second key — and, ONLY when the file holds more than one program unit,
+  `"program_units"` listing every unit in source order, so a report can say
+  which programs it did not cover (see *Selecting a program unit*). Analyzer
+  reports get these via `_emit_report(..., ast=ast)`.
 * **`parse`** — full-AST output gets `"source_file"` spliced in (the AST dict
   already carries `program_name`). With `--errors`/`--stats` the wrapper is
   `{"source_file", "program_id", "ast", ...}`. Dotted-path extraction emits
@@ -151,11 +154,26 @@ non-object pytest-results JSON file raised uncaught inside
 ## Expand
 
 ```bash
-cobol-parser expand <file.cbl> --copybook-path ./copybooks
+cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map]
 ```
 
 Runs copybook expansion and prints the expanded source. `--copybook-path` may be
 specified multiple times for multiple search directories.
+
+`--keep-comments` (2026-09-07) puts every comment line's original text back
+into the listing, in the program and in each inlined member. Expansion always
+blanks comments first — a `COPY` written inside one must not be expanded — so
+without this the output keeps their line numbers and loses their text, which
+for a listing meant to be *read* is most of what was wanted. Restoration
+happens after every substitution and changes no line of code and no line
+number. See [preprocessing.md](preprocessing.md).
+
+`--source-map` (2026-09-07) adds `source_location_map` to the JSON: one entry
+per expanded line, `{"<expanded line>": {"file": ..., "line": ...}}`, naming
+the file and line that line came from — the program itself, or the copybook it
+was inlined from. This is what lets a consumer move a line number reported
+against the expansion back onto a file a human edits; the `lint` subcommand
+applies it for its own findings automatically (see below).
 
 ## Gen-Data
 
@@ -332,6 +350,32 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   inventory, or Phase 3's own field resolution could not pin down. The
   CI-friendly "no silent gaps" switch.
 
+## Selecting a program unit (`--program`)
+
+```bash
+cobol-parser dead-code NESTED.cbl --program INNERP
+```
+
+A source file can hold several `PROGRAM-ID`s — stacked, or nested inside the
+enclosing program's PROCEDURE DIVISION — and every analyzer here is
+program-scoped: it grades a paragraph against the references it can see, so a
+report is about ONE unit. It has always been the outermost, silently; a
+contained program came back "clean" because it was never examined.
+
+`--program NAME` (2026-09-07, on every subcommand built by
+`_build_analyzer_parser`, plus `lint`) selects the unit to report on,
+case-insensitively, via `CobolProgram.find_program_unit`. An unknown name
+fails with the list of units that are there rather than falling back to a
+report about a different program.
+
+Whenever a file holds more than one unit, every such report also carries
+`"program_units": [...]` in its identification header, listing them all in
+source order — so a report can say what it did *not* cover. A single-program
+file's output is unchanged, key for key.
+
+`lint` is the deliberate exception to the default: it covers every unit unless
+`--program` narrows it.
+
 ## Analyze
 
 ```bash
@@ -474,10 +518,32 @@ which argparse exits on itself before `_cmd_lint` ever runs (pinned by
 tell "this program has problems" from "lint never ran", and `1`/`2` already
 mean something else across this CLI (see *Exit codes* above).
 
-`--copybook-path` does double duty here: it expands COPY members so MOVE
-operands resolve *and* it lets lint tell a copybook-sourced unused item (info)
-from one the program declares itself (warning), via the same unexpanded-parse
-set difference `unused-variables` uses.
+`--copybook-path` does triple duty here: it expands COPY members so MOVE
+operands resolve, it lets lint tell a copybook-sourced unused item (info)
+from one the program declares itself (warning) via the same unexpanded-parse
+set difference `unused-variables` uses, *and* (2026-09-07) it turns on
+finding origins. With expansion, every analyzer location counts lines in the
+expanded text; the expander's own source map turns each one back into a real
+file and line, emitted per finding as `"origin": {"file", "line"}` and used
+by `--format text` for its `file:line:column:` prefix. A finding inside an
+inlined member therefore names the *copybook*, not the program. Findings the
+map cannot place, and runs with no expansion at all, carry no `origin` key
+rather than a guess.
+
+**Copybook provenance covers every unit too.** `_lint_copybook_item_names`
+diffs declared DATA DIVISION names between an expanded and an unexpanded
+parse, and `collect_declared_items` is program-scoped -- so once lint covered
+every unit, diffing the outermost alone left a contained program's copybook
+fields out of the set and graded them `warning` instead of `info`. Both sides
+now walk `program_units()`, and both are narrowed the same way when
+`--program` selects one (otherwise another unit's own declaration of the same
+name subtracts from this one's copybook set). Pinned by
+`tests/regression/test_nested_program_units.py::TestCopybookProvenanceCoversEveryUnit`.
+
+**Program units.** Unlike every other analyzer subcommand, `lint` covers
+*every* program unit in the file by default — a contained program left
+unexamined would read as a clean one. `--program NAME` narrows it to one (see
+*Selecting a program unit* above).
 
 ## Batch
 
@@ -525,6 +591,32 @@ cobol-parser language-env <file.cbl>
 ```
 
 Runs `LanguageEnvironmentAnalyzer` and reports IBM LE function/service usage.
+
+## LE-Info
+
+```bash
+cobol-parser le-info                    # the whole catalogue
+cobol-parser le-info CEEDAYS            # one LE callable service
+cobol-parser le-info NUMVAL-C           # one intrinsic function
+cobol-parser le-info --kind service     # every catalogued service
+cobol-parser le-info CEEGMT --compact -o le.json
+```
+
+The only subcommand that reads **no source file**: it dumps
+`cobolparser/dialects/le_signatures.py`'s call-signature catalogue, which is
+static dialect knowledge rather than analysis. Backs the COBOL Analyzer VS
+Code extension's LE hover ("what does this CALL need?"), so its JSON shape is
+pinned by `catalog_version`.
+
+Output has no `source_file` / `program_id` identification header (there is no
+source). With no name: `{catalog_version, reference, services[],
+services_without_signature[], functions[]}`. With one or more names:
+`{catalog_version, reference, entries[]}`, in the order asked.
+
+A name the dialect recognises but the catalogue cannot describe comes back
+with `"parameters": null` and a note saying so — distinguishable from an
+unknown name, which exits 1. `--kind service|function|all` restricts both
+forms.
 
 ## IMS-DLI
 

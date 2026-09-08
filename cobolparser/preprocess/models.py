@@ -280,6 +280,9 @@ class ExpansionContext:
         source_maps: Accumulated source location mappings (line_number -> (file, original_line))
         current_depth: Current nesting depth in the expansion recursion
         content_cache: Cache of already-expanded copybook content (for diamond dependencies)
+        content_origins: Per-line ``(file, original line)`` origins of each
+            cached content entry, keyed identically to ``content_cache`` so a
+            cache hit contributes the same source map a miss would have
         total_bytes: Running total of bytes processed
         defined_symbols: Symbols defined via >>DEFINE for conditional compilation
     """
@@ -290,6 +293,7 @@ class ExpansionContext:
     source_maps: dict[int, tuple[str, int]] = field(default_factory=dict)
     current_depth: int = 0
     content_cache: OrderedDict[str, str] = field(default_factory=OrderedDict)
+    content_origins: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
     total_bytes: int = 0
     defined_symbols: dict[str, str] = field(default_factory=dict)
 
@@ -318,15 +322,32 @@ class ExpansionContext:
             return self.content_cache[key]
         return None
 
-    def cache_put(self, key: str, value: str) -> None:
-        """Put item in cache with LRU eviction if full. O(1)."""
+    def cache_put(
+        self,
+        key: str,
+        value: str,
+        origins: list[tuple[str, int]] | None = None,
+    ) -> None:
+        """Put item in cache with LRU eviction if full. O(1).
+
+        ``origins`` (one ``(file, original line)`` per line of *value*) rides
+        along under the same key so a later cache hit can splice the same
+        source map a miss would have produced.
+        """
         if key in self.content_cache:
             self.content_cache.move_to_end(key)
             self.content_cache[key] = value
         else:
             if len(self.content_cache) >= self.max_cache_size:
-                self.content_cache.popitem(last=False)
+                evicted, _ = self.content_cache.popitem(last=False)
+                self.content_origins.pop(evicted, None)
             self.content_cache[key] = value
+        if origins is not None:
+            self.content_origins[key] = list(origins)
+
+    def cache_get_origins(self, key: str) -> list[tuple[str, int]] | None:
+        """Per-line origins stored beside a cached content entry, if any."""
+        return self.content_origins.get(key)
 
     def get_cache_key(
         self, copybook_path: str, replacing_clauses: list | None = None

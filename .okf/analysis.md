@@ -1011,6 +1011,44 @@ report a fictitious intrinsic function `KEYS` and set
 `uses_intrinsic_functions` true. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`.
 
+### Call signatures (`dialects/le_signatures.py`)
+
+The analyzer answers "is this an LE service?"; `le_signatures.py` answers the
+next question — **what does the CALL need?**
+
+```python
+from cobolparser.dialects.le_signatures import (
+    le_service_signature, intrinsic_signature,
+    LE_SERVICE_SIGNATURES, INTRINSIC_FUNCTION_SIGNATURES,
+    services_without_signature, catalog_to_dict,
+)
+
+sig = le_service_signature("CEEDAYS")     # case-insensitive; None when unknown
+sig.parameters                            # tuple[LEParameter]: name, direction
+                                          # (input/output/input-output), type_id,
+                                          # description, optional, repeats
+sig.required_parameters                   # the ones that may not be omitted
+sig.call_example()                        # 'CALL "CEEDAYS" USING ...'
+p.data_type                               # LEDataType: declaration, byte_length,
+                                          # snippet (VSTRING / feedback code)
+intrinsic_signature("NUMVAL-C").returns   # "numeric"
+```
+
+**Coverage is partial and says so.** `services_without_signature()` lists the
+LE services `IBM_LE_CALLABLE_SERVICES` recognises but this module cannot
+describe exactly — so a consumer can say "known service, signature not
+catalogued" rather than guess a parameter list or show nothing. The intrinsic
+half *is* complete, pinned by
+`tests/unit/test_le_signatures.py::TestIntrinsicSignatures::test_every_ibm_intrinsic_has_a_signature`.
+
+`IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
+(merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
+one-line metadata and the signatures cannot drift. Categories are cross-checked
+against `IBM_LE_SERVICE_CATEGORIES` per service by the same test module.
+
+Exposed to non-Python consumers as `cobol-parser le-info` (see `.okf/cli.md`),
+which is what the VS Code extension's LE hover reads.
+
 ## CRUDMatrixGenerator
 
 ```python
@@ -1798,3 +1836,39 @@ and `DynamicCallAnalyzer`'s MOVE source/target keying (a bare `CALL
 WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
 keying data items by bare name needs it too. Pinned by
 `tests/regression/test_folded_reference_analyzers.py`.
+
+# Lint: program units and finding origins (2026-09-07)
+
+Two changes to `LintAnalyzer`, both about a report that was quietly narrower
+than it looked.
+
+**Every program unit is linted, not just the outermost.** A source file can
+hold several `PROGRAM-ID`s (stacked, or nested inside the enclosing program's
+PROCEDURE DIVISION); the parse returns the outermost with the rest on
+`CobolProgram.contained_programs`. Every rule here is program-scoped, so
+running them on the outer program alone left a contained program *entirely
+unexamined* while the report read as clean. `analyze()` now iterates
+`ast.program_units()` and merges: `_analyze_unit` runs the rule set over one
+unit into a shared `LintReport`, `rules_run` and `failed_rules` carry one
+entry per rule however many units it ran on (the reader needs to know the
+concern went unexamined, not the arithmetic), caveats are deduplicated, and
+the sort + dedup happen once at the end. A caller-supplied `flow_report`
+describes the outermost unit only; the others build their own. Passing a
+contained unit directly still lints just that unit, which is what the CLI's
+`--program` does.
+
+**A finding now says where it really is.** `LintFinding` gained
+`origin_file` / `origin_line`, serialized as `"origin": {"file", "line"}` and
+emitted only when BOTH are known (a half-filled `{"file": null, "line": 12}`
+would read as an answer to a consumer checking for the key). `apply_source_map(report, source_map)` fills them
+from `ParseResult.expansion_source_map` (see
+[preprocessing.md](preprocessing.md)): analyzer locations count lines in the
+copybook-*expanded* text, so a finding after an expanded `COPY` is nowhere
+near that line on disk and one *inside* an inlined member is not in that file
+at all. A `None` map (nothing expanded) and a line the map does not cover both
+leave the finding untouched rather than claiming a line nobody vouched for.
+The `lint` CLI applies it whenever `--copybook-path` was given, and its `text`
+format prints the origin's own `file:line:column:` prefix so the output stays
+clickable after expansion. Pinned by
+`tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
+and `tests/regression/test_nested_program_units.py`.

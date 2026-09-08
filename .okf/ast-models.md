@@ -412,6 +412,24 @@ reusing `ContinueStatement`: NEXT SENTENCE transfers control past the rest
 of the current sentence, not a true fall-through no-op, even at the depth
 this parser models control flow.
 
+
+# Program units (`program_units` / `find_program_unit`, 2026-09-07)
+
+```python
+ast.program_units()          # [self, *contained, recursively], source order
+ast.find_program_unit("INNERP")   # CobolProgram | None, case-insensitive
+```
+
+A compilation unit can hold several programs — stacked or nested, delimited by
+`END PROGRAM` — and the parse has always kept them on
+`CobolProgram.contained_programs`. What was missing was the *list*: every
+analyzer in this package is program-scoped (it grades a paragraph against the
+references it can see), so analyzing a multi-program file means running the
+analyzer once per unit, and nothing said so or offered a way to reach the
+others. These two methods are that, and back both `LintAnalyzer`'s per-unit
+pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
+`tests/regression/test_nested_program_units.py`.
+
 # See Also
 
 * [parser.md](parser.md) — produces AST nodes

@@ -9,6 +9,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **preprocess/cli:** copybook expansion now reports **where every expanded
+  line came from**. `expand_copybooks(preserve_source_locations=True)` builds
+  a real `source_location_map` -- one `(file, original line)` per expanded
+  line -- instead of the always-empty dict the flag returned before, carrying
+  the origin through continuation merging (which removes lines), the COPY
+  splice (which inserts them) and the re-pad's width wrap (which splits one
+  into several). Exposed as `ParseResult.expansion_source_map` from
+  `parse_cobol_with_expansion`, and as `cobol-parser expand --source-map`.
+  A cached (diamond-dependency) member carries its origins with it, so the
+  fast path and the slow path produce the same map.
+* **analysis/cli:** `lint` findings say where they really are.
+  `LintFinding` gained `origin_file` / `origin_line` (serialized as
+  `"origin": {"file", "line"}`), filled by `lint.apply_source_map()` from the
+  expander's map whenever `--copybook-path` was given -- so a finding inside
+  an inlined member names the *copybook* and its line, and `--format text`
+  stays clickable after expansion instead of pointing at whatever sits at
+  that line number of the program. Findings the map cannot place carry no
+  `origin` key rather than a guess.
+* **preprocess/cli:** `cobol-parser expand --keep-comments` keeps every
+  comment line's original text in the listing, in the program and in each
+  inlined member. Expansion still blanks comments before it expands anything
+  (a `COPY` written inside a comment must not be expanded); the text is
+  restored afterwards through the same source map, only where the line is
+  blank in the expansion and its origin really is a comment -- so no line of
+  code and no line number changes.
+* **models/analysis/cli:** program units in a multi-`PROGRAM-ID` file are
+  reachable at last. `CobolProgram.program_units()` /
+  `find_program_unit()` list and look them up; `--program NAME` on every
+  analyzer subcommand (and `lint`) selects which unit a report covers,
+  defaulting to the outermost as before; a report on such a file also carries
+  `program_units` in its identification header, so it can say what it did not
+  cover. **`LintAnalyzer` now lints every unit** rather than the outermost
+  only -- a contained program left unexamined used to read as a clean one.
+  Single-program output is unchanged, key for key.
+
+* **dialects/cli:** a **call-signature catalogue for IBM Language Environment
+  services and COBOL intrinsic functions**, and `cobol-parser le-info` to read
+  it. The question it answers is the one a developer has in front of a
+  `CALL "CEEDAYS"`: what has to be declared, in what order, and which operands
+  may be left out.
+  * New `cobolparser/dialects/le_signatures.py`: `LE_SERVICE_SIGNATURES` (33
+    LE callable services) and `INTRINSIC_FUNCTION_SIGNATURES` (all 44 IBM
+    intrinsics), with `le_service_signature()` / `intrinsic_signature()`
+    lookups. Every operand carries its direction (input / output /
+    input-output), its exact COBOL declaration, whether it may be omitted, and
+    whether it repeats — plus a full WORKING-STORAGE snippet for the two
+    shapes people get wrong, the halfword-prefixed string and the 12-byte
+    feedback code.
+  * **Coverage is partial and says so**: `services_without_signature()` lists
+    the services the dialect recognises but the catalogue cannot describe
+    exactly, so a consumer can distinguish "no signature catalogued" from "not
+    an LE service".
+  * New `cobol-parser le-info [NAME...] [--kind service|function|all]` — the
+    only subcommand that reads no source file, since it dumps static dialect
+    knowledge rather than analyzing a program (and therefore emits no
+    `source_file` header). Backs the COBOL Analyzer VS Code extension's LE
+    hover.
+  * `IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is now **derived** from the
+    catalogue rather than hand-maintained beside it, so the two cannot drift;
+    `get_le_service_info()` keeps its shape and now answers for 37 services
+    instead of 12.
+  * 18 real LE services the dialect did not recognise are now detected:
+    `CEEDAYS`, `CEECBLDY`, `CEEUTC`, `CEEISEC`, `CEESECI`, `CEEQCEN`,
+    `CEESCEN`, `CEEFMDA`, `CEEFMDT`, `CEEFMTM`, `CEEFRST`, `CEEHDLU`,
+    `CEEMOUT`, `CEE3DMP`, `CEE3ABD`, `CEE3PRM`, `CEE3GRC`, `CEE3SRC`.
+
 * **generators/cli:** `cobol-parser decode` reads a **record image file back
   through a copybook** -- the inverse of `gen-data --format record`, and the
   half people actually have a file for. A VSAM extract, an EBCDIC flat file,
@@ -284,6 +350,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **dialects:** `CEECZST` is categorised as a `storage` service (it
+  reallocates heap storage, per the LE reference), not a `string` one.
+
 * **analysis:** `ConstraintExtractor` no longer treats a **non-literal
   comparison operand as a literal value**. `IF WS-IN = WS-E (IDX)` became
   `WS-IN eq 'WS-E ( IDX )'` -- a constraint on the operand's own source text,
@@ -368,6 +437,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line through, and a new `coverage` job enforces the 90% floor on a
   pure-Python install -- coverage.py cannot see into a compiled extension, so
   the same suite reports 54.32% with them built and 91.76% without. (M3)
+
+* **tests/ci:** the two absolute nodes/sec assertions in
+  `tests/performance/test_factory_performance.py` now skip when a tracer is
+  active. Wiring the suite into CI surfaced them immediately: under
+  coverage.py's tracer the same suite takes 950 s instead of 94 s, and
+  `test_factory_throughput` measured 64,243 nodes/sec against its 100,000
+  floor -- a number describing the tracer, not the factory. Not a
+  quarantine: the `build` matrix runs the file uninstrumented on 3.11, 3.12
+  and 3.13 for every PR, which is the only condition where an absolute
+  throughput floor means anything, and it passes there. The ratio-based
+  overhead assertion is unaffected and still runs under coverage.
 
 * **generators:** `RecordViews.to_dict()` (and therefore
   `decode --list-views`) now reports `framing_length` alongside
