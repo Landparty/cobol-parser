@@ -140,6 +140,19 @@ _FIGURATIVE_CONSTANTS = frozenset(
     }
 )
 
+# COBOL special registers with a fixed, implicit numeric picture -- they never
+# appear in the DATA DIVISION with a PICTURE clause of their own, so the
+# catalog built from CobolDataItem nodes can never contain them. Without this,
+# every MOVE touching RETURN-CODE (by far the most common of the three) was
+# silently counted as unresolved rather than checked.
+_NUMERIC_SPECIAL_REGISTERS = frozenset({"RETURN-CODE", "TALLY", "LINAGE-COUNTER"})
+
+# Intrinsic FUNCTION results whose category is fixed by the COBOL standard
+# regardless of context. Both are fixed-length timestamp strings, so a
+# "MOVE FUNCTION ... TO ..." using one of these was always ALPHANUMERIC and
+# never actually depended on an unresolved COPY.
+_ALPHANUMERIC_INTRINSIC_FUNCTIONS = frozenset({"CURRENT-DATE", "WHEN-COMPILED"})
+
 # Illegal MOVE combinations: (source_category, target_category)
 _ILLEGAL_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
     {
@@ -274,12 +287,26 @@ class MoveTypeChecker:
     # ------------------------------------------------------------------
 
     def _build_catalog(self, node: ASTNode) -> None:
-        """Recursively collect PIC clauses from CobolDataItem nodes."""
+        """Recursively collect PIC clauses from CobolDataItem nodes.
+
+        A group item (e.g. an 01/05-level header with no PICTURE of its own,
+        only subordinate elementary items) is cataloged as ALPHANUMERIC: an
+        elementary MOVE of a group operand always moves it byte-for-byte, as
+        though described PIC X, regardless of what its subordinate items
+        contain. Without this, every group-level MOVE target/source (a very
+        common pattern -- e.g. `MOVE FUNCTION CURRENT-DATE TO` a date/time
+        group) was silently counted as unresolved rather than checked.
+        """
         if isinstance(node, CobolDataItem):
             name = (node.name or "").upper().strip()
             pic = node.picture_clause
             if name and pic is not None:
                 self._catalog[name] = _classify_picture(pic)
+            elif name and any(
+                isinstance(child, CobolDataItem)
+                for child in getattr(node, "children", ())
+            ):
+                self._catalog[name] = DataCategory.ALPHANUMERIC
 
         if hasattr(node, "children"):
             for child in node.children:
@@ -369,10 +396,22 @@ class MoveTypeChecker:
         "WS-TAB ( 3 )") is looked up by its base data name -- the catalog is
         keyed by bare item names, so the folded reference would otherwise
         miss every entry and silently classify as a literal.
+
+        Special registers (RETURN-CODE and friends) and a handful of
+        intrinsic FUNCTION results have a category fixed by the COBOL
+        standard itself -- neither ever shows up as a CobolDataItem with a
+        PICTURE clause, so the catalog built from the DATA DIVISION can never
+        resolve them on its own.
         """
         upper = base_data_name(name).upper()
         if upper in self._catalog:
             return self._catalog[upper]
+        if upper in _NUMERIC_SPECIAL_REGISTERS:
+            return DataCategory.NUMERIC
+        if upper.startswith("FUNCTION "):
+            function_name = upper[len("FUNCTION ") :].strip()
+            if function_name in _ALPHANUMERIC_INTRINSIC_FUNCTIONS:
+                return DataCategory.ALPHANUMERIC
         return _classify_literal(name)
 
     def get_catalog(self) -> dict[str, str]:

@@ -674,3 +674,151 @@ class TestNestedDataItems:
         catalog = checker.get_catalog()
         assert "CHILD-ITEM" in catalog
         assert catalog["CHILD-ITEM"] == "NUMERIC"
+
+
+# ---------------------------------------------------------------------------
+# Special registers (RETURN-CODE, TALLY, LINAGE-COUNTER) -- fixed numeric
+# category, never declared with a PICTURE clause of their own.
+# ---------------------------------------------------------------------------
+
+
+class TestSpecialRegisters:
+    def test_return_code_target_resolves_numeric(self):
+        report = _check([("SRC", "9(5)")], [("SRC", ["RETURN-CODE"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_return_code_source_resolves_numeric(self):
+        report = _check([("TGT", "9(5)")], [("RETURN-CODE", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_figurative_zero_to_return_code_still_unresolved(self):
+        # A figurative constant source is never category-checked (it is
+        # compatible with any receiving category), regardless of how well
+        # the target resolves -- unchanged pre-existing behavior.
+        report = _check([], [("ZERO", ["RETURN-CODE"])])
+        assert report.unresolved_count == 1
+        assert not report.violations
+
+    def test_alphabetic_to_return_code_is_error(self):
+        report = _check([("SRC", "A(5)")], [("SRC", ["RETURN-CODE"])])
+        assert report.has_errors
+        assert report.errors[0].source_category == DataCategory.ALPHABETIC
+        assert report.errors[0].target_category == DataCategory.NUMERIC
+
+    def test_tally_and_linage_counter_resolve_numeric(self):
+        report = _check(
+            [("SRC", "9(5)")],
+            [("SRC", ["TALLY"]), ("SRC", ["LINAGE-COUNTER"])],
+        )
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+
+# ---------------------------------------------------------------------------
+# Intrinsic FUNCTION results with a category fixed by the COBOL standard.
+# ---------------------------------------------------------------------------
+
+
+class TestIntrinsicFunctionSources:
+    def test_function_current_date_resolves_alphanumeric(self):
+        report = _check([("TGT", "X(21)")], [("FUNCTION CURRENT-DATE", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_function_when_compiled_resolves_alphanumeric(self):
+        report = _check([("TGT", "X(21)")], [("FUNCTION WHEN-COMPILED", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_function_current_date_to_numeric_is_warning(self):
+        report = _check([("TGT", "9(5)")], [("FUNCTION CURRENT-DATE", ["TGT"])])
+        assert report.warnings
+
+    def test_unrecognized_function_still_unresolved(self):
+        # Only the specific intrinsic functions this checker knows are
+        # classified; anything else correctly stays unresolved rather than
+        # guessing at its category.
+        report = _check([("TGT", "9(5)")], [("FUNCTION SOME-OTHER-FUNC", ["TGT"])])
+        assert report.unresolved_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Group-item MOVE operands -- a group with no PICTURE of its own is always
+# treated as alphanumeric, per COBOL's elementary-move rule.
+# ---------------------------------------------------------------------------
+
+
+class TestGroupItemMoveOperand:
+    def _group_program(self):
+        from cobolparser.models.program import CobolParagraph
+
+        loc = SourceLocation(1, 1)
+        prog = CobolProgram("TEST", loc)
+        data_div = CobolDivision("DATA", loc)
+        ws = CobolSection("WORKING-STORAGE", loc)
+
+        # 01 WS-DATE-TIME → 05 WS-YEAR PIC 9(4) (a group with no PIC of its own)
+        group = CobolDataItem("WS-DATE-TIME", 1, loc)
+        child = CobolDataItem("WS-YEAR", 5, loc)
+        child.set_picture_clause(PictureClause("9(4)", loc))
+        group.add_child(child)
+        ws.add_data_item(group)
+
+        for name, pattern in [
+            ("WS-ALPHA", "X(10)"),
+            ("WS-NUM", "9(5)"),
+            ("WS-ALPHABETIC", "A(5)"),
+        ]:
+            item = CobolDataItem(name, 1, loc)
+            item.set_picture_clause(PictureClause(pattern, loc))
+            ws.add_data_item(item)
+
+        data_div.add_section(ws)
+        prog.add_division(data_div)
+
+        proc_div = CobolDivision("PROCEDURE", loc)
+        para = CobolParagraph("MAIN", loc)
+        proc_div.add_paragraph(para)
+        prog.add_division(proc_div)
+        return prog, para
+
+    def test_group_item_catalogued_as_alphanumeric(self):
+        prog, _ = self._group_program()
+        checker = MoveTypeChecker()
+        checker.check(prog)
+        assert checker.get_catalog()["WS-DATE-TIME"] == "ALPHANUMERIC"
+
+    def test_move_to_group_item_target_not_unresolved(self):
+        prog, para = self._group_program()
+        stmt = MoveStatement(SourceLocation(1, 1))
+        stmt.set_source("WS-ALPHA")
+        stmt.add_target("WS-DATE-TIME")
+        para.add_statement(stmt)
+
+        report = MoveTypeChecker().check(prog)
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_move_group_item_source_to_numeric_is_warning(self):
+        prog, para = self._group_program()
+        stmt = MoveStatement(SourceLocation(1, 1))
+        stmt.set_source("WS-DATE-TIME")
+        stmt.add_target("WS-NUM")
+        para.add_statement(stmt)
+
+        report = MoveTypeChecker().check(prog)
+        assert report.unresolved_count == 0
+        assert report.warnings
+
+    def test_move_alphabetic_to_group_item_is_legal(self):
+        prog, para = self._group_program()
+        stmt = MoveStatement(SourceLocation(1, 1))
+        stmt.set_source("WS-ALPHABETIC")
+        stmt.add_target("WS-DATE-TIME")
+        para.add_statement(stmt)
+
+        report = MoveTypeChecker().check(prog)
+        assert report.unresolved_count == 0
+        assert not report.violations
