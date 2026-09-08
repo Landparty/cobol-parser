@@ -5,7 +5,9 @@ Creates before/after benchmarks to understand the performance
 characteristics of factory-based node creation.
 """
 
-import sys
+# `sys` is used only by the string skipif condition below, which pytest
+# evaluates against this module's namespace -- ruff cannot see that use.
+import sys  # noqa: F401
 import time
 from collections.abc import Callable
 
@@ -29,8 +31,15 @@ pytestmark = pytest.mark.slow
 # condition under which the number means anything; the `coverage` job is the
 # one place it does not. A debugger sets a trace function too, and the same
 # reasoning applies there.
+# The condition is a *string* on purpose. pytest evaluates a string condition
+# per test at setup time; a bare boolean is computed once, when this module is
+# imported. Under pytest-cov the two agree (coverage starts before collection),
+# but a debugger attaching mid-session, or any tracer installed after import,
+# would slip past the boolean form and fail an absolute floor it should have
+# skipped. `sys` is in this module's namespace, which is what the string is
+# evaluated against.
 requires_untraced = pytest.mark.skipif(
-    sys.gettrace() is not None,
+    "sys.gettrace() is not None",
     reason=(
         "a tracer is active (coverage.py or a debugger), which instruments "
         "every call and makes an absolute throughput floor meaningless -- the "
