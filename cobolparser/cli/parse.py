@@ -37,6 +37,7 @@ _SUBCOMMANDS = frozenset(
         "ims-dli",
         "data-items",
         "le-info",
+        "program-signature",
     }
 )
 
@@ -2377,6 +2378,35 @@ def _cmd_data_items(args: argparse.Namespace) -> None:
 # -- Subcommand: le-info ------------------------------------------------------
 
 
+# -- Subcommand: program-signature --------------------------------------------
+
+
+def _cmd_program_signature(args: argparse.Namespace) -> None:
+    """Report the calling interface of every program unit in the file.
+
+    Unlike the other analyzer subcommands, this one defaults to reporting
+    *every* unit rather than the outermost: the question it answers is "what
+    may a caller call in this file, and with what", and a caller may target a
+    contained program as readily as the outermost one. Reporting only the
+    outermost would hide the other entry points from exactly the consumer
+    that needs them.
+
+    ``--program`` still narrows, via the shared parse path, for a caller that
+    knows which unit it means.
+    """
+    from ..analysis.program_signature import extract_signatures
+
+    ast, prof = _parse_or_fail(args)
+
+    signatures = extract_signatures(ast)
+    _emit_report(
+        {"signatures": [s.to_dict() for s in signatures]},
+        args,
+        prof,
+        ast,
+    )
+
+
 def _build_le_info_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "le-info",
@@ -2708,6 +2738,19 @@ def _build_parser() -> argparse.ArgumentParser:
         _cmd_data_items,
         profiling=True,
         examples="  cobol-parser data-items program.cbl",
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "program-signature",
+        "Report a program's calling interface: every entry point's USING "
+        "operands joined to their LINKAGE declarations, with the direction "
+        "the callee uses each one in",
+        _cmd_program_signature,
+        profiling=True,
+        examples=(
+            "  cobol-parser program-signature SUBPGM.cbl\n"
+            "  cobol-parser program-signature SUBPGM.cbl --copybook-path ./copybooks"
+        ),
     )
     _build_le_info_parser(subparsers)
 
