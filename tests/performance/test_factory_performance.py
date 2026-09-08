@@ -5,6 +5,9 @@ Creates before/after benchmarks to understand the performance
 characteristics of factory-based node creation.
 """
 
+# `sys` is used only by the string skipif condition below, which pytest
+# evaluates against this module's namespace -- ruff cannot see that use.
+import sys  # noqa: F401
 import time
 from collections.abc import Callable
 
@@ -15,6 +18,34 @@ from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.statements import DisplayStatement, MoveStatement
 
 pytestmark = pytest.mark.slow
+
+# An absolute nodes/sec threshold measures the interpreter as much as the
+# code. Under coverage.py's tracer -- which fires on every line of every call
+# -- it measures the tracer: the same suite that runs in 94 s uninstrumented
+# takes 950 s under `--cov`, and `test_factory_throughput` came back at
+# 64,243 nodes/sec against a 100,000 floor on a CI runner that passes it
+# comfortably without coverage.
+#
+# Skipping here is not quarantining the guard. The `build` matrix runs this
+# file uninstrumented on 3.11, 3.12 and 3.13 for every PR, which is the only
+# condition under which the number means anything; the `coverage` job is the
+# one place it does not. A debugger sets a trace function too, and the same
+# reasoning applies there.
+# The condition is a *string* on purpose. pytest evaluates a string condition
+# per test at setup time; a bare boolean is computed once, when this module is
+# imported. Under pytest-cov the two agree (coverage starts before collection),
+# but a debugger attaching mid-session, or any tracer installed after import,
+# would slip past the boolean form and fail an absolute floor it should have
+# skipped. `sys` is in this module's namespace, which is what the string is
+# evaluated against.
+requires_untraced = pytest.mark.skipif(
+    "sys.gettrace() is not None",
+    reason=(
+        "a tracer is active (coverage.py or a debugger), which instruments "
+        "every call and makes an absolute throughput floor meaningless -- the "
+        "build matrix runs this uninstrumented"
+    ),
+)
 
 
 def benchmark_function(func: Callable, iterations: int = 1000) -> tuple[float, float]:
@@ -273,6 +304,7 @@ def test_factory_performance_baseline():
     benchmark.print_results()
 
 
+@requires_untraced
 def test_factory_throughput():
     """Test factory throughput (nodes per second)."""
     benchmark = PerformanceBenchmark()
@@ -286,6 +318,7 @@ def test_factory_throughput():
     ), f"Factory throughput too low: {results['nodes_per_second']:.0f} nodes/sec"
 
 
+@requires_untraced
 def test_direct_creation_baseline():
     """Verify direct creation baseline performance."""
     benchmark = PerformanceBenchmark()

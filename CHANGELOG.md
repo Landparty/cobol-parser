@@ -438,6 +438,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pure-Python install -- coverage.py cannot see into a compiled extension, so
   the same suite reports 54.32% with them built and 91.76% without. (M3)
 
+* **tests/ci:** the two absolute nodes/sec assertions in
+  `tests/performance/test_factory_performance.py` now skip when a tracer is
+  active. Wiring the suite into CI surfaced them immediately: under
+  coverage.py's tracer the same suite takes 950 s instead of 94 s, and
+  `test_factory_throughput` measured 64,243 nodes/sec against its 100,000
+  floor -- a number describing the tracer, not the factory. Not a
+  quarantine: the `build` matrix runs the file uninstrumented on 3.11, 3.12
+  and 3.13 for every PR, which is the only condition where an absolute
+  throughput floor means anything, and it passes there. The ratio-based
+  overhead assertion is unaffected and still runs under coverage.
+
 * **generators:** `RecordViews.to_dict()` (and therefore
   `decode --list-views`) now reports `framing_length` alongside
   `record_length`. It carried only the base view's span, so for the one
