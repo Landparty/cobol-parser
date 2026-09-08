@@ -328,6 +328,6 @@ class TestCopybookCommentDriftIssue123:
         )
         lines = self._paragraph_lines(source, tmp_path)
         # Without the fix, both copybook comments are dropped (no
-        # placeholder), shifting both paragraphs to line 12 / 15.
-        assert lines["0000-MAIN"] == 14
-        assert lines["1000-FIRST"] == 17
+        # placeholder), shifting both paragraphs to line 11 / 14.
+        assert lines["0000-MAIN"] == 13
+        assert lines["1000-FIRST"] == 16

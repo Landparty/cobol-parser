@@ -253,6 +253,67 @@ class TestSourceMap:
         assert result.expansion_source_map[1] == (str(library / "PAYROLL.cbl"), 1)
 
 
+class TestNoPhantomLinePerCopy:
+    """A COPY splice used to retain both the copybook's own trailing "\\n"
+    and the COPY statement's own line terminator, inserting one extra blank
+    physical line per COPY beyond the real net growth (a 2-line copybook
+    replacing a 1-line COPY grew the file by +2 instead of +1). See
+    reports/open-findings.md's "Every COPY statement inserts one extra
+    phantom line" entry -- this pins the fix.
+    """
+
+    def test_one_copybook_grows_by_real_content_only(self, tmp_path):
+        (tmp_path / "TWO.cpy").write_text(
+            _pad(" 01  WS-A PIC X.") + "\n" + _pad(" 01  WS-B PIC X.") + "\n"
+        )
+        source = "\n".join(
+            [_pad(" IDENTIFICATION DIVISION."), _pad(" COPY TWO."), _pad(" GOBACK.")]
+        )
+        result = expand_copybooks(source, [str(tmp_path)])
+
+        # The 2-line copybook replaces the 1-line COPY statement: net growth
+        # is +1, not +2 (the phantom line's excess on top of that).
+        assert len(result.expanded_source.splitlines()) == len(
+            source.splitlines()
+        ) + 1
+
+    def test_no_blank_line_separates_copybook_content_from_what_follows(
+        self, tmp_path
+    ):
+        (tmp_path / "TWO.cpy").write_text(
+            _pad(" 01  WS-A PIC X.") + "\n" + _pad(" 01  WS-B PIC X.") + "\n"
+        )
+        source = "\n".join(
+            [_pad(" IDENTIFICATION DIVISION."), _pad(" COPY TWO."), _pad(" GOBACK.")]
+        )
+        result = expand_copybooks(source, [str(tmp_path)])
+        lines = result.expanded_source.splitlines()
+
+        ws_b = next(i for i, line in enumerate(lines) if "WS-B" in line)
+        assert "GOBACK" in lines[ws_b + 1]
+
+    def test_two_copies_do_not_compound_the_excess(self, tmp_path):
+        (tmp_path / "TWOLINE.cpy").write_text(
+            _pad(" 01  WS-A PIC X.") + "\n" + _pad(" 01  WS-B PIC X.") + "\n"
+        )
+        (tmp_path / "ONELINE.cpy").write_text(_pad(" 01  WS-C PIC X.") + "\n")
+        source = "\n".join(
+            [
+                _pad(" IDENTIFICATION DIVISION."),
+                _pad(" COPY TWOLINE."),
+                _pad(" COPY ONELINE."),
+                _pad(" GOBACK."),
+            ]
+        )
+        result = expand_copybooks(source, [str(tmp_path)])
+
+        # 3 copybook lines total replace 2 COPY statements: net growth +1,
+        # not +3 (a +1 excess per COPY compounding with the count of COPYs).
+        assert len(result.expanded_source.splitlines()) == len(
+            source.splitlines()
+        ) + 1
+
+
 class TestApplySourceMap:
     def _report(self, line):
         return LintReport(
