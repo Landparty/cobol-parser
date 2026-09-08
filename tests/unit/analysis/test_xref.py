@@ -32,6 +32,7 @@ from cobolparser.analysis.xref import (
     XrefEntry,
     XrefReference,
     XrefReport,
+    _partition_operand,
 )
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import (
@@ -46,8 +47,19 @@ from cobolparser.models.program import (
     CobolSection,
 )
 from cobolparser.models.statements.call import CallParameter, CallStatement
-from cobolparser.models.statements.control import GoStatement, PerformStatement
-from cobolparser.models.statements.data import MoveStatement
+from cobolparser.models.statements.control import (
+    EvaluateStatement,
+    GoStatement,
+    PerformStatement,
+    WhenClause,
+)
+from cobolparser.models.statements.data import (
+    InitializeStatement,
+    MoveStatement,
+    SetStatement,
+)
+from cobolparser.models.statements.io import IOReadStatement
+from cobolparser.models.statements.misc import XmlJsonStatement
 from cobolparser.parser import parse_cobol
 
 LOC = SourceLocation(20, 12)
@@ -1058,3 +1070,502 @@ def test_condition_name_declaration_from_a_hand_built_ast():
     assert entry.level == 88
     assert entry.definition.line == 6
     assert entry.is_referenced is False
+
+
+# ---------------------------------------------------------------------------
+# Wider statement coverage
+# ---------------------------------------------------------------------------
+
+_KITCHEN_SINK = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROBE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT WORK-FILE ASSIGN TO 'W.DAT'
+               ORGANIZATION IS SEQUENTIAL.
+           SELECT SORT-FILE ASSIGN TO 'S.DAT'.
+           SELECT OUT-FILE ASSIGN TO 'O.DAT'
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS DYNAMIC
+               RECORD KEY IS OUT-KEY.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  WORK-FILE.
+       01  WORK-REC PIC X(20).
+       SD  SORT-FILE.
+       01  SORT-REC.
+           05  SORT-KEY PIC X(4).
+       FD  OUT-FILE.
+       01  OUT-REC.
+           05  OUT-KEY  PIC X(4).
+       WORKING-STORAGE SECTION.
+       01  WS-A     PIC 9(4).
+       01  WS-B     PIC 9(4).
+       01  WS-Q     PIC 9(4).
+       01  WS-REM   PIC 9(4).
+       01  WS-TEXT  PIC X(30).
+       01  WS-DOC   PIC X(99).
+       01  WS-N     PIC 9(4).
+       01  WS-CODE  PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DIVIDE WS-A BY WS-B GIVING WS-Q REMAINDER WS-REM
+           SET WS-A TO 1
+           INITIALIZE WS-TEXT REPLACING ALPHANUMERIC BY WS-CODE
+           INSPECT WS-TEXT REPLACING ALL 'A' BY 'B'
+           INSPECT WS-TEXT CONVERTING 'AB' TO 'CD'
+           XML GENERATE WS-DOC FROM WS-TEXT
+           SORT SORT-FILE ON ASCENDING KEY SORT-KEY
+               INPUT PROCEDURE IS IN-PARA
+               OUTPUT PROCEDURE IS OUT-PARA
+           MERGE SORT-FILE ON ASCENDING KEY SORT-KEY
+               USING WORK-FILE OUT-FILE
+               GIVING WORK-FILE
+           PERFORM WORK-PARA WS-N TIMES
+           GO TO IN-PARA OUT-PARA DEPENDING ON WS-A
+           REWRITE OUT-REC FROM WS-TEXT
+           DELETE OUT-FILE RECORD
+           START OUT-FILE KEY IS EQUAL TO OUT-KEY
+           END-START
+           UNLOCK OUT-FILE
+           EXEC DLI GU SEGMENT(EMPLOYEE) INTO(WS-TEXT) END-EXEC
+           EVALUATE TRUE
+               WHEN WS-A > 5 MOVE 1 TO WS-B
+           END-EVALUATE
+           EVALUATE WS-CODE
+               WHEN 'A' THRU 'M' MOVE 1 TO WS-B
+           END-EVALUATE
+           ALTER IN-PARA TO PROCEED TO OUT-PARA
+           STOP RUN.
+       WORK-PARA.
+           ENTRY 'ALT-ENTRY' USING WS-TEXT.
+       IN-PARA.
+           CALL WS-TEXT USING WS-A
+           GOBACK.
+       OUT-PARA.
+           CONTINUE.
+"""
+
+
+def test_divide_giving_and_remainder_are_writes():
+    report = _analyze_source(_KITCHEN_SINK)
+    assert ROLE_WRITE in _roles(report, "WS-Q")
+    assert ROLE_WRITE in _roles(report, "WS-REM")
+    assert ROLE_READ in _roles(report, "WS-A")
+
+
+def test_initialize_and_inspect_replacing_roles():
+    report = _analyze_source(_KITCHEN_SINK)
+    text_roles = _roles(report, "WS-TEXT")
+    # INITIALIZE target, INSPECT REPLACING target and INSPECT CONVERTING
+    # target are all receiving fields.
+    assert text_roles.count(ROLE_WRITE) >= 3
+    assert ROLE_READ in _roles(report, "WS-CODE")  # REPLACING ... BY WS-CODE
+
+
+def test_xml_generate_target_is_write_and_from_item_is_read():
+    report = _analyze_source(_KITCHEN_SINK)
+    assert _roles(report, "WS-DOC") == [ROLE_WRITE]
+    assert ROLE_READ in _roles(report, "WS-TEXT")
+
+
+def test_sort_and_merge_files_keys_and_procedures():
+    report = _analyze_source(_KITCHEN_SINK)
+    assert _roles(report, "SORT-KEY") == [ROLE_READ, ROLE_READ]
+    assert _roles(report, "SORT-FILE") == [ROLE_FILE_OPERATION, ROLE_FILE_OPERATION]
+    assert ROLE_FILE_OPERATION in _roles(report, "WORK-FILE")
+    assert ROLE_PERFORM in _roles(report, "IN-PARA")
+    assert ROLE_PERFORM in _roles(report, "OUT-PARA")
+
+
+def test_perform_times_with_a_variable_count_is_a_read():
+    report = _analyze_source(_KITCHEN_SINK)
+    assert _roles(report, "WS-N") == [ROLE_READ]
+    assert ROLE_PERFORM in _roles(report, "WORK-PARA")
+
+
+def test_go_to_depending_on_marks_targets_and_the_selector():
+    report = _analyze_source(_KITCHEN_SINK)
+    assert ROLE_GOTO in _roles(report, "IN-PARA")
+    assert ROLE_GOTO in _roles(report, "OUT-PARA")
+    assert ROLE_READ in _roles(report, "WS-A")
+
+
+def test_alter_names_both_procedures():
+    report = _analyze_source(_KITCHEN_SINK)
+    in_para = report.entry_for("IN-PARA")
+    assert sum(1 for ref in in_para.references if ref.role == ROLE_GOTO) == 2
+
+
+def test_rewrite_delete_start_and_unlock_file_operations():
+    report = _analyze_source(_KITCHEN_SINK)
+    out_file = _roles(report, "OUT-FILE")
+    # MERGE USING, DELETE, START, UNLOCK
+    assert out_file.count(ROLE_FILE_OPERATION) == 4
+    assert _roles(report, "OUT-REC") == [ROLE_READ]  # REWRITE source record
+    assert _roles(report, "OUT-KEY") == [ROLE_READ]  # START KEY IS
+
+
+def test_entry_using_parameters_are_call_arguments():
+    report = _analyze_source(_KITCHEN_SINK)
+    statements = {ref.statement for ref in report.entry_for("WS-TEXT").references}
+    assert "EntryStatement" in statements
+    assert ROLE_CALL_ARGUMENT in _roles(report, "WS-TEXT")
+
+
+def test_dynamic_call_program_name_is_a_read():
+    report = _analyze_source(_KITCHEN_SINK)
+    call_refs = [
+        ref
+        for ref in report.entry_for("WS-TEXT").references
+        if ref.statement == "CallStatement"
+    ]
+    assert [ref.role for ref in call_refs] == [ROLE_READ]
+
+
+def test_exec_dli_argument_is_a_reference_not_a_subscript():
+    report = _analyze_source(_KITCHEN_SINK)
+    dli_refs = [
+        ref
+        for ref in report.entry_for("WS-TEXT").references
+        if ref.statement == "ExecImsStatement"
+    ]
+    assert [ref.role for ref in dli_refs] == [ROLE_REFERENCE]
+    assert any("EXEC IMS/DLI" in caveat for caveat in report.caveats)
+
+
+def test_evaluate_range_selector_does_not_invent_symbols():
+    report = _analyze_source(_KITCHEN_SINK)
+    assert report.undefined == []
+
+
+def test_perform_varying_variable_is_written_and_bounds_are_read():
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. VARY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-I     PIC 9(4).
+       01  WS-J     PIC 9(4).
+       01  WS-STEP  PIC 9(4).
+       01  WS-MAX   PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM VARYING WS-I FROM 1 BY WS-STEP UNTIL WS-I > WS-MAX
+               AFTER WS-J FROM 1 BY 1 UNTIL WS-J > 3
+               CONTINUE
+           END-PERFORM
+           STOP RUN.
+""")
+    assert ROLE_WRITE in _roles(report, "WS-I")
+    assert ROLE_CONDITION in _roles(report, "WS-I")
+    assert _roles(report, "WS-STEP") == [ROLE_READ]
+    assert _roles(report, "WS-MAX") == [ROLE_CONDITION]
+    assert ROLE_WRITE in _roles(report, "WS-J")
+
+
+def test_set_with_several_groups_writes_every_target():
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SETG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-P1 USAGE IS POINTER.
+       01  WS-P2 USAGE IS POINTER.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           SET WS-P1 TO NULL
+           SET WS-P2 TO NULL
+           STOP RUN.
+""")
+    assert _roles(report, "WS-P1") == [ROLE_WRITE]
+    assert _roles(report, "WS-P2") == [ROLE_WRITE]
+
+
+def test_call_returning_target_is_a_write():
+    call = CallStatement(SourceLocation(21, 12))
+    call.set_called_program("'SUBPROG'")
+    call.set_returning_parameter("WS-RC")
+    prog = _make_program([("MAIN-PARA", [call])], data_items=[_data_item("WS-RC")])
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "WS-RC") == [ROLE_WRITE]
+
+
+def test_data_division_exec_sql_is_cross_referenced_without_a_context():
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DCLP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL BEGIN DECLARE SECTION END-EXEC.
+       01  WS-ID PIC 9(6).
+           EXEC SQL END DECLARE SECTION END-EXEC.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL SELECT ID INTO :WS-ID FROM T END-EXEC
+           STOP RUN.
+""")
+    entry = report.entry_for("WS-ID")
+    assert entry is not None
+    assert ROLE_HOST_VARIABLE in [ref.role for ref in entry.references]
+
+
+def test_synthetic_period_paragraph_is_not_declared():
+    prog = _make_program([(".", []), ("REAL-PARA", [])])
+    report = XrefAnalyzer().analyze(prog)
+    assert [e.name for e in report.entries_of_kind(KIND_PARAGRAPH)] == ["REAL-PARA"]
+
+
+def test_qualified_reference_credits_both_names():
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. QUAL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-GRP.
+           05  WS-FLD PIC X(4).
+       01  WS-OUT PIC X(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE WS-FLD OF WS-GRP TO WS-OUT
+           STOP RUN.
+""")
+    assert _roles(report, "WS-FLD") == [ROLE_READ]
+    assert _roles(report, "WS-GRP") == [ROLE_READ]
+
+
+# ---------------------------------------------------------------------------
+# Operand partitioning helper
+# ---------------------------------------------------------------------------
+
+
+def test_partition_operand_shapes():
+    assert _partition_operand("") == (set(), set(), True)
+    assert _partition_operand("WS-A") == ({"WS-A"}, set(), True)
+    assert _partition_operand("WS-TBL (WS-IDX)") == ({"WS-TBL"}, {"WS-IDX"}, True)
+    # Nested subscripts: both index names are subscripts.
+    base, subs, exact = _partition_operand("WS-TBL (WS-OUTER (WS-INNER))")
+    assert base == {"WS-TBL"}
+    assert subs == {"WS-OUTER", "WS-INNER"}
+    assert exact is True
+    # Reference modification is not a subscript.
+    assert _partition_operand("WS-TEXT (WS-OFF:5)") == (
+        {"WS-TEXT", "WS-OFF"},
+        set(),
+        True,
+    )
+    # An intrinsic function reference is inexact and never a subscript.
+    base, subs, exact = _partition_operand("FUNCTION UPPER-CASE(WS-X)")
+    assert "WS-X" in base
+    assert subs == set()
+    assert exact is False
+
+
+# ---------------------------------------------------------------------------
+# Remaining statement shapes
+# ---------------------------------------------------------------------------
+
+_IO_AND_STRINGS = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROBE2.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IX-FILE ASSIGN TO 'I.DAT'
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS RANDOM
+               RECORD KEY IS IX-KEY.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IX-FILE.
+       01  IX-REC.
+           05  IX-KEY PIC X(4).
+       WORKING-STORAGE SECTION.
+       01  WS-TEXT  PIC X(30).
+       01  WS-P1    PIC X(10).
+       01  WS-C1    PIC 9(4).
+       01  WS-PTR   PIC 9(4).
+       01  WS-TALLY PIC 9(4).
+       01  WS-DOC   PIC X(99).
+       01  WS-IDX   PIC 9(4).
+       01  WS-TBL.
+           05  WS-ROW OCCURS 5 TIMES.
+               10 WS-K PIC X(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           READ IX-FILE RECORD INTO WS-TEXT KEY IS IX-KEY
+           END-READ
+           UNSTRING WS-TEXT DELIMITED BY ',' INTO WS-P1
+               COUNT IN WS-C1 WITH POINTER WS-PTR TALLYING IN WS-TALLY
+           END-UNSTRING
+           XML PARSE WS-DOC PROCESSING PROCEDURE IS HANDLER-PARA
+           SEARCH WS-ROW VARYING WS-IDX
+               AT END CONTINUE
+           END-SEARCH
+           STOP RUN.
+       HANDLER-PARA.
+           CONTINUE.
+"""
+
+
+def test_read_into_and_key_roles():
+    report = _analyze_source(_IO_AND_STRINGS)
+    assert _roles(report, "WS-TEXT")[0] == ROLE_WRITE  # READ ... INTO
+    assert _roles(report, "IX-KEY") == [ROLE_READ]  # READ ... KEY IS
+    assert _roles(report, "IX-FILE") == [ROLE_FILE_OPERATION]
+
+
+def test_unstring_count_pointer_and_tallying_are_writes():
+    report = _analyze_source(_IO_AND_STRINGS)
+    assert _roles(report, "WS-P1") == [ROLE_WRITE]
+    assert _roles(report, "WS-C1") == [ROLE_WRITE]
+    assert _roles(report, "WS-PTR") == [ROLE_WRITE]
+    assert _roles(report, "WS-TALLY") == [ROLE_WRITE]
+
+
+def test_xml_parse_reads_its_document_and_performs_its_handler():
+    report = _analyze_source(_IO_AND_STRINGS)
+    assert _roles(report, "WS-DOC") == [ROLE_READ]
+    assert _roles(report, "HANDLER-PARA") == [ROLE_PERFORM]
+
+
+def test_search_varying_index_is_written():
+    report = _analyze_source(_IO_AND_STRINGS)
+    assert _roles(report, "WS-IDX") == [ROLE_WRITE]
+    assert _roles(report, "WS-ROW") == [ROLE_READ]
+
+
+def test_truncated_operand_is_dropped_with_a_caveat():
+    """The UNSTRING parser can hand back a bare ``"WS-"`` for DELIMITER IN.
+
+    A hyphen-terminated fragment is not a COBOL word, so it must not be
+    reported as an undeclared symbol -- it is dropped and counted instead.
+    """
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TRUNC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-TEXT PIC X(30).
+       01  WS-P1   PIC X(10).
+       01  WS-D1   PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           UNSTRING WS-TEXT DELIMITED BY ',' INTO WS-P1 DELIMITER IN WS-D1
+           END-UNSTRING
+           STOP RUN.
+""")
+    assert report.undefined == []
+    assert any("not valid COBOL words" in caveat for caveat in report.caveats)
+
+
+def test_set_with_multiple_groups_from_a_hand_built_statement():
+    stmt = SetStatement(SourceLocation(21, 12))
+    stmt.set_set_type("TO")
+    stmt.add_target("WS-A")
+    stmt.set_value("1")
+    stmt.add_group(["WS-B"], "TO", "WS-C")
+
+    prog = _make_program(
+        [("MAIN-PARA", [stmt])],
+        data_items=[_data_item("WS-A"), _data_item("WS-B"), _data_item("WS-C")],
+    )
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "WS-A") == [ROLE_WRITE]
+    assert _roles(report, "WS-B") == [ROLE_WRITE]
+    assert _roles(report, "WS-C") == [ROLE_READ]
+
+
+def test_evaluate_identifier_and_unknown_selectors():
+    when_clause = WhenClause(
+        [
+            {"type": "Identifier", "value": "WS-A"},
+            {"type": "SomethingNew", "value": "WS-B"},
+        ],
+        SourceLocation(21, 12),
+    )
+    stmt = EvaluateStatement(SourceLocation(20, 12))
+    stmt.add_subject("WS-CODE")
+    stmt.add_when_clause(when_clause)
+
+    prog = _make_program(
+        [("MAIN-PARA", [stmt])],
+        data_items=[_data_item("WS-A"), _data_item("WS-B"), _data_item("WS-CODE")],
+    )
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "WS-A") == [ROLE_CONDITION]
+    assert _roles(report, "WS-CODE") == [ROLE_CONDITION]
+    # An unrecognized selector shape contributes nothing rather than a guess.
+    assert report.entry_for("WS-B").is_referenced is False
+
+
+def test_perform_varying_clause_with_non_string_values():
+    stmt = PerformStatement(SourceLocation(21, 12))
+    stmt.set_target_paragraph("WORK-PARA")
+    stmt.varying_clause = {
+        "variable": "WS-I",
+        "from_value": 1,  # an int, not operand text
+        "by_value": None,
+        "until_condition": None,
+    }
+    prog = _make_program(
+        [("MAIN-PARA", [stmt]), ("WORK-PARA", [])],
+        data_items=[_data_item("WS-I")],
+    )
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "WS-I") == [ROLE_WRITE]
+
+
+def test_statement_outside_any_paragraph_keeps_its_own_location():
+    stmt = _move("WS-A", "WS-B")
+    stmt.location = SourceLocation(0, 0)
+
+    prog = _make_program([("MAIN-PARA", [])], data_items=[_data_item("WS-A")])
+    data_div = prog.get_division("DATA")
+    data_div.add_child(stmt)
+
+    report = XrefAnalyzer().analyze(prog)
+    ref = report.entry_for("WS-A").references[0]
+    assert ref.context is None
+    assert ref.location.line == 0
+    # No paragraph to fall back to, so no fallback caveat either.
+    assert not any("no usable statement location" in c for c in report.caveats)
+
+
+def test_read_record_name_is_a_write():
+    stmt = IOReadStatement(SourceLocation(21, 12))
+    stmt.set_file_name("IN-FILE")
+    stmt.set_record_name("IN-REC")
+
+    prog = _make_program([("MAIN-PARA", [stmt])], data_items=[_data_item("IN-REC")])
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "IN-REC") == [ROLE_WRITE]
+    # No SELECT/FD in this hand-built AST, so the file is undefined but named.
+    assert report.entry_for("IN-FILE").kind == KIND_FILE
+
+
+def test_xml_processing_procedure_thru_range():
+    stmt = XmlJsonStatement("XML", "PARSE", SourceLocation(21, 12))
+    stmt.set_primary_operand("WS-DOC")
+    stmt.processing_procedure = "A-PARA"
+    stmt.processing_procedure_thru = "C-PARA"
+
+    prog = _make_program(
+        [("MAIN-PARA", [stmt]), ("A-PARA", []), ("C-PARA", [])],
+        data_items=[_data_item("WS-DOC")],
+    )
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "A-PARA") == [ROLE_PERFORM]
+    assert _roles(report, "C-PARA") == [ROLE_PERFORM]
+
+
+def test_clause_value_of_none_contributes_nothing():
+    stmt = InitializeStatement(SourceLocation(21, 12))
+    stmt.add_target("WS-A")
+    stmt.replacing_clauses.append({"category": "ALPHANUMERIC", "by_value": None})
+
+    prog = _make_program([("MAIN-PARA", [stmt])], data_items=[_data_item("WS-A")])
+    report = XrefAnalyzer().analyze(prog)
+    assert _roles(report, "WS-A") == [ROLE_WRITE]
+    assert report.undefined == []

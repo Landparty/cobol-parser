@@ -143,6 +143,13 @@ _KIND_ORDER: dict[str, int] = {
 # a paragraph and a data item that share a name are never confused.
 _PROCEDURE_ROLES = frozenset({ROLE_PERFORM, ROLE_GOTO})
 
+#: A COBOL word: letters/digits/hyphens, never starting or ending with a
+#: hyphen. Identifier extraction runs over raw operand text a statement
+#: parser sometimes truncates (an UNSTRING ``DELIMITER IN`` operand can
+#: arrive as ``"WS-"``), and a fragment like that is not a symbol -- it is
+#: dropped and counted rather than reported as an undeclared name.
+_COBOL_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$")
+
 _PAREN_RE = re.compile(r"\(([^()]*)\)")
 _FUNCTION_RE = re.compile(r"\bFUNCTION\b", re.IGNORECASE)
 
@@ -365,6 +372,7 @@ class XrefAnalyzer:
         self._caveats: list[str] = []
         self._generic_statements: set[str] = set()
         self._location_fallbacks: int = 0
+        self._malformed_names: int = 0
 
     # ------------------------------------------------------------------
     # Entry point
@@ -387,6 +395,7 @@ class XrefAnalyzer:
         self._caveats = []
         self._generic_statements = set()
         self._location_fallbacks = 0
+        self._malformed_names = 0
 
         self._collect_data_definitions(ast)
         self._collect_file_definitions(ast)
@@ -397,6 +406,12 @@ class XrefAnalyzer:
             self._caveat(
                 f"{self._location_fallbacks} reference(s) had no usable statement "
                 "location; the enclosing paragraph's location was used instead"
+            )
+        if self._malformed_names:
+            self._caveat(
+                f"{self._malformed_names} extracted name(s) were not valid COBOL "
+                "words (a truncated operand) and were dropped rather than reported "
+                "as undeclared symbols"
             )
         if self._generic_statements:
             names = ", ".join(sorted(self._generic_statements))
@@ -749,6 +764,9 @@ class XrefAnalyzer:
         """
         upper = name.upper()
         entry = self._lookup(upper, role)
+        if entry is None and not _COBOL_WORD_RE.match(upper):
+            self._malformed_names += 1
+            return
         if entry is None:
             if not exact:
                 return
