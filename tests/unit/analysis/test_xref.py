@@ -1457,7 +1457,7 @@ def test_truncated_operand_is_dropped_with_a_caveat():
            STOP RUN.
 """)
     assert report.undefined == []
-    assert any("not valid COBOL words" in caveat for caveat in report.caveats)
+    assert any("truncated operand" in caveat for caveat in report.caveats)
 
 
 def test_set_with_multiple_groups_from_a_hand_built_statement():
@@ -1569,3 +1569,23 @@ def test_clause_value_of_none_contributes_nothing():
     report = XrefAnalyzer().analyze(prog)
     assert _roles(report, "WS-A") == [ROLE_WRITE]
     assert report.undefined == []
+
+
+def test_reserved_and_intrinsic_names_are_never_reported_undefined():
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RESW.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-A PIC X(21).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE FUNCTION CURRENT-DATE TO WS-A
+           STOP RUN.
+""")
+    assert report.undefined == []
+    assert _roles(report, "WS-A") == [ROLE_WRITE]
+    assert any(
+        "reserved word, an intrinsic function name" in caveat
+        for caveat in report.caveats
+    )

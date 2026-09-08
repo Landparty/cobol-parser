@@ -34,6 +34,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..dialects.ibm_enterprise import IBMEnterpriseCobol
+from ..lexer import CobolLexer
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import ConditionNameItem
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
@@ -142,6 +144,16 @@ _KIND_ORDER: dict[str, int] = {
 # file. The role decides which namespace a reference is resolved against, so
 # a paragraph and a data item that share a name are never confused.
 _PROCEDURE_ROLES = frozenset({ROLE_PERFORM, ROLE_GOTO})
+
+#: Words that can never be a user-declared symbol: every reserved word the
+#: lexer knows plus the IBM intrinsic function names. Identifier extraction
+#: is deliberately over-inclusive (see ``_extract_identifiers``), so a raw
+#: operand can yield ``BY``, ``DISPLAY`` or ``ASIN``; those attach to nothing
+#: and must not be reported as *undeclared* symbols either. Checked only
+#: after a lookup has already failed, so a real declaration always wins.
+_RESERVED_WORDS: frozenset[str] = frozenset(CobolLexer.KEYWORDS) | frozenset(
+    IBMEnterpriseCobol.IBM_INTRINSIC_FUNCTIONS
+)
 
 #: A COBOL word: letters/digits/hyphens, never starting or ending with a
 #: hyphen. Identifier extraction runs over raw operand text a statement
@@ -345,6 +357,12 @@ class XrefAnalyzer:
     - Names extracted from any of the above never land in
       ``report.undefined`` -- an approximate extraction must not invent an
       undeclared symbol.
+    - The declared-symbol set is the one ``collect_declared_items`` defines
+      (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE), plus files,
+      procedures, level-88 condition names and ``INDEXED BY`` index names.
+      SCREEN / COMMUNICATION / REPORT SECTION items and special registers are
+      outside it, so a reference to one reads as undefined -- reported, with
+      a caveat saying so, rather than silently swallowed.
     - Symbols are resolved by uppercased name, not by structural identity, so
       two same-named items at different qualification scopes (legal but rare
       in COBOL) share one entry; a duplicate declaration is reported as a
@@ -372,7 +390,7 @@ class XrefAnalyzer:
         self._caveats: list[str] = []
         self._generic_statements: set[str] = set()
         self._location_fallbacks: int = 0
-        self._malformed_names: int = 0
+        self._dropped_tokens: int = 0
 
     # ------------------------------------------------------------------
     # Entry point
@@ -395,7 +413,7 @@ class XrefAnalyzer:
         self._caveats = []
         self._generic_statements = set()
         self._location_fallbacks = 0
-        self._malformed_names = 0
+        self._dropped_tokens = 0
 
         self._collect_data_definitions(ast)
         self._collect_file_definitions(ast)
@@ -407,11 +425,12 @@ class XrefAnalyzer:
                 f"{self._location_fallbacks} reference(s) had no usable statement "
                 "location; the enclosing paragraph's location was used instead"
             )
-        if self._malformed_names:
+        if self._dropped_tokens:
             self._caveat(
-                f"{self._malformed_names} extracted name(s) were not valid COBOL "
-                "words (a truncated operand) and were dropped rather than reported "
-                "as undeclared symbols"
+                f"{self._dropped_tokens} extracted token(s) matched no declared "
+                "symbol and could not be one -- a reserved word, an intrinsic "
+                "function name, or a truncated operand -- so they were dropped "
+                "rather than reported as undeclared symbols"
             )
         if self._generic_statements:
             names = ", ".join(sorted(self._generic_statements))
@@ -424,6 +443,12 @@ class XrefAnalyzer:
                 "the kind of an undefined symbol is inferred from the role it is "
                 "used in (procedure for perform/goto, file for file-operation, "
                 "data-item otherwise), not from a declaration"
+            )
+            self._caveat(
+                "'undefined' means 'not declared in anything this analyzer sees': "
+                "SCREEN / COMMUNICATION / REPORT SECTION items, special registers "
+                "and non-IBM dialect words are outside its declared-symbol set and "
+                "read as undefined"
             )
 
         entries = [*self._entries, *self._undefined.values()]
@@ -764,8 +789,10 @@ class XrefAnalyzer:
         """
         upper = name.upper()
         entry = self._lookup(upper, role)
-        if entry is None and not _COBOL_WORD_RE.match(upper):
-            self._malformed_names += 1
+        if entry is None and (
+            upper in _RESERVED_WORDS or not _COBOL_WORD_RE.match(upper)
+        ):
+            self._dropped_tokens += 1
             return
         if entry is None:
             if not exact:
