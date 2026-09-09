@@ -273,13 +273,9 @@ class TestNoPhantomLinePerCopy:
 
         # The 2-line copybook replaces the 1-line COPY statement: net growth
         # is +1, not +2 (the phantom line's excess on top of that).
-        assert len(result.expanded_source.splitlines()) == len(
-            source.splitlines()
-        ) + 1
+        assert len(result.expanded_source.splitlines()) == len(source.splitlines()) + 1
 
-    def test_no_blank_line_separates_copybook_content_from_what_follows(
-        self, tmp_path
-    ):
+    def test_no_blank_line_separates_copybook_content_from_what_follows(self, tmp_path):
         (tmp_path / "TWO.cpy").write_text(
             _pad(" 01  WS-A PIC X.") + "\n" + _pad(" 01  WS-B PIC X.") + "\n"
         )
@@ -309,9 +305,7 @@ class TestNoPhantomLinePerCopy:
 
         # 3 copybook lines total replace 2 COPY statements: net growth +1,
         # not +3 (a +1 excess per COPY compounding with the count of COPYs).
-        assert len(result.expanded_source.splitlines()) == len(
-            source.splitlines()
-        ) + 1
+        assert len(result.expanded_source.splitlines()) == len(source.splitlines()) + 1
 
 
 class TestApplySourceMap:

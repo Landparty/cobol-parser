@@ -141,35 +141,17 @@ this was measured (2026-07-09) and have not been re-measured since.
   `_UNSUPPORTED_VERBS` but still produce no AST node — downgraded from
   "silent drop" to "warned, unmodeled." Tracking here only as a reminder
   these constructs still aren't captured in the AST, not as a live bug.
-- **Every `COPY` statement inserts one extra phantom line into the
-  copybook-expansion pipeline** (found while fixing issue #123's
-  comment-driven `location.line` drift — see `CHANGELOG.md` and
-  `.okf/preprocessing.md`, "Line-Number Preservation"). In
-  `copybook_expander.py::_expand_source_recursive`, the splice
-  `expanded_source[:statement_start] + expanded_copybook +
-  expanded_source[statement_end:]` (around `copybook_expander.py:927-931`)
-  inserts `expanded_copybook` — which still carries the copybook file's own
-  trailing `"\n"` — into a span that already ends in a newline (the COPY
-  statement's own terminating period line), so each copybook contributes
-  one extra blank physical line beyond its real content. Confirmed
-  empirically to be exactly `+1` per `COPY` statement, not a one-time
-  constant:
-
-  | fixture | copybook lines | `COPY`s | content growth | measured offset | excess |
-  |---|---|---|---|---|---|
-  | 1 copybook, 2 lines | 2 | 1 | +1 | +2 | +1 |
-  | 1 copybook, 4 lines (incl. 2 comments) | 4 | 1 | +3 | +4 | +1 |
-  | 2 copybooks, 2+1 lines | 3 | 2 | +1 | +3 | +2 |
-
-  This makes the *base* offset between a copybook-expanded `location.line`
-  and the true original-file line number larger than the copybooks' real
-  combined content by one line per `COPY` — on top of, and independent
-  from, the per-comment drift issue #123 fixed. It is constant per file
-  (doesn't grow with unrelated comments/blanks elsewhere), so it does not
-  reintroduce the drift bug, but it does mean `location.line` still cannot
-  be used directly against the original source file for any file with a
-  `COPY` statement — a real original-file location map remains the only
-  fix that removes the need to guess at this offset at all.
+- ~~**Every `COPY` statement inserts one extra phantom line into the
+  copybook-expansion pipeline**~~ — **fixed.**
+  `_expand_source_recursive` now strips exactly one trailing newline from
+  the expanded member before the splice (and before `copybook_line_count`
+  is taken, since that count pads the spliced-in origins to match), so the
+  member's own line terminator no longer doubles up with the one the COPY
+  statement's line already ended in. Expanded line counts are exact:
+  `len(source) - len(COPY lines) + len(member lines)`, for any nesting
+  depth. Note that `location.line` against the *original* file is answered
+  by `ParseResult.expansion_source_map`, not by guessing at an offset —
+  that map is what removed the need for this arithmetic at all.
 
 ---
 

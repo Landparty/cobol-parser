@@ -1328,8 +1328,22 @@ def _expand_source_recursive(
             spliced[0] = origins[start_line]
         origins = origins[:start_line] + spliced + origins[end_line + 1 :]
 
+        # `COPY X.` on a line of its own: the blanks before it are the COPY
+        # statement's OWN indentation, not the copied text's. Splicing at
+        # `statement_start` would prepend them to the member's first line,
+        # which is that line's columns as its author wrote them -- so a `01`
+        # copied from a member that puts it in Area A lands in Area B, and a
+        # far-right `COPY` pushes the line past column 72, where
+        # `_fit_fixed_format_width` then squeezes its blanks out or wraps it
+        # onto an extra physical line (shifting every following line number).
+        # A member's lines are inserted as whole source records, in their own
+        # columns, so the splice starts at the beginning of the record. When
+        # the parent DOES have text before the COPY on that line, those
+        # characters are program text and must survive -- hence the guard.
+        text_start = statement_start if head_has_text else head_start
+
         expanded_source = (
-            expanded_source[:statement_start]
+            expanded_source[:text_start]
             + expanded_copybook
             + expanded_source[statement_end:]
         )
