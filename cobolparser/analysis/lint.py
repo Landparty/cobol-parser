@@ -94,7 +94,6 @@ _SEVERITY_IO: dict[str, str] = {
 _SEVERITY_LINKAGE: dict[str, str] = {
     "TOO_MANY_ARGS": "error",
     "TOO_FEW_ARGS": "error",
-    "VALUE_TO_LINKAGE": "error",
     "UNKNOWN_ENTRY": "error",
     "UNREFERENCED_LINKAGE": "warning",
 }
@@ -400,6 +399,7 @@ class LintAnalyzer:
             self._analyze_unit(
                 unit,
                 report,
+                root=ast,
                 flow_report=flow_report if index == 0 else None,
                 copybook_item_names=copybook_item_names,
             )
@@ -416,10 +416,16 @@ class LintAnalyzer:
         ast: CobolProgram,
         report: LintReport,
         *,
+        root: CobolProgram,
         flow_report: ProgramFlowReport | None,
         copybook_item_names: set[str] | None,
     ) -> None:
-        """Run every selected rule over one program unit, into *report*."""
+        """Run every selected rule over one program unit, into *report*.
+
+        *root* is the outermost program of the file, for the one rule
+        (``linkage-check``) whose findings are per unit but whose knowledge
+        -- which entry declares which parameters -- spans the file.
+        """
         collectors: dict[str, Callable[[], list[LintFinding]]] = {
             "dead-code": lambda: self._dead_code(ast),
             "unused-variables": lambda: self._unused_variables(
@@ -427,7 +433,7 @@ class LintAnalyzer:
             ),
             "move-type-check": lambda: self._move_type_check(ast, report),
             "io-sequence": lambda: self._io_sequence(ast),
-            "linkage-check": lambda: self._linkage_check(ast),
+            "linkage-check": lambda: self._linkage_check(ast, root),
             "recursion-check": lambda: self._recursion_check(
                 ast, self._flow(ast, flow_report)
             ),
@@ -556,17 +562,25 @@ class LintAnalyzer:
             for v in result.violations
         ]
 
-    def _linkage_check(self, ast: CobolProgram) -> list[LintFinding]:
+    def _linkage_check(
+        self, ast: CobolProgram, root: CobolProgram
+    ) -> list[LintFinding]:
         from .linkage_checker import LinkageChecker
 
-        result = LinkageChecker().check(ast)
+        # This unit only: analyze() already visits every unit, and letting
+        # the checker recurse too would report a contained program's items
+        # twice -- or, for two units declaring a same-named item, once with
+        # no location, which _deduplicate then folds into one finding.
+        result = LinkageChecker(include_contained_programs=False).check(
+            ast, interface_scope=root
+        )
         return [
             LintFinding(
                 rule="linkage-check",
                 severity=_SEVERITY_LINKAGE.get(v.kind.name, "warning"),
                 message=v.message,
                 location=v.location,
-                symbol=v.call_target,
+                symbol=v.call_target or v.item_name,
                 kind=v.kind.name,
             )
             for v in result.violations

@@ -37,7 +37,7 @@ from ..models.statements.control import (
 )
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import IOReadStatement
-from .boundary_inventory import BoundaryRef, BoundaryReport
+from .boundary_inventory import BoundaryRef, BoundaryReport, _condition_field_names
 
 if TYPE_CHECKING:
     # Deferred: cobolparser.generators (reached via generators/__init__.py's
@@ -964,7 +964,7 @@ def _build_relational_constraint(
         return None
 
     return FieldConstraint(
-        field_ref, op, (_strip_quotes(value_text),), origin, negated=False
+        field_ref, op, (_literal_value(value_text),), origin, negated=False
     )
 
 
@@ -1054,10 +1054,12 @@ def _extract_evaluate_selector(
                 f"literal, which is not supported in v1: {value}"
             )
             return None
-        return [FieldConstraint(resolved, "eq", (value,), origin, False)]
+        return [
+            FieldConstraint(resolved, "eq", (_literal_value(value),), origin, False)
+        ]
     if sel_type == "Range":
-        start = str(sel.get("start", ""))
-        end = str(sel.get("end", ""))
+        start = _literal_value(str(sel.get("start", "")))
+        end = _literal_value(str(sel.get("end", "")))
         named = [bound for bound in (start, end) if index.resolve(bound) is not None]
         if named:
             unsupported.append(
@@ -1154,6 +1156,19 @@ def _strip_quotes(text: str) -> str:
     return t
 
 
+#: A sign the lexer emitted as its own token, so ``-5`` reaches us as
+#: ``- 5``.  Collapsed before a value is stored on a constraint: the solver
+#: parses it with ``Decimal``, which rejects the spaced form -- and used to
+#: drop the whole constraint on the floor when it did.
+_SIGN_SPACE_RE = re.compile(r"^([+-])\s+")
+
+
+def _literal_value(text: str) -> str:
+    """The comparison value to store for a literal operand: quotes stripped,
+    a detached sign reattached (``- 5`` -> ``-5``)."""
+    return _SIGN_SPACE_RE.sub(r"\1", _strip_quotes(text))
+
+
 #: A numeric literal as the operand text actually reaches us.  The sign is
 #: its own token upstream, so ``-45`` arrives as ``- 45`` -- the whitespace
 #: is not optional politeness, it is the shape of the input.
@@ -1202,26 +1217,6 @@ def _is_literal_operand(text: str, *, quoted: bool = True) -> bool:
 
 
 # -- PERFORM UNTIL / EOF-flag pattern -----------------------------------------
-
-
-def _condition_field_names(expr: CobolExpression | None) -> list[str]:
-    """Every bare operand string anywhere in *expr*'s tree (over-approximates
-    -- a literal like ``"Y"`` is included too -- but the caller only ever
-    looks these up against a name map, so a stray literal simply never
-    matches anything real)."""
-    if expr is None:
-        return []
-    if isinstance(expr, LogicalExpression):
-        return _condition_field_names(expr.left_condition) + _condition_field_names(
-            expr.right_condition
-        )
-    if isinstance(expr, ConditionalExpression):
-        names = []
-        for operand in (expr.left_operand, expr.right_operand):
-            if isinstance(operand, str) and operand.strip():
-                names.append(operand.strip())
-        return names
-    return []
 
 
 def _collect_eof_flags(ast: CobolProgram) -> dict[str, list[str | None]]:

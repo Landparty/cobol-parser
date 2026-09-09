@@ -29,7 +29,8 @@ from typing import Any
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
 from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
-from .program_flow.edges import INTERNAL_EDGE_TYPES
+from .program_flow.edges import INTERNAL_EDGE_TYPES, PERFORM_EDGE_TYPES
+from .program_flow.models import FlowEdgeType
 from .value_tracker import DynamicCallAnalyzer
 
 _LOOP_CYCLE_KINDS = frozenset({"PERFORM_RECURSION", "GOTO_LOOP", "MIXED"})
@@ -136,6 +137,8 @@ class RecursionRiskAnalyzer:
             nodes: list[str] = list(detail.get("nodes", []))
             if not nodes:
                 continue
+            if self._closed_by_perform_range_end(nodes, flow_report):
+                continue
             path = " -> ".join([*nodes, nodes[0]])
 
             if kind == "PERFORM_RECURSION":
@@ -186,6 +189,57 @@ class RecursionRiskAnalyzer:
                 )
             )
         return risks
+
+    @staticmethod
+    def _closed_by_perform_range_end(
+        cycle: list[str], flow_report: ProgramFlowReport
+    ) -> bool:
+        """True if *cycle* only closes by falling off the end of a PERFORM
+        range the cycle itself entered by PERFORM -- an edge that cannot fire.
+
+        ``ProgramFlowAnalyzer`` emits a ``FALL_THROUGH`` edge between *any*
+        two adjacent non-terminating procedures, PERFORM targets included (a
+        documented over-approximation of the CFG). But a PERFORM *returns*
+        at the end of its range; control never runs off the end of
+        ``1000-READ`` into ``2000-PROCESS``. So the priming-read idiom --
+        ``MAIN`` performs ``1000-READ`` and ``2000-PROCESS``, and
+        ``2000-PROCESS`` performs ``1000-READ`` again -- shows up in
+        ``cycle_details`` as a ``MIXED`` cycle (``2000-PROCESS ->
+        1000-READ`` by PERFORM, ``1000-READ -> 2000-PROCESS`` by
+        fall-through) that no execution can traverse.
+
+        The test is per hop, not per node: a hop that *needs* a fall-through
+        edge (no PERFORM/GO TO edge connects the same pair) out of paragraph
+        ``P`` is impossible when some other hop of the same cycle can *only*
+        be closed by a PERFORM whose range ends at ``P`` -- the cycle enters
+        the range by PERFORM, so it leaves it by returning. A paragraph that
+        is also reachable by fall-through or GO TO (the hop into it is not
+        PERFORM-only) keeps its fall-through exit, and a range left by a
+        ``GO TO`` rather than by running off its end is still a loop.
+        """
+        pair_edges: dict[tuple[str, str], list[Any]] = {}
+        for edge in flow_report.edges:
+            if edge.edge_type in INTERNAL_EDGE_TYPES:
+                pair_edges.setdefault((edge.source, edge.target), []).append(edge)
+
+        n = len(cycle)
+        hops = [(cycle[i], cycle[(i + 1) % n]) for i in range(n)]
+        hop_edges = [pair_edges.get(hop, []) for hop in hops]
+        hop_types = [{e.edge_type for e in edges} for edges in hop_edges]
+
+        for i, (src, _tgt) in enumerate(hops):
+            if hop_types[i] != {FlowEdgeType.FALL_THROUGH}:
+                continue
+            for j in range(n):
+                if j == i or not hop_types[j] or not hop_types[j] <= PERFORM_EDGE_TYPES:
+                    continue
+                for edge in hop_edges[j]:
+                    # ``PERFORM A`` returns from the end of A; ``PERFORM A
+                    # THRU C`` (and its ``*_THRU`` edge, whose target is C)
+                    # from C.
+                    if (edge.thru_target or edge.target) == src:
+                        return True
+        return False
 
     @staticmethod
     def _has_escape(cycle: list[str], flow_report: ProgramFlowReport) -> bool:

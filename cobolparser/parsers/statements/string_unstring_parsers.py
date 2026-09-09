@@ -7,6 +7,7 @@ from ...lexer import TokenType
 from ...models.statements import StringStatement, UnstringStatement
 from ._utils import (
     collect_clause_stmts,
+    consume_optional_qualifiers,
     consume_period,
     is_statement_boundary,
     looks_dedented_relative_to,
@@ -37,6 +38,23 @@ def _parse_overflow_stmts(token_stream: ITokenStream) -> list:
     this codebase recovers from an unrecognized token.
     """
     return collect_clause_stmts(token_stream, _OVERFLOW_CLAUSE_STOP)
+
+
+def _consume_operand(token_stream: ITokenStream) -> str | None:
+    """Consume one STRING/UNSTRING operand: a literal, or an identifier with
+    its subscript / reference modification / OF-IN qualifier chain folded in
+    (``A(1:2)``, ``D(3:5)``, ``WS-T(I)``). Returns None -- consuming nothing
+    -- at a period or end of stream. Reading a single token here silently
+    truncated every subscripted or reference-modified operand and left the
+    ``(I)`` tokens to be misread as further operands."""
+    token = token_stream.peek()
+    if not token or token.type == TokenType.PERIOD:
+        return None
+    token_stream.consume()
+    value = token.value or ""
+    if token.type == TokenType.IDENTIFIER:
+        value = consume_optional_qualifiers(token_stream, value)
+    return value
 
 
 class StringStatementParser(IStatementParser):
@@ -101,28 +119,28 @@ class StringStatementParser(IStatementParser):
                 if nxt and _val(nxt) == "BY":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    d = token_stream.peek()
-                    if d and d.type != TokenType.PERIOD:
-                        token_stream.consume()
-                        stmt.add_delimiter(d.value or "")
+                    delimiter = _consume_operand(token_stream)
+                    if delimiter is not None:
+                        stmt.add_delimiter(delimiter)
             elif val == "INTO":
                 token_stream.consume()
                 skip_whitespace(token_stream)
-                tgt = token_stream.peek()
-                if tgt and tgt.type != TokenType.PERIOD:
+                target = _consume_operand(token_stream)
+                if target is not None:
+                    stmt.set_into_target(target)
+            elif val in ("WITH", "POINTER"):
+                # ``WITH`` is optional: a bare ``POINTER I`` is the same
+                # clause (previously POINTER and I both became operands).
+                if val == "WITH":
                     token_stream.consume()
-                    stmt.set_into_target(tgt.value or "")
-            elif val == "WITH":
-                token_stream.consume()
-                skip_whitespace(token_stream)
+                    skip_whitespace(token_stream)
                 nxt = token_stream.peek()
                 if nxt and _val(nxt) == "POINTER":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    pv = token_stream.peek()
-                    if pv and pv.type != TokenType.PERIOD:
-                        token_stream.consume()
-                        stmt.set_pointer_variable(pv.value or "")
+                    pointer = _consume_operand(token_stream)
+                    if pointer is not None:
+                        stmt.set_pointer_variable(pointer)
             elif val == "ON":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -158,9 +176,11 @@ class StringStatementParser(IStatementParser):
                 TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
+                TokenType.FIGURATIVE_CONSTANT,
             ):
-                token_stream.consume()
-                stmt.add_operand(token.value or "")
+                operand = _consume_operand(token_stream)
+                if operand is not None:
+                    stmt.add_operand(operand)
             else:
                 token_stream.consume()
 
@@ -193,11 +213,10 @@ class UnstringStatementParser(IStatementParser):
         start_column = token_column(start)
         skip_whitespace(token_stream)
 
-        # Source identifier
-        token = token_stream.peek()
-        if token and token.type not in (TokenType.PERIOD, None):
-            token_stream.consume()
-            stmt.set_source(token.value or "")
+        # Source identifier (subscript / reference modification folded in)
+        source = _consume_operand(token_stream)
+        if source is not None:
+            stmt.set_source(source)
         skip_whitespace(token_stream)
 
         while not token_stream.is_empty():
@@ -241,11 +260,10 @@ class UnstringStatementParser(IStatementParser):
                         if nxt and _val(nxt) == "ALL":
                             token_stream.consume()
                             skip_whitespace(token_stream)
-                        d = token_stream.peek()
-                        if not d or d.type == TokenType.PERIOD:
+                        delimiter = _consume_operand(token_stream)
+                        if delimiter is None:
                             break
-                        token_stream.consume()
-                        stmt.add_delimiter(d.value or "")
+                        stmt.add_delimiter(delimiter)
                         skip_whitespace(token_stream)
                         nxt = token_stream.peek()
                         if nxt and _val(nxt) == "OR":
@@ -257,17 +275,18 @@ class UnstringStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 self._parse_into_targets(token_stream, stmt, start_column)
-            elif val == "WITH":
-                token_stream.consume()
-                skip_whitespace(token_stream)
+            elif val in ("WITH", "POINTER"):
+                # ``WITH`` is optional: a bare ``POINTER I`` is the same clause.
+                if val == "WITH":
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
                 nxt = token_stream.peek()
                 if nxt and _val(nxt) == "POINTER":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    pv = token_stream.peek()
-                    if pv and pv.type != TokenType.PERIOD:
-                        token_stream.consume()
-                        stmt.set_pointer_variable(pv.value or "")
+                    pointer = _consume_operand(token_stream)
+                    if pointer is not None:
+                        stmt.set_pointer_variable(pointer)
             elif val == "TALLYING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -275,10 +294,9 @@ class UnstringStatementParser(IStatementParser):
                 if nxt and _val(nxt) == "IN":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    tv = token_stream.peek()
-                    if tv and tv.type != TokenType.PERIOD:
-                        token_stream.consume()
-                        stmt.set_tallying_variable(tv.value or "")
+                    tally = _consume_operand(token_stream)
+                    if tally is not None:
+                        stmt.set_tallying_variable(tally)
             elif val == "ON":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -341,10 +359,7 @@ class UnstringStatementParser(IStatementParser):
                 if n and _val(n) == "IN":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and n.type != TokenType.PERIOD:
-                    token_stream.consume()
-                    current_delim_var = n.value or ""
+                current_delim_var = _consume_operand(token_stream)
             elif tval == "COUNT":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -352,10 +367,7 @@ class UnstringStatementParser(IStatementParser):
                 if n and _val(n) == "IN":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and n.type != TokenType.PERIOD:
-                    token_stream.consume()
-                    current_count_var = n.value or ""
+                current_count_var = _consume_operand(token_stream)
             elif tgt.type == TokenType.IDENTIFIER and is_statement_boundary(tgt):
                 # A following statement's verb that lexes as a plain
                 # IDENTIFIER (e.g. PURGE/RAISE/RESUME have no dedicated
@@ -383,8 +395,7 @@ class UnstringStatementParser(IStatementParser):
                     )
                     current_delim_var = None
                     current_count_var = None
-                token_stream.consume()
-                current_target = tgt.value or ""
+                current_target = _consume_operand(token_stream)
             elif tgt.type == TokenType.COMMA:
                 # A comma between INTO targets (normal COBOL style) is a
                 # separator, not a terminator -- skip it and keep collecting

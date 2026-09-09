@@ -341,6 +341,11 @@ class PerformStatementParser(IStatementParser):
                     if token and _is_procedure_name_token(token):
                         stmt.set_thru_paragraph(token.value)
                         token_stream.consume()
+                        # ``THRU P2 OF S1`` -- same qualifier form as the
+                        # target; previously left as an unparsed OF.
+                        thru_qualifier = consume_procedure_qualifier(token_stream)
+                        if thru_qualifier:
+                            stmt.set_metadata("thru_qualifier", thru_qualifier)
                         token = token_stream.peek()
                     else:
                         report_parse_error(

@@ -278,8 +278,12 @@ class CobolParser:
                         )
                     actual_free_form = True
                 else:
-                    # Source is already free-form, no preprocessing needed
-                    actual_free_form = False
+                    # Source is already free-form, no preprocessing needed:
+                    # lex it as free-form (mirrors parse_cobol, which flips
+                    # free_form on for undetected-fixed input). Lexing it
+                    # with the fixed-format column rules instead sliced the
+                    # first seven characters off every line.
+                    actual_free_form = True
                 logger.debug(
                     "Format auto-detection for %s: %s",
                     filename,

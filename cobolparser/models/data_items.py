@@ -15,12 +15,11 @@ from .ast_base import ASTNode, SourceLocation
 _PIC_P_FACTOR_RE = re.compile(r"P(\((\d+)\))?")
 _PIC_ALPHA_RE = re.compile(r"([XA])(\((\d+)\))?$")
 _PIC_NATIONAL_RE = re.compile(r"N(\((\d+)\))?$")
+_PIC_DBCS_RE = re.compile(r"G(\((\d+)\))?$")
 _PIC_BASIC_NUMERIC_RE = re.compile(r"S?9(\((\d+)\))?$")
 _PIC_SIGNED_RE = re.compile(r"S(9+|\((\d+)\)|9\((\d+)\))$")
 _PIC_LEFT_V_RE = re.compile(r"S?(9+|9\((\d+)\))$")
 _PIC_RIGHT_V_RE = re.compile(r"(9+|9\((\d+)\))$")
-_PIC_SCALING_LEFT_RE = re.compile(r"S?P(\((\d+)\))?9+$")
-_PIC_SCALING_RIGHT_RE = re.compile(r"S?9+P(\((\d+)\))?$")
 _PIC_COMPLEX_RE = re.compile(r"S?(9+)V(9+)$")
 _PIC_DIGIT_X_RE = re.compile(r"[9XN]")
 _PIC_NINE_RE = re.compile(r"9")
@@ -34,8 +33,13 @@ _PIC_PAREN_COUNT_RE = re.compile(r"\(\d+\)")
 # indistinguishable from junk letters/digits in a malformed pattern, so they only
 # count as positions once an item is already known to be edited via another symbol.
 _PIC_EDIT_SYMBOLS: frozenset[str] = frozenset("Z*+-,./$")
-# Symbols that occupy a digit position in a numeric-edited item.
-_PIC_EDIT_DIGIT_SYMBOLS: frozenset[str] = frozenset("9Z*$")
+# Symbols that always occupy a digit position in a numeric-edited item.
+_PIC_EDIT_DIGIT_SYMBOLS: frozenset[str] = frozenset("9Z*")
+# Symbols that occupy a digit position only as part of a *floating* insertion
+# string (two or more of the same symbol): the leftmost one is the currency
+# sign / operational sign itself, every further one stands for a digit.  A
+# single ``$``/``+``/``-`` is a fixed insertion character and no digit at all.
+_PIC_FLOATING_SYMBOLS: frozenset[str] = frozenset("$+-")
 
 # Characters that may legally appear in a PICTURE pattern (case-insensitive),
 # once repeat factors ``(n)`` and the two-letter ``CR``/``DB`` symbols have been
@@ -85,10 +89,14 @@ class PictureClause(ASTNode):
             p_matches = _PIC_P_FACTOR_RE.findall(pattern)
             if p_matches:
                 self.has_scaling_factor = True
-                if p_matches[0][1]:  # P(n) format
-                    self.scaling_factor = int(p_matches[0][1])
-                else:  # Single P
-                    self.scaling_factor = 1
+                # Every P position counts: ``PPP`` and ``P(3)`` both scale by
+                # three, so the factor is the sum over the whole run rather
+                # than the first match's own repeat count.
+                self.scaling_factor = sum(
+                    int(count) if count else 1 for _, count in p_matches
+                )
+            if self._parse_scaled_pattern(pattern):
+                return
 
         # Use the first character as a cheap guard for the simple
         # alphanumeric/national branches below, so we avoid those regexes
@@ -103,19 +111,22 @@ class PictureClause(ASTNode):
                 self.size = int(count_str) if count_str else 1
                 return
 
-        # 1b. Basic national patterns: N, N(n) -- national/DBCS character
-        # items (PIC N). Counted the same way X/A are counted above: one
-        # character position per N, expanded by an optional (n) repeat
-        # factor. This codebase has no existing double-byte/DBCS sizing
-        # convention elsewhere (no GROUP-USAGE NATIONAL byte-doubling, no
-        # code page handling), so -- per the simpler, more defensible
-        # option -- size is a single-width character count (PIC N(10) ->
-        # size 10), not a double-byte count.
-        if first == "N":
-            national_match = _PIC_NATIONAL_RE.match(pattern)
-            if national_match:
-                count_str = national_match.group(2)
-                self.size = int(count_str) if count_str else 1
+        # 1b. National (PIC N) and DBCS (PIC G) patterns: N, N(n), G, G(n).
+        # Each N/G names one *double-byte* character position, so the item
+        # occupies twice as many bytes as it has symbols -- ``PIC N(10)`` is
+        # 20 bytes on IBM Enterprise COBOL, and so is ``PIC G(10)`` (which
+        # always pairs with USAGE DISPLAY-1). ``size`` is what every layout
+        # surface (record offsets, encoder, decoder) reads as the item's
+        # byte width, so it carries the doubled count; nothing else in this
+        # codebase models UTF-16/DBCS content, and a 20-byte slot is what a
+        # record image and a ``data-items`` offset both need to agree on.
+        if first in ("N", "G"):
+            wide_match = (_PIC_NATIONAL_RE if first == "N" else _PIC_DBCS_RE).match(
+                pattern
+            )
+            if wide_match:
+                count_str = wide_match.group(2)
+                self.size = 2 * (int(count_str) if count_str else 1)
                 return
 
         # 2. Basic numeric patterns: 9, 9(n)
@@ -181,18 +192,10 @@ class PictureClause(ASTNode):
         # 5. Leading decimal patterns: SV9(n), V9(n) - already handled above in V parsing
         # This is redundant now since we handle V patterns above
 
-        # 6. Scaling factor patterns: SP(n)9, S9P(n)
-        scaling_match = _PIC_SCALING_LEFT_RE.match(
-            self.pattern
-        ) or _PIC_SCALING_RIGHT_RE.match(self.pattern)
-        if scaling_match:
-            # Count digits (9s)
-            digit_count = len(_PIC_NINE_RE.findall(self.pattern))
-            self.integer_digits = digit_count
-            self.decimal_digits = 0
-            self.total_digits = digit_count
-            self.size = digit_count
-            return
+        # 6. Scaling factor patterns (SP(n)9, S9P(n), SVPP9(3), 9(3)PPP) are
+        # handled by _parse_scaled_pattern before the V split above, since a
+        # V next to the P run would otherwise be read as an ordinary decimal
+        # point with nothing parseable on either side.
 
         # 7. Edited pictures (numeric-edited and alphanumeric-edited).
         # Covers zero-suppression (Z, *), floating/fixed insertion ($, +, -),
@@ -358,6 +361,50 @@ class PictureClause(ASTNode):
             i += 1
         return symbols
 
+    def _parse_scaled_pattern(self, pattern: str) -> bool:
+        """Populate the fields for a ``P``-scaled numeric picture.
+
+        ``P`` is a decimal scaling position: it holds no byte, but it shifts
+        the assumed decimal point one place further away from the digits.
+        ``9(3)PPP`` therefore describes an integer of six digits whose low
+        three are always zero (``123000``), stored in three bytes;
+        ``SVPP9(3)`` describes a five-place fraction whose first two places
+        are always zero (``0.00123``), also stored in three bytes.  The
+        ``integer_digits``/``decimal_digits`` counts include the P positions
+        (they describe the *value*), while ``size`` and ``total_digits``
+        count only the ``9``s (they describe the *storage*) -- which is what
+        keeps a ``PIC 9(3)PPP COMP-3`` item at two bytes, not four.
+
+        Returns False when *pattern* is not a plain ``S``/``V``/``P``/``9``
+        picture with one contiguous run of ``P`` at exactly one end, leaving
+        the general parse to deal with it.
+        """
+        symbols = [s.upper() for s in self._expand_symbols(pattern)]
+        core = [s for s in symbols if s not in ("S", "V")]
+        if not core or any(s not in ("9", "P") for s in core):
+            return False
+        nines = core.count("9")
+        ps = core.count("P")
+        if nines == 0 or ps == 0:
+            return False
+        leading = core[0] == "P"
+        trailing = core[-1] == "P"
+        if leading == trailing:
+            return False  # P on both ends, or P in the middle: not a scaled picture
+        run = core[:ps] if leading else core[-ps:]
+        if any(s != "P" for s in run):
+            return False
+
+        if leading:
+            self.integer_digits = 0
+            self.decimal_digits = ps + nines
+        else:
+            self.integer_digits = nines + ps
+            self.decimal_digits = 0
+        self.total_digits = nines
+        self.size = nines
+        return True
+
     def _parse_edited_pattern(self, pattern: str) -> None:
         """Populate size/digit fields for an edited picture clause."""
         self.is_edited = True
@@ -368,6 +415,20 @@ class PictureClause(ASTNode):
         decimal_digits = 0
         seen_decimal = False
         has_alpha = False
+
+        # A floating insertion string (``$$$,$$9``, ``++++9``, ``--,--9``)
+        # is two or more of the same symbol: its leftmost occurrence is the
+        # sign or currency character and holds no digit; each further one
+        # stands for a digit position. A lone ``$``/``+``/``-`` is a fixed
+        # insertion character and holds no digit either. Counting every
+        # such symbol as a digit -- the previous rule for ``$`` -- made
+        # ``$$$,$$9`` a six-digit field, and the value generator then
+        # produced numbers the edited picture cannot display.
+        floating_counts = {
+            sym: sum(1 for s in symbols if s.upper() == sym)
+            for sym in _PIC_FLOATING_SYMBOLS
+        }
+        floating_seen: set[str] = set()
 
         for sym in symbols:
             upper = sym.upper()
@@ -380,11 +441,17 @@ class PictureClause(ASTNode):
                 size += 2
                 continue
             size += 1
+            is_digit = upper in _PIC_EDIT_DIGIT_SYMBOLS
+            if upper in _PIC_FLOATING_SYMBOLS:
+                # Only the second and later symbols of a floating string
+                # are digit positions.
+                is_digit = floating_counts[upper] >= 2 and upper in floating_seen
+                floating_seen.add(upper)
             if upper in ("X", "A"):
                 has_alpha = True
             elif upper == ".":
                 seen_decimal = True
-            elif upper in _PIC_EDIT_DIGIT_SYMBOLS:
+            elif is_digit:
                 if seen_decimal:
                     decimal_digits += 1
                 else:

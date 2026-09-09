@@ -53,6 +53,9 @@ class SetStatementParser(IStatementParser):
         SET condition-name TO TRUE
     """
 
+    #: Set by ``_parse_action`` when the value was introduced by ENTRY.
+    _entry_form: bool = False
+
     def matches(self, token_stream: ITokenStream) -> bool:
         return matches_keyword(token_stream, TokenType.SET, "SET")
 
@@ -70,12 +73,15 @@ class SetStatementParser(IStatementParser):
         if ended:
             return stmt
 
+        self._entry_form = False
         action = self._parse_action(token_stream)
         if action is not None:
             set_type, value, is_address_of = action
             stmt.set_set_type(set_type)
             if value is not None:
                 stmt.set_value(value, is_address_of=is_address_of)
+            if self._entry_form:
+                stmt.set_metadata("value_is_entry", True)
 
         # COBOL lets one SET carry several target/value groups: ``SET SW-1
         # TO ON SW-2 TO OFF`` (NIST NC174A) or ``SET IX-1 TO 1 IX-2 TO 2``.
@@ -179,8 +185,8 @@ class SetStatementParser(IStatementParser):
             skip_whitespace(token_stream)
         return targets, False
 
-    @staticmethod
     def _parse_action(
+        self,
         token_stream: ITokenStream,
     ) -> tuple[str, str | None, bool] | None:
         """Parse ``TO value`` / ``TO TRUE|FALSE`` / ``TO ADDRESS OF x`` /
@@ -221,6 +227,18 @@ class SetStatementParser(IStatementParser):
                 if v2 and v2.type != TokenType.PERIOD:
                     return ("TO", _consume_set_value(token_stream), True)
                 return ("TO", None, True)
+            if vv == "ENTRY":
+                # SET procedure-pointer TO ENTRY literal|identifier. The
+                # value recorded is the entry name; ``value_is_entry``
+                # metadata marks the form (previously the literal was
+                # dropped as an unparsed trailing token).
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                self._entry_form = True
+                v2 = token_stream.peek()
+                if v2 and v2.type != TokenType.PERIOD:
+                    return ("TO", _consume_set_value(token_stream), False)
+                return ("TO", None, False)
             if v.type != TokenType.PERIOD:
                 return ("TO", _consume_set_value(token_stream), False)
             return ("TO", None, False)

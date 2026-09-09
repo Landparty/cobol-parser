@@ -12,11 +12,13 @@ Performance features for large batch scenarios (3000+ programs, 50+ copybooks):
 - Directory index in PathResolver for instant file lookups
 """
 
+import os
 import time
 from collections import OrderedDict
 from typing import Any
 
 from . import (
+    ALL_COMMENT_INDICATORS,
     CircularReferenceError,
     EncodingError,
     NestingDepthError,
@@ -52,7 +54,10 @@ from .path_resolver import PathResolver
 # lossy-decode diagnostics — without this, only the first reader of a copybook
 # would see U+FFFD-replacement warnings; subsequent readers from the same
 # process would silently use the replaced text.
-_FILE_CONTENT_CACHE: OrderedDict[str, tuple[str, tuple[str, ...]]] = OrderedDict()
+#: key -> (content, encoding warnings, (mtime_ns, size) stamp at read time)
+_FILE_CONTENT_CACHE: OrderedDict[
+    str, tuple[str, tuple[str, ...], tuple[int, int] | None]
+] = OrderedDict()
 _FILE_CONTENT_CACHE_MAX = 2048  # Max cached file contents
 
 # Cache observability — track hits / misses / evictions across the process so
@@ -81,11 +86,18 @@ def _cached_read_file(
     global _FILE_CONTENT_CACHE_HITS, _FILE_CONTENT_CACHE_MISSES
     global _FILE_CONTENT_CACHE_EVICTIONS
 
+    # The file's (mtime_ns, size) is stored beside the content and compared
+    # on every hit, so an edit on disk invalidates the entry: the cache is
+    # process-wide and never cleared between calls, and a stale hit fed a
+    # long-lived process (an editor extension, a batch run) the old member
+    # for as long as it lived.
+    stamp = _file_stamp(file_path)
     cache_key = f"{file_path}::{encoding_override or 'auto'}::{encoding_errors}"
-    if cache_key in _FILE_CONTENT_CACHE:
+    cached = _FILE_CONTENT_CACHE.get(cache_key)
+    if cached is not None and cached[2] == stamp:
         _FILE_CONTENT_CACHE.move_to_end(cache_key)
         _FILE_CONTENT_CACHE_HITS += 1
-        content, cached_warnings = _FILE_CONTENT_CACHE[cache_key]
+        content, cached_warnings, _ = cached
         if warnings is not None and cached_warnings:
             warnings.extend(cached_warnings)
         return content
@@ -101,12 +113,25 @@ def _cached_read_file(
     if warnings is not None and fresh_warnings:
         warnings.extend(fresh_warnings)
 
-    # LRU eviction
-    if len(_FILE_CONTENT_CACHE) >= _FILE_CONTENT_CACHE_MAX:
+    # LRU eviction (a stale entry being replaced does not count as one)
+    if cached is not None:
+        del _FILE_CONTENT_CACHE[cache_key]
+    elif len(_FILE_CONTENT_CACHE) >= _FILE_CONTENT_CACHE_MAX:
         _FILE_CONTENT_CACHE.popitem(last=False)
         _FILE_CONTENT_CACHE_EVICTIONS += 1
-    _FILE_CONTENT_CACHE[cache_key] = (content, tuple(fresh_warnings))
+    _FILE_CONTENT_CACHE[cache_key] = (content, tuple(fresh_warnings), stamp)
     return content
+
+
+def _file_stamp(file_path: str) -> tuple[int, int] | None:
+    """``(st_mtime_ns, st_size)`` of *file_path*, or None when it cannot be
+    stat-ed (the read below reports the real error; an unstat-able file is
+    simply never served from cache)."""
+    try:
+        st = os.stat(file_path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def clear_file_cache() -> None:
@@ -688,6 +713,33 @@ def _fit_fixed_format_width(line: str) -> list[str]:
 LineOrigin = tuple[str, int]
 
 
+def _looks_fixed_format(text: str) -> bool:
+    """Whether *text* uses the fixed-format column layout.
+
+    Defers to the parser's :func:`_detect_fixed_format` (the same verdict the
+    final parse will reach), which declines to judge fewer than three
+    non-blank lines; a short member is then judged directly -- fixed when
+    every non-blank line carries a blank/numeric sequence area and a valid
+    indicator column, and by default when it has no lines at all (nothing
+    to strip either way).
+    """
+    # Deferred: parser imports this package at module scope.
+    from ..parser import _detect_fixed_format, _sequence_area_is_fixed_like
+
+    non_blank = [line for line in text.splitlines() if line.strip()]
+    if len(non_blank) >= 3:
+        return _detect_fixed_format(text)
+    for line in non_blank:
+        if len(line) < 7:
+            return False
+        indicator = line[6]
+        if indicator not in (" ", "-") and indicator not in ALL_COMMENT_INDICATORS:
+            return False
+        if not _sequence_area_is_fixed_like(line[:6])[0]:
+            return False
+    return True
+
+
 def _identity_origins(source_file: str, text: str) -> list[LineOrigin]:
     """One origin per line of *text*, each naming its own line in *source_file*."""
     return [(source_file, n) for n in range(1, text.count("\n") + 2)]
@@ -1010,6 +1062,7 @@ def _expand_source_recursive(
     process_conditionals: bool = False,
     stats: ExpansionStatistics | None = None,
     already_stripped: bool = False,
+    free_form: bool | None = None,
 ) -> tuple[str, int, bool, list[LineOrigin]]:
     """
     Recursively expand COPY statements in source code.
@@ -1032,6 +1085,11 @@ def _expand_source_recursive(
             sequence-number or identification columns). Skips the redundant
             internal strip, which would otherwise double-strip and corrupt
             already-normalized text.
+        free_form: True when *source_code* is free-form (no sequence,
+            indicator or identification columns): nothing is stripped or
+            merged, and the result is never re-padded. None (the default)
+            detects it from the text; the copybook branch passes each
+            member's own verdict down.
 
     Returns:
         Tuple of (expanded_source, max_depth_reached, is_normalized, origins)
@@ -1069,7 +1127,17 @@ def _expand_source_recursive(
     # comment-blanking and sequence-area strips above it are line-preserving
     # by construction (both blank in place), so nothing else has to be tracked.
     merged_from: list[int] = []
-    if already_stripped:
+    if free_form is None:
+        free_form = not _looks_fixed_format(source_code)
+    if free_form:
+        # Free-form source has no sequence/indicator/identification columns
+        # to strip and no column-7 continuation records to merge; slicing
+        # it at column 7 (the previous unconditional path) cut the first
+        # six characters off every line. Its `*>` comments are skipped by
+        # the COPY scanner itself.
+        normalized_source = source_code
+        merged_from = list(range(1, source_code.count("\n") + 2))
+    elif already_stripped:
         normalized_source = normalize_continuation_lines(
             source_code, indicator_position=0, line_origins=merged_from
         )
@@ -1097,7 +1165,7 @@ def _expand_source_recursive(
         return (
             source_code,
             context.current_depth,
-            already_stripped,
+            already_stripped and not free_form,
             _identity_origins(source_file, source_code),
         )
 
@@ -1179,9 +1247,21 @@ def _expand_source_recursive(
             # text into the kept window, and a growing one silently
             # truncated real code (including its terminating period).
             raw_copybook_content = copybook_content
-            copybook_content = strip_sequence_area(
-                remove_comment_lines(copybook_content)
-            )
+            member_free_form = not _looks_fixed_format(copybook_content)
+            if not member_free_form:
+                copybook_content = strip_sequence_area(
+                    remove_comment_lines(copybook_content)
+                )
+            elif not free_form:
+                # A free-form member spliced into a fixed-format parent: the
+                # stripped shape (and the final 6-column re-pad) expect each
+                # line to begin with its indicator column, so give the
+                # member one -- otherwise its first character would land in
+                # column 7 and be read as the indicator.
+                copybook_content = "\n".join(
+                    (" " + line) if line.strip() else line
+                    for line in copybook_content.split("\n")
+                )
 
             # Validate copybook content if requested
             if validate_content:
@@ -1247,6 +1327,9 @@ def _expand_source_recursive(
                     process_conditionals,
                     stats,
                     already_stripped=True,
+                    # A free-form member under a fixed-format parent was
+                    # just given the stripped fixed shape above.
+                    free_form=member_free_form and free_form,
                 )
             )
 
@@ -1352,11 +1435,13 @@ def _expand_source_recursive(
     # Pop current file from stack
     context.stack_pop()
 
-    # Return normalized source (we don't pad here to avoid double-padding during recursion)
+    # Return normalized source (we don't pad here to avoid double-padding
+    # during recursion). Free-form output was never stripped, so it must not
+    # be re-padded either.
     return (
         expanded_source,
         max_depth,
-        True,
+        not free_form,
         _fit_origins(origins, expanded_source.count("\n") + 1, (source_file, 1)),
     )
 

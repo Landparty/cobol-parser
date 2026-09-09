@@ -326,7 +326,21 @@ def _normalized_usage(spec: FieldSpec) -> str:
 
 
 def _total_digits(spec: FieldSpec) -> int:
-    return max(1, spec.integer_digits + spec.decimal_digits)
+    # ``P`` scaling positions are not stored, so ``9(3)PPP`` is three digits.
+    return max(1, spec.stored_digits)
+
+
+def _field_number(magnitude: int, negative: bool, spec: FieldSpec) -> str:
+    """:func:`_render_number` for *spec*, the ``P`` scaling put back.
+
+    The bytes of ``9(3)PPP`` hold ``123`` for the value ``123000``; a
+    leading ``P`` run (``SVPP9(3)``) needs nothing here because the field's
+    own ``decimal_digits`` already counts those places.
+    """
+    scaling = spec.scaling_positions
+    if scaling > 0:
+        magnitude *= 10**scaling
+    return _render_number(magnitude, negative, spec.decimal_digits)
 
 
 def _is_sign_separate(spec: FieldSpec) -> bool:
@@ -404,7 +418,7 @@ def _decode_zoned(
         negative = negative or byte_negative
         if byte_error and error is None:
             error = f"byte {index} ({byte:02X}) {byte_error}"
-    return _render_number(magnitude, negative, decimals), error
+    return _field_number(magnitude, negative, spec), error
 
 
 def _zoned_digit(
@@ -456,7 +470,7 @@ def _zoned_digit(
 def _decode_packed(raw: bytes, spec: FieldSpec) -> tuple[str, str | None]:
     """COMP-3: two BCD digits per byte, sign in the final low nibble."""
     if not raw:
-        return _render_number(0, False, spec.decimal_digits), "empty field"
+        return _field_number(0, False, spec), "empty field"
     nibbles = raw.hex().upper()
     sign_nibble = int(nibbles[-1], 16)
     error: str | None = None
@@ -471,7 +485,7 @@ def _decode_packed(raw: bytes, spec: FieldSpec) -> tuple[str, str | None]:
             digit = 0
         magnitude = magnitude * 10 + digit
     negative = sign_nibble in _NEGATIVE_NIBBLES
-    return _render_number(magnitude, negative, spec.decimal_digits), error
+    return _field_number(magnitude, negative, spec), error
 
 
 def _decode_binary(
@@ -489,7 +503,7 @@ def _decode_binary(
     expected = binary_byte_length(_total_digits(spec))
     if len(raw) != expected:
         error = f"{len(raw)} bytes where {usage} needs {expected}"
-    return _render_number(abs(value), value < 0, spec.decimal_digits), error
+    return _field_number(abs(value), value < 0, spec), error
 
 
 def _decode_float(

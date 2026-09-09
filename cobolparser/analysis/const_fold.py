@@ -51,11 +51,13 @@ than guessing:
 from __future__ import annotations
 
 import re
+import weakref
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import TYPE_CHECKING, Any
 
+from ..models.data_items import CobolDataItem
 from ..models.program import CobolParagraph, CobolProgram
 from ..models.statements.arithmetic import (
     AddStatement,
@@ -93,6 +95,11 @@ from ..generators.data.layout import FieldCategory
 
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
+#: A subscript or reference-modification suffix: ``WS-T ( 1 )``, ``WS-B(1:1)``.
+_SUFFIX_RE = re.compile(r"\s*\(.*$", re.DOTALL)
+#: ``A OF B`` / ``A IN B`` qualification, as ``ProgramLayoutIndex.resolve``
+#: reads it.
+_OF_IN_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
 
 _TEXT_CATEGORIES = frozenset(
     {FieldCategory.ALPHANUMERIC, FieldCategory.ALPHABETIC, FieldCategory.NATIONAL}
@@ -160,6 +167,198 @@ def _safe_resolve(index: ProgramLayoutIndex, name: str) -> Any:
     return index.resolve(name)
 
 
+def _base_name(name: str) -> tuple[str, bool]:
+    """*name* without any subscript / reference-modification suffix, and
+    whether one was there. ``WS-T ( 1 )`` and ``WS-B(1:1)`` both name storage
+    inside ``WS-T``/``WS-B`` that this walk does not model position by
+    position, so a write through either poisons the base item as a whole."""
+    text = (name or "").strip()
+    if "(" in text:
+        return _SUFFIX_RE.sub("", text).strip(), True
+    return text, False
+
+
+class _LayoutFacts:
+    """What the walk needs to know about a program's storage *beyond* what
+    `ProgramLayoutIndex.resolve()` answers (which only ever finds elementary
+    fields): which qualified leaves sit under each group item, which leaves
+    share bytes through a REDEFINES chain, and which are JUSTIFIED. Built
+    once per index from the raw `CobolDataItem` trees and cached weakly."""
+
+    __slots__ = ("groups", "leaves", "aliases", "justified")
+
+    def __init__(self) -> None:
+        #: UPPERCASED bare group/record name -> qualified paths of every
+        #: group item carrying that name (a name may repeat across records).
+        self.groups: dict[str, list[str]] = {}
+        #: Every elementary leaf, as its qualified name (the env key shape).
+        self.leaves: list[str] = []
+        #: Leaf -> the other leaves whose bytes it shares via REDEFINES.
+        self.aliases: dict[str, set[str]] = {}
+        #: Leaves declared JUSTIFIED (RIGHT).
+        self.justified: set[str] = set()
+
+    def leaves_under(self, qpath: str) -> list[str]:
+        prefix = qpath + "."
+        return [leaf for leaf in self.leaves if leaf == qpath or leaf.startswith(prefix)]
+
+
+_FACTS_CACHE: weakref.WeakKeyDictionary[Any, _LayoutFacts] = weakref.WeakKeyDictionary()
+
+
+def _facts(index: ProgramLayoutIndex) -> _LayoutFacts:
+    try:
+        cached = _FACTS_CACHE.get(index)
+    except TypeError:  # an index that cannot be weakly referenced
+        cached = None
+    if cached is not None:
+        return cached
+    facts = _LayoutFacts()
+    records_method = getattr(index, "records", None)
+    top_level: list[CobolDataItem] = (
+        list(records_method()) if callable(records_method) else []
+    )
+    for record in top_level:
+        _collect_facts(record, (), facts)
+    # A top-level ``01 B REDEFINES A`` has the section's records as its
+    # sibling list; every section is pooled here, which can only widen the
+    # alias set (an over-approximation that poisons more, never less).
+    _link_redefines(top_level, (), facts)
+    try:
+        _FACTS_CACHE[index] = facts
+    except TypeError:
+        pass
+    return facts
+
+
+def _data_children(item: CobolDataItem) -> list[CobolDataItem]:
+    # Same filter as CobolDataItem._direct_data_children: level-88/66 nodes
+    # are not CobolDataItems, and a level-77 misfiled under a preceding item
+    # by level-number nesting is a standalone record, not a child.
+    return [
+        child
+        for child in item.children
+        if isinstance(child, CobolDataItem) and child.level != 77
+    ]
+
+
+def _collect_facts(
+    item: CobolDataItem, path: tuple[str, ...], facts: _LayoutFacts
+) -> None:
+    qpath = (*path, item.name)
+    qname = ".".join(qpath)
+    children = _data_children(item)
+    if children:
+        facts.groups.setdefault(item.name.upper(), []).append(qname)
+        for child in children:
+            _collect_facts(child, qpath, facts)
+        _link_redefines(children, qpath, facts)
+        return
+    facts.leaves.append(qname)
+    if getattr(item, "justified", False):
+        facts.justified.add(qname)
+
+
+def _link_redefines(
+    siblings: list[CobolDataItem], path: tuple[str, ...], facts: _LayoutFacts
+) -> None:
+    """Union every leaf under a REDEFINES slot (``[base, redefiner, ...]``,
+    chains included) into one alias class: a write to any of them may
+    change the bytes every other one reads."""
+    if len(siblings) < 2:
+        return
+    first_by_name: dict[str, int] = {}
+    for position, sibling in enumerate(siblings):
+        first_by_name.setdefault(sibling.name.upper(), position)
+    parent = list(range(len(siblings)))
+
+    def find(position: int) -> int:
+        while parent[position] != position:
+            parent[position] = parent[parent[position]]
+            position = parent[position]
+        return position
+
+    linked = False
+    for position, sibling in enumerate(siblings):
+        target = (sibling.redefines or "").strip().upper()
+        if not target or target not in first_by_name:
+            continue
+        other = first_by_name[target]
+        if other == position:
+            continue
+        root_a, root_b = find(position), find(other)
+        if root_a != root_b:
+            parent[root_a] = root_b
+            linked = True
+    if not linked:
+        return
+
+    classes: dict[int, set[str]] = {}
+    for position, sibling in enumerate(siblings):
+        qname = ".".join((*path, sibling.name))
+        classes.setdefault(find(position), set()).update(facts.leaves_under(qname))
+    for members in classes.values():
+        if len(members) < 2:
+            continue
+        for leaf in members:
+            facts.aliases.setdefault(leaf, set()).update(members - {leaf})
+
+
+def _group_paths(index: ProgramLayoutIndex, name: str) -> list[str]:
+    """Qualified paths of the group item(s) *name* denotes -- bare, ``A OF
+    B``, or dotted ``B.A``. Every match is returned: when a bare name is
+    declared in more than one record the walk poisons all of them rather
+    than guess which one the program meant."""
+    text = (name or "").strip()
+    if not text:
+        return []
+    if _OF_IN_RE.search(text):
+        parts = [p.strip() for p in _OF_IN_RE.split(text) if p.strip()]
+        if not parts:
+            return []
+        base, qualifiers = parts[0], parts[1:]
+    elif "." in text:
+        parts = [p.strip() for p in text.split(".") if p.strip()]
+        if not parts:
+            return []
+        base, qualifiers = parts[-1], parts[:-1]
+    else:
+        base, qualifiers = text, []
+    candidates = _facts(index).groups.get(base.upper(), [])
+    if not qualifiers:
+        return list(candidates)
+    wanted = {q.upper() for q in qualifiers}
+    return [
+        qpath
+        for qpath in candidates
+        if wanted <= {segment.upper() for segment in qpath.split(".")}
+    ]
+
+
+def _file_record_paths(index: ProgramLayoutIndex, file_name: str | None) -> list[str]:
+    if not file_name:
+        return []
+    return [record.name for record in index.records_for_file(file_name)]
+
+
+def _drop(qname: str, index: ProgramLayoutIndex, env: dict[str, Decimal | str]) -> None:
+    """Forget *qname* -- and every leaf sharing its bytes through REDEFINES."""
+    env.pop(qname, None)
+    for alias in _facts(index).aliases.get(qname, ()):
+        env.pop(alias, None)
+
+
+def _drop_under(
+    qpath: str, index: ProgramLayoutIndex, env: dict[str, Decimal | str]
+) -> None:
+    """Forget every leaf under the group/record *qpath* (aliases included)."""
+    for leaf in _facts(index).leaves_under(qpath):
+        _drop(leaf, index, env)
+    prefix = qpath + "."
+    for key in [k for k in env if k == qpath or k.startswith(prefix)]:
+        env.pop(key, None)
+
+
 @dataclass
 class ConstantFoldResult:
     """Fields still knowable at a DISPLAY/WRITE site by the end of the walk."""
@@ -195,7 +394,7 @@ class ConstantFolder:
             return ConstantFoldResult(known={})
 
         ordered_names, by_name = _ordered_paragraphs(ast)
-        state = _WalkState(env=env)
+        state = _WalkState(env=env, seed_env=dict(env))
         _walk_statements(
             entry.statements,
             index,
@@ -221,12 +420,26 @@ class ConstantFolder:
 
 
 class _WalkState:
-    __slots__ = ("env", "observed", "stopped")
+    __slots__ = ("env", "seed_env", "observed", "stopped", "read_files", "accepted")
 
-    def __init__(self, env: dict[str, Decimal | str]) -> None:
+    def __init__(
+        self,
+        env: dict[str, Decimal | str],
+        seed_env: dict[str, Decimal | str] | None = None,
+    ) -> None:
         self.env = env
+        #: The scenario's own mock-supplied values, as typed at fold start:
+        #: what the FIRST READ of a file / ACCEPT of a target puts back into
+        #: `env`, whatever the chain MOVEd there beforehand.
+        self.seed_env: dict[str, Decimal | str] = seed_env if seed_env else {}
         self.observed: set[str] = set()
         self.stopped = False
+        #: UPPERCASED file names already READ on the walked path (loop and
+        #: branch bodies included), so a later READ is known to be past the
+        #: single mocked record and poisons rather than re-seeds.
+        self.read_files: set[str] = set()
+        #: UPPERCASED ACCEPT targets already ACCEPTed, same idea.
+        self.accepted: set[str] = set()
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -355,7 +568,9 @@ def _walk_one(
     for attr in _HANDLER_BODY_ATTRS:
         body = getattr(stmt, attr, None)
         if isinstance(body, list) and body:
-            _poison_written_names(body, index, state.env, by_name, ordered_names)
+            _poison_written_names(
+                body, index, state.env, by_name, ordered_names, state=state
+            )
     return result
 
 
@@ -386,39 +601,32 @@ def _dispatch_one(
     elif isinstance(stmt, IOWriteStatement):
         if stmt.record_name:
             _mark_observed(stmt.record_name, index, state)
-    elif isinstance(stmt, (IOAcceptStatement, IOReadStatement)):
-        # A deliberate no-op, not an omission: ACCEPT/READ are exactly the
-        # boundary categories `_tier2_expectations` (program_fixtures.py)
-        # seeds `env` from before the walk starts, using the scenario's own
-        # mock-supplied value. Falling through to the generic "unmodeled
-        # write" fallback below would poison that seed the instant the walk
-        # reached the very statement it represents -- self-defeating. A
-        # field with no seed simply stays absent from `env`, which is
-        # already "unknown"; there is nothing to poison either way.
-        # CALL/EXEC SQL/CICS/DLI are NOT given the same treatment: their
-        # operand lists mix genuinely-unknowable OUT-direction values with
-        # seedable IN ones, and the raw AST does not carry resolved
-        # direction to tell them apart (only `BoundaryInventoryAnalyzer`'s
-        # own richer analysis does) -- deferred to a future version rather
-        # than risk treating an OUT value as still-known.
-        pass
+    elif isinstance(stmt, IOReadStatement):
+        _fold_read(stmt, index, state)
+    elif isinstance(stmt, IOAcceptStatement):
+        _fold_accept(stmt, index, state)
     elif isinstance(stmt, PerformStatement):
         return _walk_perform(stmt, index, by_name, ordered_names, state)
     elif isinstance(stmt, IfStatement):
         _poison_written_names(
-            stmt.then_statements, index, state.env, by_name, ordered_names
+            stmt.then_statements, index, state.env, by_name, ordered_names, state=state
         )
         _poison_written_names(
-            stmt.else_statements, index, state.env, by_name, ordered_names
+            stmt.else_statements, index, state.env, by_name, ordered_names, state=state
         )
     elif isinstance(stmt, EvaluateStatement):
         for wc in stmt.when_clauses:
             _poison_written_names(
-                wc.statements, index, state.env, by_name, ordered_names
+                wc.statements, index, state.env, by_name, ordered_names, state=state
             )
         if stmt.default_when:
             _poison_written_names(
-                stmt.default_when.statements, index, state.env, by_name, ordered_names
+                stmt.default_when.statements,
+                index,
+                state.env,
+                by_name,
+                ordered_names,
+                state=state,
             )
     elif isinstance(stmt, (GoStatement, StopStatement, GobackStatement)):
         state.stopped = True
@@ -426,11 +634,108 @@ def _dispatch_one(
         state.stopped = True
     else:
         # Unmodeled statement type: conservatively poison every name it
-        # references rather than risk a stale, now-incorrect env entry
-        # surviving an unrecognized write (INITIALIZE, SET, STRING,
-        # UNSTRING, INSPECT, ACCEPT, CALL, SQL/CICS/DLI host variables, ...).
-        _poison_names(list(getattr(stmt, "operands", [])), index, state.env)
+        # could write -- its operands plus every write-shaped attribute
+        # (`_write_targets`) -- rather than risk a stale, now-incorrect env
+        # entry surviving an unrecognized write (INITIALIZE, SET, STRING,
+        # UNSTRING, INSPECT, CALL, SQL/CICS/DLI host variables, ...).
+        # CALL/EXEC SQL/CICS/DLI are not seed-aware the way READ/ACCEPT
+        # are: their operand lists mix genuinely-unknowable OUT-direction
+        # values with seedable IN ones, and the raw AST does not carry
+        # resolved direction to tell them apart (only
+        # `BoundaryInventoryAnalyzer`'s own richer analysis does).
+        _poison_statement_writes(stmt, index, state.env, state=state)
     return None
+
+
+def _fold_read(stmt: IOReadStatement, index: ProgramLayoutIndex, state: _WalkState) -> None:
+    """A READ overwrites the file's record area and its INTO target.
+
+    The FIRST READ of a file on the walked path is the one the scenario's
+    mocked record answers, so every seeded field under the record (and the
+    INTO target) is reset to its seed -- whatever the chain MOVEd there
+    beforehand -- and every unseeded one is forgotten. A later READ of the
+    same file is past the single mocked record (or hit AT END), and
+    poisons. Before this, READ was a no-op that left `MOVE 'ABC' TO
+    IN-CODE. READ IN-FILE. DISPLAY IN-CODE.` claiming ``'ABC'``.
+    """
+    file_name = (stmt.file_name or "").strip().upper()
+    first = bool(file_name) and file_name not in state.read_files
+    if file_name:
+        state.read_files.add(file_name)
+    paths = _file_record_paths(index, stmt.file_name)
+    if stmt.into_target:
+        paths.extend(_target_paths(stmt.into_target, index))
+    for qpath in paths:
+        _reset_under(qpath, index, state, restore=first)
+
+
+def _fold_accept(
+    stmt: IOAcceptStatement, index: ProgramLayoutIndex, state: _WalkState
+) -> None:
+    """An ACCEPT overwrites its target -- same first-time-reseeds,
+    otherwise-poisons rule as `_fold_read`."""
+    if not stmt.target:
+        return
+    base, _ = _base_name(stmt.target)
+    key = base.upper()
+    first = bool(key) and key not in state.accepted
+    if key:
+        state.accepted.add(key)
+    for qpath in _target_paths(stmt.target, index):
+        _reset_under(qpath, index, state, restore=first)
+
+
+def _target_paths(name: str, index: ProgramLayoutIndex) -> list[str]:
+    """Qualified path(s) a write target denotes: the leaf it resolves to,
+    else the group/record item(s) of that name. A subscripted or
+    reference-modified target denotes its base item as a whole."""
+    base, _ = _base_name(name)
+    if not base or not base.strip(" ."):
+        return []
+    resolved = _safe_resolve(index, base)
+    if resolved is not None:
+        return [resolved.spec.qualified_name]
+    return _group_paths(index, base)
+
+
+def _reset_under(
+    qpath: str, index: ProgramLayoutIndex, state: _WalkState, *, restore: bool
+) -> None:
+    _drop_under(qpath, index, state.env)
+    if not restore:
+        return
+    for leaf in _facts(index).leaves_under(qpath):
+        if leaf in state.seed_env:
+            state.env[leaf] = state.seed_env[leaf]
+
+
+def _poison_statement_writes(
+    stmt: Any,
+    index: ProgramLayoutIndex,
+    env: dict[str, Decimal | str],
+    *,
+    state: _WalkState | None = None,
+) -> None:
+    """Poison everything *stmt* could write, with no attempt to fold it.
+
+    A READ inside a branch/loop body poisons the file's whole record area
+    (plus its INTO target) and is remembered on *state* so a READ of the
+    same file further down the walk knows it is not the first. Every other
+    statement poisons `_write_targets`.
+    """
+    if isinstance(stmt, IOReadStatement):
+        file_name = (stmt.file_name or "").strip().upper()
+        if state is not None and file_name:
+            state.read_files.add(file_name)
+        for qpath in _file_record_paths(index, stmt.file_name):
+            _drop_under(qpath, index, env)
+        if stmt.into_target:
+            _poison_names([stmt.into_target], index, env)
+        return
+    if isinstance(stmt, IOAcceptStatement) and stmt.target and state is not None:
+        base, _ = _base_name(stmt.target)
+        state.accepted.add(base.upper())
+    _poison_names(_write_targets(stmt), index, env)
 
 
 def _mark_observed(operand: str, index: ProgramLayoutIndex, state: _WalkState) -> None:
@@ -461,7 +766,9 @@ def _walk_perform(
         body = stmt.inline_statements or _perform_body_statements(
             stmt, by_name, ordered_names
         )
-        _poison_written_names(body, index, state.env, by_name, ordered_names)
+        _poison_written_names(
+            body, index, state.env, by_name, ordered_names, state=state
+        )
         return None
 
     if stmt.inline_statements:
@@ -522,7 +829,27 @@ def _write_targets(stmt: Any) -> list[str]:
         if stmt.giving_parameter:
             names.append(stmt.giving_parameter)
         return names
-    return list(getattr(stmt, "operands", []))
+    # Everything else: its operand bag plus every write-shaped attribute a
+    # statement model can carry. `.operands` alone missed real writes --
+    # EXEC SQL's host variables live in `.host_variables`, UNSTRING's
+    # receivers in `.into_targets[*]["target"]`, STRING's in `.into_target`
+    # (absent from its operands entirely), INSPECT/ACCEPT's in `.target`,
+    # and the WITH POINTER / TALLYING counters in their own attributes.
+    names = list(getattr(stmt, "operands", None) or [])
+    for attr in ("targets", "givings", "host_variables"):
+        names.extend(getattr(stmt, attr, None) or [])
+    for attr in ("target", "into_target", "pointer_variable", "tallying_variable"):
+        value = getattr(stmt, attr, None)
+        if isinstance(value, str) and value:
+            names.append(value)
+    for entry in getattr(stmt, "into_targets", None) or []:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("target", "name", "delimiter_var", "count_var"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                names.append(value)
+    return names
 
 
 def _nested_statement_lists(stmt: Any) -> list[list[Any]]:
@@ -546,6 +873,8 @@ def _poison_written_names(
     by_name: dict[str, CobolParagraph],
     ordered_names: list[str],
     visiting: set[str] | None = None,
+    *,
+    state: _WalkState | None = None,
 ) -> None:
     """Poison every field a nested block (an IF/EVALUATE arm, a loop body)
     could possibly write -- including through a PERFORM to another
@@ -582,9 +911,11 @@ def _poison_written_names(
             visiting.add(target)
             frames.append((iter(body), target))
             continue
-        _poison_names(_write_targets(stmt), index, env)
+        _poison_statement_writes(stmt, index, env, state=state)
         for nested in _nested_statement_lists(stmt):
-            _poison_written_names(nested, index, env, by_name, ordered_names, visiting)
+            _poison_written_names(
+                nested, index, env, by_name, ordered_names, visiting, state=state
+            )
 
 
 # -- MOVE ----------------------------------------------------------------------
@@ -627,12 +958,20 @@ def _apply_move_target(
     index: ProgramLayoutIndex,
     env: dict[str, Decimal | str],
 ) -> None:
-    resolved = _safe_resolve(index, target_name)
+    base, has_suffix = _base_name(target_name)
+    resolved = _safe_resolve(index, base) if not has_suffix else None
     if resolved is None:
+        # A group/record target (`MOVE SPACES TO WS-GRP`), or a subscripted
+        # / reference-modified one (`WS-B(1:1)`): every leaf under the base
+        # item is forgotten. `resolve()` never finds a group, which used to
+        # leave stale child values standing after a whole-group write.
+        _poison_names([base], index, env)
         return
     qname = resolved.spec.qualified_name
+    # Any write drops the old value AND every REDEFINES alias sharing its
+    # bytes, before the new value (if any) is recorded.
+    _drop(qname, index, env)
     if source is None:
-        env.pop(qname, None)
         return
     kind, value = source
     if kind == "numeric" and isinstance(value, Decimal):
@@ -640,16 +979,18 @@ def _apply_move_target(
             value, resolved.spec
         ):
             env[qname] = value
-        else:
-            env.pop(qname, None)
     elif kind == "text" and isinstance(value, str):
         if resolved.spec.category in _TEXT_CATEGORIES:
             size = resolved.spec.size if resolved.spec.size > 0 else len(value)
-            env[qname] = value[:size]
-        else:
-            env.pop(qname, None)
-    else:
-        env.pop(qname, None)
+            if qname in _facts(index).justified:
+                # JUSTIFIED RIGHT keeps the RIGHTMOST characters of an
+                # oversized value; a shorter one is padded on the left,
+                # a rendering this module's unpadded env does not model,
+                # so only the exact/oversized case is knowable.
+                if len(value) >= size:
+                    env[qname] = value[-size:]
+            else:
+                env[qname] = value[:size]
 
 
 # -- arithmetic ------------------------------------------------------------
@@ -673,24 +1014,35 @@ def _resolve_operand(
 def _poison_names(
     names: list[str], index: ProgramLayoutIndex, env: dict[str, Decimal | str]
 ) -> None:
+    """Forget every name: an elementary field (and its REDEFINES aliases),
+    or -- when the name is a group/record, or carries a subscript /
+    reference-modification -- every leaf under the item as a whole."""
     for name in names:
-        resolved = _safe_resolve(index, name)
+        base, _ = _base_name(name)
+        if not base or not base.strip(" ."):
+            continue
+        resolved = _safe_resolve(index, base)
         if resolved is not None:
-            env.pop(resolved.spec.qualified_name, None)
+            _drop(resolved.spec.qualified_name, index, env)
+            continue
+        for qpath in _group_paths(index, base):
+            _drop_under(qpath, index, env)
 
 
 def _write_numeric(
     name: str, value: Decimal, index: ProgramLayoutIndex, env: dict[str, Decimal | str]
 ) -> None:
-    resolved = _safe_resolve(index, name)
+    base, has_suffix = _base_name(name)
+    resolved = _safe_resolve(index, base) if not has_suffix else None
     if resolved is None:
+        _poison_names([base], index, env)
         return
+    qname = resolved.spec.qualified_name
+    _drop(qname, index, env)
     if resolved.spec.category is FieldCategory.NUMERIC and _fits_exactly(
         value, resolved.spec
     ):
-        env[resolved.spec.qualified_name] = value
-    else:
-        env.pop(resolved.spec.qualified_name, None)
+        env[qname] = value
 
 
 def _fold_add(
@@ -989,6 +1341,10 @@ def _fits_exactly(value: Decimal, spec: FieldSpec) -> bool:
     coercion to be stored in *spec* -- the "exact by construction" gate
     every numeric write goes through."""
     if spec.category is not FieldCategory.NUMERIC:
+        return False
+    if spec.scaling_positions:
+        # A P-scaled field stores only some of the digits its value shows
+        # (``9(3)PPP`` keeps 123 of 123456); truncation rules not modeled.
         return False
     if value < 0 and not spec.is_signed:
         return False

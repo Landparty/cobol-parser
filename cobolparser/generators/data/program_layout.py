@@ -344,6 +344,18 @@ class ProgramLayoutIndex:
         )
         return None
 
+    def records(self) -> list[CobolDataItem]:
+        """Every top-level (01/77) record this index knows, section by
+        section (FILE, WORKING-STORAGE, LOCAL-STORAGE, LINKAGE), each in
+        source order -- for a caller that needs to walk the raw
+        :class:`CobolDataItem` trees themselves (group membership, REDEFINES
+        siblings, JUSTIFIED flags: facts ``flatten_record`` does not carry)."""
+        return [
+            record
+            for attr in _SECTION_NAMES.values()
+            for record in self._section_records[attr]
+        ]
+
     def linkage_records(self) -> list[CobolDataItem]:
         """Top-level (01/77) LINKAGE SECTION records, in source order."""
         return list(self._section_records["linkage"])

@@ -1435,6 +1435,15 @@ class _CobolLexerPure:
                         text[start_pos:new_pos],
                     )
                 )
+            else:
+                # Same non-fatal diagnostic the plain-literal path emits
+                # (H7): free-form closes the literal at end of line, but a
+                # caller checking warnings must not be blind to it.
+                self.warnings.append(
+                    f"Unterminated string literal at line {line_num + 1}, "
+                    f"column {start_col + start_pos}: closed at end of line "
+                    "instead of a matching quote"
+                )
             token = Token(TokenType.STRING_LITERAL, partial, location)
 
         assert token is not None
@@ -1911,24 +1920,54 @@ def _fixed_format_comment_tokens(
     # the shared home for the comment-indicator set — see _normalize.py.
     from .preprocess import ALL_COMMENT_INDICATORS
 
-    # One entry per placeholder-producing physical line, in order: the
-    # COMMENT token value, or None for blank/short lines (no token).
-    placeholders: list[str | None] = []
-    for raw in physical_lines:
-        line = raw.rstrip("\n").expandtabs(8)
+    physical = [raw.rstrip("\n").expandtabs(8) for raw in physical_lines]
+
+    def _comment_text(line: str) -> str | None:
         if len(line) < _FF_AREA_A:
-            placeholders.append(None)  # blank/short line placeholder
-            continue
+            return None
         indicator = line[_FF_INDICATOR]
         if indicator == "/":
             # Page eject — same token value the legacy fixed-format
             # lexer path emitted.
-            placeholders.append("/ PAGE BREAK")
-        elif indicator in ALL_COMMENT_INDICATORS:
-            placeholders.append(line[_FF_INDICATOR:_FF_LINE_END].rstrip())
-        # Code / continuation lines produce no placeholder.
+            return "/ PAGE BREAK"
+        if indicator in ALL_COMMENT_INDICATORS:
+            return line[_FF_INDICATOR:_FF_LINE_END].rstrip()
+        return None
 
     comments: list[Token] = []
+    if normalized.count("\n") == len(physical):
+        # normalize_fixed_format emits exactly one output line per physical
+        # line, in physical order: a logical line at its first record's
+        # index, then one empty placeholder for every continuation, comment
+        # or blank record merged into or deferred behind it. A comment
+        # line's normalized number is therefore its own physical number.
+        for idx, line in enumerate(physical):
+            text = _comment_text(line)
+            if text is not None:
+                location = SourceLocation(idx + 1, _FF_INDICATOR + 1, 1)
+                comments.append(Token(TokenType.COMMENT, text, location))
+        return comments
+
+    # Fallback should a normalizer ever not keep the line count: pair each
+    # empty line in *normalized* with the physical line that produced it
+    # (they correspond 1:1, in order). One entry per placeholder-producing
+    # physical line: the COMMENT token value, or None for a line that
+    # normalizes to an empty line without a token -- a blank/short line, a
+    # continuation record (merged into its logical line, its placeholder
+    # deferred behind it), or a full-width blank code line.
+    placeholders: list[str | None] = []
+    for line in physical:
+        text = _comment_text(line)
+        if text is not None:
+            placeholders.append(text)
+        elif (
+            len(line) < _FF_AREA_A
+            or line[_FF_INDICATOR] == "-"
+            or not line[_FF_AREA_A:_FF_LINE_END].strip()
+        ):
+            placeholders.append(None)
+        # Code lines with program text produce no placeholder.
+
     next_placeholder = 0
     for norm_idx, norm_line in enumerate(normalized.splitlines()):
         if norm_line:

@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
+    peek_past_noise,
     skip_whitespace,
     token_column,
     warn_paragraph_boundary_swallowed,
@@ -17,6 +18,12 @@ from cobolparser.parsers.statements._utils import (
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOCloseStatement
+
+
+def _removal_follows(token_stream: ITokenStream) -> bool:
+    """True when the token after the current ``FOR`` is ``REMOVAL``."""
+    nxt, _ = peek_past_noise(token_stream, 1)
+    return bool(nxt and nxt.value and nxt.value.upper() == "REMOVAL")
 
 
 class CloseStatementParser(IStatementParser):
@@ -79,6 +86,7 @@ class CloseStatementParser(IStatementParser):
             unit = False
             no_rewind = False
             with_lock = False
+            for_removal = False
 
             # Parse per-file options. These can combine (e.g. REEL WITH NO
             # REWIND), so this must loop and keep applying options until
@@ -149,6 +157,20 @@ class CloseStatementParser(IStatementParser):
                     token_stream.consume()
                     skip_whitespace(token_stream)
                     with_lock = True
+                elif (
+                    token
+                    and token.value
+                    and token.value.upper() == "FOR"
+                    and _removal_follows(token_stream)
+                ):
+                    # ``CLOSE F REEL FOR REMOVAL`` -- the tape option that
+                    # goes with REEL/UNIT. Previously FOR and REMOVAL were
+                    # recorded as two more file names.
+                    token_stream.consume()  # FOR
+                    skip_whitespace(token_stream)
+                    token_stream.consume()  # REMOVAL
+                    skip_whitespace(token_stream)
+                    for_removal = True
                 else:
                     break
 
@@ -158,6 +180,7 @@ class CloseStatementParser(IStatementParser):
                 unit=unit,
                 no_rewind=no_rewind,
                 with_lock=with_lock,
+                for_removal=for_removal,
             )
 
         # Consume period if present

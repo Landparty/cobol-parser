@@ -47,6 +47,20 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # whitespace program text, non-comment indicator) whenever it followed
     # another blank/comment line, shifting every later line number.
     cdef bint has_line = False
+    # Placeholder lines owed *after* the logical line in `parts` is flushed
+    # (mirrors the pure-Python `deferred`): every physical line contributes
+    # exactly one output line, so a continuation record -- merged into the
+    # logical line -- still owes one empty placeholder, emitted once the
+    # logical line is written. Comment/blank lines interrupting an open
+    # continued literal are deferred the same way instead of severing it.
+    cdef int deferred = 0
+    # True while a literal is left open across an interrupting comment/blank
+    # line; such a literal keeps the historical "closed at the interruption"
+    # outcome at EOF instead of raising (mirrors `literal_suspended`).
+    cdef bint literal_suspended = False
+
+    if isinstance(lines, str):
+        lines = lines.splitlines()
 
     result = []
     parts  = []
@@ -55,6 +69,13 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
         line = raw.rstrip("\n").expandtabs(8)
 
         if len(line) < _TEXT_START:
+            # Blank/short line. Inside an open continued literal it may sit
+            # between the continued line and its continuation: keep the
+            # logical line pending and owe a placeholder for this record.
+            if pending_literal and merge_continued_literals and has_line:
+                deferred += 1
+                literal_suspended = True
+                continue
             # Flush accumulated parts for this logical line, then emit an
             # empty placeholder for this physical line so later lines keep
             # their true line number (mirrors the pure-Python fix — a
@@ -62,9 +83,13 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             # error/warning location).
             if has_line:
                 result.append("".join(parts))
+            if deferred:
+                result.extend([""] * deferred)
+                deferred = 0
             result.append("")
             parts         = []
             has_line      = False
+            literal_suspended = False
             quote_open    = False
             quote_ch      = None
             pending_literal = False
@@ -81,13 +106,23 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
         is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")
         if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:
             # Comment line (incl. page eject, debug lines, version-tag
-            # lines): flush buffer, discard comment text, but still emit an
-            # empty placeholder to preserve line numbering.
+            # lines): discard comment text, but still emit an empty
+            # placeholder to preserve line numbering. A comment interrupting
+            # an open continued literal does not sever it -- the placeholder
+            # is deferred behind the logical line instead.
+            if pending_literal and merge_continued_literals and has_line:
+                deferred += 1
+                literal_suspended = True
+                continue
             if has_line:
                 result.append("".join(parts))
+            if deferred:
+                result.extend([""] * deferred)
+                deferred = 0
             result.append("")
             parts         = []
             has_line      = False
+            literal_suspended = False
             quote_open    = False
             quote_ch      = None
             pending_literal = False
@@ -148,6 +183,12 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
         is_cont = indicator == "-"
 
         if is_cont:
+            # One physical line merged into the logical line: owe one
+            # placeholder behind it (an orphan continuation with nothing to
+            # join starts the logical line itself and owes none).
+            if has_line:
+                deferred += 1
+            literal_suspended = False
             if pending_literal and merge_continued_literals:
                 chunk = text_slice.lstrip()
                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
@@ -171,7 +212,13 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                         if ch == "'" or ch == '"':
                             quote_open = True
                             quote_ch   = ch
-                        i += 1
+                            i += 1
+                        elif ch == "*" and i + 1 < n and chunk[i + 1] == ">":
+                            # Inline comment outside a literal: nothing after it
+                            # can open one (mirrors _update_quote_state).
+                            break
+                        else:
+                            i += 1
                 pending_literal = quote_open
                 # Trailing blanks up to column 72 are part of a literal's
                 # value when it remains open at end of line (COBOL
@@ -205,14 +252,24 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                             if ch == "'" or ch == '"':
                                 quote_open = True
                                 quote_ch   = ch
-                            i += 1
+                                i += 1
+                            elif ch == "*" and i + 1 < n and stripped[i + 1] == ">":
+                                # Inline comment outside a literal: nothing after it
+                                # can open one (mirrors _update_quote_state).
+                                break
+                            else:
+                                i += 1
                     pending_literal = quote_open
         else:
             # Non-continuation: flush previous logical line
             if has_line:
                 result.append("".join(parts))
+            if deferred:
+                result.extend([""] * deferred)
+                deferred = 0
             parts         = []
             has_line      = False
+            literal_suspended = False
             quote_open    = False
             quote_ch      = None
             pending_literal = False
@@ -234,7 +291,13 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                         if ch == "'" or ch == '"':
                             quote_open = True
                             quote_ch   = ch
-                        i += 1
+                            i += 1
+                        elif ch == "*" and i + 1 < n and text_slice[i + 1] == ">":
+                            # Inline comment outside a literal: nothing after it
+                            # can open one (mirrors _update_quote_state).
+                            break
+                        else:
+                            i += 1
                 pending_literal = quote_open
                 # M5: trailing blanks are part of the literal's value when
                 # it remains open at end of line -- only strip once closed.
@@ -249,8 +312,10 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
 
     if has_line:
         result.append("".join(parts))
+    if deferred:
+        result.extend([""] * deferred)
 
-    if pending_literal and merge_continued_literals:
+    if pending_literal and merge_continued_literals and not literal_suspended:
         raise ValueError(
             f"Unterminated string literal at end of input "
             f"(opened with quote character '{quote_ch or '?'}')"

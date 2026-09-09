@@ -27,6 +27,7 @@ from ..models.statements import (
     IOUnlockStatement,
     IOWriteStatement,
 )
+from ._files import record_to_file_map, resolve_file_name
 
 
 @dataclass
@@ -177,6 +178,9 @@ class IOLogger:
     def __init__(self) -> None:
         """Initialize the IO logger."""
         self._operations: list[IOOperation] = []
+        # FILE SECTION record name -> owning FD/SD name. WRITE/REWRITE name
+        # a record, never a file, so their target is resolved through it.
+        self._record_to_file: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOLogReport:
         """Analyze AST and return structured I/O report.
@@ -188,6 +192,7 @@ class IOLogger:
             IOLogReport with all extracted I/O operations
         """
         self._operations = []
+        self._record_to_file = record_to_file_map(ast)
 
         # Collect all statements once to avoid repeated AST traversal
         all_statements = ast.get_all_statements()
@@ -437,21 +442,28 @@ class IOLogger:
                         operation="WRITE",
                         direction="OUTPUT",
                         variables=variables,
-                        target=stmt.file_name,
+                        target=self._file_for(stmt.file_name, stmt.record_name),
                         line=line,
                         details={"from_clause": stmt.from_clause},
                     )
                 )
 
             elif isinstance(stmt, IOOpenStatement):
-                mode = stmt.open_mode or "UNKNOWN"
-                if mode == "I-O":
-                    direction = "BIDIRECTIONAL"
-                elif mode in ("OUTPUT", "EXTEND"):
-                    direction = "OUTPUT"
-                else:
-                    direction = "INPUT"
+                # ``OPEN INPUT IN-FILE OUTPUT OUT-FILE`` opens each file under
+                # its own mode group; ``open_mode`` only ever holds the first
+                # one, so the per-file ``file_modes`` is authoritative and
+                # ``open_mode`` merely the fallback (same as crud_matrix.py).
+                file_modes = getattr(stmt, "file_modes", None) or {}
                 for file_name in stmt.file_names:
+                    mode = (
+                        file_modes.get(file_name) or stmt.open_mode or "UNKNOWN"
+                    ).upper()
+                    if mode == "I-O":
+                        direction = "BIDIRECTIONAL"
+                    elif mode in ("OUTPUT", "EXTEND"):
+                        direction = "OUTPUT"
+                    else:
+                        direction = "INPUT"
                     self._operations.append(
                         IOOperation(
                             category="FILE-IO",
@@ -488,7 +500,7 @@ class IOLogger:
                         operation="REWRITE",
                         direction="OUTPUT",
                         variables=variables,
-                        target=stmt.file_name,
+                        target=self._file_for(stmt.file_name, stmt.record_name),
                         line=line,
                         details={},
                     )
@@ -532,6 +544,10 @@ class IOLogger:
                         details={"record_scope": stmt.record_scope},
                     )
                 )
+
+    def _file_for(self, file_name: str | None, record_name: str | None) -> str | None:
+        """The file a WRITE/REWRITE targets, via its record's FD."""
+        return resolve_file_name(file_name, record_name, self._record_to_file)
 
     def _collect_console_io_operations(self, statements: list) -> None:
         """Extract I/O from ACCEPT and DISPLAY statements."""

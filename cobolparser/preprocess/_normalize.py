@@ -16,7 +16,12 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
-_DEFINE_RE = re.compile(r">>DEFINE\s+(\w+)(?:\s+AS\s+(.+))?")
+#: ``>>DEFINE name [AS] {literal | PARAMETER | OFF} [OVERRIDE]`` (IBM). The
+#: value is captured lazily so a trailing ``OVERRIDE`` is never taken as
+#: part of it (``AS 2 OVERRIDE`` used to define the value ``"2 OVERRIDE"``).
+_DEFINE_RE = re.compile(
+    r">>DEFINE\s+(\w+)(?:\s+(?:AS\s+)?(?!OVERRIDE\s*$)(.+?))?(?:\s+OVERRIDE)?\s*$"
+)
 _DATA_DEF_RE = re.compile(
     r"^[ \t]*\d{2}[ \t]+[A-Za-z][A-Za-z0-9-]*[ \t]+PIC[ \t]+[^\s]*[^\s.][ \t]*$",
     re.MULTILINE,
@@ -381,7 +386,7 @@ def strip_compiler_directives(
 
 
 def normalize_fixed_format(
-    lines: Iterable[str],
+    lines: Iterable[str] | str,
     *,
     merge_continued_literals: bool = True,
     debug_lines_as_comments: bool = True,
@@ -467,6 +472,10 @@ def normalize_fixed_format(
     80-column width and doesn't split mid-token (the classic
     sequence-number/identification-area case) is never flagged.
     """
+    if isinstance(lines, str):
+        # A whole source string is a common caller mistake (iterating it
+        # would feed one *character* per "line" and normalize to nothing).
+        lines = lines.splitlines()
     result: list[str] = []
     pending_literal = False
     quote_char: str | None = None
@@ -477,12 +486,35 @@ def normalize_fixed_format(
     # line was accumulated but its merged text happens to be empty" (a blank
     # placeholder must still be emitted -- see flush_parts below).
     has_line = False
+    # Placeholder lines owed *after* the logical line in `parts` is flushed.
+    # Every physical line must contribute exactly one output line so line
+    # numbers survive normalization (``output.count("\n") == len(lines)``);
+    # a continuation record merges its text into the logical line but is
+    # still one physical line, so it owes one empty placeholder -- emitted
+    # once the logical line it belongs to is written, so the logical line
+    # keeps the number of its *first* record and the placeholders keep the
+    # numbers of the records that followed it. Comment/blank lines that
+    # interrupt a continued literal (legal in IBM fixed format: a
+    # continuation line is "the next line that is neither a comment line nor
+    # a blank line") are deferred the same way instead of severing it.
+    deferred = 0
+    # True while a literal is left open across an interrupting comment/blank
+    # line. Decides the EOF verdict: a literal still open on the last *code*
+    # line raises as before; one whose only successors were comment/blank
+    # lines keeps the historical outcome (closed at the interruption, left
+    # for the lexer to warn about) rather than escalating to a hard error.
+    literal_suspended = False
     # Track quote state incrementally to avoid O(n²) rescanning
     _quote_open = False
     _quote_ch: str | None = None
 
     def _update_quote_state(text: str) -> None:
-        """Incrementally update quote state for new text chunk."""
+        """Incrementally update quote state for new text chunk.
+
+        Outside a literal, a ``*>`` inline comment runs to end of line, so a
+        quote after it is comment text, not a literal opening -- scanning
+        stops there. Inside a literal ``*>`` is just literal text.
+        """
         nonlocal _quote_open, _quote_ch, pending_literal, quote_char
         if not text:
             pending_literal = _quote_open
@@ -504,14 +536,21 @@ def normalize_fixed_format(
                 i = first_single
             else:
                 i = min(first_single, first_double)
+
+            comment_at = text.find("*>")
+            if comment_at != -1 and comment_at < i:
+                pending_literal = False
+                quote_char = None
+                return
         else:
             i = 0
 
-        while i < len(text):
+        n = len(text)
+        while i < n:
             ch = text[i]
             if _quote_open:
                 if ch == _quote_ch:
-                    if i + 1 < len(text) and text[i + 1] == _quote_ch:
+                    if i + 1 < n and text[i + 1] == _quote_ch:
                         i += 2  # escaped quote
                         continue
                     _quote_open = False
@@ -522,13 +561,16 @@ def normalize_fixed_format(
                     _quote_open = True
                     _quote_ch = ch
                     i += 1
+                elif ch == "*" and i + 1 < n and text[i + 1] == ">":
+                    break  # inline comment: nothing after it can open a literal
                 else:
                     i += 1
         pending_literal = _quote_open
         quote_char = _quote_ch
 
     def flush_parts() -> None:
-        nonlocal parts, has_line, _quote_open, _quote_ch, pending_literal, quote_char
+        nonlocal parts, has_line, deferred, literal_suspended
+        nonlocal _quote_open, _quote_ch, pending_literal, quote_char
         # A logical line that was actually started (has_line) must always get
         # a result entry, even when its merged text is empty -- e.g. a
         # full-width blank line (all-whitespace program text, non-comment
@@ -538,8 +580,14 @@ def normalize_fixed_format(
         # nothing else on the line ever produced non-blank text.
         if has_line:
             result.append("".join(parts))
+        if deferred:
+            # One placeholder per physical line merged into (or deferred
+            # behind) the logical line just written.
+            result.extend([""] * deferred)
+            deferred = 0
         parts = []
         has_line = False
+        literal_suspended = False
         # Reset quote state for new logical line
         _quote_open = False
         _quote_ch = None
@@ -549,10 +597,17 @@ def normalize_fixed_format(
     for line_no, raw in enumerate(lines, start=1):
         line = raw.rstrip("\n").expandtabs(8)
         if len(line) < TEXT_START_COL - 1:
-            # Blank/short line: flush whatever logical line was in progress,
-            # then emit an empty placeholder for this physical line so later
+            # Blank/short line. When a literal is open it may legitimately
+            # sit between a continued line and its continuation: keep the
+            # logical line pending and owe a placeholder for this record.
+            # Otherwise flush whatever logical line was in progress, then
+            # emit an empty placeholder for this physical line so later
             # lines keep their true line number (a dropped line here would
             # silently shift every subsequent error/warning location).
+            if pending_literal and merge_continued_literals and has_line:
+                deferred += 1
+                literal_suspended = True
+                continue
             flush_parts()
             result.append("")
             continue
@@ -567,11 +622,16 @@ def normalize_fixed_format(
             or is_debug_comment
             or is_version_tag_comment
         ):  # comment (incl. page eject, debug lines, version-tag lines)
-            # Comment lines: flush pending buffer but do not emit comment text
-            # (emitting it would let the free-form lexer tokenize it as code).
-            # Still emit an empty placeholder to preserve line numbering.
+            # Comment lines: do not emit comment text (emitting it would let
+            # the free-form lexer tokenize it as code), but still account
+            # for the physical line with an empty placeholder. A comment
+            # interrupting an open continued literal does not sever it --
+            # the placeholder is deferred behind the logical line instead.
+            if pending_literal and merge_continued_literals and has_line:
+                deferred += 1
+                literal_suspended = True
+                continue
             flush_parts()
-            pending_literal = False
             result.append("")
             continue
 
@@ -638,7 +698,13 @@ def normalize_fixed_format(
 
         # Handle continuation lines
         if is_cont:
-            # This is a continuation line - merge with previous buffer
+            # This is a continuation line - merge with previous buffer. It
+            # is still one physical line, so it owes one placeholder behind
+            # the logical line it joins (an orphan continuation with nothing
+            # to join starts the logical line itself and owes none).
+            if has_line:
+                deferred += 1
+            literal_suspended = False
             if pending_literal and merge_continued_literals:
                 chunk = text_slice.lstrip()
                 if chunk and chunk[0] == quote_char:
@@ -681,7 +747,7 @@ def normalize_fixed_format(
         has_line = True
 
     # Save state before final flush
-    final_pending_literal = pending_literal
+    final_pending_literal = pending_literal and not literal_suspended
     final_quote_char = quote_char
     flush_parts()
 
@@ -1063,6 +1129,29 @@ class _CondFrame:
         self.eval_subject_valid = True  # False -> only >>WHEN OTHER matches
 
 
+def _fixed_format_directive_text(line: str) -> str | None:
+    """The ``>>`` directive a sequence-numbered fixed-format line carries.
+
+    ``line.strip()`` finds a directive only when columns 1-6 are blank; a
+    numbered deck (``000400     >>IF DEBUG IS DEFINED``) puts the sequence
+    number first. Returns the upper-cased directive text from columns 8-72
+    when columns 1-6 look like a sequence area (blank or digits, the
+    parser's own strict rule) and column 7 is blank; otherwise ``None``.
+    """
+    if ">>" not in line or len(line) < TEXT_START_COL:
+        return None
+    expanded = line.expandtabs(8)
+    if len(expanded) < TEXT_START_COL or expanded[INDICATOR_COL - 1] != " ":
+        return None
+    # Deferred: parser imports this package at module scope.
+    from ..parser import _sequence_area_is_fixed_like
+
+    if not _sequence_area_is_fixed_like(expanded[:DEFAULT_SEQ_COL_END])[0]:
+        return None
+    text = expanded[TEXT_START_COL - 1 : TEXT_END_COL].strip().upper()
+    return text if text.startswith(">>") else None
+
+
 def preprocess_conditional_compilation(
     source: str,
     defined_symbols: (
@@ -1140,6 +1229,12 @@ def preprocess_conditional_compilation(
 
     for line_no, line in enumerate(source.splitlines(), start=1):
         stripped = line.strip().upper()
+        if not stripped.startswith(">>"):
+            # A directive in a sequence-numbered fixed-format line
+            # (``000400     >>IF ...``) starts at column 8, not column 1.
+            fixed_text = _fixed_format_directive_text(line)
+            if fixed_text is not None:
+                stripped = fixed_text
 
         directive_match = (
             _DIRECTIVE_LINE_RE.match(stripped) if stripped.startswith(">>") else None
@@ -1157,8 +1252,24 @@ def preprocess_conditional_compilation(
             if match:
                 if _active():
                     symbol = match.group(1)
-                    value = _strip_quotes(match.group(2)) if match.group(2) else "TRUE"
-                    defined[symbol] = value
+                    raw_value = match.group(2)
+                    if raw_value is None:
+                        defined[symbol] = "TRUE"
+                    elif raw_value.upper() == "OFF":
+                        # IBM: ``>>DEFINE name [AS] OFF`` undefines it.
+                        defined.pop(symbol, None)
+                    elif raw_value.upper() == "PARAMETER":
+                        # IBM: the value comes from the DEFINE compiler
+                        # option -- here, the caller's defined_symbols.
+                        if symbol not in defined:
+                            _warn(
+                                f"Line {line_no}: >>DEFINE {symbol} AS "
+                                "PARAMETER takes its value from the caller's "
+                                "defined symbols, which do not define it — "
+                                "left undefined"
+                            )
+                    else:
+                        defined[symbol] = _strip_quotes(raw_value)
             else:
                 _warn(
                     f"Line {line_no}: malformed >>DEFINE directive "

@@ -46,7 +46,7 @@ from __future__ import annotations
 import struct
 import sys
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from enum import StrEnum
 
 from .errors import CopybookLayoutError
@@ -286,9 +286,10 @@ def _total_digits(spec: FieldSpec) -> int:
 
     A PICTURE-less numeric item (``INDEX``, ``POINTER``) never reaches the
     numeric encoders, so the floor only guards a malformed picture whose
-    digit counts both came back zero.
+    digit counts both came back zero.  ``P`` scaling positions are not
+    stored (:attr:`FieldSpec.stored_digits`), so ``9(3)PPP`` is three.
     """
-    return max(1, spec.integer_digits + spec.decimal_digits)
+    return max(1, spec.stored_digits)
 
 
 def _is_sign_separate(spec: FieldSpec) -> bool:
@@ -356,7 +357,15 @@ def _scaled_integer(text: str, spec: FieldSpec) -> int:
         return 0
     # Quantize by shifting the exponent rather than multiplying: exact for
     # every value _format_number can have produced, including PIC 9(18).
-    return int(value.scaleb(spec.decimal_digits).to_integral_value())
+    units = value.scaleb(spec.decimal_digits)
+    scaling = spec.scaling_positions
+    if scaling > 0:
+        # Trailing P: the low `scaling` digits are implied zeros that no
+        # byte holds -- ``123000`` in ``9(3)PPP`` is stored as ``123``.
+        # Truncation, not rounding, is what the compiler does with a value
+        # that is not a whole multiple (``123456`` -> ``123``).
+        return int(units.scaleb(-scaling).to_integral_value(rounding=ROUND_DOWN))
+    return int(units.to_integral_value())
 
 
 def _digits_string(magnitude: int, digits: int) -> str:

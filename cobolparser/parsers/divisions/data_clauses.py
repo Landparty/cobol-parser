@@ -79,6 +79,12 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         "OCCURS",
         "REDEFINES",
         "SIGN",
+        # ``PIC S999 LEADING SEPARATE`` -- the SIGN word itself is optional
+        # (NIST NC117A/NC118A), so the direction words must stop the
+        # picture scan too, or they are glued into the pattern.
+        "LEADING",
+        "TRAILING",
+        "SEPARATE",
         "SYNCHRONIZED",
         "SYNC",
         "JUSTIFIED",
@@ -115,6 +121,10 @@ _REPORT_ANONYMOUS_STARTS: frozenset[str] = _REPORT_CLAUSE_STARTS | frozenset(
 # PRESENT WHEN ...) ends.
 _REPORT_OPERAND_STOPS: frozenset[str] = _PICTURE_TERMINATOR_KEYWORDS | frozenset(
     {"PIC", "PICTURE", "OCCURS", "REDEFINES", "UPON", "RESET"}
+)
+# ``,`` / ``;`` between data-item clauses are separators, not clauses.
+_CLAUSE_SEPARATOR_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {TokenType.COMMA, TokenType.SEMICOLON}
 )
 _PICTURE_PATTERN_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     {
@@ -275,9 +285,23 @@ class DataItemClauseParser:
         location = token.location
         token_stream.consume()  # Consume level number
 
-        # Get data name
+        # Get data name. It may sit on the line after its level number
+        # (NIST NC205A writes ``02\n    SPACING-2.``); without crossing the
+        # break the item became anonymous and the name was dropped as an
+        # unparsed clause token. A NEWLINE is only crossed when the next
+        # meaningful token can actually be a name -- an IDENTIFIER or
+        # FILLER -- so a bare level number at end of line followed by the
+        # *next* item's level number is left exactly as before.
         name = None
         token = token_stream.peek()
+        if token and token.type == TokenType.NEWLINE:
+            following = self._peek_next_meaningful(token_stream, 0)
+            if following and (
+                following.type == TokenType.IDENTIFIER
+                or (following.value and following.value.upper() == "FILLER")
+            ):
+                self._skip_newlines(token_stream)
+                token = token_stream.peek()
 
         if (
             report_group
@@ -358,6 +382,12 @@ class DataItemClauseParser:
             if tok_type == TokenType.LEVEL_NUMBER:
                 break
 
+            # ``,`` / ``;`` between clauses are separators (NIST NC245A:
+            # ``77 TEMP; PIC S999999.``, ``PIC X, VALUE 'A'``), not clauses.
+            if tok_type in _CLAUSE_SEPARATOR_TOKEN_TYPES:
+                token_stream.consume()
+                continue
+
             # Division tokens end this data item (don't consume them)
             if tok_type in _DIVISION_TOKEN_TYPES:
                 break
@@ -434,6 +464,15 @@ class DataItemClauseParser:
                 data_item.set_usage(value_upper)
                 token_stream.consume()
 
+            # DISPLAY without the USAGE keyword (``05 X PIC X(3) DISPLAY.``).
+            # DISPLAY lexes as the verb token, which no branch accepted, so
+            # the clause was dropped with an "Unparsed token" warning (32
+            # times across the NIST corpus). A data item can never be
+            # *named* DISPLAY, so in clause position it is the usage.
+            elif tok_type == TokenType.DISPLAY or value_upper == "DISPLAY":
+                data_item.set_usage("DISPLAY")
+                token_stream.consume()
+
             # INDEX without the USAGE keyword: ``05 X [USAGE [IS]] INDEX.``
             # -- both USAGE and IS are optional in the grammar, and INDEX
             # is a reserved word, so a bare INDEX in clause position is
@@ -456,29 +495,16 @@ class DataItemClauseParser:
                 nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() == "IS":
                     token_stream.consume()
-                self._skip_newlines(token_stream)
-                dir_tok = token_stream.peek()
-                if (
-                    dir_tok
-                    and dir_tok.value
-                    and dir_tok.value.upper()
-                    in (
-                        "LEADING",
-                        "TRAILING",
-                    )
-                ):
-                    direction = dir_tok.value.upper()
-                    token_stream.consume()
-                    self._skip_newlines(token_stream)
-                    sep = token_stream.peek()
-                    if sep and sep.value and sep.value.upper() == "SEPARATE":
-                        token_stream.consume()
-                        self._skip_newlines(token_stream)
-                        ch = token_stream.peek()
-                        if ch and ch.value and ch.value.upper() == "CHARACTER":
-                            token_stream.consume()
-                        direction = direction + " SEPARATE"
-                    data_item.sign_clause = direction
+                self._parse_sign_direction(token_stream, data_item)
+
+            # The same clause with the SIGN word omitted -- ``[SIGN IS]
+            # LEADING|TRAILING [SEPARATE [CHARACTER]]`` is the standard's
+            # grammar, and NIST NC117A/NC118A write ``PIC S999 LEADING
+            # SEPARATE`` and ``01 MULTIPLY-DATA LEADING SEPARATE.``
+            # (a group-level sign clause). Neither word can name a data
+            # item, so in clause position they are unambiguous.
+            elif value_upper in ("LEADING", "TRAILING"):
+                self._parse_sign_direction(token_stream, data_item)
 
             # SYNCHRONIZED / SYNC [IS] [LEFT|RIGHT] clause
             elif value_upper in {"SYNCHRONIZED", "SYNC"}:
@@ -594,6 +620,35 @@ class DataItemClauseParser:
                 token_stream.consume()
 
         return data_item
+
+    def _parse_sign_direction(
+        self, token_stream: ITokenStream, data_item: CobolDataItem
+    ) -> None:
+        """Parse ``LEADING|TRAILING [SEPARATE [CHARACTER]]`` into
+        ``data_item.sign_clause`` (each word may start a continuation line;
+        the read is restricted to LEADING/TRAILING so a raw newline is never
+        recorded as the direction). Shared by the ``SIGN [IS] ...`` branch and
+        the bare form with the SIGN word omitted."""
+        self._skip_newlines(token_stream)
+        dir_tok = token_stream.peek()
+        if not (
+            dir_tok
+            and dir_tok.value
+            and dir_tok.value.upper() in ("LEADING", "TRAILING")
+        ):
+            return
+        direction = dir_tok.value.upper()
+        token_stream.consume()
+        self._skip_newlines(token_stream)
+        sep = token_stream.peek()
+        if sep and sep.value and sep.value.upper() == "SEPARATE":
+            token_stream.consume()
+            self._skip_newlines(token_stream)
+            ch = token_stream.peek()
+            if ch and ch.value and ch.value.upper() == "CHARACTER":
+                token_stream.consume()
+            direction = direction + " SEPARATE"
+        data_item.sign_clause = direction
 
     # ------------------------------------------------------------------
     # REPORT SECTION report-group clauses
@@ -753,7 +808,7 @@ class DataItemClauseParser:
         # Variable OCCURS: OCCURS min TO max [TIMES] DEPENDING ON var
         # (TO and the max count may each start a continuation line too;
         # the max-count read carries the same crossing guard as the first)
-        self._skip_newlines(token_stream)
+        self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "TO":
             token_stream.consume()  # consume TO
@@ -767,7 +822,7 @@ class DataItemClauseParser:
                     token_stream.consume()
 
         # Skip optional TIMES keyword (may be preceded by newlines)
-        self._skip_newlines(token_stream)
+        self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "TIMES":
             token_stream.consume()
@@ -776,15 +831,15 @@ class DataItemClauseParser:
         # continuation line; the variable read requires an IDENTIFIER, so
         # crossing the break can never swallow a level number)
         depending_var = None
-        self._skip_newlines(token_stream)
+        self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "DEPENDING":
             token_stream.consume()  # consume DEPENDING
-            self._skip_newlines(token_stream)
+            self._skip_clause_separators(token_stream)
             on_token = token_stream.peek()
             if on_token and on_token.value and on_token.value.upper() == "ON":
                 token_stream.consume()  # consume ON
-            self._skip_newlines(token_stream)
+            self._skip_clause_separators(token_stream)
             dep_token = token_stream.peek()
             if dep_token and dep_token.type == TokenType.IDENTIFIER:
                 depending_var = dep_token.value
@@ -796,7 +851,7 @@ class DataItemClauseParser:
         # SEARCH ALL (binary search), so dropping them loses real
         # semantics — and previously it also cascaded into dropping a
         # following INDEXED BY clause.
-        self._skip_newlines(token_stream)
+        self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
         while (
             nxt
@@ -809,17 +864,17 @@ class DataItemClauseParser:
         ):
             direction = nxt.value.upper()
             token_stream.consume()  # consume ASCENDING/DESCENDING
-            self._skip_newlines(token_stream)
+            self._skip_clause_separators(token_stream)
             key_kw = token_stream.peek()
             if key_kw and key_kw.value and key_kw.value.upper() == "KEY":
                 token_stream.consume()  # consume KEY
-            self._skip_newlines(token_stream)
+            self._skip_clause_separators(token_stream)
             is_kw = token_stream.peek()
             if is_kw and is_kw.value and is_kw.value.upper() == "IS":
                 token_stream.consume()  # consume optional IS
             keys: list[str] = []
             while True:
-                self._skip_newlines(token_stream)
+                self._skip_clause_separators(token_stream)
                 key_token = token_stream.peek()
                 if key_token and key_token.type == TokenType.COMMA:
                     # Comma-separated key list: the comma is only a
@@ -839,21 +894,21 @@ class DataItemClauseParser:
                     break
             if keys:
                 occurs.add_key_clause(direction, keys)
-            self._skip_newlines(token_stream)
+            self._skip_clause_separators(token_stream)
             nxt = token_stream.peek()
 
         # INDEXED BY clause (one or more index names, optionally
         # comma-separated; INDEXED and BY may straddle a line break)
-        self._skip_newlines(token_stream)
+        self._skip_clause_separators(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "INDEXED":
             token_stream.consume()  # consume INDEXED
-            self._skip_newlines(token_stream)
+            self._skip_clause_separators(token_stream)
             by_token = token_stream.peek()
             if by_token and by_token.value and by_token.value.upper() == "BY":
                 token_stream.consume()  # consume BY
             while True:
-                self._skip_newlines(token_stream)
+                self._skip_clause_separators(token_stream)
                 idx_token = token_stream.peek()
                 if idx_token and idx_token.type == TokenType.COMMA:
                     token_stream.consume()
@@ -918,6 +973,23 @@ class DataItemClauseParser:
         while not token_stream.is_empty():
             t = token_stream.peek()
             if t and t.type == TokenType.NEWLINE:
+                token_stream.consume()
+            else:
+                break
+
+    @staticmethod
+    def _skip_clause_separators(token_stream: ITokenStream) -> None:
+        """Consume NEWLINE, ``,`` and ``;`` tokens at the current position.
+
+        Inside an OCCURS clause the sub-clauses may be comma/semicolon
+        separated (NIST NC245A: ``OCCURS 15 TIMES;\n INDEXED BY IN1,
+        INDEX1,``); a separator is layout, never an operand.
+        """
+        while not token_stream.is_empty():
+            t = token_stream.peek()
+            if t and (
+                t.type == TokenType.NEWLINE or t.type in _CLAUSE_SEPARATOR_TOKEN_TYPES
+            ):
                 token_stream.consume()
             else:
                 break
@@ -1066,8 +1138,19 @@ class DataItemClauseParser:
                 paren_depth -= 1
                 token_stream.consume()
             elif token.value == ",":
+                # An editing comma (``ZZ,ZZ9``) is always followed by more
+                # pattern; a comma followed by a clause word, the period or
+                # a line break is the NIST-style clause separator (``PIC X,
+                # VALUE 'A'``) and must not be glued onto the pattern.
+                if paren_depth == 0 and self._comma_ends_picture(token_stream):
+                    token_stream.consume()
+                    break
                 pattern_parts.append(token.value)
                 token_stream.consume()
+            elif token.type == TokenType.SEMICOLON and paren_depth == 0:
+                # ``PIC S999999; OCCURS 10 TIMES`` (NIST NC245A)
+                token_stream.consume()
+                break
             elif token.type == TokenType.NEWLINE:
                 if paren_depth == 0:
                     next_item_token = self._picture_clause_next_item_token(token_stream)
@@ -1080,6 +1163,20 @@ class DataItemClauseParser:
 
         result = "".join(pattern_parts) if pattern_parts else None
         return result
+
+    @staticmethod
+    def _comma_ends_picture(token_stream: ITokenStream) -> bool:
+        """True when the ``,`` at the current position is a clause separator
+        rather than an editing symbol: nothing pattern-shaped follows it."""
+        nxt = token_stream.peek(1)
+        if nxt is None:
+            return True
+        if nxt.type in (TokenType.PERIOD, TokenType.NEWLINE, TokenType.EOF):
+            return True
+        if nxt.type in _COMP_TOKEN_TYPES:
+            return True
+        value = (nxt.value or "").upper()
+        return value in _PICTURE_TERMINATOR_KEYWORDS or value in ("PIC", "PICTURE")
 
     @staticmethod
     def _picture_clause_next_item_token(token_stream: ITokenStream) -> Any:

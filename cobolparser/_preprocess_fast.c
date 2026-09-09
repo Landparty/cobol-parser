@@ -2066,6 +2066,13 @@ static CYTHON_INLINE int __Pyx_ParseKeywords(
 static void __Pyx_RaiseArgtupleInvalid(const char* func_name, int exact,
     Py_ssize_t num_min, Py_ssize_t num_max, Py_ssize_t num_found);
 
+/* PyObjectFastCallMethod.proto */
+#if CYTHON_VECTORCALL
+#define __Pyx_PyObject_FastCallMethod(name, args, nargsf) PyObject_VectorcallMethod(name, args, nargsf, NULL)
+#else
+static PyObject *__Pyx_PyObject_FastCallMethod(PyObject *name, PyObject *const *args, size_t nargsf);
+#endif
+
 /* PyObjectVectorcallKwds.proto */
 #if CYTHON_VECTORCALL
 #define __Pyx_Object_VectorcallKwds PyObject_Vectorcall
@@ -2087,13 +2094,6 @@ static CYTHON_INLINE int __Pyx_IterFinish(void);
 
 /* UnpackItemEndCheck.proto */
 static int __Pyx_IternextUnpackEndCheck(PyObject *retval, Py_ssize_t expected);
-
-/* PyObjectFastCallMethod.proto */
-#if CYTHON_VECTORCALL
-#define __Pyx_PyObject_FastCallMethod(name, args, nargsf) PyObject_VectorcallMethod(name, args, nargsf, NULL)
-#else
-static PyObject *__Pyx_PyObject_FastCallMethod(PyObject *name, PyObject *const *args, size_t nargsf);
-#endif
 
 /* PyDictVersioning.proto (used by GetModuleGlobalName) */
 #if CYTHON_USE_DICT_VERSIONS && CYTHON_USE_TYPE_SLOTS
@@ -2150,6 +2150,13 @@ static CYTHON_INLINE int __Pyx_PyObject_CompareBoolLt_int_object(PyObject *op1, 
 static CYTHON_INLINE int __Pyx_PyList_Append(PyObject* list, PyObject* x);
 #else
 #define __Pyx_PyList_Append(L,x) PyList_Append(L,x)
+#endif
+
+/* ListExtend.proto */
+#if (CYTHON_COMPILING_IN_LIMITED_API || PY_VERSION_HEX < 0x030d0000) && !defined(PyList_Extend)
+static CYTHON_INLINE int __Pyx_PyList_Extend(PyObject* L, PyObject* v);
+#else
+#define __Pyx_PyList_Extend(L, v)  PyList_Extend(L, v)
 #endif
 
 /* PyObjectCompare.proto */
@@ -2393,6 +2400,12 @@ static int __Pyx_RaiseUnexpectedTypeError(const char *expected, PyObject *obj);
 
 /* UnicodeEquals_uchar.proto */
 #define __Pyx_PyObject_Equals_str_ch34(s1, s2, equals)  __Pyx_PyObject_Equals_uchar(s1, s2, 34, equals, 1)
+
+/* UnicodeEquals_uchar.proto */
+#define __Pyx_PyObject_Equals_str_ch42(s1, s2, equals)  __Pyx_PyObject_Equals_uchar(s1, s2, 42, equals, 1)
+
+/* UnicodeEquals_uchar.proto */
+#define __Pyx_PyObject_Equals_obj_ch62(s1, s2, equals)  __Pyx_PyObject_Equals_uchar(s1, s2, 62, equals, 0)
 
 /* PyValueError_Check.proto */
 #define __Pyx_PyExc_ValueError_Check(obj)  __Pyx_TypeCheck(obj, PyExc_ValueError)
@@ -2780,7 +2793,7 @@ namespace {
     PyObject *__pyx_slice[1];
     PyObject *__pyx_tuple[1];
     PyObject *__pyx_codeobj_tab[1];
-    PyObject *__pyx_string_tab[92];
+    PyObject *__pyx_string_tab[96];
     PyObject *__pyx_number_tab[6];
 /* #### Code section: module_state_contents ### */
 /* PyFrozenDict.module_state_decls */
@@ -2838,90 +2851,94 @@ static __pyx_mstatetype * const __pyx_mstate_global = &__pyx_mstate_global_stati
 #define __pyx_kp_u_was_dropped_mid_token __pyx_string_tab[5]
 #define __pyx_kp_u__10 __pyx_string_tab[6]
 #define __pyx_kp_u__9 __pyx_string_tab[7]
-#define __pyx_kp_u__11 __pyx_string_tab[8]
+#define __pyx_kp_u__12 __pyx_string_tab[8]
 #define __pyx_kp_u__5 __pyx_string_tab[9]
 #define __pyx_kp_u__8 __pyx_string_tab[10]
 #define __pyx_kp_u_column_identification_area_widt __pyx_string_tab[11]
 #define __pyx_kp_u__7 __pyx_string_tab[12]
 #define __pyx_kp_u__6 __pyx_string_tab[13]
 #define __pyx_kp_u_content_beyond_column __pyx_string_tab[14]
-#define __pyx_kp_u__3 __pyx_string_tab[15]
-#define __pyx_kp_u_Line __pyx_string_tab[16]
-#define __pyx_kp_u_Unterminated_string_literal_at_e __pyx_string_tab[17]
-#define __pyx_kp_u_cobolparser__preprocess_fast_pyx __pyx_string_tab[18]
-#define __pyx_n_u_D __pyx_string_tab[19]
-#define __pyx_n_u_Iterable __pyx_string_tab[20]
-#define __pyx_n_u_V __pyx_string_tab[21]
-#define __pyx_n_u_ID_END __pyx_string_tab[22]
-#define __pyx_n_u_IND_IDX __pyx_string_tab[23]
-#define __pyx_n_u_SEQ_END __pyx_string_tab[24]
-#define __pyx_n_u_TEXT_END __pyx_string_tab[25]
-#define __pyx_n_u_TEXT_START __pyx_string_tab[26]
-#define __pyx_n_u_Pyx_PyDict_NextRef __pyx_string_tab[27]
-#define __pyx_n_u_annotate __pyx_string_tab[28]
-#define __pyx_n_u_class_getitem __pyx_string_tab[29]
-#define __pyx_n_u_func __pyx_string_tab[30]
-#define __pyx_n_u_main __pyx_string_tab[31]
-#define __pyx_n_u_module __pyx_string_tab[32]
-#define __pyx_n_u_name __pyx_string_tab[33]
-#define __pyx_n_u_qualname __pyx_string_tab[34]
-#define __pyx_n_u_test __pyx_string_tab[35]
-#define __pyx_n_u_is_coroutine __pyx_string_tab[36]
-#define __pyx_n_u_after __pyx_string_tab[37]
-#define __pyx_n_u_append __pyx_string_tab[38]
-#define __pyx_n_u_asyncio_coroutines __pyx_string_tab[39]
-#define __pyx_n_u_before __pyx_string_tab[40]
-#define __pyx_n_u_ch __pyx_string_tab[41]
-#define __pyx_n_u_chunk __pyx_string_tab[42]
-#define __pyx_n_u_cline_in_traceback __pyx_string_tab[43]
-#define __pyx_n_u_cobolparser__preprocess_fast __pyx_string_tab[44]
-#define __pyx_n_u_collections_abc __pyx_string_tab[45]
-#define __pyx_n_u_content_len __pyx_string_tab[46]
-#define __pyx_n_u_d __pyx_string_tab[47]
-#define __pyx_n_u_debug_lines_as_comments __pyx_string_tab[48]
-#define __pyx_n_u_dropped __pyx_string_tab[49]
-#define __pyx_n_u_enumerate __pyx_string_tab[50]
-#define __pyx_n_u_exceeds_traditional_width __pyx_string_tab[51]
-#define __pyx_n_u_expandtabs __pyx_string_tab[52]
-#define __pyx_n_u_has_line __pyx_string_tab[53]
-#define __pyx_n_u_has_sequence_number __pyx_string_tab[54]
-#define __pyx_n_u_i __pyx_string_tab[55]
-#define __pyx_n_u_indicator __pyx_string_tab[56]
-#define __pyx_n_u_is_bare_terminal_period __pyx_string_tab[57]
-#define __pyx_n_u_is_cont __pyx_string_tab[58]
-#define __pyx_n_u_is_debug_comment __pyx_string_tab[59]
-#define __pyx_n_u_is_numeric_id_stamp __pyx_string_tab[60]
-#define __pyx_n_u_is_version_tag_comment __pyx_string_tab[61]
-#define __pyx_n_u_isdigit __pyx_string_tab[62]
-#define __pyx_n_u_isspace __pyx_string_tab[63]
-#define __pyx_n_u_items __pyx_string_tab[64]
-#define __pyx_n_u_line __pyx_string_tab[65]
-#define __pyx_n_u_line_no __pyx_string_tab[66]
-#define __pyx_n_u_lines __pyx_string_tab[67]
-#define __pyx_n_u_lstrip __pyx_string_tab[68]
-#define __pyx_n_u_merge_continued_literals __pyx_string_tab[69]
-#define __pyx_n_u_mid_token __pyx_string_tab[70]
-#define __pyx_n_u_n __pyx_string_tab[71]
-#define __pyx_n_u_normalize_fixed_format __pyx_string_tab[72]
-#define __pyx_n_u_parts __pyx_string_tab[73]
-#define __pyx_n_u_pending_literal __pyx_string_tab[74]
-#define __pyx_n_u_pop __pyx_string_tab[75]
-#define __pyx_n_u_quote_ch __pyx_string_tab[76]
-#define __pyx_n_u_quote_open __pyx_string_tab[77]
-#define __pyx_n_u_raw __pyx_string_tab[78]
-#define __pyx_n_u_result __pyx_string_tab[79]
-#define __pyx_n_u_rstrip __pyx_string_tab[80]
-#define __pyx_n_u_seq_area __pyx_string_tab[81]
-#define __pyx_n_u_setdefault __pyx_string_tab[82]
-#define __pyx_n_u_start __pyx_string_tab[83]
-#define __pyx_n_u_strip __pyx_string_tab[84]
-#define __pyx_n_u_stripped __pyx_string_tab[85]
-#define __pyx_n_u_text_slice __pyx_string_tab[86]
-#define __pyx_n_u_v __pyx_string_tab[87]
-#define __pyx_n_u_values __pyx_string_tab[88]
-#define __pyx_n_u_version_tag_lines_as_comments __pyx_string_tab[89]
-#define __pyx_n_u_warnings __pyx_string_tab[90]
-#define __pyx_kp_b_iso88591_DDb_c_G_G_H_a_a_Q_Q_q_s_1_3avRq __pyx_string_tab[91]
+#define __pyx_kp_u__11 __pyx_string_tab[15]
+#define __pyx_kp_u__3 __pyx_string_tab[16]
+#define __pyx_kp_u_Line __pyx_string_tab[17]
+#define __pyx_kp_u_Unterminated_string_literal_at_e __pyx_string_tab[18]
+#define __pyx_kp_u_cobolparser__preprocess_fast_pyx __pyx_string_tab[19]
+#define __pyx_n_u_D __pyx_string_tab[20]
+#define __pyx_n_u_Iterable __pyx_string_tab[21]
+#define __pyx_n_u_V __pyx_string_tab[22]
+#define __pyx_n_u_ID_END __pyx_string_tab[23]
+#define __pyx_n_u_IND_IDX __pyx_string_tab[24]
+#define __pyx_n_u_SEQ_END __pyx_string_tab[25]
+#define __pyx_n_u_TEXT_END __pyx_string_tab[26]
+#define __pyx_n_u_TEXT_START __pyx_string_tab[27]
+#define __pyx_n_u_Pyx_PyDict_NextRef __pyx_string_tab[28]
+#define __pyx_n_u_annotate __pyx_string_tab[29]
+#define __pyx_n_u_class_getitem __pyx_string_tab[30]
+#define __pyx_n_u_func __pyx_string_tab[31]
+#define __pyx_n_u_main __pyx_string_tab[32]
+#define __pyx_n_u_module __pyx_string_tab[33]
+#define __pyx_n_u_name __pyx_string_tab[34]
+#define __pyx_n_u_qualname __pyx_string_tab[35]
+#define __pyx_n_u_test __pyx_string_tab[36]
+#define __pyx_n_u_is_coroutine __pyx_string_tab[37]
+#define __pyx_n_u_after __pyx_string_tab[38]
+#define __pyx_n_u_append __pyx_string_tab[39]
+#define __pyx_n_u_asyncio_coroutines __pyx_string_tab[40]
+#define __pyx_n_u_before __pyx_string_tab[41]
+#define __pyx_n_u_ch __pyx_string_tab[42]
+#define __pyx_n_u_chunk __pyx_string_tab[43]
+#define __pyx_n_u_cline_in_traceback __pyx_string_tab[44]
+#define __pyx_n_u_cobolparser__preprocess_fast __pyx_string_tab[45]
+#define __pyx_n_u_collections_abc __pyx_string_tab[46]
+#define __pyx_n_u_content_len __pyx_string_tab[47]
+#define __pyx_n_u_d __pyx_string_tab[48]
+#define __pyx_n_u_debug_lines_as_comments __pyx_string_tab[49]
+#define __pyx_n_u_deferred __pyx_string_tab[50]
+#define __pyx_n_u_dropped __pyx_string_tab[51]
+#define __pyx_n_u_enumerate __pyx_string_tab[52]
+#define __pyx_n_u_exceeds_traditional_width __pyx_string_tab[53]
+#define __pyx_n_u_expandtabs __pyx_string_tab[54]
+#define __pyx_n_u_has_line __pyx_string_tab[55]
+#define __pyx_n_u_has_sequence_number __pyx_string_tab[56]
+#define __pyx_n_u_i __pyx_string_tab[57]
+#define __pyx_n_u_indicator __pyx_string_tab[58]
+#define __pyx_n_u_is_bare_terminal_period __pyx_string_tab[59]
+#define __pyx_n_u_is_cont __pyx_string_tab[60]
+#define __pyx_n_u_is_debug_comment __pyx_string_tab[61]
+#define __pyx_n_u_is_numeric_id_stamp __pyx_string_tab[62]
+#define __pyx_n_u_is_version_tag_comment __pyx_string_tab[63]
+#define __pyx_n_u_isdigit __pyx_string_tab[64]
+#define __pyx_n_u_isspace __pyx_string_tab[65]
+#define __pyx_n_u_items __pyx_string_tab[66]
+#define __pyx_n_u_line __pyx_string_tab[67]
+#define __pyx_n_u_line_no __pyx_string_tab[68]
+#define __pyx_n_u_lines __pyx_string_tab[69]
+#define __pyx_n_u_literal_suspended __pyx_string_tab[70]
+#define __pyx_n_u_lstrip __pyx_string_tab[71]
+#define __pyx_n_u_merge_continued_literals __pyx_string_tab[72]
+#define __pyx_n_u_mid_token __pyx_string_tab[73]
+#define __pyx_n_u_n __pyx_string_tab[74]
+#define __pyx_n_u_normalize_fixed_format __pyx_string_tab[75]
+#define __pyx_n_u_parts __pyx_string_tab[76]
+#define __pyx_n_u_pending_literal __pyx_string_tab[77]
+#define __pyx_n_u_pop __pyx_string_tab[78]
+#define __pyx_n_u_quote_ch __pyx_string_tab[79]
+#define __pyx_n_u_quote_open __pyx_string_tab[80]
+#define __pyx_n_u_raw __pyx_string_tab[81]
+#define __pyx_n_u_result __pyx_string_tab[82]
+#define __pyx_n_u_rstrip __pyx_string_tab[83]
+#define __pyx_n_u_seq_area __pyx_string_tab[84]
+#define __pyx_n_u_setdefault __pyx_string_tab[85]
+#define __pyx_n_u_splitlines __pyx_string_tab[86]
+#define __pyx_n_u_start __pyx_string_tab[87]
+#define __pyx_n_u_strip __pyx_string_tab[88]
+#define __pyx_n_u_stripped __pyx_string_tab[89]
+#define __pyx_n_u_text_slice __pyx_string_tab[90]
+#define __pyx_n_u_v __pyx_string_tab[91]
+#define __pyx_n_u_values __pyx_string_tab[92]
+#define __pyx_n_u_version_tag_lines_as_comments __pyx_string_tab[93]
+#define __pyx_n_u_warnings __pyx_string_tab[94]
+#define __pyx_kp_b_iso88591_DDb_c_G_G_H_a_a_z_Q_Q_q_s_1_3av __pyx_string_tab[95]
 #define __pyx_int_1 __pyx_number_tab[0]
 #define __pyx_int_6 __pyx_number_tab[1]
 #define __pyx_int_7 __pyx_number_tab[2]
@@ -2948,7 +2965,7 @@ static CYTHON_SMALL_CODE int __pyx_m_clear(PyObject *m) {
   for (int i=0; i<1; ++i) { Py_CLEAR(clear_module_state->__pyx_slice[i]); }
   for (int i=0; i<1; ++i) { Py_CLEAR(clear_module_state->__pyx_tuple[i]); }
   for (int i=0; i<1; ++i) { Py_CLEAR(clear_module_state->__pyx_codeobj_tab[i]); }
-  for (int i=0; i<92; ++i) { Py_CLEAR(clear_module_state->__pyx_string_tab[i]); }
+  for (int i=0; i<96; ++i) { Py_CLEAR(clear_module_state->__pyx_string_tab[i]); }
   for (int i=0; i<6; ++i) { Py_CLEAR(clear_module_state->__pyx_number_tab[i]); }
 /* #### Code section: module_state_clear_contents ### */
 /* CommonTypesMetaclass.module_state_clear */
@@ -2978,7 +2995,7 @@ static CYTHON_SMALL_CODE int __pyx_m_traverse(PyObject *m, visitproc visit, void
   for (int i=0; i<1; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_slice[i]); }
   for (int i=0; i<1; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_tuple[i]); }
   for (int i=0; i<1; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_codeobj_tab[i]); }
-  for (int i=0; i<92; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_string_tab[i]); }
+  for (int i=0; i<96; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_string_tab[i]); }
   for (int i=0; i<6; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_number_tab[i]); }
 /* #### Code section: module_state_traverse_contents ### */
 /* CommonTypesMetaclass.module_state_traverse */
@@ -3113,6 +3130,8 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
   int __pyx_v_is_debug_comment;
   int __pyx_v_is_version_tag_comment;
   int __pyx_v_has_line;
+  int __pyx_v_deferred;
+  int __pyx_v_literal_suspended;
   PyObject *__pyx_v_result = NULL;
   PyObject *__pyx_v_parts = NULL;
   PyObject *__pyx_v_line_no = NULL;
@@ -3135,17 +3154,17 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
   PyObject *__pyx_v_stripped = NULL;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
+  int __pyx_t_1;
   PyObject *__pyx_t_2 = NULL;
-  size_t __pyx_t_3;
-  PyObject *__pyx_t_4 = NULL;
-  Py_ssize_t __pyx_t_5;
-  PyObject *(*__pyx_t_6)(PyObject *);
-  PyObject *__pyx_t_7 = NULL;
+  PyObject *__pyx_t_3 = NULL;
+  size_t __pyx_t_4;
+  PyObject *__pyx_t_5 = NULL;
+  Py_ssize_t __pyx_t_6;
+  PyObject *(*__pyx_t_7)(PyObject *);
   PyObject *__pyx_t_8 = NULL;
-  PyObject *(*__pyx_t_9)(PyObject *);
-  Py_ssize_t __pyx_t_10;
-  int __pyx_t_11;
+  PyObject *__pyx_t_9 = NULL;
+  PyObject *(*__pyx_t_10)(PyObject *);
+  Py_ssize_t __pyx_t_11;
   int __pyx_t_12;
   int __pyx_t_13;
   PyObject *__pyx_t_14 = NULL;
@@ -3160,6 +3179,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("normalize_fixed_format", 0);
+  __Pyx_INCREF(__pyx_v_lines);
 
   /* "cobolparser/_preprocess_fast.pyx":35
  *     """
@@ -3193,292 +3213,473 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *     # whitespace program text, non-comment indicator) whenever it followed
  *     # another blank/comment line, shifting every later line number.
  *     cdef bint has_line = False             # <<<<<<<<<<<<<<
- * 
- *     result = []
+ *     # Placeholder lines owed *after* the logical line in `parts` is flushed
+ *     # (mirrors the pure-Python `deferred`): every physical line contributes
 */
   __pyx_v_has_line = 0;
 
-  /* "cobolparser/_preprocess_fast.pyx":51
- *     cdef bint has_line = False
+  /* "cobolparser/_preprocess_fast.pyx":56
+ *     # logical line is written. Comment/blank lines interrupting an open
+ *     # continued literal are deferred the same way instead of severing it.
+ *     cdef int deferred = 0             # <<<<<<<<<<<<<<
+ *     # True while a literal is left open across an interrupting comment/blank
+ *     # line; such a literal keeps the historical "closed at the interruption"
+*/
+  __pyx_v_deferred = 0;
+
+  /* "cobolparser/_preprocess_fast.pyx":60
+ *     # line; such a literal keeps the historical "closed at the interruption"
+ *     # outcome at EOF instead of raising (mirrors `literal_suspended`).
+ *     cdef bint literal_suspended = False             # <<<<<<<<<<<<<<
+ * 
+ *     if isinstance(lines, str):
+*/
+  __pyx_v_literal_suspended = 0;
+
+  /* "cobolparser/_preprocess_fast.pyx":62
+ *     cdef bint literal_suspended = False
+ * 
+ *     if isinstance(lines, str):             # <<<<<<<<<<<<<<
+ *         lines = lines.splitlines()
+ * 
+*/
+  __pyx_t_1 = PyUnicode_Check(__pyx_v_lines); 
+  if (__pyx_t_1) {
+
+
+    /* "cobolparser/_preprocess_fast.pyx":63
+ * 
+ *     if isinstance(lines, str):
+ *         lines = lines.splitlines()             # <<<<<<<<<<<<<<
+ * 
+ *     result = []
+*/
+    __pyx_t_3 = __pyx_v_lines;
+    __Pyx_INCREF(__pyx_t_3);
+    __pyx_t_4 = 0;
+    {
+      PyObject *__pyx_callargs[2] = {__pyx_t_3, NULL};
+      __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_splitlines, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 63, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_2);
+    }
+    __Pyx_DECREF_SET(__pyx_v_lines, __pyx_t_2);
+    __pyx_t_2 = 0;
+
+    /* "cobolparser/_preprocess_fast.pyx":62
+ *     cdef bint literal_suspended = False
+ * 
+ *     if isinstance(lines, str):             # <<<<<<<<<<<<<<
+ *         lines = lines.splitlines()
+ * 
+*/
+  }
+
+  /* "cobolparser/_preprocess_fast.pyx":65
+ *         lines = lines.splitlines()
  * 
  *     result = []             # <<<<<<<<<<<<<<
  *     parts  = []
  * 
 */
-  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 51, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_v_result = ((PyObject*)__pyx_t_1);
-  __pyx_t_1 = 0;
+  __pyx_t_2 = PyList_New(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 65, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_v_result = ((PyObject*)__pyx_t_2);
+  __pyx_t_2 = 0;
 
-  /* "cobolparser/_preprocess_fast.pyx":52
+  /* "cobolparser/_preprocess_fast.pyx":66
  * 
  *     result = []
  *     parts  = []             # <<<<<<<<<<<<<<
  * 
  *     for line_no, raw in enumerate(lines, start=1):
 */
-  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 52, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_v_parts = ((PyObject*)__pyx_t_1);
-  __pyx_t_1 = 0;
+  __pyx_t_2 = PyList_New(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 66, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_v_parts = ((PyObject*)__pyx_t_2);
+  __pyx_t_2 = 0;
 
-  /* "cobolparser/_preprocess_fast.pyx":54
+  /* "cobolparser/_preprocess_fast.pyx":68
  *     parts  = []
  * 
  *     for line_no, raw in enumerate(lines, start=1):             # <<<<<<<<<<<<<<
  *         line = raw.rstrip("\n").expandtabs(8)
  * 
 */
-  __pyx_t_2 = NULL;
-  __pyx_t_3 = 1;
+  __pyx_t_3 = NULL;
+  __pyx_t_4 = 1;
   {
-    PyObject *__pyx_callargs[3] = {__pyx_t_2, __pyx_v_lines, __pyx_mstate_global->__pyx_int_1};
+    PyObject *__pyx_callargs[3] = {__pyx_t_3, __pyx_v_lines, __pyx_mstate_global->__pyx_int_1};
     #if CYTHON_VECTORCALL
-    __pyx_t_4 = __pyx_mstate_global->__pyx_tuple[0];
-    if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 54, __pyx_L1_error)
-    __Pyx_INCREF(__pyx_t_4);
+    __pyx_t_5 = __pyx_mstate_global->__pyx_tuple[0];
+    if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 68, __pyx_L1_error)
+    __Pyx_INCREF(__pyx_t_5);
     #else
     {
       PyObject *__pyx_temp[1] = {__pyx_mstate_global->__pyx_n_u_start};
-      __pyx_t_4 = __Pyx_MakeKwargDict(__pyx_temp, __pyx_callargs+2, 1);
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 54, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
+      __pyx_t_5 = __Pyx_MakeKwargDict(__pyx_temp, __pyx_callargs+2, 1);
+      if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 68, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_5);
     }
     #endif
-    __pyx_t_1 = __Pyx_Object_VectorcallKwds((PyObject*)__pyx_builtin_enumerate, __pyx_callargs+__pyx_t_3, (2-__pyx_t_3) | (__pyx_t_3*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET), __pyx_t_4);
-    __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 54, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
+    __pyx_t_2 = __Pyx_Object_VectorcallKwds((PyObject*)__pyx_builtin_enumerate, __pyx_callargs+__pyx_t_4, (2-__pyx_t_4) | (__pyx_t_4*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET), __pyx_t_5);
+    __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+    if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 68, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
   }
-  if (likely(PyList_CheckExact(__pyx_t_1)) || PyTuple_CheckExact(__pyx_t_1)) {
-    __pyx_t_4 = __pyx_t_1; __Pyx_INCREF(__pyx_t_4);
-    __pyx_t_5 = 0;
-    __pyx_t_6 = NULL;
+  if (likely(PyList_CheckExact(__pyx_t_2)) || PyTuple_CheckExact(__pyx_t_2)) {
+    __pyx_t_5 = __pyx_t_2; __Pyx_INCREF(__pyx_t_5);
+    __pyx_t_6 = 0;
+    __pyx_t_7 = NULL;
   } else {
-    __pyx_t_5 = -1; __pyx_t_4 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 54, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_4);
-    __pyx_t_6 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_4); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 54, __pyx_L1_error)
+    __pyx_t_6 = -1; __pyx_t_5 = PyObject_GetIter(__pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 68, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_5);
+    __pyx_t_7 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_5); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 68, __pyx_L1_error)
   }
-  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   for (;;) {
-    if (likely(!__pyx_t_6)) {
-      if (likely(PyList_CheckExact(__pyx_t_4))) {
+    if (likely(!__pyx_t_7)) {
+      if (likely(PyList_CheckExact(__pyx_t_5))) {
         {
-          Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_4);
+          Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_5);
           #if !CYTHON_ASSUME_SAFE_SIZE
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 54, __pyx_L1_error)
+          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 68, __pyx_L1_error)
           #endif
-          if (__pyx_t_5 >= __pyx_temp) break;
+          if (__pyx_t_6 >= __pyx_temp) break;
         }
-        __pyx_t_1 = __Pyx_PyList_GET_ITEM_REF(__pyx_t_4, __pyx_t_5, __Pyx_ReferenceSharing_OwnStrongReference);
-        ++__pyx_t_5;
+        __pyx_t_2 = __Pyx_PyList_GET_ITEM_REF(__pyx_t_5, __pyx_t_6, __Pyx_ReferenceSharing_OwnStrongReference);
+        ++__pyx_t_6;
       } else {
         {
-          Py_ssize_t __pyx_temp = __Pyx_PyTuple_GET_SIZE(__pyx_t_4);
+          Py_ssize_t __pyx_temp = __Pyx_PyTuple_GET_SIZE(__pyx_t_5);
           #if !CYTHON_ASSUME_SAFE_SIZE
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 54, __pyx_L1_error)
+          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 68, __pyx_L1_error)
           #endif
-          if (__pyx_t_5 >= __pyx_temp) break;
+          if (__pyx_t_6 >= __pyx_temp) break;
         }
         #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_1 = __Pyx_NewRef(PyTuple_GET_ITEM(__pyx_t_4, __pyx_t_5));
+        __pyx_t_2 = __Pyx_NewRef(PyTuple_GET_ITEM(__pyx_t_5, __pyx_t_6));
         #else
-        __pyx_t_1 = __Pyx_PySequence_ITEM(__pyx_t_4, __pyx_t_5);
+        __pyx_t_2 = __Pyx_PySequence_ITEM(__pyx_t_5, __pyx_t_6);
         #endif
-        ++__pyx_t_5;
+        ++__pyx_t_6;
       }
-      if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 54, __pyx_L1_error)
+      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 68, __pyx_L1_error)
     } else {
-      __pyx_t_1 = __pyx_t_6(__pyx_t_4);
-      if (unlikely(!__pyx_t_1)) {
+      __pyx_t_2 = __pyx_t_7(__pyx_t_5);
+      if (unlikely(!__pyx_t_2)) {
         PyObject* exc_type = PyErr_Occurred();
         if (exc_type) {
-          if (unlikely(!__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration))) __PYX_ERR(0, 54, __pyx_L1_error)
+          if (unlikely(!__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration))) __PYX_ERR(0, 68, __pyx_L1_error)
           PyErr_Clear();
         }
         break;
       }
     }
-    __Pyx_GOTREF(__pyx_t_1);
-    if ((likely(PyTuple_CheckExact(__pyx_t_1))) || (PyList_CheckExact(__pyx_t_1))) {
-      PyObject* sequence = __pyx_t_1;
+    __Pyx_GOTREF(__pyx_t_2);
+    if ((likely(PyTuple_CheckExact(__pyx_t_2))) || (PyList_CheckExact(__pyx_t_2))) {
+      PyObject* sequence = __pyx_t_2;
       Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
       if (unlikely(size != 2)) {
         if (size > 2) __Pyx_RaiseTooManyValuesError(2);
         else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-        __PYX_ERR(0, 54, __pyx_L1_error)
+        __PYX_ERR(0, 68, __pyx_L1_error)
       }
       #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
       if (likely(PyTuple_CheckExact(sequence))) {
-        __pyx_t_2 = PyTuple_GET_ITEM(sequence, 0);
-        __Pyx_INCREF(__pyx_t_2);
-        __pyx_t_7 = PyTuple_GET_ITEM(sequence, 1);
-        __Pyx_INCREF(__pyx_t_7);
+        __pyx_t_3 = PyTuple_GET_ITEM(sequence, 0);
+        __Pyx_INCREF(__pyx_t_3);
+        __pyx_t_8 = PyTuple_GET_ITEM(sequence, 1);
+        __Pyx_INCREF(__pyx_t_8);
       } else {
-        __pyx_t_2 = __Pyx_PyList_GET_ITEM_REF(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
-        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 54, __pyx_L1_error)
-        __Pyx_XGOTREF(__pyx_t_2);
-        __pyx_t_7 = __Pyx_PyList_GET_ITEM_REF(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
-        if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 54, __pyx_L1_error)
-        __Pyx_XGOTREF(__pyx_t_7);
+        __pyx_t_3 = __Pyx_PyList_GET_ITEM_REF(sequence, 0, __Pyx_ReferenceSharing_SharedReference);
+        if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 68, __pyx_L1_error)
+        __Pyx_XGOTREF(__pyx_t_3);
+        __pyx_t_8 = __Pyx_PyList_GET_ITEM_REF(sequence, 1, __Pyx_ReferenceSharing_SharedReference);
+        if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 68, __pyx_L1_error)
+        __Pyx_XGOTREF(__pyx_t_8);
       }
       #else
-      __pyx_t_2 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 54, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_2);
-      __pyx_t_7 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 54, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
+      __pyx_t_3 = __Pyx_PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 68, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_3);
+      __pyx_t_8 = __Pyx_PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 68, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_8);
       #endif
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
     } else {
       Py_ssize_t index = -1;
-      __pyx_t_8 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 54, __pyx_L1_error)
+      __pyx_t_9 = PyObject_GetIter(__pyx_t_2); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 68, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_9);
+      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+      __pyx_t_10 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_9);
+      index = 0; __pyx_t_3 = __pyx_t_10(__pyx_t_9); if (unlikely(!__pyx_t_3)) goto __pyx_L6_unpacking_failed;
+      __Pyx_GOTREF(__pyx_t_3);
+      index = 1; __pyx_t_8 = __pyx_t_10(__pyx_t_9); if (unlikely(!__pyx_t_8)) goto __pyx_L6_unpacking_failed;
       __Pyx_GOTREF(__pyx_t_8);
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __pyx_t_9 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_8);
-      index = 0; __pyx_t_2 = __pyx_t_9(__pyx_t_8); if (unlikely(!__pyx_t_2)) goto __pyx_L5_unpacking_failed;
-      __Pyx_GOTREF(__pyx_t_2);
-      index = 1; __pyx_t_7 = __pyx_t_9(__pyx_t_8); if (unlikely(!__pyx_t_7)) goto __pyx_L5_unpacking_failed;
-      __Pyx_GOTREF(__pyx_t_7);
-      if (__Pyx_IternextUnpackEndCheck(__pyx_t_9(__pyx_t_8), 2) < (0)) __PYX_ERR(0, 54, __pyx_L1_error)
-      __pyx_t_9 = NULL;
-      __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-      goto __pyx_L6_unpacking_done;
-      __pyx_L5_unpacking_failed:;
-      __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-      __pyx_t_9 = NULL;
+      if (__Pyx_IternextUnpackEndCheck(__pyx_t_10(__pyx_t_9), 2) < (0)) __PYX_ERR(0, 68, __pyx_L1_error)
+      __pyx_t_10 = NULL;
+      __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+      goto __pyx_L7_unpacking_done;
+      __pyx_L6_unpacking_failed:;
+      __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+      __pyx_t_10 = NULL;
       if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-      __PYX_ERR(0, 54, __pyx_L1_error)
-      __pyx_L6_unpacking_done:;
+      __PYX_ERR(0, 68, __pyx_L1_error)
+      __pyx_L7_unpacking_done:;
     }
-    __Pyx_XDECREF_SET(__pyx_v_line_no, __pyx_t_2);
-    __pyx_t_2 = 0;
-    __Pyx_XDECREF_SET(__pyx_v_raw, __pyx_t_7);
-    __pyx_t_7 = 0;
+    __Pyx_XDECREF_SET(__pyx_v_line_no, __pyx_t_3);
+    __pyx_t_3 = 0;
+    __Pyx_XDECREF_SET(__pyx_v_raw, __pyx_t_8);
+    __pyx_t_8 = 0;
 
-    /* "cobolparser/_preprocess_fast.pyx":55
+    /* "cobolparser/_preprocess_fast.pyx":69
  * 
  *     for line_no, raw in enumerate(lines, start=1):
  *         line = raw.rstrip("\n").expandtabs(8)             # <<<<<<<<<<<<<<
  * 
  *         if len(line) < _TEXT_START:
 */
-    __pyx_t_8 = __pyx_v_raw;
-    __Pyx_INCREF(__pyx_t_8);
-    __pyx_t_3 = 0;
+    __pyx_t_9 = __pyx_v_raw;
+    __Pyx_INCREF(__pyx_t_9);
+    __pyx_t_4 = 0;
     {
-      PyObject *__pyx_callargs[2] = {__pyx_t_8, __pyx_mstate_global->__pyx_kp_u_};
-      __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_3, (2-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      PyObject *__pyx_callargs[2] = {__pyx_t_9, __pyx_mstate_global->__pyx_kp_u_};
+      __pyx_t_3 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_4, (2-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
+      if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 69, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_3);
+    }
+    __pyx_t_8 = __pyx_t_3;
+    __Pyx_INCREF(__pyx_t_8);
+    __pyx_t_4 = 0;
+    {
+      PyObject *__pyx_callargs[2] = {__pyx_t_8, __pyx_mstate_global->__pyx_int_8};
+      __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_expandtabs, __pyx_callargs+__pyx_t_4, (2-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
       __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
-      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 55, __pyx_L1_error)
+      __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 69, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
     }
-    __pyx_t_7 = __pyx_t_2;
-    __Pyx_INCREF(__pyx_t_7);
-    __pyx_t_3 = 0;
-    {
-      PyObject *__pyx_callargs[2] = {__pyx_t_7, __pyx_mstate_global->__pyx_int_8};
-      __pyx_t_1 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_expandtabs, __pyx_callargs+__pyx_t_3, (2-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 55, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_1);
-    }
-    __Pyx_XDECREF_SET(__pyx_v_line, __pyx_t_1);
-    __pyx_t_1 = 0;
+    __Pyx_XDECREF_SET(__pyx_v_line, __pyx_t_2);
+    __pyx_t_2 = 0;
 
-    /* "cobolparser/_preprocess_fast.pyx":57
+    /* "cobolparser/_preprocess_fast.pyx":71
  *         line = raw.rstrip("\n").expandtabs(8)
  * 
  *         if len(line) < _TEXT_START:             # <<<<<<<<<<<<<<
+ *             # Blank/short line. Inside an open continued literal it may sit
+ *             # between the continued line and its continuation: keep the
+*/
+    __pyx_t_11 = PyObject_Length(__pyx_v_line); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 71, __pyx_L1_error)
+    __pyx_t_2 = PyLong_FromSsize_t(__pyx_t_11); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 71, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+
+    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_TEXT_START); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 71, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_3);
+    __pyx_t_1 = __Pyx_PyObject_CompareBoolLt_int_object(__pyx_t_2, __pyx_t_3, Py_LT); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 71, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+    if (__pyx_t_1) {
+
+
+      /* "cobolparser/_preprocess_fast.pyx":75
+ *             # between the continued line and its continuation: keep the
+ *             # logical line pending and owe a placeholder for this record.
+ *             if pending_literal and merge_continued_literals and has_line:             # <<<<<<<<<<<<<<
+ *                 deferred += 1
+ *                 literal_suspended = True
+*/
+      if (__pyx_v_pending_literal) {
+      } else {
+
+        __pyx_t_1 = __pyx_v_pending_literal;
+        goto __pyx_L10_bool_binop_done;
+      }
+      __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 75, __pyx_L1_error)
+      if (__pyx_t_12) {
+
+      } else {
+
+        __pyx_t_1 = __pyx_t_12;
+
+        goto __pyx_L10_bool_binop_done;
+      }
+
+      __pyx_t_1 = __pyx_v_has_line;
+      __pyx_L10_bool_binop_done:;
+      if (__pyx_t_1) {
+
+
+        /* "cobolparser/_preprocess_fast.pyx":76
+ *             # logical line pending and owe a placeholder for this record.
+ *             if pending_literal and merge_continued_literals and has_line:
+ *                 deferred += 1             # <<<<<<<<<<<<<<
+ *                 literal_suspended = True
+ *                 continue
+*/
+        __pyx_v_deferred = (__pyx_v_deferred + 1);
+
+        /* "cobolparser/_preprocess_fast.pyx":77
+ *             if pending_literal and merge_continued_literals and has_line:
+ *                 deferred += 1
+ *                 literal_suspended = True             # <<<<<<<<<<<<<<
+ *                 continue
+ *             # Flush accumulated parts for this logical line, then emit an
+*/
+        __pyx_v_literal_suspended = 1;
+
+        /* "cobolparser/_preprocess_fast.pyx":78
+ *                 deferred += 1
+ *                 literal_suspended = True
+ *                 continue             # <<<<<<<<<<<<<<
  *             # Flush accumulated parts for this logical line, then emit an
  *             # empty placeholder for this physical line so later lines keep
 */
-    __pyx_t_10 = PyObject_Length(__pyx_v_line); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 57, __pyx_L1_error)
-    __pyx_t_1 = PyLong_FromSsize_t(__pyx_t_10); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 57, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
+        goto __pyx_L4_continue;
 
-    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_TEXT_START); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 57, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_2);
-    __pyx_t_11 = __Pyx_PyObject_CompareBoolLt_int_object(__pyx_t_1, __pyx_t_2, Py_LT); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 57, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (__pyx_t_11) {
-
-
-      /* "cobolparser/_preprocess_fast.pyx":63
- *             # dropped line here would silently shift every subsequent
- *             # error/warning location).
- *             if has_line:             # <<<<<<<<<<<<<<
- *                 result.append("".join(parts))
- *             result.append("")
-*/
-      if (__pyx_v_has_line) {
-
-        /* "cobolparser/_preprocess_fast.pyx":64
- *             # error/warning location).
- *             if has_line:
- *                 result.append("".join(parts))             # <<<<<<<<<<<<<<
- *             result.append("")
- *             parts         = []
-*/
-        __pyx_t_2 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 64, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_2); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 64, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-
-
-        /* "cobolparser/_preprocess_fast.pyx":63
- *             # dropped line here would silently shift every subsequent
- *             # error/warning location).
- *             if has_line:             # <<<<<<<<<<<<<<
- *                 result.append("".join(parts))
- *             result.append("")
+        /* "cobolparser/_preprocess_fast.pyx":75
+ *             # between the continued line and its continuation: keep the
+ *             # logical line pending and owe a placeholder for this record.
+ *             if pending_literal and merge_continued_literals and has_line:             # <<<<<<<<<<<<<<
+ *                 deferred += 1
+ *                 literal_suspended = True
 */
       }
 
-      /* "cobolparser/_preprocess_fast.pyx":65
+      /* "cobolparser/_preprocess_fast.pyx":84
+ *             # dropped line here would silently shift every subsequent
+ *             # error/warning location).
+ *             if has_line:             # <<<<<<<<<<<<<<
+ *                 result.append("".join(parts))
+ *             if deferred:
+*/
+      if (__pyx_v_has_line) {
+
+        /* "cobolparser/_preprocess_fast.pyx":85
+ *             # error/warning location).
+ *             if has_line:
+ *                 result.append("".join(parts))             # <<<<<<<<<<<<<<
+ *             if deferred:
+ *                 result.extend([""] * deferred)
+*/
+        __pyx_t_3 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 85, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_3);
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_3); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 85, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+
+
+        /* "cobolparser/_preprocess_fast.pyx":84
+ *             # dropped line here would silently shift every subsequent
+ *             # error/warning location).
+ *             if has_line:             # <<<<<<<<<<<<<<
+ *                 result.append("".join(parts))
+ *             if deferred:
+*/
+      }
+
+      /* "cobolparser/_preprocess_fast.pyx":86
  *             if has_line:
  *                 result.append("".join(parts))
+ *             if deferred:             # <<<<<<<<<<<<<<
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
+*/
+      __pyx_t_1 = (__pyx_v_deferred != 0);
+
+      if (__pyx_t_1) {
+
+
+        /* "cobolparser/_preprocess_fast.pyx":87
+ *                 result.append("".join(parts))
+ *             if deferred:
+ *                 result.extend([""] * deferred)             # <<<<<<<<<<<<<<
+ *                 deferred = 0
+ *             result.append("")
+*/
+        __pyx_t_3 = PyList_New(1 * ((__pyx_v_deferred<0) ? 0:__pyx_v_deferred)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 87, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_3);
+        { Py_ssize_t __pyx_temp;
+          for (__pyx_temp=0; __pyx_temp < __pyx_v_deferred; __pyx_temp++) {
+            __Pyx_INCREF(__pyx_mstate_global->__pyx_kp_u__2);
+            __Pyx_GIVEREF(__pyx_mstate_global->__pyx_kp_u__2);
+            if (__Pyx_PyList_SET_ITEM(__pyx_t_3, __pyx_temp, __pyx_mstate_global->__pyx_kp_u__2) != (0)) __PYX_ERR(0, 87, __pyx_L1_error);
+          }
+        }
+        __pyx_t_13 = __Pyx_PyList_Extend(__pyx_v_result, __pyx_t_3); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 87, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+
+
+        /* "cobolparser/_preprocess_fast.pyx":88
+ *             if deferred:
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0             # <<<<<<<<<<<<<<
+ *             result.append("")
+ *             parts         = []
+*/
+        __pyx_v_deferred = 0;
+
+        /* "cobolparser/_preprocess_fast.pyx":86
+ *             if has_line:
+ *                 result.append("".join(parts))
+ *             if deferred:             # <<<<<<<<<<<<<<
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
+*/
+      }
+
+      /* "cobolparser/_preprocess_fast.pyx":89
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
  *             result.append("")             # <<<<<<<<<<<<<<
  *             parts         = []
  *             has_line      = False
 */
-      __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_result, __pyx_mstate_global->__pyx_kp_u__2); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 65, __pyx_L1_error)
+      __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_result, __pyx_mstate_global->__pyx_kp_u__2); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 89, __pyx_L1_error)
 
 
-      /* "cobolparser/_preprocess_fast.pyx":66
- *                 result.append("".join(parts))
+      /* "cobolparser/_preprocess_fast.pyx":90
+ *                 deferred = 0
  *             result.append("")
  *             parts         = []             # <<<<<<<<<<<<<<
  *             has_line      = False
- *             quote_open    = False
+ *             literal_suspended = False
 */
-      __pyx_t_2 = PyList_New(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 66, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_2);
-      __Pyx_DECREF_SET(__pyx_v_parts, ((PyObject*)__pyx_t_2));
-      __pyx_t_2 = 0;
+      __pyx_t_3 = PyList_New(0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 90, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_3);
+      __Pyx_DECREF_SET(__pyx_v_parts, ((PyObject*)__pyx_t_3));
+      __pyx_t_3 = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":67
+      /* "cobolparser/_preprocess_fast.pyx":91
  *             result.append("")
  *             parts         = []
  *             has_line      = False             # <<<<<<<<<<<<<<
+ *             literal_suspended = False
  *             quote_open    = False
- *             quote_ch      = None
 */
       __pyx_v_has_line = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":68
+      /* "cobolparser/_preprocess_fast.pyx":92
  *             parts         = []
  *             has_line      = False
+ *             literal_suspended = False             # <<<<<<<<<<<<<<
+ *             quote_open    = False
+ *             quote_ch      = None
+*/
+      __pyx_v_literal_suspended = 0;
+
+      /* "cobolparser/_preprocess_fast.pyx":93
+ *             has_line      = False
+ *             literal_suspended = False
  *             quote_open    = False             # <<<<<<<<<<<<<<
  *             quote_ch      = None
  *             pending_literal = False
 */
       __pyx_v_quote_open = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":69
- *             has_line      = False
+      /* "cobolparser/_preprocess_fast.pyx":94
+ *             literal_suspended = False
  *             quote_open    = False
  *             quote_ch      = None             # <<<<<<<<<<<<<<
  *             pending_literal = False
@@ -3487,7 +3688,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
       __Pyx_INCREF(Py_None);
       __Pyx_DECREF_SET(__pyx_v_quote_ch, ((PyObject*)Py_None));
 
-      /* "cobolparser/_preprocess_fast.pyx":70
+      /* "cobolparser/_preprocess_fast.pyx":95
  *             quote_open    = False
  *             quote_ch      = None
  *             pending_literal = False             # <<<<<<<<<<<<<<
@@ -3496,248 +3697,371 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
       __pyx_v_pending_literal = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":71
+      /* "cobolparser/_preprocess_fast.pyx":96
  *             quote_ch      = None
  *             pending_literal = False
  *             continue             # <<<<<<<<<<<<<<
  * 
  *         indicator  = line[_IND_IDX] if len(line) > _IND_IDX else " "
 */
-      goto __pyx_L3_continue;
+      goto __pyx_L4_continue;
 
-      /* "cobolparser/_preprocess_fast.pyx":57
+      /* "cobolparser/_preprocess_fast.pyx":71
  *         line = raw.rstrip("\n").expandtabs(8)
  * 
  *         if len(line) < _TEXT_START:             # <<<<<<<<<<<<<<
- *             # Flush accumulated parts for this logical line, then emit an
- *             # empty placeholder for this physical line so later lines keep
+ *             # Blank/short line. Inside an open continued literal it may sit
+ *             # between the continued line and its continuation: keep the
 */
     }
 
-    /* "cobolparser/_preprocess_fast.pyx":73
+    /* "cobolparser/_preprocess_fast.pyx":98
  *             continue
  * 
  *         indicator  = line[_IND_IDX] if len(line) > _IND_IDX else " "             # <<<<<<<<<<<<<<
  *         text_slice = line[_TEXT_START : _TEXT_END]
  * 
 */
-    __pyx_t_10 = PyObject_Length(__pyx_v_line); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 73, __pyx_L1_error)
-    __pyx_t_1 = PyLong_FromSsize_t(__pyx_t_10); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 73, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
+    __pyx_t_11 = PyObject_Length(__pyx_v_line); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 98, __pyx_L1_error)
+    __pyx_t_2 = PyLong_FromSsize_t(__pyx_t_11); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 98, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
 
-    __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_IND_IDX); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 73, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_7);
-    __pyx_t_11 = __Pyx_PyObject_CompareBoolGt_int_object(__pyx_t_1, __pyx_t_7, Py_GT); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 73, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    if (__pyx_t_11) {
-      __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_IND_IDX); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 73, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
-      __pyx_t_1 = __Pyx_PyObject_GetItem(__pyx_v_line, __pyx_t_7); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 73, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_1);
-      __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-      __pyx_t_2 = __pyx_t_1;
-      __pyx_t_1 = 0;
+    __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_IND_IDX); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 98, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_8);
+    __pyx_t_1 = __Pyx_PyObject_CompareBoolGt_int_object(__pyx_t_2, __pyx_t_8, Py_GT); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 98, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+    if (__pyx_t_1) {
+      __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_IND_IDX); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 98, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_8);
+      __pyx_t_2 = __Pyx_PyObject_GetItem(__pyx_v_line, __pyx_t_8); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 98, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_2);
+      __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+      __pyx_t_3 = __pyx_t_2;
+      __pyx_t_2 = 0;
     } else {
       __Pyx_INCREF(__pyx_mstate_global->__pyx_kp_u__4);
-      __pyx_t_2 = __pyx_mstate_global->__pyx_kp_u__4;
+      __pyx_t_3 = __pyx_mstate_global->__pyx_kp_u__4;
     }
 
-    __Pyx_XDECREF_SET(__pyx_v_indicator, __pyx_t_2);
-    __pyx_t_2 = 0;
+    __Pyx_XDECREF_SET(__pyx_v_indicator, __pyx_t_3);
+    __pyx_t_3 = 0;
 
-    /* "cobolparser/_preprocess_fast.pyx":74
+    /* "cobolparser/_preprocess_fast.pyx":99
  * 
  *         indicator  = line[_IND_IDX] if len(line) > _IND_IDX else " "
  *         text_slice = line[_TEXT_START : _TEXT_END]             # <<<<<<<<<<<<<<
  * 
  *         # Indicator characters mirror _normalize.py's COMMENT_INDICATORS /
 */
-    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_TEXT_START); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 74, __pyx_L1_error)
+    __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_TEXT_START); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 99, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_3);
+    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 99, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_2);
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 74, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_7 = __Pyx_PyObject_GetSlice(__pyx_v_line, 0, 0, &__pyx_t_2, &__pyx_t_1, NULL, 0, 0, 0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 74, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_7);
+    __pyx_t_8 = __Pyx_PyObject_GetSlice(__pyx_v_line, 0, 0, &__pyx_t_3, &__pyx_t_2, NULL, 0, 0, 0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 99, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_8);
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_XDECREF_SET(__pyx_v_text_slice, __pyx_t_7);
-    __pyx_t_7 = 0;
+    __Pyx_XDECREF_SET(__pyx_v_text_slice, __pyx_t_8);
+    __pyx_t_8 = 0;
 
-    /* "cobolparser/_preprocess_fast.pyx":80
+    /* "cobolparser/_preprocess_fast.pyx":105
  *         # for C-level char comparisons, like the rest of this mirror) --
  *         # extend those sets and this line together.
  *         is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")             # <<<<<<<<<<<<<<
  *         is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")
  *         if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:
 */
-    __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_debug_lines_as_comments); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 80, __pyx_L1_error)
-    if (__pyx_t_13) {
+    __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_debug_lines_as_comments); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 105, __pyx_L1_error)
+    if (__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L9_bool_binop_done;
+      goto __pyx_L15_bool_binop_done;
     }
-    __pyx_t_13 = (__Pyx_PyObject_Equals_obj_ch68(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_D, Py_EQ)); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 80, __pyx_L1_error)
-    if (!__pyx_t_13) {
+    __pyx_t_12 = (__Pyx_PyObject_Equals_obj_ch68(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_D, Py_EQ)); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 105, __pyx_L1_error)
+    if (!__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L9_bool_binop_done;
+      goto __pyx_L15_bool_binop_done;
     }
-    __pyx_t_13 = (__Pyx_PyObject_Equals_obj_ch100(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_d, Py_EQ)); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 80, __pyx_L1_error)
+    __pyx_t_12 = (__Pyx_PyObject_Equals_obj_ch100(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_d, Py_EQ)); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 105, __pyx_L1_error)
 
-    __pyx_t_11 = __pyx_t_13;
+    __pyx_t_1 = __pyx_t_12;
 
-    __pyx_L9_bool_binop_done:;
-    __pyx_v_is_debug_comment = __pyx_t_11;
+    __pyx_L15_bool_binop_done:;
+    __pyx_v_is_debug_comment = __pyx_t_1;
 
-    /* "cobolparser/_preprocess_fast.pyx":81
+    /* "cobolparser/_preprocess_fast.pyx":106
  *         # extend those sets and this line together.
  *         is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")
  *         is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")             # <<<<<<<<<<<<<<
  *         if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:
  *             # Comment line (incl. page eject, debug lines, version-tag
 */
-    __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_version_tag_lines_as_comments); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 81, __pyx_L1_error)
-    if (__pyx_t_13) {
+    __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_version_tag_lines_as_comments); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 106, __pyx_L1_error)
+    if (__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L12_bool_binop_done;
+      goto __pyx_L18_bool_binop_done;
     }
-    __pyx_t_13 = (__Pyx_PyObject_Equals_obj_ch86(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_V, Py_EQ)); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 81, __pyx_L1_error)
-    if (!__pyx_t_13) {
+    __pyx_t_12 = (__Pyx_PyObject_Equals_obj_ch86(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_V, Py_EQ)); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 106, __pyx_L1_error)
+    if (!__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L12_bool_binop_done;
+      goto __pyx_L18_bool_binop_done;
     }
-    __pyx_t_13 = (__Pyx_PyObject_Equals_obj_ch118(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_v, Py_EQ)); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 81, __pyx_L1_error)
+    __pyx_t_12 = (__Pyx_PyObject_Equals_obj_ch118(__pyx_v_indicator, __pyx_mstate_global->__pyx_n_u_v, Py_EQ)); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 106, __pyx_L1_error)
 
-    __pyx_t_11 = __pyx_t_13;
+    __pyx_t_1 = __pyx_t_12;
 
-    __pyx_L12_bool_binop_done:;
-    __pyx_v_is_version_tag_comment = __pyx_t_11;
+    __pyx_L18_bool_binop_done:;
+    __pyx_v_is_version_tag_comment = __pyx_t_1;
 
-    /* "cobolparser/_preprocess_fast.pyx":82
+    /* "cobolparser/_preprocess_fast.pyx":107
  *         is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")
  *         is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")
  *         if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:             # <<<<<<<<<<<<<<
  *             # Comment line (incl. page eject, debug lines, version-tag
- *             # lines): flush buffer, discard comment text, but still emit an
+ *             # lines): discard comment text, but still emit an empty
 */
-    __pyx_t_13 = (__Pyx_PyObject_Equals_obj_ch42(__pyx_v_indicator, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 82, __pyx_L1_error)
-    if (!__pyx_t_13) {
+    __pyx_t_12 = (__Pyx_PyObject_Equals_obj_ch42(__pyx_v_indicator, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 107, __pyx_L1_error)
+    if (!__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L16_bool_binop_done;
+      goto __pyx_L22_bool_binop_done;
     }
-    __pyx_t_13 = (__Pyx_PyObject_Equals_obj_ch47(__pyx_v_indicator, __pyx_mstate_global->__pyx_kp_u__6, Py_EQ)); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 82, __pyx_L1_error)
-    if (!__pyx_t_13) {
+    __pyx_t_12 = (__Pyx_PyObject_Equals_obj_ch47(__pyx_v_indicator, __pyx_mstate_global->__pyx_kp_u__6, Py_EQ)); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 107, __pyx_L1_error)
+    if (!__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L16_bool_binop_done;
+      goto __pyx_L22_bool_binop_done;
     }
     if (!__pyx_v_is_debug_comment) {
     } else {
 
-      __pyx_t_11 = __pyx_v_is_debug_comment;
-      goto __pyx_L16_bool_binop_done;
+      __pyx_t_1 = __pyx_v_is_debug_comment;
+      goto __pyx_L22_bool_binop_done;
     }
 
-    __pyx_t_11 = __pyx_v_is_version_tag_comment;
-    __pyx_L16_bool_binop_done:;
-    if (__pyx_t_11) {
+    __pyx_t_1 = __pyx_v_is_version_tag_comment;
+    __pyx_L22_bool_binop_done:;
+    if (__pyx_t_1) {
 
 
-      /* "cobolparser/_preprocess_fast.pyx":86
- *             # lines): flush buffer, discard comment text, but still emit an
- *             # empty placeholder to preserve line numbering.
- *             if has_line:             # <<<<<<<<<<<<<<
- *                 result.append("".join(parts))
- *             result.append("")
+      /* "cobolparser/_preprocess_fast.pyx":113
+ *             # an open continued literal does not sever it -- the placeholder
+ *             # is deferred behind the logical line instead.
+ *             if pending_literal and merge_continued_literals and has_line:             # <<<<<<<<<<<<<<
+ *                 deferred += 1
+ *                 literal_suspended = True
 */
-      if (__pyx_v_has_line) {
+      if (__pyx_v_pending_literal) {
+      } else {
 
-        /* "cobolparser/_preprocess_fast.pyx":87
- *             # empty placeholder to preserve line numbering.
+        __pyx_t_1 = __pyx_v_pending_literal;
+        goto __pyx_L27_bool_binop_done;
+      }
+      __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 113, __pyx_L1_error)
+      if (__pyx_t_12) {
+
+      } else {
+
+        __pyx_t_1 = __pyx_t_12;
+
+        goto __pyx_L27_bool_binop_done;
+      }
+
+      __pyx_t_1 = __pyx_v_has_line;
+      __pyx_L27_bool_binop_done:;
+      if (__pyx_t_1) {
+
+
+        /* "cobolparser/_preprocess_fast.pyx":114
+ *             # is deferred behind the logical line instead.
+ *             if pending_literal and merge_continued_literals and has_line:
+ *                 deferred += 1             # <<<<<<<<<<<<<<
+ *                 literal_suspended = True
+ *                 continue
+*/
+        __pyx_v_deferred = (__pyx_v_deferred + 1);
+
+        /* "cobolparser/_preprocess_fast.pyx":115
+ *             if pending_literal and merge_continued_literals and has_line:
+ *                 deferred += 1
+ *                 literal_suspended = True             # <<<<<<<<<<<<<<
+ *                 continue
  *             if has_line:
- *                 result.append("".join(parts))             # <<<<<<<<<<<<<<
- *             result.append("")
- *             parts         = []
 */
-        __pyx_t_7 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 87, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_7); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 87, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+        __pyx_v_literal_suspended = 1;
 
-
-        /* "cobolparser/_preprocess_fast.pyx":86
- *             # lines): flush buffer, discard comment text, but still emit an
- *             # empty placeholder to preserve line numbering.
- *             if has_line:             # <<<<<<<<<<<<<<
+        /* "cobolparser/_preprocess_fast.pyx":116
+ *                 deferred += 1
+ *                 literal_suspended = True
+ *                 continue             # <<<<<<<<<<<<<<
+ *             if has_line:
  *                 result.append("".join(parts))
- *             result.append("")
+*/
+        goto __pyx_L4_continue;
+
+        /* "cobolparser/_preprocess_fast.pyx":113
+ *             # an open continued literal does not sever it -- the placeholder
+ *             # is deferred behind the logical line instead.
+ *             if pending_literal and merge_continued_literals and has_line:             # <<<<<<<<<<<<<<
+ *                 deferred += 1
+ *                 literal_suspended = True
 */
       }
 
-      /* "cobolparser/_preprocess_fast.pyx":88
+      /* "cobolparser/_preprocess_fast.pyx":117
+ *                 literal_suspended = True
+ *                 continue
+ *             if has_line:             # <<<<<<<<<<<<<<
+ *                 result.append("".join(parts))
+ *             if deferred:
+*/
+      if (__pyx_v_has_line) {
+
+        /* "cobolparser/_preprocess_fast.pyx":118
+ *                 continue
+ *             if has_line:
+ *                 result.append("".join(parts))             # <<<<<<<<<<<<<<
+ *             if deferred:
+ *                 result.extend([""] * deferred)
+*/
+        __pyx_t_8 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 118, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_8);
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_8); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 118, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+
+
+        /* "cobolparser/_preprocess_fast.pyx":117
+ *                 literal_suspended = True
+ *                 continue
+ *             if has_line:             # <<<<<<<<<<<<<<
+ *                 result.append("".join(parts))
+ *             if deferred:
+*/
+      }
+
+      /* "cobolparser/_preprocess_fast.pyx":119
  *             if has_line:
  *                 result.append("".join(parts))
+ *             if deferred:             # <<<<<<<<<<<<<<
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
+*/
+      __pyx_t_1 = (__pyx_v_deferred != 0);
+
+      if (__pyx_t_1) {
+
+
+        /* "cobolparser/_preprocess_fast.pyx":120
+ *                 result.append("".join(parts))
+ *             if deferred:
+ *                 result.extend([""] * deferred)             # <<<<<<<<<<<<<<
+ *                 deferred = 0
+ *             result.append("")
+*/
+        __pyx_t_8 = PyList_New(1 * ((__pyx_v_deferred<0) ? 0:__pyx_v_deferred)); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 120, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_8);
+        { Py_ssize_t __pyx_temp;
+          for (__pyx_temp=0; __pyx_temp < __pyx_v_deferred; __pyx_temp++) {
+            __Pyx_INCREF(__pyx_mstate_global->__pyx_kp_u__2);
+            __Pyx_GIVEREF(__pyx_mstate_global->__pyx_kp_u__2);
+            if (__Pyx_PyList_SET_ITEM(__pyx_t_8, __pyx_temp, __pyx_mstate_global->__pyx_kp_u__2) != (0)) __PYX_ERR(0, 120, __pyx_L1_error);
+          }
+        }
+        __pyx_t_13 = __Pyx_PyList_Extend(__pyx_v_result, __pyx_t_8); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 120, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+
+
+        /* "cobolparser/_preprocess_fast.pyx":121
+ *             if deferred:
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0             # <<<<<<<<<<<<<<
+ *             result.append("")
+ *             parts         = []
+*/
+        __pyx_v_deferred = 0;
+
+        /* "cobolparser/_preprocess_fast.pyx":119
+ *             if has_line:
+ *                 result.append("".join(parts))
+ *             if deferred:             # <<<<<<<<<<<<<<
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
+*/
+      }
+
+      /* "cobolparser/_preprocess_fast.pyx":122
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
  *             result.append("")             # <<<<<<<<<<<<<<
  *             parts         = []
  *             has_line      = False
 */
-      __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_result, __pyx_mstate_global->__pyx_kp_u__2); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 88, __pyx_L1_error)
+      __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_result, __pyx_mstate_global->__pyx_kp_u__2); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 122, __pyx_L1_error)
 
 
-      /* "cobolparser/_preprocess_fast.pyx":89
- *                 result.append("".join(parts))
+      /* "cobolparser/_preprocess_fast.pyx":123
+ *                 deferred = 0
  *             result.append("")
  *             parts         = []             # <<<<<<<<<<<<<<
  *             has_line      = False
- *             quote_open    = False
+ *             literal_suspended = False
 */
-      __pyx_t_7 = PyList_New(0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 89, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
-      __Pyx_DECREF_SET(__pyx_v_parts, ((PyObject*)__pyx_t_7));
-      __pyx_t_7 = 0;
+      __pyx_t_8 = PyList_New(0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 123, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_8);
+      __Pyx_DECREF_SET(__pyx_v_parts, ((PyObject*)__pyx_t_8));
+      __pyx_t_8 = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":90
+      /* "cobolparser/_preprocess_fast.pyx":124
  *             result.append("")
  *             parts         = []
  *             has_line      = False             # <<<<<<<<<<<<<<
+ *             literal_suspended = False
  *             quote_open    = False
- *             quote_ch      = None
 */
       __pyx_v_has_line = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":91
+      /* "cobolparser/_preprocess_fast.pyx":125
  *             parts         = []
  *             has_line      = False
+ *             literal_suspended = False             # <<<<<<<<<<<<<<
+ *             quote_open    = False
+ *             quote_ch      = None
+*/
+      __pyx_v_literal_suspended = 0;
+
+      /* "cobolparser/_preprocess_fast.pyx":126
+ *             has_line      = False
+ *             literal_suspended = False
  *             quote_open    = False             # <<<<<<<<<<<<<<
  *             quote_ch      = None
  *             pending_literal = False
 */
       __pyx_v_quote_open = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":92
- *             has_line      = False
+      /* "cobolparser/_preprocess_fast.pyx":127
+ *             literal_suspended = False
  *             quote_open    = False
  *             quote_ch      = None             # <<<<<<<<<<<<<<
  *             pending_literal = False
@@ -3746,7 +4070,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
       __Pyx_INCREF(Py_None);
       __Pyx_DECREF_SET(__pyx_v_quote_ch, ((PyObject*)Py_None));
 
-      /* "cobolparser/_preprocess_fast.pyx":93
+      /* "cobolparser/_preprocess_fast.pyx":128
  *             quote_open    = False
  *             quote_ch      = None
  *             pending_literal = False             # <<<<<<<<<<<<<<
@@ -3755,333 +4079,333 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
       __pyx_v_pending_literal = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":94
+      /* "cobolparser/_preprocess_fast.pyx":129
  *             quote_ch      = None
  *             pending_literal = False
  *             continue             # <<<<<<<<<<<<<<
  * 
  *         if warnings is not None and len(line) > _TEXT_END:
 */
-      goto __pyx_L3_continue;
+      goto __pyx_L4_continue;
 
-      /* "cobolparser/_preprocess_fast.pyx":82
+      /* "cobolparser/_preprocess_fast.pyx":107
  *         is_debug_comment = debug_lines_as_comments and (indicator == "D" or indicator == "d")
  *         is_version_tag_comment = version_tag_lines_as_comments and (indicator == "V" or indicator == "v")
  *         if indicator == "*" or indicator == "/" or is_debug_comment or is_version_tag_comment:             # <<<<<<<<<<<<<<
  *             # Comment line (incl. page eject, debug lines, version-tag
- *             # lines): flush buffer, discard comment text, but still emit an
+ *             # lines): discard comment text, but still emit an empty
 */
     }
 
-    /* "cobolparser/_preprocess_fast.pyx":96
+    /* "cobolparser/_preprocess_fast.pyx":131
  *             continue
  * 
  *         if warnings is not None and len(line) > _TEXT_END:             # <<<<<<<<<<<<<<
  *             seq_area = line[:_SEQ_END]
  *             # Mirrors the pure-Python rule: a numeric sequence number in
 */
-    __pyx_t_13 = (__pyx_v_warnings != Py_None);
-    if (__pyx_t_13) {
+    __pyx_t_12 = (__pyx_v_warnings != Py_None);
+    if (__pyx_t_12) {
 
     } else {
 
-      __pyx_t_11 = __pyx_t_13;
+      __pyx_t_1 = __pyx_t_12;
 
-      goto __pyx_L22_bool_binop_done;
+      goto __pyx_L33_bool_binop_done;
     }
-    __pyx_t_10 = PyObject_Length(__pyx_v_line); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 96, __pyx_L1_error)
-    __pyx_t_7 = PyLong_FromSsize_t(__pyx_t_10); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 96, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_7);
+    __pyx_t_11 = PyObject_Length(__pyx_v_line); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 131, __pyx_L1_error)
+    __pyx_t_8 = PyLong_FromSsize_t(__pyx_t_11); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 131, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_8);
 
-    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 96, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_13 = __Pyx_PyObject_CompareBoolGt_int_object(__pyx_t_7, __pyx_t_1, Py_GT); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 96, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 131, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_2);
+    __pyx_t_12 = __Pyx_PyObject_CompareBoolGt_int_object(__pyx_t_8, __pyx_t_2, Py_GT); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 131, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-    __pyx_t_11 = __pyx_t_13;
+    __pyx_t_1 = __pyx_t_12;
 
-    __pyx_L22_bool_binop_done:;
-    if (__pyx_t_11) {
+    __pyx_L33_bool_binop_done:;
+    if (__pyx_t_1) {
 
 
-      /* "cobolparser/_preprocess_fast.pyx":97
+      /* "cobolparser/_preprocess_fast.pyx":132
  * 
  *         if warnings is not None and len(line) > _TEXT_END:
  *             seq_area = line[:_SEQ_END]             # <<<<<<<<<<<<<<
  *             # Mirrors the pure-Python rule: a numeric sequence number in
  *             # columns 1-6 is strong evidence this line deliberately uses
 */
-      __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_mstate_global->__pyx_n_u_SEQ_END); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 97, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_1);
-      __pyx_t_7 = __Pyx_PyObject_GetSlice(__pyx_v_line, 0, 0, NULL, &__pyx_t_1, NULL, 0, 0, 0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 97, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __Pyx_XDECREF_SET(__pyx_v_seq_area, __pyx_t_7);
-      __pyx_t_7 = 0;
+      __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_SEQ_END); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 132, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_2);
+      __pyx_t_8 = __Pyx_PyObject_GetSlice(__pyx_v_line, 0, 0, NULL, &__pyx_t_2, NULL, 0, 0, 0); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 132, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_8);
+      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+      __Pyx_XDECREF_SET(__pyx_v_seq_area, __pyx_t_8);
+      __pyx_t_8 = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":105
+      /* "cobolparser/_preprocess_fast.pyx":140
  *             # flooding sequence-numbered decks with false positives.
  *             has_sequence_number = (
  *                 seq_area.strip() != "" and seq_area.strip().isdigit()             # <<<<<<<<<<<<<<
  *             )
  *             if not has_sequence_number:
 */
-      __pyx_t_2 = __pyx_v_seq_area;
-      __Pyx_INCREF(__pyx_t_2);
-      __pyx_t_3 = 0;
+      __pyx_t_3 = __pyx_v_seq_area;
+      __Pyx_INCREF(__pyx_t_3);
+      __pyx_t_4 = 0;
       {
-        PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
-        __pyx_t_1 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_strip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-        __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 105, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
+        PyObject *__pyx_callargs[2] = {__pyx_t_3, NULL};
+        __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_strip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+        __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 140, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_2);
       }
-      __pyx_t_2 = __Pyx_PyObject_CompareNe_object_str(__pyx_t_1, __pyx_mstate_global->__pyx_kp_u__2, Py_NE); __Pyx_XGOTREF(__pyx_t_2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 105, __pyx_L1_error)
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 105, __pyx_L1_error)
-      if (__pyx_t_11) {
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+      __pyx_t_3 = __Pyx_PyObject_CompareNe_object_str(__pyx_t_2, __pyx_mstate_global->__pyx_kp_u__2, Py_NE); __Pyx_XGOTREF(__pyx_t_3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 140, __pyx_L1_error)
+      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+      __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_t_3); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 140, __pyx_L1_error)
+      if (__pyx_t_1) {
+        __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
       } else {
-        __Pyx_INCREF(__pyx_t_2);
-        __pyx_t_7 = __pyx_t_2;
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-        goto __pyx_L24_bool_binop_done;
+        __Pyx_INCREF(__pyx_t_3);
+        __pyx_t_8 = __pyx_t_3;
+        __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+        goto __pyx_L35_bool_binop_done;
       }
       __pyx_t_14 = __pyx_v_seq_area;
       __Pyx_INCREF(__pyx_t_14);
-      __pyx_t_3 = 0;
+      __pyx_t_4 = 0;
       {
         PyObject *__pyx_callargs[2] = {__pyx_t_14, NULL};
-        __pyx_t_8 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_strip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+        __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_strip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_14); __pyx_t_14 = 0;
-        if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 105, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_8);
+        if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 140, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_9);
       }
-      __pyx_t_1 = __pyx_t_8;
-      __Pyx_INCREF(__pyx_t_1);
-      __pyx_t_3 = 0;
-      {
-        PyObject *__pyx_callargs[2] = {__pyx_t_1, NULL};
-        __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isdigit, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-        __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 105, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
-      }
+      __pyx_t_2 = __pyx_t_9;
       __Pyx_INCREF(__pyx_t_2);
-      __pyx_t_7 = __pyx_t_2;
-      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      __pyx_L24_bool_binop_done:;
-      __Pyx_XDECREF_SET(__pyx_v_has_sequence_number, __pyx_t_7);
-      __pyx_t_7 = 0;
+      __pyx_t_4 = 0;
+      {
+        PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
+        __pyx_t_3 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isdigit, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+        __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 140, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_3);
+      }
+      __Pyx_INCREF(__pyx_t_3);
+      __pyx_t_8 = __pyx_t_3;
+      __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+      __pyx_L35_bool_binop_done:;
+      __Pyx_XDECREF_SET(__pyx_v_has_sequence_number, __pyx_t_8);
+      __pyx_t_8 = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":107
+      /* "cobolparser/_preprocess_fast.pyx":142
  *                 seq_area.strip() != "" and seq_area.strip().isdigit()
  *             )
  *             if not has_sequence_number:             # <<<<<<<<<<<<<<
  *                 before, after = line[_TEXT_END - 1], line[_TEXT_END]
  *                 mid_token = not before.isspace() and not after.isspace()
 */
-      __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_v_has_sequence_number); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 107, __pyx_L1_error)
-      __pyx_t_13 = (!__pyx_t_11);
+      __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_has_sequence_number); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 142, __pyx_L1_error)
+      __pyx_t_12 = (!__pyx_t_1);
 
 
-      if (__pyx_t_13) {
+      if (__pyx_t_12) {
 
 
-        /* "cobolparser/_preprocess_fast.pyx":108
+        /* "cobolparser/_preprocess_fast.pyx":143
  *             )
  *             if not has_sequence_number:
  *                 before, after = line[_TEXT_END - 1], line[_TEXT_END]             # <<<<<<<<<<<<<<
  *                 mid_token = not before.isspace() and not after.isspace()
  *                 content_len = len(line.rstrip())
 */
-        __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 108, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
-        __pyx_t_2 = __Pyx_PyLong_SubtractObjC(__pyx_t_7, __pyx_mstate_global->__pyx_int_1, 1, 0, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 108, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-        __pyx_t_7 = __Pyx_PyObject_GetItem(__pyx_v_line, __pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 108, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-        __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 108, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
-        __pyx_t_8 = __Pyx_PyObject_GetItem(__pyx_v_line, __pyx_t_2); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 108, __pyx_L1_error)
+        __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 143, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_8);
-        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-        __Pyx_XDECREF_SET(__pyx_v_before, __pyx_t_7);
-        __pyx_t_7 = 0;
-        __Pyx_XDECREF_SET(__pyx_v_after, __pyx_t_8);
+        __pyx_t_3 = __Pyx_PyLong_SubtractObjC(__pyx_t_8, __pyx_mstate_global->__pyx_int_1, 1, 0, 0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 143, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_3);
+        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+        __pyx_t_8 = __Pyx_PyObject_GetItem(__pyx_v_line, __pyx_t_3); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 143, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_8);
+        __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+        __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 143, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_3);
+        __pyx_t_9 = __Pyx_PyObject_GetItem(__pyx_v_line, __pyx_t_3); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 143, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_9);
+        __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_before, __pyx_t_8);
         __pyx_t_8 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_after, __pyx_t_9);
+        __pyx_t_9 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":109
+        /* "cobolparser/_preprocess_fast.pyx":144
  *             if not has_sequence_number:
  *                 before, after = line[_TEXT_END - 1], line[_TEXT_END]
  *                 mid_token = not before.isspace() and not after.isspace()             # <<<<<<<<<<<<<<
  *                 content_len = len(line.rstrip())
  *                 # A real 80-column punch-card line can't exceed 80 columns
 */
-        __pyx_t_7 = __pyx_v_before;
-        __Pyx_INCREF(__pyx_t_7);
-        __pyx_t_3 = 0;
+        __pyx_t_8 = __pyx_v_before;
+        __Pyx_INCREF(__pyx_t_8);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_7, NULL};
-          __pyx_t_8 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isspace, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-          if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 109, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_8);
+          PyObject *__pyx_callargs[2] = {__pyx_t_8, NULL};
+          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isspace, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
+          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 144, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
         }
-        __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_t_8); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 109, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __pyx_t_15 = (!__pyx_t_11);
+        __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_t_9); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 144, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __pyx_t_15 = (!__pyx_t_1);
 
 
         if (__pyx_t_15) {
 
         } else {
 
-          __pyx_t_13 = __pyx_t_15;
+          __pyx_t_12 = __pyx_t_15;
 
-          goto __pyx_L27_bool_binop_done;
+          goto __pyx_L38_bool_binop_done;
         }
-        __pyx_t_7 = __pyx_v_after;
-        __Pyx_INCREF(__pyx_t_7);
-        __pyx_t_3 = 0;
+        __pyx_t_8 = __pyx_v_after;
+        __Pyx_INCREF(__pyx_t_8);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_7, NULL};
-          __pyx_t_8 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isspace, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-          if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 109, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_8);
+          PyObject *__pyx_callargs[2] = {__pyx_t_8, NULL};
+          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isspace, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
+          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 144, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
         }
-        __pyx_t_15 = __Pyx_PyObject_IsTrue(__pyx_t_8); if (unlikely((__pyx_t_15 < 0))) __PYX_ERR(0, 109, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __pyx_t_11 = (!__pyx_t_15);
+        __pyx_t_15 = __Pyx_PyObject_IsTrue(__pyx_t_9); if (unlikely((__pyx_t_15 < 0))) __PYX_ERR(0, 144, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __pyx_t_1 = (!__pyx_t_15);
 
 
 
-        __pyx_t_13 = __pyx_t_11;
+        __pyx_t_12 = __pyx_t_1;
 
-        __pyx_L27_bool_binop_done:;
-        __pyx_v_mid_token = __pyx_t_13;
+        __pyx_L38_bool_binop_done:;
+        __pyx_v_mid_token = __pyx_t_12;
 
-        /* "cobolparser/_preprocess_fast.pyx":110
+        /* "cobolparser/_preprocess_fast.pyx":145
  *                 before, after = line[_TEXT_END - 1], line[_TEXT_END]
  *                 mid_token = not before.isspace() and not after.isspace()
  *                 content_len = len(line.rstrip())             # <<<<<<<<<<<<<<
  *                 # A real 80-column punch-card line can't exceed 80 columns
  *                 # by construction, so content surviving past column 80 is
 */
-        __pyx_t_7 = __pyx_v_line;
-        __Pyx_INCREF(__pyx_t_7);
-        __pyx_t_3 = 0;
+        __pyx_t_8 = __pyx_v_line;
+        __Pyx_INCREF(__pyx_t_8);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_7, NULL};
-          __pyx_t_8 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-          if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 110, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_8);
+          PyObject *__pyx_callargs[2] = {__pyx_t_8, NULL};
+          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
+          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 145, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
         }
-        __pyx_t_10 = PyObject_Length(__pyx_t_8); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 110, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __pyx_v_content_len = __pyx_t_10;
+        __pyx_t_11 = PyObject_Length(__pyx_t_9); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 145, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __pyx_v_content_len = __pyx_t_11;
 
-        /* "cobolparser/_preprocess_fast.pyx":115
+        /* "cobolparser/_preprocess_fast.pyx":150
  *                 # overflow even when the split lands on a space
  *                 # (mid_token False) rather than mid-token.
  *                 exceeds_traditional_width = content_len > _ID_END             # <<<<<<<<<<<<<<
  *                 dropped = line[_TEXT_END:].rstrip()
  *                 # Second, independent gate (mirrors the pure-Python rule): a
 */
-        __pyx_t_8 = PyLong_FromSsize_t(__pyx_v_content_len); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 115, __pyx_L1_error)
+        __pyx_t_9 = PyLong_FromSsize_t(__pyx_v_content_len); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 150, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_9);
+        __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_ID_END); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 150, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_8);
-        __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_ID_END); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 115, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
-        __pyx_t_2 = __Pyx_PyObject_CompareGt_int_object(__pyx_t_8, __pyx_t_7, Py_GT); __Pyx_XGOTREF(__pyx_t_2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 115, __pyx_L1_error)
+        __pyx_t_3 = __Pyx_PyObject_CompareGt_int_object(__pyx_t_9, __pyx_t_8, Py_GT); __Pyx_XGOTREF(__pyx_t_3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 150, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
         __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-        __Pyx_XDECREF_SET(__pyx_v_exceeds_traditional_width, __pyx_t_2);
-        __pyx_t_2 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_exceeds_traditional_width, __pyx_t_3);
+        __pyx_t_3 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":116
+        /* "cobolparser/_preprocess_fast.pyx":151
  *                 # (mid_token False) rather than mid-token.
  *                 exceeds_traditional_width = content_len > _ID_END
  *                 dropped = line[_TEXT_END:].rstrip()             # <<<<<<<<<<<<<<
  *                 # Second, independent gate (mirrors the pure-Python rule): a
  *                 # purely-numeric dropped tail that fills the traditional
 */
-        __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 116, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_8);
-        __pyx_t_1 = __Pyx_PyObject_GetSlice(__pyx_v_line, 0, 0, &__pyx_t_8, NULL, NULL, 0, 0, 0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 116, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
-        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __pyx_t_7 = __pyx_t_1;
-        __Pyx_INCREF(__pyx_t_7);
-        __pyx_t_3 = 0;
+        __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 151, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_9);
+        __pyx_t_2 = __Pyx_PyObject_GetSlice(__pyx_v_line, 0, 0, &__pyx_t_9, NULL, NULL, 0, 0, 0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 151, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_2);
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __pyx_t_8 = __pyx_t_2;
+        __Pyx_INCREF(__pyx_t_8);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_7, NULL};
-          __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-          __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 116, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
+          PyObject *__pyx_callargs[2] = {__pyx_t_8, NULL};
+          __pyx_t_3 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+          if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 151, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_3);
         }
-        __Pyx_XDECREF_SET(__pyx_v_dropped, __pyx_t_2);
-        __pyx_t_2 = 0;
+        __Pyx_XDECREF_SET(__pyx_v_dropped, __pyx_t_3);
+        __pyx_t_3 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":128
+        /* "cobolparser/_preprocess_fast.pyx":163
  *                 # IX2094.2 test-case id) both still warn.
  *                 is_numeric_id_stamp = (
  *                     content_len == _ID_END and dropped.isdigit()             # <<<<<<<<<<<<<<
  *                 )
  *                 # Mirrors the pure-Python rule: a dropped tail that is only
 */
-        __pyx_t_1 = PyLong_FromSsize_t(__pyx_v_content_len); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 128, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
-        __Pyx_GetModuleGlobalName(__pyx_t_7, __pyx_mstate_global->__pyx_n_u_ID_END); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 128, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_7);
-        __pyx_t_8 = __Pyx_PyObject_CompareEq_int_object(__pyx_t_1, __pyx_t_7, Py_EQ); __Pyx_XGOTREF(__pyx_t_8); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 128, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-        __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-        __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_t_8); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 128, __pyx_L1_error)
-        if (__pyx_t_13) {
-          __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        } else {
-          __Pyx_INCREF(__pyx_t_8);
-          __pyx_t_2 = __pyx_t_8;
-          __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-          goto __pyx_L29_bool_binop_done;
-        }
-        __pyx_t_7 = __pyx_v_dropped;
-        __Pyx_INCREF(__pyx_t_7);
-        __pyx_t_3 = 0;
-        {
-          PyObject *__pyx_callargs[2] = {__pyx_t_7, NULL};
-          __pyx_t_8 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isdigit, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
-          if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 128, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_8);
-        }
-        __Pyx_INCREF(__pyx_t_8);
-        __pyx_t_2 = __pyx_t_8;
+        __pyx_t_2 = PyLong_FromSsize_t(__pyx_v_content_len); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 163, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_2);
+        __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_ID_END); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 163, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_8);
+        __pyx_t_9 = __Pyx_PyObject_CompareEq_int_object(__pyx_t_2, __pyx_t_8, Py_EQ); __Pyx_XGOTREF(__pyx_t_9); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 163, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
         __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-        __pyx_L29_bool_binop_done:;
-        __Pyx_XDECREF_SET(__pyx_v_is_numeric_id_stamp, __pyx_t_2);
-        __pyx_t_2 = 0;
+        __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_t_9); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 163, __pyx_L1_error)
+        if (__pyx_t_12) {
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        } else {
+          __Pyx_INCREF(__pyx_t_9);
+          __pyx_t_3 = __pyx_t_9;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          goto __pyx_L40_bool_binop_done;
+        }
+        __pyx_t_8 = __pyx_v_dropped;
+        __Pyx_INCREF(__pyx_t_8);
+        __pyx_t_4 = 0;
+        {
+          PyObject *__pyx_callargs[2] = {__pyx_t_8, NULL};
+          __pyx_t_9 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_isdigit, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
+          if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 163, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
+        }
+        __Pyx_INCREF(__pyx_t_9);
+        __pyx_t_3 = __pyx_t_9;
+        __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+        __pyx_L40_bool_binop_done:;
+        __Pyx_XDECREF_SET(__pyx_v_is_numeric_id_stamp, __pyx_t_3);
+        __pyx_t_3 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":134
+        /* "cobolparser/_preprocess_fast.pyx":169
  *                 # VALUE literal whose closing quote lands on column 72)
  *                 # closed cleanly -- nothing was actually split mid-token.
  *                 is_bare_terminal_period = dropped == "."             # <<<<<<<<<<<<<<
  *                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:
  *                     warnings.append(
 */
-        __pyx_t_2 = __Pyx_PyObject_CompareEq_object_str(__pyx_v_dropped, __pyx_mstate_global->__pyx_kp_u__7, Py_EQ); __Pyx_XGOTREF(__pyx_t_2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 134, __pyx_L1_error)
-        __Pyx_XDECREF_SET(__pyx_v_is_bare_terminal_period, __pyx_t_2);
-        __pyx_t_2 = 0;
+        __pyx_t_3 = __Pyx_PyObject_CompareEq_object_str(__pyx_v_dropped, __pyx_mstate_global->__pyx_kp_u__7, Py_EQ); __Pyx_XGOTREF(__pyx_t_3); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 169, __pyx_L1_error)
+        __Pyx_XDECREF_SET(__pyx_v_is_bare_terminal_period, __pyx_t_3);
+        __pyx_t_3 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":135
+        /* "cobolparser/_preprocess_fast.pyx":170
  *                 # closed cleanly -- nothing was actually split mid-token.
  *                 is_bare_terminal_period = dropped == "."
  *                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:             # <<<<<<<<<<<<<<
@@ -4091,214 +4415,214 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
         if (__pyx_v_mid_token) {
         } else {
 
-          __pyx_t_13 = __pyx_v_mid_token;
-          goto __pyx_L32_bool_binop_done;
+          __pyx_t_12 = __pyx_v_mid_token;
+          goto __pyx_L43_bool_binop_done;
         }
-        __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_v_is_numeric_id_stamp); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 135, __pyx_L1_error)
-        __pyx_t_15 = (!__pyx_t_11);
+        __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_is_numeric_id_stamp); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 170, __pyx_L1_error)
+        __pyx_t_15 = (!__pyx_t_1);
 
 
         if (__pyx_t_15) {
 
         } else {
 
-          __pyx_t_13 = __pyx_t_15;
+          __pyx_t_12 = __pyx_t_15;
 
-          goto __pyx_L32_bool_binop_done;
+          goto __pyx_L43_bool_binop_done;
         }
-        __pyx_t_15 = __Pyx_PyObject_IsTrue(__pyx_v_is_bare_terminal_period); if (unlikely((__pyx_t_15 < 0))) __PYX_ERR(0, 135, __pyx_L1_error)
-        __pyx_t_11 = (!__pyx_t_15);
+        __pyx_t_15 = __Pyx_PyObject_IsTrue(__pyx_v_is_bare_terminal_period); if (unlikely((__pyx_t_15 < 0))) __PYX_ERR(0, 170, __pyx_L1_error)
+        __pyx_t_1 = (!__pyx_t_15);
 
 
 
-        __pyx_t_13 = __pyx_t_11;
+        __pyx_t_12 = __pyx_t_1;
 
-        __pyx_L32_bool_binop_done:;
-        if (__pyx_t_13) {
+        __pyx_L43_bool_binop_done:;
+        if (__pyx_t_12) {
 
 
-          /* "cobolparser/_preprocess_fast.pyx":137
+          /* "cobolparser/_preprocess_fast.pyx":172
  *                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "             # <<<<<<<<<<<<<<
  *                         f"was dropped mid-token: {dropped!r}"
  *                     )
 */
-          __pyx_t_2 = __Pyx_PyObject_FormatSimple(__pyx_v_line_no, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 137, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
-          __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 137, __pyx_L1_error)
+          __pyx_t_3 = __Pyx_PyObject_FormatSimple(__pyx_v_line_no, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 172, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_3);
+          __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 172, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
+          __pyx_t_8 = __Pyx_PyObject_FormatSimple(__pyx_t_9, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 172, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_8);
-          __pyx_t_7 = __Pyx_PyObject_FormatSimple(__pyx_t_8, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 137, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
-          __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":138
+          /* "cobolparser/_preprocess_fast.pyx":173
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
  *                         f"was dropped mid-token: {dropped!r}"             # <<<<<<<<<<<<<<
  *                     )
  *                 elif exceeds_traditional_width:
 */
-          __pyx_t_8 = __Pyx_PyObject_FormatSimpleAndDecref(PyObject_Repr(__pyx_v_dropped), __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 138, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_8);
+          __pyx_t_9 = __Pyx_PyObject_FormatSimpleAndDecref(PyObject_Repr(__pyx_v_dropped), __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 173, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
           __pyx_t_16[0] = __pyx_mstate_global->__pyx_kp_u_Line;
-          __pyx_t_16[1] = __pyx_t_2;
+          __pyx_t_16[1] = __pyx_t_3;
           __pyx_t_16[2] = __pyx_mstate_global->__pyx_kp_u_content_beyond_column;
-          __pyx_t_16[3] = __pyx_t_7;
+          __pyx_t_16[3] = __pyx_t_8;
           __pyx_t_16[4] = __pyx_mstate_global->__pyx_kp_u_was_dropped_mid_token;
-          __pyx_t_16[5] = __pyx_t_8;
+          __pyx_t_16[5] = __pyx_t_9;
 
-          /* "cobolparser/_preprocess_fast.pyx":137
+          /* "cobolparser/_preprocess_fast.pyx":172
  *                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "             # <<<<<<<<<<<<<<
  *                         f"was dropped mid-token: {dropped!r}"
  *                     )
 */
-          __pyx_t_10 = 53;
+          __pyx_t_11 = 53;
           #if __Pyx_PyUnicode_Join_CAN_USE_KIND_AND_LENGTH
-          __pyx_t_10 += __Pyx_PyUnicode_GET_LENGTH(__pyx_t_16[1]) + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_16[3]) + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_16[5]);
+          __pyx_t_11 += __Pyx_PyUnicode_GET_LENGTH(__pyx_t_16[1]) + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_16[3]) + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_16[5]);
           #endif
           __pyx_t_17 = 0;
           #if __Pyx_PyUnicode_Join_CAN_USE_KIND_AND_LENGTH
           __pyx_t_17 |= __Pyx_PyUnicode_KIND_04(__pyx_t_16[1]) | __Pyx_PyUnicode_KIND_04(__pyx_t_16[3]) | __Pyx_PyUnicode_KIND_04(__pyx_t_16[5]);
           #endif
-          __pyx_t_1 = __Pyx_PyUnicode_Join(__pyx_t_16, 6, __pyx_t_10, __pyx_t_17);
-          if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 137, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_1);
-          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+          __pyx_t_2 = __Pyx_PyUnicode_Join(__pyx_t_16, 6, __pyx_t_11, __pyx_t_17);
+          if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 172, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_2);
+          __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
           __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":136
+          /* "cobolparser/_preprocess_fast.pyx":171
  *                 is_bare_terminal_period = dropped == "."
  *                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:
  *                     warnings.append(             # <<<<<<<<<<<<<<
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
  *                         f"was dropped mid-token: {dropped!r}"
 */
-          __pyx_t_12 = __Pyx_PyObject_Append(__pyx_v_warnings, __pyx_t_1); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 136, __pyx_L1_error)
-          __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+          __pyx_t_13 = __Pyx_PyObject_Append(__pyx_v_warnings, __pyx_t_2); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 171, __pyx_L1_error)
+          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
 
-          /* "cobolparser/_preprocess_fast.pyx":135
+          /* "cobolparser/_preprocess_fast.pyx":170
  *                 # closed cleanly -- nothing was actually split mid-token.
  *                 is_bare_terminal_period = dropped == "."
  *                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:             # <<<<<<<<<<<<<<
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
 */
-          goto __pyx_L31;
+          goto __pyx_L42;
         }
 
-        /* "cobolparser/_preprocess_fast.pyx":140
+        /* "cobolparser/_preprocess_fast.pyx":175
  *                         f"was dropped mid-token: {dropped!r}"
  *                     )
  *                 elif exceeds_traditional_width:             # <<<<<<<<<<<<<<
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
 */
-        __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_exceeds_traditional_width); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 140, __pyx_L1_error)
-        if (__pyx_t_13) {
+        __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_exceeds_traditional_width); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 175, __pyx_L1_error)
+        if (__pyx_t_12) {
 
 
-          /* "cobolparser/_preprocess_fast.pyx":142
+          /* "cobolparser/_preprocess_fast.pyx":177
  *                 elif exceeds_traditional_width:
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "             # <<<<<<<<<<<<<<
  *                         f"was dropped -- line is {content_len} columns wide, "
  *                         f"past the traditional {_ID_END}-column "
 */
-          __pyx_t_1 = __Pyx_PyObject_FormatSimple(__pyx_v_line_no, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 142, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_1);
-          __Pyx_GetModuleGlobalName(__pyx_t_8, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 142, __pyx_L1_error)
+          __pyx_t_2 = __Pyx_PyObject_FormatSimple(__pyx_v_line_no, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 177, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_2);
+          __Pyx_GetModuleGlobalName(__pyx_t_9, __pyx_mstate_global->__pyx_n_u_TEXT_END); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 177, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
+          __pyx_t_8 = __Pyx_PyObject_FormatSimple(__pyx_t_9, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 177, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_8);
-          __pyx_t_7 = __Pyx_PyObject_FormatSimple(__pyx_t_8, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 142, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_7);
-          __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":143
+          /* "cobolparser/_preprocess_fast.pyx":178
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
  *                         f"was dropped -- line is {content_len} columns wide, "             # <<<<<<<<<<<<<<
  *                         f"past the traditional {_ID_END}-column "
  *                         f"identification-area width: {dropped!r}"
 */
-          __pyx_t_8 = __Pyx_PyUnicode_From_Py_ssize_t(__pyx_v_content_len, 0, ' ', 'd'); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 143, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_8);
+          __pyx_t_9 = __Pyx_PyUnicode_From_Py_ssize_t(__pyx_v_content_len, 0, ' ', 'd'); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 178, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_9);
 
-          /* "cobolparser/_preprocess_fast.pyx":144
+          /* "cobolparser/_preprocess_fast.pyx":179
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
  *                         f"was dropped -- line is {content_len} columns wide, "
  *                         f"past the traditional {_ID_END}-column "             # <<<<<<<<<<<<<<
  *                         f"identification-area width: {dropped!r}"
  *                     )
 */
-          __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_ID_END); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 144, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
-          __pyx_t_14 = __Pyx_PyObject_FormatSimple(__pyx_t_2, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 144, __pyx_L1_error)
+          __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_ID_END); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 179, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_3);
+          __pyx_t_14 = __Pyx_PyObject_FormatSimple(__pyx_t_3, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 179, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_14);
-          __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+          __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":145
+          /* "cobolparser/_preprocess_fast.pyx":180
  *                         f"was dropped -- line is {content_len} columns wide, "
  *                         f"past the traditional {_ID_END}-column "
  *                         f"identification-area width: {dropped!r}"             # <<<<<<<<<<<<<<
  *                     )
  * 
 */
-          __pyx_t_2 = __Pyx_PyObject_FormatSimpleAndDecref(PyObject_Repr(__pyx_v_dropped), __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 145, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_2);
+          __pyx_t_3 = __Pyx_PyObject_FormatSimpleAndDecref(PyObject_Repr(__pyx_v_dropped), __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 180, __pyx_L1_error)
+          __Pyx_GOTREF(__pyx_t_3);
           __pyx_t_18[0] = __pyx_mstate_global->__pyx_kp_u_Line;
-          __pyx_t_18[1] = __pyx_t_1;
+          __pyx_t_18[1] = __pyx_t_2;
           __pyx_t_18[2] = __pyx_mstate_global->__pyx_kp_u_content_beyond_column;
-          __pyx_t_18[3] = __pyx_t_7;
+          __pyx_t_18[3] = __pyx_t_8;
           __pyx_t_18[4] = __pyx_mstate_global->__pyx_kp_u_was_dropped_line_is;
-          __pyx_t_18[5] = __pyx_t_8;
+          __pyx_t_18[5] = __pyx_t_9;
           __pyx_t_18[6] = __pyx_mstate_global->__pyx_kp_u_columns_wide_past_the_tradition;
           __pyx_t_18[7] = __pyx_t_14;
           __pyx_t_18[8] = __pyx_mstate_global->__pyx_kp_u_column_identification_area_widt;
-          __pyx_t_18[9] = __pyx_t_2;
+          __pyx_t_18[9] = __pyx_t_3;
 
-          /* "cobolparser/_preprocess_fast.pyx":142
+          /* "cobolparser/_preprocess_fast.pyx":177
  *                 elif exceeds_traditional_width:
  *                     warnings.append(
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "             # <<<<<<<<<<<<<<
  *                         f"was dropped -- line is {content_len} columns wide, "
  *                         f"past the traditional {_ID_END}-column "
 */
-          __pyx_t_10 = 124;
+          __pyx_t_11 = 124;
           #if __Pyx_PyUnicode_Join_CAN_USE_KIND_AND_LENGTH
           for (Py_ssize_t i=1; i <= 9; i += 2) {
             Py_ssize_t l = __Pyx_PyUnicode_GET_LENGTH(__pyx_t_18[i]);
-            __pyx_t_10 += l;
+            __pyx_t_11 += l;
           }
           #endif
           __pyx_t_17 = 0;
           #if __Pyx_PyUnicode_Join_CAN_USE_KIND_AND_LENGTH
           __pyx_t_17 |= __Pyx_PyUnicode_KIND_04(__pyx_t_18[1]) | __Pyx_PyUnicode_KIND_04(__pyx_t_18[3]) | __Pyx_PyUnicode_KIND_04(__pyx_t_18[7]) | __Pyx_PyUnicode_KIND_04(__pyx_t_18[9]);
           #endif
-          __pyx_t_19 = __Pyx_PyUnicode_Join(__pyx_t_18, 10, __pyx_t_10, __pyx_t_17);
-          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 142, __pyx_L1_error)
+          __pyx_t_19 = __Pyx_PyUnicode_Join(__pyx_t_18, 10, __pyx_t_11, __pyx_t_17);
+          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 177, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
-          __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-          __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-          __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
-          __Pyx_DECREF(__pyx_t_14); __pyx_t_14 = 0;
           __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+          __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+          __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+          __Pyx_DECREF(__pyx_t_14); __pyx_t_14 = 0;
+          __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":141
+          /* "cobolparser/_preprocess_fast.pyx":176
  *                     )
  *                 elif exceeds_traditional_width:
  *                     warnings.append(             # <<<<<<<<<<<<<<
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
  *                         f"was dropped -- line is {content_len} columns wide, "
 */
-          __pyx_t_12 = __Pyx_PyObject_Append(__pyx_v_warnings, __pyx_t_19); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 141, __pyx_L1_error)
+          __pyx_t_13 = __Pyx_PyObject_Append(__pyx_v_warnings, __pyx_t_19); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 176, __pyx_L1_error)
           __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
 
-          /* "cobolparser/_preprocess_fast.pyx":140
+          /* "cobolparser/_preprocess_fast.pyx":175
  *                         f"was dropped mid-token: {dropped!r}"
  *                     )
  *                 elif exceeds_traditional_width:             # <<<<<<<<<<<<<<
@@ -4306,9 +4630,9 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                         f"Line {line_no}: content beyond column {_TEXT_END} "
 */
         }
-        __pyx_L31:;
+        __pyx_L42:;
 
-        /* "cobolparser/_preprocess_fast.pyx":107
+        /* "cobolparser/_preprocess_fast.pyx":142
  *                 seq_area.strip() != "" and seq_area.strip().isdigit()
  *             )
  *             if not has_sequence_number:             # <<<<<<<<<<<<<<
@@ -4317,7 +4641,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
       }
 
-      /* "cobolparser/_preprocess_fast.pyx":96
+      /* "cobolparser/_preprocess_fast.pyx":131
  *             continue
  * 
  *         if warnings is not None and len(line) > _TEXT_END:             # <<<<<<<<<<<<<<
@@ -4326,31 +4650,67 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
     }
 
-    /* "cobolparser/_preprocess_fast.pyx":148
+    /* "cobolparser/_preprocess_fast.pyx":183
  *                     )
  * 
  *         is_cont = indicator == "-"             # <<<<<<<<<<<<<<
  * 
  *         if is_cont:
 */
-    __pyx_t_19 = __Pyx_PyObject_CompareEq_object_str(__pyx_v_indicator, __pyx_mstate_global->__pyx_kp_u__8, Py_EQ); __Pyx_XGOTREF(__pyx_t_19); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 148, __pyx_L1_error)
+    __pyx_t_19 = __Pyx_PyObject_CompareEq_object_str(__pyx_v_indicator, __pyx_mstate_global->__pyx_kp_u__8, Py_EQ); __Pyx_XGOTREF(__pyx_t_19); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 183, __pyx_L1_error)
     __Pyx_XDECREF_SET(__pyx_v_is_cont, __pyx_t_19);
     __pyx_t_19 = 0;
 
-    /* "cobolparser/_preprocess_fast.pyx":150
+    /* "cobolparser/_preprocess_fast.pyx":185
  *         is_cont = indicator == "-"
  * 
  *         if is_cont:             # <<<<<<<<<<<<<<
+ *             # One physical line merged into the logical line: owe one
+ *             # placeholder behind it (an orphan continuation with nothing to
+*/
+    __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_is_cont); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 185, __pyx_L1_error)
+    if (__pyx_t_12) {
+
+
+      /* "cobolparser/_preprocess_fast.pyx":189
+ *             # placeholder behind it (an orphan continuation with nothing to
+ *             # join starts the logical line itself and owes none).
+ *             if has_line:             # <<<<<<<<<<<<<<
+ *                 deferred += 1
+ *             literal_suspended = False
+*/
+      if (__pyx_v_has_line) {
+
+        /* "cobolparser/_preprocess_fast.pyx":190
+ *             # join starts the logical line itself and owes none).
+ *             if has_line:
+ *                 deferred += 1             # <<<<<<<<<<<<<<
+ *             literal_suspended = False
+ *             if pending_literal and merge_continued_literals:
+*/
+        __pyx_v_deferred = (__pyx_v_deferred + 1);
+
+        /* "cobolparser/_preprocess_fast.pyx":189
+ *             # placeholder behind it (an orphan continuation with nothing to
+ *             # join starts the logical line itself and owes none).
+ *             if has_line:             # <<<<<<<<<<<<<<
+ *                 deferred += 1
+ *             literal_suspended = False
+*/
+      }
+
+      /* "cobolparser/_preprocess_fast.pyx":191
+ *             if has_line:
+ *                 deferred += 1
+ *             literal_suspended = False             # <<<<<<<<<<<<<<
  *             if pending_literal and merge_continued_literals:
  *                 chunk = text_slice.lstrip()
 */
-    __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_is_cont); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 150, __pyx_L1_error)
-    if (__pyx_t_13) {
+      __pyx_v_literal_suspended = 0;
 
-
-      /* "cobolparser/_preprocess_fast.pyx":151
- * 
- *         if is_cont:
+      /* "cobolparser/_preprocess_fast.pyx":192
+ *                 deferred += 1
+ *             literal_suspended = False
  *             if pending_literal and merge_continued_literals:             # <<<<<<<<<<<<<<
  *                 chunk = text_slice.lstrip()
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
@@ -4358,86 +4718,86 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
       if (__pyx_v_pending_literal) {
       } else {
 
-        __pyx_t_13 = __pyx_v_pending_literal;
-        goto __pyx_L37_bool_binop_done;
+        __pyx_t_12 = __pyx_v_pending_literal;
+        goto __pyx_L49_bool_binop_done;
       }
-      __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 151, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 192, __pyx_L1_error)
 
-      __pyx_t_13 = __pyx_t_11;
+      __pyx_t_12 = __pyx_t_1;
 
-      __pyx_L37_bool_binop_done:;
-      if (__pyx_t_13) {
+      __pyx_L49_bool_binop_done:;
+      if (__pyx_t_12) {
 
 
-        /* "cobolparser/_preprocess_fast.pyx":152
- *         if is_cont:
+        /* "cobolparser/_preprocess_fast.pyx":193
+ *             literal_suspended = False
  *             if pending_literal and merge_continued_literals:
  *                 chunk = text_slice.lstrip()             # <<<<<<<<<<<<<<
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
  *                     chunk = chunk[1:]
 */
-        __pyx_t_2 = __pyx_v_text_slice;
-        __Pyx_INCREF(__pyx_t_2);
-        __pyx_t_3 = 0;
+        __pyx_t_3 = __pyx_v_text_slice;
+        __Pyx_INCREF(__pyx_t_3);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
-          __pyx_t_19 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_lstrip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 152, __pyx_L1_error)
+          PyObject *__pyx_callargs[2] = {__pyx_t_3, NULL};
+          __pyx_t_19 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_lstrip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 193, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
         }
         __Pyx_XDECREF_SET(__pyx_v_chunk, __pyx_t_19);
         __pyx_t_19 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":153
+        /* "cobolparser/_preprocess_fast.pyx":194
  *             if pending_literal and merge_continued_literals:
  *                 chunk = text_slice.lstrip()
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:             # <<<<<<<<<<<<<<
  *                     chunk = chunk[1:]
  *                 # Inline quote-state update (scan the un-rstripped chunk so
 */
-        __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_v_chunk); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 153, __pyx_L1_error)
-        if (__pyx_t_11) {
+        __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_chunk); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 194, __pyx_L1_error)
+        if (__pyx_t_1) {
 
         } else {
 
-          __pyx_t_13 = __pyx_t_11;
+          __pyx_t_12 = __pyx_t_1;
 
-          goto __pyx_L40_bool_binop_done;
+          goto __pyx_L52_bool_binop_done;
         }
-        __pyx_t_11 = (__pyx_v_quote_ch != ((PyObject*)Py_None));
-        if (__pyx_t_11) {
+        __pyx_t_1 = (__pyx_v_quote_ch != ((PyObject*)Py_None));
+        if (__pyx_t_1) {
 
         } else {
 
-          __pyx_t_13 = __pyx_t_11;
+          __pyx_t_12 = __pyx_t_1;
 
-          goto __pyx_L40_bool_binop_done;
+          goto __pyx_L52_bool_binop_done;
         }
-        __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, 0, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 153, __pyx_L1_error)
+        __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, 0, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 194, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_19);
-        __pyx_t_11 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 153, __pyx_L1_error)
+        __pyx_t_1 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 194, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
-        __pyx_t_13 = __pyx_t_11;
+        __pyx_t_12 = __pyx_t_1;
 
-        __pyx_L40_bool_binop_done:;
-        if (__pyx_t_13) {
+        __pyx_L52_bool_binop_done:;
+        if (__pyx_t_12) {
 
 
-          /* "cobolparser/_preprocess_fast.pyx":154
+          /* "cobolparser/_preprocess_fast.pyx":195
  *                 chunk = text_slice.lstrip()
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
  *                     chunk = chunk[1:]             # <<<<<<<<<<<<<<
  *                 # Inline quote-state update (scan the un-rstripped chunk so
  *                 # trailing blanks aren't discarded before we know whether
 */
-          __pyx_t_19 = __Pyx_PyObject_GetSlice(__pyx_v_chunk, 1, 0, NULL, NULL, &__pyx_mstate_global->__pyx_slice[0], 1, 0, 0); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 154, __pyx_L1_error)
+          __pyx_t_19 = __Pyx_PyObject_GetSlice(__pyx_v_chunk, 1, 0, NULL, NULL, &__pyx_mstate_global->__pyx_slice[0], 1, 0, 0); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 195, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
           __Pyx_DECREF_SET(__pyx_v_chunk, __pyx_t_19);
           __pyx_t_19 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":153
+          /* "cobolparser/_preprocess_fast.pyx":194
  *             if pending_literal and merge_continued_literals:
  *                 chunk = text_slice.lstrip()
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:             # <<<<<<<<<<<<<<
@@ -4446,17 +4806,17 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
         }
 
-        /* "cobolparser/_preprocess_fast.pyx":158
+        /* "cobolparser/_preprocess_fast.pyx":199
  *                 # trailing blanks aren't discarded before we know whether
  *                 # the literal is still open -- M5).
  *                 n = len(chunk)             # <<<<<<<<<<<<<<
  *                 i = 0
  *                 while i < n:
 */
-        __pyx_t_10 = PyObject_Length(__pyx_v_chunk); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 158, __pyx_L1_error)
-        __pyx_v_n = __pyx_t_10;
+        __pyx_t_11 = PyObject_Length(__pyx_v_chunk); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 199, __pyx_L1_error)
+        __pyx_v_n = __pyx_t_11;
 
-        /* "cobolparser/_preprocess_fast.pyx":159
+        /* "cobolparser/_preprocess_fast.pyx":200
  *                 # the literal is still open -- M5).
  *                 n = len(chunk)
  *                 i = 0             # <<<<<<<<<<<<<<
@@ -4465,7 +4825,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
         __pyx_v_i = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":160
+        /* "cobolparser/_preprocess_fast.pyx":201
  *                 n = len(chunk)
  *                 i = 0
  *                 while i < n:             # <<<<<<<<<<<<<<
@@ -4473,25 +4833,25 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                     if quote_open:
 */
         while (1) {
-          __pyx_t_13 = (__pyx_v_i < __pyx_v_n);
+          __pyx_t_12 = (__pyx_v_i < __pyx_v_n);
 
 
-          if (!__pyx_t_13) break;
+          if (!__pyx_t_12) break;
 
-          /* "cobolparser/_preprocess_fast.pyx":161
+          /* "cobolparser/_preprocess_fast.pyx":202
  *                 i = 0
  *                 while i < n:
  *                     ch = chunk[i]             # <<<<<<<<<<<<<<
  *                     if quote_open:
  *                         if ch == quote_ch:
 */
-          __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, __pyx_v_i, int, 1, __Pyx_PyLong_From_int, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 161, __pyx_L1_error)
+          __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, __pyx_v_i, int, 1, __Pyx_PyLong_From_int, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 202, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
-          if (!(likely(PyUnicode_CheckExact(__pyx_t_19))||((__pyx_t_19) == Py_None) || __Pyx_RaiseUnexpectedTypeError("str", __pyx_t_19))) __PYX_ERR(0, 161, __pyx_L1_error)
+          if (!(likely(PyUnicode_CheckExact(__pyx_t_19))||((__pyx_t_19) == Py_None) || __Pyx_RaiseUnexpectedTypeError("str", __pyx_t_19))) __PYX_ERR(0, 202, __pyx_L1_error)
           __Pyx_XDECREF_SET(__pyx_v_ch, ((PyObject*)__pyx_t_19));
           __pyx_t_19 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":162
+          /* "cobolparser/_preprocess_fast.pyx":203
  *                 while i < n:
  *                     ch = chunk[i]
  *                     if quote_open:             # <<<<<<<<<<<<<<
@@ -4500,49 +4860,49 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
           if (__pyx_v_quote_open) {
 
-            /* "cobolparser/_preprocess_fast.pyx":163
+            /* "cobolparser/_preprocess_fast.pyx":204
  *                     ch = chunk[i]
  *                     if quote_open:
  *                         if ch == quote_ch:             # <<<<<<<<<<<<<<
  *                             if i + 1 < n and chunk[i + 1] == quote_ch:
  *                                 i += 2
 */
-            __pyx_t_13 = __Pyx_PyObject_CompareBoolEq_str_str(__pyx_v_ch, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 163, __pyx_L1_error)
-            if (__pyx_t_13) {
+            __pyx_t_12 = __Pyx_PyObject_CompareBoolEq_str_str(__pyx_v_ch, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 204, __pyx_L1_error)
+            if (__pyx_t_12) {
 
 
-              /* "cobolparser/_preprocess_fast.pyx":164
+              /* "cobolparser/_preprocess_fast.pyx":205
  *                     if quote_open:
  *                         if ch == quote_ch:
  *                             if i + 1 < n and chunk[i + 1] == quote_ch:             # <<<<<<<<<<<<<<
  *                                 i += 2
  *                                 continue
 */
-              __pyx_t_11 = ((__pyx_v_i + 1) < __pyx_v_n);
+              __pyx_t_1 = ((__pyx_v_i + 1) < __pyx_v_n);
 
-              if (__pyx_t_11) {
+              if (__pyx_t_1) {
 
               } else {
 
-                __pyx_t_13 = __pyx_t_11;
+                __pyx_t_12 = __pyx_t_1;
 
-                goto __pyx_L48_bool_binop_done;
+                goto __pyx_L60_bool_binop_done;
               }
               __pyx_t_20 = (__pyx_v_i + 1);
 
-              __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 164, __pyx_L1_error)
+              __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 205, __pyx_L1_error)
               __Pyx_GOTREF(__pyx_t_19);
 
-              __pyx_t_11 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 164, __pyx_L1_error)
+              __pyx_t_1 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 205, __pyx_L1_error)
               __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
-              __pyx_t_13 = __pyx_t_11;
+              __pyx_t_12 = __pyx_t_1;
 
-              __pyx_L48_bool_binop_done:;
-              if (__pyx_t_13) {
+              __pyx_L60_bool_binop_done:;
+              if (__pyx_t_12) {
 
 
-                /* "cobolparser/_preprocess_fast.pyx":165
+                /* "cobolparser/_preprocess_fast.pyx":206
  *                         if ch == quote_ch:
  *                             if i + 1 < n and chunk[i + 1] == quote_ch:
  *                                 i += 2             # <<<<<<<<<<<<<<
@@ -4551,16 +4911,16 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
                 __pyx_v_i = (__pyx_v_i + 2);
 
-                /* "cobolparser/_preprocess_fast.pyx":166
+                /* "cobolparser/_preprocess_fast.pyx":207
  *                             if i + 1 < n and chunk[i + 1] == quote_ch:
  *                                 i += 2
  *                                 continue             # <<<<<<<<<<<<<<
  *                             quote_open = False
  *                             quote_ch   = None
 */
-                goto __pyx_L43_continue;
+                goto __pyx_L55_continue;
 
-                /* "cobolparser/_preprocess_fast.pyx":164
+                /* "cobolparser/_preprocess_fast.pyx":205
  *                     if quote_open:
  *                         if ch == quote_ch:
  *                             if i + 1 < n and chunk[i + 1] == quote_ch:             # <<<<<<<<<<<<<<
@@ -4569,7 +4929,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
               }
 
-              /* "cobolparser/_preprocess_fast.pyx":167
+              /* "cobolparser/_preprocess_fast.pyx":208
  *                                 i += 2
  *                                 continue
  *                             quote_open = False             # <<<<<<<<<<<<<<
@@ -4578,7 +4938,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
               __pyx_v_quote_open = 0;
 
-              /* "cobolparser/_preprocess_fast.pyx":168
+              /* "cobolparser/_preprocess_fast.pyx":209
  *                                 continue
  *                             quote_open = False
  *                             quote_ch   = None             # <<<<<<<<<<<<<<
@@ -4588,7 +4948,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
               __Pyx_INCREF(Py_None);
               __Pyx_DECREF_SET(__pyx_v_quote_ch, ((PyObject*)Py_None));
 
-              /* "cobolparser/_preprocess_fast.pyx":163
+              /* "cobolparser/_preprocess_fast.pyx":204
  *                     ch = chunk[i]
  *                     if quote_open:
  *                         if ch == quote_ch:             # <<<<<<<<<<<<<<
@@ -4597,7 +4957,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
             }
 
-            /* "cobolparser/_preprocess_fast.pyx":169
+            /* "cobolparser/_preprocess_fast.pyx":210
  *                             quote_open = False
  *                             quote_ch   = None
  *                         i += 1             # <<<<<<<<<<<<<<
@@ -4606,17 +4966,17 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
             __pyx_v_i = (__pyx_v_i + 1);
 
-            /* "cobolparser/_preprocess_fast.pyx":162
+            /* "cobolparser/_preprocess_fast.pyx":203
  *                 while i < n:
  *                     ch = chunk[i]
  *                     if quote_open:             # <<<<<<<<<<<<<<
  *                         if ch == quote_ch:
  *                             if i + 1 < n and chunk[i + 1] == quote_ch:
 */
-            goto __pyx_L45;
+            goto __pyx_L57;
           }
 
-          /* "cobolparser/_preprocess_fast.pyx":171
+          /* "cobolparser/_preprocess_fast.pyx":212
  *                         i += 1
  *                     else:
  *                         if ch == "'" or ch == '"':             # <<<<<<<<<<<<<<
@@ -4624,74 +4984,146 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                             quote_ch   = ch
 */
           /*else*/ {
-            __pyx_t_11 = (__Pyx_PyObject_Equals_str_ch39(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__9, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 171, __pyx_L1_error)
-            if (!__pyx_t_11) {
+            __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch39(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__9, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 212, __pyx_L1_error)
+            if (!__pyx_t_1) {
 
             } else {
 
-              __pyx_t_13 = __pyx_t_11;
+              __pyx_t_12 = __pyx_t_1;
 
-              goto __pyx_L51_bool_binop_done;
+              goto __pyx_L63_bool_binop_done;
             }
-            __pyx_t_11 = (__Pyx_PyObject_Equals_str_ch34(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 171, __pyx_L1_error)
+            __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch34(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 212, __pyx_L1_error)
 
-            __pyx_t_13 = __pyx_t_11;
+            __pyx_t_12 = __pyx_t_1;
 
-            __pyx_L51_bool_binop_done:;
-            if (__pyx_t_13) {
+            __pyx_L63_bool_binop_done:;
+            if (__pyx_t_12) {
 
 
-              /* "cobolparser/_preprocess_fast.pyx":172
+              /* "cobolparser/_preprocess_fast.pyx":213
  *                     else:
  *                         if ch == "'" or ch == '"':
  *                             quote_open = True             # <<<<<<<<<<<<<<
  *                             quote_ch   = ch
- *                         i += 1
+ *                             i += 1
 */
               __pyx_v_quote_open = 1;
 
-              /* "cobolparser/_preprocess_fast.pyx":173
+              /* "cobolparser/_preprocess_fast.pyx":214
  *                         if ch == "'" or ch == '"':
  *                             quote_open = True
  *                             quote_ch   = ch             # <<<<<<<<<<<<<<
- *                         i += 1
- *                 pending_literal = quote_open
+ *                             i += 1
+ *                         elif ch == "*" and i + 1 < n and chunk[i + 1] == ">":
 */
               __Pyx_INCREF(__pyx_v_ch);
               __Pyx_DECREF_SET(__pyx_v_quote_ch, __pyx_v_ch);
 
-              /* "cobolparser/_preprocess_fast.pyx":171
+              /* "cobolparser/_preprocess_fast.pyx":215
+ *                             quote_open = True
+ *                             quote_ch   = ch
+ *                             i += 1             # <<<<<<<<<<<<<<
+ *                         elif ch == "*" and i + 1 < n and chunk[i + 1] == ">":
+ *                             # Inline comment outside a literal: nothing after it
+*/
+              __pyx_v_i = (__pyx_v_i + 1);
+
+              /* "cobolparser/_preprocess_fast.pyx":212
  *                         i += 1
  *                     else:
  *                         if ch == "'" or ch == '"':             # <<<<<<<<<<<<<<
  *                             quote_open = True
  *                             quote_ch   = ch
 */
+              goto __pyx_L62;
             }
 
-            /* "cobolparser/_preprocess_fast.pyx":174
- *                             quote_open = True
+            /* "cobolparser/_preprocess_fast.pyx":216
  *                             quote_ch   = ch
- *                         i += 1             # <<<<<<<<<<<<<<
+ *                             i += 1
+ *                         elif ch == "*" and i + 1 < n and chunk[i + 1] == ">":             # <<<<<<<<<<<<<<
+ *                             # Inline comment outside a literal: nothing after it
+ *                             # can open one (mirrors _update_quote_state).
+*/
+            __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch42(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 216, __pyx_L1_error)
+            if (__pyx_t_1) {
+
+            } else {
+
+              __pyx_t_12 = __pyx_t_1;
+
+              goto __pyx_L65_bool_binop_done;
+            }
+            __pyx_t_1 = ((__pyx_v_i + 1) < __pyx_v_n);
+
+            if (__pyx_t_1) {
+
+            } else {
+
+              __pyx_t_12 = __pyx_t_1;
+
+              goto __pyx_L65_bool_binop_done;
+            }
+            __pyx_t_20 = (__pyx_v_i + 1);
+
+            __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_chunk, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 216, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_19);
+
+            __pyx_t_1 = (__Pyx_PyObject_Equals_obj_ch62(__pyx_t_19, __pyx_mstate_global->__pyx_kp_u__11, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 216, __pyx_L1_error)
+            __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
+
+            __pyx_t_12 = __pyx_t_1;
+
+            __pyx_L65_bool_binop_done:;
+            if (__pyx_t_12) {
+
+
+              /* "cobolparser/_preprocess_fast.pyx":219
+ *                             # Inline comment outside a literal: nothing after it
+ *                             # can open one (mirrors _update_quote_state).
+ *                             break             # <<<<<<<<<<<<<<
+ *                         else:
+ *                             i += 1
+*/
+              goto __pyx_L56_break;
+
+              /* "cobolparser/_preprocess_fast.pyx":216
+ *                             quote_ch   = ch
+ *                             i += 1
+ *                         elif ch == "*" and i + 1 < n and chunk[i + 1] == ">":             # <<<<<<<<<<<<<<
+ *                             # Inline comment outside a literal: nothing after it
+ *                             # can open one (mirrors _update_quote_state).
+*/
+            }
+
+            /* "cobolparser/_preprocess_fast.pyx":221
+ *                             break
+ *                         else:
+ *                             i += 1             # <<<<<<<<<<<<<<
  *                 pending_literal = quote_open
  *                 # Trailing blanks up to column 72 are part of a literal's
 */
-            __pyx_v_i = (__pyx_v_i + 1);
+            /*else*/ {
+              __pyx_v_i = (__pyx_v_i + 1);
+            }
+            __pyx_L62:;
           }
-          __pyx_L45:;
-          __pyx_L43_continue:;
+          __pyx_L57:;
+          __pyx_L55_continue:;
         }
+        __pyx_L56_break:;
 
-        /* "cobolparser/_preprocess_fast.pyx":175
- *                             quote_ch   = ch
- *                         i += 1
+        /* "cobolparser/_preprocess_fast.pyx":222
+ *                         else:
+ *                             i += 1
  *                 pending_literal = quote_open             # <<<<<<<<<<<<<<
  *                 # Trailing blanks up to column 72 are part of a literal's
  *                 # value when it remains open at end of line (COBOL
 */
         __pyx_v_pending_literal = __pyx_v_quote_open;
 
-        /* "cobolparser/_preprocess_fast.pyx":180
+        /* "cobolparser/_preprocess_fast.pyx":227
  *                 # fixed-format continuation rule) -- only strip them once
  *                 # we know no literal is left dangling (M5).
  *                 parts.append(chunk if pending_literal else chunk.rstrip())             # <<<<<<<<<<<<<<
@@ -4704,32 +5136,32 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
         } else {
           __pyx_t_14 = __pyx_v_chunk;
           __Pyx_INCREF(__pyx_t_14);
-          __pyx_t_3 = 0;
+          __pyx_t_4 = 0;
           {
             PyObject *__pyx_callargs[2] = {__pyx_t_14, NULL};
-            __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+            __pyx_t_3 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
             __Pyx_XDECREF(__pyx_t_14); __pyx_t_14 = 0;
-            if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 180, __pyx_L1_error)
-            __Pyx_GOTREF(__pyx_t_2);
+            if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 227, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_3);
           }
-          __pyx_t_19 = __pyx_t_2;
-          __pyx_t_2 = 0;
+          __pyx_t_19 = __pyx_t_3;
+          __pyx_t_3 = 0;
         }
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_t_19); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 180, __pyx_L1_error)
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_t_19); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 227, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
 
-        /* "cobolparser/_preprocess_fast.pyx":151
- * 
- *         if is_cont:
+        /* "cobolparser/_preprocess_fast.pyx":192
+ *                 deferred += 1
+ *             literal_suspended = False
  *             if pending_literal and merge_continued_literals:             # <<<<<<<<<<<<<<
  *                 chunk = text_slice.lstrip()
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
 */
-        goto __pyx_L36;
+        goto __pyx_L48;
       }
 
-      /* "cobolparser/_preprocess_fast.pyx":189
+      /* "cobolparser/_preprocess_fast.pyx":236
  *                 # mid-token, e.g. '-999.777' one character per line). Strip
  *                 # both ends so the chunk butts directly onto the buffer.
  *                 stripped = text_slice.strip()             # <<<<<<<<<<<<<<
@@ -4737,51 +5169,51 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                 if merge_continued_literals:
 */
       /*else*/ {
-        __pyx_t_2 = __pyx_v_text_slice;
-        __Pyx_INCREF(__pyx_t_2);
-        __pyx_t_3 = 0;
+        __pyx_t_3 = __pyx_v_text_slice;
+        __Pyx_INCREF(__pyx_t_3);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
-          __pyx_t_19 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_strip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 189, __pyx_L1_error)
+          PyObject *__pyx_callargs[2] = {__pyx_t_3, NULL};
+          __pyx_t_19 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_strip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 236, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
         }
         __Pyx_XDECREF_SET(__pyx_v_stripped, __pyx_t_19);
         __pyx_t_19 = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":190
+        /* "cobolparser/_preprocess_fast.pyx":237
  *                 # both ends so the chunk butts directly onto the buffer.
  *                 stripped = text_slice.strip()
  *                 parts.append(stripped)             # <<<<<<<<<<<<<<
  *                 if merge_continued_literals:
  *                     n = len(stripped)
 */
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_v_stripped); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 190, __pyx_L1_error)
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_v_stripped); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 237, __pyx_L1_error)
 
 
-        /* "cobolparser/_preprocess_fast.pyx":191
+        /* "cobolparser/_preprocess_fast.pyx":238
  *                 stripped = text_slice.strip()
  *                 parts.append(stripped)
  *                 if merge_continued_literals:             # <<<<<<<<<<<<<<
  *                     n = len(stripped)
  *                     i = 0
 */
-        __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 191, __pyx_L1_error)
-        if (__pyx_t_13) {
+        __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 238, __pyx_L1_error)
+        if (__pyx_t_12) {
 
 
-          /* "cobolparser/_preprocess_fast.pyx":192
+          /* "cobolparser/_preprocess_fast.pyx":239
  *                 parts.append(stripped)
  *                 if merge_continued_literals:
  *                     n = len(stripped)             # <<<<<<<<<<<<<<
  *                     i = 0
  *                     while i < n:
 */
-          __pyx_t_10 = PyObject_Length(__pyx_v_stripped); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 192, __pyx_L1_error)
-          __pyx_v_n = __pyx_t_10;
+          __pyx_t_11 = PyObject_Length(__pyx_v_stripped); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 239, __pyx_L1_error)
+          __pyx_v_n = __pyx_t_11;
 
-          /* "cobolparser/_preprocess_fast.pyx":193
+          /* "cobolparser/_preprocess_fast.pyx":240
  *                 if merge_continued_literals:
  *                     n = len(stripped)
  *                     i = 0             # <<<<<<<<<<<<<<
@@ -4790,7 +5222,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
           __pyx_v_i = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":194
+          /* "cobolparser/_preprocess_fast.pyx":241
  *                     n = len(stripped)
  *                     i = 0
  *                     while i < n:             # <<<<<<<<<<<<<<
@@ -4798,25 +5230,25 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                         if quote_open:
 */
           while (1) {
-            __pyx_t_13 = (__pyx_v_i < __pyx_v_n);
+            __pyx_t_12 = (__pyx_v_i < __pyx_v_n);
 
 
-            if (!__pyx_t_13) break;
+            if (!__pyx_t_12) break;
 
-            /* "cobolparser/_preprocess_fast.pyx":195
+            /* "cobolparser/_preprocess_fast.pyx":242
  *                     i = 0
  *                     while i < n:
  *                         ch = stripped[i]             # <<<<<<<<<<<<<<
  *                         if quote_open:
  *                             if ch == quote_ch:
 */
-            __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_stripped, __pyx_v_i, int, 1, __Pyx_PyLong_From_int, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 195, __pyx_L1_error)
+            __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_stripped, __pyx_v_i, int, 1, __Pyx_PyLong_From_int, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 242, __pyx_L1_error)
             __Pyx_GOTREF(__pyx_t_19);
-            if (!(likely(PyUnicode_CheckExact(__pyx_t_19))||((__pyx_t_19) == Py_None) || __Pyx_RaiseUnexpectedTypeError("str", __pyx_t_19))) __PYX_ERR(0, 195, __pyx_L1_error)
+            if (!(likely(PyUnicode_CheckExact(__pyx_t_19))||((__pyx_t_19) == Py_None) || __Pyx_RaiseUnexpectedTypeError("str", __pyx_t_19))) __PYX_ERR(0, 242, __pyx_L1_error)
             __Pyx_XDECREF_SET(__pyx_v_ch, ((PyObject*)__pyx_t_19));
             __pyx_t_19 = 0;
 
-            /* "cobolparser/_preprocess_fast.pyx":196
+            /* "cobolparser/_preprocess_fast.pyx":243
  *                     while i < n:
  *                         ch = stripped[i]
  *                         if quote_open:             # <<<<<<<<<<<<<<
@@ -4825,49 +5257,49 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
             if (__pyx_v_quote_open) {
 
-              /* "cobolparser/_preprocess_fast.pyx":197
+              /* "cobolparser/_preprocess_fast.pyx":244
  *                         ch = stripped[i]
  *                         if quote_open:
  *                             if ch == quote_ch:             # <<<<<<<<<<<<<<
  *                                 if i + 1 < n and stripped[i + 1] == quote_ch:
  *                                     i += 2
 */
-              __pyx_t_13 = __Pyx_PyObject_CompareBoolEq_str_str(__pyx_v_ch, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 197, __pyx_L1_error)
-              if (__pyx_t_13) {
+              __pyx_t_12 = __Pyx_PyObject_CompareBoolEq_str_str(__pyx_v_ch, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 244, __pyx_L1_error)
+              if (__pyx_t_12) {
 
 
-                /* "cobolparser/_preprocess_fast.pyx":198
+                /* "cobolparser/_preprocess_fast.pyx":245
  *                         if quote_open:
  *                             if ch == quote_ch:
  *                                 if i + 1 < n and stripped[i + 1] == quote_ch:             # <<<<<<<<<<<<<<
  *                                     i += 2
  *                                     continue
 */
-                __pyx_t_11 = ((__pyx_v_i + 1) < __pyx_v_n);
+                __pyx_t_1 = ((__pyx_v_i + 1) < __pyx_v_n);
 
-                if (__pyx_t_11) {
+                if (__pyx_t_1) {
 
                 } else {
 
-                  __pyx_t_13 = __pyx_t_11;
+                  __pyx_t_12 = __pyx_t_1;
 
-                  goto __pyx_L59_bool_binop_done;
+                  goto __pyx_L74_bool_binop_done;
                 }
                 __pyx_t_20 = (__pyx_v_i + 1);
 
-                __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_stripped, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 198, __pyx_L1_error)
+                __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_stripped, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 245, __pyx_L1_error)
                 __Pyx_GOTREF(__pyx_t_19);
 
-                __pyx_t_11 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 198, __pyx_L1_error)
+                __pyx_t_1 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 245, __pyx_L1_error)
                 __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
-                __pyx_t_13 = __pyx_t_11;
+                __pyx_t_12 = __pyx_t_1;
 
-                __pyx_L59_bool_binop_done:;
-                if (__pyx_t_13) {
+                __pyx_L74_bool_binop_done:;
+                if (__pyx_t_12) {
 
 
-                  /* "cobolparser/_preprocess_fast.pyx":199
+                  /* "cobolparser/_preprocess_fast.pyx":246
  *                             if ch == quote_ch:
  *                                 if i + 1 < n and stripped[i + 1] == quote_ch:
  *                                     i += 2             # <<<<<<<<<<<<<<
@@ -4876,16 +5308,16 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
                   __pyx_v_i = (__pyx_v_i + 2);
 
-                  /* "cobolparser/_preprocess_fast.pyx":200
+                  /* "cobolparser/_preprocess_fast.pyx":247
  *                                 if i + 1 < n and stripped[i + 1] == quote_ch:
  *                                     i += 2
  *                                     continue             # <<<<<<<<<<<<<<
  *                                 quote_open = False
  *                                 quote_ch   = None
 */
-                  goto __pyx_L54_continue;
+                  goto __pyx_L69_continue;
 
-                  /* "cobolparser/_preprocess_fast.pyx":198
+                  /* "cobolparser/_preprocess_fast.pyx":245
  *                         if quote_open:
  *                             if ch == quote_ch:
  *                                 if i + 1 < n and stripped[i + 1] == quote_ch:             # <<<<<<<<<<<<<<
@@ -4894,7 +5326,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
                 }
 
-                /* "cobolparser/_preprocess_fast.pyx":201
+                /* "cobolparser/_preprocess_fast.pyx":248
  *                                     i += 2
  *                                     continue
  *                                 quote_open = False             # <<<<<<<<<<<<<<
@@ -4903,7 +5335,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
                 __pyx_v_quote_open = 0;
 
-                /* "cobolparser/_preprocess_fast.pyx":202
+                /* "cobolparser/_preprocess_fast.pyx":249
  *                                     continue
  *                                 quote_open = False
  *                                 quote_ch   = None             # <<<<<<<<<<<<<<
@@ -4913,7 +5345,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
                 __Pyx_INCREF(Py_None);
                 __Pyx_DECREF_SET(__pyx_v_quote_ch, ((PyObject*)Py_None));
 
-                /* "cobolparser/_preprocess_fast.pyx":197
+                /* "cobolparser/_preprocess_fast.pyx":244
  *                         ch = stripped[i]
  *                         if quote_open:
  *                             if ch == quote_ch:             # <<<<<<<<<<<<<<
@@ -4922,7 +5354,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
               }
 
-              /* "cobolparser/_preprocess_fast.pyx":203
+              /* "cobolparser/_preprocess_fast.pyx":250
  *                                 quote_open = False
  *                                 quote_ch   = None
  *                             i += 1             # <<<<<<<<<<<<<<
@@ -4931,17 +5363,17 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
               __pyx_v_i = (__pyx_v_i + 1);
 
-              /* "cobolparser/_preprocess_fast.pyx":196
+              /* "cobolparser/_preprocess_fast.pyx":243
  *                     while i < n:
  *                         ch = stripped[i]
  *                         if quote_open:             # <<<<<<<<<<<<<<
  *                             if ch == quote_ch:
  *                                 if i + 1 < n and stripped[i + 1] == quote_ch:
 */
-              goto __pyx_L56;
+              goto __pyx_L71;
             }
 
-            /* "cobolparser/_preprocess_fast.pyx":205
+            /* "cobolparser/_preprocess_fast.pyx":252
  *                             i += 1
  *                         else:
  *                             if ch == "'" or ch == '"':             # <<<<<<<<<<<<<<
@@ -4949,74 +5381,146 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                                 quote_ch   = ch
 */
             /*else*/ {
-              __pyx_t_11 = (__Pyx_PyObject_Equals_str_ch39(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__9, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 205, __pyx_L1_error)
-              if (!__pyx_t_11) {
+              __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch39(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__9, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 252, __pyx_L1_error)
+              if (!__pyx_t_1) {
 
               } else {
 
-                __pyx_t_13 = __pyx_t_11;
+                __pyx_t_12 = __pyx_t_1;
 
-                goto __pyx_L62_bool_binop_done;
+                goto __pyx_L77_bool_binop_done;
               }
-              __pyx_t_11 = (__Pyx_PyObject_Equals_str_ch34(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 205, __pyx_L1_error)
+              __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch34(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 252, __pyx_L1_error)
 
-              __pyx_t_13 = __pyx_t_11;
+              __pyx_t_12 = __pyx_t_1;
 
-              __pyx_L62_bool_binop_done:;
-              if (__pyx_t_13) {
+              __pyx_L77_bool_binop_done:;
+              if (__pyx_t_12) {
 
 
-                /* "cobolparser/_preprocess_fast.pyx":206
+                /* "cobolparser/_preprocess_fast.pyx":253
  *                         else:
  *                             if ch == "'" or ch == '"':
  *                                 quote_open = True             # <<<<<<<<<<<<<<
  *                                 quote_ch   = ch
- *                             i += 1
+ *                                 i += 1
 */
                 __pyx_v_quote_open = 1;
 
-                /* "cobolparser/_preprocess_fast.pyx":207
+                /* "cobolparser/_preprocess_fast.pyx":254
  *                             if ch == "'" or ch == '"':
  *                                 quote_open = True
  *                                 quote_ch   = ch             # <<<<<<<<<<<<<<
- *                             i += 1
- *                     pending_literal = quote_open
+ *                                 i += 1
+ *                             elif ch == "*" and i + 1 < n and stripped[i + 1] == ">":
 */
                 __Pyx_INCREF(__pyx_v_ch);
                 __Pyx_DECREF_SET(__pyx_v_quote_ch, __pyx_v_ch);
 
-                /* "cobolparser/_preprocess_fast.pyx":205
+                /* "cobolparser/_preprocess_fast.pyx":255
+ *                                 quote_open = True
+ *                                 quote_ch   = ch
+ *                                 i += 1             # <<<<<<<<<<<<<<
+ *                             elif ch == "*" and i + 1 < n and stripped[i + 1] == ">":
+ *                                 # Inline comment outside a literal: nothing after it
+*/
+                __pyx_v_i = (__pyx_v_i + 1);
+
+                /* "cobolparser/_preprocess_fast.pyx":252
  *                             i += 1
  *                         else:
  *                             if ch == "'" or ch == '"':             # <<<<<<<<<<<<<<
  *                                 quote_open = True
  *                                 quote_ch   = ch
 */
+                goto __pyx_L76;
               }
 
-              /* "cobolparser/_preprocess_fast.pyx":208
- *                                 quote_open = True
+              /* "cobolparser/_preprocess_fast.pyx":256
  *                                 quote_ch   = ch
- *                             i += 1             # <<<<<<<<<<<<<<
+ *                                 i += 1
+ *                             elif ch == "*" and i + 1 < n and stripped[i + 1] == ">":             # <<<<<<<<<<<<<<
+ *                                 # Inline comment outside a literal: nothing after it
+ *                                 # can open one (mirrors _update_quote_state).
+*/
+              __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch42(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 256, __pyx_L1_error)
+              if (__pyx_t_1) {
+
+              } else {
+
+                __pyx_t_12 = __pyx_t_1;
+
+                goto __pyx_L79_bool_binop_done;
+              }
+              __pyx_t_1 = ((__pyx_v_i + 1) < __pyx_v_n);
+
+              if (__pyx_t_1) {
+
+              } else {
+
+                __pyx_t_12 = __pyx_t_1;
+
+                goto __pyx_L79_bool_binop_done;
+              }
+              __pyx_t_20 = (__pyx_v_i + 1);
+
+              __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_stripped, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 256, __pyx_L1_error)
+              __Pyx_GOTREF(__pyx_t_19);
+
+              __pyx_t_1 = (__Pyx_PyObject_Equals_obj_ch62(__pyx_t_19, __pyx_mstate_global->__pyx_kp_u__11, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 256, __pyx_L1_error)
+              __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
+
+              __pyx_t_12 = __pyx_t_1;
+
+              __pyx_L79_bool_binop_done:;
+              if (__pyx_t_12) {
+
+
+                /* "cobolparser/_preprocess_fast.pyx":259
+ *                                 # Inline comment outside a literal: nothing after it
+ *                                 # can open one (mirrors _update_quote_state).
+ *                                 break             # <<<<<<<<<<<<<<
+ *                             else:
+ *                                 i += 1
+*/
+                goto __pyx_L70_break;
+
+                /* "cobolparser/_preprocess_fast.pyx":256
+ *                                 quote_ch   = ch
+ *                                 i += 1
+ *                             elif ch == "*" and i + 1 < n and stripped[i + 1] == ">":             # <<<<<<<<<<<<<<
+ *                                 # Inline comment outside a literal: nothing after it
+ *                                 # can open one (mirrors _update_quote_state).
+*/
+              }
+
+              /* "cobolparser/_preprocess_fast.pyx":261
+ *                                 break
+ *                             else:
+ *                                 i += 1             # <<<<<<<<<<<<<<
  *                     pending_literal = quote_open
  *         else:
 */
-              __pyx_v_i = (__pyx_v_i + 1);
+              /*else*/ {
+                __pyx_v_i = (__pyx_v_i + 1);
+              }
+              __pyx_L76:;
             }
-            __pyx_L56:;
-            __pyx_L54_continue:;
+            __pyx_L71:;
+            __pyx_L69_continue:;
           }
+          __pyx_L70_break:;
 
-          /* "cobolparser/_preprocess_fast.pyx":209
- *                                 quote_ch   = ch
- *                             i += 1
+          /* "cobolparser/_preprocess_fast.pyx":262
+ *                             else:
+ *                                 i += 1
  *                     pending_literal = quote_open             # <<<<<<<<<<<<<<
  *         else:
  *             # Non-continuation: flush previous logical line
 */
           __pyx_v_pending_literal = __pyx_v_quote_open;
 
-          /* "cobolparser/_preprocess_fast.pyx":191
+          /* "cobolparser/_preprocess_fast.pyx":238
  *                 stripped = text_slice.strip()
  *                 parts.append(stripped)
  *                 if merge_continued_literals:             # <<<<<<<<<<<<<<
@@ -5025,82 +5529,141 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
         }
       }
-      __pyx_L36:;
+      __pyx_L48:;
 
-      /* "cobolparser/_preprocess_fast.pyx":150
+      /* "cobolparser/_preprocess_fast.pyx":185
  *         is_cont = indicator == "-"
  * 
  *         if is_cont:             # <<<<<<<<<<<<<<
- *             if pending_literal and merge_continued_literals:
- *                 chunk = text_slice.lstrip()
+ *             # One physical line merged into the logical line: owe one
+ *             # placeholder behind it (an orphan continuation with nothing to
 */
-      goto __pyx_L35;
+      goto __pyx_L46;
     }
 
-    /* "cobolparser/_preprocess_fast.pyx":212
+    /* "cobolparser/_preprocess_fast.pyx":265
  *         else:
  *             # Non-continuation: flush previous logical line
  *             if has_line:             # <<<<<<<<<<<<<<
  *                 result.append("".join(parts))
- *             parts         = []
+ *             if deferred:
 */
     /*else*/ {
       if (__pyx_v_has_line) {
 
-        /* "cobolparser/_preprocess_fast.pyx":213
+        /* "cobolparser/_preprocess_fast.pyx":266
  *             # Non-continuation: flush previous logical line
  *             if has_line:
  *                 result.append("".join(parts))             # <<<<<<<<<<<<<<
- *             parts         = []
- *             has_line      = False
+ *             if deferred:
+ *                 result.extend([""] * deferred)
 */
-        __pyx_t_19 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 213, __pyx_L1_error)
+        __pyx_t_19 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 266, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_19);
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_19); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 213, __pyx_L1_error)
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_19); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 266, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
 
-        /* "cobolparser/_preprocess_fast.pyx":212
+        /* "cobolparser/_preprocess_fast.pyx":265
  *         else:
  *             # Non-continuation: flush previous logical line
  *             if has_line:             # <<<<<<<<<<<<<<
  *                 result.append("".join(parts))
- *             parts         = []
+ *             if deferred:
 */
       }
 
-      /* "cobolparser/_preprocess_fast.pyx":214
+      /* "cobolparser/_preprocess_fast.pyx":267
  *             if has_line:
  *                 result.append("".join(parts))
+ *             if deferred:             # <<<<<<<<<<<<<<
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
+*/
+      __pyx_t_12 = (__pyx_v_deferred != 0);
+
+      if (__pyx_t_12) {
+
+
+        /* "cobolparser/_preprocess_fast.pyx":268
+ *                 result.append("".join(parts))
+ *             if deferred:
+ *                 result.extend([""] * deferred)             # <<<<<<<<<<<<<<
+ *                 deferred = 0
+ *             parts         = []
+*/
+        __pyx_t_19 = PyList_New(1 * ((__pyx_v_deferred<0) ? 0:__pyx_v_deferred)); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 268, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_19);
+        { Py_ssize_t __pyx_temp;
+          for (__pyx_temp=0; __pyx_temp < __pyx_v_deferred; __pyx_temp++) {
+            __Pyx_INCREF(__pyx_mstate_global->__pyx_kp_u__2);
+            __Pyx_GIVEREF(__pyx_mstate_global->__pyx_kp_u__2);
+            if (__Pyx_PyList_SET_ITEM(__pyx_t_19, __pyx_temp, __pyx_mstate_global->__pyx_kp_u__2) != (0)) __PYX_ERR(0, 268, __pyx_L1_error);
+          }
+        }
+        __pyx_t_13 = __Pyx_PyList_Extend(__pyx_v_result, __pyx_t_19); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 268, __pyx_L1_error)
+        __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
+
+
+        /* "cobolparser/_preprocess_fast.pyx":269
+ *             if deferred:
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0             # <<<<<<<<<<<<<<
+ *             parts         = []
+ *             has_line      = False
+*/
+        __pyx_v_deferred = 0;
+
+        /* "cobolparser/_preprocess_fast.pyx":267
+ *             if has_line:
+ *                 result.append("".join(parts))
+ *             if deferred:             # <<<<<<<<<<<<<<
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
+*/
+      }
+
+      /* "cobolparser/_preprocess_fast.pyx":270
+ *                 result.extend([""] * deferred)
+ *                 deferred = 0
  *             parts         = []             # <<<<<<<<<<<<<<
  *             has_line      = False
- *             quote_open    = False
+ *             literal_suspended = False
 */
-      __pyx_t_19 = PyList_New(0); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 214, __pyx_L1_error)
+      __pyx_t_19 = PyList_New(0); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 270, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_19);
       __Pyx_DECREF_SET(__pyx_v_parts, ((PyObject*)__pyx_t_19));
       __pyx_t_19 = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":215
- *                 result.append("".join(parts))
+      /* "cobolparser/_preprocess_fast.pyx":271
+ *                 deferred = 0
  *             parts         = []
  *             has_line      = False             # <<<<<<<<<<<<<<
+ *             literal_suspended = False
  *             quote_open    = False
- *             quote_ch      = None
 */
       __pyx_v_has_line = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":216
+      /* "cobolparser/_preprocess_fast.pyx":272
  *             parts         = []
  *             has_line      = False
+ *             literal_suspended = False             # <<<<<<<<<<<<<<
+ *             quote_open    = False
+ *             quote_ch      = None
+*/
+      __pyx_v_literal_suspended = 0;
+
+      /* "cobolparser/_preprocess_fast.pyx":273
+ *             has_line      = False
+ *             literal_suspended = False
  *             quote_open    = False             # <<<<<<<<<<<<<<
  *             quote_ch      = None
  *             pending_literal = False
 */
       __pyx_v_quote_open = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":217
- *             has_line      = False
+      /* "cobolparser/_preprocess_fast.pyx":274
+ *             literal_suspended = False
  *             quote_open    = False
  *             quote_ch      = None             # <<<<<<<<<<<<<<
  *             pending_literal = False
@@ -5109,7 +5672,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
       __Pyx_INCREF(Py_None);
       __Pyx_DECREF_SET(__pyx_v_quote_ch, ((PyObject*)Py_None));
 
-      /* "cobolparser/_preprocess_fast.pyx":218
+      /* "cobolparser/_preprocess_fast.pyx":275
  *             quote_open    = False
  *             quote_ch      = None
  *             pending_literal = False             # <<<<<<<<<<<<<<
@@ -5118,28 +5681,28 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
       __pyx_v_pending_literal = 0;
 
-      /* "cobolparser/_preprocess_fast.pyx":220
+      /* "cobolparser/_preprocess_fast.pyx":277
  *             pending_literal = False
  * 
  *             if merge_continued_literals:             # <<<<<<<<<<<<<<
  *                 n = len(text_slice)
  *                 i = 0
 */
-      __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 220, __pyx_L1_error)
-      if (__pyx_t_13) {
+      __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 277, __pyx_L1_error)
+      if (__pyx_t_12) {
 
 
-        /* "cobolparser/_preprocess_fast.pyx":221
+        /* "cobolparser/_preprocess_fast.pyx":278
  * 
  *             if merge_continued_literals:
  *                 n = len(text_slice)             # <<<<<<<<<<<<<<
  *                 i = 0
  *                 while i < n:
 */
-        __pyx_t_10 = PyObject_Length(__pyx_v_text_slice); if (unlikely(__pyx_t_10 == ((Py_ssize_t)-1))) __PYX_ERR(0, 221, __pyx_L1_error)
-        __pyx_v_n = __pyx_t_10;
+        __pyx_t_11 = PyObject_Length(__pyx_v_text_slice); if (unlikely(__pyx_t_11 == ((Py_ssize_t)-1))) __PYX_ERR(0, 278, __pyx_L1_error)
+        __pyx_v_n = __pyx_t_11;
 
-        /* "cobolparser/_preprocess_fast.pyx":222
+        /* "cobolparser/_preprocess_fast.pyx":279
  *             if merge_continued_literals:
  *                 n = len(text_slice)
  *                 i = 0             # <<<<<<<<<<<<<<
@@ -5148,7 +5711,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
         __pyx_v_i = 0;
 
-        /* "cobolparser/_preprocess_fast.pyx":223
+        /* "cobolparser/_preprocess_fast.pyx":280
  *                 n = len(text_slice)
  *                 i = 0
  *                 while i < n:             # <<<<<<<<<<<<<<
@@ -5156,25 +5719,25 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                     if quote_open:
 */
         while (1) {
-          __pyx_t_13 = (__pyx_v_i < __pyx_v_n);
+          __pyx_t_12 = (__pyx_v_i < __pyx_v_n);
 
 
-          if (!__pyx_t_13) break;
+          if (!__pyx_t_12) break;
 
-          /* "cobolparser/_preprocess_fast.pyx":224
+          /* "cobolparser/_preprocess_fast.pyx":281
  *                 i = 0
  *                 while i < n:
  *                     ch = text_slice[i]             # <<<<<<<<<<<<<<
  *                     if quote_open:
  *                         if ch == quote_ch:
 */
-          __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_text_slice, __pyx_v_i, int, 1, __Pyx_PyLong_From_int, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 224, __pyx_L1_error)
+          __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_text_slice, __pyx_v_i, int, 1, __Pyx_PyLong_From_int, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 281, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
-          if (!(likely(PyUnicode_CheckExact(__pyx_t_19))||((__pyx_t_19) == Py_None) || __Pyx_RaiseUnexpectedTypeError("str", __pyx_t_19))) __PYX_ERR(0, 224, __pyx_L1_error)
+          if (!(likely(PyUnicode_CheckExact(__pyx_t_19))||((__pyx_t_19) == Py_None) || __Pyx_RaiseUnexpectedTypeError("str", __pyx_t_19))) __PYX_ERR(0, 281, __pyx_L1_error)
           __Pyx_XDECREF_SET(__pyx_v_ch, ((PyObject*)__pyx_t_19));
           __pyx_t_19 = 0;
 
-          /* "cobolparser/_preprocess_fast.pyx":225
+          /* "cobolparser/_preprocess_fast.pyx":282
  *                 while i < n:
  *                     ch = text_slice[i]
  *                     if quote_open:             # <<<<<<<<<<<<<<
@@ -5183,49 +5746,49 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
           if (__pyx_v_quote_open) {
 
-            /* "cobolparser/_preprocess_fast.pyx":226
+            /* "cobolparser/_preprocess_fast.pyx":283
  *                     ch = text_slice[i]
  *                     if quote_open:
  *                         if ch == quote_ch:             # <<<<<<<<<<<<<<
  *                             if i + 1 < n and text_slice[i + 1] == quote_ch:
  *                                 i += 2
 */
-            __pyx_t_13 = __Pyx_PyObject_CompareBoolEq_str_str(__pyx_v_ch, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 226, __pyx_L1_error)
-            if (__pyx_t_13) {
+            __pyx_t_12 = __Pyx_PyObject_CompareBoolEq_str_str(__pyx_v_ch, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 283, __pyx_L1_error)
+            if (__pyx_t_12) {
 
 
-              /* "cobolparser/_preprocess_fast.pyx":227
+              /* "cobolparser/_preprocess_fast.pyx":284
  *                     if quote_open:
  *                         if ch == quote_ch:
  *                             if i + 1 < n and text_slice[i + 1] == quote_ch:             # <<<<<<<<<<<<<<
  *                                 i += 2
  *                                 continue
 */
-              __pyx_t_11 = ((__pyx_v_i + 1) < __pyx_v_n);
+              __pyx_t_1 = ((__pyx_v_i + 1) < __pyx_v_n);
 
-              if (__pyx_t_11) {
+              if (__pyx_t_1) {
 
               } else {
 
-                __pyx_t_13 = __pyx_t_11;
+                __pyx_t_12 = __pyx_t_1;
 
-                goto __pyx_L71_bool_binop_done;
+                goto __pyx_L90_bool_binop_done;
               }
               __pyx_t_20 = (__pyx_v_i + 1);
 
-              __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_text_slice, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 227, __pyx_L1_error)
+              __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_text_slice, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 284, __pyx_L1_error)
               __Pyx_GOTREF(__pyx_t_19);
 
-              __pyx_t_11 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 227, __pyx_L1_error)
+              __pyx_t_1 = __Pyx_PyObject_CompareBoolEq_object_str(__pyx_t_19, __pyx_v_quote_ch, Py_EQ); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 284, __pyx_L1_error)
               __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
-              __pyx_t_13 = __pyx_t_11;
+              __pyx_t_12 = __pyx_t_1;
 
-              __pyx_L71_bool_binop_done:;
-              if (__pyx_t_13) {
+              __pyx_L90_bool_binop_done:;
+              if (__pyx_t_12) {
 
 
-                /* "cobolparser/_preprocess_fast.pyx":228
+                /* "cobolparser/_preprocess_fast.pyx":285
  *                         if ch == quote_ch:
  *                             if i + 1 < n and text_slice[i + 1] == quote_ch:
  *                                 i += 2             # <<<<<<<<<<<<<<
@@ -5234,16 +5797,16 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
                 __pyx_v_i = (__pyx_v_i + 2);
 
-                /* "cobolparser/_preprocess_fast.pyx":229
+                /* "cobolparser/_preprocess_fast.pyx":286
  *                             if i + 1 < n and text_slice[i + 1] == quote_ch:
  *                                 i += 2
  *                                 continue             # <<<<<<<<<<<<<<
  *                             quote_open = False
  *                             quote_ch   = None
 */
-                goto __pyx_L66_continue;
+                goto __pyx_L85_continue;
 
-                /* "cobolparser/_preprocess_fast.pyx":227
+                /* "cobolparser/_preprocess_fast.pyx":284
  *                     if quote_open:
  *                         if ch == quote_ch:
  *                             if i + 1 < n and text_slice[i + 1] == quote_ch:             # <<<<<<<<<<<<<<
@@ -5252,7 +5815,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
               }
 
-              /* "cobolparser/_preprocess_fast.pyx":230
+              /* "cobolparser/_preprocess_fast.pyx":287
  *                                 i += 2
  *                                 continue
  *                             quote_open = False             # <<<<<<<<<<<<<<
@@ -5261,7 +5824,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
               __pyx_v_quote_open = 0;
 
-              /* "cobolparser/_preprocess_fast.pyx":231
+              /* "cobolparser/_preprocess_fast.pyx":288
  *                                 continue
  *                             quote_open = False
  *                             quote_ch   = None             # <<<<<<<<<<<<<<
@@ -5271,7 +5834,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
               __Pyx_INCREF(Py_None);
               __Pyx_DECREF_SET(__pyx_v_quote_ch, ((PyObject*)Py_None));
 
-              /* "cobolparser/_preprocess_fast.pyx":226
+              /* "cobolparser/_preprocess_fast.pyx":283
  *                     ch = text_slice[i]
  *                     if quote_open:
  *                         if ch == quote_ch:             # <<<<<<<<<<<<<<
@@ -5280,7 +5843,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
             }
 
-            /* "cobolparser/_preprocess_fast.pyx":232
+            /* "cobolparser/_preprocess_fast.pyx":289
  *                             quote_open = False
  *                             quote_ch   = None
  *                         i += 1             # <<<<<<<<<<<<<<
@@ -5289,17 +5852,17 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
             __pyx_v_i = (__pyx_v_i + 1);
 
-            /* "cobolparser/_preprocess_fast.pyx":225
+            /* "cobolparser/_preprocess_fast.pyx":282
  *                 while i < n:
  *                     ch = text_slice[i]
  *                     if quote_open:             # <<<<<<<<<<<<<<
  *                         if ch == quote_ch:
  *                             if i + 1 < n and text_slice[i + 1] == quote_ch:
 */
-            goto __pyx_L68;
+            goto __pyx_L87;
           }
 
-          /* "cobolparser/_preprocess_fast.pyx":234
+          /* "cobolparser/_preprocess_fast.pyx":291
  *                         i += 1
  *                     else:
  *                         if ch == "'" or ch == '"':             # <<<<<<<<<<<<<<
@@ -5307,74 +5870,146 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *                             quote_ch   = ch
 */
           /*else*/ {
-            __pyx_t_11 = (__Pyx_PyObject_Equals_str_ch39(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__9, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 234, __pyx_L1_error)
-            if (!__pyx_t_11) {
+            __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch39(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__9, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 291, __pyx_L1_error)
+            if (!__pyx_t_1) {
 
             } else {
 
-              __pyx_t_13 = __pyx_t_11;
+              __pyx_t_12 = __pyx_t_1;
 
-              goto __pyx_L74_bool_binop_done;
+              goto __pyx_L93_bool_binop_done;
             }
-            __pyx_t_11 = (__Pyx_PyObject_Equals_str_ch34(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 234, __pyx_L1_error)
+            __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch34(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__10, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 291, __pyx_L1_error)
 
-            __pyx_t_13 = __pyx_t_11;
+            __pyx_t_12 = __pyx_t_1;
 
-            __pyx_L74_bool_binop_done:;
-            if (__pyx_t_13) {
+            __pyx_L93_bool_binop_done:;
+            if (__pyx_t_12) {
 
 
-              /* "cobolparser/_preprocess_fast.pyx":235
+              /* "cobolparser/_preprocess_fast.pyx":292
  *                     else:
  *                         if ch == "'" or ch == '"':
  *                             quote_open = True             # <<<<<<<<<<<<<<
  *                             quote_ch   = ch
- *                         i += 1
+ *                             i += 1
 */
               __pyx_v_quote_open = 1;
 
-              /* "cobolparser/_preprocess_fast.pyx":236
+              /* "cobolparser/_preprocess_fast.pyx":293
  *                         if ch == "'" or ch == '"':
  *                             quote_open = True
  *                             quote_ch   = ch             # <<<<<<<<<<<<<<
- *                         i += 1
- *                 pending_literal = quote_open
+ *                             i += 1
+ *                         elif ch == "*" and i + 1 < n and text_slice[i + 1] == ">":
 */
               __Pyx_INCREF(__pyx_v_ch);
               __Pyx_DECREF_SET(__pyx_v_quote_ch, __pyx_v_ch);
 
-              /* "cobolparser/_preprocess_fast.pyx":234
+              /* "cobolparser/_preprocess_fast.pyx":294
+ *                             quote_open = True
+ *                             quote_ch   = ch
+ *                             i += 1             # <<<<<<<<<<<<<<
+ *                         elif ch == "*" and i + 1 < n and text_slice[i + 1] == ">":
+ *                             # Inline comment outside a literal: nothing after it
+*/
+              __pyx_v_i = (__pyx_v_i + 1);
+
+              /* "cobolparser/_preprocess_fast.pyx":291
  *                         i += 1
  *                     else:
  *                         if ch == "'" or ch == '"':             # <<<<<<<<<<<<<<
  *                             quote_open = True
  *                             quote_ch   = ch
 */
+              goto __pyx_L92;
             }
 
-            /* "cobolparser/_preprocess_fast.pyx":237
- *                             quote_open = True
+            /* "cobolparser/_preprocess_fast.pyx":295
  *                             quote_ch   = ch
- *                         i += 1             # <<<<<<<<<<<<<<
+ *                             i += 1
+ *                         elif ch == "*" and i + 1 < n and text_slice[i + 1] == ">":             # <<<<<<<<<<<<<<
+ *                             # Inline comment outside a literal: nothing after it
+ *                             # can open one (mirrors _update_quote_state).
+*/
+            __pyx_t_1 = (__Pyx_PyObject_Equals_str_ch42(__pyx_v_ch, __pyx_mstate_global->__pyx_kp_u__5, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 295, __pyx_L1_error)
+            if (__pyx_t_1) {
+
+            } else {
+
+              __pyx_t_12 = __pyx_t_1;
+
+              goto __pyx_L95_bool_binop_done;
+            }
+            __pyx_t_1 = ((__pyx_v_i + 1) < __pyx_v_n);
+
+            if (__pyx_t_1) {
+
+            } else {
+
+              __pyx_t_12 = __pyx_t_1;
+
+              goto __pyx_L95_bool_binop_done;
+            }
+            __pyx_t_20 = (__pyx_v_i + 1);
+
+            __pyx_t_19 = __Pyx_GetItemInt(__pyx_v_text_slice, __pyx_t_20, long, 1, __Pyx_PyLong_From_long, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 295, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_19);
+
+            __pyx_t_1 = (__Pyx_PyObject_Equals_obj_ch62(__pyx_t_19, __pyx_mstate_global->__pyx_kp_u__11, Py_EQ)); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 295, __pyx_L1_error)
+            __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
+
+            __pyx_t_12 = __pyx_t_1;
+
+            __pyx_L95_bool_binop_done:;
+            if (__pyx_t_12) {
+
+
+              /* "cobolparser/_preprocess_fast.pyx":298
+ *                             # Inline comment outside a literal: nothing after it
+ *                             # can open one (mirrors _update_quote_state).
+ *                             break             # <<<<<<<<<<<<<<
+ *                         else:
+ *                             i += 1
+*/
+              goto __pyx_L86_break;
+
+              /* "cobolparser/_preprocess_fast.pyx":295
+ *                             quote_ch   = ch
+ *                             i += 1
+ *                         elif ch == "*" and i + 1 < n and text_slice[i + 1] == ">":             # <<<<<<<<<<<<<<
+ *                             # Inline comment outside a literal: nothing after it
+ *                             # can open one (mirrors _update_quote_state).
+*/
+            }
+
+            /* "cobolparser/_preprocess_fast.pyx":300
+ *                             break
+ *                         else:
+ *                             i += 1             # <<<<<<<<<<<<<<
  *                 pending_literal = quote_open
  *                 # M5: trailing blanks are part of the literal's value when
 */
-            __pyx_v_i = (__pyx_v_i + 1);
+            /*else*/ {
+              __pyx_v_i = (__pyx_v_i + 1);
+            }
+            __pyx_L92:;
           }
-          __pyx_L68:;
-          __pyx_L66_continue:;
+          __pyx_L87:;
+          __pyx_L85_continue:;
         }
+        __pyx_L86_break:;
 
-        /* "cobolparser/_preprocess_fast.pyx":238
- *                             quote_ch   = ch
- *                         i += 1
+        /* "cobolparser/_preprocess_fast.pyx":301
+ *                         else:
+ *                             i += 1
  *                 pending_literal = quote_open             # <<<<<<<<<<<<<<
  *                 # M5: trailing blanks are part of the literal's value when
  *                 # it remains open at end of line -- only strip once closed.
 */
         __pyx_v_pending_literal = __pyx_v_quote_open;
 
-        /* "cobolparser/_preprocess_fast.pyx":241
+        /* "cobolparser/_preprocess_fast.pyx":304
  *                 # M5: trailing blanks are part of the literal's value when
  *                 # it remains open at end of line -- only strip once closed.
  *                 parts.append(text_slice if pending_literal else text_slice.rstrip())             # <<<<<<<<<<<<<<
@@ -5387,32 +6022,32 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
         } else {
           __pyx_t_14 = __pyx_v_text_slice;
           __Pyx_INCREF(__pyx_t_14);
-          __pyx_t_3 = 0;
+          __pyx_t_4 = 0;
           {
             PyObject *__pyx_callargs[2] = {__pyx_t_14, NULL};
-            __pyx_t_2 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+            __pyx_t_3 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
             __Pyx_XDECREF(__pyx_t_14); __pyx_t_14 = 0;
-            if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 241, __pyx_L1_error)
-            __Pyx_GOTREF(__pyx_t_2);
+            if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 304, __pyx_L1_error)
+            __Pyx_GOTREF(__pyx_t_3);
           }
-          __pyx_t_19 = __pyx_t_2;
-          __pyx_t_2 = 0;
+          __pyx_t_19 = __pyx_t_3;
+          __pyx_t_3 = 0;
         }
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_t_19); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 241, __pyx_L1_error)
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_t_19); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 304, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
 
-        /* "cobolparser/_preprocess_fast.pyx":220
+        /* "cobolparser/_preprocess_fast.pyx":277
  *             pending_literal = False
  * 
  *             if merge_continued_literals:             # <<<<<<<<<<<<<<
  *                 n = len(text_slice)
  *                 i = 0
 */
-        goto __pyx_L65;
+        goto __pyx_L84;
       }
 
-      /* "cobolparser/_preprocess_fast.pyx":243
+      /* "cobolparser/_preprocess_fast.pyx":306
  *                 parts.append(text_slice if pending_literal else text_slice.rstrip())
  *             else:
  *                 parts.append(text_slice.rstrip())             # <<<<<<<<<<<<<<
@@ -5420,25 +6055,25 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
  *         # Either branch above (continuation or new logical line) always
 */
       /*else*/ {
-        __pyx_t_2 = __pyx_v_text_slice;
-        __Pyx_INCREF(__pyx_t_2);
-        __pyx_t_3 = 0;
+        __pyx_t_3 = __pyx_v_text_slice;
+        __Pyx_INCREF(__pyx_t_3);
+        __pyx_t_4 = 0;
         {
-          PyObject *__pyx_callargs[2] = {__pyx_t_2, NULL};
-          __pyx_t_19 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_3, (1-__pyx_t_3) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
-          __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
-          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 243, __pyx_L1_error)
+          PyObject *__pyx_callargs[2] = {__pyx_t_3, NULL};
+          __pyx_t_19 = __Pyx_PyObject_FastCallMethod((PyObject*)__pyx_mstate_global->__pyx_n_u_rstrip, __pyx_callargs+__pyx_t_4, (1-__pyx_t_4) | (1*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+          __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
+          if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 306, __pyx_L1_error)
           __Pyx_GOTREF(__pyx_t_19);
         }
-        __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_t_19); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 243, __pyx_L1_error)
+        __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_parts, __pyx_t_19); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 306, __pyx_L1_error)
         __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
 
       }
-      __pyx_L65:;
+      __pyx_L84:;
     }
-    __pyx_L35:;
+    __pyx_L46:;
 
-    /* "cobolparser/_preprocess_fast.pyx":248
+    /* "cobolparser/_preprocess_fast.pyx":311
  *         # appends to `parts` (even an empty string), so this physical line
  *         # has real content pending flush.
  *         has_line = True             # <<<<<<<<<<<<<<
@@ -5447,162 +6082,213 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 */
     __pyx_v_has_line = 1;
 
-    /* "cobolparser/_preprocess_fast.pyx":54
+    /* "cobolparser/_preprocess_fast.pyx":68
  *     parts  = []
  * 
  *     for line_no, raw in enumerate(lines, start=1):             # <<<<<<<<<<<<<<
  *         line = raw.rstrip("\n").expandtabs(8)
  * 
 */
-    __pyx_L3_continue:;
+    __pyx_L4_continue:;
   }
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
-  /* "cobolparser/_preprocess_fast.pyx":250
+  /* "cobolparser/_preprocess_fast.pyx":313
  *         has_line = True
  * 
  *     if has_line:             # <<<<<<<<<<<<<<
  *         result.append("".join(parts))
- * 
+ *     if deferred:
 */
   if (__pyx_v_has_line) {
 
-    /* "cobolparser/_preprocess_fast.pyx":251
+    /* "cobolparser/_preprocess_fast.pyx":314
  * 
  *     if has_line:
  *         result.append("".join(parts))             # <<<<<<<<<<<<<<
- * 
- *     if pending_literal and merge_continued_literals:
+ *     if deferred:
+ *         result.extend([""] * deferred)
 */
-    __pyx_t_4 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 251, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_4);
-    __pyx_t_12 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_4); if (unlikely(__pyx_t_12 == ((int)-1))) __PYX_ERR(0, 251, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+    __pyx_t_5 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u__2, __pyx_v_parts); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 314, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_5);
+    __pyx_t_13 = __Pyx_PyList_Append(__pyx_v_result, __pyx_t_5); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 314, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
 
-    /* "cobolparser/_preprocess_fast.pyx":250
+    /* "cobolparser/_preprocess_fast.pyx":313
  *         has_line = True
  * 
  *     if has_line:             # <<<<<<<<<<<<<<
  *         result.append("".join(parts))
+ *     if deferred:
+*/
+  }
+
+  /* "cobolparser/_preprocess_fast.pyx":315
+ *     if has_line:
+ *         result.append("".join(parts))
+ *     if deferred:             # <<<<<<<<<<<<<<
+ *         result.extend([""] * deferred)
+ * 
+*/
+  __pyx_t_12 = (__pyx_v_deferred != 0);
+
+  if (__pyx_t_12) {
+
+
+    /* "cobolparser/_preprocess_fast.pyx":316
+ *         result.append("".join(parts))
+ *     if deferred:
+ *         result.extend([""] * deferred)             # <<<<<<<<<<<<<<
+ * 
+ *     if pending_literal and merge_continued_literals and not literal_suspended:
+*/
+    __pyx_t_5 = PyList_New(1 * ((__pyx_v_deferred<0) ? 0:__pyx_v_deferred)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 316, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_5);
+    { Py_ssize_t __pyx_temp;
+      for (__pyx_temp=0; __pyx_temp < __pyx_v_deferred; __pyx_temp++) {
+        __Pyx_INCREF(__pyx_mstate_global->__pyx_kp_u__2);
+        __Pyx_GIVEREF(__pyx_mstate_global->__pyx_kp_u__2);
+        if (__Pyx_PyList_SET_ITEM(__pyx_t_5, __pyx_temp, __pyx_mstate_global->__pyx_kp_u__2) != (0)) __PYX_ERR(0, 316, __pyx_L1_error);
+      }
+    }
+    __pyx_t_13 = __Pyx_PyList_Extend(__pyx_v_result, __pyx_t_5); if (unlikely(__pyx_t_13 == ((int)-1))) __PYX_ERR(0, 316, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+
+
+    /* "cobolparser/_preprocess_fast.pyx":315
+ *     if has_line:
+ *         result.append("".join(parts))
+ *     if deferred:             # <<<<<<<<<<<<<<
+ *         result.extend([""] * deferred)
  * 
 */
   }
 
-  /* "cobolparser/_preprocess_fast.pyx":253
- *         result.append("".join(parts))
+  /* "cobolparser/_preprocess_fast.pyx":318
+ *         result.extend([""] * deferred)
  * 
- *     if pending_literal and merge_continued_literals:             # <<<<<<<<<<<<<<
+ *     if pending_literal and merge_continued_literals and not literal_suspended:             # <<<<<<<<<<<<<<
  *         raise ValueError(
  *             f"Unterminated string literal at end of input "
 */
   if (__pyx_v_pending_literal) {
   } else {
 
-    __pyx_t_13 = __pyx_v_pending_literal;
-    goto __pyx_L79_bool_binop_done;
+    __pyx_t_12 = __pyx_v_pending_literal;
+    goto __pyx_L102_bool_binop_done;
   }
-  __pyx_t_11 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 253, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_IsTrue(__pyx_v_merge_continued_literals); if (unlikely((__pyx_t_1 < 0))) __PYX_ERR(0, 318, __pyx_L1_error)
+  if (__pyx_t_1) {
 
-  __pyx_t_13 = __pyx_t_11;
+  } else {
 
-  __pyx_L79_bool_binop_done:;
-  if (unlikely(__pyx_t_13)) {
+    __pyx_t_12 = __pyx_t_1;
+
+    goto __pyx_L102_bool_binop_done;
+  }
+  __pyx_t_1 = (!__pyx_v_literal_suspended);
 
 
-    /* "cobolparser/_preprocess_fast.pyx":254
+  __pyx_t_12 = __pyx_t_1;
+
+  __pyx_L102_bool_binop_done:;
+  if (unlikely(__pyx_t_12)) {
+
+
+    /* "cobolparser/_preprocess_fast.pyx":319
  * 
- *     if pending_literal and merge_continued_literals:
+ *     if pending_literal and merge_continued_literals and not literal_suspended:
  *         raise ValueError(             # <<<<<<<<<<<<<<
  *             f"Unterminated string literal at end of input "
  *             f"(opened with quote character '{quote_ch or '?'}')"
 */
     __pyx_t_19 = NULL;
 
-    /* "cobolparser/_preprocess_fast.pyx":256
+    /* "cobolparser/_preprocess_fast.pyx":321
  *         raise ValueError(
  *             f"Unterminated string literal at end of input "
  *             f"(opened with quote character '{quote_ch or '?'}')"             # <<<<<<<<<<<<<<
  *         )
  * 
 */
-    __pyx_t_13 = __Pyx_PyObject_IsTrue(__pyx_v_quote_ch); if (unlikely((__pyx_t_13 < 0))) __PYX_ERR(0, 256, __pyx_L1_error)
-    if (!__pyx_t_13) {
+    __pyx_t_12 = __Pyx_PyObject_IsTrue(__pyx_v_quote_ch); if (unlikely((__pyx_t_12 < 0))) __PYX_ERR(0, 321, __pyx_L1_error)
+    if (!__pyx_t_12) {
     } else {
       __Pyx_INCREF(__pyx_v_quote_ch);
-      __pyx_t_2 = __pyx_v_quote_ch;
-      goto __pyx_L81_bool_binop_done;
+      __pyx_t_3 = __pyx_v_quote_ch;
+      goto __pyx_L105_bool_binop_done;
     }
     __Pyx_INCREF(__pyx_mstate_global->__pyx_kp_u__3);
-    __pyx_t_2 = __pyx_mstate_global->__pyx_kp_u__3;
-    __pyx_L81_bool_binop_done:;
-    __pyx_t_14 = __Pyx_PyObject_FormatSimple(__pyx_t_2, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 256, __pyx_L1_error)
+    __pyx_t_3 = __pyx_mstate_global->__pyx_kp_u__3;
+    __pyx_L105_bool_binop_done:;
+    __pyx_t_14 = __Pyx_PyObject_FormatSimple(__pyx_t_3, __pyx_mstate_global->__pyx_empty_unicode); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 321, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_14);
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
+    __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
     __pyx_t_21[0] = __pyx_mstate_global->__pyx_kp_u_Unterminated_string_literal_at_e;
     __pyx_t_21[1] = __pyx_t_14;
-    __pyx_t_21[2] = __pyx_mstate_global->__pyx_kp_u__11;
+    __pyx_t_21[2] = __pyx_mstate_global->__pyx_kp_u__12;
 
-    /* "cobolparser/_preprocess_fast.pyx":255
- *     if pending_literal and merge_continued_literals:
+    /* "cobolparser/_preprocess_fast.pyx":320
+ *     if pending_literal and merge_continued_literals and not literal_suspended:
  *         raise ValueError(
  *             f"Unterminated string literal at end of input "             # <<<<<<<<<<<<<<
  *             f"(opened with quote character '{quote_ch or '?'}')"
  *         )
 */
-    __pyx_t_5 = 76;
+    __pyx_t_6 = 76;
     #if __Pyx_PyUnicode_Join_CAN_USE_KIND_AND_LENGTH
-    __pyx_t_5 += __Pyx_PyUnicode_GET_LENGTH(__pyx_t_21[1]);
+    __pyx_t_6 += __Pyx_PyUnicode_GET_LENGTH(__pyx_t_21[1]);
     #endif
     __pyx_t_17 = 0;
     #if __Pyx_PyUnicode_Join_CAN_USE_KIND_AND_LENGTH
     __pyx_t_17 |= __Pyx_PyUnicode_KIND_04(__pyx_t_21[1]);
     #endif
-    __pyx_t_2 = __Pyx_PyUnicode_Join(__pyx_t_21, 3, __pyx_t_5, __pyx_t_17);
-    if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 255, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_2);
+    __pyx_t_3 = __Pyx_PyUnicode_Join(__pyx_t_21, 3, __pyx_t_6, __pyx_t_17);
+    if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 320, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_3);
     __Pyx_DECREF(__pyx_t_14); __pyx_t_14 = 0;
-    __pyx_t_3 = 1;
+    __pyx_t_4 = 1;
     {
-      PyObject *__pyx_callargs[2] = {__pyx_t_19, __pyx_t_2};
-      __pyx_t_4 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_ValueError)), __pyx_callargs+__pyx_t_3, (2-__pyx_t_3) | (__pyx_t_3*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      PyObject *__pyx_callargs[2] = {__pyx_t_19, __pyx_t_3};
+      __pyx_t_5 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_ValueError)), __pyx_callargs+__pyx_t_4, (2-__pyx_t_4) | (__pyx_t_4*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
       __Pyx_XDECREF(__pyx_t_19); __pyx_t_19 = 0;
-      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 254, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_4);
+      __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
+      if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 319, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_5);
     }
-    __Pyx_Raise(__pyx_t_4, 0, 0, 0);
-    __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    __PYX_ERR(0, 254, __pyx_L1_error)
+    __Pyx_Raise(__pyx_t_5, 0, 0, 0);
+    __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
+    __PYX_ERR(0, 319, __pyx_L1_error)
 
-    /* "cobolparser/_preprocess_fast.pyx":253
- *         result.append("".join(parts))
+    /* "cobolparser/_preprocess_fast.pyx":318
+ *         result.extend([""] * deferred)
  * 
- *     if pending_literal and merge_continued_literals:             # <<<<<<<<<<<<<<
+ *     if pending_literal and merge_continued_literals and not literal_suspended:             # <<<<<<<<<<<<<<
  *         raise ValueError(
  *             f"Unterminated string literal at end of input "
 */
   }
 
-  /* "cobolparser/_preprocess_fast.pyx":259
+  /* "cobolparser/_preprocess_fast.pyx":324
  *         )
  * 
  *     return "\n".join(result) + "\n"             # <<<<<<<<<<<<<<
 */
-  __pyx_t_4 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u_, __pyx_v_result); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 259, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = __Pyx_PyUnicode_Concat__Pyx_ReferenceSharing_OwnStrongReferenceInPlace(__pyx_t_4, __pyx_mstate_global->__pyx_kp_u_); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 259, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
+  __pyx_t_5 = PyUnicode_Join(__pyx_mstate_global->__pyx_kp_u_, __pyx_v_result); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 324, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_t_3 = __Pyx_PyUnicode_Concat__Pyx_ReferenceSharing_OwnStrongReferenceInPlace(__pyx_t_5, __pyx_mstate_global->__pyx_kp_u_); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 324, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_3);
+  __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
   {
     PyObject *__pyx_temp;
     {
       __pyx_temp = __pyx_r;
-      __pyx_r = __pyx_t_2;
+      __pyx_r = __pyx_t_3;
     }
     __Pyx_XDECREF(__pyx_temp);
   }
-  __pyx_t_2 = 0;
+  __pyx_t_3 = 0;
   goto __pyx_L0;
 
   /* "cobolparser/_preprocess_fast.pyx":25
@@ -5615,11 +6301,11 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 
   /* function exit code */
   __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_XDECREF(__pyx_t_4);
-  __Pyx_XDECREF(__pyx_t_7);
+  __Pyx_XDECREF(__pyx_t_3);
+  __Pyx_XDECREF(__pyx_t_5);
   __Pyx_XDECREF(__pyx_t_8);
+  __Pyx_XDECREF(__pyx_t_9);
   __Pyx_XDECREF(__pyx_t_14);
   __Pyx_XDECREF(__pyx_t_19);
   __Pyx_AddTraceback("cobolparser._preprocess_fast.normalize_fixed_format", __pyx_clineno, __pyx_lineno, __pyx_filename);
@@ -5631,6 +6317,8 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
 
   __Pyx_XDECREF(__pyx_v_quote_ch);
   __Pyx_XDECREF(__pyx_v_ch);
+
+
 
 
 
@@ -5654,6 +6342,7 @@ static PyObject *__pyx_pf_11cobolparser_16_preprocess_fast_normalize_fixed_forma
   __Pyx_XDECREF(__pyx_v_is_cont);
   __Pyx_XDECREF(__pyx_v_chunk);
   __Pyx_XDECREF(__pyx_v_stripped);
+  __Pyx_XDECREF(__pyx_v_lines);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
@@ -6148,7 +6837,7 @@ static int __Pyx_InitCachedBuiltins(__pyx_mstatetype *__pyx_mstate) {
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   CYTHON_UNUSED_VAR(__pyx_mstate);
-  __pyx_builtin_enumerate = __Pyx_GetBuiltinName(__pyx_mstate->__pyx_n_u_enumerate); if (!__pyx_builtin_enumerate) __PYX_ERR(0, 54, __pyx_L1_error)
+  __pyx_builtin_enumerate = __Pyx_GetBuiltinName(__pyx_mstate->__pyx_n_u_enumerate); if (!__pyx_builtin_enumerate) __PYX_ERR(0, 68, __pyx_L1_error)
 
   /* Cached unbound methods */
   __pyx_mstate->__pyx_umethod_PyDict_Type_items.type = (PyObject*)&PyDict_Type;
@@ -6171,7 +6860,7 @@ static int __Pyx_InitCachedConstants(__pyx_mstatetype *__pyx_mstate) {
   CYTHON_UNUSED_VAR(__pyx_mstate);
   __Pyx_RefNannySetupContext("__Pyx_InitCachedConstants", 0);
 
-  /* "cobolparser/_preprocess_fast.pyx":54
+  /* "cobolparser/_preprocess_fast.pyx":68
  *     parts  = []
  * 
  *     for line_no, raw in enumerate(lines, start=1):             # <<<<<<<<<<<<<<
@@ -6180,19 +6869,19 @@ static int __Pyx_InitCachedConstants(__pyx_mstatetype *__pyx_mstate) {
 */
   {
     PyObject* __pyx_temp[1] = {__pyx_mstate_global->__pyx_n_u_start};
-    __pyx_mstate_global->__pyx_tuple[0] = __Pyx_PyTuple_FromArray(__pyx_temp, 1); if (unlikely(!__pyx_mstate_global->__pyx_tuple[0])) __PYX_ERR(0, 54, __pyx_L1_error)
+    __pyx_mstate_global->__pyx_tuple[0] = __Pyx_PyTuple_FromArray(__pyx_temp, 1); if (unlikely(!__pyx_mstate_global->__pyx_tuple[0])) __PYX_ERR(0, 68, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_mstate_global->__pyx_tuple[0]);
   }
   __Pyx_GIVEREF(__pyx_mstate_global->__pyx_tuple[0]);
 
-  /* "cobolparser/_preprocess_fast.pyx":154
+  /* "cobolparser/_preprocess_fast.pyx":195
  *                 chunk = text_slice.lstrip()
  *                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
  *                     chunk = chunk[1:]             # <<<<<<<<<<<<<<
  *                 # Inline quote-state update (scan the un-rstripped chunk so
  *                 # trailing blanks aren't discarded before we know whether
 */
-  __pyx_mstate_global->__pyx_slice[0] = PySlice_New(__pyx_mstate_global->__pyx_int_1, Py_None, Py_None); if (unlikely(!__pyx_mstate_global->__pyx_slice[0])) __PYX_ERR(0, 154, __pyx_L1_error)
+  __pyx_mstate_global->__pyx_slice[0] = PySlice_New(__pyx_mstate_global->__pyx_int_1, Py_None, Py_None); if (unlikely(!__pyx_mstate_global->__pyx_slice[0])) __PYX_ERR(0, 195, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_mstate_global->__pyx_slice[0]);
   __Pyx_GIVEREF(__pyx_mstate_global->__pyx_slice[0]);
   #if CYTHON_IMMORTAL_CONSTANTS
@@ -6255,41 +6944,41 @@ static int __Pyx_InitConstants(__pyx_mstatetype *__pyx_mstate) {
   int __pyx_clineno = 0;
   CYTHON_UNUSED_VAR(__pyx_mstate);
   {
-    const struct { const unsigned int length: 7; } str_length_index[] = {{0},{1},{1},{36},{24},{24},{1},{1},{2},{1},{1},{35},{1},{1},{24},{1},{5},{74},{32},{1},{8},{1},{7},{8},{8},{9},{11},{20},{12},{17},{8},{8},{10},{8},{12},{8},{13},{5},{6},{18},{6},{2},{5},{18},{28},{15},{11},{1},{23},{7},{9},{25},{10},{8},{19},{1},{9},{23},{7},{16},{19},{22},{7},{7},{5},{4},{7},{5},{6},{24},{9},{1},{22},{5},{15},{3},{8},{10},{3},{6},{6},{8},{10},{5},{5},{8},{10},{1},{6},{29},{8}};
-    const struct { const unsigned int length: 11; } bytes_length_index[] = {{1273}};
+    const struct { const unsigned int length: 7; } str_length_index[] = {{0},{1},{1},{36},{24},{24},{1},{1},{2},{1},{1},{35},{1},{1},{24},{1},{1},{5},{74},{32},{1},{8},{1},{7},{8},{8},{9},{11},{20},{12},{17},{8},{8},{10},{8},{12},{8},{13},{5},{6},{18},{6},{2},{5},{18},{28},{15},{11},{1},{23},{8},{7},{9},{25},{10},{8},{19},{1},{9},{23},{7},{16},{19},{22},{7},{7},{5},{4},{7},{5},{17},{6},{24},{9},{1},{22},{5},{15},{3},{8},{10},{3},{6},{6},{8},{10},{10},{5},{5},{8},{10},{1},{6},{29},{8}};
+    const struct { const unsigned int length: 11; } bytes_length_index[] = {{1627}};
     #ifndef CYTHON_COMPRESS_STRINGS
       #define CYTHON_COMPRESS_STRINGS 90
     #endif
-    #if (CYTHON_COMPRESS_STRINGS) == 1 /* compression: zlib (1430 bytes) */
-static const char cstring[] = "x\332\245T\313R\333H\0245\317\0001\001\203!\036\302\0142\217\220\227I\031\002\2250U\2238\230b\222J\245\306`2\300bTm\251mkbK\226\272\315#\263\231\245\227Z\366\262\227Zj\251\245\227,\265\354\245?\301\2370\267\2053C^\263\211\253\334-\365\275}\357\271\347\034{LQ4\253\326\254\233D93t\374Hi B\025Z\305\nu\220nP\3032QMQ\316\020Qt\307j4\260\256d2J\3150\261b\220O\317\353\206\236\241\326{ln+\213\253\253\367\037d2W\225\025\250kR\243lhH\226\313 \007#\331\214V\267\225\265\307\333\320\337\244\220\240\224\360\205e\352=8\312\3637\262\307!\204\234\272a\"\n\r\010u\014\263\002\315\341\014@!\252`\310\267\312\212a6\232T\271g5\260\tig\006\255*v\323\242X\321\252\310A\032\244+\253\232U\262j\r\344\020\354<V\033\016n8\226\206\tQ\3130\357Z\343\342<\377JV-\325\360;\365U^\335}\233W_\311o\376H=\330-D\357\305\335\243\342\177\017\007\305\334~QU\177\2738\207o\336\320\250\372\026\237\323}\\VUd\232\026\005\304*|\264\032\202&\025L\001t]\036\224\233\246&\367:2\314h\267\364f-J5Q=\332\355&\252}|\246\230P\330\014\242j\226c5)p\202\312\022(0n\352\210\\\230\232a\255\375\033#%\\\266\034\254U\265j\323|\257I\231Th\003Rj\270\204\264\367\327HX\373\234\004\340\275\2065\251\020YC%\255\247\212Z\203>:.5+\252\254FT$\241\324\353\020\"=\341\261\331\254\003\"\212\361\271\206\261N\324k\316Q#\235\361y\003\231:E%R\205\353\262\216\334\t\266\233\330\324\260\n\367K\3301\014S\227\026\261\034\230\266\004&Q{\322\327\324\006D-=\"\001\214D\324+<=\030\360\036\00104\325\320UBQ\275\001G\247\330!\200@\245\350Z\242nT\000\027!\r\240C\352A$\224\210$\323\212\246\253I\2135\240X\005_\3652\233XW{\206#`p528\350\353\324Q\315\370\200\325\262q\016\031e\371N\201XJ\244.\340\322\217\227\032V#\262\242\252U\257viR\007\2359\2304k\324\211\372\001\021\252\374Q\020Lu\\Fp\016S@\251(&\027 \231\202\271T\300\253\341\323STkbr}\300/\2249C\216\t H\030[\tW\362a\276\324\215\305\264\276\275~\330\366\372\177\355\357&cC\013\014\211A\205\367\211\301\237\030\352\246bCs,\321\031\034o\025\204\\:\203#\255Q\3676\033\345\t\276\352\315z\266\030\231h\021w\225%\330\n\373\313K{""\331\316\310\315\326F\013\265N\335}\327\356\306c\343\223-[L\316\272\025V`%>\304\013\034\211\370Tt#-\342\363,\367\305\002}E|\27432\343\026!)\303\t\224\335\362\247\374_\332\t\321;\\\363\372\240\364\350|xg\303\337\014\306\332K\355\342\345\364\345\353\360\335qx|\"F\322a\372y\320l\277\276\324\302\302axx\024\036\225\302\022\016qY\000\270m\367\200\r\262\035\366\301\233\366\362\376@\270\221o\357\264\355\356\310w \275\331z\346\356\261M>\310w\270\355\r{%\277O\304o\273\224\255\263B\367Vl\374\226\230L\261a\246\361iH\240\336S\177+\230\n\236\266\263\235\370D\213\272Y\031\035\201\3139~\3429~\322/\006\211 -&\347Y\236\017\363\252\247EG3A\265\215\304\344OP%\301\227y\305+t\307b\211\214\367&\350\227\311sl\231!P`\325Otgc\211)\221T\370\000\177\352=\361\316\374j\200\200\255\304C\357\236\277\344\027\304\344\264\273\315\212<\031\256<\013\222A\021XM\316\263=\236\025\251\005f\207\312\213v\037\034e\327\375tgf\366k\241T\326O\370i\221z\354\3310\347\346\226\217\272\303\261\321i\367\001\220jK2\262\">\021N,0\312\243\321\306\300)\t\331u\213%\3311 ?\364\227}\034d\203\235\200\264\323\262\303.\214\224\006\005\0223\356\216k\263>1\231tsR\212\022\353\007\356\223?\260\031\030\316\026\311\333\256-Rw\330\206$A\314/0\207O\361u\276\317\035/\tU\323\376\272\277\357\223`)(\010e\205\303\222\026\363\367\241w\264\244~d\205N\357r\222\037x\003\336\206\207>\213\213\311E\000\002\274\316\272\277\263\034;\016\357\376\034l\266o\200=\246b\211y\266\315\337y0\322L\024\214\210\314\212d\212\r\260,\270\001\036\372Dr\216-\262\227`\013\250v\0249\010:f%T\302\227$\242\245\036\336)o\335+\372)Pz1x\031h\355\351vN,K\030\313+B\311x\205\253e>\315\023\235\336\345\"\370u\307#\300\374\247q\221\274\313\245\002_\265\3577\\+\215gK\226\277A\367\034\317\362\334\377\323}\342\333\340\274\305\236\210\337C\367\360G\272\377\010\037\276h\217]\256\206\205\375N\217\344\023~\346!\020d4\351f;\2037\376\206\377\233[\255\212[\000\250C0\047\202\263\360\206\374\245ee\340O\230%>.\342\217\274\234w\354kA\002j\017\305[OZM7\347\036\261}f\377\003\264\200z\017";
-    PyObject *data = __Pyx_DecompressString(cstring, 1430, 1);
+    #if (CYTHON_COMPRESS_STRINGS) == 1 /* compression: zlib (1614 bytes) */
+static const char cstring[] = "x\332\255TMS\333F\0306`\010PHl#\210KH\"\363Q\372e2\006\222Ii\247\255\2033i:\235Nm\234\024\322\231jV\322\032\253\261%Y\273\002\222^z\364Q\307=\356QG\035u\324\321G\035u\364O\360O\350\273\302iH\277f:S\317xW\332}\367}\237\347}\236\325\274,kV\307\355\232D>7t\374\251l#Be\332\3062u\220nP\3032QG\226\317\021\221u\307\262m\254\313\345\262\3341L,\033\344\335\365\256\241\227\251\365\022\233\007\362\372\366\366G\037\227\313\227\231e\310kR\243ehH\244+#\007#Q\214\266\017\344\235{\007P\337\244\020 \253\370\225e\352c8\362\227_}\047\212<\203=\247k\230\210B\005B\035\303<\205\352\260\006\250\020\2251\034\260Z\262a\332.\225?\264llB\330\271A\333r\317\265(\226\2656r\220\006\341\362\266f\251V\307F\016\301\316=\305v\260\355X\032&Di\001\341\035\373\325E\355\251\310\252v\360s\345iMy\374}My*\376\265c\345\350q=}o>>n\276}8jV\033ME\371\341\325\005\374k\206F\225\357\361\005m\340\226\242 \323\264( V\340\247u\020\0249\305\024@w\305B\313551w\221a\246\263\245\273\2354\324D\335t\356\271\250\363\346\231bBa2\210\242Y\216\345R\350\tj\t\240\320rSG\344\225\251\031\326\316\037{D\305-\313\301Z[k\273\346KM\350\244@\031\320R\303*\322^^i\302\316\237\233\000\215\357`MHDv\220\252\215eQ:PG\307\252{\252\210lDA\002J\267\013[D\307-\3548X\037;\000\233n\027\220Q\214/4\214u\242\\\261\220\222\n\216/ld\352\024\251\244\riD>1\023\334s\261\251a\005\316\253\3301\014S\027^\261\034`\255\202[\224\261\005:\212\r\273\226\2366\003\034E\224K\\c8\360\236\00204\305\320\025BQ\327\206\2453\354\020@\240Pt%P7N\001\027!6\264E\350B\004\224\264Y\246\225\262\034[L!.\021}\306zGx\317\206\354\247\370\262\270\351b]\031\207\021\260\276\222Z\037\204w\272\250c\274\306J\313\270\200\210\226x\247\320q\232&\002\373\2769d[v\352QEk_\316\302\275\016:w0q;\324I\353Ag\024q]\010\246\320k\004\353\304\206\343)D \010I\323(1@\377)\370O\001\350\032>;C\035\027\223\253\334\377\"\3369rL\200C\342\314V\274U\213k\352(\223\321&\236L\302\364d\362\233\311\221\224\231\276\313P\222\225\371D\222\275\303\320\250\230\231^e\371\321\365\314\364\373lb4\233\231\336\340\245a\366\332o""\257\275\274\267\315\362\311l\316\233\366~\342\023\303\354b\277\236\210a\230\235\355\317y7\331\034\317\363m\177\305\357%\2637\372D\004\263-\366\253_\362+\303\331\367\372{}\324?\363\032^\017r.\346\342\033w\031\2157\276\010k\321D\222[c\325$\267\311a\310\217\026`\267\337Kr+\336)\2533\225O\363:G\311\302\215\267k\210\235\361z\222\273\305*\311B!-SJ\026D\212\313A0\271\362\n\234\222\205\305\341\354\262\327\204\3102\047\000\350AP\010\276\214\200\313\345\342\216?\001e\347\326\342[{\301\375p>\332\210\232\203\245\301\267\361\363\223\370\344E2[\212K_\205n\364\355@\213\353\317\342g\307\361\261\032\2538\306\255\004h\035xG,\313\016\331k\177\311\257\005S\361^-:\214z)\213\177\344\370\016\233\377\217\341{\375\317\274\047\354>\317\362C\336\363g|5\200\260\233\036e\273\254\016z.^OrE6\3034\276\004\001\324\177\030<\010\013\341\303\2502\204\322\324\253\210\335Y8\\\345/|\047\220\202f\230\017K\002w\215\317\360\266\257\245K\313a;BI\356\016d\311\363M~\352\327G\363\231|\331\377.\234\024\301\253l\023\300\377\352o\007\371\321J&_H$\231O\361\207\376\276\177\036\264C\004m\311\177\342\177\030l\004\300n\311;`M.\305[\237\205R\330\0045\2445\366\204W\222\342]\326\213\345\257\243\tX\252\354\006\245\341\362\312\337m\025+A>(%\305{~\017x\336\177\020\240\321Lfn\311\373\030\304\350\211fTR\243\211\246\276m\332\215T\023\236r\235\007\263\346\005\214\007Lb\047@\345Y\260\031\340\260\022\036\206$*\211\222\217\201c\t\262\344\227\275C\257\307@D\311\253\n\215T6\t\212H\357\263e`\333K\244\233^/)\336b{\242+\311\332]\346\360\002\337\345\r\356\370\022d-\005\273A# \341FXO\344-\020V.%k\037A\355t(\336f\365\341\370\260\304\217\374)\177\317GW\366\327J\220\363\266h\343>\210\266\3537@\234\002d\024Z\240\320\211\n\321^\244\r\362@\376\366\235a\032\234[\007\324\240\312\212\367#\253\262\223\370\203\317\303\373\32150e!\223_c\007\374\271\017\374\227\323\315T\206J\"\025\331\024\253@\227\340a\"\221V\331:{\004\246\002h\307\2517\213\302\211\300\213\360\r\001\177cL\256\000p\232A\021|\262\036>\n\265h)\252&\233\002\363\346V\"\227\375\372\345 0""\r\307\207\233pK\016}\002\272\275\335O[R\332L=\271?&\327\010\0340\305qT\217\324\301\344`cp\024\377P\007\206\245\365a\032-}\300\205\332\377\345C\361o\267gxyH\372\047\225Wy\005\356\355\277\252\374\"\350\301\rX\037{\347\377Ty5\252D\217\240\rS\203\275\001\372\263\3123oT\3769\376\344\353h~\260\035\327\033\303\261\266/\370\271\217\300\007s\222W\021\037p\370,_\357\237zu\3405-\232\223\\]C\336\031\000\314^\213\257\301\007#\276\265\037\324\302lX\025\273\277@G\026\026\223\205O\375\252\177\022h\241p\332\364B\177\277\357zU\357\2305X\357w\026\215\025\n";
+    PyObject *data = __Pyx_DecompressString(cstring, 1614, 1);
     #define __Pyx_DecompressString_LZSS_UNUSED
     if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
     const char* const bytes = __Pyx_PyBytes_AsString(data);
     #if !CYTHON_ASSUME_SAFE_MACROS
     if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
     #endif
-    #elif (CYTHON_COMPRESS_STRINGS) > 0 && (CYTHON_COMPRESS_STRINGS) <= 90 /* compression: lzss (1814 bytes) */
-static const char cstring[] = "\377\n  colum\377ns wide,\377 past th\377e tradit\377ional  w\377as dropp\377ed -- li\337ne is\n\013mi\377d-token:\377 \"\047\047)*--\372T\003 U\000ntifi\373caK\001-area\376i\001th: ./:\376}\000ntent b\337eyond\210\004 ?\365L`\001U\030\000rmin\373atv\000strin\335gz\000ter\222\000at\373 e-\000of in\377put (ope\375n\235\000with q\377uote cha\367rac,\000 \047co\377bolparse\377r/_prepr\177ocess_f\355\000\277.pyxDIR\001b\377leV_ID_E\357ND_I\000\001DX_\367SEQ\013\002TEXT\376\000\006_START_\357_Pyx\001\000Dic\377t_NextRe\377f__annot\376\257\000____cla\376b\000getitem\336\r\001func\025\001ma\373in\003\002odule\356\047\001nam\003\002qua\275l\004\005testD\000i\377s_corout\346\365 af\373\001\207@nda\177syncio.\023\006\377sbeforec\177hchunkc\243A\371_d\000\310@cebac\345k\372\010.\365\r\204`lec\376\355As.abcco\366\221B_l\341 debu\273g_\361As_a\207\001m\365m\256@s\212denum\376\216@teexcee\227ds_\257h_\322`\312`x\377pandtabs\361h<\000\271a\004\001sequ\337ence_=\000be\337riind\237aor\312\353\000b\242`_\344@\367Al_\315p\033\000od\200\"\306`s_\306\212\003co\202\002\231 |\002ic\377_id_stam\375p\254 versio\277n_tag_ \006d\377igitissp\227ace\214As\304\204\001\240\"n\325o\331\002l\337ap\313\000ge:\356 n\354 ued\366\000\354b\343sm]\000\334\204\002\335@rma\377lize_fix\334\037\000\362 mat\333`ts\333pe\304\000ng-\005po\235p\206\204\002_ch\002\003\241\204\001r\377awresult\351rk\002\206 _\221\205\001set\317defa\025\000\303\000rt\256\026\003tri\362\205\001t\332`_\376\255\000cevvalu\363es\325\t\211Nwarn\377ings\320\000%\320\377%D\320Db\360\000\000\357c\001G\002\004\000G\002H\377\002\360\024\000\005\037\230a\377\330\004 \240\001\330\004\036\377\230a\360\030\000\005\032\230\177\021\340\004\r\210Q\330\001\001\377\340\004\010\210\t\220\027\230\377\t\240\021\240\047\250\026\250\377q\330\010\017\210s\220\047\377\230\021\230%\230{\250!\377\2501\340\010\013\2103\210\377a\210v\220R\220q\360\377\014\000\r\020\210q\330\020\377\026\220g\230Q\230b\240\377\005\240Q\240a\330\014\022~-\002!\330\014\034\230A""\000\002\366\000\007\330\014u\000\330\014\r\340\357\010\025\220TT\000-\240s\376T\0006\260\022\260>\300\021\335\330\016\004.\250\001X\000\t\034\377\320\0333\2605\270\n\300\377#\300T\310\023\310J\320\377VY\320YZ\330\010!\377\320!?\270u\300J\310\377c\320QU\320UX\320\377Xb\320be\320ef\375\330\232\000:\220S\230\004\230\377C\230z\250\023\250D\260\377\003\3203D\300C\300q\373\360\010o8\013\2109\220G\377\2305\240\004\240C\240q\377\250\006\250b\260\001\330\014\377\027\220t\2302\230Q\360\377\016\000\r\016\330\020\030\230\337\006\230c\240\023\036\000t\250\3778\2606\270\022\2708\300\3771\340\014\017\210t\2201\372\032\001\010:\000A\240Z\250r\377\260\024\260T\270\021\270!\377\330\020\034\230D\240\006\240\367h\250c\016\002\025\270h\300\357a\330\020\036C\000\021\240$\377\240g\250Q\360\n\000\021\337-\250L\270\002)\001\032\230\367$\230a\377 \047\260\021\360\377\026\000\021\022\330\024 \240\377\003\2408\2504\250w\260\367h\270a\206@\021+\250(\377\260#\260Q\330\020\023\220\377:\230T\240\024\320%9\357\270\024\270T\323 \024\034\230\377G\2401\330\030\037\230q\337\320 @\300\001\346 12\277\260!\340\025\026\330\010\020\030\3771\260\021\260!\330\030/\373\250q\345\00056\260a\360\277\006\000\t\023\220*\322 q\376\373A1\330\014\017\320\017\037W\230t\240\326\002\n\247`\021r\001\3376\230\024\230Y\267\000U\260\377$\260e\2701\270C\270Ws\300!^\001E\313`!\377 \377\021\025\220C\220q\230\001\337\330\020\024\220A\261ab\230\273\002\230\037\000\031\230\025\332\000q\377\330\024\027\220q\330\030\033\373\2303\201!\330\034\037\230r\377\240\022\2402\240R\240r\377\250\024\250U\260!\2602\377\260R\260s\270#\270Q\357\330 %\240\002\000!\330\034\367)\250\021\000\002\330\030\035\230\373Q\3406\004\024\240S\250\003\357\2503\250a\021\014\330\020\"\373\240!\324!\026\220W\230A\377\230Y\320&;\2705\300\375\007\234`\022\000\021\034\230:\227\240V\250\253@\025\030\002\304\"1\377\330\024\030\230\003\2301\230\375A\005\001\001\330\024\032\230\"/\230B\230aj\001X\347\204\002\254\000]1\247\001s\240#\216\001#\251\004\177\022\2502\250T""\260\030\347@\377\"\270B\270c\300\023\300\367A\330$\250\001$%\330 \363-\250\276\000\001\001\034!\240\021\371\340\345\0009\001T\250\023\250C\363\250s\367 \022\013\330\024&\240\220\376!\324\205\022\311\205\024\365aq\342!\3304\032\357\2401\240A\321;Z\260qr\367`\"\276D\263\2019\006\000\021\351#\377^\320+@\300\n\310\047\337\320QR\340\020\337#Z\240\377w\250a\360\n\000\t\024\377\2201\340\004\007\200q\330\377\010\016\210g\220Q\220b\277\230\005\230Q\230a\021\000\320\325\007\346\205\0011\025\001j\270`\014\r\377\330\014,\250A\250Y\260\377c\270\021\360\006\000\005\014\377\2104\210u\220A\220X\017\230R\230q";
-    PyObject *data = __Pyx_DecompressString_LZSS(cstring, 1814, 2263);
+    #elif (CYTHON_COMPRESS_STRINGS) > 0 && (CYTHON_COMPRESS_STRINGS) <= 90 /* compression: lzss (2051 bytes) */
+static const char cstring[] = "\377\n  colum\377ns wide,\377 past th\377e tradit\377ional  w\377as dropp\377ed -- li\337ne is\n\013mi\377d-token:\377 \"\047\047)*--\372T\003 U\000ntifi\373caK\001-area\376i\001th: ./:\376}\000ntent b\337eyond\210\004 >\353?La\001U\031\000rmi\367natw\000stri\273ng{\000ter\223\000a\367t e.\000of i\377nput (op\373en\236\000with \377quote ch\357arac,\000 \047c\377obolpars\377er/_prep\377rocess_f~\356\000.pyxDIR\001\377bleV_ID_\337END_I\000\001DX\357_SEQ\013\002TEX\375T\000\006_START\337__Pyx\001\000Di\377ct_NextR\377ef__anno\375t\257\000____cl\375ab\000getite\275m\r\001func\025\001m\367ain\003\002odul\335e\047\001nam\003\002qu{al\004\005testD\000\377is_corou\315t\366 af\373\001\210@nd\377asyncio.\376\023\006sbefore\377chchunkc\362\244A_d\000\311@ceba\313ck\372\010.\365\r\205`le\375c\356As.abcc\355o\222B_l\341 debwug_\362As_a\207\001\373mm\257@sdefe\357rred\223denu\375m\226@teexce/eds_\270h_\333`\323`\377xpandtab\343shD\000\302a\004\001seq\277uence_=\000b\277eriind\250ao\225r\363\000b\253`_\354@\377Al\233_p\033\000od\210\"\317`s\215_\222\003co\212\002\241 |\002i\377c_id_sta\373mp\264 versi\177on_tag_ \006\377digitiss/pace\224As\315\204\001\250\"\333no\341\002li\336b_s{us\321`dedl\370a\255p\334\000ge\207@n\205@u7ed_ \004smn\000\366\204\002\376\366@rmalize\317_fix\037\000\213@maut\364`tD\002ing-\005wpop\237\204\002_ch\002\003\376\272\204\001rawresu\247ltrk\002\227 _\253\205\001sket\351 a\025\000sp\230\000\354\204B\336\000rt \003tri\352\226\206\001t\375`_\310\000cev?values\360\t\254N\377warnings\377\320\000%\320%D\320D\377b\360\000\000c\001G\002\376\004\000G\002H\002\360\024\000\377\005\037\230a\330\004 \240\377\001\330\004\036\230a\360\030\377\000\005\032\230\021\360\016\000\377\005\031\230\001\360\010\000\005\377#\240!\340\004\007\200z\377\220\021\220\047\230\021\330\010\377\020\220\005\220[\240\001\340\337\004\r\210Q\330\001\001\340\004\377\010\210\t\220\027\230\t\240\377\021\240\047\250\026\250q\330\357\010\017\210s)\001\230%\230\377{\250!\2501\340\010\013\377\2103""\210a\210v\220R\373\220qQ\000\r\020\320\017\037\377\230t\320#<\270D\300\377\001\330\020\034\230A\330\020\373$\240\002\000\021\360\014\000\r\377\020\210q\330\020\026\220g\377\230Q\230b\240\005\240Q\337\240a\330\014\017\n\007a\230\377v\240Q\330\020\033\2301w\330\014\022b\002!\330\014?\001\342\000\002\014\306\001\004\010\321\000\330\014\r\377\340\010\025\220T\230\021\230\367-\240s\216\0006\260\022\260s>\300\311\000\017\003.\250\001t\000\377\t\034\320\0333\2605\270\377\n\300#\300T\310\023\310\377J\320VY\320YZ\330\377\010!\320!?\270u\300\377J\310c\320QU\320U\377X\320Xb\320be\320\367ef\330\324\000:\220S\230\377\004\230C\230z\250\023\250\377D\260\003\3203D\300C\303\300q\301\002\313\026\301\n\230\200G\013\210\3779\220G\2305\240\004\240\377C\240q\250\006\250b\260\377\001\330\014\027\220t\2302\373\230Q\315@\r\016\330\020\030\277\230\006\230c\240\023\036\000t\377\2508\2606\270\022\2708w\3001\340\332 t\2201\032\001\375\010:\000A\240Z\250r\260\177\024\260T\270\021\270!\230A\177D\240\006\240h\250c\016\002\377\025\270h\300a\330\020\036\376C\000\021\240$\240g\250Q\377\360\n\000\021-\250L\270}\002)\001\032\230$\230a\361@\377\047\260\021\360\026\000\021\022\377\330\024 \240\003\2408\250\1774\250w\260h\270a\332@\177\021+\250(\260#\260\275@\377\023\220:\230T\240\024\320\277%9\270\024\270T\213@\024\377\034\230G\2401\330\030\037\177\230q\320 @\300\001\236@\37712\260!\340\025\026\330\376\010\020\0301\260\021\260!\330\357\030/\250q\345\00056\260\377a\360\006\000\t\023\220*\n\212@q\355a1\344b\307a\227b\222b\365\017\363b\240\347\002\n\240\047\250\377\021\330\020\023\2206\230\024\373\230Y\310\000U\260$\260e\377\2701\270C\270s\300!\376o\001E\240\021\240!\360\010\377\000\021\025\220C\220q\230\277\001\330\020\024\220A\226\204\001bw\230\002\230\037\000\031\230\025\353\000\377q\330\024\027\220q\330\030\367\033\2303\222!\330\034\037\230\377r\240\022\2402\240R\240\377r\250\024\250U\260!\260\3772\260R\260s\270#\270\337Q\330 %\240\002\000!\330\363\034)y\000\000\002\030\035\230Q\375\3406\004\024\240S""\250\003\250\3673\250a\025\010\034!\240\021\373\330\035\303!4\240t\2502\353\250R\232@\022O\000T\270\025\377\270a\270r\300\022\3003\357\300c\310\021\372\000\035\036\340\346(\002\020\"\263\000\223@\026\220W\377\230A\230Y\320&;\270\3775\300\007\300q\360\022\000\177\021\034\230:\240V\250\351@\371\025\030\002\202B1\330\024\030\230\337\003\2301\230A\005\001\001\330\377\024\032\230\"\230B\230a\245\330\230\000X\371\205\002\331\0001\324\001s\253\240#\273\001#\326\004\022\214\000T\373\260\030\245`\"\270B\270c\277\300\023\300A\330$\325\001$\037%\330 -\250\353\000\001\001\275\001\371\340\222 9\001T\250\023\250Cc\250s\265@\026\007\216\"!$\217\204\002\3354\326\004R\260r\222`X\300\377Q\300b\310\002\310#\310\357S\320PQ\334@!\"\340\216\274\"\024&\240\352A\375\206)\204\207\031\340\372\330\207\003\024\316U\032\2401\240A\376\310[Z\260q\270\002\270\"|\265d\232\202I\032\3001\300B\204 \337\003\3103\310a\326M\006\000\375\021\340C^\320+@\300\n\177\310\047\320QR\340\020\326C\377Z\240w\250a\360\n\000\357\t\024\2201\275\212\001q\330\010\377\016\210g\220Q\220b\230\267\005\230Q\360\212\001\007\200\013\006a\377\220v\230Q\340\004\007\320\377\007\027\220t\320\0334\260\337D\270\004\270A.\001j\230\377\001\330\014\r\330\014,\250\277A\250Y\260c\270\346a\005\377\014\2104\210u\220A\220\037X\230R\230q";
+    PyObject *data = __Pyx_DecompressString_LZSS(cstring, 2051, 2653);
     #define __Pyx_DecompressString_UNUSED
     if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
     const char* const bytes = __Pyx_PyBytes_AsString(data);
     #if !CYTHON_ASSUME_SAFE_MACROS
     if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
     #endif
-    #else /* compression: none (2263 bytes) */
-static const char bytes[] = "\n  columns wide, past the traditional  was dropped -- line is  was dropped mid-token: \"\047\047)*--column identification-area width: ./: content beyond column ?Line Unterminated string literal at end of input (opened with quote character \047cobolparser/_preprocess_fast.pyxDIterableV_ID_END_IND_IDX_SEQ_END_TEXT_END_TEXT_START__Pyx_PyDict_NextRef__annotate____class_getitem____func____main____module____name____qualname____test___is_coroutineafterappendasyncio.coroutinesbeforechchunkcline_in_tracebackcobolparser._preprocess_fastcollections.abccontent_lenddebug_lines_as_commentsdroppedenumerateexceeds_traditional_widthexpandtabshas_linehas_sequence_numberiindicatoris_bare_terminal_periodis_contis_debug_commentis_numeric_id_stampis_version_tag_commentisdigitisspaceitemslineline_nolineslstripmerge_continued_literalsmid_tokennnormalize_fixed_formatpartspending_literalpopquote_chquote_openrawresultrstripseq_areasetdefaultstartstripstrippedtext_slicevvaluesversion_tag_lines_as_commentswarnings\320\000%\320%D\320Db\360\000\000c\001G\002\360\000\000G\002H\002\360\024\000\005\037\230a\330\004 \240\001\330\004\036\230a\360\030\000\005\032\230\021\340\004\r\210Q\330\004\r\210Q\340\004\010\210\t\220\027\230\t\240\021\240\047\250\026\250q\330\010\017\210s\220\047\230\021\230%\230{\250!\2501\340\010\013\2103\210a\210v\220R\220q\360\014\000\r\020\210q\330\020\026\220g\230Q\230b\240\005\240Q\240a\330\014\022\220\047\230\021\230!\330\014\034\230A\330\014\034\230A\330\014\034\230A\330\014\034\230A\330\014\036\230a\330\014\r\340\010\025\220T\230\021\230-\240s\250!\2506\260\022\260>\300\021\330\010\025\220T\230\021\230.\250\001\360\014\000\t\034\320\0333\2605\270\n\300#\300T\310\023\310J\320VY\320YZ\330\010!\320!?\270u\300J\310c\320QU\320UX\320Xb\320be\320ef\330\010\013\210:\220S\230\004\230C\230z\250\023\250D\260\003\3203D\300C\300q\360\010\000\r\020\210q\330\020\026\220g\230Q\230b\240\005\240Q\240a\330\014\022\220\047\230\021\230!\330\014\034\230A\330\014\034\230A\330\014\034\230A""\330\014\034\230A\330\014\036\230a\330\014\r\340\010\013\2109\220G\2305\240\004\240C\240q\250\006\250b\260\001\330\014\027\220t\2302\230Q\360\016\000\r\016\330\020\030\230\006\230c\240\023\240C\240t\2508\2606\270\022\2708\3001\340\014\017\210t\2201\330\020\030\230\010\240\004\240A\240Z\250r\260\024\260T\270\021\270!\330\020\034\230D\240\006\240h\250c\260\024\260T\270\025\270h\300a\330\020\036\230c\240\021\240$\240g\250Q\360\n\000\021-\250L\270\002\270!\330\020\032\230$\230a\230{\250\047\260\021\360\026\000\021\022\330\024 \240\003\2408\2504\250w\260h\270a\360\014\000\021+\250(\260#\260Q\330\020\023\220:\230T\240\024\320%9\270\024\270T\300\021\330\024\034\230G\2401\330\030\037\230q\320 @\300\001\300\021\33012\260!\340\025\026\330\024\034\230G\2401\330\030\037\230q\320 @\300\001\300\021\330\0301\260\021\260!\330\030/\250q\260\001\33056\260a\360\006\000\t\023\220*\230C\230q\340\010\013\2101\330\014\017\320\017\037\230t\2401\330\020\030\230\n\240\047\250\021\330\020\023\2206\230\024\230Y\240g\250U\260$\260e\2701\270C\270s\300!\330\024\034\230E\240\021\240!\360\010\000\021\025\220C\220q\230\001\330\020\024\220A\330\020\026\220b\230\002\230!\330\024\031\230\025\230a\230q\330\024\027\220q\330\030\033\2303\230c\240\021\330\034\037\230r\240\022\2402\240R\240r\250\024\250U\260!\2602\260R\260s\270#\270Q\330 %\240Q\330 !\330\034)\250\021\330\034)\250\021\330\030\035\230Q\340\030\033\2303\230c\240\024\240S\250\003\2503\250a\330\034)\250\021\330\034)\250\021\330\030\035\230Q\330\020\"\240!\360\n\000\021\026\220W\230A\230Y\320&;\2705\300\007\300q\360\022\000\021\034\230:\240V\2501\330\020\025\220W\230A\230Q\330\020\023\2201\330\024\030\230\003\2301\230A\330\024\030\230\001\330\024\032\230\"\230B\230a\330\030\035\230X\240Q\240a\330\030\033\2301\330\034\037\230s\240#\240Q\330 #\2402\240R\240r\250\022\2502\250T\260\030\270\021\270\"\270B\270c\300\023\300A\330$)\250\021\330$%\330 -\250Q\330 -\250Q\330\034!\240\021\340\034\037\230s\240#\240T\250\023\250C\250s\260!\330 -\250Q\330 -\250Q""\330\034!\240\021\330\024&\240a\360\006\000\r\020\210q\330\020\026\220g\230Q\230b\240\005\240Q\240a\330\014\034\230A\330\014\034\230A\330\014\034\230A\330\014\034\230A\330\014\036\230a\340\014\017\210q\330\020\024\220C\220q\230\001\330\020\024\220A\330\020\026\220b\230\002\230!\330\024\031\230\032\2401\240A\330\024\027\220q\330\030\033\2303\230c\240\021\330\034\037\230r\240\022\2402\240R\240r\250\024\250Z\260q\270\002\270\"\270C\270s\300!\330 %\240Q\330 !\330\034)\250\021\330\034)\250\021\330\030\035\230Q\340\030\033\2303\230c\240\024\240S\250\003\2503\250a\330\034)\250\021\330\034)\250\021\330\030\035\230Q\330\020\"\240!\360\006\000\021\026\220W\230A\230^\320+@\300\n\310\047\320QR\340\020\025\220W\230A\230Z\240w\250a\360\n\000\t\024\2201\340\004\007\200q\330\010\016\210g\220Q\220b\230\005\230Q\230a\340\004\007\320\007\027\220t\2301\330\010\016\210j\230\001\330\014\r\330\014,\250A\250Y\260c\270\021\360\006\000\005\014\2104\210u\220A\220X\230R\230q";
+    #else /* compression: none (2653 bytes) */
+static const char bytes[] = "\n  columns wide, past the traditional  was dropped -- line is  was dropped mid-token: \"\047\047)*--column identification-area width: ./: content beyond column >?Line Unterminated string literal at end of input (opened with quote character \047cobolparser/_preprocess_fast.pyxDIterableV_ID_END_IND_IDX_SEQ_END_TEXT_END_TEXT_START__Pyx_PyDict_NextRef__annotate____class_getitem____func____main____module____name____qualname____test___is_coroutineafterappendasyncio.coroutinesbeforechchunkcline_in_tracebackcobolparser._preprocess_fastcollections.abccontent_lenddebug_lines_as_commentsdeferreddroppedenumerateexceeds_traditional_widthexpandtabshas_linehas_sequence_numberiindicatoris_bare_terminal_periodis_contis_debug_commentis_numeric_id_stampis_version_tag_commentisdigitisspaceitemslineline_nolinesliteral_suspendedlstripmerge_continued_literalsmid_tokennnormalize_fixed_formatpartspending_literalpopquote_chquote_openrawresultrstripseq_areasetdefaultsplitlinesstartstripstrippedtext_slicevvaluesversion_tag_lines_as_commentswarnings\320\000%\320%D\320Db\360\000\000c\001G\002\360\000\000G\002H\002\360\024\000\005\037\230a\330\004 \240\001\330\004\036\230a\360\030\000\005\032\230\021\360\016\000\005\031\230\001\360\010\000\005#\240!\340\004\007\200z\220\021\220\047\230\021\330\010\020\220\005\220[\240\001\340\004\r\210Q\330\004\r\210Q\340\004\010\210\t\220\027\230\t\240\021\240\047\250\026\250q\330\010\017\210s\220\047\230\021\230%\230{\250!\2501\340\010\013\2103\210a\210v\220R\220q\360\010\000\r\020\320\017\037\230t\320#<\270D\300\001\330\020\034\230A\330\020$\240A\330\020\021\360\014\000\r\020\210q\330\020\026\220g\230Q\230b\240\005\240Q\240a\330\014\017\210q\330\020\026\220g\230Q\230a\230v\240Q\330\020\033\2301\330\014\022\220\047\230\021\230!\330\014\034\230A\330\014\034\230A\330\014 \240\001\330\014\034\230A\330\014\034\230A\330\014\036\230a\330\014\r\340\010\025\220T\230\021\230-\240s\250!\2506\260\022\260>\300\021\330\010\025\220T\230\021\230.\250\001\360\014\000\t\034""\320\0333\2605\270\n\300#\300T\310\023\310J\320VY\320YZ\330\010!\320!?\270u\300J\310c\320QU\320UX\320Xb\320be\320ef\330\010\013\210:\220S\230\004\230C\230z\250\023\250D\260\003\3203D\300C\300q\360\014\000\r\020\320\017\037\230t\320#<\270D\300\001\330\020\034\230A\330\020$\240A\330\020\021\330\014\017\210q\330\020\026\220g\230Q\230b\240\005\240Q\240a\330\014\017\210q\330\020\026\220g\230Q\230a\230v\240Q\330\020\033\2301\330\014\022\220\047\230\021\230!\330\014\034\230A\330\014\034\230A\330\014 \240\001\330\014\034\230A\330\014\034\230A\330\014\036\230a\330\014\r\340\010\013\2109\220G\2305\240\004\240C\240q\250\006\250b\260\001\330\014\027\220t\2302\230Q\360\016\000\r\016\330\020\030\230\006\230c\240\023\240C\240t\2508\2606\270\022\2708\3001\340\014\017\210t\2201\330\020\030\230\010\240\004\240A\240Z\250r\260\024\260T\270\021\270!\330\020\034\230D\240\006\240h\250c\260\024\260T\270\025\270h\300a\330\020\036\230c\240\021\240$\240g\250Q\360\n\000\021-\250L\270\002\270!\330\020\032\230$\230a\230{\250\047\260\021\360\026\000\021\022\330\024 \240\003\2408\2504\250w\260h\270a\360\014\000\021+\250(\260#\260Q\330\020\023\220:\230T\240\024\320%9\270\024\270T\300\021\330\024\034\230G\2401\330\030\037\230q\320 @\300\001\300\021\33012\260!\340\025\026\330\024\034\230G\2401\330\030\037\230q\320 @\300\001\300\021\330\0301\260\021\260!\330\030/\250q\260\001\33056\260a\360\006\000\t\023\220*\230C\230q\340\010\013\2101\360\010\000\r\020\210q\330\020\034\230A\330\014 \240\001\330\014\017\320\017\037\230t\2401\330\020\030\230\n\240\047\250\021\330\020\023\2206\230\024\230Y\240g\250U\260$\260e\2701\270C\270s\300!\330\024\034\230E\240\021\240!\360\010\000\021\025\220C\220q\230\001\330\020\024\220A\330\020\026\220b\230\002\230!\330\024\031\230\025\230a\230q\330\024\027\220q\330\030\033\2303\230c\240\021\330\034\037\230r\240\022\2402\240R\240r\250\024\250U\260!\2602\260R\260s\270#\270Q\330 %\240Q\330 !\330\034)\250\021\330\034)\250\021\330\030\035\230Q\340\030\033\2303\230c\240\024\240S""\250\003\2503\250a\330\034)\250\021\330\034)\250\021\330\034!\240\021\330\035 \240\003\2404\240t\2502\250R\250r\260\022\2602\260T\270\025\270a\270r\300\022\3003\300c\310\021\360\006\000\035\036\340\034!\240\021\330\020\"\240!\360\n\000\021\026\220W\230A\230Y\320&;\2705\300\007\300q\360\022\000\021\034\230:\240V\2501\330\020\025\220W\230A\230Q\330\020\023\2201\330\024\030\230\003\2301\230A\330\024\030\230\001\330\024\032\230\"\230B\230a\330\030\035\230X\240Q\240a\330\030\033\2301\330\034\037\230s\240#\240Q\330 #\2402\240R\240r\250\022\2502\250T\260\030\270\021\270\"\270B\270c\300\023\300A\330$)\250\021\330$%\330 -\250Q\330 -\250Q\330\034!\240\021\340\034\037\230s\240#\240T\250\023\250C\250s\260!\330 -\250Q\330 -\250Q\330 %\240Q\330!$\240C\240t\2504\250r\260\022\2602\260R\260r\270\024\270X\300Q\300b\310\002\310#\310S\320PQ\360\006\000!\"\340 %\240Q\330\024&\240a\360\006\000\r\020\210q\330\020\026\220g\230Q\230b\240\005\240Q\240a\330\014\017\210q\330\020\026\220g\230Q\230a\230v\240Q\330\020\033\2301\330\014\034\230A\330\014\034\230A\330\014 \240\001\330\014\034\230A\330\014\034\230A\330\014\036\230a\340\014\017\210q\330\020\024\220C\220q\230\001\330\020\024\220A\330\020\026\220b\230\002\230!\330\024\031\230\032\2401\240A\330\024\027\220q\330\030\033\2303\230c\240\021\330\034\037\230r\240\022\2402\240R\240r\250\024\250Z\260q\270\002\270\"\270C\270s\300!\330 %\240Q\330 !\330\034)\250\021\330\034)\250\021\330\030\035\230Q\340\030\033\2303\230c\240\024\240S\250\003\2503\250a\330\034)\250\021\330\034)\250\021\330\034!\240\021\330\035 \240\003\2404\240t\2502\250R\250r\260\022\2602\260T\270\032\3001\300B\300b\310\003\3103\310a\360\006\000\035\036\340\034!\240\021\330\020\"\240!\360\006\000\021\026\220W\230A\230^\320+@\300\n\310\047\320QR\340\020\025\220W\230A\230Z\240w\250a\360\n\000\t\024\2201\340\004\007\200q\330\010\016\210g\220Q\220b\230\005\230Q\230a\330\004\007\200q\330\010\016\210g\220Q\220a\220v\230Q\340\004\007\320\007\027\220t\320\0334\260D\270\004\270A\330\010\016""\210j\230\001\330\014\r\330\014,\250A\250Y\260c\270\021\360\006\000\005\014\2104\210u\220A\220X\230R\230q";
     PyObject *data = NULL;
     #define __Pyx_DecompressString_UNUSED
     #define __Pyx_DecompressString_LZSS_UNUSED
     #endif
     PyObject **stringtab = __pyx_mstate->__pyx_string_tab;
     Py_ssize_t pos = 0;
-    for (int i = 0; i < 91; i++) {
+    for (int i = 0; i < 95; i++) {
       Py_ssize_t bytes_length = str_length_index[i].length;
       PyObject *string = PyUnicode_DecodeUTF8(bytes + pos, bytes_length, NULL);
-      if (likely(string) && i >= 19) PyUnicode_InternInPlace(&string);
+      if (likely(string) && i >= 20) PyUnicode_InternInPlace(&string);
       if (unlikely(!string)) {
         Py_XDECREF(data);
         __PYX_ERR(0, 1, __pyx_L1_error)
@@ -6297,8 +6986,8 @@ static const char bytes[] = "\n  columns wide, past the traditional  was dropped
       stringtab[i] = string;
       pos += bytes_length;
     }
-    for (int i = 91; i < 92; i++) {
-      Py_ssize_t bytes_length = bytes_length_index[i-91].length;
+    for (int i = 95; i < 96; i++) {
+      Py_ssize_t bytes_length = bytes_length_index[i-95].length;
       PyObject *string = PyBytes_FromStringAndSize(bytes + pos, bytes_length);
       stringtab[i] = string;
       pos += bytes_length;
@@ -6308,14 +6997,14 @@ static const char bytes[] = "\n  columns wide, past the traditional  was dropped
       }
     }
     Py_XDECREF(data);
-    for (Py_ssize_t i = 0; i < 92; i++) {
+    for (Py_ssize_t i = 0; i < 96; i++) {
       if (unlikely(PyObject_Hash(stringtab[i]) == -1)) {
         __PYX_ERR(0, 1, __pyx_L1_error)
       }
     }
     #if CYTHON_IMMORTAL_CONSTANTS
     {
-      PyObject **table = stringtab + 91;
+      PyObject **table = stringtab + 95;
       for (Py_ssize_t i=0; i<1; ++i) {
         #if PY_VERSION_HEX >= 0x030F0000
         PyUnstable_SetImmortal(table[i]);
@@ -6402,9 +7091,9 @@ static int __Pyx_CreateCodeObjects(__pyx_mstatetype *__pyx_mstate) {
   PyObject* tuple_dedup_map = PyDict_New();
   if (unlikely(!tuple_dedup_map)) return -1;
   {
-    const __Pyx_PyCode_New_function_description descr = {1, 0, 4, 34, (unsigned int)(CO_OPTIMIZED|CO_NEWLOCALS), 25};
-    PyObject* const varnames[] = {__pyx_mstate->__pyx_n_u_lines, __pyx_mstate->__pyx_n_u_merge_continued_literals, __pyx_mstate->__pyx_n_u_debug_lines_as_comments, __pyx_mstate->__pyx_n_u_version_tag_lines_as_comments, __pyx_mstate->__pyx_n_u_warnings, __pyx_mstate->__pyx_n_u_i, __pyx_mstate->__pyx_n_u_n, __pyx_mstate->__pyx_n_u_quote_open, __pyx_mstate->__pyx_n_u_pending_literal, __pyx_mstate->__pyx_n_u_quote_ch, __pyx_mstate->__pyx_n_u_ch, __pyx_mstate->__pyx_n_u_is_debug_comment, __pyx_mstate->__pyx_n_u_is_version_tag_comment, __pyx_mstate->__pyx_n_u_has_line, __pyx_mstate->__pyx_n_u_result, __pyx_mstate->__pyx_n_u_parts, __pyx_mstate->__pyx_n_u_line_no, __pyx_mstate->__pyx_n_u_raw, __pyx_mstate->__pyx_n_u_line, __pyx_mstate->__pyx_n_u_indicator, __pyx_mstate->__pyx_n_u_text_slice, __pyx_mstate->__pyx_n_u_seq_area, __pyx_mstate->__pyx_n_u_has_sequence_number, __pyx_mstate->__pyx_n_u_before, __pyx_mstate->__pyx_n_u_after, __pyx_mstate->__pyx_n_u_mid_token, __pyx_mstate->__pyx_n_u_content_len, __pyx_mstate->__pyx_n_u_exceeds_traditional_width, __pyx_mstate->__pyx_n_u_dropped, __pyx_mstate->__pyx_n_u_is_numeric_id_stamp, __pyx_mstate->__pyx_n_u_is_bare_terminal_period, __pyx_mstate->__pyx_n_u_is_cont, __pyx_mstate->__pyx_n_u_chunk, __pyx_mstate->__pyx_n_u_stripped};
-    __pyx_mstate_global->__pyx_codeobj_tab[0] = __Pyx_PyCode_New(descr, varnames, __pyx_mstate->__pyx_kp_u_cobolparser__preprocess_fast_pyx, __pyx_mstate->__pyx_n_u_normalize_fixed_format, __pyx_mstate->__pyx_kp_b_iso88591_DDb_c_G_G_H_a_a_Q_Q_q_s_1_3avRq, tuple_dedup_map); if (unlikely(!__pyx_mstate_global->__pyx_codeobj_tab[0])) goto bad;
+    const __Pyx_PyCode_New_function_description descr = {1, 0, 4, 36, (unsigned int)(CO_OPTIMIZED|CO_NEWLOCALS), 25};
+    PyObject* const varnames[] = {__pyx_mstate->__pyx_n_u_lines, __pyx_mstate->__pyx_n_u_merge_continued_literals, __pyx_mstate->__pyx_n_u_debug_lines_as_comments, __pyx_mstate->__pyx_n_u_version_tag_lines_as_comments, __pyx_mstate->__pyx_n_u_warnings, __pyx_mstate->__pyx_n_u_i, __pyx_mstate->__pyx_n_u_n, __pyx_mstate->__pyx_n_u_quote_open, __pyx_mstate->__pyx_n_u_pending_literal, __pyx_mstate->__pyx_n_u_quote_ch, __pyx_mstate->__pyx_n_u_ch, __pyx_mstate->__pyx_n_u_is_debug_comment, __pyx_mstate->__pyx_n_u_is_version_tag_comment, __pyx_mstate->__pyx_n_u_has_line, __pyx_mstate->__pyx_n_u_deferred, __pyx_mstate->__pyx_n_u_literal_suspended, __pyx_mstate->__pyx_n_u_result, __pyx_mstate->__pyx_n_u_parts, __pyx_mstate->__pyx_n_u_line_no, __pyx_mstate->__pyx_n_u_raw, __pyx_mstate->__pyx_n_u_line, __pyx_mstate->__pyx_n_u_indicator, __pyx_mstate->__pyx_n_u_text_slice, __pyx_mstate->__pyx_n_u_seq_area, __pyx_mstate->__pyx_n_u_has_sequence_number, __pyx_mstate->__pyx_n_u_before, __pyx_mstate->__pyx_n_u_after, __pyx_mstate->__pyx_n_u_mid_token, __pyx_mstate->__pyx_n_u_content_len, __pyx_mstate->__pyx_n_u_exceeds_traditional_width, __pyx_mstate->__pyx_n_u_dropped, __pyx_mstate->__pyx_n_u_is_numeric_id_stamp, __pyx_mstate->__pyx_n_u_is_bare_terminal_period, __pyx_mstate->__pyx_n_u_is_cont, __pyx_mstate->__pyx_n_u_chunk, __pyx_mstate->__pyx_n_u_stripped};
+    __pyx_mstate_global->__pyx_codeobj_tab[0] = __Pyx_PyCode_New(descr, varnames, __pyx_mstate->__pyx_kp_u_cobolparser__preprocess_fast_pyx, __pyx_mstate->__pyx_n_u_normalize_fixed_format, __pyx_mstate->__pyx_kp_b_iso88591_DDb_c_G_G_H_a_a_z_Q_Q_q_s_1_3av, tuple_dedup_map); if (unlikely(!__pyx_mstate_global->__pyx_codeobj_tab[0])) goto bad;
   }
   Py_DECREF(tuple_dedup_map);
   return 0;
@@ -7693,6 +8382,31 @@ static void __Pyx_RaiseArgtupleInvalid(
                  (num_expected == 1) ? "" : "s", num_found);
 }
 
+/* PyObjectFastCallMethod */
+#if !CYTHON_VECTORCALL
+static PyObject *__Pyx_PyObject_FastCallMethod(PyObject *name, PyObject *const *args, size_t nargsf) {
+    PyObject *result;
+    switch (__Pyx_PyVectorcall_NARGS(nargsf)) {
+        case 1:
+            return PyObject_CallMethodObjArgs(args[0], name, NULL);
+        case 2:
+            return PyObject_CallMethodObjArgs(args[0], name, args[1], NULL);
+        case 3:
+            return PyObject_CallMethodObjArgs(args[0], name, args[1], args[2], NULL);
+        case 4:
+            return PyObject_CallMethodObjArgs(args[0], name, args[1], args[2], args[3], NULL);
+        case 5:
+            return PyObject_CallMethodObjArgs(args[0], name, args[1], args[2], args[3], args[4], NULL);
+    }
+    PyObject *attr = PyObject_GetAttr(args[0], name);
+    if (unlikely(!attr))
+        return NULL;
+    result = __Pyx_PyObject_FastCall(attr, args+1, nargsf - 1);
+    Py_DECREF(attr);
+    return result;
+}
+#endif
+
 /* PyObjectVectorcallKwds */
 #if CYTHON_VECTORCALL
 CYTHON_UNUSED static int __Pyx_CheckVectorcallKwarg(PyObject *kwnames, Py_ssize_t i) {
@@ -7765,31 +8479,6 @@ static int __Pyx_IternextUnpackEndCheck(PyObject *retval, Py_ssize_t expected) {
     }
     return __Pyx_IterFinish();
 }
-
-/* PyObjectFastCallMethod */
-#if !CYTHON_VECTORCALL
-static PyObject *__Pyx_PyObject_FastCallMethod(PyObject *name, PyObject *const *args, size_t nargsf) {
-    PyObject *result;
-    switch (__Pyx_PyVectorcall_NARGS(nargsf)) {
-        case 1:
-            return PyObject_CallMethodObjArgs(args[0], name, NULL);
-        case 2:
-            return PyObject_CallMethodObjArgs(args[0], name, args[1], NULL);
-        case 3:
-            return PyObject_CallMethodObjArgs(args[0], name, args[1], args[2], NULL);
-        case 4:
-            return PyObject_CallMethodObjArgs(args[0], name, args[1], args[2], args[3], NULL);
-        case 5:
-            return PyObject_CallMethodObjArgs(args[0], name, args[1], args[2], args[3], args[4], NULL);
-    }
-    PyObject *attr = PyObject_GetAttr(args[0], name);
-    if (unlikely(!attr))
-        return NULL;
-    result = __Pyx_PyObject_FastCall(attr, args+1, nargsf - 1);
-    Py_DECREF(attr);
-    return result;
-}
-#endif
 
 /* PyDictVersioning (used by GetModuleGlobalName) */
 #if CYTHON_USE_DICT_VERSIONS && CYTHON_USE_TYPE_SLOTS
@@ -8004,6 +8693,21 @@ static CYTHON_INLINE int __Pyx_PyList_Append(PyObject* list, PyObject* x) {
         return 0;
     }
     return PyList_Append(list, x);
+}
+#endif
+
+/* ListExtend */
+#if (CYTHON_COMPILING_IN_LIMITED_API || PY_VERSION_HEX < 0x030d0000) && !defined(PyList_Extend)
+static CYTHON_INLINE int __Pyx_PyList_Extend(PyObject* L, PyObject* v) {
+#if CYTHON_COMPILING_IN_CPYTHON
+    PyObject* none = _PyList_Extend((PyListObject*)L, v);
+    if (unlikely(!none))
+        return -1;
+    Py_DECREF(none);
+    return 0;
+#else
+    return PyList_SetSlice(L, PY_SSIZE_T_MAX, PY_SSIZE_T_MAX, v);
+#endif
 }
 #endif
 

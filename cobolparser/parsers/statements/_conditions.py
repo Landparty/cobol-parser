@@ -85,6 +85,42 @@ _CLASS_SIGN_WORDS = {
 # ``IF END-OF-FILE``) apart from stray literals in the fallback path.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
 
+# Resolved relational operator names, and each one's negation. Used both to
+# fold a leading ``NOT`` into a simple relation (``NOT A = 1`` is ``A NOT =
+# 1``, which the cleaning pass already spells NOT_EQUAL) and to expand the
+# ``NOT literal`` leg of an abbreviated combined condition.
+_NEGATED_RELATIONAL = {
+    "EQUAL": "NOT_EQUAL",
+    "NOT_EQUAL": "EQUAL",
+    "GREATER": "LESS_OR_EQUAL",
+    "LESS_OR_EQUAL": "GREATER",
+    "LESS": "GREATER_OR_EQUAL",
+    "GREATER_OR_EQUAL": "LESS",
+}
+_RELATIONAL_OPERATORS = frozenset(_NEGATED_RELATIONAL)
+
+# Figurative constants that can stand alone as the object of a relation
+# (``IF A = 1 OR SPACES``); a bare one of these after AND/OR is a literal
+# leg of an abbreviated combined condition, never a condition-name.
+_FIGURATIVE_WORDS = frozenset(
+    {
+        "SPACE",
+        "SPACES",
+        "ZERO",
+        "ZEROS",
+        "ZEROES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "QUOTE",
+        "QUOTES",
+        "NULL",
+        "NULLS",
+    }
+)
+_NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
+
 
 def condition_token_text(token: Token) -> str:
     """Text for one condition token, re-quoting string literals.
@@ -175,12 +211,28 @@ def build_condition_expression(
         idx = find_top_level_operator(cleaned, logical_op)
         if idx is not None:
             left_expr = build_condition_expression(cleaned[:idx], location)
-            right_expr = build_condition_expression(cleaned[idx + 1 :], location)
+            # ``IF A = 1 OR 2`` / ``IF A > 1 AND < 5``: an abbreviated
+            # combined relation condition repeats the subject (and, for a
+            # bare literal, the operator) of the relation before it.
+            right_tokens = _expand_abbreviated_condition(left_expr, cleaned[idx + 1 :])
+            right_expr = build_condition_expression(right_tokens, location)
             if left_expr and right_expr:
                 logical = LogicalExpression(logical_op, location)
                 logical.set_left_condition(left_expr)
                 logical.set_right_condition(right_expr)
                 return logical
+
+    # Leading NOT: ``NOT A = 1``, ``NOT (A = 1 AND B = 2)``, ``NOT FLAG-ON``.
+    # NOT binds tighter than AND/OR, so this runs after the split above
+    # (``NOT A = 1 AND B = 2`` negates only the first relation). The
+    # negation is folded into a simple relation / class / sign condition's
+    # operator and wrapped as a unary LogicalExpression("NOT") otherwise.
+    # Previously the word was swallowed into the left operand text
+    # (``left_operand="NOT ( A"``).
+    if len(cleaned) > 1 and cleaned[0].upper() == "NOT":
+        inner = build_condition_expression(cleaned[1:], location)
+        if inner is not None and not _is_raw_fallback(inner):
+            return _negate_condition(inner, location)
 
     # Simple comparison: find the first comparison operator token
     upper_cleaned = [t.upper() for t in cleaned]
@@ -223,6 +275,97 @@ def build_condition_expression(
         return expr
 
     return None
+
+
+def _is_raw_fallback(expr: CobolExpression) -> bool:
+    """True for the catch-all ``COMPARISON`` node the builder emits when it
+    cannot decompose a condition (only ``metadata["raw_condition"]`` set)."""
+    return (
+        isinstance(expr, ConditionalExpression)
+        and expr.operator == "COMPARISON"
+        and expr.left_operand is None
+    )
+
+
+def _negate_condition(
+    expr: CobolExpression, location: SourceLocation
+) -> CobolExpression:
+    """Apply a leading ``NOT`` to an already-built condition."""
+    if isinstance(expr, ConditionalExpression):
+        if expr.operator in _NEGATED_RELATIONAL:
+            expr.operator = _NEGATED_RELATIONAL[expr.operator]
+            return expr
+        if expr.operator.startswith("IS NOT "):
+            expr.operator = "IS " + expr.operator[len("IS NOT ") :]
+            return expr
+        if expr.operator.startswith("IS "):
+            expr.operator = "IS NOT " + expr.operator[len("IS ") :]
+            return expr
+    negated = LogicalExpression("NOT", location)
+    negated.set_left_condition(expr)
+    return negated
+
+
+def _rightmost_relation(expr: CobolExpression | None) -> ConditionalExpression | None:
+    """The relation condition an abbreviated leg would repeat the subject of:
+    the rightmost relational leaf of *expr* (through NOT wrappers)."""
+    if isinstance(expr, LogicalExpression):
+        if expr.operator == "NOT":
+            return _rightmost_relation(expr.left_condition)
+        return _rightmost_relation(expr.right_condition)
+    if (
+        isinstance(expr, ConditionalExpression)
+        and expr.operator in _RELATIONAL_OPERATORS
+        and isinstance(expr.left_operand, str)
+    ):
+        return expr
+    return None
+
+
+def _is_literal_leg(tokens: list[str]) -> bool:
+    """True when *tokens* is exactly one literal: a re-quoted string, a
+    (possibly sign-split) number, or a figurative constant."""
+    if len(tokens) == 2 and tokens[0] in ("+", "-"):
+        return bool(_NUMERIC_LITERAL_RE.match(tokens[1]))
+    if len(tokens) != 1:
+        return False
+    tok = tokens[0]
+    if tok.startswith(("'", '"')):
+        return True
+    if _NUMERIC_LITERAL_RE.match(tok):
+        return True
+    return tok.upper() in _FIGURATIVE_WORDS
+
+
+def _expand_abbreviated_condition(
+    left_expr: CobolExpression | None, rest: list[str]
+) -> list[str]:
+    """Rebuild the right leg of an AND/OR when it has no subject of its own.
+
+    COBOL's abbreviated combined relation condition lets the subject -- and
+    the operator -- of the preceding relation be omitted: ``A = 1 OR 2 OR
+    3`` means ``A = 1 OR A = 2 OR A = 3`` and ``A > 1 AND < 5`` means ``A >
+    1 AND A < 5``. Two shapes are expanded: a leg that *starts with a
+    relational operator* (subject prepended) and a leg that is *one bare
+    literal* (subject and operator prepended; ``NOT literal`` negates the
+    operator). A bare identifier is left alone: without a symbol table it
+    is indistinguishable from a level-88 condition-name (``A = 1 OR
+    FLAG-ON``), and the CONDITION_NAME reading is the one the analyzers
+    resolve. Anything else is returned unchanged.
+    """
+    if not rest:
+        return rest
+    subject = _rightmost_relation(left_expr)
+    if subject is None or not isinstance(subject.left_operand, str):
+        return rest
+    first = rest[0].upper()
+    if first in COMPARISON_OPS or first in _RELATIONAL_OPERATORS:
+        return [subject.left_operand, *rest]
+    if _is_literal_leg(rest):
+        return [subject.left_operand, subject.operator, *rest]
+    if first == "NOT" and _is_literal_leg(rest[1:]):
+        return [subject.left_operand, _NEGATED_RELATIONAL[subject.operator], *rest[1:]]
+    return rest
 
 
 def _build_unary_condition(

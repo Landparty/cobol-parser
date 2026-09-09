@@ -153,14 +153,31 @@ _NUMERIC_SPECIAL_REGISTERS = frozenset({"RETURN-CODE", "TALLY", "LINAGE-COUNTER"
 # never actually depended on an unresolved COPY.
 _ALPHANUMERIC_INTRINSIC_FUNCTIONS = frozenset({"CURRENT-DATE", "WHEN-COMPILED"})
 
-# Illegal MOVE combinations: (source_category, target_category)
+# Illegal MOVE combinations: (source_category, target_category), per the
+# IBM Enterprise COBOL Language Reference's "Valid and invalid elementary
+# moves" table. An alphanumeric-edited sending item may only go to an
+# alphabetic, alphanumeric or alphanumeric-edited receiver -- never to a
+# numeric or numeric-edited one (the editing characters have no numeric
+# meaning; de-editing is defined for numeric-edited sources only).
 _ILLEGAL_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
     {
         (DataCategory.NUMERIC, DataCategory.ALPHABETIC),
         (DataCategory.NUMERIC_EDITED, DataCategory.ALPHABETIC),
         (DataCategory.ALPHABETIC, DataCategory.NUMERIC),
         (DataCategory.ALPHABETIC, DataCategory.NUMERIC_EDITED),
+        (DataCategory.ALPHANUMERIC_EDITED, DataCategory.NUMERIC),
+        (DataCategory.ALPHANUMERIC_EDITED, DataCategory.NUMERIC_EDITED),
     }
+)
+
+# The same table splits numeric *sending* items by integer-ness: an integer
+# (PIC 9(5), COMP-3 with no V) may be moved to an alphanumeric or
+# alphanumeric-edited receiver, a non-integer (PIC 9(5)V99, PIC PPP9, a
+# COMP-1/COMP-2 floating-point item) may not -- there is no way to place the
+# implied decimal point in a character field. These are the receivers that
+# rule forbids for a non-integer numeric source.
+_NON_INTEGER_NUMERIC_ILLEGAL_TARGETS: frozenset[DataCategory] = frozenset(
+    {DataCategory.ALPHANUMERIC, DataCategory.ALPHANUMERIC_EDITED}
 )
 
 # Potentially problematic (warning-level) combinations
@@ -168,10 +185,28 @@ _WARN_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
     {
         (DataCategory.ALPHANUMERIC, DataCategory.NUMERIC),
         (DataCategory.ALPHANUMERIC, DataCategory.NUMERIC_EDITED),
-        (DataCategory.ALPHANUMERIC_EDITED, DataCategory.NUMERIC),
         (DataCategory.NUMERIC_EDITED, DataCategory.NUMERIC),
     }
 )
+
+# USAGE keywords of internal floating-point items: numeric, never integer,
+# and declared without a PICTURE clause of their own.
+_FLOATING_POINT_USAGES = frozenset({"COMP-1", "COMP-2"})
+
+
+def _is_non_integer_picture(pic: PictureClause) -> bool:
+    """True for a numeric PICTURE describing a non-integer value: digits
+    after an assumed decimal point (``9(5)V99``) or a decimal-scaling ``P``
+    to the left of every digit (``PPP9``, value .000n)."""
+    if (pic.decimal_digits or 0) > 0:
+        return True
+    pattern = (pic.pattern or "").upper().replace("S", "")
+    return pattern.startswith("P")
+
+
+def _is_floating_point_usage(usage: str | None) -> bool:
+    normalized = (usage or "").upper().replace("COMPUTATIONAL", "COMP")
+    return normalized in _FLOATING_POINT_USAGES
 
 
 def _classify_picture(pic: PictureClause) -> DataCategory:
@@ -257,6 +292,10 @@ class MoveTypeChecker:
     def __init__(self) -> None:
         # Map of upper-case data-item name → DataCategory
         self._catalog: dict[str, DataCategory] = {}
+        # NUMERIC catalog entries that are *not* integers (a V or leading P
+        # in the PICTURE, or COMP-1/COMP-2 usage) -- the IBM move rules
+        # treat those as a category of their own on the sending side.
+        self._non_integer: set[str] = set()
         self._unresolved_count = 0
 
     def check(self, ast: CobolProgram) -> MoveTypeReport:
@@ -269,6 +308,7 @@ class MoveTypeChecker:
             MoveTypeReport with all detected type violations.
         """
         self._catalog = {}
+        self._non_integer = set()
         self._unresolved_count = 0
         violations: list[MoveTypeViolation] = []
 
@@ -301,7 +341,17 @@ class MoveTypeChecker:
             name = (node.name or "").upper().strip()
             pic = node.picture_clause
             if name and pic is not None:
-                self._catalog[name] = _classify_picture(pic)
+                category = _classify_picture(pic)
+                self._catalog[name] = category
+                if category == DataCategory.NUMERIC and (
+                    _is_non_integer_picture(pic)
+                    or _is_floating_point_usage(getattr(node, "usage", None))
+                ):
+                    self._non_integer.add(name)
+            elif name and _is_floating_point_usage(getattr(node, "usage", None)):
+                # COMP-1/COMP-2 carry no PICTURE: numeric, non-integer.
+                self._catalog[name] = DataCategory.NUMERIC
+                self._non_integer.add(name)
             elif name and any(
                 isinstance(child, CobolDataItem)
                 for child in getattr(node, "children", ())
@@ -346,6 +396,9 @@ class MoveTypeChecker:
             return
 
         loc = getattr(stmt, "location", None)
+        source_non_integer = source_cat == DataCategory.NUMERIC and (
+            self._is_non_integer(source_name)
+        )
 
         for target_name in stmt.targets or []:
             target_name = target_name.strip()
@@ -369,6 +422,26 @@ class MoveTypeChecker:
                         message=(
                             f"Illegal MOVE: cannot move {source_cat.name} item "
                             f"'{source_name}' to {target_cat.name} item '{target_name}'"
+                        ),
+                    )
+                )
+            elif (
+                source_non_integer
+                and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS
+            ):
+                violations.append(
+                    MoveTypeViolation(
+                        kind=MoveViolationKind.ERROR,
+                        source_name=source_name,
+                        target_name=target_name,
+                        source_category=source_cat,
+                        target_category=target_cat,
+                        location=loc,
+                        message=(
+                            f"Illegal MOVE: cannot move non-integer NUMERIC item "
+                            f"'{source_name}' to {target_cat.name} item "
+                            f"'{target_name}' (only an integer may be moved to "
+                            "an alphanumeric or alphanumeric-edited item)"
                         ),
                     )
                 )
@@ -413,6 +486,15 @@ class MoveTypeChecker:
             if function_name in _ALPHANUMERIC_INTRINSIC_FUNCTIONS:
                 return DataCategory.ALPHANUMERIC
         return _classify_literal(name)
+
+    def _is_non_integer(self, name: str) -> bool:
+        """Whether a NUMERIC source is a non-integer: a catalogued item with
+        decimal digits / leading P scaling / floating-point usage, or a
+        numeric literal with a decimal point."""
+        upper = base_data_name(name).upper()
+        if upper in self._catalog:
+            return upper in self._non_integer
+        return "." in name.strip()
 
     def get_catalog(self) -> dict[str, str]:
         """Return the data item category catalog (name → category name).

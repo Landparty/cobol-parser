@@ -182,6 +182,10 @@ _MAX_RANDOM_TEXT = 32
 # Word-split regex for parsing field names into semantic tokens
 _WORD_SPLIT_RE = re.compile(r"[-_]+")
 
+#: ``VALUE ALL 'x'`` / ``VALUE ALL SPACES``: the keyword, then the literal
+#: (or figurative constant) that fills the field.
+_VALUE_ALL_RE = re.compile(r"^ALL\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
 #: Usages that name storage rather than data.  See :meth:`ValueFactory._make`.
 _NON_DATA_USAGES = POINTER_USAGES | {"INDEX"}
 
@@ -313,6 +317,21 @@ class ValueFactory:
         raw = (spec.value_clause or "").strip()
         if not raw:
             return None
+        all_match = _VALUE_ALL_RE.match(raw)
+        if all_match:
+            # ``VALUE ALL '='`` fills the whole field with the literal
+            # repeated -- the report-separator idiom.  Rendering the keyword
+            # itself (``ALL ``) was the previous, wrong, answer.
+            raw = all_match.group(1)
+            figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
+            if figurative is not None:
+                return figurative if figurative else None
+            unit = _strip_literal_quotes(raw)
+            if not unit:
+                return None
+            width = spec.size if spec.size > 0 else len(unit)
+            repeated = (unit * (width // len(unit) + 1))[:width]
+            return self._fit_domain_value(repeated, spec)
         figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
         if figurative is not None:
             # SPACES/LOW-VALUES mean "no meaningful initial content"; generate
@@ -365,6 +384,18 @@ class ValueFactory:
         digits = spec.integer_digits
         if digits <= 0 and spec.decimal_digits <= 0:
             digits = 1
+
+        scaling = spec.scaling_positions
+        if scaling:
+            # A P-scaled field can only hold values its stored digits can
+            # express: ``9(3)PPP`` holds multiples of 1000, ``SVPP9(3)``
+            # fractions whose first two places are zero.  Draw the stored
+            # digits directly and put the scale back, so the value is
+            # representable by construction rather than snapped afterwards.
+            stored = max(1, spec.stored_digits)
+            mantissa = self._rng.randint(0, 10**stored - 1)
+            exponent = scaling if scaling > 0 else -spec.decimal_digits
+            return self._format_number(Decimal(mantissa).scaleb(exponent), spec)
 
         if tokens & _DATE_TOKENS and spec.decimal_digits == 0:
             dated = self._date_digits(digits)
@@ -486,6 +517,18 @@ class ValueFactory:
             magnitude = min(magnitude, Decimal(1) - Decimal(1).scaleb(-decimals))
         else:
             magnitude = Decimal(0)
+
+        scaling = spec.scaling_positions
+        if scaling > 0:
+            # Trailing P: only multiples of 10**scaling are representable;
+            # the compiler truncates anything else, so do the same here.
+            magnitude = (magnitude // Decimal(10**scaling)) * Decimal(10**scaling)
+        elif scaling < 0:
+            # Leading P: the first `-scaling` decimal places are always
+            # zero, so the value must sit below 10**scaling.
+            limit = Decimal(1).scaleb(scaling)
+            if magnitude >= limit:
+                magnitude = limit - Decimal(1).scaleb(-decimals)
 
         negative = spec.is_signed and (
             exact < 0

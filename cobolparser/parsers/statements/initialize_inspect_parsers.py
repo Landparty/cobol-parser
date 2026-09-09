@@ -6,11 +6,13 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import InitializeStatement, InspectStatement
 from ._utils import (
+    consume_optional_qualifiers,
     consume_period,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
+    peek_past_noise,
     skip_whitespace,
     token_column,
     token_location,
@@ -136,6 +138,34 @@ class InitializeStatementParser(IStatementParser):
                 break
 
 
+#: Token types an INSPECT operand (the thing tallied / replaced / the
+#: replacement) may take.
+_INSPECT_LITERAL_TOKEN_TYPES = frozenset(
+    {
+        TokenType.STRING_LITERAL,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.FIGURATIVE_CONSTANT,
+    }
+)
+_INSPECT_VALUE_TOKEN_TYPES = _INSPECT_LITERAL_TOKEN_TYPES | {TokenType.IDENTIFIER}
+#: Words that start the next REPLACING/TALLYING phrase -- never an operand.
+_INSPECT_KEYWORDS = frozenset(
+    {
+        "ALL",
+        "LEADING",
+        "FIRST",
+        "CHARACTERS",
+        "BEFORE",
+        "AFTER",
+        "REPLACING",
+        "TALLYING",
+        "CONVERTING",
+        "BY",
+        "TO",
+    }
+)
+
+
 class InspectStatementParser(IStatementParser):
     """Parser for INSPECT statements.
 
@@ -156,11 +186,18 @@ class InspectStatementParser(IStatementParser):
         start_column = token_column(start)
         skip_whitespace(token_stream)
 
-        # Target identifier
+        # Target identifier -- with its subscript / reference modification /
+        # OF-IN qualifier chain folded in, the way MOVE/READ/WRITE read
+        # theirs. Reading it as one token left ``(1:5)`` in the stream, and
+        # the TALLYING/REPLACING dispatch below (which expects a keyword
+        # next) then silently dropped the whole clause.
         token = token_stream.peek()
         if token and token.type not in (TokenType.PERIOD, None):
             token_stream.consume()
-            stmt.set_target(token.value or "")
+            target = token.value or ""
+            if token.type == TokenType.IDENTIFIER:
+                target = consume_optional_qualifiers(token_stream, target)
+            stmt.set_target(target)
         skip_whitespace(token_stream)
 
         # Determine type
@@ -282,21 +319,27 @@ class InspectStatementParser(IStatementParser):
 
                 value = None
                 if for_type != "CHARACTERS":
-                    v = ts.peek()
-                    if v and v.type in (
-                        TokenType.IDENTIFIER,
-                        TokenType.STRING_LITERAL,
-                        TokenType.NUMERIC_LITERAL,
-                    ):
-                        ts.consume()
-                        value = v.value
-                        skip_whitespace(ts)
+                    value = self._consume_inspect_value(ts)
 
                 # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a single
                 # FOR-phrase may carry both qualifiers simultaneously.
                 before, after = self._parse_before_after(ts)
 
                 stmt.add_tallying_clause(counter, for_type, value, before, after)
+
+                # ``FOR ALL 'X' 'Y'``: further *literal* values under the same
+                # ALL/LEADING each get their own clause. Only literals are
+                # taken -- an IDENTIFIER here is the next counter name.
+                while for_type != "CHARACTERS":
+                    extra = ts.peek()
+                    if not (extra and extra.type in _INSPECT_LITERAL_TOKEN_TYPES):
+                        break
+                    ts.consume()
+                    skip_whitespace(ts)
+                    before, after = self._parse_before_after(ts)
+                    stmt.add_tallying_clause(
+                        counter, for_type, extra.value, before, after
+                    )
             else:
                 break
 
@@ -318,31 +361,10 @@ class InspectStatementParser(IStatementParser):
                 if replace_type == "CHARACTERS":
                     from_value = "CHARACTERS"
                 else:
-                    v = ts.peek()
-                    if v and v.type in (
-                        TokenType.IDENTIFIER,
-                        TokenType.STRING_LITERAL,
-                        TokenType.NUMERIC_LITERAL,
-                    ):
-                        ts.consume()
-                        from_value = v.value or ""
-                        skip_whitespace(ts)
+                    from_value = self._consume_inspect_value(ts) or ""
 
                 # Expect BY
-                nxt = ts.peek()
-                to_value = ""
-                if nxt and _val(nxt) == "BY":
-                    ts.consume()
-                    skip_whitespace(ts)
-                    v = ts.peek()
-                    if v and v.type in (
-                        TokenType.IDENTIFIER,
-                        TokenType.STRING_LITERAL,
-                        TokenType.NUMERIC_LITERAL,
-                    ):
-                        ts.consume()
-                        to_value = v.value or ""
-                        skip_whitespace(ts)
+                to_value = self._consume_by_value(ts)
 
                 # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a single
                 # REPLACING phrase may carry both qualifiers simultaneously.
@@ -351,8 +373,80 @@ class InspectStatementParser(IStatementParser):
                 stmt.add_replacing_clause(
                     replace_type, from_value, to_value, before, after
                 )
+
+                # ``ALL 'A' BY 'B' 'C' BY 'D'``: further ``from BY to`` pairs
+                # under the same ALL/LEADING/FIRST. A pair is only taken when
+                # a BY actually follows the candidate value, so the next
+                # keyword (or a stray token) is left for the loop head.
+                while replace_type != "CHARACTERS":
+                    nxt = ts.peek()
+                    if not (nxt and nxt.type in _INSPECT_VALUE_TOKEN_TYPES):
+                        break
+                    if _val(nxt) in _INSPECT_KEYWORDS:
+                        break
+                    if not self._by_follows_value(ts):
+                        break
+                    from_value = self._consume_inspect_value(ts) or ""
+                    to_value = self._consume_by_value(ts)
+                    before, after = self._parse_before_after(ts)
+                    stmt.add_replacing_clause(
+                        replace_type, from_value, to_value, before, after
+                    )
             else:
                 break
+
+    @staticmethod
+    def _consume_inspect_value(ts: ITokenStream) -> str | None:
+        """One TALLYING/REPLACING operand: a literal, a figurative constant
+        (``SPACES``/``ZEROS``/... lex as FIGURATIVE_CONSTANT and were
+        previously rejected, leaving ``LEADING SPACES BY ZEROS`` with empty
+        from/to values), or an identifier with its subscript / qualifier
+        chain folded in. Returns None (consuming nothing) otherwise."""
+        v = ts.peek()
+        if not (v and v.type in _INSPECT_VALUE_TOKEN_TYPES):
+            return None
+        ts.consume()
+        value = v.value or ""
+        if v.type == TokenType.IDENTIFIER:
+            value = consume_optional_qualifiers(ts, value)
+        skip_whitespace(ts)
+        return value
+
+    def _consume_by_value(self, ts: ITokenStream) -> str:
+        """``BY <value>`` -- the replacement operand; "" when BY is absent."""
+        nxt = ts.peek()
+        if not (nxt and _val(nxt) == "BY"):
+            return ""
+        ts.consume()
+        skip_whitespace(ts)
+        return self._consume_inspect_value(ts) or ""
+
+    @staticmethod
+    def _by_follows_value(ts: ITokenStream) -> bool:
+        """True when the value at the current position (possibly subscripted
+        or qualified) is followed by ``BY`` -- i.e. it starts another
+        ``from BY to`` pair rather than something else."""
+        i = 1
+        depth = 0
+        while True:
+            tok, i = peek_past_noise(ts, i)
+            if tok is None:
+                return False
+            if tok.type == TokenType.LEFT_PAREN:
+                depth += 1
+            elif tok.type == TokenType.RIGHT_PAREN:
+                depth -= 1
+            elif depth == 0:
+                if _val(tok) in ("OF", "IN"):
+                    i += 1
+                    tok, i = peek_past_noise(ts, i)
+                    if tok is None:
+                        return False
+                else:
+                    return _val(tok) == "BY"
+            elif depth < 0:
+                return False
+            i += 1
 
     def _parse_before_after(self, ts: ITokenStream) -> tuple[str | None, str | None]:
         """Parse an optional ``BEFORE [INITIAL] ... AFTER [INITIAL] ...`` suffix.
