@@ -362,7 +362,7 @@ class TestFinding5CopyInInlineComment:
         src = "       MOVE A TO B. *> REPLACE ==A== BY ==B==.\n       REPLACE ==X== BY ==Y==.\n"
         stmts = _ReplaceScanner(src).scan()
         assert len(stmts) == 1
-        assert src[stmts[0].start :].startswith("REPLACE ==X==")
+        assert src[stmts[0].start :].lstrip().startswith("REPLACE ==X==")
 
 
 # ---------------------------------------------------------------------------

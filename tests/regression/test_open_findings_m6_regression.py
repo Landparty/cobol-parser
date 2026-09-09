@@ -73,13 +73,14 @@ class TestM6TokenizeParity:
         comments = [t for t in tokens if t.type == TokenType.COMMENT]
 
         # Physical lines 1 ('*'), 4 ('/'), 9 ('*'), 15 ('*'). The continuation
-        # (physical line 8) merges into line 7's logical line, so every line
-        # after it shifts up by one in normalized coordinates: 9 -> 8, 15 -> 14.
+        # (physical line 8) merges into line 7's logical line but still
+        # occupies its own placeholder line (2026-09-09 review, finding 1),
+        # so normalized coordinates equal physical ones: no shift.
         assert [(t.value, t.location.line) for t in comments] == [
             ("* TOP COMMENT LINE", 1),
             ("/ PAGE BREAK", 4),
-            ("* MID COMMENT", 8),
-            ("* TRAILING COMMENT", 14),
+            ("* MID COMMENT", 9),
+            ("* TRAILING COMMENT", 15),
         ]
 
         # Comment lines are blank in the normalized text, so no other token
