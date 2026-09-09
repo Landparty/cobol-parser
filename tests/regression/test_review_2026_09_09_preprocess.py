@@ -303,9 +303,9 @@ class TestFinding4ExpanderContinuedLiterals:
     def test_quote_state_not_quote_parity(self):
         # An apostrophe literal holding a double quote is still open on the
         # first line -- counting quotes said otherwise.
-        src = "           DISPLAY 'IT\"S\n      -    \"MORE\".\n"
+        src = '           DISPLAY \'IT"S\n      -    "MORE".\n'
         out = normalize_continuation_lines(src)
-        assert out == "           DISPLAY 'IT\"S\"MORE\".\n"
+        assert out == '           DISPLAY \'IT"S"MORE".\n'
         # ...and a doubled quote is an escape, not a close.
         src = "           DISPLAY 'IT''S \n      -    'MORE'.\n"
         assert normalize_continuation_lines(src) == "           DISPLAY 'IT''S MORE'.\n"
@@ -395,7 +395,9 @@ class TestFinding7ReplacingBackslash:
         ["'C:\\TEMP\\1'", "'\\g<0>'", "'A\\'"],
     )
     def test_replacement_is_literal_text(self, tmp_path, replacement):
-        (tmp_path / "PATHS.cpy").write_text("       01  WS-PATH PIC X(20) VALUE :DIR:.\n")
+        (tmp_path / "PATHS.cpy").write_text(
+            "       01  WS-PATH PIC X(20) VALUE :DIR:.\n"
+        )
         src = _prog(
             "       IDENTIFICATION DIVISION.",
             "       PROGRAM-ID. T5.",
@@ -536,6 +538,10 @@ class TestFinding11Minor:
         assert typed.get_errors() == []
         assert len(typed.get_warnings()) == 1
         assert re.match(
-            r"Unterminated string literal at line 1, column \d+", typed.get_warnings()[0]
+            r"Unterminated string literal at line 1, column \d+",
+            typed.get_warnings()[0],
         )
-        assert plain.get_warnings()[0].split(":")[1] == typed.get_warnings()[0].split(":")[1]
+        assert (
+            plain.get_warnings()[0].split(":")[1]
+            == typed.get_warnings()[0].split(":")[1]
+        )

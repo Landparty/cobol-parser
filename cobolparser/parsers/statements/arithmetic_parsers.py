@@ -116,6 +116,10 @@ class AddStatementParser(IStatementParser):
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                # ``ADD A TO B GIVING C`` / ``SUBTRACT A FROM B GIVING C``:
+                # with a GIVING the TO/FROM items are operands, not targets
+                # -- only the GIVING items are written.
+                stmt.demote_targets_to_operands()
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
                 _consume_additional_giving_targets(token_stream, stmt, start_column)
@@ -236,6 +240,10 @@ class SubtractStatementParser(IStatementParser):
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
+                # ``ADD A TO B GIVING C`` / ``SUBTRACT A FROM B GIVING C``:
+                # with a GIVING the TO/FROM items are operands, not targets
+                # -- only the GIVING items are written.
+                stmt.demote_targets_to_operands()
                 if _consume_optional_rounded(token_stream):
                     stmt.set_rounded(True)
                 _consume_additional_giving_targets(token_stream, stmt, start_column)

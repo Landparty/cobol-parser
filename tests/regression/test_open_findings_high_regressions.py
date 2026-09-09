@@ -372,6 +372,7 @@ class TestH8CloseCombinedOptions:
             "unit": False,
             "no_rewind": False,
             "with_lock": False,
+            "for_removal": False,
         }
 
 

@@ -1024,7 +1024,9 @@ def apply_replacing_clauses(
         # The replacement is literal text, never an re template: a
         # backslash in it (`'C:\TEMP\1'`) would otherwise raise re.error or
         # be silently reinterpreted as a group reference.
-        def _literal_replacement(_m: re.Match[str], r: str = clause.replace_text) -> str:
+        def _literal_replacement(
+            _m: re.Match[str], r: str = clause.replace_text
+        ) -> str:
             return r
 
         for idx, line in enumerate(lines):
@@ -1032,7 +1034,11 @@ def apply_replacing_clauses(
                 continue
             if protect_literals and ('"' in line or "'" in line):
                 lines[idx] = "".join(
-                    segment if is_literal else pattern.sub(_literal_replacement, segment)
+                    (
+                        segment
+                        if is_literal
+                        else pattern.sub(_literal_replacement, segment)
+                    )
                     for segment, is_literal in _split_literal_segments(line)
                 )
             else:

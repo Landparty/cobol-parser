@@ -374,10 +374,10 @@ class EvaluateStatementParser(IStatementParser):
                 selector["operator"] = "AND"
             return selector
 
-        selector = {"type": "Literal", "value": selector_text}
+        literal: dict[str, Any] = {"type": "Literal", "value": selector_text}
         if is_identifier:
-            selector["identifier"] = True
-        return selector
+            literal["identifier"] = True
+        return literal
 
     def _skip_clause_statements(
         self, token_stream: ITokenStream
