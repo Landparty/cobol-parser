@@ -614,14 +614,27 @@ that from whether the merged text happens to be non-empty. Pinned by
 (`TestNormalizeFixedFormatPreservesFullWidthBlankLines`,
 `TestCopybookCommentDriftIssue123`).
 
-**Known residual (not fixed by the above): +1 phantom line per `COPY`.**
-The per-comment *drift* is gone and the copybook-expansion offset is now
-constant per file, but that constant itself is one line larger than the
-copybooks' real combined content for every `COPY` statement in the file —
-`copybook_expander.py::_expand_source_recursive`'s splice re-inserts each
-copybook's own trailing `"\n"` into a span that already ends in one. See
-`reports/open-findings.md` (LOW) for the measured `+1`-per-`COPY` table and
-exact splice location.
+**Formerly a residual, now fixed: +1 phantom line per `COPY`.** The splice
+re-inserted each copybook's own trailing `"\n"` into a span that already
+ended in one, so the expansion carried one blank physical line more than the
+copybooks' real combined content per `COPY` statement, compounding with
+nesting. `_expand_source_recursive` now strips exactly one trailing newline
+from `expanded_copybook` (never more, so a member with a genuine blank final
+line keeps it) *before* `copybook_line_count` is taken, since that count pads
+the spliced-in origins to match. Expanded line counts are now exact:
+`len(source) - len(COPY lines) + len(member lines)`.
+
+**The splice reclaims the whole record when the `COPY` owns it.** The COPY
+statement's own indentation is not the copied text's. Splicing at the `COPY`
+keyword prepended it to the member's first line — pushing a member's `01` out
+of Area A by however far right the `COPY` sat, and, on a far-right `COPY`,
+past column 72, where `_fit_fixed_format_width` then squeezed the line's
+blanks out or wrapped it onto an extra physical line. The splice now starts
+at `head_start` (the beginning of the record) whenever `head_has_text` is
+false — the same flag the origins splice already computed — and still starts
+at the keyword when the parent has real program text before the `COPY` on
+that line. Pinned by
+`tests/regression/test_copy_splice_keeps_member_columns.py`.
 
 # Error Hierarchy
 
@@ -843,7 +856,7 @@ expanded line through every step that can move one:
 |------|-----------------|-------------------------|
 | `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
 | `normalize_continuation_lines` | merges N records into 1 | new `line_origins` out-parameter records the input line each output line started on |
-| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line |
+| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides whether the text splice reclaims the whole record or starts at the `COPY` keyword, so map and text are spliced identically |
 | the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | every wrapped piece inherits the origin of the line it came from |
 
 `ExpansionContext.content_origins` stores origins beside each cached content

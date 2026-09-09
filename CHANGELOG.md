@@ -350,6 +350,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocess:** the COPY splice no longer indents a member's first line by
+  the `COPY` statement's own indentation. A member's lines are whole source
+  records in the columns its author wrote; splicing at the `COPY` keyword
+  prepended that statement's leading blanks to the first of them, so a
+  copybook that puts its `01` in Area A came out with it in Area B -- and a
+  far-right `COPY` pushed the line past column 72, where the re-pad's width
+  fitter squeezed its interior blanks out (emitting text that differed from
+  the member's, character for character) or wrapped it onto an extra physical
+  line, shifting every following line number in the expansion. The splice now
+  reclaims the whole record whenever the `COPY` owns it alone, and still
+  starts at the keyword when the parent has real text before it on that line.
+  Affects `cobol-parser expand` (and the COBOL Analyzer extension's
+  "Show Expanded Source" / "Save Expanded Source As...", whose whole value is
+  being a listing a compiler would accept); the parse itself was unaffected
+  except where the width fitter's wrap had shifted line numbers.
+
 * **dialects:** `CEECZST` is categorised as a `storage` service (it
   reallocates heap storage, per the LE reference), not a `string` one.
 
