@@ -114,8 +114,12 @@ def normalize_continuation_lines(
                 # Get the continuation text (after the indicator)
                 continuation_text = line[text_start:] if len(line) > text_start else ""
 
-                # Get the previous line (the one we're continuing)
+                # Get the previous line (the one we're continuing). A CRLF
+                # source keeps its "\r" here (lines were split on "\n"); it
+                # is a line terminator, never part of the continued text.
                 prev_line = result[target]
+                if prev_line.endswith("\r"):
+                    prev_line = prev_line[:-1]
 
                 # Same open-quote state machine as normalize_fixed_format:
                 # doubled quotes are escapes, the quote that opened the

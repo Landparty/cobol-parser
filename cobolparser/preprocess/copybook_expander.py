@@ -726,6 +726,8 @@ def _looks_fixed_format(text: str) -> bool:
     # Deferred: parser imports this package at module scope.
     from ..parser import _detect_fixed_format, _sequence_area_is_fixed_like
 
+    # Tabs are expanded first, as every column-sensitive step here does.
+    text = text.expandtabs(8)
     non_blank = [line for line in text.splitlines() if line.strip()]
     if len(non_blank) >= 3:
         return _detect_fixed_format(text)
@@ -1336,7 +1338,7 @@ def _expand_source_recursive(
             # copybook_content was already stripped above, so nested_normalized
             # is always True here; this fixup is kept as a defensive no-op in
             # case that invariant ever changes.
-            if not nested_normalized:
+            if not nested_normalized and not (member_free_form and free_form):
                 nested_no_comments = remove_comment_lines(expanded_copybook)
                 nested_stripped = strip_sequence_area(nested_no_comments)
                 nested_merged_from: list[int] = []

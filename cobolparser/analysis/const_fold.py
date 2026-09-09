@@ -200,7 +200,9 @@ class _LayoutFacts:
 
     def leaves_under(self, qpath: str) -> list[str]:
         prefix = qpath + "."
-        return [leaf for leaf in self.leaves if leaf == qpath or leaf.startswith(prefix)]
+        return [
+            leaf for leaf in self.leaves if leaf == qpath or leaf.startswith(prefix)
+        ]
 
 
 _FACTS_CACHE: weakref.WeakKeyDictionary[Any, _LayoutFacts] = weakref.WeakKeyDictionary()
@@ -647,7 +649,9 @@ def _dispatch_one(
     return None
 
 
-def _fold_read(stmt: IOReadStatement, index: ProgramLayoutIndex, state: _WalkState) -> None:
+def _fold_read(
+    stmt: IOReadStatement, index: ProgramLayoutIndex, state: _WalkState
+) -> None:
     """A READ overwrites the file's record area and its INTO target.
 
     The FIRST READ of a file on the walked path is the one the scenario's
