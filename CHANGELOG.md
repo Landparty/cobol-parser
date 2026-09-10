@@ -350,6 +350,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocess:** continuation lines no longer collapse the line count.
+  `normalize_fixed_format` merged N physical records into one logical line
+  and emitted nothing for the other N-1, so every location after the first
+  continued literal in a program -- tokens, statements, data items, lint
+  findings, parse errors -- was off by the number of continuation records
+  seen so far. It now emits one empty placeholder per absorbed record after
+  the logical line, so the output always has exactly as many lines as the
+  input; the logical line keeps its first record's number. The same
+  mechanism lets a comment or blank line interrupt an open continued literal
+  without severing it (the next `-` record rejoins it, as IBM specifies).
+  `*>` inline comments are skipped by the quote-state scan (an apostrophe in
+  one used to raise "Unterminated string literal"), `keep_comments` COMMENT
+  tokens carry physical line numbers, `normalize_fixed_format` accepts a
+  single string, and an unterminated `X"..."` literal warns like a plain
+  one. Cython mirror regenerated; pure-vs-Cython parity verified.
+* **preprocess:** copybook expansion handles free-form programs (it sliced
+  columns 8-72 off every line, chopping `IDENTIFICATION` to `FICATION`) and
+  tab-indented members (no tab expansion, so `\t01 REC.` became `AB-REC.`
+  with zero errors). A continued literal through the expansion path kept its
+  trailing blanks and its quote parity (a `"` inside a `'...'` literal no
+  longer flips the state; CRLF sources no longer lose the literal's tail).
+  A `COPY` (or `REPLACE`) inside a `*>` inline comment is no longer
+  expanded. `COPY ... REPLACING` text containing a backslash is inserted
+  literally instead of being read as a regex template (`\T` raised
+  `re.error`). The module-level file cache re-reads a copybook whose
+  mtime/size changed instead of serving stale content to a long-lived
+  process. `>>IF`/`>>DEFINE` directives are recognised in a
+  sequence-numbered program, and `>>DEFINE X AS 2 OVERRIDE` / `AS OFF` /
+  `AS PARAMETER` are evaluated instead of storing `"2 OVERRIDE"` as the
+  value. `CobolParser().parse()` on free-form source no longer fails with
+  "No recognizable COBOL division found near 'ICATION'".
+* **parsers:** a level-77 item that followed an 01 group was nested under
+  the group's deepest open item (149 of 459 NIST programs); 01 and 77 now
+  always start a new top-level entry. `RETURN ... AT END stmt.` swallowed
+  every following statement into `at_end_clause`. `88 X VALUES [ARE] ...`
+  dropped every value. `USAGE [IS] DISPLAY` warned "content dropped".
+  `PIC S999 LEADING SEPARATE` (no `SIGN` word) was glued into the picture
+  string. `INSPECT` on a subscripted or reference-modified target dropped
+  its whole TALLYING/REPLACING clause; figurative operands
+  (`REPLACING LEADING SPACES BY ZEROS`) came out empty and a second
+  `x BY y` pair under one `ALL` was lost. `STRING`/`UNSTRING` truncated
+  subscripted and reference-modified operands and read a bare `POINTER` as
+  an operand. `IF NOT (A = 1 AND B = 2)`, `IF NOT A = 1` and abbreviated
+  combined conditions (`IF A = 1 OR 2 OR 3`) built corrupt condition trees
+  (a unary `NOT` node and subject/operator expansion now exist).
+  `CLOSE F1 REEL FOR REMOVAL` fabricated files named `FOR` and `REMOVAL`.
+  `SEARCH ... WHEN` conditions re-quote literals; an `EVALUATE WHEN`
+  selector that is a bare identifier carries `"identifier": true`. A data
+  name on the line after its level number and `,`/`;` separators between
+  clauses (`OCCURS 15 TIMES, INDEXED BY IN1`) are accepted.
+  `SET p TO ENTRY 'X'` keeps the literal; `PERFORM P1 THRU P2 OF S1` keeps
+  the THRU qualifier. `COMPUTE X = 2 ** 3 ** 2` parses left-associatively
+  (64, as IBM evaluates same-level operators), not as `2 ** (3 ** 2)`.
+* **models:** `PIC N(n)` and `PIC G(n)` occupy 2 bytes per character;
+  P-scaled pictures (`9(3)PPP`, `SVPP9(3)`) are sized by their stored
+  digits with the `P` positions reflected in the digit counts; floating
+  insertion strings (`$$$,$$9`, `$Z,ZZ9`) no longer count their leftmost
+  symbol as a digit, so generated values fit the picture. `88 X VALUE -9
+  THRU -1` keeps the range (the `THROUGH:` marker was dropped after a signed
+  end).
+* **analysis:** `recursion-check` reported the canonical priming-read loop
+  (`MAIN` performs `1000-READ` and `2000-PROCESS`, which performs
+  `1000-READ` again) as an unconditional infinite loop -- a lint `error` --
+  because the CFG's fall-through edge out of a PERFORM range end closed a
+  cycle that cannot execute. `DeadCodeAnalyzer` credited everything after
+  an `xxx-EXIT` paragraph as reached whenever that paragraph was a `GO TO`
+  target inside its `PERFORM ... THRU` range. `IOSequenceAnalyzer` could
+  never report `WRITE_BEFORE_OPEN`/`REWRITE_BEFORE_OPEN` (WRITE carries a
+  record name, never a file name; it now resolves the record through the
+  FD) and never walked SORT/MERGE INPUT/OUTPUT PROCEDUREs. `IOLogger`
+  logged the first OPEN mode for every file of a multi-file OPEN and `None`
+  as every WRITE/REWRITE target. `UnusedVariableAnalyzer` reported items
+  referenced only by `FILE STATUS`, `RECORD KEY`, `ALTERNATE RECORD KEY`,
+  `RELATIVE KEY`, `PASSWORD`, `RECORD VARYING ... DEPENDING ON` or `LINAGE`.
+  `MoveTypeChecker` now applies IBM's integer/non-integer distinction: a
+  non-integer numeric item moved to an alphanumeric or alphanumeric-edited
+  item is an error, as is alphanumeric-edited to numeric. Same-named
+  paragraphs in different sections no longer shield each other in the
+  dead-code report. `LintAnalyzer` keeps one located finding per program
+  unit for `UNREFERENCED_LINKAGE`. The unary `NOT` condition renders as
+  `NOT (...)` in program-flow condition text.
+* **analysis (gen-fixtures):** a signed literal in a condition
+  (`IF X = -5`, `WHEN -9 THRU -1`) was stored as `- 5` and silently dropped
+  by the solver, which then returned the picture midpoint as a witness and
+  counted the arm targeted; the sign is reattached and a literal a numeric
+  field cannot hold is `Unsatisfiable` with a reason. `ConstantFolder` kept
+  stale values across group-level writes (`MOVE ... TO group`,
+  `INITIALIZE`, `MOVE CORR`, `READ INTO group`, `ACCEPT group`,
+  `CALL USING group`), through statements that overwrite their target
+  (READ record fields, ACCEPT, `EXEC SQL ... INTO`, STRING/UNSTRING INTO,
+  a reference-modified MOVE target), through a `REDEFINES` alias, and
+  ignored `JUSTIFIED RIGHT`. A text witness truncated to the field width
+  was returned as satisfying (`IF X1 = 'AB'` on `PIC X` is Unsatisfiable).
+  A CALL argument read only in an IF/EVALUATE/PERFORM UNTIL condition is
+  now seen as a read (`IN`, `caller-dataflow`).
+* **generators:** `VALUE ALL '-'` generated the text `ALL ` instead of
+  `----`.
+
 * **preprocess:** the COPY splice no longer indents a member's first line by
   the `COPY` statement's own indentation. A member's lines are whole source
   records in the columns its author wrote; splicing at the `COPY` keyword

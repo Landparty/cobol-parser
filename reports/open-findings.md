@@ -1,4 +1,10 @@
-# cobolparser — Open Findings (as of 2026-09-07, post-audit)
+# cobolparser — Open Findings (as of 2026-09-09, post-review)
+
+> **2026-09-09 cross-repo bug review:** 46 further defects fixed in the
+> same branch — see `CHANGELOG.md` → Unreleased → Fixed and the `.okf/log.md`
+> entry of that date; pinned by
+> `tests/regression/test_review_2026_09_09_{preprocess,parser,analysis,generators}.py`.
+> The one item that review left open is the first LOW entry below.
 
 > **Status of `reports/audit-2026-09-07.md`:** every finding in that pass is
 > **fixed at HEAD** — the two HIGH fabricated-answer bugs (a non-literal
@@ -98,8 +104,16 @@ this was measured (2026-07-09) and have not been re-measured since.
 
 ## LOW
 
-- **`*>` inline comments** still lex as `MULTIPLY_OP` + `GREATER`, not
-  recognized as a comment marker.
+- **Numeric-edited fields are written to record images as plain numbers**
+  (found 2026-09-09, still open): `encoding.py` assumes an edited picture's
+  generated text is already the edited form, but `ValueFactory` produces
+  plain `_format_number` text, so `$$$,$$9` holding 2208 is written as
+  `"2208   "` rather than `" $2,208"` and `9(5)DB` holding -38848 as
+  `"-38848 "` rather than `"38848DB"`. Needs an edit-mask renderer (zero
+  suppression, floating insertion, `.`/`,`/`B`/`0`, `+ - CR DB`) and the
+  matching de-edit in `decoding.py`. CSV output is unaffected.
+- ~~**`*>` inline comments** still lex as `MULTIPLY_OP` + `GREATER`~~ —
+  **fixed** (lexer 2026-08-07; normalizer quote-state scan 2026-09-09).
 - **`TokenType.ALL` is dead** — `"ALL"` always lexes as a
   `FIGURATIVE_CONSTANT`; zero references to `TokenType.ALL` anywhere in the
   codebase. Currently masked for `INSPECT ... REPLACING ALL` (the statement
@@ -111,13 +125,10 @@ this was measured (2026-07-09) and have not been re-measured since.
 - **Unknown column-7 indicator characters** (anything other than
   space/`*`/`/`/`-`/`D`) are silently treated as live code by
   `normalize_fixed_format`, in both the pure-Python and active Cython path.
-- **A comment line interrupting an open continued literal silently severs
-  it**: `normalize_fixed_format`'s comment branch flushes and resets
-  `pending_literal`, so the next continuation line is treated as a
-  non-literal continuation instead of merging. If quotes stay balanced
-  across the interruption this corrupts the literal with no error; if they
-  don't, it raises a confusing unrelated "unterminated string literal at
-  EOF" error instead of a clear diagnostic.
+- ~~**A comment line interrupting an open continued literal silently severs
+  it**~~ — **fixed 2026-09-09**: the normalizer defers the comment line's
+  placeholder while a literal is open, so the next `-` record rejoins it
+  (`tests/regression/test_review_2026_09_09_preprocess.py`).
 - **`CallStatement.possible_values` (`DynamicCallAnalyzer`) returns `[]`
   ambiguously** — no way to distinguish "analyzer never tracked this
   variable" from "tracked, resolved to zero possible values" (the latter

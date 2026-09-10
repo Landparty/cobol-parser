@@ -989,9 +989,19 @@ wants a real all-clear must now check `not violations and unresolved_count
 report: LinkageReport = LinkageChecker().check(ast)   # note: .check(), not .analyze()
 # report.violations: list[LinkageViolation]
 # LinkageViolationKind: MISSING_USING_CLAUSE, UNDEFINED_LINKAGE_ITEM, …
+# LinkageChecker(include_contained_programs=False).check(ast, interface_scope=root)
+#   — one unit only (what LintAnalyzer does per program unit); the default
+#   still walks every contained program of a whole file.
 ```
 
 Validates LINKAGE SECTION items against the PROCEDURE DIVISION USING clause.
+`VALUE_TO_LINKAGE` was **removed** on 2026-09-09: COBOL has no rule that a
+LINKAGE item must be passed BY REFERENCE — BY VALUE is *required* when the
+callee declares `PROCEDURE DIVISION USING BY VALUE` — so the check only ever
+produced a false positive (a lint `error`) exactly where it could see the
+callee. `UNREFERENCED_LINKAGE` findings now carry the item's declaration
+`location` and `LinkageViolation.item_name`, so lint keeps one finding per
+program unit instead of collapsing same-text findings from different units.
 
 ## LanguageEnvironmentAnalyzer
 

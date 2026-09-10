@@ -138,9 +138,14 @@ Serialization fidelity notes (2026-07-07):
 * `IOAcceptStatement.environment_name` (2026-07-22) — `ACCEPT x FROM
   ENVIRONMENT "name"`'s variable name; the field existed but the parser
   never called its setter.
-* `PictureClause` now sizes `PIC N(n)` (national/DBCS) correctly — one
-  character position per `N`, no double-byte counting (2026-07-22;
-  previously fell through to a default size of 1 regardless of `n`).
+* `PictureClause` sizes `PIC N(n)` (national) and `PIC G(n)` (DBCS) at
+  **2 bytes per character** (2026-09-09; the 2026-07-22 fix had counted one
+  byte per `N`, and `G` fell through to size 1). `size` is a byte count —
+  it is what `calculate_size()`, `data-items` offsets and record images are
+  built from. P-scaled pictures (`9(3)PPP`, `SVPP9(3)`) are sized by their
+  stored `9`s (3 bytes) while `integer_digits`/`decimal_digits` include the
+  `P` positions (6/0 and 0/5). Floating-insertion strings (`$$$,$$9`,
+  `$Z,ZZ9`) count their leftmost symbol as the sign/currency, not a digit.
 * `ArithmeticStatement.givings: list[str]` (2026-07-24) — full ordered
   list of comma/space-separated `GIVING` result targets (`ADD A TO B
   GIVING C, D`); `.giving` keeps the first for backward compatibility,
