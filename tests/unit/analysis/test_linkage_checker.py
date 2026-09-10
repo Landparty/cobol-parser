@@ -254,15 +254,14 @@ class TestByValueToLinkageIsLegal:
         assert not report.has_violations
 
     def test_by_value_to_non_linkage_item_no_violation(self):
-        """BY VALUE to a working-storage variable is fine."""
+        """BY VALUE to a working-storage variable is fine: a clean report."""
         report = _check(
             linkage_items=["PARM-A"],
             entry_params={"MY-ENTRY": ["PARM-A"]},
             calls=[("MY-ENTRY", [("WS-FIELD", "VALUE")])],
         )
-        assert not any(
-            v.kind == LinkageViolationKind.TOO_MANY_ARGS for v in report.violations
-        )
+        assert not report.has_violations
+        assert report.violations == []
 
 
 # ---------------------------------------------------------------------------
