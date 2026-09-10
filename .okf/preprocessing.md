@@ -160,6 +160,24 @@ make them part of the literal's value — e.g. opening line `VALUE "ABC   `
 (blanks silently dropped). Applies to both the opening-line branch and
 the literal-continuation branch, pure-Python and Cython.
 
+**Line numbers survive continuation** (fixed 2026-09-09). A continuation
+record used to vanish from the output — N physical lines became one logical
+line — so every location after the first continued literal in a program was
+off by the number of continuation records seen so far (a `MOVE` on physical
+line 10 reported line 8). The normalizer now counts the continuation records
+a logical line absorbed and emits that many empty placeholder lines *after*
+the flushed logical line, so `output.count("\n") == len(lines)` for every
+input and the logical line keeps its first record's number. The same
+deferred-placeholder mechanism means a comment (or blank) line that
+interrupts an open continued literal no longer severs it: the placeholder is
+deferred, the next `-` record rejoins the literal (the IBM rule — the
+continuation is the next line that is neither a comment nor blank). A
+literal still open on the last *code* line still raises. `*>` inline
+comments are now skipped by the quote-state scan, so an apostrophe inside
+one no longer reads as an unterminated literal. The lexer's
+`_fixed_format_comment_tokens` emits COMMENT tokens at physical line numbers
+whenever that count invariant holds (it always does now).
+
 The optional Cython `_preprocess_fast` fast-path mirrors this logic; the
 pure-Python implementation stays reachable as `_normalize_fixed_format_pure`
 for testing both paths.

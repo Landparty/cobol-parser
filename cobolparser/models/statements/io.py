@@ -417,6 +417,7 @@ class IOCloseStatement(CobolStatement):
         unit: bool = False,
         no_rewind: bool = False,
         with_lock: bool = False,
+        for_removal: bool = False,
     ) -> None:
         """Add a file to close with options."""
         if file_name not in self.file_names:
@@ -427,6 +428,7 @@ class IOCloseStatement(CobolStatement):
                 "unit": unit,
                 "no_rewind": no_rewind,
                 "with_lock": with_lock,
+                "for_removal": for_removal,
             }
             if with_lock:
                 self.metadata["has_lock"] = True

@@ -15,8 +15,13 @@ sources), this module cross-references:
 Detected issues:
   - CALL has more arguments than the matching ENTRY / PROCEDURE DIVISION USING
   - CALL has fewer arguments than declared (missing required args)
-  - Argument passed BY VALUE to a LINKAGE item (must be BY REFERENCE)
   - LINKAGE SECTION 01-items not referenced by any ENTRY or CALL
+
+Passing a LINKAGE item ``BY VALUE`` is deliberately *not* an issue: COBOL has
+no such rule. ``BY VALUE`` is what a caller must write when the callee
+declares ``PROCEDURE DIVISION USING BY VALUE``, and the item's own section is
+irrelevant to that (a former ``VALUE_TO_LINKAGE`` rule flagged exactly that
+legal call as an error).
 """
 
 from __future__ import annotations
@@ -35,7 +40,6 @@ class LinkageViolationKind(Enum):
 
     TOO_MANY_ARGS = auto()  # CALL passes more args than declared
     TOO_FEW_ARGS = auto()  # CALL passes fewer args than declared
-    VALUE_TO_LINKAGE = auto()  # BY VALUE passed to a LINKAGE item
     UNREFERENCED_LINKAGE = auto()  # 01-item in LINKAGE not used by any ENTRY/CALL
     UNKNOWN_ENTRY = auto()  # CALL targets an entry not found in this program
 
@@ -48,11 +52,15 @@ class LinkageViolation:
     call_target: str | None
     location: SourceLocation | None
     message: str
+    # The LINKAGE item an UNREFERENCED_LINKAGE finding is about (None for
+    # the CALL-shaped kinds, which name their target in ``call_target``).
+    item_name: str | None = None
 
     def to_dict(self) -> dict:
         return {
             "kind": self.kind.name,
             "call_target": self.call_target,
+            "item_name": self.item_name,
             "location": (
                 {"line": self.location.line, "column": self.location.column}
                 if self.location
@@ -89,10 +97,21 @@ class LinkageReport:
 class LinkageChecker:
     """Correlates CALL arguments with ENTRY/LINKAGE declarations.
 
-    This checker operates within a single parsed program unit.  When a CALL
-    target matches an ENTRY statement defined inside the same program, the
-    argument count is validated.  Additionally, all 01-level LINKAGE SECTION
-    items are checked for use.
+    Every finding is scoped to one *program unit*: a unit's LINKAGE SECTION
+    items are checked against that unit's own ``PROCEDURE DIVISION USING``,
+    ``ENTRY`` and ``CALL ... USING`` clauses. By default every unit in *ast*
+    (the program and each of its ``contained_programs``) is checked in turn;
+    pass ``include_contained_programs=False`` to check just the unit given,
+    which is what a caller already iterating ``program_units()`` wants
+    (``LintAnalyzer``). Entry interfaces -- what each program or ENTRY
+    declares -- are gathered from the whole tree regardless, so a CALL from
+    one unit to a sibling or nested unit is validated against the right
+    parameter list; ``interface_scope`` widens that to a tree the checked
+    unit is part of but not the root of.
+
+    Keeping the item bookkeeping per unit is what makes the report
+    attributable: two units declaring a same-named LINKAGE item used to
+    collapse into one location-less finding.
 
     Usage::
 
@@ -106,134 +125,163 @@ class LinkageChecker:
             print(v.message)
     """
 
-    def __init__(self) -> None:
-        # entry_name (upper) → list of parameter names from ENTRY USING
+    def __init__(self, *, include_contained_programs: bool = True) -> None:
+        self._include_contained_programs = include_contained_programs
+        # entry_name (upper) → list of parameter names from ENTRY USING /
+        # PROCEDURE DIVISION USING, across every unit in scope
         self._entry_interfaces: dict[str, list[str]] = {}
-        # 01-level linkage items: name (upper) → bool referenced
+        # 01-level linkage items of the unit being checked:
+        # name (upper) → referenced?  (plus where each was declared)
         self._linkage_items: dict[str, bool] = {}
+        self._linkage_locations: dict[str, SourceLocation | None] = {}
+        self._all_linkage_items: set[str] = set()
         self._violations: list[LinkageViolation] = []
 
-    def check(self, ast: CobolProgram) -> LinkageReport:
+    def check(
+        self, ast: CobolProgram, *, interface_scope: CobolProgram | None = None
+    ) -> LinkageReport:
         """Analyze *ast* and return a LinkageReport.
 
         Args:
-            ast: The parsed COBOL program AST.
+            ast: The parsed COBOL program AST (a unit, or a whole file).
+            interface_scope: The program tree whose declared entry
+                interfaces CALLs in *ast* may target. Defaults to *ast*
+                itself; a caller checking one contained unit at a time
+                passes the outermost program so calls to sibling units
+                still resolve.
 
         Returns:
             LinkageReport with all detected violations.
         """
         self._entry_interfaces = {}
         self._linkage_items = {}
+        self._linkage_locations = {}
+        self._all_linkage_items = set()
         self._violations = []
 
-        # 1. Collect LINKAGE SECTION 01-level items
-        self._collect_linkage_items(ast)
+        scope = interface_scope if interface_scope is not None else ast
+        for unit in scope.program_units():
+            self._collect_interfaces(unit)
 
-        # 2. Collect PROCEDURE DIVISION USING clause (implicit ENTRY)
-        self._collect_procedure_using(ast)
-
-        # 3. Collect all ENTRY statements from PROCEDURE DIVISION
-        self._collect_entry_statements(ast)
-
-        # 4. Validate all CALL statements
-        self._validate_call_statements(ast)
-
-        # 5. Warn on unreferenced LINKAGE items
-        self._check_unreferenced_linkage()
+        units = ast.program_units() if self._include_contained_programs else [ast]
+        for unit in units:
+            self._check_unit(unit)
 
         return LinkageReport(
             violations=list(self._violations),
             entry_interfaces={k: list(v) for k, v in self._entry_interfaces.items()},
-            linkage_items=sorted(self._linkage_items.keys()),
+            linkage_items=sorted(self._all_linkage_items),
         )
 
     # ------------------------------------------------------------------
-    # Collection passes
+    # Interface collection (whole scope)
     # ------------------------------------------------------------------
 
-    def _collect_linkage_items(self, ast: CobolProgram) -> None:
-        """Find all 01-level items in the LINKAGE SECTION.
-
-        Recurses into ``ast.contained_programs`` -- a nested/contained
-        program has its own DATA DIVISION and its own LINKAGE SECTION, and
-        without this recursion its linkage items never register, so
-        `UNREFERENCED_LINKAGE` silently never fires for a nested program's
-        parameters.
-        """
-        data_div = ast.data_division
-        if data_div:
-            # Look for a section named LINKAGE (use public .sections property)
-            for section in data_div.sections:
-                if not isinstance(section, CobolSection):
-                    continue
-                section_name = section.section_name or ""
-                if "LINKAGE" in section_name.upper():
-                    for item in section.data_items:
-                        if isinstance(item, CobolDataItem) and item.level == 1:
-                            name = (item.name or "").upper().strip()
-                            if name:
-                                self._linkage_items[name] = False  # not yet referenced
-
-        for contained in ast.contained_programs:
-            self._collect_linkage_items(contained)
-
-    def _collect_procedure_using(self, ast: CobolProgram) -> None:
-        """Collect parameters from PROCEDURE DIVISION USING clause.
-
-        Recurses into ``ast.contained_programs`` so a nested program's own
-        implicit entry interface (its ``PROCEDURE DIVISION USING``) is
-        registered too, matching `_collect_linkage_items`.
-        """
-        proc_div = ast.procedure_division
+    def _collect_interfaces(self, unit: CobolProgram) -> None:
+        """Register *unit*'s PROCEDURE DIVISION USING and ENTRY interfaces."""
+        proc_div = unit.procedure_division
         if proc_div:
             # The parser stores PROCEDURE DIVISION USING params in metadata
             using_params = proc_div.get_metadata("using_parameters") or []
             if using_params:
                 # Use the program name as key for the implicit entry interface
-                prog_name = (ast.program_name or "PROGRAM").upper()
+                prog_name = (unit.program_name or "PROGRAM").upper()
                 self._entry_interfaces[prog_name] = [
                     p if isinstance(p, str) else str(p) for p in using_params
                 ]
-                # Mark them as referenced
-                for p in using_params:
-                    pname = (p if isinstance(p, str) else str(p)).upper()
-                    if pname in self._linkage_items:
-                        self._linkage_items[pname] = True
+        for node in self._own_nodes(unit):
+            if isinstance(node, EntryStatement):
+                entry_name = (node.entry_name or "").upper().strip()
+                if entry_name:
+                    self._entry_interfaces[entry_name] = [
+                        p.upper() for p in (node.using_parameters or [])
+                    ]
 
-        for contained in ast.contained_programs:
-            self._collect_procedure_using(contained)
+    @staticmethod
+    def _own_nodes(unit: CobolProgram) -> list[ASTNode]:
+        """Every node of *unit* except those belonging to a nested program.
 
-    def _collect_entry_statements(self, ast: ASTNode) -> None:
-        """Recursively collect ENTRY statements and their USING clauses."""
-        if isinstance(ast, EntryStatement):
-            entry_name = (ast.entry_name or "").upper().strip()
-            if entry_name:
-                params = [p.upper() for p in (ast.using_parameters or [])]
-                self._entry_interfaces[entry_name] = params
-                # Mark LINKAGE items as referenced
-                for p in params:
-                    if p in self._linkage_items:
-                        self._linkage_items[p] = True
+        A contained program hangs off its parent as a child node, so a plain
+        recursive walk of ``children`` would attribute its statements to the
+        outer unit.
+        """
+        found: list[ASTNode] = []
+        stack: list[ASTNode] = list(reversed(getattr(unit, "children", [])))
+        while stack:
+            node = stack.pop()
+            if isinstance(node, CobolProgram):
+                continue
+            found.append(node)
+            stack.extend(reversed(getattr(node, "children", [])))
+        return found
 
-        if hasattr(ast, "children"):
-            for child in ast.children:
-                self._collect_entry_statements(child)
+    # ------------------------------------------------------------------
+    # Per-unit check
+    # ------------------------------------------------------------------
+
+    def _check_unit(self, unit: CobolProgram) -> None:
+        """Check one program unit's LINKAGE items and CALL statements."""
+        self._linkage_items = {}
+        self._linkage_locations = {}
+
+        # 1. Collect this unit's LINKAGE SECTION 01-level items
+        self._collect_linkage_items(unit)
+        self._all_linkage_items.update(self._linkage_items)
+
+        # 2. Its PROCEDURE DIVISION USING clause references them
+        proc_div = unit.procedure_division
+        if proc_div:
+            for p in proc_div.get_metadata("using_parameters") or []:
+                self._mark_referenced(p if isinstance(p, str) else str(p))
+
+        # 3. So do its ENTRY USING clauses; its CALLs are validated
+        for node in self._own_nodes(unit):
+            if isinstance(node, EntryStatement):
+                for p in node.using_parameters or []:
+                    self._mark_referenced(p)
+            elif isinstance(node, CallStatement):
+                self._validate_call(node)
+
+        # 4. Warn on unreferenced LINKAGE items
+        self._check_unreferenced_linkage()
+
+    def _collect_linkage_items(self, unit: CobolProgram) -> None:
+        """Find all 01-level items in *unit*'s LINKAGE SECTION."""
+        data_div = unit.data_division
+        if not data_div:
+            return
+        # Look for a section named LINKAGE (use public .sections property)
+        for section in data_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            section_name = section.section_name or ""
+            if "LINKAGE" in section_name.upper():
+                for item in section.data_items:
+                    if isinstance(item, CobolDataItem) and item.level == 1:
+                        name = (item.name or "").upper().strip()
+                        if name:
+                            self._linkage_items[name] = False  # not yet referenced
+                            self._linkage_locations[name] = getattr(
+                                item, "location", None
+                            )
+
+    def _mark_referenced(self, name: str) -> None:
+        key = name.upper()
+        if key in self._linkage_items:
+            self._linkage_items[key] = True
 
     # ------------------------------------------------------------------
     # Validation pass
     # ------------------------------------------------------------------
 
-    def _validate_call_statements(self, node: ASTNode) -> None:
-        """Recursively find and validate CALL statements."""
-        if isinstance(node, CallStatement):
-            self._validate_call(node)
-
-        if hasattr(node, "children"):
-            for child in node.children:
-                self._validate_call_statements(child)
-
     def _validate_call(self, stmt: CallStatement) -> None:
         """Validate a single CALL statement against the known entry interfaces."""
+        call_params = stmt.using_parameters or []
+        # Passing a LINKAGE item on to a callee references it, whatever the
+        # target and however it is passed.
+        for param in call_params:
+            self._mark_referenced(param.name)
+
         target = (stmt.called_program or "").upper().strip()
         if not target or stmt.is_dynamic:
             return  # Cannot validate dynamic calls statically
@@ -244,7 +292,6 @@ class LinkageChecker:
             return
 
         declared_params = self._entry_interfaces[target]
-        call_params = stmt.using_parameters or []
         loc = getattr(stmt, "location", None)
 
         declared_count = len(declared_params)
@@ -275,30 +322,6 @@ class LinkageChecker:
                 )
             )
 
-        # Check BY VALUE against LINKAGE items (LINKAGE items must be BY REFERENCE)
-        for i, param in enumerate(call_params):
-            if param.passing_mode.upper() == "VALUE":
-                param_name = param.name.upper()
-                if param_name in self._linkage_items:
-                    self._violations.append(
-                        LinkageViolation(
-                            kind=LinkageViolationKind.VALUE_TO_LINKAGE,
-                            call_target=target,
-                            location=loc,
-                            message=(
-                                f"CALL '{target}' passes LINKAGE item '{param.name}' "
-                                f"BY VALUE (arg {i + 1}); LINKAGE items must be "
-                                "passed BY REFERENCE"
-                            ),
-                        )
-                    )
-
-        # Mark matching LINKAGE items as referenced
-        for param in call_params:
-            pname = param.name.upper()
-            if pname in self._linkage_items:
-                self._linkage_items[pname] = True
-
     # ------------------------------------------------------------------
     # Unreferenced linkage check
     # ------------------------------------------------------------------
@@ -311,10 +334,11 @@ class LinkageChecker:
                     LinkageViolation(
                         kind=LinkageViolationKind.UNREFERENCED_LINKAGE,
                         call_target=None,
-                        location=None,
+                        location=self._linkage_locations.get(name),
                         message=(
                             f"LINKAGE SECTION item '{name}' is declared but never "
                             "referenced by any ENTRY or CALL USING clause"
                         ),
+                        item_name=name,
                     )
                 )

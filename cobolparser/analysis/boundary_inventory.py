@@ -17,13 +17,24 @@ built for the same program (Phase 1).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.sql_statements import ExecSQLStatement, FetchStatement
+from ..models.statements.base import (
+    CobolExpression,
+    ConditionalExpression,
+    LogicalExpression,
+)
 from ..models.statements.call import CallStatement
-from ..models.statements.control import EvaluateStatement, SearchStatement
+from ..models.statements.control import (
+    EvaluateStatement,
+    IfStatement,
+    PerformStatement,
+    SearchStatement,
+)
 from ..models.statements.data import DisplayStatement
 from ..models.statements.io import (
     IOAcceptStatement,
@@ -131,10 +142,75 @@ def _write_targets(statement: Any) -> list[str]:
     if into_target:
         names.append(into_target)
     for entry in getattr(statement, "into_targets", None) or []:
-        name = entry.get("name") if isinstance(entry, dict) else None
+        # UNSTRING's ``into_targets`` entries carry the receiving field under
+        # "target" (see UnstringStatement.add_into_target); "name" is kept
+        # for any hand-built dict shaped the older way.
+        name = (
+            (entry.get("target") or entry.get("name"))
+            if isinstance(entry, dict)
+            else None
+        )
         if name:
             names.append(name)
     return names
+
+
+def _condition_field_names(expr: CobolExpression | None) -> list[str]:
+    """Every bare operand string anywhere in *expr*'s tree (over-approximates
+    -- a literal like ``"Y"`` is included too -- but the caller only ever
+    looks these up against a name map, so a stray literal simply never
+    matches anything real). Shared with ``constraints.py``, which imports it
+    from here (the dependency runs constraints -> boundary_inventory, never
+    the other way round)."""
+    if expr is None:
+        return []
+    if isinstance(expr, LogicalExpression):
+        return _condition_field_names(expr.left_condition) + _condition_field_names(
+            expr.right_condition
+        )
+    if isinstance(expr, ConditionalExpression):
+        names = []
+        for operand in (expr.left_operand, expr.right_operand):
+            if isinstance(operand, str) and operand.strip():
+                names.append(operand.strip())
+        return names
+    return []
+
+
+def _condition_read_names(statement: Any) -> list[str]:
+    """Names a branching statement *reads* in its own condition -- an IF's
+    condition tree, a PERFORM UNTIL's guard, an EVALUATE's subjects and its
+    WHEN selectors. None of these reach the statement's generic
+    ``.operands`` bag (an IfStatement's is empty), so a CALL argument whose
+    only later use is ``IF WS-RC = 'Y'`` used to look unread."""
+    names: list[str] = []
+    if isinstance(statement, IfStatement):
+        names.extend(_condition_field_names(statement.condition))
+    elif isinstance(statement, PerformStatement):
+        until = statement.until_condition
+        names.extend(_condition_field_names(getattr(until, "condition_tree", None)))
+    elif isinstance(statement, EvaluateStatement):
+        names.extend(
+            subject for subject in statement.subjects if isinstance(subject, str)
+        )
+        for clause in statement.when_clauses:
+            for selector in clause.selectors:
+                if not isinstance(selector, dict):
+                    continue
+                for key in ("value", "start", "end"):
+                    value = selector.get(key)
+                    if isinstance(value, str) and value.strip():
+                        names.append(value.strip())
+                text = selector.get("text")
+                if isinstance(text, str):
+                    names.extend(_RELATIONAL_TEXT_OPERAND_RE.findall(text))
+    return names
+
+
+#: Word-shaped tokens of a raw ``EVALUATE TRUE`` selector text ("WS-G = B"),
+#: for the read scan above: over-approximates (a literal word is included
+#: too), harmless since every name is looked up against the layout index.
+_RELATIONAL_TEXT_OPERAND_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 
 
 _WRITE_SHAPED_ATTRS = ("targets", "givings", "target", "into_target", "into_targets")
@@ -769,6 +845,9 @@ class BoundaryInventoryAnalyzer:
                     break
                 continue
             if any(touches(op) for op in getattr(statement, "operands", None) or []):
+                read_after = True
+                break
+            if any(touches(name) for name in _condition_read_names(statement)):
                 read_after = True
                 break
 

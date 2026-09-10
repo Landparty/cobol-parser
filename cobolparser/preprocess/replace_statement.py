@@ -255,6 +255,12 @@ class _ReplaceScanner:
                         break
                     self.pos += 1
                 continue
+            # A `*>` inline comment (outside a literal) runs to end of line:
+            # a REPLACE mentioned there is prose, not a statement.
+            if ch == "*" and self._peek(1) == ">":
+                newline = self.source.find("\n", self.pos)
+                self.pos = self.length if newline == -1 else newline
+                continue
             keyword_start = self.pos
             # Left word-boundary check so ``NOREPLACE`` is not matched.
             prev = self.source[keyword_start - 1] if keyword_start > 0 else ""

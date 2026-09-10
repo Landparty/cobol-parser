@@ -220,6 +220,26 @@ class FieldSpec:
     odo_counter_bounds: tuple[int, int] | None = None
 
     @property
+    def scaling_positions(self) -> int:
+        """Signed count of ``P`` scaling positions in the PICTURE.
+
+        Positive for trailing ``P``s (``9(3)PPP``: the value is a multiple of
+        ``10**3``), negative for leading ones (``SVPP9(3)``: the first two
+        decimal places are always zero), zero for every other picture.  A
+        ``P`` holds no byte, so :attr:`stored_digits` excludes them while
+        :attr:`integer_digits`/:attr:`decimal_digits` -- which describe the
+        *value* -- include them.
+        """
+        return scaling_positions(self.picture)
+
+    @property
+    def stored_digits(self) -> int:
+        """Digit positions the field actually stores: every ``9``, no ``P``."""
+        return max(
+            0, self.integer_digits + self.decimal_digits - abs(self.scaling_positions)
+        )
+
+    @property
     def storage_size(self) -> int:
         """Bytes one occurrence of this field really occupies.
 
@@ -231,7 +251,7 @@ class FieldSpec:
         return storage_size(
             self.usage,
             picture_size=self.size,
-            total_digits=self.integer_digits + self.decimal_digits,
+            total_digits=self.stored_digits,
             sign_clause=self.sign_clause,
             is_signed=self.is_signed,
         )
@@ -347,6 +367,35 @@ def _condition_values(item: CobolDataItem) -> list[str]:
         values.extend(expand_condition_values(child.values))
     # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
+
+
+_PIC_REPEAT_EXPAND_RE = re.compile(r"([^()])\((\d+)\)")
+
+
+def scaling_positions(picture: str | None) -> int:
+    """Signed ``P`` count of *picture*: ``+n`` trailing, ``-n`` leading, else 0.
+
+    See :attr:`FieldSpec.scaling_positions`.  Only the plain scaled shapes
+    the :class:`~...models.data_items.PictureClause` parser recognises
+    (``S``/``V``/``P``/``9`` with one contiguous ``P`` run at one end) count;
+    anything else reports zero, so an edited picture is never misread.
+    """
+    if not picture:
+        return 0
+    expanded = _PIC_REPEAT_EXPAND_RE.sub(
+        lambda m: m.group(1) * int(m.group(2)), picture.upper()
+    )
+    core = [ch for ch in expanded if ch not in ("S", "V")]
+    if not core or any(ch not in ("9", "P") for ch in core):
+        return 0
+    count = core.count("P")
+    if count == 0 or count == len(core):
+        return 0
+    if core[0] == "P" and all(ch == "P" for ch in core[:count]):
+        return -count
+    if core[-1] == "P" and all(ch == "P" for ch in core[-count:]):
+        return count
+    return 0
 
 
 def _strip_literal_quotes(value: str) -> str:

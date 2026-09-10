@@ -700,12 +700,31 @@ class _ExpressionTreeParser:
 
     def _parse_power(self) -> str | CobolExpression:
         node = self._parse_primary()
-        if self._peek() == "**":
+        while self._peek() == "**":
             self._advance()
-            # Right-associative; the exponent may itself carry a sign
-            # (2 ** -3), hence _parse_unary on the right.
-            node = self._binary("**", node, self._parse_unary())
+            # Left-associative, like every other COBOL binary operator:
+            # IBM evaluates operators of the same precedence left to right,
+            # so ``2 ** 3 ** 2`` is ``(2 ** 3) ** 2 == 64``, not ``2 ** 9``.
+            # The exponent may itself carry a sign (``2 ** -3``), hence the
+            # signed-primary parse on the right -- which deliberately does
+            # NOT absorb a further ``**`` of its own.
+            node = self._binary("**", node, self._parse_signed_primary())
         return node
+
+    def _parse_signed_primary(self) -> str | CobolExpression:
+        """A primary with any number of leading unary signs, for the
+        right-hand side of ``**`` -- ``_parse_unary`` minus its descent into
+        ``_parse_power``, so exponentiation chains stay left-associative."""
+        tok = self._peek()
+        if tok == "+":
+            self._advance()
+            return self._parse_signed_primary()
+        if tok == "-":
+            self._advance()
+            node = ArithmeticExpression("NEGATE", self._location)
+            node.set_right_operand(self._parse_signed_primary())
+            return node
+        return self._parse_primary()
 
     def _parse_primary(self) -> str | CobolExpression:
         tok = self._peek()

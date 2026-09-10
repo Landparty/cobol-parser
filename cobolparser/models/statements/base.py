@@ -200,7 +200,16 @@ class ConditionalExpression(CobolExpression):
 
 
 class LogicalExpression(CobolExpression):
-    """AST node for logical expressions (AND, OR, NOT)."""
+    """AST node for logical expressions (AND, OR, NOT).
+
+    ``AND`` / ``OR`` are binary: both ``left_condition`` and
+    ``right_condition`` are set. ``NOT`` is unary: the negated condition is
+    ``left_condition`` and ``right_condition`` stays ``None`` (``to_dict()``
+    emits ``"right_condition": null``). The parser only builds a ``NOT``
+    node for a negation it cannot fold into the operand itself -- ``NOT A =
+    1`` becomes ``NOT_EQUAL`` directly, the way ``A NOT = 1`` always has;
+    ``NOT (A = 1 AND B = 2)`` and ``NOT FLAG-ON`` get the wrapper.
+    """
 
     def __init__(self, operator: str, location: SourceLocation):
         super().__init__("LOGICAL", location)

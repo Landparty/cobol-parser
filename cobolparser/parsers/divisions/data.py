@@ -509,6 +509,15 @@ class DataDivisionParser(BaseDivisionParser):
 
             current_level = item.level
 
+            # Level 01 and level 77 always start a new top-level entry.
+            # A 77 is, by COBOL's level-number rules, never subordinate to
+            # anything, but a plain numeric pop (``stack[-1][0] >= 77``)
+            # left it attached under whatever elementary item happened to be
+            # open (``01 REC. 05 Y1 PIC X. 77 STANDALONE PIC 9.`` nested
+            # STANDALONE under Y1).
+            if current_level in (1, 77):
+                stack.clear()
+
             # Remove items from stack that have higher or equal level
             while stack and stack[-1][0] >= current_level:
                 stack.pop()

@@ -85,10 +85,14 @@ class TestCmdValidate:
 
 
 class TestCmdRenderSummary:
-    def test_render_summary_format(self, capsys):
+    def test_render_summary_format(self, capsys, tmp_path):
         renderer = MagicMock()
         renderer.render_summary.return_value = "SUMMARY OUTPUT"
-        args = argparse.Namespace(input="c.json", output=None, format="summary")
+        # cmd_render now checks the input is a JSON object before rendering
+        # (a non-object artifact used to reach the renderer and traceback).
+        artifact = tmp_path / "c.json"
+        artifact.write_text("{}")
+        args = argparse.Namespace(input=str(artifact), output=None, format="summary")
 
         # Let cmd_render mutate the real sys.path (it inserts the tools dir),
         # then restore the original entries afterwards rather than replacing

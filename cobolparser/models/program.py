@@ -215,6 +215,22 @@ class CobolParagraph(ASTNode):
         }
 
 
+def _strip_locations(node: Any) -> None:
+    """Drop every nested ``location`` key in place.
+
+    Division, section, paragraph and statement nodes each serialize their own
+    ``location``; ``SerializationConfig(include_source_locations=False)`` has
+    to reach all of them, not only the program's.
+    """
+    if isinstance(node, dict):
+        node.pop("location", None)
+        for value in node.values():
+            _strip_locations(value)
+    elif isinstance(node, list):
+        for value in node:
+            _strip_locations(value)
+
+
 class CobolProgram(ASTNode):
     """AST node representing a complete COBOL program."""
 
@@ -227,6 +243,9 @@ class CobolProgram(ASTNode):
         # nested programs delimited by END PROGRAM). Historically everything
         # after the first program was silently dropped.
         self.contained_programs: list[CobolProgram] = []
+        # The SerializationConfig the building parser was constructed with;
+        # to_dict()/to_json() fall back to it when called without one.
+        self.serialization_config: SerializationConfig | None = None
         # Cached statistics
         self._statistics: dict[str, Any] | None = None
         # S1 optimization: cache get_all_statements() result. Multiple
@@ -795,9 +814,15 @@ class CobolProgram(ASTNode):
         }
 
     def to_dict(self, config: SerializationConfig | None = None) -> dict[str, Any]:
-        """Convert program to dictionary representation."""
+        """Convert program to dictionary representation.
+
+        With no explicit *config*, the one the parser that built this program
+        was constructed with applies (``CobolParser(serialization_config=...)``),
+        so the constructor option is honoured by every ``to_dict()``/``to_json()``
+        call rather than only by callers who pass it again.
+        """
         if config is None:
-            config = SerializationConfig()
+            config = self.serialization_config or SerializationConfig()
 
         result: dict[str, Any] = {
             "node_type": self.node_type,
@@ -814,6 +839,8 @@ class CobolProgram(ASTNode):
 
         if config.include_source_locations:
             result["location"] = self.location.to_dict()
+        else:
+            _strip_locations(result["divisions"])
 
         if config.include_metadata:
             metadata = {
@@ -835,10 +862,13 @@ class CobolProgram(ASTNode):
         """Convert program to JSON representation with configuration options."""
         if isinstance(config_or_indent, SerializationConfig):
             config = config_or_indent
-            indent = 2
+            indent = None if config.compact_format else 2
         else:
-            config = SerializationConfig()
-            indent = config_or_indent if config_or_indent is not None else 2
+            config = self.serialization_config or SerializationConfig()
+            if config_or_indent is not None:
+                indent = config_or_indent
+            else:
+                indent = None if config.compact_format else 2
         data = self.to_dict(config)
         return json.dumps(data, indent=indent)
 

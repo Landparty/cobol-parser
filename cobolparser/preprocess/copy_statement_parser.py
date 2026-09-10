@@ -88,7 +88,10 @@ def normalize_continuation_lines(
         >>> normalize_continuation_lines(source)
         "       COPY EMPLOYEE REPLACING ==OLD== BY ==NEW==."
     """
-    lines = source.split("\n")
+    # Tabs are expanded before any column-sensitive slicing, exactly as
+    # normalize_fixed_format does, so the indicator column is found where
+    # the final parse will look for it.
+    lines = source.expandtabs(8).split("\n")
     result: list[str] = []
 
     # Text starts after the indicator column
@@ -98,40 +101,50 @@ def normalize_continuation_lines(
         line_number = _i + 1
         # Check if this is a continuation line (indicator is '-')
         if len(line) > indicator_position and line[indicator_position] == "-":
-            # This is a continuation line
-            if result:
+            # This is a continuation line. It continues the nearest earlier
+            # line that is not blank: comment lines reach this function
+            # already blanked (remove_comment_lines), and IBM fixed format
+            # lets comment and blank lines sit between a continued line and
+            # its continuation -- joining onto the blank line instead would
+            # sever a continued literal.
+            target = len(result) - 1
+            while target >= 0 and not result[target].strip():
+                target -= 1
+            if target >= 0:
                 # Get the continuation text (after the indicator)
                 continuation_text = line[text_start:] if len(line) > text_start else ""
 
-                # Get the previous line (the one we're continuing)
-                prev_line = result[-1].rstrip()
+                # Get the previous line (the one we're continuing). A CRLF
+                # source keeps its "\r" here (lines were split on "\n"); it
+                # is a line terminator, never part of the continued text.
+                prev_line = result[target]
+                if prev_line.endswith("\r"):
+                    prev_line = prev_line[:-1]
 
-                # Check if we're continuing a string literal
-                # Count unmatched quotes in previous line to determine if we're in a string
-                in_double_string = _count_unmatched_quotes(prev_line, '"') % 2 == 1
-                in_single_string = _count_unmatched_quotes(prev_line, "'") % 2 == 1
+                # Same open-quote state machine as normalize_fixed_format:
+                # doubled quotes are escapes, the quote that opened the
+                # literal is the only one that closes it, and a `*>` outside
+                # a literal comments out the rest of the line. Counting
+                # quotes (the previous rule) miscounted an apostrophe
+                # literal holding a double quote, and vice versa.
+                open_quote = _open_literal_quote(prev_line)
 
-                if in_double_string or in_single_string:
-                    # We're continuing a string literal
-                    # COBOL continuation: the continuation line starts with the quote char
-                    # which should be skipped as it's just indicating literal continuation
+                if open_quote is not None:
+                    # We're continuing a string literal. The continuation
+                    # line's leading quote only marks the resumption and is
+                    # dropped; the continued line keeps its trailing blanks
+                    # up to column 72, which are part of the literal's value
+                    # (the M5 rule) -- never rstrip an open literal.
                     cont_stripped = continuation_text.lstrip()
-                    if cont_stripped:
-                        if in_double_string and cont_stripped.startswith('"'):
-                            # Skip the continuation quote
-                            continuation_text = cont_stripped[1:]
-                        elif in_single_string and cont_stripped.startswith("'"):
-                            # Skip the continuation quote
-                            continuation_text = cont_stripped[1:]
+                    if cont_stripped.startswith(open_quote):
+                        cont_stripped = cont_stripped[1:]
+                    result[target] = prev_line + cont_stripped
                 else:
                     # Non-literal continuation: strip leading spaces
                     # In COBOL, when continuing a non-literal (like an identifier),
                     # the continuation text is concatenated directly to the previous text.
                     # Example: "O005" continued with "F-001" becomes "O005F-001"
-                    continuation_text = continuation_text.lstrip()
-
-                # Append to previous line
-                result[-1] = prev_line + continuation_text
+                    result[target] = prev_line.rstrip() + continuation_text.lstrip()
             else:
                 # Orphan continuation line - just add the text part
                 result.append(line[text_start:] if len(line) > text_start else "")
@@ -143,6 +156,37 @@ def normalize_continuation_lines(
                 line_origins.append(line_number)
 
     return "\n".join(result)
+
+
+def _open_literal_quote(text: str) -> str | None:
+    """Return the quote character of a literal still open at the end of *text*.
+
+    Mirrors ``normalize_fixed_format``'s quote tracking: a doubled quote
+    inside a literal is an escape, only the opening quote character closes
+    the literal, and outside a literal a ``*>`` inline comment runs to end of
+    line (a quote after it is comment text). ``None`` when no literal is
+    open.
+    """
+    open_quote: str | None = None
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if open_quote is not None:
+            if ch == open_quote:
+                if i + 1 < n and text[i + 1] == open_quote:
+                    i += 2
+                    continue
+                open_quote = None
+            i += 1
+        elif ch in ('"', "'"):
+            open_quote = ch
+            i += 1
+        elif ch == "*" and i + 1 < n and text[i + 1] == ">":
+            break
+        else:
+            i += 1
+    return open_quote
 
 
 def _count_unmatched_quotes(text: str, quote_char: str) -> int:
@@ -218,7 +262,9 @@ def strip_sequence_area(source: str) -> str:
         >>> strip_sequence_area(line)
         "     COPY                                                    KP001"
     """
-    lines = source.split("\n")
+    # Tabs are expanded before slicing, as normalize_fixed_format does, so a
+    # tab-indented member is cut at the same columns the final parse uses.
+    lines = source.expandtabs(8).split("\n")
     result = []
 
     # Define column boundaries (0-indexed)
@@ -366,7 +412,9 @@ def remove_comment_lines(source: str) -> str:
     Returns:
         Source with comment lines blanked out so line positions remain stable
     """
-    lines = source.split("\n")
+    # Tabs expanded first so column 7 is judged where normalize_fixed_format
+    # will judge it (a tab-indented line is never a comment in either).
+    lines = source.expandtabs(8).split("\n")
     result = []
 
     for line in lines:
@@ -524,6 +572,13 @@ class CopyStatementLexer:
             # 1. Protection against COPY inside strings
             if char in ('"', "'"):
                 self._read_operand()
+                continue
+
+            # 1b. A `*>` inline comment (outside a literal) runs to end of
+            # line: a COPY mentioned there is prose, not a statement.
+            if char == "*" and self._peek(1) == ">":
+                newline = self.source.find("\n", self.pos)
+                self.pos = self.length if newline == -1 else newline
                 continue
 
             # 2. Find next 'COPY'
@@ -966,16 +1021,28 @@ def apply_replacing_clauses(
         # literal text; only then may string literals be rewritten.
         protect_literals = '"' not in clause.find_text and "'" not in clause.find_text
 
+        # The replacement is literal text, never an re template: a
+        # backslash in it (`'C:\TEMP\1'`) would otherwise raise re.error or
+        # be silently reinterpreted as a group reference.
+        def _literal_replacement(
+            _m: re.Match[str], r: str = clause.replace_text
+        ) -> str:
+            return r
+
         for idx, line in enumerate(lines):
             if is_comment[idx]:
                 continue
             if protect_literals and ('"' in line or "'" in line):
                 lines[idx] = "".join(
-                    segment if is_literal else pattern.sub(clause.replace_text, segment)
+                    (
+                        segment
+                        if is_literal
+                        else pattern.sub(_literal_replacement, segment)
+                    )
                     for segment, is_literal in _split_literal_segments(line)
                 )
             else:
-                lines[idx] = pattern.sub(clause.replace_text, line)
+                lines[idx] = pattern.sub(_literal_replacement, line)
 
     return "\n".join(lines)
 

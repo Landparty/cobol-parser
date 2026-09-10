@@ -1,5 +1,62 @@
 # OKF Update Log
 
+## 2026-09-09 — cross-repo bug review: 46 fixes across the pipeline
+
+A review pass over every layer (lexer/preprocess, parsers, analysis,
+generators, CLI) with one reviewer per area, each finding reproduced by a
+script before it was accepted. Regression tests live in
+`tests/regression/test_review_2026_09_09_{preprocess,parser,analysis,generators}.py`
+(one class per finding); the full list is in `CHANGELOG.md` → Unreleased →
+Fixed. Three decisions worth keeping:
+
+### Continuation records owe a placeholder (`preprocessing.md`)
+
+The normalizer's claim that "output line count equals input line count" only
+ever held for comment and blank lines. A continued literal *removed* lines,
+so every location after it was wrong — and lint, the extension's
+diagnostics, and the expander's source map all consume those locations. The
+fix is a `deferred` counter: a continuation record owes one empty line,
+emitted after its logical line flushes. The same counter is what lets a
+comment line interrupt an open literal without severing it (the placeholder
+is deferred, the next `-` record rejoins), which had been on the LOW list
+since July. Both paths (pure and Cython) changed; the parity harness still
+reports zero mismatches.
+
+### A PERFORM range end never falls through (`analysis.md`)
+
+Two HIGH analysis bugs shared one cause: the CFG's documented
+over-approximation of a fall-through edge out of a performed range's end.
+`recursion-check` closed a phantom cycle with it (the priming-read idiom,
+graded as an unconditional infinite loop), and `DeadCodeAnalyzer` credited
+everything after an `xxx-EXIT` paragraph as reached when that paragraph was
+a `GO TO` target inside its own range. Both fixes are local — the recursion
+analyzer discards a cycle whose closing hop is that edge; dead-code stops
+treating a THRU end as a fall-through source — rather than removing the
+edge from the graph, which other consumers rely on.
+
+### "Unknown" must be unknown (`generators.md`, `analysis.md`)
+
+`ConstantFolder`'s contract is "exact by construction, or absent". Three
+findings were places it kept a value it could not know: a group-level write
+(the layout index resolves only leaves, so the write was a no-op), a
+statement that overwrites its target through a field the folder did not
+scan (SQL host variables, UNSTRING targets, a reference-modified MOVE), and
+a `REDEFINES` alias. The solver had the same shape: a signed literal it
+could not parse was *ignored*, which turned "constraint unknown" into
+"constraint satisfied". Every one of these is now a poison or an
+`Unsatisfiable` with a reason.
+
+The CLI pass (eight smaller items, `tests/regression/test_review_2026_09_09_cli.py`)
+found the one cross-repo contract break: the extension sends `--program` to
+every analyzer, but `unused-variables` and `program-flow` never accepted it,
+and the extension's "CLI too old" fallback re-ran without it — a wrong unit's
+report with no sign of it. Both take it now.
+
+Also removed: `LinkageChecker`'s `VALUE_TO_LINKAGE` rule, which had no basis
+in COBOL and fired exactly where it could see the callee wanted BY VALUE.
+Still open, recorded in `reports/open-findings.md`: numeric-edited fields are
+written to record images as plain numbers, not the edited image.
+
 ## 2026-09-07 — where a line came from, and which program it belongs to
 
 Request (from the VS Code extension's own limitation list): make the four

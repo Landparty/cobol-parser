@@ -249,6 +249,7 @@ class EvaluateStatementParser(IStatementParser):
         """Parse selector list for a WHEN clause, including validation issues."""
         selectors = []
         current_selector: list[str] = []
+        current_types: list[TokenType] = []
         issues = []
         selector_count = 0
         expecting_selector = True
@@ -276,11 +277,12 @@ class EvaluateStatementParser(IStatementParser):
                 if expecting_selector:
                     issues.append("Consecutive ALSO keywords without selector")
                 elif current_selector:
-                    selector = self._build_selector(current_selector)
+                    selector = self._build_selector(current_selector, current_types)
                     if selector:
                         selectors.append(selector)
                         selector_count += 1
                     current_selector = []
+                    current_types = []
                 expecting_selector = True
                 saw_separator = True
                 token_stream.consume()
@@ -299,13 +301,14 @@ class EvaluateStatementParser(IStatementParser):
                 if token.type == TokenType.STRING_LITERAL and not value.strip():
                     value = f"'{value}'"
                 current_selector.append(value)
+                current_types.append(token.type)
                 expecting_selector = False
                 saw_separator = False
             token_stream.consume()
 
         # Save final selector if any
         if current_selector:
-            selector = self._build_selector(current_selector)
+            selector = self._build_selector(current_selector, current_types)
             if selector:
                 selectors.append(selector)
                 selector_count += 1
@@ -318,13 +321,30 @@ class EvaluateStatementParser(IStatementParser):
 
         return selectors, selector_count, issues
 
-    def _build_selector(self, selector_tokens: list[str]) -> dict | None:
-        """Convert raw selector tokens into a selector dictionary."""
+    def _build_selector(
+        self, selector_tokens: list[str], token_types: list[TokenType] | None = None
+    ) -> dict | None:
+        """Convert raw selector tokens into a selector dictionary.
+
+        A plain value selector is always ``{"type": "Literal", "value": ...}``
+        -- the lexer strips string quotes, so ``WHEN "AB"`` and ``WHEN WS-AB``
+        were indistinguishable in the dict. When the selector is a single
+        IDENTIFIER token the dict additionally carries ``"identifier": True``.
+        The ``type`` key deliberately stays ``"Literal"``: the constraint
+        extractor (``analysis/constraints.py``) keys EVALUATE TRUE
+        condition-name selectors on it, so an additive marker is the
+        backward-compatible way to make the distinction visible.
+        """
         normalized_tokens = [
             token for token in selector_tokens if token and token.strip()
         ]
         if not normalized_tokens:
             return None
+        is_identifier = bool(
+            token_types
+            and len(token_types) == len(selector_tokens) == 1
+            and token_types[0] == TokenType.IDENTIFIER
+        )
 
         selector_text = " ".join(normalized_tokens).strip()
         selector_upper = selector_text.upper()
@@ -354,7 +374,10 @@ class EvaluateStatementParser(IStatementParser):
                 selector["operator"] = "AND"
             return selector
 
-        return {"type": "Literal", "value": selector_text}
+        literal: dict[str, Any] = {"type": "Literal", "value": selector_text}
+        if is_identifier:
+            literal["identifier"] = True
+        return literal
 
     def _skip_clause_statements(
         self, token_stream: ITokenStream

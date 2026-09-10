@@ -30,6 +30,7 @@ from ._utils import (
     SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
+    collect_clause_stmts,
     consume_period,
     consume_procedure_qualifier,
     is_procedure_name_token,
@@ -38,11 +39,10 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     peek_past_noise,
-    skip_statement_separators,
+    previous_meaningful_token,
     skip_whitespace,
     token_column,
     token_location,
-    try_parse_nested_statement,
     warn_paragraph_boundary_swallowed,
 )
 from ._utils import (
@@ -473,6 +473,8 @@ class ReturnStatementParser(IStatementParser):
                     at_end_stmts = self._parse_clause_stmts(token_stream)
                     if at_end_stmts:
                         stmt.set_at_end_clause(at_end_stmts)
+                    if self._sentence_period_consumed(token_stream):
+                        break
             elif val == "NOT":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -487,6 +489,8 @@ class ReturnStatementParser(IStatementParser):
                     not_at_end_stmts = self._parse_clause_stmts(token_stream)
                     if not_at_end_stmts:
                         stmt.set_not_at_end_clause(not_at_end_stmts)
+                    if self._sentence_period_consumed(token_stream):
+                        break
             elif bare_end_starts_at_end_clause(token_stream):
                 # ``RETURN F END stmts`` -- AT is optional.
                 token_stream.consume()  # END
@@ -494,6 +498,8 @@ class ReturnStatementParser(IStatementParser):
                 at_end_stmts = self._parse_clause_stmts(token_stream)
                 if at_end_stmts:
                     stmt.set_at_end_clause(at_end_stmts)
+                if self._sentence_period_consumed(token_stream):
+                    break
             elif token.type not in LITERAL_TOKEN_TYPES and val in STATEMENT_KEYWORDS:
                 break
             else:
@@ -504,30 +510,21 @@ class ReturnStatementParser(IStatementParser):
 
     @staticmethod
     def _parse_clause_stmts(token_stream: ITokenStream) -> list:
-        """Parse imperative statements in an AT END / NOT AT END clause."""
-        stmts: list = []
-        while not token_stream.is_empty():
-            skip_statement_separators(token_stream)
-            token = token_stream.peek()
-            if not token:
-                break
-            val = _token_value_upper(token)
-            if (
-                token.type == TokenType.PERIOD
-                or val
-                in (
-                    "NOT",
-                    "END-RETURN",
-                )
-                or val in CONTROL_FLOW_BOUNDARIES
-            ):
-                break
-            nested = try_parse_nested_statement(token_stream)
-            if nested:
-                stmts.append(nested)
-            else:
-                break
-        return stmts
+        """Parse imperative statements in an AT END / NOT AT END clause.
+
+        Delegates to the shared ``collect_clause_stmts`` (the same helper
+        READ/WRITE use) so a nested statement that consumed the sentence
+        period ends the clause. The previous private loop did not notice
+        the consumed period, so ``RETURN SF AT END MOVE 'Y' TO A.`` swallowed
+        every following statement of the paragraph into ``at_end_clause``.
+        """
+        return collect_clause_stmts(token_stream, {"END-RETURN", "END_RETURN"})
+
+    @staticmethod
+    def _sentence_period_consumed(token_stream: ITokenStream) -> bool:
+        """True when the clause body just parsed ended on the sentence period."""
+        prev = previous_meaningful_token(token_stream)
+        return prev is not None and prev.type == TokenType.PERIOD
 
 
 class UseStatementParser(IStatementParser):

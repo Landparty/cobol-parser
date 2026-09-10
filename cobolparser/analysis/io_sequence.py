@@ -29,9 +29,12 @@ from ..models.statements import (
     IORewriteStatement,
     IOStartStatement,
     IOWriteStatement,
+    MergeStatement,
     PerformStatement,
+    SortStatement,
     StopStatement,
 )
+from ._files import record_to_file_map, resolve_file_name
 
 
 class IOViolationKind(Enum):
@@ -135,6 +138,10 @@ class IOSequenceAnalyzer:
         self._name_last: dict[str, int] = {}
         self._perform_stack: list[tuple[int, int]] = []
         self._terminated = False
+        # FILE SECTION record name -> owning FD/SD name (upper-cased). WRITE
+        # and REWRITE name a record, never a file, so without this map they
+        # could never be checked against the open-file set at all.
+        self._record_to_file: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
         """Analyze the AST and return an IOSequenceReport.
@@ -153,6 +160,7 @@ class IOSequenceAnalyzer:
         self._name_last = {}
         self._perform_stack = []
         self._terminated = False
+        self._record_to_file = record_to_file_map(ast)
 
         proc_division = ast.procedure_division
         if proc_division is not None:
@@ -286,7 +294,9 @@ class IOSequenceAnalyzer:
 
     def _process_statement(self, stmt: ASTNode) -> None:
         """Dispatch *stmt* and its nested statements in declaration order,
-        inlining out-of-line PERFORM targets at their call sites."""
+        inlining out-of-line PERFORM targets -- and SORT/MERGE INPUT/OUTPUT
+        PROCEDUREs, which the sort runs exactly like a PERFORM of the named
+        range -- at their call sites."""
         visited: set[int] = set()
 
         def _visit(node: ASTNode) -> None:
@@ -300,6 +310,14 @@ class IOSequenceAnalyzer:
                 and not node.inline_statements
             ):
                 self._run_perform(node.target_paragraph, node.thru_paragraph)
+            elif isinstance(node, SortStatement):
+                if node.input_procedure:
+                    self._run_perform(node.input_procedure, node.input_procedure_thru)
+                if node.output_procedure:
+                    self._run_perform(node.output_procedure, node.output_procedure_thru)
+            elif isinstance(node, MergeStatement):
+                if node.output_procedure:
+                    self._run_perform(node.output_procedure, node.output_procedure_thru)
             if hasattr(node, "children"):
                 for child in node.children:
                     _visit(child)
@@ -351,15 +369,20 @@ class IOSequenceAnalyzer:
         elif isinstance(node, IOReadStatement):
             self._check_open(node.file_name or "", "READ", loc)
         elif isinstance(node, IOWriteStatement):
-            # WRITE names a record (not a file); record_name cannot reliably
-            # identify which file is open, so only validate when file_name is
-            # explicitly set by the parser.
-            if node.file_name:
-                self._check_open(node.file_name, "WRITE", loc)
+            # WRITE names a record, not a file. The parser never sets
+            # file_name for it, so the record is resolved to the FD that
+            # owns it (FILE SECTION metadata); a record no FD claims stays
+            # unchecked rather than guessed.
+            self._check_open(
+                self._file_for(node.file_name, node.record_name) or "", "WRITE", loc
+            )
         elif isinstance(node, IORewriteStatement):
-            # Same as WRITE: record_name is not a reliable file identifier.
-            if node.file_name:
-                self._check_open(node.file_name, "REWRITE", loc)
+            # Same as WRITE: REWRITE names the record.
+            self._check_open(
+                self._file_for(node.file_name, node.record_name) or "",
+                "REWRITE",
+                loc,
+            )
         elif isinstance(node, IODeleteStatement):
             self._check_open(node.file_name or "", "DELETE", loc)
         elif isinstance(node, IOStartStatement):
@@ -376,6 +399,10 @@ class IOSequenceAnalyzer:
         # unopened. Only a GOBACK/STOP RUN reached as a paragraph's own
         # top-level statement is unconditional; that case is handled by
         # _terminate_program(), called from _run_paragraph.
+
+    def _file_for(self, file_name: str | None, record_name: str | None) -> str | None:
+        """The file a WRITE/REWRITE targets, via its record's FD."""
+        return resolve_file_name(file_name, record_name, self._record_to_file)
 
     def _terminate_program(self, loc: SourceLocation | None) -> None:
         """Record FILE_LEFT_OPEN for still-open files and clear I/O state.

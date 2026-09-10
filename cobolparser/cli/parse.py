@@ -402,34 +402,33 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
         **_source_format_kwargs(args),
     }
 
-    if not enable_profiling:
+    def _parse_once() -> Any:
         if copybook_paths:
+            from ..preprocess import PreprocessingError
             from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
-            result = parse_cobol_with_expansion(
-                source,
-                filename=args.file,
-                copybook_paths=copybook_paths,
-                **parse_kwargs,
-            )
-        else:
-            result = parse_cobol(source, filename=args.file, **parse_kwargs)
-        return result, None
+            try:
+                return parse_cobol_with_expansion(
+                    source,
+                    filename=args.file,
+                    copybook_paths=copybook_paths,
+                    **parse_kwargs,
+                )
+            except PreprocessingError as exc:
+                # A copybook that cannot be found (or expands circularly)
+                # is a configuration error the caller has to see on one
+                # line, not a traceback: the VS Code extension clears its
+                # diagnostics on any non-zero exit and reads stderr for why.
+                _fail(f"Copybook expansion failed for {args.file}: {exc}")
+        return parse_cobol(source, filename=args.file, **parse_kwargs)
+
+    if not enable_profiling:
+        return _parse_once(), None
 
     # With profiling
     ctx = ProfilerContext(top_n=top_n, prof_output=prof_output)
     with ctx:
-        if copybook_paths:
-            from ..preprocess.copybook_expander import parse_cobol_with_expansion
-
-            result = parse_cobol_with_expansion(
-                source,
-                filename=args.file,
-                copybook_paths=copybook_paths,
-                **parse_kwargs,
-            )
-        else:
-            result = parse_cobol(source, filename=args.file, **parse_kwargs)
+        result = _parse_once()
     assert ctx.result is not None
     return result, ctx.result
 
@@ -514,6 +513,10 @@ def _cmd_parse(args: argparse.Namespace) -> None:
         error_lines = [str(e) for e in result.errors]
         _fail(f"Parse failed for {args.file}\n" + "\n".join(error_lines))
 
+    # Record the file's program units so a multi-PROGRAM-ID file says so in
+    # its identification header, the way every analyzer subcommand does.
+    _select_program_unit(args, result)
+
     # --find-type: query AST by node type
     if args.find_type:
         matched = result.ast.find_all_by_type(args.find_type)
@@ -538,8 +541,13 @@ def _cmd_parse(args: argparse.Namespace) -> None:
         output = {**_identification(args, result.ast), "ast": result.ast.to_dict()}
     else:
         # The AST dict already carries program_name; only the source file
-        # needs to be spliced in for identification.
-        output = {"source_file": args.file, **result.ast.to_dict()}
+        # (and, for a multi-PROGRAM-ID file, the unit list) needs to be
+        # spliced in for identification.
+        output = {"source_file": args.file}
+        units = getattr(args, "program_units", None)
+        if units:
+            output["program_units"] = units
+        output.update(result.ast.to_dict())
 
     if args.errors:
         output["errors"] = [str(e) for e in result.errors]
@@ -662,6 +670,9 @@ def _cmd_batch(args: argparse.Namespace) -> None:
         _fail(
             "--profile-output in batch mode must be a directory path, not a .prof file"
         )
+
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
 
     results = parse_files(
         unique_files,
@@ -1832,6 +1843,7 @@ def _build_unused_variables_parser(
     _add_define_args(p)
     _add_output_arg(p)
     _add_profiling_args(p)
+    _add_program_arg(p)
     p.add_argument(
         "--exclude-copybook-variables",
         action="store_true",
@@ -1896,9 +1908,15 @@ def _cmd_unused_variables(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
         else:
+            # `ast` is already narrowed when --program named a unit; narrow
+            # the unexpanded parse the same way, or another unit's own
+            # declaration of a name would subtract from this one's set.
+            local_root = unexpanded_result.ast
+            wanted = getattr(args, "program", None)
+            if wanted:
+                local_root = local_root.find_program_unit(wanted) or local_root
             local_names = {
-                item.name.upper()
-                for item in collect_declared_items(unexpanded_result.ast)
+                item.name.upper() for item in collect_declared_items(local_root)
             }
             expanded_names = {item.name.upper() for item in collect_declared_items(ast)}
             copybook_item_names = expanded_names - local_names
@@ -1951,6 +1969,7 @@ def _build_program_flow_parser(
     _add_define_args(p)
     _add_output_arg(p)
     _add_profiling_args(p)
+    _add_program_arg(p)
     p.set_defaults(func=_cmd_program_flow)
 
 
@@ -2336,6 +2355,14 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     report.findings = filter_by_severity(report.findings, args.min_severity)
 
     if args.output_format == "text":
+        if prof is not None:
+            # The text report has nowhere to embed the profiling dict;
+            # dropping it silently would make --profile look like a no-op.
+            print(
+                "warning: --profile metrics are only included in --format json "
+                "output; ignoring for --format text",
+                file=sys.stderr,
+            )
         _text_out(_lint_text_report(report, args.file), getattr(args, "output", None))
     else:
         _emit_report(report.to_dict(), args, prof, ast)

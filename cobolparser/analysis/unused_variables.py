@@ -41,7 +41,7 @@ from ..models.statements.data import (
     StringStatement,
     UnstringStatement,
 )
-from ..models.statements.misc import MergeStatement, SortStatement
+from ..models.statements.misc import MergeStatement, SelectStatement, SortStatement
 
 # DATA DIVISION section names whose data items are in scope for this
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
@@ -717,13 +717,18 @@ class UnusedVariableAnalyzer:
     # ------------------------------------------------------------------
 
     def _collect_data_division_references(self, ast: CobolProgram) -> set[str]:
-        """Collect references that live entirely inside the DATA DIVISION:
-        OCCURS ... DEPENDING ON variables, level-66 RENAMES targets, and the
-        REPORT SECTION clauses that name a data item.  REDEFINES is handled
+        """Collect references that live outside the PROCEDURE DIVISION:
+        OCCURS ... DEPENDING ON variables, level-66 RENAMES targets, the
+        REPORT SECTION clauses that name a data item, the data items an FD
+        names (``RECORD VARYING ... DEPENDING ON``, ``LINAGE``), and the ones
+        a ``SELECT`` names (``FILE STATUS``, ``RECORD KEY``, ``ALTERNATE
+        RECORD KEY``, ``RELATIVE KEY``, ``PASSWORD``).  REDEFINES is handled
         separately in ``analyze()`` since it needs item-level (not just
         name-level) propagation.
         """
         names: set[str] = set()
+        names |= self._file_control_references(ast)
+
         data_div = ast.data_division
         if data_div is None:
             return names
@@ -737,6 +742,7 @@ class UnusedVariableAnalyzer:
                 continue
 
             for item in section.data_items:
+                names |= self._fd_clause_references(item)
                 for descendant in [item, *item.get_all_children()]:
                     occurs = descendant.occurs_clause
                     if occurs and occurs.depending_on:
@@ -749,6 +755,60 @@ class UnusedVariableAnalyzer:
                         getattr(child, "renames_through", None)
                     )
 
+        return names
+
+    @staticmethod
+    def _file_control_references(ast: CobolProgram) -> set[str]:
+        """Data names the FILE-CONTROL paragraph's SELECT clauses read or
+        write at run time.
+
+        The runtime stores into a ``FILE STATUS`` item after every I/O
+        operation and reads the ``RECORD KEY`` / ``ALTERNATE RECORD KEY`` /
+        ``RELATIVE KEY`` / ``PASSWORD`` items to position the file, whether
+        or not the PROCEDURE DIVISION ever names them -- a program that
+        only tests its status through a level-88 on the same item, or never
+        tests it at all, still uses it. Scanning only the PROCEDURE
+        DIVISION reported every one of them unused.
+        """
+        names: set[str] = set()
+        env_div = ast.get_division("ENVIRONMENT")
+        if env_div is None:
+            return names
+        for node in env_div.find_all_by_type("Statement"):
+            if not isinstance(node, SelectStatement):
+                continue
+            for value in (
+                node.file_status,
+                node.file_status_vsam,
+                node.record_key,
+                node.record_key_source,
+                node.relative_key,
+                node.password,
+            ):
+                names |= _extract_identifiers(value)
+            for alt in node.alternate_keys:
+                names |= _extract_identifiers(alt.get("key"))
+                names |= _extract_identifiers(alt.get("password"))
+        return names
+
+    @staticmethod
+    def _fd_clause_references(item: Any) -> set[str]:
+        """Data names an FD/SD's own clauses depend on, from the
+        ``fd_clauses`` metadata the DATA DIVISION parser leaves on the
+        01-level record: ``RECORD VARYING ... DEPENDING ON`` (the runtime
+        reads/sets the length item on every WRITE/READ) and ``LINAGE``
+        (its LINES / FOOTING / TOP / BOTTOM operands may be data names)."""
+        names: set[str] = set()
+        get_metadata = getattr(item, "get_metadata", None)
+        clauses = get_metadata("fd_clauses") if get_metadata else None
+        if not isinstance(clauses, dict):
+            return names
+        record = clauses.get("record")
+        if isinstance(record, dict):
+            names |= _extract_identifiers(record.get("depending_on"))
+        linage = clauses.get("linage")
+        if linage:
+            names |= _extract_identifiers(str(linage))
         return names
 
     @staticmethod

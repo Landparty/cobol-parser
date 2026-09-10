@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import itertools
 import random
+import re
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 
@@ -41,6 +42,8 @@ _FIGURATIVE_VALUES: dict[str, str] = {
     "NULLS": "",
 }
 _ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
+#: A sign token detached from its digits by the lexer: ``- 5`` / ``+ 7``.
+_SIGN_SPACE_RE = re.compile(r"^([+-])\s+")
 
 
 @dataclass(frozen=True)
@@ -214,6 +217,19 @@ def solve(
 
     factory = ValueFactory(random.Random(0), DataGeneratorOptions())
     rendered = factory.render(spec, str(witness))
+    if (
+        isinstance(domain, TextDomain)
+        and domain.allowed is not None
+        and rendered != str(witness)
+    ):
+        # Rendering truncates to the field's width: `IF WS-X = 'AB'` on a
+        # PIC X field picked 'AB' and rendered 'A', which the branch can
+        # never match. A literal the field cannot hold whole is a branch
+        # this field's data cannot reach.
+        return Unsatisfiable(
+            f"literal {witness!r} does not fit the {spec.size}-character field "
+            f"{spec.qualified_name} (rendered {rendered!r})"
+        )
     if isinstance(domain, TextDomain) and not domain._matches_classes(rendered):
         # Same defensive role as the numeric check below: rendering pads and
         # justifies, and a witness whose RENDERED form no longer satisfies the
@@ -283,7 +299,7 @@ def _apply(domain: Domain, c: FieldConstraint) -> str | None:
     if isinstance(domain, EnumDomain):
         return None if _apply_enum(domain, c) else _EMPTY
     if isinstance(domain, NumericDomain):
-        return None if _apply_numeric(domain, c) else _EMPTY
+        return _apply_numeric(domain, c)
     return _apply_text(domain, c)
 
 
@@ -299,11 +315,13 @@ def _apply_enum(domain: EnumDomain, c: FieldConstraint) -> bool:
     return bool(domain.values)
 
 
-def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
+def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> str | None:
+    """Narrow *domain* by *c*. ``None`` on success, else why it failed --
+    the same contract as :func:`_apply_text`."""
     if c.op == "figurative":
         fig = c.values[0].upper() if c.values else ""
         if fig not in _ZERO_FIGURATIVES:
-            return True  # SPACES/LOW-VALUES etc. don't narrow a numeric range
+            return None  # SPACES/LOW-VALUES etc. don't narrow a numeric range
         return _apply_numeric(
             domain,
             FieldConstraint(c.field, "ne" if c.negated else "eq", ("0",), c.origin),
@@ -314,7 +332,7 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
     # rather than no-op'd: a witness that silently violates `not_in_set` would
     # be an "exact by construction" promise the value does not keep.
     #
-    # This block MUST stay above the catch-all guard below, which returns True
+    # This block MUST stay above the catch-all guard below, which succeeds
     # for every op outside the relational set -- a set op placed after it is
     # dead code that no-ops silently. It shipped that way once and the numeric
     # test was too weak to notice (its midpoint witness happened to miss the
@@ -324,16 +342,20 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
         parsed = []
         for raw in c.values:
             try:
-                candidate = Decimal(raw)
+                candidate = Decimal(_numeric_literal_text(raw))
             except InvalidOperation:
                 continue
             if candidate.is_finite():
                 parsed.append(candidate)
         if not parsed:
-            return True
+            return None
         if c.op == "not_in_set":
             domain.excluded.update(parsed)
-            return domain.lo < domain.hi or domain.lo not in domain.excluded
+            return (
+                None
+                if domain.lo < domain.hi or domain.lo not in domain.excluded
+                else _EMPTY
+            )
         # in_set: an interval cannot express a discrete allow-set, so narrow
         # to the first admissible member -- sound (it satisfies the set) and
         # deterministic, at the cost of generality no caller depends on.
@@ -341,47 +363,69 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> bool:
             if domain.lo <= candidate <= domain.hi and candidate not in domain.excluded:
                 domain.lo = domain.hi = candidate
                 domain.excluded = set()
-                return True
-        return False
+                return None
+        return _EMPTY
 
     if c.op not in ("eq", "ne", "gt", "ge", "lt", "le"):
-        return True  # class_numeric/class_alphabetic: no-op on a numeric domain in v1
+        return None  # class_numeric/class_alphabetic: no-op on a numeric domain in v1
 
+    if not c.values:
+        return None
     try:
-        value = Decimal(c.values[0]) if c.values else None
+        value = Decimal(_numeric_literal_text(c.values[0]))
     except InvalidOperation:
-        return True  # a non-numeric literal against a numeric field: ignore, don't fail solve()
-    if value is None or not value.is_finite():
-        return True
+        # A literal the numeric field cannot hold (`IF WS-CNT = 'X'`, or a
+        # malformed number). Dropping the constraint used to hand back a
+        # witness that satisfied the arm's OTHER conjuncts and let the arm
+        # count as targeted; nothing generatable satisfies it, and saying so
+        # is what lands the arm in ScenarioCoverage as missed with a reason.
+        return (
+            f"literal {c.values[0]!r} is not a number the numeric field "
+            f"{c.field.spec.qualified_name} can hold"
+        )
+    if not value.is_finite():
+        return f"literal {c.values[0]!r} is not a finite number"
 
     if c.op == "eq":
         if not (domain.lo <= value <= domain.hi) or value in domain.excluded:
-            return False
+            return _EMPTY
         domain.lo = domain.hi = value
         domain.excluded = set()
-        return True
+        return None
     if c.op == "ne":
         domain.excluded.add(value)
-        return domain.lo < domain.hi or domain.lo not in domain.excluded
+        return (
+            None
+            if domain.lo < domain.hi or domain.lo not in domain.excluded
+            else _EMPTY
+        )
     # Same wide-precision reasoning as NumericDomain.pick(): a strict bound
     # nudged by one grid epsilon must stay exact for the widest PICTUREs.
     if c.op == "gt":
         with localcontext() as ctx:
             ctx.prec = 80
             domain.lo = max(domain.lo, value + _epsilon(domain.decimals))
-        return domain.lo <= domain.hi
+        return None if domain.lo <= domain.hi else _EMPTY
     if c.op == "ge":
         domain.lo = max(domain.lo, value)
-        return domain.lo <= domain.hi
+        return None if domain.lo <= domain.hi else _EMPTY
     if c.op == "lt":
         with localcontext() as ctx:
             ctx.prec = 80
             domain.hi = min(domain.hi, value - _epsilon(domain.decimals))
-        return domain.lo <= domain.hi
+        return None if domain.lo <= domain.hi else _EMPTY
     if c.op == "le":
         domain.hi = min(domain.hi, value)
-        return domain.lo <= domain.hi
-    return True
+        return None if domain.lo <= domain.hi else _EMPTY
+    return None
+
+
+def _numeric_literal_text(raw: str) -> str:
+    """*raw* with the sign-then-space shape a detached sign token leaves
+    (``- 5``) collapsed to ``-5``.  The extractor normalises this at the
+    source; doing it again here costs nothing and protects a caller that
+    builds a :class:`FieldConstraint` by hand."""
+    return _SIGN_SPACE_RE.sub(r"\1", raw.strip())
 
 
 def _apply_text(domain: TextDomain, c: FieldConstraint) -> str | None:

@@ -101,12 +101,14 @@ class TestH1NonLiteralOperand:
     def test_a_real_literal_still_builds_a_constraint(self):
         """The guard is a whitelist, so the forms that must keep working are
         pinned here: quoted, integer, decimal, and a negative (whose sign
-        reaches the extractor as its own token, `- 45`)."""
+        reaches the extractor as its own token, `- 45`, and is stored
+        reattached as `-45` -- the 2026-09-09 review found the spaced form
+        made the solver drop the constraint)."""
         for literal, expected in [
             ('"AB"', "AB"),
             ("'AB'", "AB"),
             ("123", "123"),
-            ("-45", "- 45"),
+            ("-45", "-45"),
             ("1.5", "1.5"),
         ]:
             source = _DATA_HEADER + f"""\

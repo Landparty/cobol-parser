@@ -47,7 +47,10 @@ class SpecialEntryParser:
                 break
             if t.type == TokenType.PERIOD or t.type == TokenType.LEVEL_NUMBER:
                 break
-            if t.value and t.value.upper() == "VALUE":
+            # ``VALUE [IS]`` and ``VALUES [ARE]`` are the same clause; only
+            # the singular was recognised, so ``88 V VALUES 'A' 'B'.``
+            # skipped every value as noise and recorded none.
+            if t.value and t.value.upper() in ("VALUE", "VALUES"):
                 token_stream.consume()
                 # optional IS / ARE
                 nxt = token_stream.peek()
@@ -102,6 +105,19 @@ class SpecialEntryParser:
                 ):
                     item.add_value(f"THROUGH:{end_token.value}")
                     token_stream.consume()
+                elif end_token and end_token.type in (TokenType.MINUS, TokenType.PLUS):
+                    # A signed range end (``VALUE -9 THRU -1``): the sign is
+                    # its own token, exactly as in the value branch above.
+                    # Without this lookahead the THROUGH marker was dropped
+                    # and the range degraded to its two endpoints.
+                    after_sign = token_stream.peek(1)
+                    if after_sign and after_sign.type in (
+                        TokenType.NUMERIC_LITERAL,
+                        TokenType.LEVEL_NUMBER,
+                    ):
+                        item.add_value(f"THROUGH:{end_token.value}{after_sign.value}")
+                        token_stream.consume()
+                        token_stream.consume()
             else:
                 break
 

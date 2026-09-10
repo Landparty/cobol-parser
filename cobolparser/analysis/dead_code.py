@@ -126,8 +126,20 @@ class DeadCodeAnalyzer:
         self._ordered_procedures: list[str] = []
         # Maps section name -> list of paragraph names within that section
         self._section_paragraphs: dict[str, list[str]] = {}
-        # Maps paragraph name -> parent section name (if any)
+        # Maps paragraph name -> parent section name (if any). Only the
+        # first same-named paragraph is registered as a procedure, but every
+        # section holding one is recorded in ``_paragraph_sections`` so a
+        # bare ``PERFORM 100-DO`` (or a qualified ``PERFORM 100-DO OF
+        # SEC-A``, whose qualifier the parser keeps only as metadata) keeps
+        # each of those sections alive rather than just the last one seen.
         self._paragraph_section: dict[str, str] = {}
+        self._paragraph_sections: dict[str, set[str]] = {}
+        # Closing paragraphs of every PERFORM/SORT/MERGE ... THRU range. A
+        # GO TO landing on one of these (the ``GO TO 1000-EXIT`` idiom
+        # inside ``PERFORM 1000-INIT THRU 1000-EXIT``) ends the range and
+        # *returns* to the performer -- it does not run on into whatever
+        # follows the range in source order.
+        self._range_ends: set[str] = set()
         # Maps paragraph name -> its CobolParagraph node, for fall-through
         # termination checks. Sections have no entry here -- a bare SECTION
         # header has no statements of its own and never blocks fall-through.
@@ -152,6 +164,8 @@ class DeadCodeAnalyzer:
         self._ordered_procedures = []
         self._section_paragraphs = {}
         self._paragraph_section = {}
+        self._paragraph_sections = {}
+        self._range_ends = set()
         self._paragraph_nodes = {}
         self._fallthrough_sources = set()
 
@@ -233,6 +247,9 @@ class DeadCodeAnalyzer:
                             sec_upper = name.upper()
                             self._section_paragraphs[sec_upper].append(upper_pname)
                             self._paragraph_section[upper_pname] = sec_upper
+                            self._paragraph_sections.setdefault(upper_pname, set()).add(
+                                sec_upper
+                            )
             else:
                 # Top-level paragraph (not inside a section)
                 pname = item.paragraph_name
@@ -278,14 +295,24 @@ class DeadCodeAnalyzer:
                 for pname in para_names:
                     self._referenced_names.add(pname)
 
-        # Upward: paragraph referenced -> parent section is referenced
-        for para_name, sec_name in self._paragraph_section.items():
+        # Upward: paragraph referenced -> parent section is referenced.
+        # Every section holding a paragraph of that name, not just the last
+        # one registered: a bare ``PERFORM 100-DO`` in a program with a
+        # ``100-DO`` in both ``SEC-A`` and ``SEC-B`` cannot be told apart by
+        # name alone, and reporting one of those sections dead would be
+        # reporting live code -- the over-approximation goes the safe way.
+        for para_name, sec_names in self._paragraph_sections.items():
             if para_name in self._referenced_names:
-                self._referenced_names.add(sec_name)
+                self._referenced_names.update(sec_names)
 
     def _collect_references(self, ast: CobolProgram) -> None:
         """Collect all procedure name references from control flow statements."""
         all_statements = ast.get_all_statements()
+
+        # THRU range ends must be known before any GO TO is classified, so a
+        # jump onto one is not mistaken for a jump that keeps running.
+        for stmt in all_statements:
+            self._collect_range_end(stmt)
 
         for stmt in all_statements:
             if isinstance(stmt, PerformStatement):
@@ -300,6 +327,19 @@ class DeadCodeAnalyzer:
                 self._collect_alter_refs(stmt)
             elif isinstance(stmt, EntryStatement):
                 self._collect_entry_refs(stmt)
+
+    def _collect_range_end(self, stmt: Any) -> None:
+        """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range."""
+        ends: list[str | None] = []
+        if isinstance(stmt, PerformStatement):
+            ends.append(stmt.thru_paragraph)
+        elif isinstance(stmt, SortStatement):
+            ends.extend([stmt.input_procedure_thru, stmt.output_procedure_thru])
+        elif isinstance(stmt, MergeStatement):
+            ends.append(stmt.output_procedure_thru)
+        for end in ends:
+            if end:
+                self._range_ends.add(end.upper())
 
     def _collect_perform_refs(self, stmt: PerformStatement) -> None:
         """Collect references from a PERFORM statement."""
@@ -317,7 +357,7 @@ class DeadCodeAnalyzer:
         # filtering operands would collapse a target that happens to share
         # its name with the DEPENDING ON variable.
         for target in stmt.target_paragraphs:
-            self._add_jump_ref(target)
+            self._add_goto_ref(target)
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
@@ -349,7 +389,7 @@ class DeadCodeAnalyzer:
         is not itself a reference to that paragraph.
         """
         for alteration in stmt.alterations:
-            self._add_jump_ref(alteration["to_paragraph"])
+            self._add_goto_ref(alteration["to_paragraph"])
 
     def _collect_entry_refs(self, stmt: EntryStatement) -> None:
         """Mark the paragraph containing an ENTRY statement as referenced.
@@ -464,6 +504,28 @@ class DeadCodeAnalyzer:
         if name:
             self._add_ref(name)
             self._fallthrough_sources.add(name.upper())
+
+    def _add_goto_ref(self, name: str | None) -> None:
+        """Add a GO TO (or ALTER ... TO PROCEED TO) target.
+
+        A jump lands in the target and carries on -- unless the target is
+        the closing paragraph of a ``PERFORM ... THRU`` range, where the
+        ``GO TO 1000-EXIT`` idiom ends the range early and control returns
+        to the performer. Such a target is referenced (never dead) but is
+        *not* a fall-through source: crediting it with one invented a
+        runtime edge out of the range that hid every dead paragraph after
+        ``1000-EXIT``. A GO TO onto a *middle* paragraph of a range still
+        falls on to the range end, which then returns just the same; that
+        residual over-approximation is deliberate -- a range end can also
+        be reached by a path that never PERFORMed it, and reporting live
+        code dead is the worse error.
+        """
+        if not name:
+            return
+        if name.upper() in self._range_ends:
+            self._add_ref(name)
+        else:
+            self._add_jump_ref(name)
 
     def _mark_thru_range(self, start: str | None, end: str | None) -> None:
         """Mark all procedures between start and end (inclusive) as referenced.

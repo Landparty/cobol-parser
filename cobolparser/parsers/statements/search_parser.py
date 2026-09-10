@@ -5,6 +5,7 @@ from typing import Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import SearchStatement
+from ._conditions import condition_token_text
 from ._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
@@ -124,7 +125,9 @@ class SearchStatementParser(IStatementParser):
                     if t.type not in LITERAL_TOKEN_TYPES and tv in STATEMENT_KEYWORDS:
                         break
                     token_stream.consume()
-                    cond_parts.append(t.value or "")
+                    # Re-quote string literals so ``= 'X'`` and ``= X`` stay
+                    # distinguishable in the recorded condition text.
+                    cond_parts.append(condition_token_text(t))
                     skip_whitespace(token_stream)
                 # Parse nested statements after condition
                 when_stmts = self._parse_nested_statements(token_stream)

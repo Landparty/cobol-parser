@@ -7,7 +7,8 @@ Covers:
 - CALL with correct arg count → no violation
 - CALL with too many args → TOO_MANY_ARGS
 - CALL with too few args → TOO_FEW_ARGS
-- CALL passing a LINKAGE item BY VALUE → VALUE_TO_LINKAGE
+- CALL passing a LINKAGE item BY VALUE → no violation (legal COBOL; the
+  former VALUE_TO_LINKAGE rule was a false positive, removed 2026-09-09)
 - LINKAGE 01-item never referenced → UNREFERENCED_LINKAGE
 - Dynamic CALL → skip
 - CALL targeting external program (not in ENTRY list) → skip
@@ -223,19 +224,26 @@ class TestTooFewArgs:
 
 
 # ---------------------------------------------------------------------------
-# VALUE_TO_LINKAGE
+# BY VALUE to a LINKAGE item is legal (former VALUE_TO_LINKAGE false positive)
 # ---------------------------------------------------------------------------
 
 
-class TestValueToLinkage:
-    def test_by_value_to_linkage_item_is_violation(self):
+class TestByValueToLinkageIsLegal:
+    """COBOL has no rule against passing a LINKAGE item BY VALUE -- it is
+    what a caller must write when the callee declares ``PROCEDURE DIVISION
+    USING BY VALUE``. The former VALUE_TO_LINKAGE rule flagged that legal
+    call as an error and is gone."""
+
+    def test_rule_no_longer_exists(self):
+        assert not hasattr(LinkageViolationKind, "VALUE_TO_LINKAGE")
+
+    def test_by_value_to_linkage_item_is_not_a_violation(self):
         report = _check(
             linkage_items=["PARM-A"],
             entry_params={"MY-ENTRY": ["PARM-A"]},
             calls=[("MY-ENTRY", [("PARM-A", "VALUE")])],
         )
-        kinds = [v.kind for v in report.violations]
-        assert LinkageViolationKind.VALUE_TO_LINKAGE in kinds
+        assert not report.has_violations
 
     def test_by_reference_to_linkage_no_violation(self):
         report = _check(
@@ -243,20 +251,17 @@ class TestValueToLinkage:
             entry_params={"MY-ENTRY": ["PARM-A"]},
             calls=[("MY-ENTRY", [("PARM-A", "REFERENCE")])],
         )
-        assert not any(
-            v.kind == LinkageViolationKind.VALUE_TO_LINKAGE for v in report.violations
-        )
+        assert not report.has_violations
 
     def test_by_value_to_non_linkage_item_no_violation(self):
-        """BY VALUE to a working-storage variable is fine."""
+        """BY VALUE to a working-storage variable is fine: a clean report."""
         report = _check(
             linkage_items=["PARM-A"],
             entry_params={"MY-ENTRY": ["PARM-A"]},
             calls=[("MY-ENTRY", [("WS-FIELD", "VALUE")])],
         )
-        assert not any(
-            v.kind == LinkageViolationKind.VALUE_TO_LINKAGE for v in report.violations
-        )
+        assert not report.has_violations
+        assert report.violations == []
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +508,7 @@ class TestMultipleEntryPoints:
 
 
 class TestByContentMode:
-    """BY CONTENT is not BY VALUE — must NOT trigger VALUE_TO_LINKAGE."""
+    """The passing mode never makes a matching CALL a violation."""
 
     def test_by_content_to_linkage_item_no_violation(self):
         report = _check(
@@ -511,9 +516,7 @@ class TestByContentMode:
             entry_params={"MY-ENTRY": ["PARM-A"]},
             calls=[("MY-ENTRY", [("PARM-A", "CONTENT")])],
         )
-        assert not any(
-            v.kind == LinkageViolationKind.VALUE_TO_LINKAGE for v in report.violations
-        )
+        assert not report.has_violations
 
     def test_by_reference_and_content_mixed_no_value_violation(self):
         report = _check(
@@ -526,9 +529,7 @@ class TestByContentMode:
                 )
             ],
         )
-        assert not any(
-            v.kind == LinkageViolationKind.VALUE_TO_LINKAGE for v in report.violations
-        )
+        assert not report.has_violations
 
 
 class TestCaseInsensitiveMatching:
@@ -613,19 +614,6 @@ class TestViolationMessages:
             v for v in report.violations if v.kind == LinkageViolationKind.TOO_FEW_ARGS
         )
         assert "MY-ENTRY" in v.message
-
-    def test_value_to_linkage_message_contains_param_name(self):
-        report = _check(
-            linkage_items=["PARM-A"],
-            entry_params={"MY-ENTRY": ["PARM-A"]},
-            calls=[("MY-ENTRY", [("PARM-A", "VALUE")])],
-        )
-        v = next(
-            v
-            for v in report.violations
-            if v.kind == LinkageViolationKind.VALUE_TO_LINKAGE
-        )
-        assert "PARM-A" in v.message
 
     def test_unreferenced_message_contains_item_name(self):
         report = _check(linkage_items=["LONELY-PARAM"], entry_params={}, calls=[])

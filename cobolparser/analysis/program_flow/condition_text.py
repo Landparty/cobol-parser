@@ -51,6 +51,9 @@ def render_condition_text(expr: CobolExpression | None) -> str:
 
     if isinstance(expr, LogicalExpression):
         left = render_condition_text(expr.left_condition)
+        if expr.right_condition is None:
+            # Unary NOT: the negated condition is ``left_condition`` alone.
+            return f"{expr.operator} ({left})" if left else expr.operator
         if isinstance(expr.left_condition, LogicalExpression):
             left = f"({left})"
         right = render_condition_text(expr.right_condition)
