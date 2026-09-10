@@ -170,6 +170,11 @@ def cmd_render(args: argparse.Namespace) -> int:
     from render_markdown import CoverageRenderer  # type: ignore[import-not-found]
 
     try:
+        with open(args.input, encoding="utf-8") as f:
+            artifact = json.load(f)
+        if not isinstance(artifact, dict):
+            print(f"Error: {args.input} does not contain a coverage artifact object")
+            return 1
         renderer = CoverageRenderer(args.input)
 
         if args.format == "markdown":

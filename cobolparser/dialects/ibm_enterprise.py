@@ -681,37 +681,16 @@ class IBMEnterpriseCobol:
     def get_intrinsic_function_signature(
         self, function_name: str
     ) -> dict[str, Any] | None:
-        """Get signature information for IBM intrinsic functions."""
-        function_signatures: dict[str, dict[str, Any]] = {
-            "CURRENT-DATE": {
-                "return_type": "alphanumeric",
-                "length": 21,
-                "parameters": [],
-                "description": "Returns current date and time",
-            },
-            "LENGTH": {
-                "return_type": "numeric",
-                "parameters": ["string"],
-                "description": "Returns length of string argument",
-            },
-            "NUMVAL": {
-                "return_type": "numeric",
-                "parameters": ["alphanumeric"],
-                "description": "Convert alphanumeric to numeric",
-            },
-            "UPPER-CASE": {
-                "return_type": "alphanumeric",
-                "parameters": ["alphanumeric"],
-                "description": "Convert to uppercase",
-            },
-            "LOWER-CASE": {
-                "return_type": "alphanumeric",
-                "parameters": ["alphanumeric"],
-                "description": "Convert to lowercase",
-            },
-        }
+        """Get signature information for an IBM intrinsic function.
 
-        return function_signatures.get(function_name.upper())
+        Delegates to the complete catalogue in ``le_signatures`` (the same
+        one ``le-info`` reads), so every function ``is_intrinsic_function``
+        accepts has a signature here -- previously only five did.
+        """
+        from .le_signatures import intrinsic_signature
+
+        sig = intrinsic_signature(function_name)
+        return sig.to_dict() if sig is not None else None
 
     def is_reserved_word(self, word: str) -> bool:
         """Check if word is reserved in IBM Enterprise COBOL."""

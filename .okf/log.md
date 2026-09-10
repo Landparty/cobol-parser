@@ -46,6 +46,12 @@ could not parse was *ignored*, which turned "constraint unknown" into
 "constraint satisfied". Every one of these is now a poison or an
 `Unsatisfiable` with a reason.
 
+The CLI pass (eight smaller items, `tests/regression/test_review_2026_09_09_cli.py`)
+found the one cross-repo contract break: the extension sends `--program` to
+every analyzer, but `unused-variables` and `program-flow` never accepted it,
+and the extension's "CLI too old" fallback re-ran without it — a wrong unit's
+report with no sign of it. Both take it now.
+
 Also removed: `LinkageChecker`'s `VALUE_TO_LINKAGE` rule, which had no basis
 in COBOL and fired exactly where it could see the callee wanted BY VALUE.
 Still open, recorded in `reports/open-findings.md`: numeric-edited fields are

@@ -447,6 +447,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now seen as a read (`IN`, `caller-dataflow`).
 * **generators:** `VALUE ALL '-'` generated the text `ALL ` instead of
   `----`.
+* **cli:** `unused-variables` and `program-flow` accept `--program NAME`
+  like every other analyzer subcommand (the VS Code extension passed it and,
+  on the "unrecognized arguments" error, silently re-ran without it, so the
+  inner unit's report was really the outer's). `parse --stats` and
+  `batch --stats` reported `lines_processed: 0` for every file (the parser
+  only ever set `lines_parsed`). `parse` on a multi-`PROGRAM-ID` file now
+  carries `program_units` like the analyzers. `batch --workers 0` is a clean
+  usage error instead of a traceback; so is `coverage render` on a JSON
+  array. `lint --format text --profile` warns that the profile has nowhere to
+  go instead of dropping it. `CobolParser(serialization_config=...)` is
+  honoured by `to_dict()`/`to_json()` (it was stored and never read),
+  `compact_format=True` produces one line, and
+  `include_source_locations=False` strips every nested `location`, not
+  just the program's. `IBMEnterpriseCobol.get_intrinsic_function_signature`
+  knows all 44 intrinsics (it had a five-entry table).
 
 * **preprocess:** the COPY splice no longer indents a member's first line by
   the `COPY` statement's own indentation. A member's lines are whole source

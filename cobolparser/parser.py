@@ -339,9 +339,14 @@ class CobolParser:
             # Initialize TokenStream and parse program
             self.stream = TokenStream(self.tokens)
             program = self.parse_program()
+            if program is not None:
+                for unit in program.program_units():
+                    unit.serialization_config = self.serialization_config
 
             self.statistics.end_timing()
             self.statistics.lines_parsed = len(source.splitlines())
+            # The CLI's --stats reports lines_processed; keep both counters in step.
+            self.statistics.lines_processed = self.statistics.lines_parsed
             self.statistics.tokens_processed = len(self.tokens)
 
             logger.info(
