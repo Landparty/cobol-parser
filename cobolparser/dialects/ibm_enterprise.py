@@ -678,19 +678,60 @@ class IBMEnterpriseCobol:
 
         return warnings
 
+    # The pre-2026-09-09 hand-written table, kept so the keys those callers
+    # read (return_type / parameters / description / length) are unchanged.
+    _LEGACY_INTRINSIC_SIGNATURES: dict[str, dict[str, Any]] = {
+        "CURRENT-DATE": {
+            "return_type": "alphanumeric",
+            "length": 21,
+            "parameters": [],
+            "description": "Returns current date and time",
+        },
+        "LENGTH": {
+            "return_type": "numeric",
+            "parameters": ["string"],
+            "description": "Returns length of string argument",
+        },
+        "NUMVAL": {
+            "return_type": "numeric",
+            "parameters": ["alphanumeric"],
+            "description": "Convert alphanumeric to numeric",
+        },
+        "UPPER-CASE": {
+            "return_type": "alphanumeric",
+            "parameters": ["alphanumeric"],
+            "description": "Convert to uppercase",
+        },
+        "LOWER-CASE": {
+            "return_type": "alphanumeric",
+            "parameters": ["alphanumeric"],
+            "description": "Convert to lowercase",
+        },
+    }
+
     def get_intrinsic_function_signature(
         self, function_name: str
     ) -> dict[str, Any] | None:
         """Get signature information for an IBM intrinsic function.
 
-        Delegates to the complete catalogue in ``le_signatures`` (the same
-        one ``le-info`` reads), so every function ``is_intrinsic_function``
-        accepts has a signature here -- previously only five did.
+        Backed by the complete catalogue in ``le_signatures`` (the one
+        ``le-info`` reads), so every function ``is_intrinsic_function``
+        accepts has a signature here -- previously only five did. The dict
+        carries the catalogue's keys (``returns``, ``arguments``,
+        ``call_example``, ...) plus the historical ``return_type`` /
+        ``parameters`` / ``description`` keys.
         """
         from .le_signatures import intrinsic_signature
 
         sig = intrinsic_signature(function_name)
-        return sig.to_dict() if sig is not None else None
+        if sig is None:
+            return None
+        info: dict[str, Any] = sig.to_dict()
+        info.setdefault("return_type", sig.returns)
+        info.setdefault("parameters", [a.category for a in sig.arguments])
+        info.setdefault("description", sig.summary)
+        info.update(self._LEGACY_INTRINSIC_SIGNATURES.get(sig.name, {}))
+        return info
 
     def is_reserved_word(self, word: str) -> bool:
         """Check if word is reserved in IBM Enterprise COBOL."""
