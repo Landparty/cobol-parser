@@ -153,6 +153,26 @@ cdef int _peek_count_pos(
     return -1
 
 
+cdef int _skip_layout(
+    list tokens, int pos, int n, object newline_type, object comma_type, object semicolon_type
+):
+    """Advance past NEWLINE / ``,`` / ``;`` tokens: inside an OCCURS clause
+    the sub-clauses may be comma or semicolon separated (NIST NC245A:
+    ``OCCURS 15 TIMES;`` / ``INDEXED BY IN1, INDEX1,``) -- a separator is
+    layout, never an operand. Mirrors ``_skip_clause_separators`` in the
+    pure-Python ``_parse_occurs_clause``."""
+    cdef object tok
+    while pos < n:
+        tok = tokens[pos]
+        if tok is None:
+            break
+        if tok.type is newline_type or tok.type is comma_type or tok.type is semicolon_type:
+            pos += 1
+            continue
+        break
+    return pos
+
+
 def parse_data_item_clauses_fast(
     list tokens,
     int pos,
@@ -173,6 +193,7 @@ def parse_data_item_clauses_fast(
     object numeric_literal_type,
     object newline_type,
     object comma_type,
+    object semicolon_type,
 ):
     """Drive the per-clause loop of :meth:`_parse_data_item`.
 
@@ -318,8 +339,7 @@ def parse_data_item_clauses_fast(
             # Variable OCCURS: OCCURS min TO max
             # (TO and the max count may each start a continuation line;
             # the max-count read carries the same crossing guard)
-            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                pos += 1
+            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
             if pos < n:
                 nxt = tokens[pos]
                 if (
@@ -340,8 +360,7 @@ def parse_data_item_clauses_fast(
                         pos = count_pos + 1
 
             # Skip newlines, optional TIMES keyword
-            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                pos += 1
+            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
             if pos < n:
                 nxt = tokens[pos]
                 if nxt is not None and nxt.value and nxt.value.upper() == "TIMES":
@@ -352,20 +371,17 @@ def parse_data_item_clauses_fast(
             # so crossing the break can never swallow a level number)
             depending_var = ""
             has_depending = False
-            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                pos += 1
+            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
             if pos < n:
                 nxt = tokens[pos]
                 if nxt is not None and nxt.value and nxt.value.upper() == "DEPENDING":
                     pos += 1
-                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                        pos += 1
+                    pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                     if pos < n:
                         on_token = tokens[pos]
                         if on_token is not None and on_token.value and on_token.value.upper() == "ON":
                             pos += 1
-                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                        pos += 1
+                    pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                     if pos < n:
                         dep_token = tokens[pos]
                         if dep_token is not None and dep_token.type is identifier_type:
@@ -377,8 +393,7 @@ def parse_data_item_clauses_fast(
             # repeat). These sit between DEPENDING ON and INDEXED BY and are
             # what make a table valid for SEARCH ALL; dropping them lost real
             # semantics and previously also cascaded into dropping INDEXED BY.
-            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                pos += 1
+            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
             while (
                 pos < n
                 and tokens[pos] is not None
@@ -387,18 +402,15 @@ def parse_data_item_clauses_fast(
             ):
                 direction = tokens[pos].value.upper()
                 pos += 1  # consume ASCENDING/DESCENDING
-                while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                    pos += 1
+                pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                 if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "KEY":
                     pos += 1
-                while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                    pos += 1
+                pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                 if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "IS":
                     pos += 1
                 keys = []
                 while True:
-                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                        pos += 1
+                    pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                     # Comma-separated key list: a comma is only a
                     # separator, never a key name -- consume and continue.
                     if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
@@ -417,26 +429,22 @@ def parse_data_item_clauses_fast(
                         break
                 if keys:
                     occurs.add_key_clause(direction, keys)
-                while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                    pos += 1
+                pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
 
             # INDEXED BY clause (one or more index names, optionally
             # comma-separated; INDEXED and BY may straddle a line break)
-            while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                pos += 1
+            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
             if pos < n:
                 nxt = tokens[pos]
                 if nxt is not None and nxt.value and nxt.value.upper() == "INDEXED":
                     pos += 1
-                    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                        pos += 1
+                    pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                     if pos < n:
                         by_token = tokens[pos]
                         if by_token is not None and by_token.value and by_token.value.upper() == "BY":
                             pos += 1
                     while True:
-                        while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
-                            pos += 1
+                        pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                         if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
                             pos += 1
                             continue

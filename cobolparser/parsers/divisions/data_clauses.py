@@ -179,7 +179,7 @@ _WHITESPACE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
 # Number of positional arguments ``parse_data_item`` passes to the compiled
 # clause helper. Keep in sync with the call site below; ``_data_fast_usable``
 # checks the compiled extension against it at import time.
-_DATA_FAST_ARG_COUNT = 19
+_DATA_FAST_ARG_COUNT = 20
 
 
 def _data_fast_usable(helper: Any) -> bool:
@@ -356,6 +356,7 @@ class DataItemClauseParser:
                     TokenType.NUMERIC_LITERAL,
                     TokenType.NEWLINE,
                     TokenType.COMMA,
+                    TokenType.SEMICOLON,
                 )
                 token_stream._pos = new_pos  # type: ignore[attr-defined]
                 # Fall through (no early return): the Python loop below
