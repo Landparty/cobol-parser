@@ -55,14 +55,14 @@ def _find_item(result, name: str):
 
 class TestPictureNationalSymbol:
     def test_pic_n_repeat_factor_size(self):
-        """PIC N(10) is a national field: 10 single-width character positions."""
+        """PIC N(10) is a national field: 10 characters of 2 bytes each."""
         pic = PictureClause("N(10)", SourceLocation(1, 1))
-        assert pic.size == 10
+        assert pic.size == 20
 
     def test_pic_n_bare_size(self):
-        """A bare PIC N is a single national character position."""
+        """A bare PIC N is a single national character: 2 bytes."""
         pic = PictureClause("N", SourceLocation(1, 1))
-        assert pic.size == 1
+        assert pic.size == 2
 
     def test_pic_n_end_to_end(self):
         result = _parse_working_storage("01  WS-NAT3  PIC N(10).")
@@ -72,8 +72,8 @@ class TestPictureNationalSymbol:
         item = _find_item(result, "WS-NAT3")
         assert item is not None
         assert item.picture_clause is not None
-        assert item.picture_clause.size == 10
-        assert item.calculate_size() == 10
+        assert item.picture_clause.size == 20
+        assert item.calculate_size() == 20
 
     def test_pic_n_in_group_item_updates_group_size(self):
         """A PIC N(5) child's corrected size must roll up into the group total."""
@@ -89,11 +89,11 @@ class TestPictureNationalSymbol:
         group = _find_item(result, "WS-GROUP")
         assert group is not None
         assert group.is_group_item()
-        assert group.calculate_size() == 8  # 5 (national) + 3 (numeric)
+        assert group.calculate_size() == 13  # 10 (5 national x 2 bytes) + 3
 
         nat_item = _find_item(result, "WS-NAT5")
         assert nat_item is not None
-        assert nat_item.picture_clause.size == 5
+        assert nat_item.picture_clause.size == 10
 
 
 # ---------------------------------------------------------------------------
