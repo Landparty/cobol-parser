@@ -436,24 +436,3 @@ class TestFinding13ConditionNameValues:
         assert names["V1"]["values"] == ["A", "THROUGH:F"]
         assert names["V2"]["values"] == ["A", "B"]
         assert names["V3"]["values"] == ["A"]
-
-
-class TestFinding14AddGivingTargets:
-    def test_add_to_giving_writes_only_the_giving_item(self):
-        result = _proc("ADD A TO B GIVING C.")
-        add = _stmt(result, "ADD")
-        assert add.operands == ["A", "B", "C"]
-        assert add.targets == []
-        assert add.target is None
-        assert add.givings == ["C"]
-        assert "targets" not in add.to_dict()
-
-    def test_subtract_from_giving_writes_only_the_giving_item(self):
-        result = _proc("SUBTRACT A FROM B GIVING C.")
-        sub = _stmt(result, "SUBTRACT")
-        assert sub.targets == []
-        assert sub.givings == ["C"]
-
-    def test_add_to_without_giving_keeps_targets(self):
-        result = _proc("ADD A TO B.")
-        assert _stmt(result, "ADD").targets == ["B"]

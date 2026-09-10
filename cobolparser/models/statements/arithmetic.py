@@ -35,17 +35,6 @@ class ArithmeticStatement(CobolStatement):
         self.targets.append(target)
         self._add_unique_operand(target)
 
-    def demote_targets_to_operands(self) -> None:
-        """Forget the TO/FROM targets once a GIVING clause has been seen.
-
-        In ``ADD A TO B GIVING C`` / ``SUBTRACT A FROM B GIVING C`` only C is
-        written: B is just another operand. The parser reads B as a target
-        before it can know a GIVING follows, so it calls this afterwards.
-        The names stay in ``operands`` (they were added on the way in).
-        """
-        self.target = None
-        self.targets = []
-
     def set_corresponding(self, is_corresponding: bool = True) -> None:
         """Set whether this is an ADD/SUBTRACT CORRESPONDING statement."""
         self.is_corresponding = is_corresponding
