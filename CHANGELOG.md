@@ -461,7 +461,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `compact_format=True` produces one line, and
   `include_source_locations=False` strips every nested `location`, not
   just the program's. `IBMEnterpriseCobol.get_intrinsic_function_signature`
-  knows all 44 intrinsics (it had a five-entry table).
+  knows all 44 intrinsics (it had a five-entry table; the historical
+  `return_type`/`parameters`/`description` keys are kept). A copybook that
+  cannot be found (or expands circularly) under `--copybook-path` is a
+  one-line `error:` on stderr with exit 1, not a traceback -- the VS Code
+  extension reads that line to say why lint could not run. `--version`
+  reports the released version (`__version__` had been left at 1.8.0; it is
+  now a release-please extra-file so it cannot drift again).
 
 * **preprocess:** the COPY splice no longer indents a member's first line by
   the `COPY` statement's own indentation. A member's lines are whole source

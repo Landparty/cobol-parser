@@ -224,3 +224,38 @@ class TestFinding8ParseReportsProgramUnits:
         proc = _cli("parse", str(simple_file), "--compact")
         assert proc.returncode == 0, proc.stderr
         assert "program_units" not in json.loads(proc.stdout)
+
+
+class TestFinding9MissingCopybookIsACleanError:
+    """A copybook that cannot be found escaped as a raw traceback."""
+
+    def test_lint_reports_one_line_and_exits_1(self, tmp_path: Path) -> None:
+        src = tmp_path / "PROG.cbl"
+        src.write_text(textwrap.dedent("""\
+                       IDENTIFICATION DIVISION.
+                       PROGRAM-ID. PROG.
+                       DATA DIVISION.
+                       WORKING-STORAGE SECTION.
+                       COPY NOSUCH.
+                       PROCEDURE DIVISION.
+                           STOP RUN.
+                """))
+        proc = _cli("lint", str(src), "--compact", "--copybook-path", str(tmp_path))
+        assert proc.returncode == 1
+        assert "Traceback" not in proc.stderr
+        assert "NOSUCH" in proc.stderr
+        assert "not found" in proc.stderr
+
+
+class TestFinding10VersionMatchesPackage:
+    """``--version`` said 1.8.0 while the package was 1.9.0."""
+
+    def test_dunder_version_matches_pyproject(self) -> None:
+        import re
+
+        from cobolparser import __version__
+
+        pyproject = (Path(__file__).parents[2] / "pyproject.toml").read_text()
+        declared = re.search(r'^version = "([^"]+)"', pyproject, re.M)
+        assert declared is not None
+        assert __version__ == declared.group(1)

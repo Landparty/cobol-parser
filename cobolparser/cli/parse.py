@@ -402,34 +402,33 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
         **_source_format_kwargs(args),
     }
 
-    if not enable_profiling:
+    def _parse_once() -> Any:
         if copybook_paths:
+            from ..preprocess import PreprocessingError
             from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
-            result = parse_cobol_with_expansion(
-                source,
-                filename=args.file,
-                copybook_paths=copybook_paths,
-                **parse_kwargs,
-            )
-        else:
-            result = parse_cobol(source, filename=args.file, **parse_kwargs)
-        return result, None
+            try:
+                return parse_cobol_with_expansion(
+                    source,
+                    filename=args.file,
+                    copybook_paths=copybook_paths,
+                    **parse_kwargs,
+                )
+            except PreprocessingError as exc:
+                # A copybook that cannot be found (or expands circularly)
+                # is a configuration error the caller has to see on one
+                # line, not a traceback: the VS Code extension clears its
+                # diagnostics on any non-zero exit and reads stderr for why.
+                _fail(f"Copybook expansion failed for {args.file}: {exc}")
+        return parse_cobol(source, filename=args.file, **parse_kwargs)
+
+    if not enable_profiling:
+        return _parse_once(), None
 
     # With profiling
     ctx = ProfilerContext(top_n=top_n, prof_output=prof_output)
     with ctx:
-        if copybook_paths:
-            from ..preprocess.copybook_expander import parse_cobol_with_expansion
-
-            result = parse_cobol_with_expansion(
-                source,
-                filename=args.file,
-                copybook_paths=copybook_paths,
-                **parse_kwargs,
-            )
-        else:
-            result = parse_cobol(source, filename=args.file, **parse_kwargs)
+        result = _parse_once()
     assert ctx.result is not None
     return result, ctx.result
 
